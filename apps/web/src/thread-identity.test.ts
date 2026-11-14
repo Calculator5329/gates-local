@@ -10,12 +10,13 @@ vi.mock("react", async (original) => ({
   useCallback: (fn: unknown) => fn,
   useEffect: () => undefined,
   useLayoutEffect: () => undefined,
+  useSyncExternalStore: (_subscribe: unknown, read: () => unknown) => read(),
 }));
 vi.mock("./store.ts", async (original) => {
   const actual = await original<typeof import("./store.ts")>();
   return { ...actual, useStore: <T,>(selector: (s: State) => T) => selector(actual.getState()) };
 });
-vi.mock("./session.ts", () => ({ cancelImage: vi.fn(), retryImage: vi.fn(), reloadThread: vi.fn(), retry: vi.fn(), fileUrl: vi.fn() }));
+vi.mock("./session.ts", () => ({ cancelImage: vi.fn(), retryImage: vi.fn(), reloadThread: vi.fn(), retry: vi.fn(), fileUrl: vi.fn(), loadEarlier: vi.fn(async () => false), earlierOf: () => 0, onEarlier: () => () => undefined }));
 import { Timeline } from "./Thread.tsx";
 import { setState } from "./store.ts";
 

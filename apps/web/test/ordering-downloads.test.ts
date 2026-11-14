@@ -92,6 +92,8 @@ function ended(outcome: "done" | "error" | "cancelled", firstModel: boolean, ava
         w.pending = [];
         if (outcome === "done") w.models = [...w.models, downloaded];
         w.wire.server.modelsSnapshot = w.models;
+        // the server holds the queue: its own catalog is what lets the first-model message go
+        w.wire.server.catalogChanged(w.models);
       }, { emit: () => [frame("B", "terminal.push-B")] }),
       event("terminal.push-B", ["server.offline-change"], (w) => w.wire.step(() => {
         w.wire.b.socket.frame({ type: "push", channel: "models.pull", payload: { ...w.initial, state: outcome } });

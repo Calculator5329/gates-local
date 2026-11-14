@@ -17,7 +17,6 @@ interface ModelEffects {
   readonly act: Act;
   readonly isNA: (error: unknown) => boolean;
   readonly restoreSaved: () => void;
-  readonly flushQueued: () => void;
   readonly blockingFor: (model: string, numCtx: number) => Promise<readonly BlockingTurn[]>;
 }
 
@@ -97,7 +96,7 @@ export function memoryChanged(memory: MemoryState): void {
 
 export const decided = (d: ModelDecision): Partial<State> => (d.kind === "keep" ? {} : { model: d.kind === "set" ? d.model : undefined });
 
-export function createModels({ applyServerEvent, call, probe, act, isNA, restoreSaved, flushQueued, blockingFor }: ModelEffects) {
+export function createModels({ applyServerEvent, call, probe, act, isNA, restoreSaved, blockingFor }: ModelEffects) {
   const modelsOrder = newestOnly();
   const runtimeOrder = newestOnly();
   // A catalog asked before a later models.changed describes the list before it: only the newest lands.
@@ -232,7 +231,6 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
       runtimeOrder.next(); // and a runtime.status asked before it is older than this (MP4-03)
       applyServerEvent({ runtime });
       if (runtime.state === "ready") {
-        flushQueued();
         void refreshModels();
         // A catalog read before Ollama answered recommends nothing, so first run had no Download button.
         void refreshCatalog();
@@ -244,7 +242,6 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
       applyServerEvent((s) => ({ models, pulls: settlePulls(s.pulls, models) }));
       restoreSaved();
       chooseModel();
-      flushQueued();
       // The catalog's Installed marks follow the list: a removal or a runtime
       // switch (the app's own copy has its own models) must not leave them stale.
       void refreshCatalog();

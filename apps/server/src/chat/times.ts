@@ -160,6 +160,7 @@ export function turnClock(startedAt: number): TurnClock {
       ended = how;
       return {
         startedAt,
+        ...(readyAt === undefined ? {} : { readyAt }),
         ...(firstTokenAt === undefined ? {} : { firstTokenAt }),
         ...(thoughtMs === undefined ? {} : { thoughtMs }),
         spans: [...spans],

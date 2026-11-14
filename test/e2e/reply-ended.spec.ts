@@ -116,6 +116,27 @@ test("a reply that fails before it starts puts out the sidebar's working dot in 
   } finally { rpc.close(); }
 });
 
+// Guards a first answer that waited 58 s for its model and said only "5.2 s · 111 tok/s": the wait is its own figure.
+test("a reply that waited for its model to load says the wait beside its work, the same after a reload", async ({ page, open }, info) => {
+  test.setTimeout(60_000);
+  await stack.scenario("models", { loadDelayMs: 4000 });
+  await open(); await waitReady(page);
+  await pick(page, MODEL);
+  await sendMessage(page, "hello");
+  const reply = page.locator(".turn.a").last();
+  await expect(reply).toHaveClass(/\bdone\b/, { timeout: 30_000 });
+  const wait = reply.locator("[data-testid='chat.reply.wait']");
+  await reply.hover();
+  await shot(page, info, "waited", { wait, meta: reply.locator(".a-act .meta") });
+  await expect(wait).toHaveText(/^\d+\.\d s$/);
+  const said = await wait.innerText();
+  expect(Number.parseFloat(said), "the load counts from Enter").toBeGreaterThanOrEqual(4);
+  await page.reload(); await waitReady(page);
+  await page.locator(".turn.a").last().hover();
+  await shot(page, info, "waited-after-reload", { wait: page.locator(".turn.a").last().locator("[data-testid='chat.reply.wait']") });
+  await expect(page.locator(".turn.a").last().locator("[data-testid='chat.reply.wait']")).toHaveText(said);
+});
+
 // The coordinator's check for chat row 3: with tools off, the attached file's wrench opens Settings on Tools.
 test("with tools off, an attached file's wrench opens Settings on Tools", async ({ page, open }, info) => {
   await open(); await waitReady(page);

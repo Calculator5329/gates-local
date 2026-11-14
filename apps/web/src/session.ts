@@ -64,7 +64,7 @@ const threadSession = createThreads({ applyServerEvent,
   navigationGeneration: () => navigation.generation,
   pendingSettings: () => navigation.pendingSettings,
 });
-export const { reloadThread, renameThread, deleteThread, waitForThreadDeletion, preloadThread } = threadSession;
+export const { reloadThread, renameThread, deleteThread, waitForThreadDeletion, preloadThread, loadEarlier, earlierOf, onEarlier } = threadSession;
 const { noteMessage, loadThread, restoreSaved, loading, createThread, untrackedDone, imageSaved } = threadSession;
 
 /**
@@ -85,10 +85,10 @@ const chat = createChat({ applyServerEvent,
   openThread: (threadId) => openThread(threadId), blockingFor,
 });
 export const { send, confirmStopAsk, stop, retry, sendQueuedNow, cancelQueuedEdit } = chat;
-const { onChatEvent, lostTurn, catchUp, activeTurns, flushQueued } = chat;
+const { onChatEvent, lostTurn, catchUp, activeTurns, queueChanged, queueListed, editEnded } = chat;
 
 const modelsSession = createModels({ applyServerEvent,
-  call, probe, act, isNA, restoreSaved, flushQueued,
+  call, probe, act, isNA, restoreSaved,
   blockingFor,
 });
 export const { refreshModels, pickModel, typedInComposer, pull, cancelPull, removeModel, recheckRuntime } = modelsSession;
@@ -155,6 +155,7 @@ async function hydrateWith(
   negotiate: Client["negotiate"],
 ): Promise<void> {
   on("chat.event", onChatEvent);
+  on("queue.changed", (list) => queueChanged(list));
   on("runtime.changed", modelsSession.runtimeChanged);
   on("models.changed", modelsSession.modelsChanged);
   // A newer chat list arrived with the update check: its makers and names, then the catalog it changes.
@@ -207,7 +208,7 @@ async function hydrateWith(
   const ticket = modelsOrder.next();
   const statusTicket = runtimeOrder.next();
   const listTicket = threadSession.listOrder.next();
-  const [status, listed, threads, snapshot, active, pendingPulls, suggested, memory] = await Promise.all([
+  const [status, listed, threads, snapshot, active, pendingPulls, suggested, memory, queue] = await Promise.all([
     call("runtime.status", {}),
     call("models.list", {}).catch(() => undefined),
     call("threads.list", {}),
@@ -222,6 +223,8 @@ async function hydrateWith(
     probe("models.suggested", {}),
     // What is in memory: a new chat's button starts on its chat model (memory.changed keeps it current).
     probe("memory.status", {}),
+    // The queue every window shows: the server keeps it and sends it.
+    probe("queue.list", {}),
   ]);
   const models = modelsOrder.current(ticket) ? listed : undefined;
   const runtime = runtimeOrder.current(statusTicket) ? status : undefined;
@@ -235,6 +238,7 @@ async function hydrateWith(
     return { ...next, ...decided(modelChoice(next)) };
   });
   if (settings !== NA && settings !== undefined) settingsSession.seedContext();
+  if (queue !== undefined && queue !== NA) queueListed(queue);
   restoreSaved();
   applyTheme(settings === NA || settings === undefined ? "system" : settings.theme);
   applyAccent(settings === NA || settings === undefined ? undefined : settings.accent);
@@ -283,7 +287,6 @@ async function hydrateWith(
   // threads reload on their next visit, the open one now (W-04).
   threadSession.markOtherThreadsStale(s);
   if (s.threadId !== null) await loadThread(s.threadId, true);
-  flushQueued();
   // turns may have ended while the connection was down
   usageSession.usageChanged();
 }
@@ -307,7 +310,7 @@ export function loadImagePresets(): Promise<void> {
 export const pictures = createPictures({ list: (params) => call("pictures.list", params) });
 
 const navigation = createNavigation({
-  flushQueued, catchUp, chooseModel, loadThread, loading,
+  editEnded, catchUp, chooseModel, loadThread, loading,
   settingsData: () => settingsReads.ready(),
   picturesData: () => pictures.enter(),
   // usageSession is made below; this runs only on a navigation, long after

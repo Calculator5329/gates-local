@@ -127,6 +127,11 @@ export type TurnEnded = typeof TurnEnded.Type;
 export const ReplyTimes = S.Struct({
   /** When chat.send took the turn. */
   startedAt: Millis,
+  /**
+   * When the model was ready: the start for a model in memory, the first token after a load. The
+   * wait from startedAt to here is the reply's own figure, beside its work. Absent on older rows.
+   */
+  readyAt: S.optional(Millis),
   /** The first word of the answer. */
   firstTokenAt: S.optional(Millis),
   /**
@@ -571,6 +576,49 @@ export const BlockingTurn = S.Struct({
   turnId: S.optional(S.String),
 });
 export type BlockingTurn = typeof BlockingTurn.Type;
+
+/**
+ * A message waiting to be sent, kept by the server (queue.*) so every window and the phone show
+ * one queue and a reload keeps it. The server sends the first one nothing holds, one reply at a
+ * time, oldest first. Added 2026-11-14.
+ */
+export const QueuedMessage = S.Struct({
+  id: S.String.check(S.isMinLength(1), S.isMaxLength(200)),
+  threadId: S.String,
+  /** The user message's id: the turn's start names it, and the entry leaves the queue. */
+  messageId: S.String.check(S.isMinLength(1), S.isMaxLength(200)),
+  text: S.String,
+  /** Pasted image data URLs, as chat.send takes them. */
+  images: S.optional(S.Array(S.String).check(S.isMaxLength(8))),
+  files: S.optional(S.Array(AttachedFile).check(S.isMaxLength(8))),
+  at: Millis,
+  /** What it was typed behind: the app's setup, the first model's download, or a reply in its chat. */
+  waitFor: S.Literals(["setup", "download", "reply"]),
+  /** The model it was typed for; one typed before any model was installed has none and takes the best installed one. */
+  model: S.optional(S.String),
+  numCtx: S.optional(PositiveInt),
+  think: S.optional(S.Boolean),
+  /** Typed with Image on: it goes to this image model and size, not to a chat model. */
+  draw: S.optional(ImageChoice),
+  drawCount: S.optional(ImageCount),
+  /** Its reply was stopped or failed, or its own send was refused: it waits for Send now. */
+  held: S.optional(S.Literal(true)),
+  /** Held behind a failed reply the server is running once more ("running"), or whose second attempt failed too ("failed"). */
+  retry: S.optional(S.Literals(["running", "failed"])),
+  /** Send now: it goes first, as soon as its chat has no reply running. */
+  now: S.optional(S.Literal(true)),
+  /** With now: the person has said yes to stopping other chats' replies, so it is not asked again. */
+  stopOthers: S.optional(S.Literal(true)),
+  /** With stopOthers: the replies that yes named; without them, the yes stands for any. */
+  stopTurns: S.optional(S.Array(S.String).check(S.isMaxLength(32))),
+  /** Open in a composer: it keeps its place and is not sent until the edit is saved or cancelled. */
+  editing: S.optional(S.Literal(true)),
+  /** The turn the server started for it; it leaves the queue at that turn's start. */
+  sending: S.optional(S.String),
+  /** Why its last send was refused: the refusal's code and words, and the replies in the way for "would-stop". */
+  why: S.optional(S.Struct({ code: S.String, message: S.String, blocking: S.optional(S.Array(BlockingTurn)) })),
+});
+export type QueuedMessage = typeof QueuedMessage.Type;
 
 export const ChatEvent = S.Union([
   // The turn began: its model and saved user message, so a client that did not send it

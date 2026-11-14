@@ -165,7 +165,7 @@ const server = http.createServer((req, res) => {
       json({ model: b.model, response: "", done: true });
     });
   }
-  else if (req.url === "/fake/env") json({ OLLAMA_MODELS: process.env.OLLAMA_MODELS ?? null, OLLAMA_HOST: process.env.OLLAMA_HOST });
+  else if (req.url === "/fake/env") json({ OLLAMA_MODELS: process.env.OLLAMA_MODELS ?? null, OLLAMA_HOST: process.env.OLLAMA_HOST, HOME: process.env.HOME ?? null, CUDA_CACHE_PATH: process.env.CUDA_CACHE_PATH ?? null, OLLAMA_MAX_LOADED_MODELS: process.env.OLLAMA_MAX_LOADED_MODELS ?? null });
   else { res.writeHead(404); res.end(); }
 });
 server.listen(Number(port), host, () => console.log("fake ollama listening on " + host + ":" + port));

@@ -126,7 +126,13 @@ describe("stopped (installed, nothing answering)", () => {
     expect(seen.map((x) => x.state)).toEqual(["stopped", "starting", "ready"]);
 
     const env = await httpGet(`${s.baseUrl}/fake/env`, 1000);
-    expect(env.kind === "response" && JSON.parse(env.body)).toEqual({ OLLAMA_MODELS: modelsDir, OLLAMA_HOST: new URL(s.baseUrl).host });
+    // its key pair and the CUDA kernels it compiles go in the app's runtime folder, never the person's
+    // home; the models stay the person's store; one model is held at a time
+    expect(env.kind === "response" && JSON.parse(env.body)).toEqual({
+      OLLAMA_MODELS: modelsDir, OLLAMA_HOST: new URL(s.baseUrl).host,
+      HOME: path.join(appDataDir, "runtime", "home"), CUDA_CACHE_PATH: path.join(appDataDir, "runtime", "cuda-cache"), OLLAMA_MAX_LOADED_MODELS: "1",
+    });
+    expect(existsSync(path.join(appDataDir, "runtime", "home"))).toBe(true);
     // the folder the status reports is the one the Ollama was really given
     expect(s.modelsDir).toBe(modelsDir);
 
@@ -153,6 +159,9 @@ describe("stopped (installed, nothing answering)", () => {
     expect(s.state).toBe("ready");
     expect(s.owner).toBe("app");
     expect(s.detail).toContain("from PATH");
+    // no models folder yet: the child is told the person's default store outright, since its own home is the app's
+    const env = await httpGet(`${s.baseUrl}/fake/env`, 1000);
+    expect(env.kind === "response" && JSON.parse(env.body)).toMatchObject({ OLLAMA_MODELS: path.join(home, ".ollama", "models"), HOME: path.join(appDataDir, "runtime", "home") });
   });
 
   it("a look while the app's copy is starting waits for that start and answers its result (BD-02)", async () => {

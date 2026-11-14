@@ -46,6 +46,9 @@ import type { Usage } from "./usage/index.ts";
 import type { SettingsReader } from "./settings/store.ts";
 import { turnSettings, type TurnSettings } from "./settings/turn.ts";
 import { sendMark, sendTimesLine, withSendTimes } from "./chat/send-times.ts";
+import { createQueue, type Why } from "./chat/queue.ts";
+import { rankChatModels } from "./runtime/pick.ts";
+import path from "node:path";
 
 /** The slice-1 methods every build answers. v2 methods join as their lanes land; until then the socket answers "not-implemented". */
 type CoreMethod =
@@ -76,7 +79,9 @@ export type AppErrorCode =
   | "preempted" // chat.send stopOthers ended the turn: another model's load needed its GPU (event.neededBy, event.partial)
   | "would-stop" // chat.send askFirst: running turns are in the way (error.blocking); nothing was saved or stopped
   | "thread-not-found" // the store's code, also thrown while the thread's delete runs
+  | "message-not-found" // threads.get before: the message a page starts from is not in the thread
   | "image-input"
+  | "queue-sending" // queue.update: the server has started this message's turn
   | "shutting-down"; // the server is stopping and takes no new turns
 
 export class AppError extends Error {
@@ -308,7 +313,71 @@ export function createApp(deps: AppDeps): App {
     } catch (e) {
       log(`push ${channel} failed: ${(e as Error).message}`);
     }
+    if (channel === "chat.event") heard(payload as Payload<"chat.event">);
   };
+
+  // The queue every window shows, kept and sent here (chat/queue.ts).
+  const queue = createQueue({ file: deps.dataDir === undefined ? undefined : path.join(deps.dataDir, "queue.json"), changed: (list) => push("queue.changed", list), log });
+  /** Turns whose start went out: a terminal event of one that never started is its refusal. */
+  const startedTurns = new Set<string>();
+  /** Every turn's events, from any window or the queue: the queue moves on what they say. */
+  function heard({ turnId, threadId, event }: Payload<"chat.event">): void {
+    if (event.type === "start") {
+      startedTurns.add(turnId);
+      queue.started(event.userMessage.id);
+      return;
+    }
+    if (event.type !== "done" && event.type !== "error") return;
+    if (!startedTurns.delete(turnId)) {
+      if (event.type !== "error") return;
+      const why = { code: event.code, message: event.message, ...(event.blocking === undefined ? {} : { blocking: event.blocking }) };
+      // a send the person stopped before it started: Stop means stop, so what queued behind it holds too
+      if (!queue.refused(turnId, why) && (event.ended?.reason === "stopped" || turns.get(turnId)?.stoppedAt !== undefined)) queue.ended(threadId, "stopped");
+      return;
+    }
+    const turn = turns.get(turnId);
+    // the person said stop: a Stop that lost the race to the last token holds the queue like any other
+    if (event.type === "done") return queue.ended(threadId, turn?.stoppedAt !== undefined ? "stopped" : "done");
+    const again = event.ended?.reason === "failed" && (turn?.clock.record(Date.now()).attempt ?? 1) > 1;
+    queue.ended(threadId, again ? "failed-again" : "stopped");
+  }
+  let pumpAt: ReturnType<typeof setImmediate> | undefined;
+  let pumping = false;
+  /** Look at the queue once the current work settles: after a turn ends, the runtime or models change, or the queue does. */
+  const pump = () => {
+    if (pumpAt === undefined && !closing) pumpAt = setImmediate(() => { pumpAt = undefined; void sendQueued(); });
+  };
+  /** The next queued message, through chat.send as a window would send it; one at a time. */
+  async function sendQueued(): Promise<void> {
+    if (closing || pumping) return;
+    const best = rankChatModels(catalog.current() ?? [])[0]?.name;
+    const q = queue.next({ chat: runtime.status().state === "ready" && best !== undefined, anyTurn: turns.size > 0, busy: new Set(byThread.keys()) });
+    if (q === undefined) return;
+    pumping = true;
+    try {
+      const r = await handlers["chat.send"]({
+        threadId: q.threadId, content: q.text, messageId: q.messageId,
+        model: q.model ?? (q.draw === undefined ? best ?? "" : ""),
+        numCtx: q.numCtx ?? deps.settings?.get().defaultNumCtx ?? 4096,
+        ...(q.images?.length ? { images: q.images } : {}),
+        ...(q.files?.length ? { files: q.files } : {}),
+        ...(q.think === undefined ? {} : { think: q.think }),
+        ...(q.draw === undefined ? {} : { draw: q.draw, ...(q.drawCount === undefined ? {} : { drawCount: q.drawCount }) }),
+        // Send now: a person is waiting on it, so a reply in another chat is not stopped without a yes
+        ...(q.now === true ? (q.stopOthers === true ? { stopOthers: true, ...(q.stopTurns === undefined ? {} : { stopTurns: q.stopTurns }) } : { askFirst: true }) : {}),
+      });
+      if ("replayed" in r) queue.started(q.messageId);
+      else queue.sending(q.id, r.turnId);
+    } catch (e) {
+      // refused before any turn was taken (a reply already running there, a chat being deleted)
+      const { code, message } = e as { code?: unknown; message?: unknown };
+      const why: Why = { code: typeof code === "string" ? code : "internal", message: typeof message === "string" ? message : String(e) };
+      queue.turnless(q.id, why);
+    } finally {
+      pumping = false;
+      pump();
+    }
+  }
 
   /** The turn's reply record as it is now, to every window (decision 33). */
   const pushReply = (turn: Turn) => push("chat.event", { turnId: turn.turnId, threadId: turn.threadId, event: { type: "reply", reply: turn.clock.record(Date.now()) } });
@@ -356,11 +425,14 @@ export function createApp(deps: AppDeps): App {
   });
   const offRuntime = runtime.onChange((status) => {
     push("runtime.changed", status);
+    pump();
     refreshModels();
     fitTable.changed();
   });
   const offCatalog = catalog.onChange((models) => {
     push("models.changed", models);
+    // the first model's download finished: what was typed behind it goes
+    pump();
     fitTable.changed();
   });
   // A newer chat list from the release page: the clients read the catalog again, the fit table lists its models.
@@ -419,6 +491,8 @@ export function createApp(deps: AppDeps): App {
         end();
         // An admitted turn's model was busy in every row's plan; now it is not.
         if (turn.started) fitTable.changed();
+        // the queue sends one reply at a time: this one's end may be what the next waits for
+        pump();
       },
     };
   };
@@ -673,6 +747,8 @@ export function createApp(deps: AppDeps): App {
         turn.text = "";
         turn.thinking = "";
         turn.clock.retry(Date.now());
+        // what waits behind it holds until the second attempt ends (decision 7)
+        queue.retrying(threadId);
         pushReply(turn);
       }
     } catch (e) {
@@ -876,10 +952,17 @@ export function createApp(deps: AppDeps): App {
       push("threads.changed", { threadId: thread.id });
       return thread;
     },
-    "threads.get": ({ threadId }) => {
+    "threads.get": ({ threadId, before, limit }) => {
       const saved = store.getThread(threadId);
       const draft = byThread.get(threadId)?.draftId;
-      return draft === undefined ? saved : { ...saved, messages: saved.messages.filter((m) => m.id !== draft) };
+      const all = draft === undefined ? saved.messages : saved.messages.filter((m) => m.id !== draft);
+      if (limit === undefined && before === undefined) return { ...saved, messages: all };
+      const end = before === undefined ? all.length : all.findIndex((m) => m.id === before);
+      if (end < 0) throw new AppError("message-not-found", `message ${before ?? ""} is not in thread ${threadId}`);
+      // a page starts at a question, so a reply never shows without the question it answers
+      let start = limit === undefined ? 0 : Math.max(0, end - limit);
+      while (start > 0 && all[start]?.role !== "user") start--;
+      return { ...saved, messages: all.slice(start, end), earlier: start };
     },
     "threads.rename": ({ threadId, title }) => {
       const thread = store.renameThread(threadId, title);
@@ -909,6 +992,7 @@ export function createApp(deps: AppDeps): App {
         const files = messages.flatMap(message => message.images ?? []);
         const attached = messages.flatMap(message => message.files ?? []).map(file => file.path);
         store.deleteThread(threadId);
+        queue.dropThread(threadId);
         await imageFiles?.collect(files).catch((error: unknown) => log(`image cleanup after thread deletion failed: ${String(error)}`));
         await attachedFiles?.collect(attached).catch((error: unknown) => log(`attached-file cleanup after thread deletion failed: ${String(error)}`));
       } finally {
@@ -1010,6 +1094,26 @@ export function createApp(deps: AppDeps): App {
       admitting(turn, admitTurn(turn, end, load, { threadId, content, model, numCtx, messageId, images, files: attaching, tools, think, stopOthers, stopTurns, askFirst }, { replaced, prior, settings }), replacedFiles, attaching.map(file => file.path));
       return { turnId: turn.turnId };
     }),
+
+    "queue.list": () => queue.list(),
+    "queue.add": (entry) => {
+      // already saved (a window's copy of a message that went out), or its chat is going: nothing to queue
+      if (store.getMessage(entry.messageId) === undefined && !deleting.has(entry.threadId)) {
+        store.getThread(entry.threadId);
+        queue.add(entry);
+        pump();
+      }
+      return queue.list();
+    },
+    "queue.update": ({ id, ...patch }) => {
+      if (queue.change(id, patch) === "sending") throw new AppError("queue-sending", "This message is already being sent.");
+      pump();
+      return queue.list();
+    },
+    "queue.remove": ({ id }) => {
+      queue.remove(id);
+      return queue.list();
+    },
 
     "chat.cancel": ({ turnId }) => {
       const turn = turns.get(turnId);

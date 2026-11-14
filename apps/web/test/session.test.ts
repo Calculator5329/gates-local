@@ -779,7 +779,8 @@ describe("background turn endings", () => {
     if (!doneFirst) finishA();
     await tick();
     expect.soft(running(store.getState(),"t1")).toBe(0);
-    expect.soft(running(store.getState(),"t2")).toBe(1);
+    // both ended first: the server sends the queued one, and this window sees its turn once the server's send is answered
+    expect.soft(running(store.getState(),"t2")).toBe(doneFirst ? 0 : 1);
     if (!doneFirst) finishB();
     await tick();
     expect(b.server.calls("chat.send").map((call) => call.params)).toMatchObject([{ content: "A" }, { content: "B" }, { content: "queued after B" }]);

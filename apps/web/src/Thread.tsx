@@ -3,11 +3,11 @@
 // props only and memoised by message, so a streaming token or a keystroke runs
 // nothing in it; only the live reply reads the store and paces its text. A
 // thread opens with its last turns mounted and adds the older ones when idle.
-import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import type { AttachedFile, ImageEvent, Message, ToolStep } from "@gates-local/contracts";
 import { useCopy } from "./copy.ts";
-import { noGpu, replyMeta, turnTime } from "./format.ts";
+import { noGpu, replyMeta, replyWait, turnTime } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { Markdown } from "./markdown.tsx";
 import { imageTurnLinks } from "./image-links.ts";
@@ -15,9 +15,9 @@ import { presetName, sizeLabel } from "./image-choice.ts";
 import { reveal } from "./reveal.ts";
 import { usePacedText } from "./paced.ts";
 import { focusComposer } from "./Sidebar.tsx";
-import { cancelImage, fileUrl, reloadThread, retry, retryImage } from "./session.ts";
+import { cancelImage, earlierOf, fileUrl, loadEarlier, onEarlier, reloadThread, retry, retryImage } from "./session.ts";
 import { AttachedFiles, AttachmentImages } from "./attachment-images.tsx";
-import { type LiveTurn, NA, type State, type StopNote, turnOf, useStore } from "./store.ts";
+import { type LiveTurn, NA, type State, type StopNote, getState, turnOf, useStore } from "./store.ts";
 import { workMsAt } from "./session/turn.ts";
 import { type Drawn, type Rounds, drawTimes } from "./session/times.ts";
 import { currentDraftKey, replaceDraft } from "./drafts.ts";
@@ -72,7 +72,7 @@ function CopyButton({ text, handle }: { text: string; handle: "reply" | "user-me
  * `stop`: a stopped reply's mark leads the row, its square always in view; a number is Stop's seconds, null no seconds
  * (a stop this session did not see, or one the thought's pill already timed). `regenOff`: Regenerate waits for the server to end the turn.
  */
-function ActRow({ text, meta, regen, regenOff = false, stop }: { text: string; meta: string; regen: boolean; regenOff?: boolean | undefined; stop?: number | null | undefined }) {
+function ActRow({ text, meta, wait, regen, regenOff = false, stop }: { text: string; meta: string; wait?: string | undefined; regen: boolean; regenOff?: boolean | undefined; stop?: number | null | undefined }) {
   // no hover on touch: the model and speed wait behind a tap so the row stays one line of icons
   const [details, setDetails] = useState(false);
   return (
@@ -99,7 +99,12 @@ function ActRow({ text, meta, regen, regenOff = false, stop }: { text: string; m
       <button type="button" className="ibtn xs a-det" data-testid="chat.reply.details" aria-label="Reply details" aria-expanded={details} onClick={() => setDetails(!details)}>
         <Icon id="more" />
       </button>
-      <span className="meta">{meta}</span>
+      <span className="meta">
+        {/* the wait for the model (a load, or a turn queued behind another) is its own figure: the work seconds after it never count it */}
+        {wait === undefined ? null : <span className="wait" data-testid="chat.reply.wait" data-tip="Waited for the model"><Icon id="clock" cls="s12" />{wait}</span>}
+        {wait !== undefined && meta !== "" ? " · " : null}
+        {meta}
+      </span>
     </div>
   );
 }
@@ -171,8 +176,9 @@ function LiveLine({ turn, tools }: { turn: LiveTurn; tools: readonly ToolStep[] 
     : imageBusy ? "Waiting for an image" : t - turn.startedAt >= 1000 ? "Waiting" : "";
   return (
     <>
+      {/* the seconds are on screen, out of the button's name: a screen reader hears "Thinking" once, not each second */}
       <span className="run-dot" />
-      {clocked ? <span className="lv-t">{`${secs} s`}</span> : null}
+      {clocked ? <span className="lv-t" aria-hidden="true">{`${secs} s`}</span> : null}
       <span className="lv-w"><span>{words}</span></span>
     </>
   );
@@ -643,6 +649,8 @@ interface ReplyView extends Files {
   /** Why this session saw the reply stop: Stop's seconds go in the actions row, a reason's words in the timeline's note under the turn. */
   readonly note: StopNote | undefined;
   readonly meta: string;
+  /** From Enter to the model being ready, in words; undefined for a warm reply. */
+  readonly wait: string | undefined;
   readonly regen: boolean;
   /** The thread's messages when an image card needs them, else EMPTY. */
   readonly thread: readonly Message[];
@@ -671,7 +679,7 @@ function FailLine({ words, why, retryable }: { words: string; why: string; retry
   );
 }
 
-function Reply({ msg, live, text, paced, thinking, tools, rounds, secs, allowedLinks, note, meta, regen, thread, slot = false, origin, token }: ReplyView) {
+function Reply({ msg, live, text, paced, thinking, tools, rounds, secs, allowedLinks, note, meta, wait, regen, thread, slot = false, origin, token }: ReplyView) {
   const end = live?.end;
   const interrupted = msg?.interrupted === true;
   // a reason in words has its own note under the turn; otherwise a saved stopped reply carries the square, with Stop's seconds when this session saw them
@@ -706,7 +714,7 @@ function Reply({ msg, live, text, paced, thinking, tools, rounds, secs, allowedL
       ) : note?.kind === "failed" ? <FailLine words="The reply didn't finish." why={note.why} retryable={regen} /> : null}
       {!streaming && !pending && !msg?.imageJob && !(text === "" && msg?.tools?.every(t => t.name === "image")) ? (
         // a stopped turn draws the row its saved reply will draw; Regenerate is off until the server has ended the turn (W-02)
-        <ActRow text={text} meta={meta} regen={regen} regenOff={live?.ending === true} stop={stop} />
+        <ActRow text={text} meta={meta} wait={wait} regen={regen} regenOff={live?.ending === true} stop={stop} />
       ) : null}
     </div>
   );
@@ -737,6 +745,8 @@ const LiveReply = memo(function LiveReply({ threadId, msg, last, origin, token }
   const note = saved?.note;
   // the server's work time: the saved row's, or the record held still where the turn ended here
   const workMs = live === null ? saved?.workMs : live.end === undefined ? undefined : workMsAt(live, Date.now());
+  const r = live?.reply;
+  const waitMs = live === null ? saved?.waitMs : r?.readyAt === undefined ? undefined : r.readyAt - r.startedAt;
   const paced = usePacedText(text, live !== null && live.end === undefined);
   if (msg === undefined && live === null) return null;
   // An Image turn's reply is its picture card, a row of its own with its progress and Cancel:
@@ -747,7 +757,7 @@ const LiveReply = memo(function LiveReply({ threadId, msg, last, origin, token }
     <>
       {live?.pendingUser != null ? <UserBubble text={live.pendingUser} images={live.pendingImages} files={live.pendingFiles} time={turnTime(live.startedAt)} /> : null}
       <Reply msg={msg} live={live} text={text} paced={paced} thinking={msg?.thinking ?? live?.thinking ?? ""} tools={tools} rounds={rounds} secs={workSecs(workMs)}
-        allowedLinks={allowedLinks} note={note} meta={replyMeta(msg ?? {}, workMs)} slot={msg === undefined || msg.times !== undefined}
+        allowedLinks={allowedLinks} note={note} meta={replyMeta(msg ?? {}, workMs)} wait={replyWait(waitMs)} slot={msg === undefined || msg.times !== undefined}
         regen={msg === undefined ? live?.end?.kind === "stopped" : last} thread={messages} origin={origin} token={token} />
     </>
   );
@@ -761,7 +771,7 @@ const SavedReply = memo(function SavedReply({ msg, last, thread, times, origin, 
   return (
     <Reply msg={msg} live={null} text={msg.content} paced={msg.content} thinking={msg.thinking ?? ""} tools={tools} rounds={times.rounds}
       secs={workSecs(times.workMs)} allowedLinks={allowedLinks}
-      note={times.note} meta={replyMeta(msg, times.workMs)} regen={last} thread={thread} origin={origin} token={token} />
+      note={times.note} meta={replyMeta(msg, times.workMs)} wait={replyWait(times.waitMs)} regen={last} thread={thread} origin={origin} token={token} />
   );
 });
 
@@ -792,9 +802,24 @@ const FILL_TURNS = 120;
 /**
  * The page holds only what the reader asked for (chat row 40, owner pick A, 2026-11-13): a
  * thread opens with a window of its latest turns, and a button at the top adds the turns
- * before them, this many a press. Turns that come in at the end widen the window there.
+ * before them, this many a press. Turns that come in at the end widen the window there. The
+ * server sends a thread a page of messages at a time, the same size: a press past what is
+ * loaded asks it for the page before.
  */
 const WINDOW_TURNS = 200;
+
+/** The key of the turn at i in the timeline's map below: a question by its id, an image job by its own, a reply by the question it answers. */
+function turnKeyAt(messages: readonly Message[], i: number): string | undefined {
+  const m = messages[i];
+  if (m === undefined) return undefined;
+  if (m.role === "user") return m.id;
+  if (m.imageJob) return `image:${m.id}`;
+  for (let j = i - 1; j >= 0; j--) {
+    const before = messages[j];
+    if (before?.role === "user") return `reply:${before.id}`;
+  }
+  return `reply:${m.id}`;
+}
 
 /** The longest a slice waits for an idle moment before it mounts anyway. */
 const IDLE_WAIT_MS = 100;
@@ -949,13 +974,42 @@ export function Timeline({ threadId }: { threadId: string }) {
     do grow(turnsNow.current.length - skipNow.current <= FIRST_TURNS ? SLICE_TURNS : FILL_TURNS); while (skipNow.current > floorNow.current && timeLeft() > SLICE_MS);
   })), [first, skip, floorAt, grow]);
 
-  // Load earlier: the window takes the turns before it, mounted at once; the turn in view stays where it is
+  // Saved messages before the loaded ones, still on the server: the button counts them with the held-back turns.
+  const unloadedOf = () => earlierOf(threadId);
+  const unloaded = useSyncExternalStore(onEarlier, unloadedOf, unloadedOf);
+  const unloadedNow = useRef(unloaded);
+  unloadedNow.current = unloaded;
+  const before = floorAt + unloaded;
+  const fetching = useRef(false);
+  // Load earlier: the window takes the turns before it, mounted at once; the turn in view stays where it is.
+  // Past what is loaded, the page before comes from the server first.
+  const threadNow = useRef(threadId);
+  threadNow.current = threadId;
   const earlier = () => {
-    const key = turnsNow.current[Math.max(0, floorNow.current - WINDOW_TURNS)]?.key;
-    if (key === undefined) return;
-    floorNow.current = Math.max(0, floorNow.current - WINDOW_TURNS);
-    flushSync(() => setFloor(key));
-    grow(Number.MAX_SAFE_INTEGER);
+    const stepTo = (to: number, key: string | undefined) => {
+      if (key === undefined) return;
+      floorNow.current = to;
+      flushSync(() => setFloor(key));
+      grow(Number.MAX_SAFE_INTEGER);
+    };
+    if (floorNow.current >= WINDOW_TURNS || unloadedNow.current === 0) {
+      const to = Math.max(0, floorNow.current - WINDOW_TURNS);
+      stepTo(to, turnsNow.current[to]?.key);
+      return;
+    }
+    if (fetching.current) return;
+    const asked = threadId;
+    const from = turnsNow.current[floorNow.current]?.msg?.id;
+    fetching.current = true;
+    void loadEarlier(asked).then((came) => {
+      fetching.current = false;
+      // the reader went to another thread meanwhile: this one keeps the page for their next visit
+      if (!came || threadNow.current !== asked) return;
+      // the messages as they are now, the page in front: the window steps back from the same turn
+      const list = getState().messages[asked] ?? [];
+      const to = Math.max(0, list.findIndex((m) => m.id === from) - WINDOW_TURNS);
+      stepTo(to, turnKeyAt(list, to));
+    });
   };
 
   // a newly opened thread starts at its end
@@ -1030,13 +1084,13 @@ export function Timeline({ threadId }: { threadId: string }) {
     <div className="tl" ref={tl} aria-busy={loading && loadError === undefined}>
       <div className={messages.length >= LONG_THREAD ? "col long" : "col"} ref={col}>
         {loading && loadError === undefined ? <TurnSkel /> : null}
-        {floorAt > 0 ? (
+        {before > 0 ? (
           // the arrow and the number say it (decision 5); the button's tip has how many there are before
           <button type="button" className="earlier" data-testid="chat.thread.earlier" onClick={earlier}
-            aria-label={`Show ${Math.min(WINDOW_TURNS, floorAt).toLocaleString("en-US")} earlier`}
-            data-tip={`${floorAt.toLocaleString("en-US")} earlier`}>
+            aria-label={`Show ${Math.min(WINDOW_TURNS, before).toLocaleString("en-US")} earlier`}
+            data-tip={`${before.toLocaleString("en-US")} earlier`}>
             <Icon id="up" />
-            {Math.min(WINDOW_TURNS, floorAt).toLocaleString("en-US")}
+            {Math.min(WINDOW_TURNS, before).toLocaleString("en-US")}
           </button>
         ) : null}
         {turns.slice(skip).map(({ msg: m, key }, j) => {

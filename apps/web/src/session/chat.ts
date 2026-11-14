@@ -1,5 +1,5 @@
-// Chat admissions, concurrent replies, streaming buffers and queue policy.
-import { type BlockingTurn, type ImageChoice, type Message, type MethodName, type Params, type Payload, type ReplyTimes, type ResultOf, WireError } from "@gates-local/contracts";
+// Chat admissions, concurrent replies, streaming buffers, and this window's view of the server's queue.
+import { type BlockingTurn, type ImageChoice, type Message, type MethodName, type Params, type Payload, type QueuedMessage, type ReplyTimes, type ResultOf, WireError } from "@gates-local/contracts";
 import { ctxFor, describeModel, k } from "../format.ts";
 import { firstChatPull, sendableModel } from "../pick.ts";
 import { type LiveTurn, NA, type Queued, type State, type StopAsk, chatReady, getState, runningTurn, setState, streamingHere, turnOf } from "../store.ts";
@@ -8,7 +8,7 @@ import { drawChoice, imageMode } from "../image-choice.ts";
 import { releaseFiles } from "../file-holds.ts";
 import { type Draft, beginQueuedDraft, cancelQueuedDraft, clearDraft, currentDraftKey, getDraft, moveDraft, replaceDraft } from "../drafts.ts";
 import type { ServerEvent } from "./server-state.ts";
-import { type ChatEvent, type TurnEvent, endReason, reduceTurn, unfinished, withTurn, workMsAt } from "./turn.ts";
+import { type ChatEvent, type TurnEvent, reduceTurn, unfinished, withTurn, workMsAt } from "./turn.ts";
 import { stopReason as stopWords } from "./times.ts";
 
 declare global {
@@ -45,6 +45,37 @@ const STOP_OTHERS_KEY = "gates-local.stop-others-ok";
 
 const queueId = () => `q-${crypto.randomUUID()}`;
 
+/**
+ * The queue is the server's (it keeps it, sends it and pushes every change); a window shows its
+ * copy and asks for changes. `server` is the connection's calls, once createChat has them.
+ */
+let server: ChatEffects["call"] | undefined;
+
+/** Queued here and not yet acknowledged: shown meanwhile, and asked again after a dropped connection. */
+const unsynced = new Map<string, QueuedMessage>();
+
+/** The words "restored on hold" a reload put up for this browser's own saved queue, which the server's now replaces. */
+const RESTORED_NOTICE = "Your queued messages were restored on hold. Use Send now when you are ready.";
+/** Set once this browser's saved queue (from before the server kept it) has gone to the server. */
+const QUEUE_MOVED_KEY = "gates-local.queue-on-server";
+
+function queueMoved(): boolean {
+  try {
+    if (localStorage.getItem(QUEUE_MOVED_KEY) === "1") return true;
+    localStorage.setItem(QUEUE_MOVED_KEY, "1");
+  } catch {
+    // private windows may refuse storage: nothing older was saved there either
+    return true;
+  }
+  return false;
+}
+
+/** The window's copy of a server entry: what it shows and acts on. */
+function toQueued(e: QueuedMessage): Queued {
+  const { numCtx: _numCtx, think: _think, drawCount: _drawCount, sending: _sending, editing: _editing, stopOthers: _stopOthers, stopTurns: _stopTurns, why: _why, ...q } = e;
+  return q;
+}
+
 type Outgoing = Omit<StopAsk, "blocking">;
 
 /** Whether a message typed now would wait for setup or the first download instead of sending. */
@@ -76,17 +107,6 @@ const APART: Draft = { text: "", images: [], sendId: null, version: -1 };
 function gone(out: Outgoing): boolean {
   const s = getState();
   return out.queuedId !== undefined && (s.editingQueued === out.queuedId || !s.queued.some((q) => q.id === out.queuedId));
-}
-
-function leaving(queued: readonly Queued[], q: Queued): Leaving {
-  return { q, ahead: new Set(queued.slice(0, queued.indexOf(q)).map((x) => x.id)) };
-}
-
-function putBack(queued: readonly Queued[], { q, ahead }: Leaving): Queued[] {
-  const { now: _now, ...rest } = q;
-  const at = queued.findLastIndex((x) => ahead.has(x.id)) + 1;
-  // reply, even if it waited for setup: that wait is over, and Send now on this row is how it goes
-  return [...queued.slice(0, at), { ...rest, waitFor: "reply" as const, held: true as const }, ...queued.slice(at)];
 }
 
 export function cancelStopAsk(): void {
@@ -155,36 +175,7 @@ function retriedRows(messages: readonly Message[]): readonly Message[] {
   return rows[0]?.role === "user" && rows.slice(1).every(retriable) ? rows : [];
 }
 
-/** The reply these messages waited for stopped or failed: they wait for Send now instead of going out on their own. */
-function holdQueue(threadId: string): void {
-  const waiting = waitsBehind(threadId);
-  setState((s) => (s.queued.some(waiting) ? { queued: s.queued.map((q) => (waiting(q) ? { ...q, held: true as const } : q)) } : {}));
-}
-
-/** A queued message that goes out on its own once this thread's reply ends. */
-function waitsBehind(threadId: string): (q: Queued) => boolean {
-  return (q) => q.threadId === threadId && q.waitFor === "reply" && q.now !== true;
-}
-
-/**
- * The queue behind a failed reply the server runs once more (decision 7): on hold while the second
- * attempt runs ("running"), still on hold when it failed too ("failed"), sent as usual when it
- * finished (undefined: no longer held). A stop during the second attempt leaves it held with no word.
- */
-function markRetry(threadId: string, retry: "running" | "failed" | "finished" | "stopped"): void {
-  const waiting = waitsBehind(threadId);
-  setState((s) => (s.queued.some(waiting) ? {
-    queued: s.queued.map((q) => {
-      if (!waiting(q)) return q;
-      const { held: _held, retry: _retry, ...rest } = q;
-      if (retry === "finished") return q.retry === "running" ? rest : q;
-      if (retry === "stopped") return { ...rest, held: true as const };
-      return { ...rest, held: true as const, retry };
-    }),
-  } : {}));
-}
-
-/** Remove: the message is gone. Edit is the way to get its words back. */
+/** Remove: the message is gone, from every window. Edit is the way to get its words back. */
 export function removeQueued(id: string): void {
   const files = getState().queued.find((q) => q.id === id)?.files ?? [];
   if (getState().editingQueued === id) cancelQueuedDraft(currentDraftKey());
@@ -194,29 +185,24 @@ export function removeQueued(id: string): void {
     ...(s.stopAsk?.queuedId === id ? { stopAsk: null } : {}),
   }));
   releaseFiles(files.map((f) => f.path));
+  unsynced.delete(id);
+  void server?.("queue.remove", { id }).catch(() => undefined);
 }
 
-/** Edit: the words go in the composer and the message keeps its place until the next Send updates it. */
+/** Edit: the words go in the composer and the message keeps its place, unsent, until the next Send updates it. */
 export function editQueued(id: string): void {
   const q = getState().queued.find((x) => x.id === id);
   if (q) {
     beginQueuedDraft(q.threadId, q.text, q.images ?? [], q.messageId ?? null, q.files);
     setState({ editingQueued: id, notice: null, stopAsk: null });
+    void server?.("queue.update", { id, editing: true }).catch(() => undefined);
   }
-}
-
-/** A queued message on its way to the server, and the ones that were ahead of it: a refused send puts it back at its place. */
-interface Leaving {
-  readonly q: Queued;
-  readonly ahead: ReadonlySet<string>;
 }
 
 interface TurnOptions {
   readonly messageId?: string;
   readonly stopOthers?: boolean;
   readonly stopTurns?: readonly string[] | undefined;
-  /** It left the queue for this send. */
-  readonly from?: Leaving | undefined;
   /** The person is waiting on it, so a reply in the way can still get the warning; queued messages that go on their own have none. */
   readonly out?: Outgoing;
 }
@@ -236,6 +222,109 @@ function withWaiting(turn: LiveTurn, w: Waiting, now: number): LiveTurn {
 
 /** History, navigation, fit and RPC operations are wired by session.ts. */
 export function createChat({ applyServerEvent, call, codeOf, createThread, creatingDraft, loadThread, loading, noteMessage, withMessage, untrackedDone, openThread, blockingFor }: ChatEffects) {
+  server = call;
+  /** Queued messages this window pressed Send now on: a would-stop answer shows the warning here. */
+  const nowAsked = new Set<string>();
+  /** Queued here to wait for setup or the first download: its chat opens when it goes. */
+  const waitedHere = new Set<string>();
+  /** Turns the server started for queued messages, until their start: an error before it is a refusal, and the message is back on hold. */
+  const queueTurns = new Map<string, string>();
+  /** Each queued message's refusal as last said, so it is said once. */
+  const refusalSaid = new Map<string, string>();
+
+  /** Hand a message to the server's queue. A dropped connection keeps it here, and the next connection asks again. */
+  function enqueue(entry: QueuedMessage): void {
+    unsynced.set(entry.id, entry);
+    call("queue.add", entry).then(() => { unsynced.delete(entry.id); }, (e: unknown) => {
+      const code = codeOf(e);
+      if (code === "closed" || code === "timeout") return;
+      // its chat is gone
+      unsynced.delete(entry.id);
+      setState((s) => ({ queued: s.queued.filter((q) => q.id !== entry.id), notice: "The chat this message was waiting in is gone, so it was not sent." }));
+    });
+  }
+
+  /**
+   * The server's queue, as this window shows it. One on its way becomes its chat's turn, with its
+   * words as the question until the start saves them; a new refusal is said once, here as a warning
+   * when this window pressed Send now and the yes is the person's to give. `listed`: the snapshot at
+   * connect, whose refusals were said before.
+   */
+  function queueChanged(list: readonly QueuedMessage[], listed = false): void {
+    const s = getState();
+    const now = Date.now();
+    // this window's own sends (a Send now's yes) are out of the list until their start
+    const waiting = list.filter((e) => e.sending === undefined && !admitting.has(e.messageId)).map(toQueued);
+    // a Send now shows first, as it goes first; the server keeps its place for a refusal
+    const shown = [...waiting.filter((q) => q.now === true), ...waiting.filter((q) => q.now !== true)];
+    const local = [...unsynced.values()].filter((u) => !list.some((e) => e.id === u.id)).map(toQueued);
+    let turns = s.turns;
+    let notice: string | undefined;
+    let stopAsk: StopAsk | undefined;
+    const opening: string[] = [];
+    for (const e of list) {
+      if (e.sending !== undefined) {
+        const turn = turns[e.threadId];
+        if (queueTurns.has(e.sending) || (turn !== undefined && turn.turnId !== e.sending && unfinished(turn))) continue;
+        queueTurns.set(e.sending, e.id);
+        const words = { pendingUser: e.text, pendingImages: e.images ?? [], ...(e.files?.length ? { pendingFiles: e.files } : {}) };
+        if (turn?.turnId === e.sending) {
+          if (turn.pendingUser === null) turns = withTurn(turns, e.threadId, { ...turn, ...words });
+        } else {
+          retire(turn);
+          turns = withTurn(turns, e.threadId, { gen: ++turnGen, threadId: e.threadId, turnId: e.sending, model: e.draw?.preset ?? e.model ?? "", startedAt: now, thinking: "", text: "", tools: [], ...words, ...(e.draw === undefined ? {} : { image: true as const }) });
+        }
+        // setup and the first download are the whole app waiting; a queue behind a reply stays out of the way
+        if (waitedHere.delete(e.id) && e.waitFor !== "reply" && s.threadId !== e.threadId) opening.push(e.threadId);
+        nowAsked.delete(e.id);
+        continue;
+      }
+      if (e.why === undefined) continue;
+      const key = JSON.stringify(e.why);
+      if (refusalSaid.get(e.id) === key) continue;
+      refusalSaid.set(e.id, key);
+      if (listed) continue;
+      const asked = nowAsked.delete(e.id);
+      const here = s.view === "thread" && s.threadId === e.threadId;
+      const { code, message, blocking } = e.why;
+      const model = e.model ?? s.model ?? "";
+      if (code === "would-stop" && blocking !== undefined && asked && here) {
+        stopAsk = { content: e.text, images: e.images ?? [], ...(e.files ? { files: e.files } : {}), messageId: e.messageId, model, threadId: e.threadId, keepDraft: true, queuedId: e.id, ...(e.draw === undefined ? {} : { draw: e.draw }), blocking };
+      } else {
+        notice = !here ? elsewhereNotice(s, e.threadId) : code === "gpu-unreadable" ? `${message} Your message is back in the queue.` : code === "image-input" ? message : refusal(code, model, "queue");
+      }
+    }
+    for (const id of refusalSaid.keys()) if (!list.some((e) => e.id === id)) refusalSaid.delete(id);
+    applyServerEvent({
+      queued: [...shown, ...local],
+      ...(turns === s.turns ? {} : { turns }),
+      ...(stopAsk === undefined ? {} : { stopAsk, notice: null }),
+      ...(notice === undefined ? {} : { notice }),
+    });
+    for (const threadId of opening) openThread(threadId);
+  }
+
+  /**
+   * The queue at connect. What this window queued while the connection was down goes now; a queue
+   * this browser kept itself before the server did goes once, on hold; one it kept since is only the
+   * server's own, and the server's wins. An edit open here keeps its message from going.
+   */
+  function queueListed(list: readonly QueuedMessage[]): void {
+    const s = getState();
+    const has = (id: string) => list.some((e) => e.id === id);
+    const older = queueMoved() ? [] : s.queued.filter((q) => !has(q.id) && !unsynced.has(q.id));
+    for (const q of older) unsynced.set(q.id, { ...q, messageId: q.messageId ?? queueId(), waitFor: "reply", held: true, numCtx: s.numCtx, think: s.think });
+    for (const u of unsynced.values()) if (!has(u.id)) enqueue(u);
+    if (older.length === 0 && s.notice === RESTORED_NOTICE) setState({ notice: null });
+    const editing = list.find((e) => e.id === s.editingQueued);
+    if (editing !== undefined && editing.editing !== true && editing.sending === undefined) void call("queue.update", { id: editing.id, editing: true }).catch(() => undefined);
+    queueChanged(list, true);
+  }
+
+  /** An edit ended without a Send (Cancel, or leaving the chat): the message goes on as it was. */
+  function editEnded(id: string): void {
+    void call("queue.update", { id, editing: false }).catch(() => undefined);
+  }
   /** A saved user message confirms its exact copy; edited words already have a new identity. */
   function confirmCopy(message: Message): void {
     const matchedDraft = getDraft(message.threadId).sendId === message.id;
@@ -355,7 +444,11 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
       if (!s.queued.some(q => q.id === id)) { setState({ editingQueued: null, notice: "Your edited words are still in the composer. Send them as a new message." }); return; }
       cancelQueuedDraft(key);
       setState((st) => ({ queued: st.queued.map((q) => (q.id === id ? { ...q, text: content, images, files, messageId } : q)), editingQueued: null, notice: null }));
-      flushQueued();
+      call("queue.update", { id, text: content, images: [...images], files: [...files], messageId, editing: false }).catch(() => {
+        // it went, or was removed, meanwhile: the edited words are not lost
+        replaceDraft(key, { text: content, images, ...attached, sendId: null });
+        setState({ notice: "Your edited words are still in the composer. Send them as a new message." });
+      });
       return;
     }
     const wait = (draw === undefined ? queueReason(s) : null) ?? (streamingHere(s) ? "reply" : null);
@@ -375,6 +468,10 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     if (key === null && !apart) moveDraft(null, queueIn);
     settleEnded();
     setState((st) => ({ notice: null, stopAsk: null, queued: [...st.queued, q] }));
+    if (wait !== "reply") waitedHere.add(q.id);
+    // the server sends it as this window would have: the context and thinking set now, a picture at its chat's count
+    const drawCount = draw === undefined ? undefined : threadId === null ? s.imageCountNew : s.threads.find((t) => t.id === queueIn)?.imageCount ?? 1;
+    enqueue({ ...q, messageId, numCtx: s.numCtx, think: s.think, ...(drawCount === undefined ? {} : { drawCount }) });
   }
 
   /** The server is being asked what a send would stop; a second Enter in that moment is the same send. */
@@ -408,9 +505,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
   /** `stopTurns`: the turns a warning named and the person agreed to; without it, standing consent. */
   async function launch(out: Outgoing, stopOthers: boolean, stopTurns?: readonly string[]): Promise<void> {
     if (gone(out)) return setState({ stopAsk: null });
-    const { queued } = getState();
-    const q = queued.find((x) => x.id === out.queuedId);
-    const from = q === undefined ? undefined : leaving(queued, q);
+    if (out.queuedId !== undefined) return queueNow(out.queuedId, stopOthers, stopTurns);
     settleEnded(undefined, out.regenerate === true ? out.threadId ?? undefined : undefined);
     // Keep the words in view until a new chat exists. A failed create leaves the draft alone.
     const threadId = out.threadId ?? (await createThread(out.content, out.model === "" ? undefined : out.model, !out.keepDraft));
@@ -420,11 +515,37 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     if (!out.keepDraft && draft.text.trim() === out.content && draft.images === out.images && (draft.files ?? []).length === (out.files ?? []).length) clearDraft(draftKey);
     // A new chat for words from elsewhere leaves the new-chat draft where it was.
     if (out.threadId === null && !out.keepDraft) moveDraft(null, threadId);
-    setState((s) => ({
-      notice: null, stopAsk: null,
-      ...(out.queuedId === undefined ? {} : { queued: s.queued.filter((x) => x.id !== out.queuedId) }),
-    }));
-    await startTurn(threadId, out.content, out.model, { stopOthers, stopTurns, from, out });
+    setState({ notice: null, stopAsk: null });
+    await startTurn(threadId, out.content, out.model, { stopOthers, stopTurns, out });
+  }
+
+  /**
+   * Send now, once nothing in its way needs a yes (or the yes is given): the server sends it first,
+   * as soon as its chat has no reply running. `stopOthers` with no `stopTurns` is standing consent.
+   */
+  function queueNow(id: string, stopOthers: boolean, stopTurns?: readonly string[]): void {
+    const s = getState();
+    const q = s.queued.find((x) => x.id === id);
+    if (q === undefined) return;
+    const { held: _held, retry: _retry, ...rest } = q;
+    nowAsked.add(id);
+    setState({ queued: [{ ...rest, now: true }, ...s.queued.filter((x) => x.id !== id)], stopAsk: null, notice: null });
+    const model = q.model ?? s.model;
+    call("queue.update", { id, now: true, ...(stopOthers ? { stopOthers: true, ...(stopTurns === undefined ? {} : { stopTurns: [...stopTurns] }) } : {}), ...(model === undefined || model === null ? {} : { model }) })
+      .catch(() => setState({ notice: "This message is already on its way." }));
+  }
+
+  /** Stop means stop: what queued behind the reply waits for Send now, even when the reply's last word reached the server before the Stop. */
+  function holdBehind(threadId: string): void {
+    const waiting = getState().queued.filter((q) => q.threadId === threadId && q.waitFor === "reply" && q.now !== true && q.held !== true);
+    if (waiting.length === 0) return;
+    const ids = new Set(waiting.map((q) => q.id));
+    setState((s) => ({ queued: s.queued.map((q) => (ids.has(q.id) ? { ...q, held: true as const } : q)) }));
+    for (const id of ids) {
+      const u = unsynced.get(id);
+      if (u !== undefined) unsynced.set(id, { ...u, held: true });
+      void call("queue.update", { id, held: true }).catch(() => undefined);
+    }
   }
 
   /** The warning's action. `dontShowAgain` is saved only here, so a Cancel with the box ticked changes nothing. */
@@ -461,16 +582,16 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const s = getState();
     // a stopped reply's words stay in its chat, unless this is a Retry there, which is asking to replace them
     retire(s.turns[threadId], opts.out?.regenerate !== true);
-    const images = opts.out?.images ?? opts.from?.q.images ?? [];
-    const files = opts.out?.files ?? opts.from?.q.files ?? [];
+    const images = opts.out?.images ?? [];
+    const files = opts.out?.files ?? [];
     const gen = ++turnGen;
     const replacing = opts.out?.regenerate === true ? retriedRows(s.messages[threadId] ?? []) : [];
     // the server has taken the old rows out in the same write that saved the new question
     const replacedIds = new Set(replacing.map((m) => m.id));
     const withoutReplaced = (st: State): State => replacing.length === 0 ? st : { ...st, messages: { ...st.messages, [threadId]: (st.messages[threadId] ?? []).filter((m) => !replacedIds.has(m.id)) } };
-    const messageId = opts.out?.messageId ?? opts.from?.q.messageId ?? queueId();
-    opts = { ...opts, messageId, ...(opts.from ? { from: { ...opts.from, q: { ...opts.from.q, messageId } } } : {}) };
-    const draw = opts.out?.draw ?? opts.from?.q.draw;
+    const messageId = opts.out?.messageId ?? queueId();
+    opts = { ...opts, messageId };
+    const draw = opts.out?.draw;
     // a new thread's first send carries the count picked before it existed; a thread keeps its own
     const fresh = opts.out?.threadId === null;
     const drawCount = draw === undefined ? undefined : fresh ? s.imageCountNew : s.threads.find((t) => t.id === threadId)?.imageCount ?? 1;
@@ -478,7 +599,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const turn: LiveTurn = { gen, threadId, turnId: null, model: draw?.preset ?? model, startedAt, thinking: "", text: "", tools: [], pendingUser: content, pendingImages: images, ...(files.length ? { pendingFiles: files } : {}), ...(draw === undefined ? {} : { image: true as const }) };
     // Using is a turn that starts: a send, a queued send, Retry or Regenerate, after any warning was answered.
     // The next new chat starts on this model (navigation.ts newThread). An Image send uses no chat model.
-    setState(st => ({ ...(opts.from ? { queued: st.queued.filter(q => q.id !== opts.from?.q.id) } : {}), turns: withTurn(st.turns, threadId, turn), ...(model === "" || draw !== undefined ? {} : { chosen: model }) }));
+    setState(st => ({ turns: withTurn(st.turns, threadId, turn), ...(model === "" || draw !== undefined ? {} : { chosen: model }) }));
     const own: Admitting = {
       threadId,
       gen,
@@ -521,7 +642,6 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         const running = own.turnId !== undefined;
         applyServerEvent(st => ({ messages: withMessage(st, threadId, saved), notice: "Your message was already sent. It was not sent again.", ...(!running && st.turns[threadId]?.gen === gen ? { turns: withTurn(st.turns, threadId, null) } : {}) }));
         await loadThread(threadId, true);
-        flushQueued();
         return;
       }
       // its start may have come already, and bound the turn's id (turnEvent)
@@ -546,21 +666,20 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
   /** chat.send was refused, or the turn ended before its start: nothing was saved. */
   function notStarted(e: unknown, gen: number, threadId: string, content: string, model: string, opts: TurnOptions): void {
     notSent(e, gen, threadId, content, model, opts);
-    flushQueued();
   }
 
   /**
    * chat.send was refused, so nothing was saved: the words go where the person
-   * will find them. A queued message goes back
-   * to its place. Other words go back in their thread's empty draft, even off
+   * will find them (a queued message the server sent is the server's to put
+   * back). Other words go back in their thread's empty draft, even off
    * screen, else on hold in that chat's queue. A Retry's are already in the chat.
    * A reply in the way that the preflight missed gets the usual warning, when
    * the person is still there to answer it.
    */
-  function notSent(e: unknown, gen: number, threadId: string, content: string, model: string, { from, out, messageId }: TurnOptions): void {
+  function notSent(e: unknown, gen: number, threadId: string, content: string, model: string, { out, messageId }: TurnOptions): void {
     const st = getState();
-    const images = out?.images ?? from?.q.images ?? [];
-    const files = out?.files ?? from?.q.files ?? [];
+    const images = out?.images ?? [];
+    const files = out?.files ?? [];
     const attached = files.length ? { files } : {};
     const code = codeOf(e);
     const turn = st.turns[threadId];
@@ -569,11 +688,11 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const halted = owner === null || owner.end?.kind === "stopped";
     const here = st.view === "thread" && st.threadId === threadId;
     const draft = getDraft(threadId);
-    const where = out?.regenerate === true ? null : from === undefined && draft.text === "" && draft.images.length === 0 && !draft.files?.length ? "box" : "queue";
+    const where = out?.regenerate === true ? null : draft.text === "" && draft.images.length === 0 && !draft.files?.length ? "box" : "queue";
     const blocking = e instanceof WireError ? e.blocking : undefined;
     // halted: the person has already said no; a message that went to the queue instead of the box would warn about words not in view
-    const ask = code === "would-stop" && blocking !== undefined && out !== undefined && here && !halted && (from !== undefined || where !== "queue") ? { ...out, threadId, blocking } : null;
-    const draw = out?.draw ?? from?.q.draw;
+    const ask = code === "would-stop" && blocking !== undefined && out !== undefined && here && !halted && where !== "queue" ? { ...out, threadId, blocking } : null;
+    const draw = out?.draw;
     const typed: Queued = { id: queueId(), ...(messageId ? { messageId } : {}), threadId, text: content, images, ...attached, at: Date.now(), waitFor: "reply", model, held: true, ...(draw === undefined ? {} : { draw }) };
     const consented = ask !== null && stopOthersOk();
     if (where === "box") replaceDraft(threadId, { text: content, images, ...attached, sendId: messageId ?? null });
@@ -584,13 +703,13 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const offer = code === "wont-fit" && here && e instanceof WireError ? e.offer : undefined;
     applyServerEvent({
       ...(owner === null ? {} : { turns: withTurn(st.turns, threadId, halted ? reduceTurn(owner, { type: "refused" }, Date.now()) : null) }),
-      ...(where === "queue" ? { queued: from === undefined ? [...st.queued, typed] : putBack(st.queued, from) } : {}),
+      ...(where === "queue" ? { queued: [...st.queued, typed] } : {}),
       ...(ask === null || consented ? {} : { stopAsk: ask, notice: null }),
       ...(ask === null && !halted ? { notice, noticeOffer: offer === undefined ? null : { notice, model, numCtx: ctxFor(st.numCtx, st.models, model), offer } } : {}),
     });
+    // on the server too, on hold
+    if (where === "queue") enqueue({ ...typed, messageId: typed.messageId ?? queueId(), numCtx: st.numCtx, think: st.think });
     if (consented) void launch(ask, true);
-    // what waited behind it does not overtake it
-    else if (ask === null && from !== undefined) holdQueue(from.q.threadId);
   }
 
   /** Stop the reply being written in this chat (the open one unless named). */
@@ -600,13 +719,12 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     // the words that were waiting for a frame stay (W-05)
     flushWords(turn.threadId);
     update(turn.threadId, turn.gen, { type: "stop" });
+    holdBehind(turn.threadId);
     if (turn.turnId !== null) {
       oldTurns.add(turn.turnId);
       void call("chat.cancel", { turnId: turn.turnId }).catch(() => undefined);
-      return;
     }
-    // without an id yet, startTurn cancels it once chat.send answers; until then another chat finishing can wake the queue
-    holdQueue(turn.threadId);
+    // without an id yet, startTurn cancels it once chat.send answers
   }
 
   /** Retry or Regenerate: send the thread's last user message again. An unfinished reply is replaced; after a finished one the server keeps both copies (no regenerate method yet). */
@@ -739,11 +857,20 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     }
     if (event.type === "done" || event.type === "error") oldTurns.delete(turnId);
     const turn = getState().turns[threadId];
+    if (queueTurns.has(turnId) && (event.type === "start" || event.type === "done" || event.type === "error")) {
+      queueTurns.delete(turnId);
+      // a queued message refused before its start: the server puts it back on hold and says why with the queue
+      if (event.type === "error") {
+        // one the person stopped stays stopped, its question back in the queue, as a stopped send's does
+        if (turn?.turnId === turnId) applyServerEvent((s) => ({ turns: withTurn(s.turns, threadId, turn.end?.kind === "stopped" ? reduceTurn(turn, { type: "refused" }, Date.now()) : null) }));
+        return;
+      }
+    }
     // a turn another window sent that never started here: refused there, so nothing of it shows here
     if (turn?.listed === true && turn.turnId === turnId && event.type === "error") {
       applyServerEvent((s) => ({ turns: withTurn(s.turns, threadId, null) }));
       keepStopped(threadId, event);
-      return flushQueued();
+      return;
     }
     if (turn === undefined || turn.turnId !== turnId) return otherTurn(p);
     const open = getState().threadId === threadId;
@@ -756,11 +883,9 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         flushWords(threadId);
         return update(threadId, turn.gen, event);
       case "reply":
-        // a second attempt starts over (decision 7): the first one's waiting words are dropped, and the queue behind it waits
-        if (turn.reply !== undefined && event.reply.attempt > turn.reply.attempt) {
-          waiting.delete(threadId);
-          markRetry(threadId, "running");
-        } else if (!open) flushWords(threadId);
+        // a second attempt starts over (decision 7): the first one's waiting words are dropped (the server holds the queue behind it)
+        if (turn.reply !== undefined && event.reply.attempt > turn.reply.attempt) waiting.delete(threadId);
+        else if (!open) flushWords(threadId);
         // the open chat's words land in their own frame (one flush a frame); a chat off screen takes them at the phase change
         return update(threadId, turn.gen, event);
       case "start":
@@ -786,15 +911,10 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         }));
         // a chat not on screen reloads: its cached history may be behind
         if (!open) untrackedDone(threadId, msg);
-        // the person said stop: a Stop that lost the race to the last token holds the queue like any other
-        if (turn.end?.kind === "stopped") { holdQueue(threadId); markRetry(threadId, "stopped"); }
-        else markRetry(threadId, "finished");
-        flushQueued();
         return;
       }
       case "error": {
         const said = { ...event, message: stopReason(event) ?? event.message };
-        holdQueue(threadId);
         if (said.partial !== undefined) {
           // the saved partial has every word the turn showed, and how and when it ended: it takes the turn's place
           waiting.delete(threadId);
@@ -813,11 +933,6 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
           const ended = getState().turns[threadId];
           if (!open && ended !== undefined && ended.gen === turn.gen) settle(ended);
         }
-        // a reply the person stopped, or the server halted to make way for something, is not retried
-        const stopped = turn.end?.kind === "stopped" || endReason(event) !== "failed";
-        // the server already ran it once more (decision 7): the queue says the second try failed too
-        markRetry(threadId, !stopped && (turn.reply?.attempt ?? 1) > 1 ? "failed" : "stopped");
-        flushQueued();
         return;
       }
     }
@@ -869,56 +984,32 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
   }
 
   /**
-   * Send the next waiting message, oldest first, once nothing is in its way:
-   * one at a time for this client, never past a message on hold or being
-   * edited unless Send now asked for it.
-   */
-  function flushQueued(): void {
-    const s = getState();
-    const next = s.queued.find((q) => q.id !== s.editingQueued && (q.now === true || q.held !== true));
-    // a picture needs no chat model: only the connection
-    if (next?.draw === undefined ? !chatReady(s) || queueReason(s) !== null : s.conn.kind !== "open") return;
-    const model = next?.model ?? s.model ?? (next?.draw === undefined ? undefined : "");
-    if (next === undefined || model === undefined) return;
-    if (next.now === true) {
-      if (unfinished(s.turns[next.threadId])) return;
-      void admit({ content: next.text, images: next.images, ...(next.files ? { files: next.files } : {}), messageId: next.messageId, model, threadId: next.threadId, keepDraft: true, queuedId: next.id, ...(next.draw === undefined ? {} : { draw: next.draw }) });
-      return;
-    }
-    // one reply at a time: a queued message waits while any reply this client knows of, in any chat, is unfinished
-    if (Object.values(s.turns).some(unfinished)) return;
-    const from = leaving(s.queued, next);
-    // setup and the first download are the whole app waiting; a queue behind a reply stays out of the way
-    if (next.waitFor !== "reply" && getState().threadId !== next.threadId) openThread(next.threadId);
-    void startTurn(next.threadId, next.text, model, { from });
-  }
-
-  /**
-   * Send now, T3 Code's interrupt: a reply running in this message's chat stops,
-   * and the message goes first once that has ended. With nothing running there
-   * it goes at once, through the same warning as any other send.
+   * Send now, T3 Code's interrupt: a reply running in this message's chat stops, and the server
+   * sends the message first once that has ended. With nothing running there it goes at once; a load
+   * that would stop another chat's reply comes back as the warning, as any other send's does.
    */
   function sendQueuedNow(id: string): void {
     const s = getState();
     const q = s.queued.find((x) => x.id === id);
     if (!q || q.waitFor !== "reply") return;
     if (unfinished(s.turns[q.threadId])) {
-      const { held: _held, retry: _retry, ...rest } = q;
-      setState({ queued: [{ ...rest, now: true }, ...s.queued.filter((x) => x.id !== id)] });
+      queueNow(id, stopOthersOk());
       stop(q.threadId);
       return;
     }
+    // nothing running in its chat: the same question first, and the same warning, as any other send
     void admit({ content: q.text, images: q.images, ...(q.files ? { files: q.files } : {}), messageId: q.messageId, model: q.model ?? s.model ?? "", threadId: q.threadId, keepDraft: true, queuedId: q.id, ...(q.draw === undefined ? {} : { draw: q.draw }) });
   }
 
   function cancelQueuedEdit(): void {
+    const id = getState().editingQueued;
     cancelQueuedDraft(currentDraftKey());
     setState({ editingQueued: null });
-    flushQueued();
+    if (id !== null) editEnded(id);
   }
 
   return {
     send, confirmStopAsk, stop: () => stop(), retry, sendQueuedNow, cancelQueuedEdit,
-    onChatEvent, lostTurn, catchUp, activeTurns, flushQueued,
+    onChatEvent, lostTurn, catchUp, activeTurns, queueChanged, queueListed, editEnded,
   };
 }

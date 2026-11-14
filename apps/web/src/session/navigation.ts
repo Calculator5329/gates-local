@@ -48,7 +48,8 @@ function setHash(threadId: string | null): void {
 }
 
 interface NavigationEffects {
-  readonly flushQueued: () => void;
+  /** An edit of a queued message ended without a Send: the server may send it again. */
+  readonly editEnded: (id: string) => void;
   readonly catchUp: (threadId: string) => void;
   readonly chooseModel: () => void;
   readonly newChatModel: (s: State) => Partial<State>;
@@ -69,7 +70,7 @@ function leavingChat(s: State): Partial<State> {
 }
 
 /** Navigation keeps its own intent; chat and history operations are wired by session.ts. */
-export function createNavigation({ flushQueued, catchUp, chooseModel, newChatModel, loadThread, loading, settingsData = () => null, dropPendingPanel, picturesData = () => Promise.resolve() }: NavigationEffects) {
+export function createNavigation({ editEnded, catchUp, chooseModel, newChatModel, loadThread, loading, settingsData = () => null, dropPendingPanel, picturesData = () => Promise.resolve() }: NavigationEffects) {
   /** Bumped by each navigation, Settings in and out included: a thread load's failure moves the view only if none happened since it was sent (WF-03). */
   let navGen = 0;
   let pendingSettings: number | null = null;
@@ -87,9 +88,10 @@ export function createNavigation({ flushQueued, catchUp, chooseModel, newChatMod
     return true;
   }
 
-  /** Leaving a chat ends an edit, which frees its message. After this task: flushQueued itself opens threads, and its own send starts first. */
+  /** Leaving a chat ends an edit, which frees its message: the server's queue goes on. */
   function wakeAfterEdit(): void {
-    if (getState().editingQueued !== null) queueMicrotask(flushQueued);
+    const id = getState().editingQueued;
+    if (id !== null) editEnded(id);
   }
 
   function openThread(threadId: string): void {

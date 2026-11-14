@@ -123,10 +123,18 @@ test("a 2,000-message thread opens at its end as a window, keeps the turn in vie
     watch.observe(document, { childList: true, subtree: true });
   }, { total: WINDOW, timeline: ".tl" });
 
+  // The owner's pick: the server sends a long thread a page at a time, never all of it at once.
+  const gets: { before?: string; limit?: number }[] = [];
+  page.on("websocket", (ws) => ws.on("framesent", ({ payload }) => {
+    if (typeof payload !== "string") return;
+    const frame = JSON.parse(payload) as { method?: string; params?: { before?: string; limit?: number } };
+    if (frame.method === "threads.get") gets.push({ ...(frame.params?.before === undefined ? {} : { before: frame.params.before }), ...(frame.params?.limit === undefined ? {} : { limit: frame.params.limit }) });
+  }));
   await open(`#thread=${seededThread ?? ""}`);
   await waitReady(page);
   const turns = page.locator(".tl .turn");
   await expect(turns).toHaveCount(WINDOW, { timeout: 45_000 });
+  expect(gets, "opening the thread asks for its newest page").toEqual([{ limit: WINDOW }]);
   await expect.poll(() => page.evaluate(() => window.longProbe?.fullAt ?? 0), { message: "the probe saw every turn mount" }).toBeGreaterThan(0);
   const probe = await page.evaluate(() => window.longProbe);
   if (probe === undefined || probe.scroll === null) throw new Error(`the probe did not see the scroll: ${JSON.stringify(probe)}`);
@@ -159,6 +167,7 @@ test("a 2,000-message thread opens at its end as a window, keeps the turn in vie
   const before = await was.evaluate((n) => n.getBoundingClientRect().top);
   await earlier.click();
   await expect(turns).toHaveCount(2 * WINDOW);
+  expect(gets.slice(1), "the press asked for the page before the first loaded message").toEqual([{ before: expect.any(String), limit: WINDOW }]);
   expect(Math.abs((await was.evaluate((n) => n.getBoundingClientRect().top)) - before), "the turn in view stayed where it was").toBeLessThanOrEqual(1);
   await expect(earlier).toHaveAttribute("data-tip", `${(TURNS - 2 * WINDOW).toLocaleString("en-US")} earlier`);
   await page.screenshot({ path: test.info().outputPath("row40-after-load-earlier.png") });

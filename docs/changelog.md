@@ -1,5 +1,50 @@
 # Changelog
 
+## 2026-11-14: A question gets its answer in the chat
+
+- A plain question is answered in words in the chat. The instruction
+  sent with every turn now says a page is only for something you asked
+  to look at or use, and a reply that makes a page says in a sentence
+  what it made.
+- With a page open beside the chat, the message box's bottom row fits
+  the narrower chat: the model name is cut short first, and Send stays
+  inside the box. Before, at the default 1200 by 800 window on a screen
+  with no hover, Send hung half off the box onto the page.
+- A reply that waited for its model now says so. Under the reply, a
+  clock and "52.8 s" give the wait from Enter until the model was ready
+  (loading it, or waiting behind another reply), before the seconds of
+  thinking and the speed. Before, a first answer that took a minute
+  said only "5.2 s · 111 tok/s". A reply that was ready within a second
+  shows no wait, and replies saved before this show none.
+- The Ollama the app starts keeps what it writes in the app's own
+  runtime folder: its key pair (it used to go in `~/.ollama`, shared
+  with any Ollama of your own) and the CUDA kernels it compiles on an
+  NVIDIA card (they used to go in `~/.nv/ComputeCache`, about 350 MB).
+  Removing the app's data now removes them too. Nothing already in your
+  home folder is moved, your models stay where they are, and an Ollama
+  you started yourself is used as it is. The app's own Ollama also holds
+  one model at a time: a reply on a second model waits for the reply on
+  the first to finish instead of loading beside it.
+- A screen reader hears the running line under a reply as "Thinking"
+  or "Writing" once, not a new name every second: the seconds still
+  show on screen but are no longer part of the button's name.
+- Messages queued behind a reply now wait on the server, not in the
+  window. Every window and the phone show the same queue: remove or
+  edit a message in one and the change shows in the others. A reload,
+  or closing the window, no longer puts the queue on hold: what waited
+  behind a reply still goes when that reply ends. Stop still holds
+  what waited behind it, Send now still asks before stopping a reply
+  in another chat, and a message being edited still keeps its place
+  until you send the change. A queue a window had saved before this
+  goes to the server once, on hold. A queue left when the app closed
+  comes back on hold, as before.
+- A long chat opens on its newest 200 messages, sent by the server,
+  instead of the whole chat sent and then cut to 200 on screen. The
+  button above them asks the server for the 200 before, and its tip
+  still counts all of them. Opening a 2,000-message chat now moves
+  about 42 KB instead of 419 KB. Export still saves the whole chat.
+  Find in page and select all see only the messages shown, as before.
+
 ## 2026-11-14: One record of what is loaded
 
 - The memory owner (`apps/server/src/gpu/memory.ts`) holds the one

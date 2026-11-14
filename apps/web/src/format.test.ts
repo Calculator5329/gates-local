@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fitWords, type FitReport, type Message } from "@gates-local/contracts";
-import { CONTEXT_SIZES, cardGb, ctxFor, decodeSpeed, fileSize, gb, k, replyMeta, shortAge, sourceDetail, verdictOf } from "./format.ts";
+import { CONTEXT_SIZES, cardGb, ctxFor, decodeSpeed, fileSize, gb, k, replyMeta, replyWait, shortAge, sourceDetail, verdictOf } from "./format.ts";
+import { drawTimes } from "./session/times.ts";
 import { homeTilde, libraryToolCanUse } from "./settings-rules.ts";
 
 const SP = String.fromCharCode(160);
@@ -146,6 +147,20 @@ describe("decode speed", () => {
     expect(replyMeta(m, 4500)).toBe("4.5 s · 120 tok/s");
     // a reply that did no thinking or tool work says its speed alone
     expect(replyMeta(m, 0)).toBe("120 tok/s");
+  });
+
+  it("a reply that waited for its model says the wait as its own figure, beside the work it did", () => {
+    // a first answer on a new card: ready 52.8 s after Enter, then 5.3 s of thinking
+    const saved: Message = { ...msg({ completionTokens: 1665, evalDurationMs: 15_000 }), times: { startedAt: 1_000, readyAt: 53_800, firstTokenAt: 59_100, spans: [], callsAt: {}, workMs: 5_300, ended: { reason: "done", at: 74_300 } } };
+    const drawn = drawTimes(saved, undefined);
+    expect(drawn.waitMs).toBe(52_800);
+    expect(replyWait(drawn.waitMs)).toBe("52.8 s");
+    expect(replyMeta(saved, drawn.workMs)).toBe("5.3 s · 111 tok/s");
+    // a warm reply, ready within a second of Enter, says no wait
+    expect(replyWait(drawTimes({ ...saved, times: { ...saved.times!, readyAt: 1_400 } }, undefined).waitMs)).toBeUndefined();
+    // a row saved before the server kept when the model was ready says none either
+    const { readyAt: _r, ...older } = saved.times!;
+    expect(drawTimes({ ...saved, times: older }, undefined).waitMs).toBeUndefined();
   });
 
   it("falls back to the total for a reply saved before decode time was kept", () => {

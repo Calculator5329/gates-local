@@ -9,7 +9,7 @@ vi.mock("./store.ts", async (original) => {
   const actual = await original<typeof import("./store.ts")>();
   return { ...actual, useStore: <T,>(selector: (s: State) => T) => selector(actual.getState()) };
 });
-vi.mock("./session.ts", () => ({ cancelImage: vi.fn(), retryImage: vi.fn(), reloadThread: vi.fn(), retry: vi.fn(), fileUrl: () => "/files/image.png" }));
+vi.mock("./session.ts", () => ({ cancelImage: vi.fn(), retryImage: vi.fn(), reloadThread: vi.fn(), retry: vi.fn(), fileUrl: () => "/files/image.png", loadEarlier: vi.fn(async () => false), earlierOf: () => 0, onEarlier: () => () => undefined }));
 afterEach(() => { setState({ messages: {}, threadId: null, turns: {}, imageStatus: undefined }); vi.unstubAllGlobals(); });
 
 it("names image generation while a chat is waiting to be admitted behind it", async () => {

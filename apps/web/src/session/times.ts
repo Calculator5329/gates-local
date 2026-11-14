@@ -15,12 +15,14 @@ export interface Rounds {
 export interface Drawn {
   /** The work seconds (decision 2): thinking plus tool time, never the load or the writing. */
   readonly workMs: number | undefined;
+  /** From Enter to the model being ready: a load, or a wait behind another reply. Its own figure. */
+  readonly waitMs: number | undefined;
   readonly rounds: Rounds | undefined;
   /** Stop's seconds on a reply's square, or a reason in words under the row. */
   readonly note: StopNote | undefined;
 }
 
-const NONE: Drawn = { workMs: undefined, rounds: undefined, note: undefined };
+const NONE: Drawn = { workMs: undefined, waitMs: undefined, rounds: undefined, note: undefined };
 /** Drawn once per row's times and catalog, so a memoized row gets the same props back. */
 const drawn = new WeakMap<ReplyTimes, { readonly catalog: readonly CatalogEntry[] | undefined; readonly out: Drawn }>();
 
@@ -60,6 +62,7 @@ export function drawTimes(msg: Message, catalog: readonly CatalogEntry[] | undef
   if (kept !== undefined && kept.catalog === catalog) return kept.out;
   const out: Drawn = {
     workMs: t.workMs ?? oldWorkMs(t),
+    waitMs: t.readyAt === undefined ? undefined : t.readyAt - t.startedAt,
     rounds: t.spans.length === 0 && Object.keys(t.callsAt).length === 0 ? undefined : { spans: t.spans, callsAt: t.callsAt },
     note: noteOf(msg.role, t, catalog),
   };

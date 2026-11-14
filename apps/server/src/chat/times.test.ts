@@ -14,7 +14,7 @@ describe("turnClock (chat row 32, decision 33)", () => {
     c.see({ type: "delta", text: "Yes" }, 3_700, "Hmm then");
     expect(c.end({ reason: "done", at: 4_000 }, "Hmm then")).toEqual({
       // the work clock starts at the first thought: from ready until then the runtime may hold it in a queue
-      startedAt: 1_000, firstTokenAt: 3_700, thoughtMs: 2_500, workMs: 2_400,
+      startedAt: 1_000, readyAt: 1_200, firstTokenAt: 3_700, thoughtMs: 2_500, workMs: 2_400,
       spans: [{ from: 0, ms: 1_000 }, { from: 3, ms: 1_200 }], callsAt: { c1: 3 }, ended: { reason: "done", at: 4_000 },
     });
   });
@@ -73,6 +73,18 @@ describe("turnClock (chat row 32, decision 33)", () => {
     expect(c.record(3_000)).toMatchObject({ stage: "waiting", readyAt: 2_000, workMs: 0 });
     expect(c.see({ type: "thinking", text: "x" }, 3_000, "")).toBe(true);
     expect(c.record(4_000)).toMatchObject({ stage: "thinking", readyAt: 2_000 });
+  });
+
+  it("keeps when the model was ready, so a saved reply can say how long it waited for a cold load", () => {
+    // a first answer on a new card: 52.8 s to its first thought, 58.1 s to its first word, done at 73.3 s
+    const c = turnClock(0);
+    c.loading();
+    c.see({ type: "thinking", text: "x" }, 52_800, "");
+    c.see({ type: "delta", text: "Water" }, 58_100, "x");
+    const times = c.end({ reason: "done", at: 73_300 }, "x");
+    expect(times.readyAt).toBe(52_800);
+    // the work stays the thinking alone (decision 2): the wait is its own figure
+    expect(times.workMs).toBe(5_300);
   });
 
   it("goes waiting, loading, thinking, tool, writing; the work clock never counts the load or the writing", () => {

@@ -4,8 +4,9 @@
 // the few browser globals session.ts touches (location, history, document,
 // localStorage, requestAnimationFrame). Each test imports session.ts fresh.
 import { vi } from "vitest";
-import type { Channel, Message, MethodName, Params, Payload, ResultOf } from "@gates-local/contracts";
+import type { Channel, Message, MethodName, Params, Payload, QueuedMessage, ResultOf } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
+import { createQueue } from "../../server/src/chat/queue.ts";
 
 type Listener = (event: { data?: unknown }) => void;
 
@@ -78,15 +79,16 @@ type Answer = (params: never) => unknown;
  * saved question together, and this splits it; a replayed answer, or one without the question
  * (the test pushes the start itself), goes out as given.
  */
-function sendAnswer(socket: FakeSocket, params: Params<"chat.send">, result: unknown, answer: (result: unknown) => void): void {
+function sendAnswer(start: (payload: Payload<"chat.event">) => void, params: Params<"chat.send">, result: unknown, answer: (result: unknown) => void): void {
   const r = result as { turnId?: string; userMessage?: Message; replayed?: boolean } | null;
   if (r === null || typeof r !== "object" || r.userMessage === undefined || r.replayed === true || r.turnId === undefined) return answer(result);
-  answer({ turnId: r.turnId });
-  const event = params.draw !== undefined
-    ? { type: "start", model: params.draw.preset, userMessage: r.userMessage, image: true }
-    : { type: "start", model: params.model, userMessage: r.userMessage };
+  const { turnId, userMessage } = r;
+  answer({ turnId });
+  const event: Payload<"chat.event">["event"] = params.draw !== undefined
+    ? { type: "start", model: params.draw.preset, userMessage, image: true }
+    : { type: "start", model: params.model, userMessage };
   // its own task, as a browser delivers each frame: the answer's continuation runs first
-  setTimeout(() => socket.frame({ type: "push", channel: "chat.event", payload: { turnId: r.turnId, threadId: params.threadId, event } }), 0);
+  setTimeout(() => start({ turnId, threadId: params.threadId, event }), 0);
 }
 
 export class FakeServer {
@@ -125,9 +127,22 @@ export class FakeServer {
 
   handle(socket: FakeSocket, req: Request): void {
     this.log.push(req);
+    if (req.method === "chat.cancel") this.stopped.add((req.params as Params<"chat.cancel">).turnId);
     const answer = (result: unknown) => socket.frame({ type: "response", id: req.id, ok: true, result });
-    const ok = req.method === "chat.send" ? (result: unknown) => sendAnswer(socket, req.params as Params<"chat.send">, result, answer) : answer;
-    const err = (code: string, message = code, blocking?: unknown) => socket.frame({ type: "response", id: req.id, ok: false, error: { code, message, ...(blocking === undefined ? {} : { blocking }) } });
+    const send = req.params as Params<"chat.send">;
+    const start = (payload: Payload<"chat.event">) => { socket.frame({ type: "push", channel: "chat.event", payload }); this.heard(payload); };
+    // the server takes a send's turn before it answers: until then the send is in its chat's way
+    if (req.method === "chat.send") this.asked.set(req.id, send.threadId);
+    const ok = req.method === "chat.send" ? (result: unknown) => { this.asked.delete(req.id); this.running(send.threadId, result); sendAnswer(start, send, result, answer); this.pump(); } : answer;
+    const err = (code: string, message = code, blocking?: unknown) => {
+      if (this.asked.delete(req.id)) this.pump();
+      socket.frame({ type: "response", id: req.id, ok: false, error: { code, message, ...(blocking === undefined ? {} : { blocking }) } });
+    };
+    this.route(req, ok, err);
+  }
+
+  /** A test's hold or answer for the method, else the queue's own answer, else the contract sample. */
+  private route(req: Request, ok: (result: unknown) => void, err: (code: string, message?: string, blocking?: unknown) => void): void {
     const waiting = this.holds.get(req.method);
     const next = waiting?.shift();
     if (next) {
@@ -136,7 +151,7 @@ export class FakeServer {
     }
     const fn = this.answers.get(req.method);
     try {
-      ok(fn ? fn(req.params as never) : methodSamples[req.method].result);
+      ok(fn ? fn(req.params as never) : req.method.startsWith("queue.") ? this.queueCall(req) : methodSamples[req.method].result);
     } catch (e) {
       const f = e as { code?: string; message?: string; blocking?: unknown };
       err(f.code ?? "internal", f.message ?? "failed", f.blocking);
@@ -145,11 +160,128 @@ export class FakeServer {
 
   push<C extends Channel>(channel: C, payload: Payload<C>): void {
     this.socket.frame({ type: "push", channel, payload });
+    this.pushed(channel, payload);
   }
 
   /** A push to every open socket, as the real server sends it to each connected client. */
   broadcast<C extends Channel>(channel: C, payload: Payload<C>): void {
     for (const s of this.sockets) s.frame({ type: "push", channel, payload });
+    this.pushed(channel, payload);
+  }
+
+  // The server's queue: its real rules (server chat/queue.ts) and, in small, the server's pump
+  // (app.ts sendQueued and heard). A queued message goes out as a chat.send the server makes
+  // itself, logged with the windows' calls and answered by the same holds and answers.
+  readonly queue = createQueue({ changed: (list) => this.broadcast("queue.changed", list), log: () => undefined });
+  /** Turns from an answered chat.send until their done or error, by id: their chats. */
+  private readonly replies = new Map<string, string>();
+  /** Windows' chat.send calls not answered yet, by request id: their chats. */
+  private readonly asked = new Map<string, string>();
+  private readonly started = new Set<string>();
+  private readonly over = new Set<string>();
+  private readonly stopped = new Set<string>();
+  private readonly attempts = new Map<string, number>();
+  private runtimeReady = methodSamples["runtime.status"].result.state === "ready";
+  private hasModels = methodSamples["models.list"].result.length > 0;
+  private pumpSoon = false;
+  private pumping = false;
+  private serverCalls = 0;
+
+  private running(threadId: string, result: unknown): void {
+    const r = result as { turnId?: string; replayed?: boolean } | null;
+    // a test may push a turn's end before its chat.send is answered
+    if (r !== null && typeof r === "object" && r.replayed !== true && typeof r.turnId === "string" && !this.over.has(r.turnId)) this.replies.set(r.turnId, threadId);
+  }
+
+  private queueCall(req: Request): readonly QueuedMessage[] {
+    const p = req.params as { id: string };
+    if (req.method === "queue.add") this.queue.add(req.params as QueuedMessage);
+    if (req.method === "queue.update") {
+      const { id, ...patch } = req.params as Params<"queue.update">;
+      if (this.queue.change(id, patch) === "sending") throw Object.assign(new Error("This message is already being sent."), { code: "queue-sending" });
+    }
+    if (req.method === "queue.remove") this.queue.remove(p.id);
+    this.pump();
+    return this.queue.list();
+  }
+
+  /** The server's catalog changed with no push yet (a scenario delivers that itself): its queue sees it. */
+  catalogChanged(models: readonly unknown[]): void {
+    this.hasModels = models.length > 0;
+    this.pump();
+  }
+
+  private pushed(channel: Channel, payload: unknown): void {
+    if (channel === "chat.event") this.heard(payload as Payload<"chat.event">);
+    if (channel === "runtime.changed") { this.runtimeReady = (payload as Payload<"runtime.changed">).state === "ready"; this.pump(); }
+    if (channel === "models.changed") { this.hasModels = (payload as Payload<"models.changed">).length > 0; this.pump(); }
+  }
+
+  private heard({ turnId, threadId, event }: Payload<"chat.event">): void {
+    if (event.type === "reply") {
+      const before = this.attempts.get(turnId) ?? 1;
+      this.attempts.set(turnId, event.reply.attempt);
+      if (event.reply.attempt > before) this.queue.retrying(threadId);
+      return;
+    }
+    if (event.type === "start") {
+      if (this.over.has(turnId)) return;
+      this.started.add(turnId);
+      this.replies.set(turnId, threadId);
+      this.queue.started(event.userMessage.id);
+      return;
+    }
+    if (event.type !== "done" && event.type !== "error") return;
+    this.over.add(turnId);
+    this.replies.delete(turnId);
+    // its chat.send may not be answered yet: the server's own turn has ended all the same
+    for (const [id, t] of this.asked) if (t === threadId) this.asked.delete(id);
+    const stopped = this.stopped.delete(turnId);
+    if (!this.started.delete(turnId)) {
+      if (event.type === "error") {
+        const why = { code: event.code, message: event.message, ...(event.blocking === undefined ? {} : { blocking: event.blocking }) };
+        if (!this.queue.refused(turnId, why) && (event.ended?.reason === "stopped" || stopped)) this.queue.ended(threadId, "stopped");
+      }
+    } else if (event.type === "done") this.queue.ended(threadId, stopped ? "stopped" : "done");
+    else this.queue.ended(threadId, event.ended?.reason === "failed" && (this.attempts.get(turnId) ?? 1) > 1 ? "failed-again" : "stopped");
+    this.pump();
+  }
+
+  private pump(): void {
+    if (this.pumpSoon) return;
+    this.pumpSoon = true;
+    setTimeout(() => { this.pumpSoon = false; this.sendQueued(); }, 0);
+  }
+
+  private sendQueued(): void {
+    if (this.pumping) return;
+    const busy = new Set([...this.replies.values(), ...this.asked.values()]);
+    const q = this.queue.next({ chat: this.runtimeReady && this.hasModels, anyTurn: busy.size > 0, busy });
+    if (q === undefined) return;
+    this.pumping = true;
+    const params: Params<"chat.send"> = {
+      threadId: q.threadId, content: q.text, messageId: q.messageId, model: q.model ?? "", numCtx: q.numCtx ?? 4096,
+      ...(q.images?.length ? { images: q.images } : {}),
+      ...(q.files?.length ? { files: q.files } : {}),
+      ...(q.think === undefined ? {} : { think: q.think }),
+      ...(q.draw === undefined ? {} : { draw: q.draw, ...(q.drawCount === undefined ? {} : { drawCount: q.drawCount }) }),
+      ...(q.now === true ? (q.stopOthers === true ? { stopOthers: true, ...(q.stopTurns === undefined ? {} : { stopTurns: [...q.stopTurns] }) } : { askFirst: true }) : {}),
+    };
+    const done = () => { this.pumping = false; this.pump(); };
+    const ok = (result: unknown) => {
+      const r = result as { turnId?: string; replayed?: boolean };
+      if (r.replayed === true) this.queue.started(q.messageId);
+      else if (typeof r.turnId === "string") { this.running(q.threadId, result); this.queue.sending(q.id, r.turnId); }
+      sendAnswer((payload) => this.broadcast("chat.event", payload), params, result, () => undefined);
+      done();
+    };
+    const err = (code: string, message = code, blocking?: unknown) => {
+      this.queue.turnless(q.id, { code, message, ...(blocking === undefined ? {} : { blocking: blocking as never }) });
+      done();
+    };
+    const req: Request = { id: `server-${++this.serverCalls}`, method: "chat.send", params };
+    this.log.push(req);
+    this.route(req, ok, err);
   }
 }
 

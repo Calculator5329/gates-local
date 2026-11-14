@@ -86,5 +86,14 @@ it("a chat turn sends the model the newest page in full and the older one as a s
 
 it("the standing rule stays short", () => {
   // what every chat turn pays for it
-  expect(estimateTokens(PAGE_RULE)).toBeLessThanOrEqual(64);
+  expect(estimateTokens(PAGE_RULE)).toBeLessThanOrEqual(84);
+});
+
+it("the standing rule keeps a question in the chat and has a page say what it made", () => {
+  // a plain question once came back as a page with no answer in the chat
+  expect(PAGE_RULE).toMatch(/^Answer a question in words here, never as a page\./);
+  // the page is only for something asked for, to look at or use
+  expect(PAGE_RULE).toMatch(/Only when asked for a page, app, tool or chart to look at or use/);
+  // a reply carrying a page still says what it is, before the code
+  expect(PAGE_RULE).toMatch(/say in one sentence what you made, then send one complete HTML document/);
 });

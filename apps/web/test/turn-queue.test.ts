@@ -959,15 +959,20 @@ async function onHold(...words: string[]): Promise<string[]> {
   return st().queued.map((q) => q.id);
 }
 
-/** "next" waits behind chat A's reply; that reply ended and its send is held at admission. */
-async function admitting(): Promise<Held<"chat.send">> {
+/**
+ * "next" waits behind chat A's reply; that reply ended and the server sent it: its turn is taken
+ * and its start has not come. The server refuses it as it refuses any answered send, with an error
+ * before the start.
+ */
+async function admitting(): Promise<{ fail(code: string, message: string): void }> {
   const turn = await answering("A");
   await session.send("next");
   const held = b.server.hold("chat.send");
   chat(turn, "A", done("a1", "A"));
-  const h = await held;
+  (await held).respond({ turnId: "turn-next" });
+  await until(() => live()?.pendingUser === "next", 2000, "the queued message on its way");
   expect(st().queued).toEqual([]);
-  return h;
+  return { fail: (code, message) => chat("turn-next", "A", { type: "error", code, message }) };
 }
 
 /** "typed" is at admission in chat A, the first turn this session. */
@@ -1034,7 +1039,8 @@ describe("a message the person typed is never lost", () => {
       const held = b.server.hold("chat.send");
       session.sendQueuedNow(ids[1] ?? "");
       const h = await held;
-      expect(texts()).toEqual(["one", "three"]);
+      // the server sends it; until its turn is taken it waits first in line
+      await until(() => texts()[0] === "two", 2000, "Send now first");
       h.fail("internal", "no");
       await until(() => st().queued.length === 3, 2000, "the message back");
       expect(texts()).toEqual(["one", "two", "three"]);

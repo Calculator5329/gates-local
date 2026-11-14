@@ -521,6 +521,8 @@ describe("pushes from the runtime and the catalog", () => {
   });
 });
 
+const contents = (p: { messages: readonly Message[] }) => p.messages.map((m) => m.content);
+
 describe("threads.*", () => {
   it("create, list, rename, get and delete go straight to the store and push threads.changed", async () => {
     const r = await rig();
@@ -531,6 +533,29 @@ describe("threads.*", () => {
     expect(await r.client.call("threads.get", { threadId: t.id })).toEqual({ thread: expect.objectContaining({ title: "Second" }), messages: [] });
     expect(await r.client.call("threads.delete", { threadId: t.id })).toEqual({ threadId: t.id });
     expect((await rejection(r.client.call("threads.get", { threadId: t.id }))).code).toBe("thread-not-found");
+  });
+
+  it("get with limit sends the newest page from a question, and with before the page before it", async () => {
+    const r = await rig();
+    const t = r.store.createThread();
+    // q0 a0 q1 a1 a1' q2 a2 …: one question answered twice, so a page can't start at a reply
+    const ids: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      ids.push(r.store.appendMessage({ threadId: t.id, role: "user", content: `q${i}` }).id);
+      ids.push(r.store.appendMessage({ threadId: t.id, role: "assistant", content: `a${i}` }).id);
+      if (i === 1) ids.push(r.store.appendMessage({ threadId: t.id, role: "assistant", content: "a1 again" }).id);
+    }
+    expect(r.store.getThread(t.id).messages).toHaveLength(13);
+    const newest = await r.client.call("threads.get", { threadId: t.id, limit: 4 });
+    expect([contents(newest), newest.earlier]).toEqual([["q4", "a4", "q5", "a5"], 9]);
+    // 6 before q4 would start at the first a1: the page reaches back to its question
+    const page = await r.client.call("threads.get", { threadId: t.id, before: ids[9]!, limit: 6 });
+    expect([contents(page), page.earlier]).toEqual([["q1", "a1", "a1 again", "q2", "a2", "q3", "a3"], 2]);
+    const rest = await r.client.call("threads.get", { threadId: t.id, before: ids[2]!, limit: 4 });
+    expect([contents(rest), rest.earlier]).toEqual([["q0", "a0"], 0]);
+    // the whole chat, for export, still comes without either
+    expect(contents(await r.client.call("threads.get", { threadId: t.id }))).toHaveLength(13);
+    expect((await rejection(r.client.call("threads.get", { threadId: t.id, before: "gone", limit: 4 }))).code).toBe("message-not-found");
   });
 });
 

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { methodSamples } from "@gates-local/contracts/testing";
 import { installBrowser, tick, until } from "./harness.ts";
 
 // A Library question, pressed in Settings, over a new chat the person has half written:
@@ -41,7 +42,9 @@ it("sends the question alone to a new chat and leaves the person's waiting words
 });
 
 it("a question that waits for the runtime queues alone in its new chat and leaves the draft too", async () => {
-  store.setState({ runtime: { state: "installing", owner: "app", baseUrl: "http://runtime.invalid" } });
+  // the server holds the queue, so it is the server's runtime that is still being set up
+  browser.server.push("runtime.changed", { ...methodSamples["runtime.status"].result, state: "installing" });
+  await until(() => store.getState().runtime?.state === "installing", 2000, "setup");
   starter.askWith(QUESTION);
   await until(() => store.getState().queued.length === 1, 2000, "queued");
   const thread = store.getState().threadId;

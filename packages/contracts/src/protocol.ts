@@ -32,6 +32,7 @@ import {
   MeasureList,
   MeasureRun,
   PageSeen,
+  QueuedMessage,
   NumCtx,
   MemoryState,
   ModelLoad,
@@ -142,7 +143,16 @@ export const methods = {
   "voice.cancel": { params: S.Struct({ id: S.String }), result: NoParams, phone: "allow" },
   "threads.list": { params: NoParams, result: S.Array(Thread), phone: "allow" },
   "threads.create": { params: S.Struct({ title: S.optional(S.String) }), result: Thread, phone: "allow" },
-  "threads.get": { params: ThreadRef, result: S.Struct({ thread: Thread, messages: S.Array(Message) }), phone: "allow" },
+  /**
+   * A thread and its messages: all of them, or with `limit` the newest that many (from a question, so
+   * a turn is never cut), or with `before` too the page before that message. `earlier` counts the
+   * messages before the ones sent; a `before` that is not in the thread answers `message-not-found`.
+   */
+  "threads.get": {
+    params: S.Struct({ threadId: S.String, before: S.optional(S.String), limit: S.optional(S.Int.check(S.isBetween({ minimum: 1, maximum: 100_000 }))) }),
+    result: S.Struct({ thread: Thread, messages: S.Array(Message), earlier: S.optional(S.Int) }),
+    phone: "allow",
+  },
   "threads.rename": { params: S.Struct({ threadId: S.String, title: S.String }), result: Thread, phone: "allow" },
   /** The picker's pick in an open thread: that thread sends with it from now on; other threads keep theirs. */
   "threads.setImageChoice": { params: S.Struct({ threadId: S.String, choice: ImageChoice }), result: Thread, phone: "allow" },
@@ -268,6 +278,34 @@ export const methods = {
     phone: "allow",
   },
   "chat.cancel": { params: S.Struct({ turnId: S.String }), result: S.Struct({ cancelled: S.Boolean }), phone: "allow" },
+  // ---- the queue (2026-11-14): kept and sent by the server; queue.changed pushes the whole list after every change
+  "queue.list": { params: NoParams, result: S.Array(QueuedMessage), phone: "allow" },
+  /** Joins the end of the queue (held when it says so). One with an id already queued, or whose messageId is saved, changes nothing. */
+  "queue.add": { params: QueuedMessage, result: S.Array(QueuedMessage), phone: "allow" },
+  /**
+   * Edit (`editing` true, then the new words with `editing` false, or false alone to cancel), Send
+   * now (`now`: it goes first, its hold lifted), on hold (`held`) or a new model after a refusal. Refused with
+   * "queue-sending" once its turn has started.
+   */
+  "queue.update": {
+    params: S.Struct({
+      id: S.String,
+      text: S.optional(S.String),
+      images: S.optional(S.Array(S.String).check(S.isMaxLength(8))),
+      files: S.optional(S.Array(AttachedFile).check(S.isMaxLength(8))),
+      messageId: S.optional(S.String.check(S.isMinLength(1), S.isMaxLength(200))),
+      model: S.optional(S.String),
+      editing: S.optional(S.Boolean),
+      now: S.optional(S.Literal(true)),
+      stopOthers: S.optional(S.Literal(true)),
+      stopTurns: S.optional(S.Array(S.String).check(S.isMaxLength(32))),
+      /** On hold: the person stopped the reply it waited behind. */
+      held: S.optional(S.Literal(true)),
+    }),
+    result: S.Array(QueuedMessage),
+    phone: "allow",
+  },
+  "queue.remove": { params: S.Struct({ id: S.String }), result: S.Array(QueuedMessage), phone: "allow" },
   // ---- v2 surface (2026-11-07): settings, GPU, downloads, Library, images
   "settings.get": { params: NoParams, result: Settings, phone: "allow" },
   "settings.update": { params: S.Struct({ ...SettingsPatch.fields, voiceChange: S.optional(S.String.check(S.isMaxLength(128))) }), result: Settings, phone: "deny" },
@@ -371,6 +409,8 @@ export const pushes = {
   /** The chat list in use changed: a newer signed list arrived with the update check. The catalog changes with it. */
   "models.suggested": { payload: SuggestedList },
   "threads.changed": { payload: ThreadRef },
+  /** The whole queue again, after every change (queue.*). */
+  "queue.changed": { payload: S.Array(QueuedMessage) },
   // ---- v2 surface (2026-11-07)
   // Transient provenance, never persisted in Settings. A client can distinguish
   // its older save completing from a new action in another window.

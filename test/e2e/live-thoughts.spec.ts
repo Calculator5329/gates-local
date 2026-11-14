@@ -57,11 +57,15 @@ test("while the model thinks, the Thinking pill opens on a click and its text gr
   });
   expect(seen.same, "the text is updated in place, not rebuilt per piece").toBe(true);
   expect(seen.eases, "arriving text does not replay the open ease").toEqual([]);
-  // thinking is over and the reply has started: still open, now the finished line
+  // thinking is over and the reply has started: still open; the line says "Writing" until the
+  // reply ends (reply-ended.spec.ts), and the same stable name
   await expect(pill).toHaveAttribute("aria-expanded", "true");
-  await expect(pill.getByText(FINISHED)).toBeVisible();
+  await expect(pill).toContainText("Writing");
+  await expect(pill).toHaveAccessibleName("Writing");
   await release();
   await expect(reply).toHaveClass(/\bdone\b/, { timeout: 15_000 });
+  // the finished line's words hide at rest, so its name carries them
+  await expect(pill).toHaveAttribute("aria-label", FINISHED);
   await expect(pill).toHaveAttribute("aria-expanded", "true");
   await expect(body).toBeVisible();
 });

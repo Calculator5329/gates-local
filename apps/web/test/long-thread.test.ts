@@ -15,7 +15,7 @@ vi.mock("../src/store.ts", async (original) => {
   const actual = await original<typeof import("../src/store.ts")>();
   return { ...actual, useStore: <T,>(selector: (s: State) => T): T => actual.useStore((s) => { runs.selectors++; return selector(s); }) };
 });
-vi.mock("../src/session.ts", () => ({ cancelImage: vi.fn(), retryImage: vi.fn(), reloadThread: vi.fn(), retry: vi.fn(), fileUrl: vi.fn() }));
+vi.mock("../src/session.ts", () => ({ cancelImage: vi.fn(), retryImage: vi.fn(), reloadThread: vi.fn(), retry: vi.fn(), fileUrl: vi.fn(), loadEarlier: vi.fn(async () => false), earlierOf: () => 0, onEarlier: () => () => undefined }));
 
 /** The bounds this test holds the timeline to. */
 const BOUND = {

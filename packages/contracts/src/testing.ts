@@ -194,6 +194,13 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   },
   "chat.cancel": { params: { turnId: "turn-1" }, result: { cancelled: true } },
   "turns.active": { params: {}, result: [] },
+  "queue.list": { params: {}, result: [] },
+  "queue.add": {
+    params: { id: "q-1", threadId: "t1", messageId: "m-q1", text: "and then?", at: 1_700_000_000_000, waitFor: "reply", model: "qwen3:14b", numCtx: 16384 },
+    result: [{ id: "q-1", threadId: "t1", messageId: "m-q1", text: "and then?", at: 1_700_000_000_000, waitFor: "reply", model: "qwen3:14b", numCtx: 16384 }],
+  },
+  "queue.update": { params: { id: "q-1", editing: true }, result: [] },
+  "queue.remove": { params: { id: "q-1" }, result: [] },
 
   "messages.delete": { params: { threadId: "t1", messageId: "m1" }, result: { messageId: "m1" } },
   "files.attach": { params: { name: "notes.txt", type: "text/plain", data: "aGVsbG8=" }, result: { path: "files/att-0f8b5c1e-3a2d-4c7e-9b1a-2d3e4f5a6b7c", name: "notes.txt", size: 5, type: "text/plain" } },
@@ -352,6 +359,7 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
   "models.changed": [models, []],
   "models.suggested": [suggestedList(CHAT_MODELS)],
   "threads.changed": [{ threadId: "t1" }],
+  "queue.changed": [[], [{ id: "q-1", threadId: "t1", messageId: "m-q1", text: "and then?", at: 1_700_000_000_000, waitFor: "reply", held: true }]],
   "settings.changed": [settings],
   "gpu.changed": [gpu, { vendor: "none", occupants: [], systemMemoryAvailableBytes: 9_000_000_000, measuredAt: 1 }],
   "fit.changed": [fitTable, { reading: { boot: "sample-process", seq: 4, measuredAt: 1 }, memory: { kind: "cpu" }, rows: [] }],

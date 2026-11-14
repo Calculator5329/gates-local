@@ -19,6 +19,9 @@ interface ThreadEffects {
 
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
 
+/** How many messages a thread opens on, and how many each ask for earlier ones brings. */
+export const PAGE_MESSAGES = 200;
+
 export function sortThreads<T extends { updatedAt: number }>(threads: readonly T[]): T[] {
   return threads.toSorted((a, b) => b.updatedAt - a.updatedAt);
 }
@@ -94,13 +97,28 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
   /** Per thread, the ticket of the newest load whose snapshot landed: an older load's answer, snapshot or failure, never replaces it. */
   const landed = new Map<string, number>();
 
+  /**
+   * Per thread, how many saved messages come before the ones loaded. A thread opens on its newest
+   * page; the server keeps the rest until the reader asks for them, a page at a time.
+   */
+  const earlierCounts = new Map<string, number>();
+  const earlierListeners = new Set<() => void>();
+  function setEarlier(threadId: string, count: number): void {
+    if ((earlierCounts.get(threadId) ?? 0) === count) return;
+    if (count === 0) earlierCounts.delete(threadId);
+    else earlierCounts.set(threadId, count);
+    for (const listener of earlierListeners) listener();
+  }
+  /** One page before the loaded messages in flight per thread; a second ask joins it. */
+  const fetchingEarlier = new Map<string, Promise<boolean>>();
+
   /** Threads whose history landed before any model list: their saved model is decided when one lands (MP5-02). */
   const unrestored = new Set<string>();
 
   const creatingDrafts = new Set<number>();
   // Speculation never enters the displayed store. Two histories, 4,000
   // messages and one million serialized characters bound what hover retains.
-  const previews = new Map<string, { messages: readonly Message[]; size: number }>();
+  const previews = new Map<string, { messages: readonly Message[]; earlier: number; size: number }>();
   interface Preload {
     readonly threadId: string;
     cancelled: boolean;
@@ -116,12 +134,12 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     if (preloading !== null && preloading.threadId === threadId) preloading.cancelled = true;
   }
 
-  function keepPreview(threadId: string, messages: readonly Message[]): void {
+  function keepPreview(threadId: string, messages: readonly Message[], earlier: number): void {
     if (messages.length > 4000) return;
     const size = JSON.stringify(messages).length;
     if (size > 1_000_000) return;
     previews.delete(threadId);
-    previews.set(threadId, { messages, size });
+    previews.set(threadId, { messages, earlier, size });
     while (previews.size > 2 || [...previews.values()].reduce((n, p) => n + p.size, 0) > 1_000_000 ||
       [...previews.values()].reduce((n, p) => n + p.messages.length, 0) > 4000) {
       const oldest = previews.keys().next().value;
@@ -150,8 +168,9 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     }, 160);
   }
 
-  function installHistory(threadId: string, messages: readonly Message[]): void {
+  function installHistory(threadId: string, messages: readonly Message[], earlier: number): void {
     stale.delete(threadId);
+    setEarlier(threadId, earlier);
     applyServerEvent((s) => ({
       messages: { ...s.messages, [threadId]: messages },
       ...(savedReplyFor(s.turns[threadId] ?? null, threadId, messages) ? { turns: withTurn(s.turns, threadId, null) } : {}),
@@ -185,7 +204,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
       const preview = previews.get(threadId);
       if (preview !== undefined) {
         previews.delete(threadId);
-        installHistory(threadId, preview.messages);
+        installHistory(threadId, preview.messages, preview.earlier);
         return;
       }
       const p = preloading;
@@ -210,12 +229,14 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     if (preload === undefined || preload.used) setLoadError(threadId, null);
     const older = () => preload?.cancelled === true || req.seq < (landed.get(threadId) ?? 0);
     try {
-      const { messages: snapshot } = await call("threads.get", { threadId });
+      // the newest page, or as many as are already loaded: a reload never takes back what the reader asked for
+      const limit = Math.max(PAGE_MESSAGES, getState().messages[threadId]?.length ?? 0);
+      const { messages: snapshot, earlier = 0 } = await call("threads.get", { threadId, limit });
       if (older()) return;
       landed.set(threadId, req.seq);
       const messages = req.since.reduce(upsertMessage, snapshot);
-      if (preload !== undefined && !preload.used) keepPreview(threadId, messages);
-      else installHistory(threadId, messages);
+      if (preload !== undefined && !preload.used) keepPreview(threadId, messages, earlier);
+      else installHistory(threadId, messages, earlier);
     } catch (e) {
       if (older()) return;
       if (preload !== undefined && !preload.used) return;
@@ -230,6 +251,40 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
       loads.delete(req);
       if (preload !== undefined && preloading === preload) preloading = null;
     }
+  }
+
+  /**
+   * The page of saved messages before the first one loaded, put in front of them. True once it is
+   * in; false when there was none, or a reload or delete changed the thread meanwhile.
+   */
+  function loadEarlier(threadId: string): Promise<boolean> {
+    const pending = fetchingEarlier.get(threadId);
+    if (pending !== undefined) return pending;
+    const first = getState().messages[threadId]?.[0];
+    if (first === undefined || (earlierCounts.get(threadId) ?? 0) === 0) return Promise.resolve(false);
+    const page = (async () => {
+      try {
+        const { messages, earlier = 0 } = await call("threads.get", { threadId, before: first.id, limit: PAGE_MESSAGES });
+        // a reload or delete that landed meanwhile decides what is in front now
+        if (getState().messages[threadId]?.[0]?.id !== first.id) return false;
+        applyServerEvent((s) => {
+          const now = s.messages[threadId] ?? [];
+          const have = new Set(now.map((m) => m.id));
+          return { messages: { ...s.messages, [threadId]: [...messages.filter((m) => !have.has(m.id)), ...now] } };
+        });
+        setEarlier(threadId, earlier);
+        return true;
+      } catch (e) {
+        // the message it starts from is gone (an edit or delete elsewhere): read the thread again
+        if (codeOf(e) === "message-not-found") void loadThread(threadId, true);
+        else applyServerEvent({ notice: failure("load the earlier messages", e) });
+        return false;
+      } finally {
+        fetchingEarlier.delete(threadId);
+      }
+    })();
+    fetchingEarlier.set(threadId, page);
+    return page;
   }
 
   function restoreSaved(): void {
@@ -296,6 +351,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     invalidatePreload(threadId);
     // A snapshot sent before this confirmed deletion cannot resurrect it.
     landed.set(threadId, ++loadSeq);
+    setEarlier(threadId, 0);
     threadsOrder.next();
     applyServerEvent((s) => {
       const { [threadId]: _gone, ...messages } = s.messages;
@@ -353,7 +409,13 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
 
   return {
     refreshThreads, noteMessage, loadThread, restoreSaved, reloadThread, loading,
-    preloadThread,
+    preloadThread, loadEarlier,
+    /** How many saved messages come before the ones loaded in this thread. */
+    earlierOf: (threadId: string) => earlierCounts.get(threadId) ?? 0,
+    onEarlier(listener: () => void) {
+      earlierListeners.add(listener);
+      return () => { earlierListeners.delete(listener); };
+    },
     threadsChanged(threadId: string) { invalidatePreload(threadId); void refreshThreads(); },
     renameThread, deleteThread, waitForThreadDeletion, createThread, untrackedDone, imageSaved,
     creatingDraft: (version: number) => creatingDrafts.has(version),
