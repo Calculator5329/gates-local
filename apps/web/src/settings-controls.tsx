@@ -4,7 +4,6 @@ import { copyText } from "./copy.ts";
 import { handleKey } from "./handles.ts";
 import { homeTilde } from "./settings-rules.ts";
 import { splitTail } from "./models-rules.ts";
-import { esc } from "./ui.tsx";
 
 /** One status: a dot carries the colour, the words stay body colour. */
 export const Status = ({ dot, children }: { dot: string; children: ReactNode }) => (
@@ -14,12 +13,12 @@ export const Status = ({ dot, children }: { dot: string; children: ReactNode }) 
   </span>
 );
 
-/** A path on one line, home as ~, cut in the middle; the whole path on hover. */
+/** A path on one line, home as ~, cut in the middle; the whole path on hover only while it is cut (data-tipt measures the .t). */
 export function PathText({ path, shown = homeTilde(path) }: { path: string; shown?: string }) {
   const [head, tail] = splitTail(shown);
   return (
-    <span className="path mono" tabIndex={0} data-tip={esc(path)} data-testid={`ui.path.${handleKey(path)}`}>
-      <span className="mp-h">{head}</span>
+    <span className="path mono" tabIndex={0} data-tipt={path} data-testid={`ui.path.${handleKey(path)}`}>
+      <span className="mp-h t">{head}</span>
       {tail ? <span className="mp-t">{tail}</span> : null}
     </span>
   );

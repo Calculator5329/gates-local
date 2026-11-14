@@ -1,5 +1,5 @@
-// Journey: switch model in the picker and the context size in GPU memory
-// (Settings › Advanced); the verdict follows each change.
+// Journey: switch model and context size in the picker; GPU memory (Settings › Advanced)
+// follows each change.
 import { expect, openGpuMemory, test, waitReady } from "./fixtures.ts";
 
 // Guards the owner's ruling: the picker carries context, and its fit verdict follows model and context.
@@ -28,14 +28,22 @@ test("switching model and context updates the fit verdict and the panel", async 
   await expect(picker).toBeHidden();
   await expect(modelBtn).toContainText("Gemma 4 12B");
 
-  // GPU memory lives in Settings › Advanced and changes context; judged against the card's own
-  // memory (the owner's ruling, 2026-11-13), 32k runs on the GPU for the 12B and 64k spills
-  const panel = await openGpuMemory(page);
+  // context is set in the picker only (decision 13); GPU memory in Settings › Advanced follows it.
+  // Judged against the card's own memory (the owner's ruling, 2026-11-13), 32k runs on the GPU
+  // for the 12B and 64k spills
+  const sizeTo = async (name: string) => {
+    await modelBtn.click();
+    await ctx.getByRole("radio", { name }).click();
+    await expect(picker).toBeHidden();
+    return openGpuMemory(page);
+  };
+  let panel = await sizeTo("32k");
   await expect(panel).toContainText("Gemma 4 12B");
-  await panel.getByRole("button", { name: "32k" }).click();
-  await expect(panel).toContainText("Should run well");
-  await panel.getByRole("button", { name: "64k" }).click();
-  await expect(panel).toContainText("Should run slower");
+  // "Runs" once a speed is measured, "Should run" before
+  await expect(panel.locator(".fp-v")).toContainText(/(Should run|Runs) well\s*at 32k/);
+  await page.keyboard.press("Escape");
+  panel = await sizeTo("64k");
+  await expect(panel.locator(".fp-v")).toContainText(/(Should run|Runs) slower\s*at 64k/);
 
   // the per-app breakdown reads gpu.status (the fake nvidia-smi)
   await expect(panel).toContainText("In use right now");
@@ -60,8 +68,9 @@ test("the panel's memory bar names whisper and the other resident app", async ({
   const whisper = panel.locator(".lg-r").filter({ hasText: "Whisper" });
   await expect(whisper).toContainText("speech-to-text");
   await expect(panel.locator(".lg-r").filter({ hasText: "other app" })).toContainText("Media Vault vision");
-  // the reassurance is the legend row's tooltip; the panel's own sentence says it only when the model does not fit
+  // a legend row is a row: no tooltip (decision 19); the panel's own sentence says Whisper is never
+  // stopped only when the model does not fit
   await panel.locator("summary", { hasText: "Details" }).click();
-  await whisper.hover();
-  await expect(page.locator("#tip")).toContainText("never stops it");
+  await expect(whisper.locator("[data-tip]")).toHaveCount(0);
+  await expect(whisper).not.toHaveAttribute("data-tip", /./);
 });

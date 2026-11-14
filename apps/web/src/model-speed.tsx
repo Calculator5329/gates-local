@@ -22,9 +22,6 @@ export function tpsText(value: unknown): string | undefined {
 const withUnit = (n: string) => `${n} tok/s`;
 const spoken = (n: string) => `${n} tokens per second`;
 
-export const speedTip = (replies: number): string =>
-  `Measured on this computer over the last 14 days · ${replies} ${replies === 1 ? "reply" : "replies"}`;
-
 const speedIn = (speeds: State["speeds"], tag: string) => (speeds === undefined || speeds === NA ? undefined : speeds[modelNameKey(tag)]);
 const speedOf = (s: State, tag: string) => speedIn(s.speeds, tag);
 
@@ -40,7 +37,7 @@ export function ModelSpeed({ tag }: { tag: string }) {
   const n = speedNumber(speed?.tokensPerSecond);
   if (speed === undefined || n === undefined) return null;
   return (
-    <span className="tps" data-tip={speedTip(speed.replies)}>
+    <span className="tps">
       <Icon id="speed" cls="s14" />
       <span aria-label={spoken(n)}>{withUnit(n)}</span>
     </span>

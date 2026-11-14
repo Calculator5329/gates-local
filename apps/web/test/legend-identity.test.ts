@@ -3,14 +3,24 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { methodSamples } from "@gates-local/contracts/testing";
 
+// `tip` is the legend row's shown name (its first .nm text); a legend row has no tooltip (decision 19).
 const keys = vi.hoisted(() => [] as { tip: string; key: unknown }[]);
 const bars = vi.hoisted(() => [] as unknown[]);
+/** An occupant's legend row (it has a key) and its shown name, or undefined. */
+const legendRow = vi.hoisted(() => (props: unknown, key: unknown): { tip: string; key: unknown } | undefined => {
+  if (key == null || typeof props !== "object" || props === null || !("className" in props) || props.className !== "lg-r") return undefined;
+  const parts = (props as { children?: unknown }).children;
+  const nm = Array.isArray(parts) ? (parts[1] as { props?: { children?: unknown } } | undefined)?.props?.children : undefined;
+  const first = Array.isArray(nm) ? nm[0] : nm;
+  return typeof first === "string" ? { tip: first, key } : undefined;
+});
 vi.mock("react/jsx-runtime", async original => {
   const actual = await original<typeof import("react/jsx-runtime")>();
   const wrap = (method: "jsx" | "jsxs") => (...args: Parameters<typeof actual.jsx>) => {
     const [, props, key] = args;
     if (typeof props === "object" && props !== null && "className" in props && ["sw-occ", "sw-other", "sw-whisper"].includes(String(props.className))) bars.push(key);
-    if (typeof props === "object" && props !== null && "className" in props && props.className === "lg-r" && "data-tip" in props && typeof props["data-tip"] === "string") keys.push({ tip: props["data-tip"], key });
+    const row = legendRow(props, key);
+    if (row !== undefined) keys.push(row);
     return actual[method](...args);
   };
   return { ...actual, jsx: wrap("jsx"), jsxs: wrap("jsxs") };
@@ -20,7 +30,8 @@ vi.mock("react/jsx-dev-runtime", async original => {
   return { ...actual, jsxDEV: (...args: Parameters<typeof actual.jsxDEV>) => {
     const [, props, key] = args;
     if (typeof props === "object" && props !== null && "className" in props && ["sw-occ", "sw-other", "sw-whisper"].includes(String(props.className))) bars.push(key);
-    if (typeof props === "object" && props !== null && "className" in props && props.className === "lg-r" && "data-tip" in props && typeof props["data-tip"] === "string") keys.push({ tip: props["data-tip"], key });
+    const row = legendRow(props, key);
+    if (row !== undefined) keys.push(row);
     return actual.jsxDEV(...args);
   } };
 });

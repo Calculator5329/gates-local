@@ -8,13 +8,12 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { ModelInfo, PullProgress } from "@gates-local/contracts";
 import { copyText } from "./copy.ts";
-import { k, noGpu } from "./format.ts";
+import { noGpu } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { type TableFit, rowOf } from "./fit-table.ts";
 import { DownloadTab, DownloadingRow, DownloadingRows, othersLine, othersOf, usePendingDownloads } from "./ModelDownloads.tsx";
 import { cardDefault, makeDefault, removeModelAndMoveDefault, savedDefault } from "./models-actions.ts";
 import {
-  FIT_DOT,
   type ModelName,
   type Row,
   about,
@@ -22,10 +21,8 @@ import {
   filterShows,
   noteSettled,
   fitLabel,
-  fitReason,
   nameOf,
   nextDefault,
-  optionVariants,
   shortTag,
   sizeText,
   sortRows,
@@ -33,33 +30,21 @@ import {
 } from "./models-rules.ts";
 import { awaitingInstall, canChat, notForChat, pickedModel } from "./pick.ts";
 import { MakerMark } from "./MakerMark.tsx";
-import { MemoryMark, markWhole } from "./MemoryMark.tsx";
+import { MemoryMark } from "./MemoryMark.tsx";
 import { ModelSpeed } from "./model-speed.tsx";
 import { MeasureCells, MeasureFail, MeasureMeta, canMeasure, useMeasureItem } from "./ModelMeasure.tsx";
 import { measureOf } from "./session/measures.ts";
 import { DialogHead } from "./Panel.tsx";
 import { leaveSettings, pull } from "./session.ts";
-import { COMPUTER_ONLY, Fail, Tipped, useAct, useOutside, walk } from "./settings-ui.tsx";
+import { COMPUTER_ONLY, Fail, useAct, useOutside, walk } from "./settings-ui.tsx";
 import { NA, type State, setState, useStore } from "./store.ts";
-import { FitSkel, PHONE, closeTip, esc, useMedia } from "./ui.tsx";
+import { FitSkel, PHONE, closeTip, useMedia } from "./ui.tsx";
 
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
 const cannotSaveDefault = (s: State) => s.settings === NA || s.unavailable["settings.update"] === true;
 
 /** The failure of the last action a control ran; cleared when the next try starts. */
 // ---------------------------------------------------------------- names and fit
-
-/** In the Default menu, an option that does not run well says so in words, with its reason on hover or focus. */
-function FitWords({ report }: { report: TableFit }) {
-  const cpu = useStore((s) => noGpu(s.gpu));
-  const whole = useStore(markWhole);
-  return (
-    <span className="mp-fit x" data-testid="models.fit.reason" tabIndex={0} data-tip={esc(fitReason(report, cpu, whole))}>
-      <span className={`dot ${FIT_DOT[report.verdict]}`} />
-      <span className="mp-w">{fitLabel(report.verdict, report.source === "measured", cpu)}</span>
-    </span>
-  );
-}
 
 /** The memory mark against the card (row 28); the verdict's words are its name and its tip, the number says the rest. */
 function Fit({ report }: { report: TableFit | undefined }) {
@@ -69,7 +54,7 @@ function Fit({ report }: { report: TableFit | undefined }) {
   const words = fitLabel(report.verdict, report.source === "measured", cpu);
   return (
     <span className="mp-fit">
-      <MemoryMark report={report} words={words} tip={`<b>${esc(words)}</b>`} />
+      <MemoryMark report={report} words={words} />
     </span>
   );
 }
@@ -219,7 +204,7 @@ function Installed() {
   const measureShown = useStore(canMeasure);
   return (
     <>
-      {rows.some((r) => r.chat) ? <DefaultCard rows={rows} def={def} disabled={settingsNA} /> : null}
+      <Fallback rows={rows} />
       {notice}
       {filterShows(listed.length, filter) ? (
         <Field value={filter} onChange={setFilter} placeholder="Filter installed models" label="Filter installed models" cls="mp-filter" />
@@ -267,9 +252,7 @@ function ModelRowView({ r, def, saved, onRemove }: { r: InstalledRow; def: strin
   const measureShown = useStore(canMeasure);
   const why = r.chat ? undefined : notForChat(r.info);
   const fit = why ? (
-    <span className="mp-fit none" data-tip={esc(why.tip)}>
-      {why.label}
-    </span>
+    <span className="mp-fit none">{why.label}</span>
   ) : (
     <Fit report={r.report} />
   );
@@ -483,7 +466,7 @@ function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: Inst
                 setBusy(false);
                 if (!removed) return;
                 const { defaultErr } = await done;
-                if (defaultErr !== null) onDefaultFailed(`${name} was removed. ${defaultErr}${nextName ? " Choose the default above." : ""}`);
+                if (defaultErr !== null) onDefaultFailed(`${name} was removed. ${defaultErr}${nextName ? " Set one from a row's menu." : ""}`);
                 onClose();
               });
             }}
@@ -496,126 +479,23 @@ function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: Inst
   );
 }
 
-// ---------------------------------------------------------------- default card
+// ---------------------------------------------------------------- default fallback
 
-const DEFAULT_TIP = "New chats start on this model. If it can't run here, they start on the first model that fits: recommended models first, then your largest. Any chat can switch from its model menu.";
-
-function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; def: string | undefined; disabled: boolean }) {
-  const [open, setOpen] = useState(false);
-  const [err, run] = useAct();
-  const box = useRef<HTMLDivElement>(null);
-  const btn = useRef<HTMLButtonElement>(null);
-  const chat = rows.filter((r) => r.chat);
-  const runs = chat.filter((r) => r.verdict !== "refuse");
-  const wont = chat.filter((r) => r.verdict === "refuse");
-  const current = rows.find((r) => r.name === def);
-  const numCtx = useStore((s) => s.numCtx);
+/**
+ * The chip marks the saved default and a row's menu sets it (decision 10). When the saved default
+ * cannot run here, new chats start on another model; without this line the chip would be untrue.
+ */
+function Fallback({ rows }: { rows: readonly InstalledRow[] }) {
   const saved = useStore(savedDefault);
   const models = useStore((s) => s.models);
-  const locked = useStore((s) => s.unavailable["settings.update"] === true);
   // the server's pick (runtime/pick.ts) is the model new chats really start on
   const picked = pickedModel(models);
-  const fallback = saved !== undefined && picked !== undefined && picked.name !== saved ? (rows.find((r) => r.name === picked.name)?.label.text ?? picked.name) : undefined;
-  // the number is only worth showing when this model cannot reach the default size
-  const max = current?.info.maxContext;
-  const limit = max !== undefined && max < numCtx ? max : undefined;
-  const close = (refocus = true) => {
-    setOpen(false);
-    if (refocus) btn.current?.focus();
-  };
-  useOutside(box, open, () => close(false));
-  useEffect(() => {
-    if (open) (box.current?.querySelector<HTMLElement>("[role=option][aria-selected=true]") ?? box.current?.querySelector<HTMLElement>("[role=option]"))?.focus();
-  }, [open]);
-  const pick = (name: string) => {
-    void run(makeDefault(name)).then((ok) => ok && close());
-  };
-  const variants = optionVariants(chat);
-  const variantOf = (name: string | undefined) => {
-    const v = name === undefined ? undefined : variants.get(name);
-    return v === undefined ? null : <span className="mp-var">{v}</span>;
-  };
-  const currentWords = current === undefined ? "none" : [current.label.text, variants.get(current.name)].filter(Boolean).join(" ");
-  const option = (r: InstalledRow, off: boolean) => (
-    <div
-      key={r.name}
-      role="option"
-      tabIndex={-1}
-      aria-selected={r.name === def}
-      aria-disabled={off}
-      aria-label={[r.label.text, r.name, sizeText(r.info.sizeBytes)].join(", ")}
-      data-tip={esc(r.name)}
-      className={`mp-opt${off ? " off" : ""}`}
-      data-testid="models.default.option"
-      onClick={() => !off && pick(r.name)}
-      onKeyDown={(e) => {
-        if ((e.key === "Enter" || e.key === " ") && !off) {
-          e.preventDefault();
-          pick(r.name);
-        }
-      }}
-    >
-      {r.name === def ? <Icon id="check" cls="s14 mp-ck" /> : <span />}
-      <span className="mp-nmx">
-        <span className="mp-nmn">{r.label.text}</span>
-        {variantOf(r.name)}
-      </span>
-      {r.report === undefined ? <Fit report={undefined} /> : r.report.verdict !== "fits" ? <FitWords report={r.report} /> : <span />}
-      <span className="mp-osz">{sizeText(r.info.sizeBytes)}</span>
-    </div>
-  );
+  if (saved === undefined || picked === undefined || picked.name === saved) return null;
+  const name = (tag: string) => rows.find((r) => r.name === tag)?.label.text ?? tag;
   return (
-    <div className="mp-defrow" ref={box} data-testid="models.default.row" onKeyDown={(e) => open && walk(e, box.current, "[role=option]", close)}>
-      <div className="mp-dl-l">
-        <b><Tipped tip={DEFAULT_TIP}>Default for new chats</Tipped></b>
-        {limit === undefined && !locked ? null : (
-          <span>
-            {limit === undefined ? null : `This model can only run at ${k(limit)}, so long chats drop their oldest messages.`}
-            {locked ? `${limit === undefined ? "" : " "}Changing this default: ${COMPUTER_ONLY.toLowerCase()}` : null}
-          </span>
-        )}
-        {fallback === undefined ? null : (
-          <span className="mp-fb">
-            {current?.label.text} won't run here, so new chats start on <b>{fallback}</b>.
-          </span>
-        )}
-        <Fail err={err} />
-      </div>
-      <button
-        ref={btn}
-        type="button"
-        className={`mp-select${open ? " on" : ""}`}
-        data-testid="models.default.select"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label={`Default for new chats: ${currentWords}`}
-        disabled={disabled}
-        onClick={() => {
-          closeTip();
-          setOpen((o) => !o);
-        }}
-      >
-        <span className="mp-sv">
-          {current ? (
-            <>
-              <span className="mp-nmn">{current.label.text}</span>
-              {variantOf(current.name)}
-            </>
-          ) : (
-            "Choose a model"
-          )}
-        </span>
-        <Icon id="down" cls="s14" />
-      </button>
-      {open ? (
-        <div className="mp-dd" role="listbox" aria-label="Installed chat models">
-          <div className="mp-cap">Installed chat models</div>
-          {runs.map((r) => option(r, false))}
-          {wont.length > 0 ? <div className="mp-sep" role="separator" /> : null}
-          {wont.map((r) => option(r, true))}
-        </div>
-      ) : null}
-    </div>
+    <p className="mp-note mp-fb" data-testid="models.default.fallback">
+      {name(saved)} won't run here, so new chats start on <b>{name(picked.name)}</b>.
+    </p>
   );
 }
 

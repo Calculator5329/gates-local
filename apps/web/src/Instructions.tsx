@@ -7,10 +7,8 @@ import { Icon } from "./icons.tsx";
 import { applyServerEvent, call, updateModelSettings, updateSettings } from "./session.ts";
 import { NA, useStore } from "./store.ts";
 import { Grp, Head, Row, Seg2, useOutside, walk } from "./settings-ui.tsx";
-import { closeTip, esc } from "./ui.tsx";
+import { closeTip } from "./ui.tsx";
 import { controlPatch, controlValues, editControl, type ControlDraft, type ControlKey } from "./instruction-draft.ts";
-
-const PROMPT_TIP = "Instructions for how the model should answer. They use part of its context window. Gates Local's tool instructions stay in place. An empty custom prompt uses no user or model instructions.";
 
 /** A fixed-height status slot and constant button labels keep save/error states from moving controls. */
 function Status({ text, error = false }: { text: string; error?: boolean }) {
@@ -33,7 +31,7 @@ function PromptEditor({ value, inherited, model, locked }: { value: string | und
   };
   return <Grp title="System prompt">
     <div className="inst-prompt" aria-busy={busy}>
-      <label className="inst-check" data-tip={esc(PROMPT_TIP)}>
+      <label className="inst-check">
         {/* the app's own switch, not the browser's checkbox (audit W14); the label still toggles it */}
         <button type="button" className="switch" role="switch" data-testid="settings.instructions.custom" aria-checked={custom} disabled={busy || locked} onClick={() => { setDraft({ custom: !custom, text }); setStatus({ text: "", error: false }); }} />
         {model === undefined ? "Use custom instructions for all chats" : "Override all-chat instructions for this model"}
@@ -41,21 +39,22 @@ function PromptEditor({ value, inherited, model, locked }: { value: string | und
       <textarea aria-label="System prompt" className="inp inst-text" data-testid="settings.instructions.prompt" value={custom ? text : inherited} placeholder={custom ? "Leave empty for no user or model prompt" : model === undefined ? "Use each model's own instructions" : "Use all-chat instructions, or the model's own"} disabled={!custom || busy || locked} onChange={e => { setDraft({ custom: true, text: e.target.value }); setStatus({ text: "", error: false }); }} />
       <div className="inst-actions">
         <Status {...status} />
-        <button type="button" className="btn ghost" data-testid="settings.instructions.reset" disabled={busy || locked} data-tip="Restore inherited instructions." onClick={() => void save(true)}>Reset</button>
+        <button type="button" className="btn ghost" data-testid="settings.instructions.reset" disabled={busy || locked} onClick={() => void save(true)}>Reset</button>
         <button type="button" className="btn outline" data-testid="settings.instructions.save" disabled={busy || locked || draft === null} onClick={() => void save()}>Save instructions</button>
       </div>
     </div>
   </Grp>;
 }
 
+/** `unit`: the one grey line a number needs to mean anything; the rest of a control is its label (no tooltips, docs/design.md). */
 const CONTROLS = [
-  { key: "temperature", label: "Temperature", hint: "Higher values make replies more varied." },
-  { key: "top_p", label: "Top p", hint: "Consider words up to this share of their combined likelihood." },
-  { key: "top_k", label: "Top k", hint: "Consider this many likely words at each step. 0 removes this limit." },
-  { key: "repeat_penalty", label: "Repeat penalty", hint: "Higher values discourage repeating words. 1 leaves repetition unchanged." },
-  { key: "seed", label: "Seed", hint: "Reuse a number to make replies more repeatable. -1 chooses a random seed." },
-  { key: "num_predict", label: "Maximum reply length", hint: "Maximum reply tokens. -1 removes the limit; -2 fills the context window. 0 is not valid." },
-  { key: "keep_alive", label: "Keep loaded", hint: "Seconds to keep the model in memory after a reply. 0 unloads it; -1 keeps it loaded. Gates Local may reclaim idle models when another load needs memory." },
+  { key: "temperature", label: "Temperature" },
+  { key: "top_p", label: "Top p" },
+  { key: "top_k", label: "Top k" },
+  { key: "repeat_penalty", label: "Repeat penalty" },
+  { key: "seed", label: "Seed" },
+  { key: "num_predict", label: "Maximum reply length", unit: "Tokens" },
+  { key: "keep_alive", label: "Keep loaded", unit: "Seconds after a reply" },
 ] as const;
 const MODES = [["default", "Default"], ["custom", "Custom"]] as const;
 
@@ -76,7 +75,7 @@ function ModelMenu({ models, value, onPick }: { models: readonly { name: string;
       <Icon id="down" cls="s14" />
     </button>
     {open ? <div className="mp-dd" role="listbox" aria-label="Installed chat models">
-      {models.map(m => <div key={m.name} role="option" data-testid={`settings.instructions.model-${handleKey(m.name)}`} tabIndex={-1} aria-selected={m.name === value} aria-label={m.text} data-tip={esc(m.name)} className="mp-opt" onClick={() => choose(m.name)}
+      {models.map(m => <div key={m.name} role="option" data-testid={`settings.instructions.model-${handleKey(m.name)}`} tabIndex={-1} aria-selected={m.name === value} aria-label={m.text} className="mp-opt" onClick={() => choose(m.name)}
         onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(m.name); } }}>
         {m.name === value ? <Icon id="check" cls="s14 mp-ck" /> : <span />}
         <span className="mp-nmx"><span className="mp-nmn">{m.text}</span></span>
@@ -112,12 +111,11 @@ function ReplyControls({ model, saved, defaults, locked }: { model: string; save
         const key = control.key, custom = values[key] !== null;
         const bounds = MODEL_CONTROL_BOUNDS[key];
         const shipped = key === "keep_alive" ? undefined : defaults?.parameters.split("\n").find(line => line.trim().startsWith(`${key} `))?.trim().split(/\s+/)[1];
-        const owner = key === "keep_alive" ? "Ollama's" : "the model's";
-        return <Row key={key} label={control.label} tip={`${control.hint} Default uses ${owner} own value. Range: ${bounds.min} to ${bounds.max}.`}>
+        return <Row key={key} label={control.label} {...("unit" in control ? { desc: control.unit } : {})}>
           <Seg2 label={`${control.label} mode`} handle={`reply-${handleKey(key)}`} disabled={busy || locked} value={custom ? "custom" : "default"} options={MODES}
             onPick={mode => { if (mode !== (custom ? "custom" : "default")) change(key, mode === "default" ? null : (shipped ?? (key === "num_predict" ? "2048" : key === "keep_alive" ? "300" : key === "repeat_penalty" ? "1" : "0"))); }} />
           <input className="inp inst-number" type="number" data-testid={`settings.reply-controls.value-${handleKey(key)}`} aria-label={control.label} value={values[key] ?? ""} placeholder={shipped ?? ""} min={key === "num_predict" ? -2 : key === "keep_alive" ? -1 : bounds.min} max={bounds.max} step={bounds.integer ? 1 : "any"} required={custom} disabled={!custom || busy || locked} onChange={e => change(key, e.target.value)} />
-          <button type="button" className="btn ghost inst-reset" data-testid={`settings.reply-controls.reset-${handleKey(key)}`} aria-label={`Reset ${control.label}`} data-tip="Use the default after saving controls." disabled={!custom || busy || locked} onClick={() => change(key, null)}>Reset</button>
+          <button type="button" className="btn ghost inst-reset" data-testid={`settings.reply-controls.reset-${handleKey(key)}`} aria-label={`Reset ${control.label}`} disabled={!custom || busy || locked} onClick={() => change(key, null)}>Reset</button>
         </Row>;
       })}
     </Grp>

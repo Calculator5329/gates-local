@@ -61,7 +61,7 @@ test("Models is its own pop-up over the chat: the shell's box, tabs and Close in
   await bot.click();
   const models = page.getByRole("dialog", { name: "Models" });
   await expect(models).toBeVisible();
-  await expect(models.getByText("Default for new chats")).toBeVisible();
+  await expect(models.locator(".mp-row[data-dm]").first()).toBeVisible();
   await expectShape(page, models);
   const close = models.getByTestId("ui.dialog.close");
   await expectOneRow(models.getByRole("heading", { name: "Models" }), models.getByTestId("models.tabs.installed"), close);
@@ -161,7 +161,7 @@ test.describe("one shell for Models, Usage and Settings", () => {
 
       await footIcon(page, 1).click();
       const models = page.getByRole("dialog", { name: "Models" });
-      await expect(models.getByText("Default for new chats")).toBeVisible();
+      await expect(models.locator(".mp-row[data-dm]").first()).toBeVisible();
       await page.mouse.move(0, 0);
       if (vw === 1280) await page.screenshot({ path: info.outputPath("shell-models.png"), animations: "disabled" });
       boxes.models = await box(models);

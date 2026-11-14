@@ -1,7 +1,7 @@
 [
   {
     "file": "apps/web/src/ModelDownloads.tsx",
-    "find": "              {mark && v ? <> · <VLabel v={v} /></> : null}",
-    "replace": "              {/* finder case: the settings row 18 fix undone (every row says its verdict) */}\n              {v ? <> · <VLabel v={v} /></> : null}"
+    "find": "            c.purpose\n          )}\n        </span>\n      </div>\n      {report && v ? <MemoryMark",
+    "replace": "            <>{c.purpose}{/* finder case: the settings row 18 fix undone (every row says its verdict) */}{v ? <> · {markWords(v, cpu)}</> : null}</>\n          )}\n        </span>\n      </div>\n      {report && v ? <MemoryMark"
   }
 ]

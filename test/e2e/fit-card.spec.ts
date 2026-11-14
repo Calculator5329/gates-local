@@ -8,11 +8,10 @@ import { expect, openGpuMemory, stack, test, waitReady } from "./fixtures.ts";
 
 const BLENDER_MIB = Math.round(9.7 * 1024);
 
-/** Each download row's verdict and need (its tooltip), by model, installed rows too, and the line said once above the list. */
+/** Each download row's verdict and need (its memory mark's name), by model, installed rows too. */
 const verdicts = (page: Page) =>
   page.locator(".dlg").evaluate((dlg) => ({
-    once: dlg.querySelector(".dl-once")?.textContent ?? "",
-    rows: Object.fromEntries([...dlg.querySelectorAll(".dlrow[data-cat]")].map((r) => [r.getAttribute("data-cat"), `${r.getAttribute("data-verdict") ?? ""} | ${r.querySelector(".sl")?.getAttribute("data-tip") ?? ""}`])),
+    rows: Object.fromEntries([...dlg.querySelectorAll(".dlrow[data-cat]")].map((r) => [r.getAttribute("data-cat"), `${r.getAttribute("data-verdict") ?? ""} | ${r.querySelector(".mm")?.getAttribute("aria-label") ?? ""}`])),
   }));
 
 test("another program's GPU memory leaves the download verdicts as they were, and one line names it", async ({ page, open }, info) => {
@@ -28,7 +27,7 @@ test("another program's GPU memory leaves the download verdicts as they were, an
   // The new reading has reached the tab: the line came, or a row's verdict moved.
   await expect.poll(async () => (await line.count()) > 0 || JSON.stringify(await verdicts(page)) !== JSON.stringify(idle), { timeout: 15_000 }).toBe(true);
   await page.evaluate(() => {
-    for (const el of document.querySelectorAll<HTMLElement>(".dl-others, .dl-once")) el.style.setProperty("outline", "2px solid #f5a524");
+    for (const el of document.querySelectorAll<HTMLElement>(".dl-others")) el.style.setProperty("outline", "2px solid #f5a524");
   });
   await page.screenshot({ path: info.outputPath("fit-card-heavy.png"), animations: "disabled" });
 
@@ -49,11 +48,9 @@ test("another program's GPU memory leaves the Settings verdicts as they were, an
   await waitReady(page);
   const gpu = await openGpuMemory(page);
   const status = gpu.locator(".fp-v");
-  // Default context says each size's fit in that size's tooltip
-  const size = gpu.locator('[data-ctx="16384"]');
-  // the row is the model and one verdict; the control above already says 16k (row 20)
+  // the row is the model's one verdict at the size it runs at (decision 13: no context control here)
   await expect(status).toHaveText(/^(Should run|Runs) \S+( \S+)*$/);
-  const idle = { status: await status.textContent(), size: await size.getAttribute("data-tip") };
+  const idle = { status: await status.textContent() };
 
   await stack.gpu(BLENDER_MIB);
   await gpu.locator("details.fp-more summary").click();
@@ -64,7 +61,7 @@ test("another program's GPU memory leaves the Settings verdicts as they were, an
   });
   await page.screenshot({ path: info.outputPath("settings-heavy.png"), animations: "disabled" });
 
-  expect({ status: await status.textContent(), size: await size.getAttribute("data-tip") }, "the verdicts, idle then with blender running").toEqual(idle);
+  expect({ status: await status.textContent() }, "the verdicts, idle then with blender running").toEqual(idle);
   await expect(gpu.locator(".fp-more")).not.toContainText("Needs");
   await expect(gpu.getByText("In use right now", { exact: true })).toBeVisible();
   await expect(gpu.locator(".legend .lg-r", { hasText: "blender" })).toContainText("9.7 GB");

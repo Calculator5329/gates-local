@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 const store = vi.hoisted(() => ({ state: undefined as unknown }));
 vi.mock("./store.ts", () => ({ NA: "na", useStore: (select: (s: unknown) => unknown) => select(store.state) }));
-const { ModelSpeed, speedTip, tpsText } = await import("./model-speed.tsx");
+const { ModelSpeed, tpsText } = await import("./model-speed.tsx");
 
 describe("tpsText: whole numbers from 10 up, one decimal below", () => {
   it.each([
@@ -23,13 +23,6 @@ describe("tpsText: whole numbers from 10 up, one decimal below", () => {
   });
 });
 
-describe("speedTip", () => {
-  it("is one line naming where and how long it was measured, with the reply count", () => {
-    expect(speedTip(8)).toBe("Measured on this computer over the last 14 days · 8 replies");
-    expect(speedTip(1)).toBe("Measured on this computer over the last 14 days · 1 reply");
-  });
-});
-
 const render = (tag: string, speeds: unknown) => {
   store.state = { speeds };
   return renderToStaticMarkup(createElement(ModelSpeed, { tag }));
@@ -38,10 +31,10 @@ const render = (tag: string, speeds: unknown) => {
 describe("ModelSpeed", () => {
   const measured = { "qwen3.5:9b": { model: "qwen3.5:9b", tokensPerSecond: 101.6, replies: 8 }, llama3: { model: "llama3", tokensPerSecond: 8.44, replies: 1 } };
 
-  it("draws the decorative gauge and the number, with its spoken label and tooltip", () => {
+  it("draws the decorative gauge and the number, with its spoken label and no tooltip (a value has none)", () => {
     const html = render("qwen3.5:9b", measured);
     expect(html).toBe(
-      '<span class="tps" data-tip="Measured on this computer over the last 14 days · 8 replies">' +
+      '<span class="tps">' +
         '<svg class="ic s14" aria-hidden="true"><use href="#i-speed"></use></svg>' +
         '<span aria-label="102 tokens per second">102 tok/s</span></span>',
     );

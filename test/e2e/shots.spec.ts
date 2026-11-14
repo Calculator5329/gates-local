@@ -189,15 +189,7 @@ const MODELS_SHOTS: readonly ModelsShot[] = [
   // every row's actions control inside its row, at the two widths the e2e pins
   { name: "M-14-installed-1280-dark", theme: "dark", viewport: { width: 1280, height: 800 }, act: models },
   { name: "M-15-installed-360-dark", theme: "dark", viewport: { width: 360, height: 800 }, act: models },
-  // a4-14
-  {
-    name: "M-13-default-dropdown-dark",
-    theme: "dark",
-    act: async (p) => {
-      await models(p);
-      await p.getByTestId("models.default.select").click();
-    },
-  },
+  // a4-14's default dropdown left with the Default card (decision 10)
 ];
 
 test.describe("models page", () => {

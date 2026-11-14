@@ -22,7 +22,7 @@ import { COMPUTER_ONLY, Fail, Grp, Head, Na, Row, Seg2, Skel, useAct, useOutside
 import { Updates } from "./SettingsUpdates.tsx";
 import Instructions from "./Instructions.tsx";
 import { VoiceSettings } from "./VoiceSettings.tsx";
-import { closeTip, esc } from "./ui.tsx";
+import { closeTip } from "./ui.tsx";
 
 // Voice to text and Instructions ship in the Settings chunk: a section that
 // suspends shows its fallback and then the real cards ~300 ms later (docs/design.md).
@@ -66,10 +66,10 @@ function General() {
       <Head title="General" />
       {settings === NA || unavailable ? null : (
         <Grp title="Appearance">
-          <Row label="Theme" tip="System follows your desktop's light or dark setting." err={themeErr}>
+          <Row label="Theme" err={themeErr}>
             <Seg2 label="Theme" handle="theme" value={current?.theme} options={THEMES} onPick={(t) => void runTheme(updateSettings({ theme: t }))} />
           </Row>
-          <Row label="Accent" tip="The colour of the mark on the start screen." err={accentErr}>
+          <Row label="Accent" err={accentErr}>
             <Swatches value={current === undefined ? undefined : (current.accent ?? "neutral")} onPick={(a) => void runAccent(updateSettings({ accent: a }))} />
           </Row>
         </Grp>
@@ -313,7 +313,7 @@ function Tools() {
       {/* Audit W03 (B1): the switch sits on the title of the one card it turns on; off dims the rows. */}
       <Grp title="Tools" action={settings === NA || settings === undefined ? undefined
         : locked ? <Status dot={on ? "ok" : "off"}>{on ? "On" : "Off"}</Status>
-        : <button type="button" className="switch" role="switch" data-testid="settings.tools.enable" aria-checked={on} aria-label="Let the model use tools" data-tip="Let the model use tools" onClick={() => void run(updateSettings({ tools: !on }))} />}>
+        : <button type="button" className="switch" role="switch" data-testid="settings.tools.enable" aria-checked={on} aria-label="Let the model use tools" data-tip="Use tools" onClick={() => void run(updateSettings({ tools: !on }))} />}>
         <ToolRow tool="read" name="Read files" desc="Reads the folders and files in your Library. It can't change them." state={libraryTool(on, sources, "read", "No folders or files")} />
         {windows ? (
           <ToolRow tool="query" name="Query databases" desc="Looks things up in a copy of the SQLite databases in your Library." state={libraryTool(on, sources, "query", "No databases")} />
@@ -644,7 +644,7 @@ function AddRow({ kind, close }: { kind: SourceKind; close: () => void }) {
   const { noun, hint } = ADD_WORDS[kind];
   useEffect(() => input.current?.focus(), []);
   return (
-    <Row label={`Add a ${noun}`} desc={<span className={err ? "src-help act-err" : "src-help"} role={err ? "alert" : undefined} data-tip={err ? esc(err) : undefined}>{err ?? "Choose a local path to share."}</span>}>
+    <Row label={`Add a ${noun}`} desc={<span className={err ? "src-help act-err" : "src-help"} role={err ? "alert" : undefined}>{err ?? "Choose a local path to share."}</span>}>
       <input
         ref={input}
         className="inp"

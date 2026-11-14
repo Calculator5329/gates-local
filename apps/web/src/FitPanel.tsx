@@ -1,16 +1,15 @@
 // GPU memory in Settings › Advanced (shell.md F16, F17b, F36, F48, F63): the
-// verdict for a model at a context, the context control, and where the memory
-// goes, from the server's fit table plus gpu.status when the server has it.
-import { type ReactNode, useState } from "react";
-import type { ContextSize, FitReport, GpuOccupant, GpuStatus } from "@gates-local/contracts";
-import { CONTEXT_SIZES, NO_GPU_TEXT, type Verdict, cardGb, decodeSpeed, describeModel, gb, k, noGpu, verdictOf } from "./format.ts";
+// verdict for a model at the context it runs at, and where the memory goes,
+// from the server's fit table plus gpu.status when the server has it.
+import type { ReactNode } from "react";
+import type { FitReport, GpuOccupant, GpuStatus } from "@gates-local/contracts";
+import { NO_GPU_TEXT, type Verdict, cardGb, decodeSpeed, describeModel, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { cardFit, fitFor } from "./fit-table.ts";
-import { setContext, updateSettings } from "./session.ts";
 import { NA, type State, chatReady, setState, useStore } from "./store.ts";
 import { Status } from "./settings-controls.tsx";
-import { Row, useAct } from "./settings-ui.tsx";
-import { FitSkel, closeTip, esc } from "./ui.tsx";
+import { Row } from "./settings-ui.tsx";
+import { FitSkel } from "./ui.tsx";
 export { openFit } from "./fit-actions.ts";
 import { FIT_DOT, fitLabel } from "./models-rules.ts";
 
@@ -26,31 +25,19 @@ export function shortGpu(name: string | undefined): string {
   return (name ?? "GPU").replace(/^NVIDIA\s+/i, "").replace(/^GeForce\s+/i, "");
 }
 
-const runsAtMost = (max: number) => `Runs at ${k(max)}, the most this model takes.`;
-
-/** A context segment's tooltip in Settings, and whether that size cannot run. */
-function ctxFit(c: ContextSize, max: number | undefined, r: FitReport | undefined, cpu: boolean): { tip: string | undefined; wont: boolean } {
-  if (max !== undefined && c > max) return { tip: `This model takes at most ${k(max)}.`, wont: false };
-  if (r === undefined) return { tip: undefined, wont: false };
-  const v = verdictOf(r);
-  const at = k(c);
-  if (v.k === "gpu") return { tip: `Runs on the GPU at ${at}.`, wont: false };
-  if (v.k === "spill") return { tip: cpu ? `Runs in system memory at ${at}.` : `Slower at ${at}: ${gb(v.amt)} runs from system memory.`, wont: false };
-  return { tip: `Won't fit at ${at}: needs ${gb(v.amt)} more.`, wont: true };
-}
-
-function occName(o: GpuOccupant): { nm: string; small: string; tip: string } {
+/** A legend row's name and its small grey kind; the row has no tooltip (docs/design.md). */
+function occName(o: GpuOccupant): { nm: string; small: string } {
   switch (o.kind) {
     case "whisper":
-      return { nm: "Whisper", small: "speech-to-text", tip: "<b>Whisper</b> keeps this memory. Gates Local measures it and never stops it." };
+      return { nm: "Whisper", small: "speech-to-text" };
     case "image":
-      return { nm: o.label, small: "image generation", tip: `<b>${esc(o.label)}</b> holds this memory for image generation.` };
+      return { nm: o.label, small: "image generation" };
     case "other-app":
-      return { nm: o.label, small: "other app", tip: "<b>Another app</b> holds this memory right now. Measured, never stopped." };
+      return { nm: o.label, small: "other app" };
     case "unknown":
-      return { nm: "Other", small: "", tip: "Held by something Gates Local can't name. Measured, never stopped." };
+      return { nm: "Other", small: "" };
     default:
-      return { nm: o.label, small: /^other$/i.test(o.label) ? "" : "other", tip: `<b>${esc(o.label)}</b> holds this memory right now. Measured, never stopped.` };
+      return { nm: o.label, small: /^other$/i.test(o.label) ? "" : "other" };
   }
 }
 
@@ -90,7 +77,7 @@ function MemoryBar({ gpu, name, v, loaded }: { gpu: GpuStatus; name: string; v: 
         {parts.map((p, i) => {
           const n = occName(p.o);
           return (
-            <div key={p.key} className="lg-r" data-tip={n.tip}>
+            <div key={p.key} className="lg-r">
               <span className={`chip ${swOf(p.o, i)}`} />
               <span className="nm">
                 {n.nm}
@@ -177,7 +164,7 @@ function Numbers({ r, v, name, gpu, loaded }: { r: FitReport; v: Verdict; name: 
     const sys = gpu ? ` plus ${gb(gpu.systemMemoryAvailableBytes)} of system memory` : "";
     return (
       <div className="fp-n fp-numbers">
-        <span className="fp-who">{name}</span> needs an estimated {gb(r.needVramBytes)}. The GPU has {gb(r.freeVramBytes)} for a model{sys}.
+        <span className="fp-who">{name}</span> needs an estimated {gb(r.needVramBytes)}. The GPU has {cardGb(r.freeVramBytes)} for a model{sys}.
       </div>
     );
   }
@@ -213,109 +200,56 @@ function Breakdown({ model, name, numCtx, gpuRaw, report, loaded }: { model: str
   );
 }
 
-/** The model's status, in the same words and the same dot as its row in Models. */
-/** One verdict. `size` is named only when it is not the one the control above already shows. */
-function FitLine({ r, size, cpu }: { r: FitReport; size: number | undefined; cpu: boolean }) {
+/** The model's status, in the same words and the same dot as its row in Models, at the size it runs at. */
+function FitLine({ r, size, cpu }: { r: FitReport; size: number; cpu: boolean }) {
   const v = verdictOf(r);
-  const at = size === undefined ? "" : `at ${k(size)}`;
+  const at = `at ${k(size)}`;
   return (
     <div className="fp-v">
       {v.k === "no" ? (
-        <Status dot={FIT_DOT.refuse}>{`Needs ${gb(v.amt)} more ${at}`.trimEnd()}</Status>
+        <Status dot={FIT_DOT.refuse}>{`Needs ${gb(v.amt)} more ${at}`}</Status>
       ) : (
         <>
           <Status dot={FIT_DOT[r.verdict]}>{fitLabel(r.verdict, v.measured, cpu)}</Status>
-          {at === "" ? null : <span style={{ color: "var(--muted-foreground)" }}>{at}</span>}
+          <span style={{ color: "var(--muted-foreground)" }}>{at}</span>
         </>
       )}
     </div>
   );
 }
 
-/**
- * What both bodies read about a model: its size limit, the size it runs at,
- * and the GPU. `chosen` is the size asked for when it is not the open chat's.
- */
-function useFitModel(model: string, chosen?: ContextSize) {
-  const live = useStore((s) => s.numCtx);
-  const numCtx = chosen ?? live;
+/** What the body reads about a model: the size it runs at (the chat's, capped by the model) and the GPU. */
+function useFitModel(model: string) {
+  const numCtx = useStore((s) => s.numCtx);
   const gpuRaw = useStore((s) => s.gpu);
   const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
   const load = useStore((s) => s.loads[model]);
   const max = useStore((s) => s.models?.find((m) => m.name === model)?.maxContext);
   const ctx = max === undefined ? numCtx : Math.min(numCtx, max);
   const gpu = gpuRaw === NA ? undefined : gpuRaw;
-  return { numCtx, max, ctx, gpuRaw, gpu, name: describeModel(model, catalog).name, loaded: load?.state === "ready" && load.numCtx === ctx };
+  return { ctx, gpuRaw, gpu, name: describeModel(model, catalog).name, loaded: load?.state === "ready" && load.numCtx === ctx };
 }
 
 /**
- * The one default-context control (S1-06) as a normal row with one short line,
- * each segment's fit in its tooltip; the model's status in its own row beneath,
- * the one place the fit is said, and the GB numbers one step away under Details.
+ * The model's status in one row, the one place the fit is said here, and the GB numbers one step
+ * away under Details. Context is set in the model picker only (decision 13), so the row names the
+ * size the chat runs at.
  */
 function SettingsBody({ model, title, head, action }: { model: string; title: string; head: string; action: ReactNode }) {
-  // the control shows the saved default; this model may run below it
-  const saved = useStore((s) => (s.settings === NA ? undefined : s.settings?.defaultNumCtx));
-  const chosen = useStore(s => s.model === undefined ? undefined : s.numCtx);
-  const { numCtx, max, ctx, gpuRaw, gpu, name, loaded } = useFitModel(model, chosen ?? saved);
+  const { ctx, gpuRaw, gpu, name, loaded } = useFitModel(model);
   const table = useStore((s) => s.fitTable);
-  const settingsNA = useStore((s) => s.settings === NA);
-  const locked = useStore((s) => s.unavailable["settings.update"] === true);
-  const [err, run] = useAct();
   const cpu = noGpu(gpu);
   const gpuNotice = gpu?.vendor === "unreadable" ? gpu.detail ?? GPU_UNREADABLE_TEXT : gpu?.vendor === "none" ? gpu.detail ?? NO_GPU_TEXT : undefined;
-  // A picked size shows at once, while the server saves it (the chat already runs at it). It stays until
-  // the server answers: then the saved default is in the store, or it goes back to it with the error.
-  const [pending, setPending] = useState<ContextSize | undefined>(undefined);
-  const pick = (c: ContextSize) => {
-    closeTip();
-    setContext(c);
-    if (settingsNA) return;
-    setPending(c);
-    void run(updateSettings({ defaultNumCtx: c })).then(() => setPending((p) => (p === c ? undefined : p)));
-  };
   const memory = cpu ? "memory" : "GPU memory";
   // the table's row at the size this model runs at; it says estimate until the model has really run there.
   // Details needs the GPU reading too, so the row waits for it rather than growing when it lands.
   // Judged against the card's own memory (cardFit), whatever other programs hold right now.
   const fit = gpuRaw === undefined ? undefined : cardFit(fitFor(table, model, ctx));
-  const defaultSize = pending ?? saved ?? numCtx;
-  // The row below carries the verdict; this line is only for a model that cannot take the saved default.
-  const limited = max !== undefined && max < CONTEXT_SIZES[CONTEXT_SIZES.length - 1]!;
-  const live = max !== undefined && defaultSize > max ? runsAtMost(max) : undefined;
   return (
     <>
       {gpuNotice === undefined ? null : <div className="fp-n fp-note">{gpuNotice}</div>}
-      {locked ? null : (
-        <Row label="Default context" desc={`Tokens the model keeps in view, in every chat. Longer uses more ${memory}.`} err={err}>
-          <div className="ctx-c">
-            <span className="mini-seg" role="group" aria-label="Default context">
-              {CONTEXT_SIZES.map((c) => {
-                const f = ctxFit(c, max, cardFit(fitFor(table, model, c)), cpu);
-                return (
-                  <button
-                    key={c}
-                    type="button"
-                    data-testid={`models.fit-panel.context-${c}`}
-                    data-ctx={c}
-                    className={`${defaultSize === c ? "on" : ""}${f.wont ? " dim" : ""}`}
-                    aria-pressed={defaultSize === c}
-                    aria-label={f.wont ? `${k(c)}, won't fit` : undefined}
-                    disabled={max !== undefined && c > max}
-                    data-tip={f.tip}
-                    onClick={() => pick(c)}
-                  >
-                    {k(c)}
-                  </button>
-                );
-              })}
-            </span>
-            {limited ? <div className="ctx-line">{live}</div> : null}
-          </div>
-        </Row>
-      )}
       <Row label={title} {...(gpuNotice === undefined && head !== "" ? { desc: head } : {})}>
-        {fit === undefined ? gpu?.vendor === "unreadable" ? null : table && gpuRaw !== undefined ? <span className="fp-n">{`No ${memory} reading for ${name}.`}</span> : <span className="fp-n" aria-busy="true"><FitSkel w="120px" /></span> : <FitLine r={fit} size={ctx === defaultSize ? undefined : ctx} cpu={cpu} />}
+        {fit === undefined ? gpu?.vendor === "unreadable" ? null : table && gpuRaw !== undefined ? <span className="fp-n">{`No ${memory} reading for ${name}.`}</span> : <span className="fp-n" aria-busy="true"><FitSkel w="120px" /></span> : <FitLine r={fit} size={ctx} cpu={cpu} />}
         {action}
       </Row>
       {fit === undefined ? null : (

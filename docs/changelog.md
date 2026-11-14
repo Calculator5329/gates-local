@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-11-14: Settings and Models: fewer controls, no explaining tooltips
+
+- Models has no "Default for new chats" card. The Default chip marks the
+  default, and a row's ⋯ menu changes it.
+- Settings has no "Default context" row. Context is chosen in the model
+  picker; a size you pick there is where the next start begins. A size
+  saved by an older version is ignored.
+- Download: a model that would run slower shows it with its orange bar and
+  "22 / 16 GB" alone. The line above the list and the words on the rows
+  are gone.
+- The model picker's footer names the card ("16 GB GPU"), and the chosen
+  row is marked for screen readers too.
+- Usage sits in the same centred column as Models.
+- Pop-ups blur what is behind them only when a GPU draws the page; on a
+  software renderer they only dim it.
+- Tooltips name icon buttons and say why a button is off, nothing more.
+  Labels, rows and values have none.
+- A model name you type is looked up only when you press Enter or
+  Download, not while you type.
+
 ## 2026-11-14: Models' tabs sit beside its title
 
 - In the Models pop-up, Installed and Download follow the title at the

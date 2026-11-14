@@ -1,10 +1,11 @@
 /* Pop-ups over the app (Panel.tsx). */
 
 /* Dialog, after T3 Code's Settings dialog: the backdrop is t3code's .dialog-backdrop (the
-   background at 60 % in light, 64 % in dark, fading in over 200 ms) over the whole window, without
-   its 4 px blur: a backdrop blur is repainted on every frame the pop-up draws, about 40 ms a frame
-   on a computer that draws without a GPU, so a Settings switch and every keystroke in a pop-up ran
-   at under 20 frames a second (settings row 31, test/e2e/settings-switch.spec.ts). The box is opaque and flat, and one size for Models, Usage and Settings whatever is in
+   background at 60 % in light, 64 % in dark, fading in over 200 ms) over the whole window. It
+   blurs 8 px only when a GPU draws the page (.blur, gpu-draw.ts): a backdrop blur is repainted on
+   every frame the pop-up draws, about 40 ms a frame on a computer that draws without a GPU, so a
+   Settings switch and every keystroke in a pop-up ran at under 20 frames a second there (settings
+   row 31, test/e2e/settings-switch.spec.ts). The box is opaque and flat, and one size for Models, Usage and Settings whatever is in
    it (owner 2026-11-13, settings row 26): 40 px from the window's edges up to 1280 by 960, 24 px
    from 640 to 1023 px wide, the whole window on a phone. Only the content scrolls. */
 :root{--dlg-veil:color-mix(in srgb,var(--background) 60%,transparent)}
@@ -14,6 +15,7 @@
 :root[data-theme="dark"]{--dlg-veil:color-mix(in srgb,var(--background) 64%,transparent)}
 @keyframes dlg-fade{from{opacity:0}}
 .dlg-dim{position:fixed;inset:0;z-index:55;background:var(--dlg-veil);animation:dlg-fade .2s ease-out}
+.dlg-dim.blur{-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
 @media (prefers-reduced-motion:reduce){.dlg-dim{animation:none}}
 /* centred with margins, not a transform: a transform would hold the fixed layers inside (the Remove confirm) */
 .dlg{position:fixed;z-index:56;inset:0;margin:auto;width:min(calc(100vw - 80px),1280px);height:min(calc(100dvh - 80px),960px);display:flex;flex-direction:column;overflow:hidden;background:var(--popover);color:var(--foreground);border:1px solid var(--popover-border);border-radius:16px;outline:none}
@@ -35,7 +37,7 @@
 .dlg-head:has(.mp-tabs) h2{margin-right:28px}
 .dlg-head .mp-tabs{align-self:stretch;height:auto;margin:0 auto -1px 0;border:0}
 .dlg-head .mp-tab{align-items:center;padding:0}
-.dlg-body>.mp{max-width:1040px;margin:0 auto}
+.dlg-body>.mp,.dlg-body>.us{max-width:1040px;margin:0 auto}
 /* Models' and Settings' bodies keep .set for their controls' look, and no empty gutter when they do not scroll */
 .dlg-body.set{flex:1 1 0;scrollbar-gutter:auto}
 /* Settings: its sections at the left, the section at the right, each scrolling on its own.

@@ -110,33 +110,7 @@ for (const width of [1440, 360]) {
       });
     }
 
-    // Guards the owner's report: GPU memory flickered when a size was picked.
-    test("expanded GPU details keep their size when the verdict changes to spill", async ({ page, open }) => {
-      // the verdict is against the whole card (owner 2026-11-13), so a 12 GB card: the 9B fits at 16k and spills at 64k
-      await stack.gpu(0, 12 * 1024 - 150);
-      await open();
-      await waitReady(page);
-      await page.keyboard.press("Control+Comma");
-      if (width <= 640) {
-        await page.getByTestId("settings.shell.back").click();
-        await page.getByTestId("settings.sections.open-advanced").click();
-      } else await page.getByTestId("settings.nav.open-advanced").click();
-      const gpu = page.locator("#gpuMemory");
-      const verdict = gpu.locator(".fp-v:visible");
-      await expect(verdict).toHaveCount(1);
-      await expect(verdict).toBeVisible();
-      await expect(gpu.locator(".fit-skel")).toHaveCount(0);
-      await expect(gpu.locator('[data-ctx="65536"]')).toHaveAttribute("data-tip", /.+/);
-      const details = gpu.locator("details.fp-more");
-      await details.locator("summary").click();
-      await expect(details).toHaveJSProperty("open", true);
-      await mark(details, "gpu-details");
-      const frames = await burst(page, `r2-${width}/gpu-spill`, "#gpuMemory", () => gpu.locator('[data-ctx="65536"]').click());
-      stableSize(frames, "surface", `gpu-spill-${width}`);
-      stableSize(frames, "gpu-details", `gpu-details-spill-${width}`);
-      await expect(details).toHaveJSProperty("open", true);
-      await expect(verdict).toContainText("Should run slower");
-    });
+    // The GPU memory size-pick test left with the Default context control (decision 13).
 
     // Guards a shipped bug fix: a late fit table moved the Download rows.
     test("Download groups after a second without a fit table, and a late table moves nothing until the next visit", async ({ page, open }) => {

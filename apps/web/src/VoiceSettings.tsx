@@ -4,8 +4,6 @@ import { getState, NA, setState, useStore } from "./store.ts";
 import { COMPUTER_ONLY, Grp, Row, Skel } from "./settings-ui.tsx";
 import { setTalk, useTalk } from "./talk.ts";
 
-const TIP = "Your local whisper.cpp transcribes audio into a draft you review before sending. Gates Local keeps no recording and never starts or stops this service.";
-const TALK_TIP = "Replies are read aloud by this device's own voice; the speaker beside the microphone turns that off.";
 
 function begin() {
   setState((s) => ({ voiceConnectionVersion: s.voiceConnectionVersion + 1 }));
@@ -26,7 +24,7 @@ export function VoiceSettings() {
   if (settings === NA) return null;
   // Settings arrive before Settings can open on a healthy start; the card keeps its shape when they do not.
   if (settings === undefined) return <Grp title="Voice to text" busy>
-    <Row label="Speech server" tip={TIP} desc={<Skel w="22em" />}><Skel w="18em" /></Row>
+    <Row label="Speech server" desc={<Skel w="22em" />}><Skel w="18em" /></Row>
   </Grp>;
   const connect = async () => {
     const current = ++attempt.current;
@@ -50,14 +48,14 @@ export function VoiceSettings() {
     if (attempt.current === current && getState().voiceConnectionVersion === version) fail(error);
   };
   return <Grp title="Voice to text">
-    <Row label="Speech server" tip={TIP} desc={settings.whisperUrl ? "Connected" : locked ? `Off. ${COMPUTER_ONLY}` : undefined} err={err}>
+    <Row label="Speech server" desc={settings.whisperUrl ? "Connected" : locked ? `Off. ${COMPUTER_ONLY}` : undefined} err={err}>
       {locked ? null : <>
         <input className="inp" data-testid="settings.voice.address" aria-label="whisper.cpp address" value={url ?? settings.whisperUrl ?? "http://127.0.0.1:8178"} onChange={(e) => setUrl(e.target.value)} spellCheck={false} />
         <button type="button" className="btn outline" data-testid="settings.voice.connect" disabled={busy} onClick={() => void connect()}>{busy ? "Connecting…" : "Connect"}</button>
         {settings.whisperUrl ? <button type="button" className="btn ghost" data-testid="settings.voice.disconnect" onClick={() => void disconnect()}>Disconnect</button> : null}
       </>}
     </Row>
-    {settings.whisperUrl ? <Row label="Talk mode" tip={TALK_TIP} desc="Try-out, on this device. Hold the microphone or Space to talk; let go to send.">
+    {settings.whisperUrl ? <Row label="Talk mode" desc="Try-out, on this device. Hold the microphone or Space to talk; let go to send.">
       <button type="button" className="switch" role="switch" data-testid="settings.voice.talk" aria-checked={talk} aria-label="Talk mode" onClick={() => setTalk({ on: !talk })} />
     </Row> : null}
   </Grp>;

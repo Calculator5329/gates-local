@@ -3,7 +3,6 @@
 import { type KeyboardEvent, type ReactNode, type RefObject, useCallback, useEffect, useState } from "react";
 import { handleKey } from "./handles.ts";
 import type { ActionResult } from "./session.ts";
-import { esc } from "./ui.tsx";
 
 export function Head({ title, children }: { title: string; children?: ReactNode }) {
   return (
@@ -16,23 +15,20 @@ export function Head({ title, children }: { title: string; children?: ReactNode 
 
 export { Skel } from "./ui.tsx";
 
-/**
- * A label that explains itself on hover or keyboard focus: mechanism, timings
- * and caveats live here, not in a grey paragraph (docs/design.md). The tip is
- * plain text, also given to screen readers as the label's description;
- * `data-tipt` would show only when the label is cut off.
+/*
+ * Tooltips (docs/design.md): a label, a row, a group title or a value has none. An icon-only
+ * button has a name of one to three words; a disabled button may say why in a few words. A
+ * sentence the screen is wrong without is a line in the panel, never a tip.
  */
-export const Tipped = ({ tip, children }: { tip: string | undefined; children: ReactNode }) =>
-  tip === undefined ? <>{children}</> : <span className="tipped" tabIndex={0} aria-description={tip} data-tip={esc(tip)}>{children}</span>;
 
-/** A group is a title and a card, never a line under the title (docs/design.md); `tip` explains the title. `busy` while a placeholder in it shows. */
-export function Grp({ title, tip, action, busy = false, children }: { title?: string; tip?: string; action?: ReactNode; busy?: boolean; children: ReactNode }) {
+/** A group is a title and a card, never a line under the title (docs/design.md). `busy` while a placeholder in it shows. */
+export function Grp({ title, action, busy = false, children }: { title?: string; action?: ReactNode; busy?: boolean; children: ReactNode }) {
   return (
     <div className="grp" aria-busy={busy || undefined}>
       {title ? (
         <div className="grp-h">
           <div className="grp-l">
-            <div className="grp-t"><Tipped tip={tip}>{title}</Tipped></div>
+            <div className="grp-t">{title}</div>
           </div>
           {action === undefined ? null : <div className="grp-a">{action}</div>}
         </div>
@@ -65,12 +61,12 @@ export const Fail = ({ err, line = false }: { err: string | null; line?: boolean
     </span>
   );
 
-/** A row: its label, at most one short grey line that the label and control do not already say, and `tip` for the rest. */
-export function Row({ label, desc, tip, err = null, busy = false, children }: { label: ReactNode; desc?: ReactNode; tip?: string; err?: string | null; busy?: boolean; children?: ReactNode }) {
+/** A row: its label and at most one short grey line that the label and control do not already say. */
+export function Row({ label, desc, err = null, busy = false, children }: { label: ReactNode; desc?: ReactNode; err?: string | null; busy?: boolean; children?: ReactNode }) {
   return (
     <div className="srow" aria-busy={busy || undefined}>
       <div className="sl">
-        <b><Tipped tip={tip}>{label}</Tipped></b>
+        <b>{label}</b>
         {desc !== undefined ? <span className="d">{desc}</span> : null}
         <Fail err={err} />
       </div>

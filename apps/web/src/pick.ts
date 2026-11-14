@@ -3,7 +3,6 @@
 // ModelInfo.pick, so the first run and the composer start on the same model
 // in the same render as the runtime dot. This file only reads it.
 import type { ModelInfo } from "@gates-local/contracts";
-import { k } from "./format.ts";
 
 type Caps = Pick<ModelInfo, "capabilities">;
 
@@ -94,14 +93,9 @@ export function firstChatPull(models: readonly ModelInfo[] | undefined, pulls: R
 }
 
 /** Why an installed model is not a chat choice, for its Settings row: an embedding model, or one Ollama has not described yet. */
-export const notForChat = (m: Caps | undefined): { label: string; tip: string } =>
+export const notForChat = (m: Caps | undefined): { label: string } =>
   m !== undefined && unreported(m)
-    ? { label: "Ollama doesn't say", tip: "This Ollama doesn't say what a model can do, so Gates Local cannot tell a chat model from an embedding model. Updating Ollama fixes this." }
+    ? { label: "Ollama doesn't say" }
     : m?.capabilities.includes("unknown")
-      ? { label: "Checking what this model can do", tip: "Ollama has not said what this model can do yet; Gates Local asks again and offers it for chat once it knows." }
-      : { label: "Embedding model, not for chat", tip: "Turns text into vectors for search; it cannot answer a chat." };
-
-/** The rule in words, for the Recommended tooltip. It says what pick.ts does. */
-export function pickRuleText(numCtx: number, cpu = false): string {
-  return `Your default model if it runs at ${k(numCtx)} of context. Otherwise the first model that ${cpu ? "fits in system memory" : "fits your GPU"} at ${k(numCtx)}, checking Gates Local's recommended models in order, then your others from largest; if none fits, the first that runs partly in system memory. Embedding models are left out.`;
-}
+      ? { label: "Checking what this model can do" }
+      : { label: "Embedding model, not for chat" };

@@ -88,13 +88,14 @@ test("the picker never lists the embedding model and is a connected combobox and
   // the arrow keys move from the model in use, so the first one lands on the row after it
   const at = Number(await list.getByRole("option", { selected: true }).getAttribute("data-i"));
   const next = (at + 1) % 3, after = (at + 2) % 3;
+  // the highlight is the active descendant; aria-selected stays on the chat's model
   await box.press("ArrowDown");
   await expect(box).toHaveAttribute("aria-activedescendant", `pk-opt-${next}`);
-  await expect(page.locator(`#pk-opt-${next}`)).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(`#pk-opt-${next}`)).toHaveAttribute("aria-selected", "false");
   await box.press("ArrowDown");
   await expect(box).toHaveAttribute("aria-activedescendant", `pk-opt-${after}`);
-  await expect(page.locator(`#pk-opt-${after}`)).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator(`#pk-opt-${next}`)).toHaveAttribute("aria-selected", "false");
+  await expect(page.locator(`#pk-opt-${after}`)).toHaveAttribute("aria-selected", "false");
+  await expect(page.locator(`#pk-opt-${at}`)).toHaveAttribute("aria-selected", "true");
   await expect(list.getByRole("option", { selected: true })).toHaveCount(1);
   // the 27B cannot load at 16k: an option a reader hears as unavailable
   await expect(list.locator('.pk-r.dis[data-m="qwen3.8-abliterated:27b"]')).toHaveAttribute("aria-disabled", "true");
@@ -173,10 +174,9 @@ test("Settings lists the embedding model as not for chat, with Remove and no def
   await expect(page.locator(`.mp-row[data-dm="${EMBED}"]`)).toHaveCount(0);
   // the three chat models are rows, the 27b among them (it won't run here, so it is dimmed)
   await expect(page.locator(".mp-row[data-dm]")).toHaveCount(3);
-  // nor can the Default card choose it: two choices, and the 27b disabled with its reason
-  await page.getByTestId("models.default.select").click();
-  const options = page.getByRole("listbox", { name: "Installed chat models" }).getByRole("option");
-  await expect(options).toHaveCount(3);
-  await expect(options.filter({ hasText: EMBED.split(":")[0] ?? EMBED })).toHaveCount(0);
-  await expect(page.locator('.mp-opt[aria-disabled="true"]')).toHaveCount(1);
+  // nor can the row menu make the 27b the default (decision 10: the row menu is the only way to set it)
+  await page.keyboard.press("Escape");
+  const big = page.locator('.mp-row.cant[data-dm="qwen3.8-abliterated:27b"]');
+  await big.getByTestId("models.row-menu.open").click();
+  await expect(page.getByRole("menu").getByTestId("models.row-menu.make-default")).toHaveCount(0);
 });

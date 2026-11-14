@@ -7,7 +7,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 const probe = vi.hoisted(() => ({
   state: {} as Record<string, unknown>, phone: false, root: undefined as unknown,
   states: [] as unknown[], cursor: 0, refs: 0, refValues: [] as { current: unknown }[],
-  pick: vi.fn(), context: vi.fn(), close: vi.fn(),
+  pick: vi.fn(), context: vi.fn(), close: vi.fn(), save: vi.fn(),
 }));
 vi.mock("react", async original => ({
   ...await original<typeof import("react")>(),
@@ -26,7 +26,7 @@ vi.mock("./store.ts", () => ({
   NA: "na", chatReady: () => true, getState: () => probe.state,
   useStore: (select: (s: unknown) => unknown) => select(probe.state), setState: vi.fn(), streamingHere: () => false,
 }));
-vi.mock("./session.ts", () => ({ pickModel: probe.pick, setContext: probe.context }));
+vi.mock("./session.ts", () => ({ pickModel: probe.pick, setContext: probe.context, updateSettings: probe.save }));
 vi.mock("./Sidebar.tsx", () => ({ focusComposer: vi.fn() }));
 vi.mock("./ui.tsx", async original => ({
   ...await original<typeof import("./ui.tsx")>(), useMedia: () => probe.phone, isPhone: () => probe.phone,
@@ -194,6 +194,20 @@ it("a size click commits from the table's row for that size", () => {
   expect(probe.context).toHaveBeenCalledWith(65536);
   expect(probe.pick).toHaveBeenCalledWith(tag);
   expect(probe.close).toHaveBeenCalledTimes(1);
+});
+
+// Decision 13: the picker is the only context control, so a size chosen there is the one the next start begins at.
+it("a size chosen in the picker is saved for the next start; picking a model alone saves nothing", () => {
+  probe.state.models = [{ name: tag, maxContext: 131072, capabilities: ["completion"] }];
+  probe.state.settings = { defaultNumCtx: 16384 };
+  table(fit("fits", 16384), fit("fits", 65536));
+  call(select(render()), "onClick");
+  expect(probe.pick).toHaveBeenCalledWith(tag);
+  expect(probe.save).not.toHaveBeenCalled();
+  call(find(render(), p => p["data-ctx"] === 16384), "onClick");
+  expect(probe.save, "the size already saved is not written again").not.toHaveBeenCalled();
+  call(find(render(), p => p["data-ctx"] === 65536), "onClick");
+  expect(probe.save).toHaveBeenCalledExactlyOnceWith({ defaultNumCtx: 65536 });
 });
 
 it.each([8192, 16384])("a catalog report at %d cannot authorize a pick the table has no row for", numCtx => {

@@ -230,17 +230,9 @@ test("Settings > Advanced shows GPU memory, live", async ({ page, open }) => {
   await set.getByText("Details", { exact: true }).click();
   await expect(set.getByText("In use right now")).toBeVisible();
   await expect(set).toContainText("Qwen 3.5 9B");
-  // live: a new size is what the control, the verdict and Details all speak about
-  const size32 = set.locator('[data-ctx="32768"]');
-  await expect(size32).toHaveAttribute("aria-pressed", "false");
-  await expect(set.locator(".fp-more")).not.toContainText("32k");
-  await size32.click();
-  await expect(size32).toHaveAttribute("aria-pressed", "true");
-  await expect(set.locator(".fp-more")).toContainText("Not measured at 32k yet.");
-  // the control already says 32k, so the verdict does not say it again
-  await expect(set.locator(".fp-v:visible")).not.toContainText("32k");
-  // each size's fit is on its own segment, never in a sentence about a size not chosen
-  await expect(set.locator('[data-ctx="65536"]')).toHaveAttribute("data-tip", /at 64k/);
+  // context is set in the model picker only (decision 13); the verdict names the size it runs at
+  await expect(set.locator("[data-ctx]")).toHaveCount(0);
+  await expect(set.locator(".fp-v:visible")).toContainText("at 16k");
   await expect(set).not.toContainText("At 64k: ");
 });
 
@@ -263,9 +255,12 @@ test("a send refused for memory says why and its click opens Settings > Advanced
   await page.locator("#pkSearch").fill("gemma");
   await page.locator('#picker .pk-r[data-m="gemma4:12b"]').click();
   await expect(page.locator("#modelBtn")).toContainText("Gemma 4 12B");
+  // context is chosen in the picker only (decision 13)
+  await page.locator("#modelBtn").click();
+  await page.locator('#picker [data-ctx="65536"]').click();
+  await expect(page.locator("#picker")).toBeHidden();
   await page.keyboard.press("Control+Comma");
   await page.getByTestId("settings.nav.open-advanced").click();
-  await page.locator(".set").getByRole("button", { name: "64k" }).first().click();
   // Settings judges the card's own memory, where it spills; Send judges right now, where it won't fit
   await expect(page.locator(".set .fp-v")).toContainText("Should run slower");
   await page.keyboard.press("Escape");

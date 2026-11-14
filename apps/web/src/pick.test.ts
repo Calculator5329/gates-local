@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ModelInfo } from "@gates-local/contracts";
-import { canChat, canThink, chatBlockedReason, chatModels, firstChatPull, modelChoice, newestOnly, notForChat, pickRuleText, sendableModel } from "./pick.ts";
+import { canChat, canThink, chatBlockedReason, chatModels, firstChatPull, modelChoice, newestOnly, notForChat, sendableModel } from "./pick.ts";
 
 const m = (name: string, sizeBytes: number, capabilities: string[], pick?: ModelInfo["pick"]): ModelInfo => ({
   name,
@@ -121,13 +121,5 @@ describe("client model choice", () => {
     expect(canChat(embed)).toBe(false);
     expect(canThink(small)).toBe(true);
     expect(canThink(gemma)).toBe(false);
-  });
-});
-
-describe("the rule in the Recommended tooltip (W1-03)", () => {
-  it("names the GPU only on a computer that has one", () => {
-    expect(pickRuleText(16384, false)).toContain("fits your GPU at 16k");
-    expect(pickRuleText(16384, true)).toContain("fits in system memory at 16k");
-    expect(pickRuleText(16384, true)).not.toContain("GPU");
   });
 });

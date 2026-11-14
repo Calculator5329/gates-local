@@ -294,8 +294,9 @@ These are all the network calls the code makes:
   pull it. Ollama fetches it from its registry (ollama.com) or from the
   source the model name points to.
 - **Model sizes.** A model name you type that is not in the app's list is
-  looked up once on `registry.ollama.ai` (or the host the name points to)
-  to show its whole size before and during the download. Set
+  looked up on `registry.ollama.ai` (or the host the name points to) only
+  when you press Enter or Download, never while you type, to show its
+  whole size before and during the download. Set
   `GATES_LOCAL_OLLAMA_REGISTRY=off` to stop it.
 - **The Ollama download.** Only when no Ollama is found: the app downloads
   a pinned Ollama release from `github.com/ollama/ollama` and checks its

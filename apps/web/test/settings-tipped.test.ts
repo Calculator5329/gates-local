@@ -1,6 +1,6 @@
-// Every Settings section rendered over the in-memory server: each label that
-// explains itself on hover also tells a screen reader, and the Image
-// generation row says once, where it can be seen, what a short GPU costs.
+// Every Settings section rendered over the in-memory server: no label carries
+// a tooltip, every tip is a few words, and the Image generation row says once,
+// where it can be seen, what a short GPU costs.
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -38,19 +38,17 @@ const render = (section: (typeof SECTIONS)[number]) => {
 
 const decode = (s: string) => s.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"').replaceAll("&#x27;", "'").replaceAll("&amp;", "&");
 
-it("F4: every tipped label carries its tip as aria-description, unescaped", () => {
-  let seen = 0;
+// Decision 19: a label, a row or a value has no tooltip; a tip names an icon-only button in 1 to 3 words,
+// or says in a few words why a button is disabled.
+it("no label, row or value in any section carries a tooltip, and every tip is a few words", () => {
   for (const section of SECTIONS) {
-    for (const span of render(section).match(/<span class="tipped"[^>]*>/g) ?? []) {
-      seen++;
-      const tip = /data-tip="([^"]*)"/.exec(span)?.[1];
-      const said = /aria-description="([^"]*)"/.exec(span)?.[1];
-      expect(said, `${section}: ${span}`).toBeTruthy();
-      // data-tip holds the tip escaped once more for the tooltip's HTML
-      expect(decode(said!), `${section}: ${span}`).toBe(decode(decode(tip!)));
+    const html = render(section);
+    expect(html, section).not.toContain('class="tipped"');
+    expect(html, section).not.toMatch(/<(?:span|div|td|b|label)\b[^>]*\sdata-tip="/);
+    for (const [, tip] of html.matchAll(/\sdata-tip="([^"]*)"/g)) {
+      expect(decode(tip ?? "").split(/\s+/).length, `${section}: ${tip}`).toBeLessThanOrEqual(6);
     }
   }
-  expect(seen, "the sections have tipped labels to check").toBeGreaterThan(3);
 });
 
 it("F4: Image generation says what an image costs the chat model in its visible line, once, and not in the tooltip", () => {

@@ -26,11 +26,8 @@ test.describe("a model with a 2,048 context window", () => {
     await expect(row.locator(".mp-fitc .mm")).toHaveAttribute("aria-label", /^Should run well: \d\.\d of \d+ GB$/);
     await expect(row).not.toHaveClass(/\bcant\b/);
     await expect(page.locator(".mp")).not.toContainText(/supports up to|too small|unsupported|won't run/i);
-    // the fallback rule is the tip of "Default for new chats", not words on the row
-    const defaultLabel = page.locator(".mp-defrow .tipped").filter({ hasText: "Default for new chats" });
-    await expect(defaultLabel).toHaveAttribute("data-tip", /If it can't run here/);
-    await expect(defaultLabel).toHaveAttribute("aria-description", /If it can't run here/);
-    await expect(page.locator(".mp-defrow")).not.toContainText("16k");
+    // no Default card (decision 10): the chip marks the default, and no row names the saved 16k
+    await expect(row).not.toContainText("16k");
     });
     await page.keyboard.press("Escape");
     await test.step("chat at 2k and offer only supported context", async () => {
@@ -46,13 +43,9 @@ test.describe("a model with a 2,048 context window", () => {
     await expect(page.locator("#picker .pk-help")).toHaveText("Runs at 2k, the most this model takes.");
     });
     await page.keyboard.press("Escape");
-    await test.step("keep the saved context default while reporting the model limit", async () => {
+    await test.step("report the size the model runs at, with no context control in Settings", async () => {
     const gpu = await openGpuMemory(page);
-    const saved = gpu.getByRole("group", { name: "Default context" }).getByRole("button", { name: "16k" });
-    await expect(saved).toHaveAttribute("aria-pressed", "true");
-    await expect(saved).toBeDisabled();
-    // the size it runs at is said once, in the status; the saved size's tooltip says why
-    await expect(saved).toHaveAttribute("data-tip", "This model takes at most 2k.");
+    await expect(gpu.locator("[data-ctx]")).toHaveCount(0);
     await expect(gpu.locator(".fp-v:visible")).toContainText("at 2k");
     });
     await page.keyboard.press("Escape");

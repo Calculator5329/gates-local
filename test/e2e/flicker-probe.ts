@@ -173,7 +173,7 @@ export interface WholeFrame {
 }
 
 export const TRACK = [
-  ".set-h", ".mp-head", ".mp-tabs", ".grp", ".srow", ".mp-row", ".mp-card", ".mp-defrow", ".mp-foot", ".mp-quiet", ".mp-empty",
+  ".set-h", ".mp-head", ".mp-tabs", ".grp", ".srow", ".mp-row", ".mp-card", ".mp-foot", ".mp-quiet", ".mp-empty",
   ".dlrow", ".fp-set", ".inst-top", ".inst-actions", ".cfm", ".na", ".src-none", "details",
   ".sb-row", ".sb-h", ".composer", ".banner", ".turn", ".pk-r", ".pk-foot", ".pk-context", ".fr-card", ".first",
   "[role=alert]", "[data-watch]",

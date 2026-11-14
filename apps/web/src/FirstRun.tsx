@@ -12,7 +12,7 @@ import { Icon } from "./icons.tsx";
 import { type RowPhase, phaseOf, rowOf } from "./fit-table.ts";
 import { finishFirstRun, firstPull, openSettings, pull, cancelPull, recheckRuntime } from "./session.ts";
 import { NA, type State, useStore } from "./store.ts";
-import { canChat, chatBlockedReason, chatModels, pickRuleText, pickedModel } from "./pick.ts";
+import { canChat, chatBlockedReason, chatModels, pickedModel } from "./pick.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { VLabel } from "./ui.tsx";
 import { FirstRunLoading, Shell } from "./FirstRunShell.tsx";
@@ -42,8 +42,6 @@ function startChat(): void {
 /** The card's verdict slot before the table has this model: the table is on its way, or it has no reading for it. */
 const pendingWord = (phase: RowPhase): string => (phase === "checking" ? "Checking…" : "Couldn't check");
 
-const CTX_TIP ="How much of the conversation the model keeps in view. Bigger needs more GPU memory.";
-const SPILL_TIP = "Your best fit uses system memory, so it is slower.";
 /** No supported GPU, said only where the card's verdict would claim one (the table plans no-GPU models in system memory, so rarely). */
 const NO_GPU_SUB = "This computer has no supported GPU, so models run in system memory and replies are slower.";
 
@@ -54,7 +52,6 @@ const NO_GPU_SUB = "This computer has no supported GPU, so models run in system 
  */
 function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; entry?: CatalogEntry | undefined; children?: ReactNode }) {
   const [open, setOpen] = useState(false);
-  const numCtx = useStore((s) => s.numCtx);
   const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
   const info = useStore((s) => s.models?.find((m) => m.name === tag));
   const cpu = useStore((s) => noGpu(s.gpu));
@@ -63,19 +60,13 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
   const phase = useStore((s) => phaseOf(s.fitTable, rowOf(s, tag)));
   const v = fit ? verdictOf(fit) : undefined;
   const d = describeModel(tag, catalog);
-  const tip = !v ? "Suggested model." : have ? pickRuleText(numCtx, cpu) : v?.k === "no" ? "Choose a smaller model or context." : cpu
-    ? `The first of Gates Local's recommended models that fits in system memory with room for ${k(numCtx)} of context.`
-    : v?.k === "spill" ? SPILL_TIP
-    : `The first of Gates Local's recommended models that runs on your GPU with room for ${k(numCtx)} of context.`;
   return (
     <div className="fr-card">
       <div className="fr-m">
         <span className="nm">{d.name}</span>
         <span className="rec">
           <span className="sep">· </span>
-          <span className="tipd" tabIndex={0} data-tip={tip}>
-            Recommended
-          </span>
+          Recommended
         </span>
         <span className="v" data-wait="" data-watch="fit">
           {v ? <VLabel v={v} /> : pendingWord(phase)}
@@ -106,11 +97,7 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
               </tr>
             ) : null}
             <tr>
-              <td>
-                <span className="tipd" tabIndex={0} data-tip={CTX_TIP}>
-                  Context
-                </span>
-              </td>
+              <td>Context</td>
               <td>{k(ctx)}</td>
             </tr>
             {fit ? (

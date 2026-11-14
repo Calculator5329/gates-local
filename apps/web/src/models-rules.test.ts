@@ -8,11 +8,9 @@ import {
   canBeDefault,
   filterShows,
   fitLabel,
-  fitReason,
   labelOf,
   nameOf,
   nextDefault,
-  optionVariants,
   pullName,
   shortTag,
   sizeText,
@@ -64,14 +62,7 @@ describe("fit words", () => {
     expect(fitLabel("spills", true, true)).toBe("Runs in system memory");
   });
 
-  it("gives the reason against the card's size, never what is free right now", () => {
-    expect(fitReason(fit("spills", 22 * GIB, 6.3 * GIB), false, 15.92 * GIB)).toBe("Needs about 22 GB of a 16 GB GPU; the rest in system memory.");
-    expect(fitReason(fit("fits", 7.5 * GIB, 6.3 * GIB), false, 15.92 * GIB)).toBe("Needs about 7.5 GB of a 16 GB GPU.");
-    expect(fitReason(fit("refuse", 49 * GIB), false, 16 * GIB)).toBe("Needs about 49 GB of a 16 GB GPU; system memory can't hold the rest.");
-    expect(fitReason(fit("spills", 9 * GIB), true)).toBe("Needs about 9.0 GB, all in system memory.");
-  });
-
-  it("rounds sizes like the tooltips: one decimal under 10 GB", () => {
+  it("rounds sizes to one decimal under 10 GB", () => {
     expect(about(6.6 * GIB)).toBe("6.6 GB");
     expect(about(9.97 * GIB)).toBe("10 GB");
     expect(about(43.2 * GIB)).toBe("43 GB");
@@ -148,38 +139,6 @@ describe("installed order and the default", () => {
     const sorted = sortRows([row("a"), row("b")], "a");
     expect(nextDefault(sorted, "b", "a")).toBeUndefined();
     expect(nextDefault(sortRows([row("only"), row("big", "refuse")], "only"), "only", "only")).toBeNull();
-  });
-});
-
-const options = (text: string, ...names: string[]) => names.map((name) => ({ name, label: { text } }));
-const variants = (text: string, ...names: string[]) => [...optionVariants(options(text, ...names)).values()];
-
-describe("optionVariants: what tells two options with the same name apart", () => {
-  it("shows the quant when only the quant differs", () => {
-    expect(variants("model 9B", "local/model:9b-q4_K_M", "local/model:9b-q8_0")).toEqual(["q4_K_M", "q8_0"]);
-  });
-
-  it("shows the owner when only the owner differs", () => {
-    expect(variants("custom", "a/custom:latest", "b/custom:latest")).toEqual(["a", "b"]);
-  });
-
-  it("never leaves an option with nothing to show", () => {
-    expect(variants("model", "x/model:latest", "model:latest")).toEqual(["x/model", "model"]);
-    expect(variants("model 9B", "model:9b", "model:9b-q4")).toEqual(["9b", "9b-q4"]);
-  });
-
-  it("tells every member of a larger group apart", () => {
-    const shown = variants("m", "a/m:1", "b/m:1", "c/m:2");
-    expect(new Set(shown).size).toBe(3);
-    expect(shown.every((v) => v !== "")).toBe(true);
-  });
-
-  it("gives up on shortening when that would make two read alike, and shows the whole id", () => {
-    expect(variants("x", "a/x:1", "a:x:1")).toEqual(["a/x:1", "a:x:1"]);
-  });
-
-  it("adds nothing to a name that is already unique", () => {
-    expect(optionVariants([...options("Gemma 4 12B", "gemma4:12b"), ...options("Qwen 3.5 9B", "qwen3.5:9b")]).size).toBe(0);
   });
 });
 

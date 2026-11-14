@@ -7,7 +7,6 @@ import { DialogHead } from "./Panel.tsx";
 import { pickerLabels } from "./picker-models.ts";
 import { closeUsage, usageData } from "./session.ts";
 import { NA, useStore } from "./store.ts";
-import { esc } from "./ui.tsx";
 import {
   METRICS, RANGES, type UsageLine, type UsageMetric, type UsagePrefs, type UsageRange, type UsageView,
   compact, duration, figuresAt, readPrefs, usageView, writePrefs,
@@ -89,10 +88,10 @@ function Seg<T extends string>({ value, options, onPick, label }: { value: T; op
   );
 }
 
-/** A total, with its exact figure as a tip when the face rounds it ("19.1k" is 19,134; "3" replies is said once). */
-function Num({ value, label, tip, ph }: { value: string; label: string; tip: string; ph: boolean }) {
+/** A total as its face shows it ("19.1k"); a value has no tooltip (docs/design.md). */
+function Num({ value, label, ph }: { value: string; label: string; ph: boolean }) {
   return (
-    <div className="us-num" data-tip={ph || tip === `${value} ${label}` ? undefined : esc(tip)}>
+    <div className="us-num">
       <b>{ph ? <span className="us-ph" /> : value}</b>
       <span>{label}</span>
     </div>
@@ -145,13 +144,15 @@ export function Usage() {
         <Seg label="Chart" value={prefs.metric} options={METRICS} onPick={(metric: UsageMetric) => pick({ metric })} />
       </div>
     </DialogHead>
-    <div className="dlg-body us">
+    <div className="dlg-body">
+    {/* the same centred column as Models (decision 17) */}
+    <div className="us">
       <div className="us-nums">
-        <Num ph={ph} value={compact(t.promptTokens + t.completionTokens)} label="tokens" tip={`${exact(t.promptTokens + t.completionTokens)} tokens`} />
-        <Num ph={ph} value={compact(t.promptTokens)} label="in" tip={`${exact(t.promptTokens)} tokens in`} />
-        <Num ph={ph} value={compact(t.completionTokens)} label="out" tip={`${exact(t.completionTokens)} tokens out`} />
-        <Num ph={ph} value={compact(t.replies)} label="replies" tip={`${exact(t.replies)} replies`} />
-        <Num ph={ph} value={duration(t.decodeMs)} label="generating" tip={`${exact(t.decodeMs / 1000)} s generating`} />
+        <Num ph={ph} value={compact(t.promptTokens + t.completionTokens)} label="tokens" />
+        <Num ph={ph} value={compact(t.promptTokens)} label="in" />
+        <Num ph={ph} value={compact(t.completionTokens)} label="out" />
+        <Num ph={ph} value={compact(t.replies)} label="replies" />
+        <Num ph={ph} value={duration(t.decodeMs)} label="generating" />
       </div>
       <div
         className="us-chart"
@@ -207,15 +208,16 @@ export function Usage() {
                     <span className="us-label t">{name}</span>
                   </span>
                 </th>
-                <td data-tip={esc(`${exact(f.prompt)} tokens in`)}>{compact(f.prompt)}</td>
-                <td data-tip={esc(`${exact(f.completion)} tokens out`)}>{compact(f.completion)}</td>
-                <td data-tip={f.readSpeed === null ? undefined : esc(`Reads prompts at ${exact(f.readSpeed)} tok/s`)}>{speedText(f.speed)}</td>
+                <td>{compact(f.prompt)}</td>
+                <td>{compact(f.completion)}</td>
+                <td>{speedText(f.speed)}</td>
                 <td>{exact(f.replies)}</td>
               </tr>
             );
           })}
         </tbody>
       </table>
+    </div>
     </div>
     </>
   );

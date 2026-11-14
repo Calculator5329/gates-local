@@ -29,14 +29,10 @@ export async function pick(page: Page, model: string): Promise<void> {
   await expect(page.locator("#picker")).toBeHidden();
 }
 export async function contextSize(page: Page, size: number): Promise<void> {
-  // Settings permits a context that cannot fit this model; the picker now
-  // refuses that selection. Exercise the real refusal/held-send path via Settings.
-  await page.keyboard.press("Control+Comma");
-  await page.getByTestId("settings.nav.open-advanced").click();
-  const context = page.locator(`#gpuMemory [data-ctx="${size}"]`);
-  await context.click();
-  await expect(context).toHaveAttribute("aria-pressed", "true");
-  await page.keyboard.press("Escape");
+  // Context is set in the model picker only (decision 13): the chosen model's size rows.
+  await page.locator("#modelBtn").click();
+  await page.locator(`#picker [data-ctx="${size}"]`).click();
+  await expect(page.locator("#picker")).toBeHidden();
 }
 export async function start(page: Page, prompt: string, model = SMALL[0] ?? "tiny-chat:2k"): Promise<string> {
   await pick(page, model);

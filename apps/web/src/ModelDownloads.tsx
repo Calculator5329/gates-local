@@ -5,8 +5,7 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { CatalogEntry, FitReport, ModelEstimate, PullProgress } from "@gates-local/contracts";
 import { suggestedOf } from "./picker-models.ts";
-import { shortGpu } from "./FitPanel.tsx";
-import { type Verdict, etaText, gb, k, noGpu, verdictOf } from "./format.ts";
+import { type Verdict, etaText, gb, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { MakerMark } from "./MakerMark.tsx";
 import { MemoryMark } from "./MemoryMark.tsx";
@@ -17,7 +16,7 @@ import { type ActionResult, cancelPull, estimateModel, pull } from "./session.ts
 import { PathText } from "./settings-controls.tsx";
 import { Grp, Row, useAct, useOutside, walk } from "./settings-ui.tsx";
 import { NA, type State, getState, useStore } from "./store.ts";
-import { Skel, VLabel, closeTip, esc } from "./ui.tsx";
+import { Skel, closeTip } from "./ui.tsx";
 
 function Progress({ p, name }: { p: PullProgress; name: string }) {
   const pct = p.totalBytes ? Math.round((p.completedBytes / p.totalBytes) * 100) : 0;
@@ -58,7 +57,7 @@ export function DownloadingRow({ p }: { p: PullProgress }) {
   const detail = <span className="prog-l dl-status"><span role={err ? "alert" : undefined} className={err ? "dl-error" : undefined}>{err ?? etaText(p)}</span></span>;
   return (
     <div className="mp-row mp-dling" data-pull={p.name}>
-      <div className="mp-nm" data-tip={`${esc(p.name)}${n.purpose ? `<br>${esc(n.purpose)}` : ""}<br>${err ? `${esc(err)}<br>` : ""}${esc(etaText(p))}`}>
+      <div className="mp-nm">
         <div className="mp-l1">
           <MakerMark tag={p.name} />
           {n.id ? <span className="mp-tag"><span className="mp-h">{head}</span>{tail ? <span className="mp-t">{tail}</span> : null}</span> : <span className="mp-nmn">{n.text}</span>}
@@ -161,22 +160,12 @@ export function DlButton({ size, label, p, installed = false, disabled = false, 
   );
 }
 
-/** The row's tooltip: the memory it takes and the context it is judged at, said in words. */
-function memoryTip(v: Verdict, context: number, cpu: boolean): string {
-  const basis = v.measured ? "Measured" : "Estimated";
-  const where = cpu ? "all in system memory (no supported GPU)" : `with ${gb(v.avail)} on the GPU`;
-  return `${basis} ${gb(v.need)} of memory with ${k(context)} of context, ${where}.`;
-}
-
 /** The verdict in words, the memory mark's name: what its colour says. */
 function markWords(v: Verdict, cpu: boolean): string {
   return v.k === "no" ? "Too big for this computer" : v.k === "gpu" ? "Runs on the GPU" : cpu ? "Runs in system memory, slower" : "Partly in system memory, slower";
 }
 
-/** The memory mark's tooltip: its name and nothing more; the row's own tooltip says the estimate (row 32). */
-const markTip = (v: Verdict, cpu: boolean) => `<b>${esc(markWords(v, cpu))}</b>`;
-
-function DlRow({ c, numCtx, report, mark, actions }: { c: CatalogEntry; numCtx: number; report: FitReport | undefined; mark: boolean; actions: DownloadActions }) {
+function DlRow({ c, report, actions }: { c: CatalogEntry; report: FitReport | undefined; actions: DownloadActions }) {
   const p = useStore(s => Object.values(s.pulls).findLast(progress => downloadKey(progress.name) === downloadKey(c.name) && awaitingInstall(progress)));
   const installed = useStore((s) => c.installed || (s.models ?? []).some((m) => downloadKey(m.name) === downloadKey(c.name)));
   const canCancel = useStore(canCancelPull);
@@ -185,11 +174,10 @@ function DlRow({ c, numCtx, report, mark, actions }: { c: CatalogEntry; numCtx: 
   const dling = p !== undefined && awaitingInstall(p) && !installed;
   const err = installed ? null : actions.error(c.name);
   const name = labelOf(c);
-  const tip = `<b>${esc(name)}</b> · <span class="mono">${esc(c.name)}</span>${v ? `<br>${esc(memoryTip(v, report?.numCtx ?? numCtx, cpu))}` : ""}`;
   return (
     <div className="dlrow" data-cat={c.name} data-verdict={report?.verdict}>
       <MakerMark tag={c.name} />
-      <div className="sl" data-tip={tip}>
+      <div className="sl">
         <b>{name}</b>
         <span className="d dl-status">
           {err ? (
@@ -197,15 +185,11 @@ function DlRow({ c, numCtx, report, mark, actions }: { c: CatalogEntry; numCtx: 
           ) : dling ? (
             etaText(p, { speed: false })
           ) : (
-            <>
-              {c.purpose}
-              {/* only an exception to the line above the list (row 18) */}
-              {mark && v ? <> · <VLabel v={v} /></> : null}
-            </>
+            c.purpose
           )}
         </span>
       </div>
-      {report && v ? <MemoryMark report={report} words={markWords(v, cpu)} tip={markTip(v, cpu)} /> : <span className="mm" aria-hidden="true" />}
+      {report && v ? <MemoryMark report={report} words={markWords(v, cpu)} /> :<span className="mm" aria-hidden="true" />}
       <DlButton
         size={gb(c.downloadBytes)}
         label={name}
@@ -219,30 +203,26 @@ function DlRow({ c, numCtx, report, mark, actions }: { c: CatalogEntry; numCtx: 
 }
 
 /** A row that cannot run here: what it needs, and no button (row 18). */
-function BigRow({ c, report, numCtx }: { c: CatalogEntry; report: FitReport; numCtx: number }) {
+function BigRow({ c, report }: { c: CatalogEntry; report: FitReport }) {
   const v = verdictOf(report);
   const cpu = useStore((s) => noGpu(s.gpu));
   const name = labelOf(c);
-  const tip = `<b>${esc(name)}</b> · <span class="mono">${esc(c.name)}</span><br>${esc(memoryTip(v, report.numCtx || numCtx, cpu))}`;
   return (
     <div className="dlrow dl-big" data-cat={c.name} data-verdict={report.verdict}>
       <MakerMark tag={c.name} />
-      <div className="sl" data-tip={tip}>
+      <div className="sl">
         <b>{name}</b>
         <span className="d">{c.purpose}</span>
       </div>
-      <MemoryMark report={report} words={markWords(v, cpu)} tip={markTip(v, cpu)} />
+      <MemoryMark report={report} words={markWords(v, cpu)} />
     </div>
   );
 }
 
-/** How long typing rests before a typed name is looked up. */
-const TYPED_DEBOUNCE_MS = 400;
-
 /** The typed name's answer: what the server said for which name, at which context. */
 type Typed = { key: string; numCtx: number; estimate: ModelEstimate | undefined };
 
-function CustomPull({ actions, numCtx }: { actions: DownloadActions; numCtx: number }) {
+export function CustomPull({ actions, numCtx }: { actions: DownloadActions; numCtx: number }) {
   const [name, setName] = useState("");
   const [typed, setTyped] = useState<Typed>();
   const [menu, setMenu] = useState(false);
@@ -260,26 +240,28 @@ function CustomPull({ actions, numCtx }: { actions: DownloadActions; numCtx: num
   };
   const tag = pullName(name);
   const key = downloadKey(tag);
-  useEffect(() => {
-    if (tag === "") return;
-    let live = true;
-    const t = setTimeout(() => {
-      void estimateModel(tag, numCtx).then((estimate) => {
-        if (live) setTyped({ key, numCtx, estimate });
-      });
-    }, TYPED_DEBOUNCE_MS);
-    return () => {
-      live = false;
-      clearTimeout(t);
-    };
-  }, [tag, key, numCtx]);
   const answer = typed?.key === key && typed.numCtx === numCtx && tag !== "" ? typed.estimate : undefined;
   const v = answer?.fit ? verdictOf(answer.fit) : undefined;
   const big = v?.k === "no";
+  // The registry hears a typed name only on Enter or Download, never while it is typed (decision 26;
+  // README, Privacy). The answer is kept for the name and context it was asked for.
+  const lookUp = async (): Promise<ModelEstimate | undefined> => {
+    const estimate = await estimateModel(tag, numCtx);
+    setTyped({ key, numCtx, estimate });
+    return estimate;
+  };
   const start = () => {
     setMenu(false);
     // the typed name stays until the download starts (W-07)
     void actions.start(tag).then(ok => { if (ok) setName(current => current === name ? "" : current); });
+  };
+  // Download asks first when the name has no answer yet: a name the library lacks, or one too big
+  // for this computer, stops at its line (and the ⋯ menu) as it would after Enter.
+  const download = async () => {
+    if (tag === "") return;
+    const a = answer ?? await lookUp();
+    if (a?.found === "no" || (a?.fit !== undefined && verdictOf(a.fit).k === "no")) return;
+    start();
   };
   // the line under the field: the typed name's verdict, said once, before any download
   const said = tag === "" || answer === undefined ? undefined
@@ -298,17 +280,18 @@ function CustomPull({ actions, numCtx }: { actions: DownloadActions; numCtx: num
             Browse the Ollama library ↗
           </a>
         ) : (
-          <span className={big || answer?.found === "no" ? "dl-typed no" : "dl-typed"} role="status" data-tip={v && answer?.fit ? esc(memoryTip(v, answer.fit.numCtx, cpu)) : undefined}>{said}</span>
+          <span className={big || answer?.found === "no" ? "dl-typed no" : "dl-typed"} role="status">{said}</span>
         )
       }
     >
-      <input className="inp" placeholder={typedExample === undefined ? "Model name" : `Model name, e.g. ${typedExample}`} aria-label="Model name" data-testid="models.custom.name" value={name} onChange={(e) => setName(e.target.value)} />
+      <input className="inp" placeholder={typedExample === undefined ? "Model name" : `Model name, e.g. ${typedExample}`} aria-label="Model name" data-testid="models.custom.name" value={name} onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter" && tag !== "") { e.preventDefault(); void lookUp(); } }} />
       <div className="dl-typed-a" ref={box} data-testid="models.custom.actions" onKeyDown={(e) => menu && walk(e, box.current, "[role=menuitem]", closeMenu)}>
         <DlButton
           size={answer?.downloadBytes === undefined ? undefined : gb(answer.downloadBytes)}
           label={tag}
           disabled={tag === "" || big || answer?.found === "no"}
-          onStart={start}
+          onStart={() => void download()}
           side={big ? (
             <button type="button" className={`dl-x${menu ? " on" : ""}`} data-testid="models.custom.more" aria-label={`More for ${tag}`} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(m => !m)}>
               <Icon id="more" />
@@ -391,10 +374,8 @@ export function DownloadTab() {
   const catalog = useStore((s) => s.catalog);
   const models = useStore(s => s.models), pulls = useStore(s => s.pulls);
   const numCtx = useStore((s) => s.numCtx);
-  const gpu = useStore((s) => s.gpu);
   const table = useStore((s) => s.fitTable);
-  const gpuName = gpu === NA || gpu === undefined || gpu.vendor !== "nvidia" ? "computer" : shortGpu(gpu.name);
-  const list = catalog === NA || catalog === undefined ? [] : catalog;
+  const list =catalog === NA || catalog === undefined ? [] : catalog;
   // Only a changed installation or successful progress confirms a start.
   // Existing files and late terminal/queued pushes do not retire a new error.
   // A failed cancel still matters while that download continues.
@@ -477,47 +458,29 @@ export function DownloadTab() {
   // A newly discovered model appears at the end without moving existing rows.
   const more = [...rows(groups.other), ...list.filter(c => !known.has(c.name) && !refuses(c))];
   const big = holding ? [] : list.filter(refuses);
-  // Said once above the list when every row that runs here runs the same way; then rows carry only
-  // an exception. Worked out from the live verdicts: its words change in place, the rows stay.
-  const runnable = [...rec, ...more];
-  const first = runnable[0] === undefined ? undefined : verdict(runnable[0]);
-  const shared = !holding && runnable.every(c => runs(c) && verdict(c) === first) ? first : undefined;
-  // Rows split between the GPU and slower: the line says the GPU and points at the marked rows, so
-  // its box is never empty once the verdicts are in.
-  const split = !holding && shared === undefined && runnable.some(c => verdict(c) === "fits") && runnable.every(runs);
-  const gpuWord = gpuName === "computer" ? "GPU" : gpuName;
-  const once = shared === "fits" ? `These run on your ${gpuWord}.`
-    : shared === "spills" ? (noGpu(gpu) ? "No supported GPU, so these run in system memory and replies are slower." : "These are bigger than your GPU's memory, so replies are slower.")
-    : split ? `These run on your ${gpuWord}, except the ones marked slower.`
-    : undefined;
-  const mark = (c: CatalogEntry) => shared === undefined && verdict(c) === "spills";
+  // Slower is said by each row's mark alone, its orange bar and "22 / 16 GB" (decision 11): no line
+  // above the list, no words beside the bar.
   const others = table?.memory.kind === "gpu" ? table.memory.others : undefined;
   return (
     <>
       {catalog === NA ? (
         <p className="na">The model list is not available in this build. You can still type a model name below.</p>
       ) : null}
-      {/* the line's box stays while its words come and go, so the groups below never move */}
-      {list.length > 0 ? (
-        <p className="dl-once" data-wait="">
-          {once === undefined ? null : <><span className={`vd ${shared === "spills" ? "spill" : "gpu"}`} />{once}</>}
-        </p>
-      ) : null}
       {holding ? <GroupsPlaceholder rows={list.length} first={list.filter(c => c.recommended).length} /> : null}
       {keep ? (
         <div className="grp grp-keep" aria-hidden="true"><div className="grp-h"><div className="grp-l"><div className="grp-t">{" "}</div></div></div></div>
       ) : null}
       {!holding && rec.length > 0 ? (
-        <Grp title="Recommended" tip={`Picked for your ${gpuName}. `}>
+        <Grp title="Recommended">
           {rec.map((c) => (
-            <DlRow key={c.name} c={c} numCtx={numCtx} report={report(c)} mark={mark(c)} actions={actions} />
+            <DlRow key={c.name} c={c} report={report(c)} actions={actions} />
           ))}
         </Grp>
       ) : null}
       {!holding && more.length > 0 ? (
         <Grp title="Also available">
           {more.map((c) => (
-            <DlRow key={c.name} c={c} numCtx={numCtx} report={report(c)} mark={mark(c)} actions={actions} />
+            <DlRow key={c.name} c={c} report={report(c)} actions={actions} />
           ))}
         </Grp>
       ) : null}
@@ -532,7 +495,7 @@ export function DownloadTab() {
           <div className="box">
             {big.map((c) => {
               const r = report(c);
-              return r ? <BigRow key={c.name} c={c} report={r} numCtx={numCtx} /> : null;
+              return r ? <BigRow key={c.name} c={c} report={r} /> : null;
             })}
           </div>
         </details>

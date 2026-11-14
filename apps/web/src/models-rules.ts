@@ -1,8 +1,8 @@
 // The rules behind Settings › Models, kept pure so tests can pin them: the
 // fit words, the installed order, the next default after a removal and the
 // name truncation.
-import type { CatalogEntry, FitReport, FitVerdict } from "@gates-local/contracts";
-import { NBSP, cardGb, friendlyName } from "./format.ts";
+import type { CatalogEntry, FitVerdict } from "@gates-local/contracts";
+import { friendlyName } from "./format.ts";
 
 // ---------------------------------------------------------------- fit words
 
@@ -21,7 +21,7 @@ export const FIT_DOT: Record<FitVerdict, string> = { fits: "ok", spills: "warn",
 
 /** The app's GB is GiB (format.ts gb), so these numbers match every other surface. */
 const GB = 1024 ** 3;
-/** Whole GB from 10 up, one decimal below, as the A4 tooltips read ("Needs about 15 GB", "about 7.5 GB"). */
+/** Whole GB from 10 up, one decimal below ("about 15 GB", "about 7.5 GB"). */
 export const about = (bytes: number) => {
   const g = bytes / GB;
   return `${g < 9.95 ? g.toFixed(1) : Math.round(g)} GB`;
@@ -29,19 +29,6 @@ export const about = (bytes: number) => {
 
 /** A model's size in the Size column: MB under 1 GB, else as `about`. */
 export const sizeText = (bytes: number) => (bytes < GB ? `${Math.round(bytes / 1024 ** 2)} MB` : about(bytes));
-
-/**
- * The reason behind a verdict in a few words, against the card's size (the mark's whole), never
- * what happens to be free right now: "Needs about 22 GB of a 16 GB GPU; the rest in system memory."
- */
-export function fitReason(r: FitReport, cpu = false, whole: number = r.freeVramBytes): string {
-  const need = `Needs about ${about(r.needVramBytes)}`;
-  if (cpu) return r.verdict === "refuse" ? `${need}; system memory can't hold it.` : `${need}, all in system memory.`;
-  const of = `${need} of a ${cardGb(whole).replace(NBSP, " ")} GPU`;
-  if (r.verdict === "fits") return `${of}.`;
-  if (r.verdict === "spills") return `${of}; the rest in system memory.`;
-  return `${of}; system memory can't hold the rest.`;
-}
 
 // ---------------------------------------------------------------- what a model is
 
@@ -64,34 +51,6 @@ export function nameOf(tag: string, catalog: readonly CatalogEntry[] | undefined
 
 /** A Download row's name: the one Installed shows for the same model ("Qwen 3.8 27B abliterated", never its Ollama tag). */
 export const labelOf = (c: CatalogEntry): string => nameOf(c.name, [c]).text;
-
-/**
- * What tells apart options that would otherwise read alike, by model name:
- * each id less the parts all of them share, so "local/model:9b-q4_K_M" and
- * "local/model:9b-q8_0" come back as "q4_K_M" and "q8_0". Names already
- * unique on the page get no entry.
- */
-export function optionVariants(options: readonly { readonly name: string; readonly label: { readonly text: string } }[]): ReadonlyMap<string, string> {
-  const out = new Map<string, string>();
-  for (const text of new Set(options.map((o) => o.label.text))) {
-    const names = options.filter((o) => o.label.text === text).map((o) => o.name);
-    if (names.length < 2) continue;
-    const shown = withoutSharedParts(names);
-    names.forEach((n, i) => out.set(n, new Set(shown).size === names.length ? (shown[i] ?? n) : n));
-  }
-  return out;
-}
-
-function withoutSharedParts(names: readonly string[]): string[] {
-  const parts = names.map((n) => n.split(/(?<=[/:-])/));
-  const room = Math.min(...parts.map((p) => p.length)) - 1;
-  const shared = (at: (p: readonly string[]) => string | undefined) => new Set(parts.map(at)).size === 1;
-  let head = 0;
-  while (head < room && shared((p) => p[head])) head++;
-  let tail = 0;
-  while (head + tail < room && shared((p) => p[p.length - 1 - tail])) tail++;
-  return parts.map((p) => p.slice(head, p.length - tail).join("").replace(/[/:-]$/, ""));
-}
 
 // ---------------------------------------------------------------- names that do not fit
 

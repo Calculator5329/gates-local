@@ -21,7 +21,8 @@ test("set a default from the row menu, then download a model into the list", asy
   await page.getByTestId("models.row-menu.make-default").click();
   await expect(page.getByRole("menu")).toHaveCount(0);
   await expect(gemma.locator(".mp-l1 .mp-chip")).toHaveText("Default");
-  await expect(page.getByTestId("models.default.select")).toHaveAccessibleName("Default for new chats: Gemma 4 12B");
+  // the chip is the only mark of the default (decision 10): one row carries it
+  await expect(page.locator(".mp-row[data-dm] .mp-l1 .mp-chip", { hasText: "Default" })).toHaveCount(1);
 
   // download one from the Download tab
   await page.getByTestId("models.tabs.download").click();

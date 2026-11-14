@@ -152,10 +152,10 @@ it("a downloaded sample's question starts a new chat with its words", async () =
 
 const OWN = { id: "own", kind: "sqlite", label: "shop", path: "/data/shops/2026/shop.db", addedAt: 1, state: "ready", snapshotAt: Date.UTC(2026, 10, 3, 12), tables: [{ name: "orders", rows: 12 }] };
 
-it("an own database's Refresh says the model reads a copy", async () => {
+it("an own database's Refresh is named in one word, as an icon-only button is (decision 19)", async () => {
   host.state = { ...host.state, sources: [OWN] };
   render(); await settle();
-  expect(find(render(), "button", "Refresh shop")["data-tip"]).toMatch(/^Refresh\. The model reads a copy from .+; refresh it to see later changes\.$/);
+  expect(find(render(), "button", "Refresh shop")["data-tip"]).toBe("Refresh");
 });
 
 it("a database past 500 tables says how many it has, not how many are listed", async () => {

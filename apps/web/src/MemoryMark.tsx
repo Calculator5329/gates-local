@@ -2,7 +2,7 @@
 // picked A): "the measure for a model is not what is available now its based on the ram in the card".
 // The bar is the whole card (with no GPU, the computer's memory), the fill is what this model takes,
 // and the number says both: "6.6 / 16 GB". The fill's colour is the verdict (green on the GPU, amber
-// slower, a grey full bar when it cannot run); the verdict's words are the mark's name and its tip.
+// slower, a grey full bar when it cannot run); the verdict's words are the mark's accessible name.
 // What other programs hold is never in a mark: each list says it once under its rows.
 //
 // Used by Settings › Models and Download. The chat picker (Picker.tsx, the row's .pk-v and the context
@@ -40,10 +40,10 @@ export function markFill(verdict: FitReport["verdict"], need: number, whole: num
 const KIND: Record<FitReport["verdict"], string> = { fits: "gpu", spills: "spill", refuse: "no" };
 
 /**
- * The mark for one model's report. words: the verdict said in words, the mark's accessible name;
- * tip: its tooltip (HTML, escaped by the caller), shown on hover or focus.
+ * The mark for one model's report. words: the verdict said in words, the mark's accessible name.
+ * A value has no tooltip (decision 19): the colour and the number say it on screen.
  */
-export function MemoryMark({ report, words, tip }: { report: FitReport; words: string; tip: string }) {
+export function MemoryMark({ report, words }: { report: FitReport; words: string }) {
   const whole = useStore(markWhole);
   const need = report.needVramBytes;
   const text = whole === undefined ? `${amount(need)} GB` : markText(need, whole);
@@ -53,8 +53,6 @@ export function MemoryMark({ report, words, tip }: { report: FitReport; words: s
       className={`mm ${KIND[report.verdict]}`}
       role="img"
       aria-label={`${words}: ${text.replace(" / ", " of ")}`}
-      tabIndex={0}
-      data-tip={tip}
       data-testid="models.fit.memory-mark"
     >
       <span className="mm-bar" aria-hidden="true"><i style={{ width: `${(fill * 100).toFixed(1)}%` }} /></span>

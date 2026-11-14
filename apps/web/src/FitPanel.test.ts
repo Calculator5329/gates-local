@@ -88,21 +88,34 @@ it("with no GPU the page says so once, and the model row is its name and one ver
   expect(times(text, "system memory")).toBe(1);
   expect(text).toContain("Should run in system memory");
   expect(text).not.toContain("16k context");
-  expect(text).not.toContain("at 16k");
+  expect(times(text, "16k")).toBe(1);
   expect(text).not.toContain("Estimated.");
 });
 
-it("with a GPU the card is named once and the verdict does not repeat the size the control shows", () => {
+// Decision 13: context is chosen in the model picker only, so the verdict names the size the chat runs at, once.
+it("with a GPU the card is named once and the verdict names the size once", () => {
   const text = shown({ vendor: "nvidia", name: "NVIDIA GeForce RTX 5070 Ti", totalBytes: 16 * GB, freeBytes: 12 * GB, occupants: [], systemMemoryAvailableBytes: 16 * GB, measuredAt: 1 }, "fits", { kind: "gpu", freeBytes: 12 * GB, usableBytes: 11 * GB });
   expect(times(text, "RTX 5070 Ti")).toBe(1);
   expect(text).toContain("Should run well");
   expect(text).not.toContain("16k context");
-  expect(text).not.toContain("at 16k");
+  expect(times(text, "at 16k")).toBe(1);
   expect(text).not.toContain("Estimated.");
 });
 
-it("Default context is explained in one line", () => {
-  const text = shown({ vendor: "none", occupants: [], systemMemoryAvailableBytes: 16 * GB, measuredAt: 1 }, "spills", { kind: "cpu" });
-  expect(text).toContain("Tokens the model keeps in view, in every chat. Longer uses more memory.");
-  expect(text).not.toContain("until you reopen the app");
+it("has no Default context control, and a saved default is not an error", () => {
+  const html = renderToStaticMarkup(createElement(GpuMemory));
+  expect(html).not.toContain("Default context");
+  expect(html).not.toContain("data-ctx");
+  expect(html).not.toContain("data-tip");
+});
+
+it("a refusal names the card as every other line does", () => {
+  store.state = {
+    model: "chat", numCtx: 16384, fitPanel: { model: null }, settings: { defaultNumCtx: 65536 },
+    gpu: { vendor: "nvidia", name: "RTX", totalBytes: 16 * GB, freeBytes: 12 * GB, occupants: [], systemMemoryAvailableBytes: 8 * GB, measuredAt: 1 },
+    models: [], catalog: [], loads: {}, messages: {}, firstToken: {}, unavailable: {},
+    fitTable: { reading: { boot: "b", seq: 1, measuredAt: 1 }, memory: { kind: "gpu", freeBytes: 12 * GB, usableBytes: 11 * GB, totalBytes: 16 * GB }, rows: [{ model: "chat", numCtx: 16384, freeVramBytes: 15.6 * GB, needVramBytes: 30 * GB, spillRamBytes: 0, verdict: "refuse", source: "estimate", stops: [] }] },
+  };
+  const html = renderToStaticMarkup(createElement(GpuMemory));
+  expect(html).toContain("The GPU has 16 GB for a model");
 });

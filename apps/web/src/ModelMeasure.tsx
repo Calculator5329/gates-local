@@ -2,8 +2,6 @@
 // computer when the person asks, kept on its row. Until then the row has a Measure button across
 // both cells; while it runs, the button is the progress. The check runs on the server
 // (apps/server/src/measure); nothing here starts one without a click.
-import type { ModelMeasure } from "@gates-local/contracts";
-import { k } from "./format.ts";
 import { handleKey } from "./handles.ts";
 import { Icon } from "./icons.tsx";
 import { tpsText } from "./model-speed.tsx";
@@ -11,20 +9,6 @@ import { measureModel } from "./session.ts";
 import { measureOf, measuringNow } from "./session/measures.ts";
 import { Fail } from "./settings-ui.tsx";
 import { NA, type State, useStore } from "./store.ts";
-
-const when = (at: number) => new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short" });
-
-/** "Passed 6 of 8 checks on this computer: tool use 3 of 3, database questions 3 of 5. Measured 13 Nov at 4k." */
-export function scoreTip(m: ModelMeasure): string {
-  const of = (kind: "tools" | "sql") => {
-    const all = m.checks.filter((c) => c.kind === kind);
-    return `${all.filter((c) => c.ok).length} of ${all.length}`;
-  };
-  const passed = m.checks.filter((c) => c.ok).length;
-  return `Passed ${passed} of ${m.checks.length} checks on this computer: tool use ${of("tools")}, database questions ${of("sql")}. Measured ${when(m.at)} at ${k(m.numCtx)}.`;
-}
-
-export const speedTipOf = (m: ModelMeasure): string => `Reply speed measured on this computer, ${when(m.at)}`;
 
 /** The Speed and Score columns show unless the server has no Measure (an older server). */
 export const canMeasure = (s: State): boolean => s.measures !== NA && s.unavailable["models.measure"] !== true;
@@ -39,7 +23,7 @@ export function MeasureMeta({ name }: { name: string }) {
   const m = useStore((s) => measureOf(s, name));
   if (m === undefined) return null;
   return (
-    <div className="mp-mline" data-tip={scoreTip(m)}>
+    <div className="mp-mline">
       {tpsText(m.tokensPerSecond) ?? "–"} · score {m.score}
     </div>
   );
@@ -62,8 +46,8 @@ export function MeasureCells({ name, label }: { name: string; label: string }) {
   if (m !== undefined && run === undefined) {
     return (
       <>
-        <span className="mp-spd" data-tip={speedTipOf(m)}>{tpsText(m.tokensPerSecond) ?? "–"}</span>
-        <span className="mp-score" tabIndex={0} aria-label={`Score ${m.score} of 100`} data-tip={scoreTip(m)}>{m.score}</span>
+        <span className="mp-spd">{tpsText(m.tokensPerSecond) ?? "–"}</span>
+        <span className="mp-score" aria-label={`Score ${m.score} of 100`}>{m.score}</span>
       </>
     );
   }
@@ -82,11 +66,8 @@ function MeasureButton({ name, label, run, other }: { name: string; label: strin
         disabled={run !== undefined || other}
         aria-busy={run !== undefined || undefined}
         aria-label={run ? `${text}, ${label}` : `Measure ${label}`}
-        data-tip={
-          run ? undefined
-          : other ? "One model is measured at a time."
-          : "Times a reply and asks eight tool and database questions, about a minute. Replies wait while it runs."
-        }
+        // a button with words has no tooltip; disabled, it says why in a few words (docs/design.md)
+        data-tip={run === undefined && other ? "One model at a time" : undefined}
         onClick={() => void measureModel(name)}
       >
         <span className="fill" aria-hidden="true" />

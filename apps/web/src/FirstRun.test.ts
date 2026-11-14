@@ -135,12 +135,12 @@ describe("first run on a computer with no supported GPU", () => {
   }
 });
 
-it("SR-03: a recommended download that spills says so on the card's tooltip, never in a line its verdict already gives", () => {
+it("SR-03: a recommended download that spills says so by its verdict alone, with no tooltip on Recommended", () => {
   const fit = { model: gemma.name, numCtx: 16384, verdict: "spills", needVramBytes: 2 ** 30, freeVramBytes: 0, spillRamBytes: 2 ** 30, source: "estimate", measuredAt: 0 };
   const state = { ...oldOllama([{ ...gemma, fit }]), models: [], gpu: { vendor: "nvidia" }, fitTable: tableOf([fit]) };
   expect(text(state)).toContain("Download your first model");
   expect(text(state)).not.toContain("Your best fit uses system memory, so it is slower.");
-  expect(raw(state)).toContain('data-tip="Your best fit uses system memory, so it is slower."');
+  expect(raw(state)).not.toContain("data-tip");
   // the size is what the person decides on; the model's blurb is not
   expect(text(state)).toContain("GB download");
   expect(text(state)).not.toContain(" chat · ");

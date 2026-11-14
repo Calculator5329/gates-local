@@ -82,8 +82,9 @@ describe("Models on a computer with no supported GPU", () => {
     const refused = render(noGpuComputer({ models: [], addPage: true, catalog: [entry("huge:1t", "Huge", "refuse", 900)] }));
     expect(refused).not.toMatch(RECOMMENDED);
     const checked = render(noGpuComputer({ models: [], addPage: true, catalog: [offered] }));
-    // every row spills here: said once above the list (row 18), not on the row
-    expect(checked).toContain('<span class="vd spill"></span>No supported GPU, so these run in system memory and replies are slower.');
+    // decision 11: the mark's colour and number say it; no line above the list, no words on the row
+    expect(checked).not.toContain("No supported GPU, so these run");
+    expect(checked).toContain('class="mm spill"');
     expect(checked).not.toContain('class="vl spill"');
     expect(checked).toMatch(RECOMMENDED);
     expect(checked).not.toContain("data-skel");
@@ -119,13 +120,14 @@ describe("Models on a computer with no supported GPU", () => {
     expect(html).toMatch(/class="mp-row[^>]+aria-label="Everyday Qwen"/);
     expect(html).toContain('aria-label="More for Everyday Qwen"');
   });
-  it("PK-02: a loaded current-context report is labeled measured", () => {
+  it("PK-02: a loaded current-context report gives the row its measured need", () => {
     const name = "qwen3:14b";
     const measured = { ...fit(name, "spills", 9), source: "measured", numCtx: 65536 };
     const html = render(noGpuComputer({ addPage: true, numCtx: 65536,
       catalog: [entry(name, "Qwen 3 14B", "spills", 10)], fitTable: tableOf(measured) }));
-    // the row's tooltip says it (row 18)
-    expect(html).toMatch(/Measured 9\.0(?:&#160;| | )GB of memory with 64k of context/);
+    // the mark says the table's 9 GB, not the catalog's 10 (a row has no tooltip, decision 19)
+    expect(html).toContain('aria-label="Runs in system memory, slower: 9.0 GB"');
+    expect(html).not.toMatch(/Measured 9\.0(?:&#160;| | )GB of memory with 64k of context/);
     expect(html).not.toContain("Measured after the first load");
   });
   it("PK-02: Download uses the viewed 64k fit instead of the saved-default 16k estimate", () => {
@@ -135,9 +137,10 @@ describe("Models on a computer with no supported GPU", () => {
     const html = render(noGpuComputer({ addPage: true, gpu: { vendor: "nvidia", name: "Test GPU" }, numCtx: 65536,
       catalog: [{ ...entry(name, "Qwen 3 14B", "spills", 10), fit: at16 }],
       fitTable: tableOf(at64) }));
-    // the only row spills: said once above the list (row 18), its need in the row's tooltip
-    expect(html).toContain("These are bigger than your GPU&#x27;s memory, so replies are slower.");
-    expect(html).toMatch(/Estimated 15\.0(?:&#160;| | )GB of memory with 64k of context/);
+    // the only row spills: its mark says so in amber with the 64k need (decision 11), nothing above the list
+    expect(html).toContain('aria-label="Partly in system memory, slower: 15 GB"');
+    expect(html).not.toContain("These are bigger than your GPU");
+    expect(html).not.toMatch(/Estimated 15\.0(?:&#160;| | )GB of memory with 64k of context/);
     expect(html).not.toContain("Runs on GPU");
   });
   it("promises no GPU on either tab or with no models, and says system memory instead", () => {
@@ -145,12 +148,12 @@ describe("Models on a computer with no supported GPU", () => {
     const download = render(noGpuComputer({ addPage: true }));
     const empty = render(noGpuComputer({ models: [] }));
     expect([...gpuPromises(list), ...gpuPromises(download), ...gpuPromises(empty)]).toEqual([]);
-    expect(list).toContain(
-      "New chats start on this model. If it can&#x27;t run here, they start on the first model that fits: recommended models first, then your largest. Any chat can switch from its model menu.",
-    );
+    // decision 10: no Default card; the chip marks the default
+    expect(list).not.toContain("New chats start on this model");
     expect(list).toContain("Should run in system memory");
     expect(list).not.toContain("run slower");
-    expect(download).toContain("all in system memory (no supported GPU)");
+    // the Download rows say it by their marks' names alone (decisions 11 and 19)
+    expect(download).toContain('aria-label="Runs in system memory, slower: ');
     expect(empty).toContain("should run in system memory on this computer");
     expect(empty).toContain("Download Qwen 3.5 4B");
   });
@@ -175,7 +178,7 @@ describe("the Default card when the saved default cannot run", () => {
 });
 
 describe("Models with a model whose window is smaller than the default", () => {
-  it("shows it as usable, at the size it runs at, with no too-small label", () => {
+  it("shows it as usable, judged at the size it runs at, with no too-small label", () => {
     const tag = "tiny-chat:2k";
     // the server answers a 16k check at the most the model takes
     const report = { ...fit(tag, "spills", 1), verdict: "fits", numCtx: 2048, spillRamBytes: 0 };
@@ -190,7 +193,7 @@ describe("Models with a model whose window is smaller than the default", () => {
     );
     expect(html).toContain("Should run well");
     expect(html).not.toMatch(/supports up to|too small|unsupported|won.{1,6}t run/i);
-    expect(html).toContain("run at 2k");
+    // the Default card that said "can only run at 2k" is gone (decision 10); the picker caps the size per model
     expect(html).not.toContain("run at 16k");
   });
 });

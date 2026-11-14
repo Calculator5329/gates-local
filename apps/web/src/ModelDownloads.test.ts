@@ -134,8 +134,8 @@ it("F2: a table that has no reading for a row answers it: grouped at once, that 
   expect(shown).not.toContain("data-skel");
   expect(groups(shown)).toEqual({ Recommended: ["a:1"], "Also available": ["b:1"], "Something else": [] });
   expect(shown).toContain('data-cat="b:1">');
-  // with one row unanswered, no verdict is said for all of them
-  expect(shown).toContain('<p class="dl-once" data-wait=""></p>');
+  // the unanswered row keeps an empty mark slot, so its row does not move when the answer lands
+  expect(shown).toMatch(/data-cat="b:1">(?:(?!data-cat)[\s\S])*<span class="mm" aria-hidden="true"><\/span>/);
 });
 
 it("F2: once grouped, the groups stay put, except that a row whose verdict becomes does-not-fit leaves Recommended once and never comes back", () => {
@@ -189,20 +189,17 @@ const rowTips = (html: string) => {
   return out;
 };
 
-it("a row's memory is said once: the memory mark's tooltip names the mark, and the row's tooltip holds the estimate (row 32)", () => {
+it("a row's memory is its mark alone: no tooltip on the row, its name or its mark (decisions 11 and 19)", () => {
   const a = entry("a:1", "A", true, "fits");
   const b = entry("b:1", "B", false, "spills");
   const c = entry("c:1", "C", false, "refuse");
   const html = render(base({ catalog: [a, b, c], fitTable: table(fit("a:1", "fits"), fit("b:1", "spills"), fit("c:1", "refuse")) }));
   const tips = rowTips(html);
   expect(Object.keys(tips).toSorted()).toEqual(["a:1", "b:1", "c:1"]);
-  for (const [cat, list] of Object.entries(tips)) {
-    expect(list.length, `${cat}: the name's tooltip and the mark's`).toBeGreaterThanOrEqual(2);
-    const said = list.flat();
-    expect(said.filter((s, i) => said.indexOf(s) !== i), `${cat}: no sentence in two of its tooltips`).toEqual([]);
-    expect(said.filter((s) => /of memory with/.test(s)), `${cat}: the estimate, once`).toHaveLength(1);
-  }
-  expect(html, "the mark's tooltip is its verdict's words").toMatch(/data-cat="a:1"[\s\S]*?class="mm gpu"[^>]*data-tip="&lt;b&gt;Runs on the GPU&lt;\/b&gt;"/);
+  for (const [cat, list] of Object.entries(tips)) expect(list, `${cat}: no tooltip`).toEqual([]);
+  // the mark's words are its accessible name, what its colour says
+  expect(html).toMatch(/data-cat="a:1"[\s\S]*?class="mm gpu" role="img" aria-label="Runs on the GPU: /);
+  expect(html).toMatch(/data-cat="b:1"[\s\S]*?class="mm spill" role="img" aria-label="Partly in system memory, slower: /);
 });
 
 it("an empty Recommended keeps its header slot for the visit when the placeholder drew one, so what is below stays put", () => {
@@ -228,24 +225,20 @@ it("no slot is kept where the placeholder drew one header", () => {
   expect(render(state)).not.toContain("grp-keep");
 });
 
-it("a verdict every row shares is said once above the list, a row carries only an exception, and the rows stay where they are (row 18)", () => {
+// Decision 11 A: "Slower" is said by the orange bar and "22 / 16 GB" alone; no line above the list, no words on a row.
+it("a verdict is said by each row's mark alone, with no line above the list, and the rows stay where they are", () => {
   const a = entry("a:1", "A", true, "fits");
   const b = entry("b:1", "B", false, "spills");
   const state = base({ catalog: [a, b], fitTable: table(fit("a:1", "fits"), fit("b:1", "spills")) });
-  const mixed = render(state);
-  expect(groups(mixed)).toEqual({ Recommended: ["a:1"], "Also available": ["b:1"], "Something else": [] });
-  // mixed: the line above says what most rows do and points at the exception, which only its row says
-  expect(mixed).toMatch(/<p class="dl-once" data-wait=""><span class="vd gpu"><\/span>These run on your RTX, except the ones marked slower\.<\/p>/);
-  expect(mixed.match(/class="vl /g)).toHaveLength(1);
-  expect(mixed).toMatch(/data-cat="b:1"[\s\S]*?class="vl spill"/);
-  // the next table says b now fits too: said once, and no row repeats it
-  const fits = render({ ...state, fitTable: table(fit("a:1", "fits"), fit("b:1", "fits")) });
-  expect(groups(fits)).toEqual({ Recommended: ["a:1"], "Also available": ["b:1"], "Something else": [] });
-  expect(fits).toMatch(/<p class="dl-once" data-wait=""><span class="vd gpu"><\/span>These run on your RTX\.<\/p>/);
-  expect(fits).not.toContain('class="vl ');
-  // every row spills: said once, the slower words
-  const spills = render({ ...state, fitTable: table(fit("a:1", "spills"), fit("b:1", "spills")) });
-  expect(groups(spills)).toEqual({ Recommended: ["a:1"], "Also available": ["b:1"], "Something else": [] });
-  expect(spills).toContain("These are bigger than your GPU&#x27;s memory, so replies are slower.");
-  expect(spills).not.toContain('class="vl ');
+  for (const html of [
+    render(state),
+    render({ ...state, fitTable: table(fit("a:1", "fits"), fit("b:1", "fits")) }),
+    render({ ...state, fitTable: table(fit("a:1", "spills"), fit("b:1", "spills")) }),
+  ]) {
+    expect(groups(html)).toEqual({ Recommended: ["a:1"], "Also available": ["b:1"], "Something else": [] });
+    expect(html).not.toContain("dl-once");
+    expect(html).not.toMatch(/These (?:run on|are bigger)/);
+    expect(html).not.toContain('class="vl ');
+  }
+  expect(render(state)).toMatch(/data-cat="b:1"[\s\S]*?class="mm spill"/);
 });

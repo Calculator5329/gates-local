@@ -229,8 +229,8 @@ test("the picker offers 8k; an 8k turn sends num_ctx 8192", async ({ page, open 
   expect(state.requests.findLast((r) => r.path === "/api/chat")?.body.options?.num_ctx).toBe(8192);
 });
 
-// Guards the owner's ask: the memory and context control lives in Advanced, once.
-test("Settings > Advanced has one default-context control with 8k on it, and Settings > Models has none", async ({ page, open }) => {
+// Decision 13: context is set per model in the picker; Settings has no context control.
+test("Settings has no context control, and a size picked in the picker survives a reload", async ({ page, open }) => {
   await open();
   await waitReady(page);
   await openModels(page);
@@ -239,18 +239,16 @@ test("Settings > Advanced has one default-context control with 8k on it, and Set
   await expect(page.locator(".set").getByRole("group", { name: /context/i })).toHaveCount(0);
   await page.keyboard.press("Control+Comma");
   await page.getByTestId("settings.nav.open-advanced").click();
-  // one control: the row inside GPU memory, nothing else on the page sets the default
-  const seg = page.locator("#gpuMemory").getByRole("group", { name: "Default context" });
-  await expect(seg.getByRole("button")).toHaveText(["8k", "16k", "32k", "64k"]);
-  await expect(page.locator(".set").getByRole("group", { name: /context/i })).toHaveCount(1);
-  await seg.getByRole("button", { name: "8k" }).click();
-  await expect(seg.getByRole("button", { name: "8k" })).toHaveAttribute("aria-pressed", "true");
-  // the saved default survives a reload
+  await expect(page.locator(".set [data-ctx]")).toHaveCount(0);
+  await expect(page.locator(".set").getByText("Default context")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.locator("#modelBtn").click();
+  await page.locator('#picker [data-ctx="8192"]').click();
+  await expect(page.locator("#modelBtn")).toContainText("8k");
+  // the size chosen there is the one the next start begins at
   await page.reload();
   await waitReady(page);
-  await page.keyboard.press("Control+Comma");
-  await page.getByTestId("settings.nav.open-advanced").click();
-  await expect(page.locator("#gpuMemory").getByRole("group", { name: "Default context" }).getByRole("button", { name: "8k" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#modelBtn")).toContainText("8k");
 });
 
 const row = (page: Page, title: string) => page.locator(".sb-row", { hasText: title });

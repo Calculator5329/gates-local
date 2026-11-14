@@ -12,7 +12,6 @@ import { PathText } from "./settings-controls.tsx";
 import { Fail, Grp, Skel } from "./settings-ui.tsx";
 import { askWith } from "./starter.ts";
 import { NA, useStore } from "./store.ts";
-import { esc } from "./ui.tsx";
 
 const bytes = (n: number) => n < 1_048_576 ? `${Math.ceil(n / 1024)} KiB` : `${(n / 1_048_576).toFixed(1)} MiB`;
 const busy = (j?: SourceImport) => j !== undefined && ["downloading", "cloning", "adding"].includes(j.state);
@@ -35,7 +34,7 @@ const DB_TOOL = typeof navigator !== "undefined" && /\bWindows\b/.test(navigator
  * result once the person started one, drawn over the description it hides so
  * the row keeps the height it had at rest (a phone wraps the description to
  * two lines; progress takes one). Nothing is reserved for a job that has not
- * started; an error may take two lines, its full text in the tooltip.
+ * started; an error may take two lines (a status has no tooltip, docs/design.md).
  */
 const line = (rest: string, job?: SourceImport, added = false, prefix = "") => {
   const error = !added && job?.state === "error";
@@ -43,7 +42,7 @@ const line = (rest: string, job?: SourceImport, added = false, prefix = "") => {
   return (
     <span className="d import-line">
       <span className={job ? "import-rest gone" : "import-rest"}>{rest}</span>
-      <span className="import-status" role={error ? "alert" : "status"} data-tip={!added && job?.detail ? esc(job.detail) : undefined}>{job ? `${prefix}${words}` : ""}</span>
+      <span className="import-status" role={error ? "alert" : "status"}>{job ? `${prefix}${words}` : ""}</span>
     </span>
   );
 };
@@ -56,7 +55,7 @@ const dbWords = (src: Source) =>
 
 /** An own database's line. */
 const dbLine = (src: Source) => src.state === "error"
-  ? <span className="d act-err" role="alert" data-tip={esc(dbWords(src))}>{dbWords(src)}</span>
+  ? <span className="d act-err" role="alert">{dbWords(src)}</span>
   : <span className="d">{dbWords(src)}</span>;
 
 /**
@@ -73,7 +72,7 @@ const sampleLine = (sample: SampleDatabase, job: SourceImport | undefined, sourc
   return (
     <span className="d import-line">
       <span className={source || ended ? "import-rest gone" : "import-rest"}>{`Sample · ${sample.description} · ${fileSize(sample.sizeBytes)}`}</span>
-      <span className={ended ? "import-status" : "import-status gone"} role={job?.state === "error" && ended ? "alert" : "status"} data-tip={ended ? esc(words) : undefined}>{ended ? words : ""}</span>
+      <span className={ended ? "import-status" : "import-status gone"} role={job?.state === "error" && ended ? "alert" : "status"}>{ended ? words : ""}</span>
       <span className={source ? `import-db${as.state === "error" ? " act-err" : ""}` : "import-db gone"} aria-hidden={source ? undefined : true}>{dbWords(as)}</span>
     </span>
   );
@@ -274,7 +273,6 @@ export default function LibraryImports({ add, clone, clones = [] }: { add: React
     const open = opened.includes(row.key);
     const done = sample !== undefined && source !== undefined && (finishing.includes(sample.id) || (ran.current.has(sample.id) && !still()));
     const own = source !== undefined && sample === undefined;
-    const copied = source?.snapshotAt === undefined ? "" : ` from ${new Date(source.snapshotAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
     return (
       <div className={`srow db-row${open ? " open" : ""}`} key={row.key} data-db={row.key}>
         <button type="button" className="db-open" data-testid={`settings.database.open-${handleKey(row.key)}`} aria-expanded={open} onClick={() => toggle(row.key)}>
@@ -289,11 +287,11 @@ export default function LibraryImports({ add, clone, clones = [] }: { add: React
           {sample && (!source || done) ? (download ? fillButton(row, sample, done) : null) : source && edit ? (
             <>
               {own || source.state === "error" ? (
-                <button type="button" className="ibtn" data-testid={`settings.database.refresh-${handleKey(row.key)}`} aria-label={`Refresh ${name}`} data-tip={own ? esc(`Refresh. The model reads a copy${copied}; refresh it to see later changes.`) : "Refresh"} onClick={() => void act(row.key, refreshSource(source.id))}>
+                <button type="button" className="ibtn" data-testid={`settings.database.refresh-${handleKey(row.key)}`} aria-label={`Refresh ${name}`} data-tip="Refresh" onClick={() => void act(row.key, refreshSource(source.id))}>
                   <Icon id="refresh" />
                 </button>
               ) : null}
-              <button type="button" className="ibtn" data-testid={`settings.database.remove-${handleKey(row.key)}`} aria-label={`Remove ${name}`} data-tip={own ? "Remove from Library. The file stays where it is." : "Remove from Library"} onClick={() => void act(row.key, removeSource(source.id))}>
+              <button type="button" className="ibtn" data-testid={`settings.database.remove-${handleKey(row.key)}`} aria-label={`Remove ${name}`} data-tip="Remove from Library" onClick={() => void act(row.key, removeSource(source.id))}>
                 <Icon id="trash" />
               </button>
             </>
@@ -333,7 +331,7 @@ export default function LibraryImports({ add, clone, clones = [] }: { add: React
         {add}
       </Grp>
       {clone || clones.length > 0 ? (
-        <Grp title="Clone a repository" tip="A public GitHub repository, copied once and read as a Library folder.">
+        <Grp title="Clone a repository">
           {clones}
           {clone ? <div className="srow">
             <div className="sl"><b>GitHub URL</b>{line("Up to 64 MiB and 10,000 files.", shownJob, false, shownJob ? `${shownJob.label} · ` : "")}</div>

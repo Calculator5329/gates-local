@@ -42,7 +42,8 @@ it("describes the selected chat's 64k breakdown while the saved default stays 16
   expect(text()).toContain("Needs");
   expect(text()).toContain("more at 64k");
   expect(text()).toContain("needs an estimated");
-  expect(html()).toMatch(/data-ctx="16384"[^>]*aria-pressed="true"/);
+  // decision 13: no Default context control here; the saved value is left as it was
+  expect(html()).not.toContain("data-ctx");
   expect(getState().settings).toMatchObject({ defaultNumCtx: 16384 });
 });
 
@@ -75,8 +76,8 @@ it("a pushed table changes the verdict in place, with no checking state between"
     expect(text()).toContain("Should run well");
     b.server.push("fit.changed", tableOf([at(65536, { verdict: "refuse", needVramBytes: row.freeVramBytes + 1024 ** 3 })], 2));
     await until(() => getState().fitTable?.reading.seq === 2);
-    // the default is 64k too, so the control above already names the size
-    expect(text()).toMatch(/Needs [\d.]+\sGB more(?! at)/);
+    // context is set in the picker only (decision 13), so the verdict names the size itself
+    expect(text()).toMatch(/Needs [\d.]+\sGB more at 64k/);
     expect(text()).not.toContain("run well");
   } finally {
     disconnect();

@@ -73,8 +73,11 @@ table is in, since a restarted server may see different memory.
 ## Settings text
 
 - A group is a title and a card. No description line under the title.
-- A row's grey line is one short sentence that says something new. How it
-  works and its caveats go in a tooltip on the label.
+- A row's grey line is one short sentence that says something new.
+- Tooltips: a label, a row or a value has none. An icon-only button keeps a
+  name of one to three words. A disabled button may say why, in a few words.
+  A sentence that informs goes on the screen as a line, and only when the
+  screen is wrong without it; otherwise it goes.
 - At most one heading line on a page.
 - Sentences about what is sent, changed or deleted stay visible.
 
@@ -92,5 +95,8 @@ table is in, since a restarted server may see different memory.
 
 ## Look
 
-No gradients, no glass, no rounded-everything, no orphan rows. Explanations
-go in tooltips, not footnotes. Check hover states.
+No gradients, no glass, no rounded-everything, no orphan rows. No footnotes,
+and no explanations in tooltips (see Settings text). Check hover states.
+
+A pop-up blurs what is behind it by 8 px only when a GPU draws the page; a
+software renderer only dims it, since a blur there costs every frame.

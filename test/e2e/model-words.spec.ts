@@ -94,9 +94,10 @@ test("GPU memory distinguishes available from free memory and leaves context fit
   await open();
   await waitReady(page);
   const panel = await openGpuMemory(page);
-  // Owner 2026-11-13: the row is the model and one verdict; the control above already says 16k
+  // the row is the model and one verdict at the size it runs at; no context control here (decision 13)
   await expect(panel.locator(".fp-v")).toHaveText(/^(Should run|Runs) \S+( \S+)*$/);
-  await expect(panel.locator(".fp-v")).not.toContainText("16k");
+  await expect(panel.locator(".fp-v")).toContainText("at 16k");
+  await expect(panel.locator("[data-ctx]")).toHaveCount(0);
   await expect(panel).not.toContainText("16k context");
   await panel.locator("summary", { hasText: "Details" }).click();
   await expect(panel.locator(".fp-n").filter({ hasText: /^Estimated/ })).toContainText(/Estimated [\d.]+\sGB of a \d+\sGB GPU\./);
@@ -105,11 +106,6 @@ test("GPU memory distinguishes available from free memory and leaves context fit
   await expect(panel.locator(".legend .sw-chat")).toHaveCount(0);
   await expect(panel.locator(".legend")).not.toContainText("Unused");
 
-  // F76: the definition once; the other size's result is apart from it, in that size's tooltip (S1)
-  const def = panel.locator(".srow", { hasText: "Default context" }).locator(".sl .d").first();
-  await expect(def).toHaveText(/^Tokens the model keeps in view, in every chat\. Longer uses more (GPU )?memory\.$/);
-  await expect(panel.locator('[data-ctx="32768"]')).toHaveAttribute("data-tip", /at 32k/);
-  await expect(panel.getByText("the model keeps in view")).toHaveCount(1);
   await page.keyboard.press("Escape");
 
   // once a reply has loaded the model, the leftover segment is what is free right now
