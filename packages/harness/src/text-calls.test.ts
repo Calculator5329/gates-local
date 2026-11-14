@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createCallHold, createTools, HOLD_LIMIT, looseCall, runLoop, toolDefinitions, type LoopInput } from "./index.ts";
+import { createCallHold, createTextView, createTools, HOLD_LIMIT, looseCall, parseTextCalls, runLoop, toolDefinitions, type LoopInput } from "./index.ts";
 import type { LoopEvent, ModelEvent, ModelMessage, ModelStream, ToolCall } from "./types.ts";
 
 // A model wrote its tool call as the whole reply, in a JSON shape of its own,
@@ -403,5 +403,78 @@ describe("fitsDefinition: an integer below its minimum does not fit", () => {
     ['{"name":"read","arguments":{"path":"/library/docs","offset":0}}', { name: "read", arguments: { path: "/library/docs", offset: 0 } }],
   ])("%s", (text, expected) => {
     expect(looseCall(text, withImage)).toEqual(expected);
+  });
+});
+
+// A model with no tool calling writes its calls as text. Its reply was shown only once whole,
+// so with anything in the Library a plain answer arrived all at once after a long wait.
+describe("text mode: the answer is shown as it comes while it cannot be a call", () => {
+  it("a plain reply's first text is shown right after the model's first piece", async () => {
+    const log: string[] = [];
+    const { shown, complete } = await run(false, [{ deltas: ["Here", " is", " a", " plain", " reply."] }], { log });
+    expect(log.slice(0, 3)).toEqual(["model:Here", "shown:Here", "model: is"]);
+    expect(shown).toBe("Here is a plain reply.");
+    expect(complete.content).toBe(shown);
+  });
+  it("text before a call is shown as it comes, the call never is, and it runs", async () => {
+    const log: string[] = [];
+    const call = '<tool_call>{"name":"image","arguments":{"prompt":"a ship"}}</tool_call>';
+    const { queued, shown, complete } = await run(false, [{ deltas: ["Making ", "it now.", ...pieces(call, 4)] }], { log });
+    expect(queued).toEqual(["a ship"]);
+    expect(log.indexOf("shown:Making")).toBe(log.indexOf("model:Making ") + 1);
+    expect(shown).toBe("Making it now.");
+    expect(complete.content).toBe(shown);
+  });
+  it("a fenced call after prose is never shown; a code answer's fence is, line by line", async () => {
+    const log: string[] = [];
+    const fenced = "```json\n" + JSON.stringify({ name: "image", arguments: { prompt: "a ship" } }) + "\n```";
+    const { queued, shown } = await run(false, [{ deltas: ["Sure.\n", ...pieces(fenced, 3)] }], { log });
+    expect(queued).toEqual(["a ship"]);
+    expect(shown).toBe("Sure.");
+    expect(log.indexOf("shown:Sure.")).toBe(log.indexOf("model:Sure.\n") + 1);
+    const code: string[] = [];
+    await run(false, [{ deltas: ["Run:\n", "```", "sh\n", "df -h", "\n```", "\nDone."] }], { log: code });
+    expect(code.indexOf("shown:\n```sh")).toBe(code.indexOf("model:sh\n") + 1);
+  });
+  it("a whole-reply JSON call is held and run, as in native mode", async () => {
+    const log: string[] = [];
+    const { queued } = await run(false, [{ deltas: pieces(SCREENSHOT, 3) }], { log });
+    expect(queued).toEqual([PROMPT]);
+    expect(log.filter(entry => entry.startsWith("shown:"))).toEqual([]);
+  });
+  it("thinking written into the reply is never shown", async () => {
+    const { shown } = await run(false, [{ deltas: ["<thi", "nk>plan", " it</th", "ink>", "The answer."] }]);
+    expect(shown).toBe("The answer.");
+  });
+  // Every way a reply can be cut into pieces: the text shown as it came is always the start of what
+  // the parser makes of the whole reply, which is what was shown before this change, whole.
+  const replies = [
+    "Plain answer.\n\nWith two paragraphs.  ",
+    '  Leading space, then <tool_call>{"name":"read","arguments":{"path":"/library/a"}}</tool_call> and after.',
+    'Text <TOOL_CALL>{"name":"read","arguments":{"path":"/library/a"}}</TOOL_CALL>',
+    'One\n```json\n{"name":"read","arguments":{"path":"/library/a"}}\n```\nTwo',
+    '```json\n{"answer":42}\n```\nand ```json\n{"name":"read","arguments":{}}\n```',
+    "Code:\n```python\nprint(1)\n```\nthen ````json\n{\"name\":\"read\",\"arguments\":{}}\n````",
+    "Inline `code` and `` two `` ticks, a < b and <tool_ and <toolbox>.",
+    "<think>hidden <tool_call></think>Shown```\n``` ```tool_code \n{\"name\":\"read\",\"parameters\":{}}```",
+    "A</think> stray close, <think>open never closed",
+    "Unfinished <tool_call>{\"name\":",
+    "Windows lines\r\n```JSON\r\n{\"name\":\"read\",\"arguments\":{}}\r\n```\r\n",
+  ];
+  it.each(replies)("%j: what streams is the start of the parsed answer, at every piece size", (reply) => {
+    const answer = parseTextCalls(reply).content;
+    for (let size = 1; size <= 9; size++) {
+      const view = createTextView();
+      const shown = pieces(reply, size).map(piece => view.push(piece).shown).join("");
+      expect(answer.startsWith(shown), `size ${size}: ${JSON.stringify(shown)}`).toBe(true);
+      expect(shown).not.toMatch(/<tool_call|<\/?think>/i);
+    }
+  });
+  it.each(replies)("%j: the saved reply is what was shown, and the parsed answer", async (reply) => {
+    for (const size of [1, 4, 9]) {
+      const { shown, complete } = await run(false, [{ deltas: pieces(reply, size) }, { content: "" }], { definitions: [] });
+      expect(complete.content).toBe(shown);
+      expect(shown.startsWith(parseTextCalls(reply).content)).toBe(true);
+    }
   });
 });

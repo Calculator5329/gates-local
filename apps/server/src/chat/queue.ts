@@ -10,7 +10,7 @@ import * as S from "effect/Schema";
 import { QueuedMessage } from "@gates-local/contracts";
 
 export type Entry = QueuedMessage;
-export type QueuePatch = Partial<Pick<Entry, "text" | "images" | "files" | "messageId" | "model">> & {
+export type QueuePatch = Partial<Pick<Entry, "text" | "images" | "files" | "messageId" | "model" | "numCtx">> & {
   readonly editing?: boolean;
   readonly now?: true;
   readonly stopOthers?: true;
@@ -34,8 +34,8 @@ export interface Ready {
 
 export interface Queue {
   list(): readonly Entry[];
-  /** Appended; an id already queued changes nothing. */
-  add(entry: Entry): void;
+  /** Appended; an id already queued changes nothing; "removed" for an id removed before, which never comes back. */
+  add(entry: Entry): "ok" | "removed";
   /** Undefined when there is no such entry; "sending" when its turn has started. */
   change(id: string, patch: QueuePatch): "ok" | "sending" | undefined;
   remove(id: string): boolean;
@@ -47,6 +47,8 @@ export interface Queue {
   started(messageId: string): void;
   /** The turn started for an entry ended before its start: it goes back to its place, on hold, with why; what waited behind it in its chat holds too. */
   refused(turnId: string, why: Why): boolean;
+  /** A Stop came for the reply this entry's turn went out behind, before that turn reached the model: it goes back to its place, on hold. */
+  pullBack(turnId: string): boolean;
   /** Refused before any turn was taken for it: the same, in one change. */
   turnless(id: string, why: Why): void;
   /** A reply in this chat ended: what waited behind it goes on, or holds. */
@@ -57,6 +59,8 @@ export interface Queue {
 }
 
 const decodeEntry = S.decodeUnknownResult(QueuedMessage);
+/** Removed ids remembered at most; the oldest go first. */
+const REMOVED_KEPT = 1000;
 
 /** Without the keys: the entry as it is with those fields unset. */
 function without(e: Entry, ...keys: (keyof Entry)[]): Entry {
@@ -77,21 +81,26 @@ const waitsBehind = (threadId: string) => (q: Entry) => q.threadId === threadId 
  * closed app left: nothing in it goes on its own, as the window's restored queue did.
  */
 export function createQueue({ file, changed, log }: { file?: string | undefined; changed: (list: readonly Entry[]) => void; log: (line: string) => void }): Queue {
-  let entries: Entry[] = file === undefined ? [] : read(file, log);
+  const kept = file === undefined ? { entries: [], removed: [] } : read(file, log);
+  let entries: Entry[] = kept.entries;
+  /** Ids removed, with their chat: a window that missed the removal may ask to queue one again. */
+  const removed = new Map<string, string>(kept.removed);
 
+  const save = () => {
+    if (file === undefined) return;
+    try {
+      mkdirSync(path.dirname(file), { recursive: true });
+      const tmp = `${file}.tmp`;
+      writeFileSync(tmp, JSON.stringify({ version: 1, entries, removed: [...removed] }));
+      renameSync(tmp, file);
+    } catch (e) {
+      log(`queue not saved: ${(e as Error).message}`);
+    }
+  };
   const set = (next: Entry[]) => {
     if (next.length === entries.length && next.every((e, i) => e === entries[i])) return;
     entries = next;
-    if (file !== undefined) {
-      try {
-        mkdirSync(path.dirname(file), { recursive: true });
-        const tmp = `${file}.tmp`;
-        writeFileSync(tmp, JSON.stringify({ version: 1, entries }));
-        renameSync(tmp, file);
-      } catch (e) {
-        log(`queue not saved: ${(e as Error).message}`);
-      }
-    }
+    save();
     changed(entries);
   };
   const map = (f: (q: Entry) => Entry) => set(entries.map((q) => {
@@ -107,8 +116,10 @@ export function createQueue({ file, changed, log }: { file?: string | undefined;
   return {
     list: () => entries,
     add(entry) {
-      if (entries.some((q) => q.id === entry.id || q.messageId === entry.messageId)) return;
+      if (removed.has(entry.id)) return "removed";
+      if (entries.some((q) => q.id === entry.id || q.messageId === entry.messageId)) return "ok";
       set([...entries, without(entry, "sending", "editing")]);
+      return "ok";
     },
     change(id, patch) {
       const q = entries.find((x) => x.id === id);
@@ -128,6 +139,12 @@ export function createQueue({ file, changed, log }: { file?: string | undefined;
     remove(id) {
       const q = entries.find((x) => x.id === id);
       if (q === undefined || q.sending !== undefined) return false;
+      removed.set(id, q.threadId);
+      // the oldest are forgotten past a bound: a window that missed a removal asks again within minutes
+      for (const old of removed.keys()) {
+        if (removed.size <= REMOVED_KEPT) break;
+        removed.delete(old);
+      }
       set(entries.filter((x) => x.id !== id));
       return true;
     },
@@ -152,6 +169,12 @@ export function createQueue({ file, changed, log }: { file?: string | undefined;
       putBack(q, why);
       return true;
     },
+    pullBack(turnId) {
+      const q = entries.find((x) => x.sending === turnId);
+      if (q === undefined) return false;
+      map((x) => (x === q ? { ...without(x, "sending", "why", "retry"), held: true } : x));
+      return true;
+    },
     turnless(id, why) {
       const q = entries.find((x) => x.id === id && x.sending === undefined);
       if (q !== undefined) putBack(q, why);
@@ -170,20 +193,25 @@ export function createQueue({ file, changed, log }: { file?: string | undefined;
       map((q) => (waiting(q) ? { ...q, held: true, retry: "running" } : q));
     },
     dropThread(threadId) {
+      let forgot = false;
+      for (const [id, thread] of removed) if (thread === threadId) forgot = removed.delete(id);
       if (entries.some((q) => q.threadId === threadId && q.sending === undefined)) set(entries.filter((q) => q.threadId !== threadId || q.sending !== undefined));
+      else if (forgot) save();
     },
   };
 }
 
-/** The queue a closed app left: every entry on hold, none open in a composer or on its way. */
-function read(file: string, log: (line: string) => void): Entry[] {
+/** The queue a closed app left: every entry on hold, none open in a composer or on its way; and the ids removed from it. */
+function read(file: string, log: (line: string) => void): { entries: Entry[]; removed: [string, string][] } {
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(file, "utf8"));
   } catch (e) {
     if ((e as { code?: unknown }).code !== "ENOENT") log(`queue not read: ${(e as Error).message}`);
-    return [];
+    return { entries: [], removed: [] };
   }
+  const gone = typeof raw === "object" && raw !== null && Array.isArray((raw as { removed?: unknown }).removed) ? (raw as { removed: unknown[] }).removed : [];
+  const removed = gone.filter((p): p is [string, string] => Array.isArray(p) && p.length === 2 && typeof p[0] === "string" && typeof p[1] === "string");
   const list = typeof raw === "object" && raw !== null && Array.isArray((raw as { entries?: unknown }).entries) ? (raw as { entries: unknown[] }).entries : [];
   const out: Entry[] = [];
   for (const item of list) {
@@ -195,5 +223,5 @@ function read(file: string, log: (line: string) => void): Entry[] {
     const q = r.success;
     out.push({ ...without(q, "sending", "editing", "now", "stopOthers", "stopTurns", "retry"), ...(q.waitFor === "reply" ? {} : { waitFor: "reply" }), held: true });
   }
-  return out;
+  return { entries: out, removed: removed.slice(-REMOVED_KEPT) };
 }

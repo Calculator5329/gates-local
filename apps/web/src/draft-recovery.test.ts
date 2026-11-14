@@ -104,7 +104,8 @@ it("R7: an editor restored off screen returns to its earlier draft", async () =>
   await drain(fixture); stop();
   const b = await fresh(); b.setState({ threadId: "B", view: "thread" });
   const resume = await b.watchDraft("r7");
-  expect({ editing: b.getState().editingQueued, text: b.getDraft("A").text, id: b.getDraft("A").sendId, queued: b.getState().queued.map(q => q.messageId) }).toEqual({ editing: null, text: "before edit", id: null, queued: ["M"] });
+  // the queue itself is the server's, listed at connect: this save holds none of it
+  expect({ editing: b.getState().editingQueued, text: b.getDraft("A").text, id: b.getDraft("A").sendId, queued: b.getState().queued.map(q => q.messageId) }).toEqual({ editing: null, text: "before edit", id: null, queued: [] });
   resume();
 });
 

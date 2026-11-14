@@ -2,7 +2,7 @@
 import { type BlockingTurn, type ImageChoice, type Message, type MethodName, type Params, type Payload, type QueuedMessage, type ReplyTimes, type ResultOf, WireError } from "@gates-local/contracts";
 import { ctxFor, describeModel, k } from "../format.ts";
 import { firstChatPull, sendableModel } from "../pick.ts";
-import { type LiveTurn, NA, type Queued, type State, type StopAsk, chatReady, getState, runningTurn, setState, streamingHere, turnOf } from "../store.ts";
+import { type LiveTurn, NA, type NoticeOffer, type Queued, type State, type StopAsk, chatReady, getState, runningTurn, setState, streamingHere, turnOf } from "../store.ts";
 import { imageReason } from "../paste.ts";
 import { drawChoice, imageMode } from "../image-choice.ts";
 import { releaseFiles } from "../file-holds.ts";
@@ -59,21 +59,53 @@ const RESTORED_NOTICE = "Your queued messages were restored on hold. Use Send no
 /** Set once this browser's saved queue (from before the server kept it) has gone to the server. */
 const QUEUE_MOVED_KEY = "gates-local.queue-on-server";
 
-function queueMoved(): boolean {
+/** Whether this browser's own saved queue has gone to the server; only the hand-over marks it. */
+export function queueOnServer(): boolean {
   try {
-    if (localStorage.getItem(QUEUE_MOVED_KEY) === "1") return true;
+    return localStorage.getItem(QUEUE_MOVED_KEY) === "1";
+  } catch {
+    // unknown: a saved queue is shown on hold rather than lost, and the server's copy is not doubled
+    return false;
+  }
+}
+
+/** A message of this browser's old saved queue the server does not have yet: kept saved until it does. */
+export function stillOwed(id: string): boolean {
+  return unsynced.has(id) || (oldQueue?.some((q) => q.id === id) ?? false);
+}
+
+/** This browser's own saved queue not yet handed over: null until the reload has read it. */
+let oldQueue: readonly Queued[] | null = null;
+let onOldQueue: (() => void) | undefined;
+
+/**
+ * The reload read this browser's saved queue (empty when there was none, or it already went). It
+ * goes to the server once the server's list is in too, whichever of the two comes first.
+ */
+export function oldQueueRead(queued: readonly Queued[]): void {
+  oldQueue = queued;
+  onOldQueue?.();
+}
+
+function queueMoved(): void {
+  try {
     localStorage.setItem(QUEUE_MOVED_KEY, "1");
   } catch {
-    // private windows may refuse storage: nothing older was saved there either
-    return true;
+    // private windows may refuse storage: what was handed over stays the server's all the same
   }
-  return false;
 }
 
 /** The window's copy of a server entry: what it shows and acts on. */
 function toQueued(e: QueuedMessage): Queued {
-  const { numCtx: _numCtx, think: _think, drawCount: _drawCount, sending: _sending, editing: _editing, stopOthers: _stopOthers, stopTurns: _stopTurns, why: _why, ...q } = e;
+  const { numCtx: _numCtx, think: _think, drawCount: _drawCount, sending: _sending, stopOthers: _stopOthers, stopTurns: _stopTurns, why: _why, ...q } = e;
   return q;
+}
+
+/** The row with its edit over, before the server's list says so: no "edited elsewhere" in between. */
+function notEditing(q: Queued): Queued {
+  if (q.editing === undefined) return q;
+  const { editing: _editing, ...rest } = q;
+  return rest;
 }
 
 type Outgoing = Omit<StopAsk, "blocking">;
@@ -192,11 +224,26 @@ export function removeQueued(id: string): void {
 /** Edit: the words go in the composer and the message keeps its place, unsent, until the next Send updates it. */
 export function editQueued(id: string): void {
   const q = getState().queued.find((x) => x.id === id);
-  if (q) {
-    beginQueuedDraft(q.threadId, q.text, q.images ?? [], q.messageId ?? null, q.files);
-    setState({ editingQueued: id, notice: null, stopAsk: null });
-    void server?.("queue.update", { id, editing: true }).catch(() => undefined);
-  }
+  if (!q) return;
+  beginQueuedDraft(q.threadId, q.text, q.images ?? [], q.messageId ?? null, q.files);
+  setState({ editingQueued: id, notice: null, stopAsk: null });
+  void server?.("queue.update", { id, editing: true }).catch((e: unknown) => {
+    // the server had already started sending it: the edit closes, and words typed into it in the meantime stay
+    if (!(e instanceof WireError && e.code === "queue-sending") || getState().editingQueued !== id) return;
+    const draft = getDraft(q.threadId);
+    const typed = draft.text !== q.text;
+    if (typed) replaceDraft(q.threadId, { text: draft.text, images: draft.images, ...(draft.files?.length ? { files: draft.files } : {}), sendId: null });
+    else cancelQueuedDraft(q.threadId);
+    setState({ editingQueued: null, notice: typed ? "That message was already sent. Your new words are still in the composer." : "That message was already sent." });
+  });
+}
+
+/** A memory refusal's offer taken for a held message: the model and context it now goes with, here and on the server, which sends it. */
+export function chooseForQueued(id: string, model: string, numCtx: number): void {
+  setState((s) => ({ queued: s.queued.map((q) => (q.id === id ? { ...q, model } : q)) }));
+  const u = unsynced.get(id);
+  if (u !== undefined) unsynced.set(id, { ...u, model, numCtx });
+  void server?.("queue.update", { id, model, numCtx }).catch(() => undefined);
 }
 
 interface TurnOptions {
@@ -238,8 +285,10 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     call("queue.add", entry).then(() => { unsynced.delete(entry.id); }, (e: unknown) => {
       const code = codeOf(e);
       if (code === "closed" || code === "timeout") return;
-      // its chat is gone
       unsynced.delete(entry.id);
+      // removed in another window while this one could not hear it: the removal stands, said nowhere twice
+      if (code === "queue-removed") return setState((s) => ({ queued: s.queued.filter((q) => q.id !== entry.id) }));
+      // its chat is gone
       setState((s) => ({ queued: s.queued.filter((q) => q.id !== entry.id), notice: "The chat this message was waiting in is gone, so it was not sent." }));
     });
   }
@@ -253,6 +302,8 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
   function queueChanged(list: readonly QueuedMessage[], listed = false): void {
     const s = getState();
     const now = Date.now();
+    // the server has it: an add whose answer was lost with the connection is not asked again
+    for (const e of list) unsynced.delete(e.id);
     // this window's own sends (a Send now's yes) are out of the list until their start
     const waiting = list.filter((e) => e.sending === undefined && !admitting.has(e.messageId)).map(toQueued);
     // a Send now shows first, as it goes first; the server keeps its place for a refusal
@@ -260,6 +311,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const local = [...unsynced.values()].filter((u) => !list.some((e) => e.id === u.id)).map(toQueued);
     let turns = s.turns;
     let notice: string | undefined;
+    let noticeOffer: NoticeOffer | undefined;
     let stopAsk: StopAsk | undefined;
     const opening: string[] = [];
     for (const e of list) {
@@ -292,6 +344,9 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         stopAsk = { content: e.text, images: e.images ?? [], ...(e.files ? { files: e.files } : {}), messageId: e.messageId, model, threadId: e.threadId, keepDraft: true, queuedId: e.id, ...(e.draw === undefined ? {} : { draw: e.draw }), blocking };
       } else {
         notice = !here ? elsewhereNotice(s, e.threadId) : code === "gpu-unreadable" ? `${message} Your message is back in the queue.` : code === "image-input" ? message : refusal(code, model, "queue");
+        // a memory refusal in view says what runs instead, as a send from the box does
+        const offer = here && code === "wont-fit" ? e.why.offer : undefined;
+        noticeOffer = offer === undefined ? undefined : { notice, model, numCtx: e.numCtx ?? ctxFor(s.numCtx, s.models, model), offer };
       }
     }
     for (const id of refusalSaid.keys()) if (!list.some((e) => e.id === id)) refusalSaid.delete(id);
@@ -299,7 +354,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
       queued: [...shown, ...local],
       ...(turns === s.turns ? {} : { turns }),
       ...(stopAsk === undefined ? {} : { stopAsk, notice: null }),
-      ...(notice === undefined ? {} : { notice }),
+      ...(notice === undefined ? {} : { notice, noticeOffer: noticeOffer ?? null }),
     });
     for (const threadId of opening) openThread(threadId);
   }
@@ -309,13 +364,32 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
    * this browser kept itself before the server did goes once, on hold; one it kept since is only the
    * server's own, and the server's wins. An edit open here keeps its message from going.
    */
+  /** The server's ids at the last connect: undefined before the first. */
+  let listedIds: ReadonlySet<string> | undefined;
+  /** This browser's old saved queue goes to the server once both are known: what it saved, and the server's list. */
+  function moveOldQueue(sendNow: boolean): number {
+    if (oldQueue === null || oldQueue.length === 0 || listedIds === undefined) return 0;
+    const s = getState();
+    const ids = listedIds;
+    const older = oldQueue.filter((q) => !ids.has(q.id) && !unsynced.has(q.id));
+    oldQueue = [];
+    queueMoved();
+    for (const q of older) {
+      const entry: QueuedMessage = { ...q, messageId: q.messageId ?? queueId(), waitFor: "reply", held: true, numCtx: s.numCtx, think: s.think };
+      if (sendNow) enqueue(entry);
+      else unsynced.set(q.id, entry);
+    }
+    return older.length;
+  }
+  onOldQueue = () => void moveOldQueue(true);
+
   function queueListed(list: readonly QueuedMessage[]): void {
     const s = getState();
     const has = (id: string) => list.some((e) => e.id === id);
-    const older = queueMoved() ? [] : s.queued.filter((q) => !has(q.id) && !unsynced.has(q.id));
-    for (const q of older) unsynced.set(q.id, { ...q, messageId: q.messageId ?? queueId(), waitFor: "reply", held: true, numCtx: s.numCtx, think: s.think });
+    listedIds = new Set(list.map((e) => e.id));
+    const moved = moveOldQueue(false);
     for (const u of unsynced.values()) if (!has(u.id)) enqueue(u);
-    if (older.length === 0 && s.notice === RESTORED_NOTICE) setState({ notice: null });
+    if (moved === 0 && oldQueue !== null && s.notice === RESTORED_NOTICE) setState({ notice: null });
     const editing = list.find((e) => e.id === s.editingQueued);
     if (editing !== undefined && editing.editing !== true && editing.sending === undefined) void call("queue.update", { id: editing.id, editing: true }).catch(() => undefined);
     queueChanged(list, true);
@@ -323,10 +397,13 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
 
   /** An edit ended without a Send (Cancel, or leaving the chat): the message goes on as it was. */
   function editEnded(id: string): void {
+    setState((s) => ({ queued: s.queued.map((q) => (q.id === id ? notEditing(q) : q)) }));
     void call("queue.update", { id, editing: false }).catch(() => undefined);
   }
   /** A saved user message confirms its exact copy; edited words already have a new identity. */
   function confirmCopy(message: Message): void {
+    // the server sent it: a queued copy this window still holds is never asked for again
+    for (const [id, u] of unsynced) if (u.messageId === message.id) unsynced.delete(id);
     const matchedDraft = getDraft(message.threadId).sendId === message.id;
     if (matchedDraft) {
       if (getDraft(message.threadId).beforeEdit) cancelQueuedDraft(message.threadId);
@@ -443,7 +520,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
       const id = s.editingQueued;
       if (!s.queued.some(q => q.id === id)) { setState({ editingQueued: null, notice: "Your edited words are still in the composer. Send them as a new message." }); return; }
       cancelQueuedDraft(key);
-      setState((st) => ({ queued: st.queued.map((q) => (q.id === id ? { ...q, text: content, images, files, messageId } : q)), editingQueued: null, notice: null }));
+      setState((st) => ({ queued: st.queued.map((q) => (q.id === id ? { ...notEditing(q), text: content, images, files, messageId } : q)), editingQueued: null, notice: null }));
       call("queue.update", { id, text: content, images: [...images], files: [...files], messageId, editing: false }).catch(() => {
         // it went, or was removed, meanwhile: the edited words are not lost
         replaceDraft(key, { text: content, images, ...attached, sendId: null });

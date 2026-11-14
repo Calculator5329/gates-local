@@ -73,6 +73,89 @@ export function partialAnswer(text: string): string {
   return parseTextCalls(visible).content;
 }
 
+const THINK_TAG = /<\/?think>/i;
+const THINK_TAGS = ["<think>", "</think>"] as const;
+/** How many characters at the end of `text` could be the start of one of `words` (compared in lower case). */
+function partialEnd(text: string, words: readonly string[]): number {
+  const tail = text.slice(-Math.max(...words.map(w => w.length))).toLowerCase();
+  for (let n = tail.length; n > 0; n--) if (words.some(w => n < w.length && w.startsWith(tail.slice(-n)))) return n;
+  return 0;
+}
+
+export interface TextView {
+  /**
+   * Reads the reply's next piece. `visible` is the new text outside thinking (what looseCall
+   * reads); `shown` is the new text that can go on screen now: it can no longer be call syntax.
+   */
+  push(text: string): { visible: string; shown: string };
+}
+
+/**
+ * A text-mode reply as it streams. Text is shown while it cannot be a call: everything up to a
+ * `<tool_call>` tag or a call fence's header line (CALL_FENCE_LANGUAGES), outside thinking. From
+ * there on nothing more is shown until the reply is whole and parsed. A start of a tag or a
+ * fence at the end of a piece, and white space, wait for what follows them. So what is shown is
+ * always the start of parseTextCalls' content for the whole reply.
+ */
+export function createTextView(): TextView {
+  let raw = ""; // the end of the reply that might still be a think tag
+  let depth = 0;
+  let visible = ""; // text outside thinking not yet judged
+  let blocked = false;
+  let started = false;
+  let space = ""; // white space waiting for text after it
+  const outside = (text: string): string => {
+    raw += text;
+    let out = "";
+    for (let tag = THINK_TAG.exec(raw); tag; tag = THINK_TAG.exec(raw)) {
+      if (depth === 0) out += raw.slice(0, tag.index);
+      depth = tag[0][1] === "/" ? Math.max(0, depth - 1) : depth + 1;
+      raw = raw.slice(tag.index + tag[0].length);
+    }
+    const keep = partialEnd(raw, THINK_TAGS);
+    if (depth === 0) out += raw.slice(0, raw.length - keep);
+    raw = raw.slice(raw.length - keep);
+    return out;
+  };
+  /** The part of `visible` that can no longer be call syntax; it stops for good at a call's start. */
+  const judge = (): string => {
+    let out = "";
+    while (!blocked) {
+      const call = visible.toLowerCase().indexOf(CALL_OPEN);
+      const fence = visible.indexOf(FENCE);
+      if (call < 0 && fence < 0) {
+        const keep = Math.max(partialEnd(visible, [CALL_OPEN]), /`{1,2}$/.exec(visible)?.[0].length ?? 0);
+        out += visible.slice(0, visible.length - keep);
+        visible = visible.slice(visible.length - keep);
+        break;
+      }
+      if (call >= 0 && (fence < 0 || call < fence)) { out += visible.slice(0, call); blocked = true; break; }
+      const end = visible.indexOf("\n", fence);
+      if (end < 0) { out += visible.slice(0, fence); visible = visible.slice(fence); break; }
+      const line = visible.slice(fence, end + 1);
+      if (CALL_FENCE_OPEN.test(line) || line.toLowerCase().includes(CALL_OPEN)) { out += visible.slice(0, fence); blocked = true; break; }
+      out += visible.slice(0, end + 1);
+      visible = visible.slice(end + 1);
+    }
+    if (blocked) visible = "";
+    return out;
+  };
+  return {
+    push(text) {
+      const seen = outside(text);
+      if (blocked) return { visible: seen, shown: "" };
+      visible += seen;
+      let out = judge();
+      if (!started) { out = out.trimStart(); started = out !== ""; }
+      const body = out.trimEnd();
+      if (!body) { space += out; return { visible: seen, shown: "" }; }
+      const shown = space + body;
+      space = out.slice(body.length);
+      return { visible: seen, shown };
+    },
+  };
+}
+
 /** Parse complete blocks only, after removing closed and unfinished thoughts. */
 export function parseTextCalls(text: string): { calls: unknown[]; errors: string[]; content: string; items: ({ call: unknown } | { error: string })[] } {
   const visible = outsideThinking(text);

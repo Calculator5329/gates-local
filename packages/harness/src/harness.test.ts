@@ -490,7 +490,8 @@ describe("what the user saw is what is saved: the concatenated deltas are the sa
     it(`text mode: a cut ${form} keeps no call syntax in the interrupted message or the saved content`, async () => {
       const { requests, complete, shown } = await streamed({ native: false, toolTimeBudgetMs: 30, rounds: [{ deltas: ["The answer ", "is par", tail], hang: true }], final: ["The answer ", "is complete."] });
       expect(shown).toBe(complete.content);
-      expect(complete.content).toBe("The answer is complete.");
+      // the words shown as they came stay shown, as in native mode; the start of call syntax never showed
+      expect(complete.content).toBe("The answer is par\n\nThe answer is complete.");
       const last = requests.at(-1)!;
       expect(last.messages.at(-2)).toEqual({ role: "assistant", content: "The answer is par" });
       for (const message of last.messages) expect(message.content).not.toMatch(/<tool|```/);

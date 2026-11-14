@@ -926,7 +926,8 @@ export function Timeline({ threadId }: { threadId: string }) {
   const [floor, setFloor] = useState<string | null>(null);
   const floorNow = useRef(0);
   let floorAt = floor === null ? -1 : turns.findIndex((t) => t.key === floor);
-  if (floorAt < 0) floorAt = Math.min(skip, Math.max(0, turns.length - WINDOW_TURNS));
+  // the window is 200 saved messages, as the server's page is: a reply still being written takes none of it
+  if (floorAt < 0) floorAt = Math.min(skip, Math.max(0, messages.length - WINDOW_TURNS));
   const floorKey = turns[floorAt]?.key ?? null;
   if (floorKey !== null && floorKey !== floor) setFloor(floorKey);
   turnsNow.current = turns;

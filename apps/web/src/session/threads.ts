@@ -222,17 +222,25 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     await fetchThread(threadId);
   }
 
-  async function fetchThread(threadId: string, preload?: Preload): Promise<void> {
+  async function fetchThread(threadId: string, preload?: Preload, again = false): Promise<void> {
     const nav = navigationGeneration();
     const req = { threadId, seq: ++loadSeq, since: [] as Message[], preload };
     loads.add(req);
     if (preload === undefined || preload.used) setLoadError(threadId, null);
     const older = () => preload?.cancelled === true || req.seq < (landed.get(threadId) ?? 0);
+    let wider = false;
     try {
       // the newest page, or as many as are already loaded: a reload never takes back what the reader asked for
       const limit = Math.max(PAGE_MESSAGES, getState().messages[threadId]?.length ?? 0);
       const { messages: snapshot, earlier = 0 } = await call("threads.get", { threadId, limit });
       if (older()) return;
+      // an earlier page came in while this was asked: the reader holds messages in front of this
+      // answer, so it is asked again for all of them (once: a front deleted meanwhile is not looped on)
+      const front = getState().messages[threadId]?.[0];
+      if (!again && (preload === undefined || preload.used) && earlier > 0 && front !== undefined && !snapshot.some((m) => m.id === front.id)) {
+        wider = true;
+        return;
+      }
       landed.set(threadId, req.seq);
       const messages = req.since.reduce(upsertMessage, snapshot);
       if (preload !== undefined && !preload.used) keepPreview(threadId, messages, earlier);
@@ -251,6 +259,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
       loads.delete(req);
       if (preload !== undefined && preloading === preload) preloading = null;
     }
+    if (wider) await fetchThread(threadId, undefined, true);
   }
 
   /**

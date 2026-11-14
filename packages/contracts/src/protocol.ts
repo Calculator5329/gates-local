@@ -287,7 +287,11 @@ export const methods = {
   "chat.cancel": { params: S.Struct({ turnId: S.String }), result: S.Struct({ cancelled: S.Boolean }), phone: "allow" },
   // ---- the queue (2026-11-14): kept and sent by the server; queue.changed pushes the whole list after every change
   "queue.list": { params: NoParams, result: S.Array(QueuedMessage), phone: "allow" },
-  /** Joins the end of the queue (held when it says so). One with an id already queued, or whose messageId is saved, changes nothing. */
+  /**
+   * Joins the end of the queue (held when it says so). One with an id already queued, or whose
+   * messageId is saved, changes nothing. Refused with "queue-removed" for an id removed before:
+   * a window that missed the removal does not bring it back.
+   */
   "queue.add": { params: QueuedMessage, result: S.Array(QueuedMessage), phone: "allow" },
   /**
    * Edit (`editing` true, then the new words with `editing` false, or false alone to cancel), Send
@@ -302,6 +306,8 @@ export const methods = {
       files: S.optional(S.Array(AttachedFile).check(S.isMaxLength(8))),
       messageId: S.optional(S.String.check(S.isMinLength(1), S.isMaxLength(200))),
       model: S.optional(S.String),
+      /** With model: the context the person chose for it after a memory refusal. */
+      numCtx: S.optional(NumCtx),
       editing: S.optional(S.Boolean),
       now: S.optional(S.Literal(true)),
       stopOthers: S.optional(S.Literal(true)),

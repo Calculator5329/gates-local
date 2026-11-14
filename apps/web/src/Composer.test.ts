@@ -200,6 +200,14 @@ it("chat row 36: queued messages sit on a shelf inside the message box, above th
   expect(html.match(/<li class="qt-r"/g)).toHaveLength(2);
 });
 
+it("a queued message open in another window's composer says so, and the same row open here says nothing", () => {
+  const rows = [{ ...queuedAt(1)[0]!, editing: true as const }];
+  setFixture({ ...ready, queued: rows });
+  expect(renderToStaticMarkup(createElement(Composer))).toContain("Being edited in another window");
+  setFixture({ ...ready, queued: rows, editingQueued: "q1" });
+  expect(renderToStaticMarkup(createElement(Composer))).not.toContain("Being edited in another window");
+});
+
 it("chat row 36: three queued show as three rows; more fold to the next two and a count that opens the rest", () => {
   setFixture({ ...ready, queued: queuedAt(3) });
   let html = renderToStaticMarkup(createElement(Composer));

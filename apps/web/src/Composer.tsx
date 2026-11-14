@@ -7,8 +7,8 @@ import { type AttachedFile, IMAGE_COUNT_MAX, type ModelInfo } from "@gates-local
 import { useActionPress } from "./composer-press.ts";
 import { CONNECTING, PLACEHOLDER, booting, rtOf, unread } from "./Banner.tsx";
 import { openFit } from "./fit-actions.ts";
-import { fitFor, stopsChat } from "./fit-table.ts";
-import { ctxFor, describeModel, k, noGpu, timeLeft, verdictOf } from "./format.ts";
+import { cardFit, fitFor, stopsChat } from "./fit-table.ts";
+import { ctxFor, describeModel, k, noGpu, slowReason, timeLeft, verdictOf } from "./format.ts";
 import { DownloadBar, LoadRing } from "./LoadBar.tsx";
 import { loadGuess } from "./load-times.ts";
 import { MakerMark } from "./MakerMark.tsx";
@@ -183,6 +183,9 @@ export function Composer() {
   const waitsOnLoad = loadingNow && isStreaming && !drawingNow;
   // The fit table's row: the server builds none while a load runs, so a loading model keeps the verdict from before it.
   const v = fit === undefined ? undefined : verdictOf(fit);
+  // A send now runs partly in system memory: why, in the table's words. The card holds it and another
+  // program is in the way ("Slower now · Whisper in the way"), else the row's own ("Partly in system memory, slower").
+  const slowWhy = v?.k !== "spill" ? undefined : slowReason(cardFit(fit)?.slowNow)?.short ?? (v.mark || undefined);
   const text = hasText || images.length > 0 || files.length > 0;
   const imageNo = imageReason(models, model, images, tag => describeModel(tag, catalog).name);
   const why = chatBlockedReason(models, model); // a download would not help: old Ollama, or the model is still being checked
@@ -201,7 +204,7 @@ export function Composer() {
           ? `${tagTip(name, shownTag)}<br>Downloading ${firstProgress}%`
           : loading
             ? `${tagTip(name, shownTag)}<br>Loading into ${cpu ? "memory" : "GPU memory"}${loadMs === undefined ? "" : `, ${loadGuess(loadMs)}`}`
-            : tagTip(name, shownTag);
+            : slowWhy === undefined ? tagTip(name, shownTag) : `${tagTip(name, shownTag)}<br>${esc(slowWhy)}`;
 
   const ctx = ctxFor(numCtx, models, model);
   const pct = Math.min(1, used / ctx);
@@ -504,7 +507,6 @@ function DraftTextarea({ textarea, placeholder, submit }: { textarea: RefObject<
 /** Why Ctrl+Shift+Space does not start dictation while Stop holds Dictate's square. */
 const VOICE_HELD = "Dictate comes back when this reply ends or you finish editing the queued message.";
 
-/** A queued message's state in a word or two, only where being in the queue does not already say it: null while it waits for the reply, and while it is edited (the pressed pencil says that). */
 /**
  * What Enter in the message box does (owner, 2026-11-14: "enter to send message is sometimes not
  * working"): with Send on, send; with words typed and Send off for memory, what the click does
@@ -518,8 +520,11 @@ export function enterAnswer(s: { readonly sendDisabled: boolean; readonly memRef
   return s.showStop ? "note" : "tip";
 }
 
+/** A queued message's state in a word or two, only where being in the queue does not already say it: null while it waits for the reply, and while it is edited here (the pressed pencil says that). */
 export function queueWords(q: Queued, editing: boolean, first: string | undefined, model: string | undefined): string | null {
   if (editing) return null;
+  // open in another window's composer, it does not go until that edit ends or that window closes
+  if (q.editing === true) return EDITED_ELSEWHERE;
   if (q.waitFor === "download") return first === undefined && (q.model ?? model) === undefined ? "Download stopped" : AFTER_DOWNLOAD;
   if (q.waitFor === "setup") return AFTER_SETUP;
   if (q.retry === "running") return RETRYING;
@@ -527,6 +532,7 @@ export function queueWords(q: Queued, editing: boolean, first: string | undefine
   return q.held ? "On hold" : null;
 }
 
+export const EDITED_ELSEWHERE = "Being edited in another window";
 /** The owner's words for a queue behind a failed reply the server runs once more (chat row 23, decision 7). */
 const RETRYING = "Retrying the reply before it";
 const RETRY_FAILED = "On hold: the reply before it didn't finish";

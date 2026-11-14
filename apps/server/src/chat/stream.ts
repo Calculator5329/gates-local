@@ -47,6 +47,14 @@ export const usageFigures = (done: { prompt_eval_count?: number | undefined; eva
   durationMs: done.total_duration === undefined ? undefined : done.total_duration / 1e6,
 });
 
+/**
+ * The longest stream line either chat path reads, in characters. A page comes in a reply, and a
+ * runtime may send a whole reply as one line, so this sits well above the largest page served
+ * (PAGE_MAX_BYTES, 2 MiB), with room for JSON escaping.
+ */
+export const STREAM_LINE_LIMIT = 8 * 1024 * 1024;
+export const STREAM_LINE_TOO_LONG = "Model stream line exceeded its size limit";
+
 const ChatChunk = S.Struct({
   model: S.optional(S.String),
   message: S.optional(
@@ -173,6 +181,10 @@ export async function* streamTurn(input: StreamTurnInput): AsyncGenerator<ChatEv
 
       const lines = buffer.split("\n");
       buffer = chunk.done ? "" : (lines.pop() ?? "");
+      if (buffer.length > STREAM_LINE_LIMIT || lines.some((raw) => raw.length > STREAM_LINE_LIMIT)) {
+        yield fail("malformed-stream", STREAM_LINE_TOO_LONG);
+        return;
+      }
       for (const raw of lines) {
         const line = raw.trim();
         if (line === "") continue;

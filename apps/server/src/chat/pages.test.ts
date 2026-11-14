@@ -86,7 +86,12 @@ it("a chat turn sends the model the newest page in full and the older one as a s
 
 it("the standing rule stays short", () => {
   // what every chat turn pays for it
-  expect(estimateTokens(PAGE_RULE)).toBeLessThanOrEqual(84);
+  expect(estimateTokens(PAGE_RULE)).toBeLessThanOrEqual(96);
+});
+
+it("the standing rule has a page act through buttons or handlers, since a javascript: link no longer runs", () => {
+  // a page's scripts run by a one-time code from the server; an href="javascript:..." is not one of them
+  expect(PAGE_RULE).toMatch(/use buttons or handlers, never javascript: links/i);
 });
 
 it("the standing rule keeps a question in the chat and has a page say what it made", () => {

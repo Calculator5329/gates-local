@@ -1,5 +1,53 @@
 # Changelog
 
+## 2026-11-14: The queue keeps its word at the edges
+
+- Stop now holds what is queued behind a reply even when the reply's last
+  word reached the app first. A queued message that had just started to
+  go is pulled back, on hold, if the model had not started on it.
+- A queued message open for editing in a window that then closes goes on
+  as before. Other windows say it is being edited in another window.
+- A queued message refused for memory offers what runs instead, as a
+  message sent from the box does, and the choice taken is kept with it.
+- A message removed in one window never comes back from a window that
+  missed the removal, and a window no longer asks again for a message
+  the app already has or has sent.
+- Edit on a message that has just gone out closes and says it was
+  already sent. Words typed into it meanwhile stay in the box.
+- The queue is kept by the app only, no longer also in the window. After
+  an update, messages a window saved under an older version come back on
+  hold, once, however the page happens to load, and are forgotten in the
+  window only once the app has them.
+- A long chat opens and shows earlier messages faster: the app reads
+  only the page it shows. A 5,000-message chat opens in about 2 ms
+  where it took about 9.
+- Show earlier keeps the messages it brought in when the chat reloads
+  at the same moment, and a reply being written no longer holds back
+  the oldest message of the window, so the count is right while a reply
+  runs.
+- A model writing a page is told to use buttons or handlers, never
+  `javascript:` links, which a page no longer runs.
+- What a refused send offers instead is marked slower only where the
+  app judged it so, with the app's own word: "System memory" on a
+  computer with no supported GPU.
+- While the chosen model would run partly in system memory, the model
+  button's tip says why: who is in the way ("Slower now · Whisper in the
+  way"), or that the model is bigger than the GPU.
+- On a touch screen with a page open beside the chat, the word Thinking
+  gives way to its icon before the model's name is cut, so the name
+  stays readable.
+
+## 2026-11-14: A model with no tool calling answers word by word, and can run commands
+
+- A model that has no tool calling of its own now shows its answer as it
+  is written when something is in the Library or the picture tool is on.
+  It used to show nothing until the whole reply had arrived. A tool call
+  it writes into its reply still never shows.
+- Such a model is offered Run commands again when the Library is empty,
+  so asked to run a command, it runs it.
+- A reply sent as one very long line (a big page) is read the same way
+  with tools on or off, up to 8 MB.
+
 ## 2026-11-14: A page cannot swap its own document, and a dragged link goes nowhere
 
 - A page a model wrote could replace its own document through a

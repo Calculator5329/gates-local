@@ -83,6 +83,7 @@ export type AppErrorCode =
   | "message-not-found" // threads.get before: the message a page starts from is not in the thread
   | "image-input"
   | "queue-sending" // queue.update: the server has started this message's turn
+  | "queue-removed" // queue.add: this message was removed from the queue before
   | "shutting-down"; // the server is stopping and takes no new turns
 
 export class AppError extends Error {
@@ -120,6 +121,8 @@ function retriedRows(messages: readonly { readonly id: string; readonly role: st
 }
 
 const HALTED = Symbol("halted");
+/** How long after a reply ends a Stop for it still holds the queue: a slow window's round trip. */
+const JUST_ENDED_MS = 5000;
 /** chat.send stopOthers ended this turn: `model`'s load needed the GPU memory `held` was using. */
 const preemptedBy = (model: string, numCtx: number, held: string): AppError =>
   new AppError("preempted", `${model} at num_ctx ${numCtx} needed the GPU memory ${held} was using, so this reply stopped. Send the message again.`, undefined, model);
@@ -321,6 +324,31 @@ export function createApp(deps: AppDeps): App {
   const queue = createQueue({ file: deps.dataDir === undefined ? undefined : path.join(deps.dataDir, "queue.json"), changed: (list) => push("queue.changed", list), log });
   /** Turns whose start went out: a terminal event of one that never started is its refusal. */
   const startedTurns = new Set<string>();
+  /**
+   * Turns that ended a moment ago, by id: a Stop for one of them lost the race to its last word, and
+   * still means stop for what queued behind it. Kept a few seconds, a few dozen at most.
+   */
+  const justEnded = new Map<string, { threadId: string; at: number }>();
+  /** Which connection has each row open in its composer. */
+  const editors = new Map<string, number>();
+  const rememberEnd = (turnId: string, threadId: string) => {
+    const now = Date.now();
+    for (const [id, e] of justEnded) if (now - e.at > JUST_ENDED_MS || justEnded.size >= 64) justEnded.delete(id);
+    justEnded.set(turnId, { threadId, at: now });
+  };
+  /** A Stop for a reply that ended a moment ago: the send that went out behind it is pulled back if it has not reached the model, and what waits behind holds. */
+  const lateStop = (turnId: string) => {
+    const ended = justEnded.get(turnId);
+    justEnded.delete(turnId);
+    if (ended === undefined || Date.now() - ended.at > JUST_ENDED_MS) return;
+    const next = byThread.get(ended.threadId);
+    const entry = next === undefined ? undefined : queue.list().find((q) => q.sending === next.turnId);
+    if (next !== undefined && entry !== undefined && entry.now !== true && next.start === undefined && !next.controller.signal.aborted && queue.pullBack(next.turnId)) {
+      next.stoppedAt = Date.now();
+      next.controller.abort();
+    }
+    queue.ended(ended.threadId, "stopped");
+  };
   /** Every turn's events, from any window or the queue: the queue moves on what they say. */
   function heard({ turnId, threadId, event }: Payload<"chat.event">): void {
     if (event.type === "start") {
@@ -331,7 +359,7 @@ export function createApp(deps: AppDeps): App {
     if (event.type !== "done" && event.type !== "error") return;
     if (!startedTurns.delete(turnId)) {
       if (event.type !== "error") return;
-      const why = { code: event.code, message: event.message, ...(event.blocking === undefined ? {} : { blocking: event.blocking }) };
+      const why = { code: event.code, message: event.message, ...(event.blocking === undefined ? {} : { blocking: event.blocking }), ...(event.offer === undefined ? {} : { offer: event.offer }) };
       // a send the person stopped before it started: Stop means stop, so what queued behind it holds too
       if (!queue.refused(turnId, why) && (event.ended?.reason === "stopped" || turns.get(turnId)?.stoppedAt !== undefined)) queue.ended(threadId, "stopped");
       return;
@@ -489,6 +517,7 @@ export function createApp(deps: AppDeps): App {
       end: () => {
         turns.delete(turn.turnId);
         if (byThread.get(threadId) === turn) byThread.delete(threadId);
+        rememberEnd(turn.turnId, threadId);
         end();
         // An admitted turn's model was busy in every row's plan; now it is not.
         if (turn.started) fitTable.changed();
@@ -697,7 +726,7 @@ export function createApp(deps: AppDeps): App {
       // A reply that fails on its own runs once more (decision 7): the person sees the second
       // attempt start over in the same place, and only its failure is said.
       for (let attempt = 1; ; attempt++) {
-        const events = useTools ? streamToolTurn({ ...input, sources, image, ...(sources.length === 0 && !image ? { shellOnly: true } : {}), ...(shell ? { shell } : {}), ...(imageChoice ? { queueImage: queueImageFor(threadId, controller.signal, imageChoice) } : {}) }) : streamTurn(input);
+        const events = useTools ? streamToolTurn({ ...input, sources, image, ...(shell ? { shell } : {}), ...(imageChoice ? { queueImage: queueImageFor(threadId, controller.signal, imageChoice) } : {}) }) : streamTurn(input);
         const iterator = events[Symbol.asyncIterator]();
         let dropped = false;
         let failed: TurnFailure | undefined;
@@ -954,16 +983,15 @@ export function createApp(deps: AppDeps): App {
       return thread;
     },
     "threads.get": ({ threadId, before, limit }) => {
-      const saved = store.getThread(threadId);
       const draft = byThread.get(threadId)?.draftId;
-      const all = draft === undefined ? saved.messages : saved.messages.filter((m) => m.id !== draft);
-      if (limit === undefined && before === undefined) return { ...saved, messages: all };
-      const end = before === undefined ? all.length : all.findIndex((m) => m.id === before);
-      if (end < 0) throw new AppError("message-not-found", `message ${before ?? ""} is not in thread ${threadId}`);
+      if (limit === undefined && before === undefined) {
+        const saved = store.getThread(threadId);
+        return draft === undefined ? saved : { ...saved, messages: saved.messages.filter((m) => m.id !== draft) };
+      }
       // a page starts at a question, so a reply never shows without the question it answers
-      let start = limit === undefined ? 0 : Math.max(0, end - limit);
-      while (start > 0 && all[start]?.role !== "user") start--;
-      return { ...saved, messages: all.slice(start, end), earlier: start };
+      const page = store.getThreadPage(threadId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }), ...(draft === undefined ? {} : { skip: draft }) });
+      if (page === undefined) throw new AppError("message-not-found", `message ${before ?? ""} is not in thread ${threadId}`);
+      return page;
     },
     "threads.pages": ({ threadId, before }) => threadPages(store, threadId, before, byThread.get(threadId)?.draftId),
     "threads.rename": ({ threadId, title }) => {
@@ -1102,23 +1130,35 @@ export function createApp(deps: AppDeps): App {
       // already saved (a window's copy of a message that went out), or its chat is going: nothing to queue
       if (store.getMessage(entry.messageId) === undefined && !deleting.has(entry.threadId)) {
         store.getThread(entry.threadId);
-        queue.add(entry);
+        if (queue.add(entry) === "removed") throw new AppError("queue-removed", "This message was removed from the queue.");
         pump();
       }
       return queue.list();
     },
-    "queue.update": ({ id, ...patch }) => {
+    "queue.update": ({ id, ...patch }, ctx) => {
       if (queue.change(id, patch) === "sending") throw new AppError("queue-sending", "This message is already being sent.");
+      // open in one window's composer: when that window's connection closes, the row goes on
+      if (patch.editing === false) editors.delete(id);
+      if (patch.editing === true) {
+        editors.set(id, ctx.clientId);
+        ctx.signal?.addEventListener("abort", () => {
+          if (editors.get(id) !== ctx.clientId) return;
+          editors.delete(id);
+          queue.change(id, { editing: false });
+          pump();
+        }, { once: true });
+      }
       pump();
       return queue.list();
     },
     "queue.remove": ({ id }) => {
-      queue.remove(id);
+      if (queue.remove(id)) editors.delete(id);
       return queue.list();
     },
 
     "chat.cancel": ({ turnId }) => {
       const turn = turns.get(turnId);
+      if (turn === undefined) lateStop(turnId);
       if (turn === undefined || turn.controller.signal.aborted) return { cancelled: false };
       turn.stoppedAt = Date.now();
       // words already on their way when the Stop landed change no time on the row

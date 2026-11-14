@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { urlsFromText } from "../../contracts/src/links.ts";
-import { createCallHold, looseCall, parseTextCalls, partialAnswer, repairCall } from "./parser.ts";
+import { createCallHold, createTextView, looseCall, parseTextCalls, partialAnswer, repairCall } from "./parser.ts";
 import type { ToolDefinition } from "./prompt.ts";
 import type { LoopEvent, ModelEvent, ModelMessage, ModelStream, ToolCall, ToolResult, ToolStep } from "./types.ts";
 
@@ -211,16 +211,20 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
     let complete: Extract<ModelEvent, { type: "complete" }> | undefined;
     // Answer text as it streamed, kept if the deadline cuts this request.
     const arrived: string[] = [];
-    // Native text is held while the reply could still be a call written as text (looseCall),
-    // so a call never flashes as an answer; it is shown the moment it cannot be one. The final
-    // round offers the model no tools, so nothing is held there: its reply is the answer.
-    const hold = input.native && !final && offered.length > 0 ? createCallHold(offered) : undefined;
+    // Text is held while the reply could still be a call written as text (looseCall), so a call
+    // never flashes as an answer; it is shown the moment it cannot be one. The final round offers
+    // the model no tools, so nothing is held there: its reply is the answer.
+    const hold = !final && offered.length > 0 ? createCallHold(offered) : undefined;
     let holding = hold !== undefined;
+    // Text mode shows its reply through the view, which keeps call syntax off screen (createTextView).
+    const view = input.native ? undefined : createTextView();
+    let viewed = ""; // what the view let through this round
+    let viewShown = ""; // what of that is on screen
     /** Held text goes on screen, and so into what the turn saves. */
     const release = function* (): Generator<LoopEvent> {
       if (!holding) return;
       holding = false;
-      yield* show(arrived.join(""));
+      if (view) { viewShown = viewed; yield* show(viewed); } else yield* show(arrived.join(""));
     };
     const cap = new AbortController();
     const capTimer = final ? setTimeout(() => cap.abort(new Error(`The final answer ran past its ${seconds(finalMs)} limit and was stopped.`)), finalMs) : undefined;
@@ -231,9 +235,12 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
         else if (event.type === "thinking") yield event;
         else {
           arrived.push(event.text);
-          // Text-mode call syntax must not leak into the answer: its visible part is shown after parsing.
-          if (!input.native) continue;
-          if (!holding) yield* show(event.text);
+          if (view) {
+            const piece = view.push(event.text);
+            viewed += piece.shown;
+            if (holding) { if (!hold?.push(piece.visible)) yield* release(); }
+            else if (piece.shown) { viewShown += piece.shown; yield* show(piece.shown); }
+          } else if (!holding) yield* show(event.text);
           else if (!hold?.push(event.text)) yield* release();
         }
       }
@@ -245,10 +252,10 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
         throw e;
       }
       // Cut by the deadline; the final request asks for the whole answer again, as a new part.
-      // Native text already shown stays shown, and saved; text still held as a possible call is
-      // not shown (if the final request then fails or comes back empty, that start of a call is
-      // lost with it). Text mode showed nothing. Either way the cut reply (text mode: its answer part,
-      // with the call syntax the cut left unfinished stripped too) goes to the model only.
+      // Text already shown stays shown, and saved; text still held as a possible call is not
+      // shown (if the final request then fails or comes back empty, that start of a call is lost
+      // with it). Either way the cut reply (text mode: its answer part, with the call syntax the
+      // cut left unfinished stripped too) goes to the model only.
       endPart();
       const partial = input.native ? arrived.join("") : partialAnswer(arrived.join(""));
       askFinal("time", partial.trim() ? partial : undefined);
@@ -259,10 +266,10 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
     if (!complete) throw new Error("The model stream ended without a done line");
     thinking += complete.thinking ?? "";
     let parsed: { items: readonly ({ call: unknown } | { error: string })[]; content: string } = input.native ? { items: complete.calls.map(call => ({ call })), content: complete.content } : parseTextCalls(complete.content);
-    // A call written as the whole reply in a JSON shape of the model's own. Native: only when the
-    // round has no tool_calls and none of its text was shown; text mode: after the parser's rules.
-    // Never on the final round: it offered no tools.
-    const loose = parsed.items.length === 0 && !final && (!input.native || holding) ? looseCall(complete.content, offered) : undefined;
+    // A call written as the whole reply in a JSON shape of the model's own: only when the round
+    // has no calls (native tool_calls, or text mode's by the parser's rules) and none of its text
+    // was shown. Never on the final round: it offered no tools.
+    const loose = parsed.items.length === 0 && !final && holding ? looseCall(complete.content, offered) : undefined;
     if (loose) parsed = { items: [{ call: loose }], content: "" };
     else yield* release();
     const pending: { call?: ToolCall; error?: string; name: string }[] = parsed.items.map(item => {
@@ -271,7 +278,12 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
       catch (e) { return { error: (e as Error).message, name: "invalid" }; }
     });
     // A native reply streamed its text already; one that sent no deltas is shown whole here.
-    if (!input.native || arrived.length === 0) yield* say(parsed.content);
+    // Text mode showed the start of its answer; the rest of it goes on screen now.
+    if (view && !loose) {
+      const rest = parsed.content.startsWith(viewShown) ? parsed.content.slice(viewShown.length) : undefined;
+      if (rest === undefined) yield* say(parsed.content);
+      else if (rest) yield* show(rest);
+    } else if (input.native && arrived.length === 0) yield* say(parsed.content);
     endPart();
     if (complete.stopReason === "length") {
       for (const item of pending) {

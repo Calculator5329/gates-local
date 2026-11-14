@@ -623,8 +623,8 @@ export const QueuedMessage = S.Struct({
   editing: S.optional(S.Literal(true)),
   /** The turn the server started for it; it leaves the queue at that turn's start. */
   sending: S.optional(S.String),
-  /** Why its last send was refused: the refusal's code and words, and the replies in the way for "would-stop". */
-  why: S.optional(S.Struct({ code: S.String, message: S.String, blocking: S.optional(S.Array(BlockingTurn)) })),
+  /** Why its last send was refused: the refusal's code and words, the replies in the way for "would-stop", and what runs instead for "wont-fit". */
+  why: S.optional(S.Struct({ code: S.String, message: S.String, blocking: S.optional(S.Array(BlockingTurn)), offer: S.optional(FitOffer) })),
 });
 export type QueuedMessage = typeof QueuedMessage.Type;
 

@@ -33,7 +33,7 @@ import { type ActionResult, codeOf, createConnection, failure, isNA } from "./se
 
 // Preserve the UI's action imports while implementation moves into session modules.
 export { threadMarkdown } from "./session/threads.ts";
-export { queueReason, firstPull, cancelStopAsk, canRetry, removeQueued, editQueued } from "./session/chat.ts";
+export { queueReason, firstPull, cancelStopAsk, canRetry, removeQueued, editQueued, chooseForQueued } from "./session/chat.ts";
 export { type ActionCall, type ActionResult, failure, isNA } from "./session/connection.ts";
 export { fileUrl, dataFolder, openDataFolder, canOpenFolder, canUpdateHere, canShowUpdate, showUpdate, folderDialog } from "./session/platform.ts";
 export { threadFromHash } from "./session/navigation.ts";

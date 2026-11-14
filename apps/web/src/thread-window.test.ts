@@ -46,3 +46,19 @@ it("fewer earlier turns than a press adds says how many there are", async () => 
 it("a thread that fits in the window has no button", async () => {
   expect(button(await render(200))).toBeUndefined();
 });
+
+/** `n` saved messages ending on a question whose reply is being written. */
+async function renderLive(n: number): Promise<string> {
+  const { Timeline } = await import("./Thread.tsx");
+  const saved = thread(n + 1).slice(1);
+  const ask = saved.at(-1)!;
+  const live = { gen: 1, threadId: T, turnId: "turn", userMessageId: ask.id, model: "m", startedAt: 1, thinking: "", text: "So far", tools: [], pendingUser: null };
+  setState({ threadId: T, turns: { [T]: live }, messages: { [T]: saved } });
+  return renderToStaticMarkup(createElement(Timeline, { threadId: T }));
+}
+
+// the reply being written is not a saved message: it takes no place in the window's 200
+it("a reply being written counts for nothing in the window: a page of 200 has no button, and 2,000 have 1,800 before", async () => {
+  expect(button(await renderLive(200))).toBeUndefined();
+  expect(button(await renderLive(2000))).toEqual({ arrow: true, says: "200", tip: "1,800 earlier" });
+});

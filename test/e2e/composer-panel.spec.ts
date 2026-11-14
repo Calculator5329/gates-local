@@ -24,6 +24,9 @@ for (const input of ["mouse", "touch"] as const) {
       await page.setViewportSize({ width: 1200, height: 800 });
       await open(); await waitReady(page);
       await configure();
+      // with no page open the row has room: touch shows the word Thinking at rest (a new chat's composer is not in .cw)
+      if (input === "touch") await expect(page.locator(".composer .pill.thinking .plbl")).toBeVisible();
+      const word = page.locator(".cw .pill.thinking .plbl");
       await start(page, LOAN_PROMPTS[0], "qwen3.5:9b");
       await expect(page.locator(".turn.a.done")).toHaveCount(1, { timeout: 20_000 });
       await expect(page.getByTestId("pages.panel")).toBeVisible();
@@ -44,6 +47,12 @@ for (const input of ["mouse", "touch"] as const) {
         expect.soft(send.x + send.width, `Send ends inside the composer at ${width}x800`).toBeLessThanOrEqual(composer.x + composer.width);
         // the model name gives way: its button ends before Send starts
         expect.soft(model.x + model.width, `the model button ends before Send at ${width}x800`).toBeLessThanOrEqual(send.x);
+        // the word Thinking gives way before the name does: a cut name never sits beside the word
+        const name = await page.locator(".cw #modelBtn .picker-trigger-name").evaluate((el) => ({ shown: el.clientWidth, whole: el.scrollWidth }));
+        const said = await word.isVisible();
+        test.info().annotations.push({ type: `${width}x800 name`, description: `name ${name.shown} of ${name.whole} px, Thinking word ${said ? "shown" : "icon only"}` });
+        expect.soft(name.shown, `the model name keeps some room at ${width}x800`).toBeGreaterThan(0);
+        if (name.shown < name.whole) expect.soft(said, `the name is cut at ${width}x800 while the word Thinking still shows`).toBe(false);
       }
     });
   });

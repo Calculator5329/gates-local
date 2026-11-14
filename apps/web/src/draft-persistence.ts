@@ -2,9 +2,11 @@
 import type { AttachedFile } from "@gates-local/contracts";
 import { getState, setState, subscribe, type Queued } from "./store.ts";
 import { type DraftKey, type DraftWords, cancelQueuedDraft, draftRevision, restoreDrafts, savedDrafts, subscribeDrafts } from "./drafts.ts";
+import { oldQueueRead, queueOnServer, stillOwed } from "./session/chat.ts";
 
 interface Slot { key: DraftKey; draft: DraftWords & { beforeEdit?: DraftWords }; }
-interface Saved { draft: string; images: readonly string[]; queued: readonly Queued[]; editing: string | null; sendId?: string; sendThreadId?: string; threadId?: DraftKey; slots?: readonly Slot[]; }
+/** `owed`: the queue saved is one the server has yet to take, kept only until it does. */
+interface Saved { draft: string; images: readonly string[]; queued: readonly Queued[]; owed?: true; editing: string | null; sendId?: string; sendThreadId?: string; threadId?: DraftKey; slots?: readonly Slot[]; }
 const record = (v: unknown): Record<string, unknown> | undefined => typeof v === "object" && v !== null ? v as Record<string, unknown> : undefined;
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.length <= 8 && v.every(i => typeof i === "string" && i.length <= 14 * 1024 * 1024);
 /** Attached files are small references to the server's copies; anything malformed is dropped, never sent. */
@@ -30,7 +32,8 @@ export function recoverDraft(value: unknown): Saved | undefined {
     if (!q || typeof q["id"] !== "string" || typeof q["threadId"] !== "string" || typeof q["text"] !== "string" || typeof q["at"] !== "number" || !Number.isFinite(q["at"]) || (q["images"] !== undefined && !strings(q["images"]))) return;
     queued.push({ id: q["id"], threadId: q["threadId"], text: q["text"], at: q["at"], images: q["images"] ?? [], ...withFiles(q["files"]), waitFor: "reply", held: true, ...(typeof q["messageId"] === "string" ? { messageId: q["messageId"] } : {}), ...(typeof q["model"] === "string" ? { model: q["model"] } : {}) });
   }
-  const editing = typeof saved["editing"] === "string" && queued.some(q => q.id === saved["editing"]) ? saved["editing"] : null;
+  // the queue is the server's: an edit open at the reload names its row, which this save need not hold
+  const editing = typeof saved["editing"] === "string" ? saved["editing"] : null;
   const words = (input: unknown): DraftWords | undefined => {
     const w = record(input);
     if (!w || typeof w["text"] !== "string" || !strings(w["images"]) || w["sendId"] !== null && typeof w["sendId"] !== "string") return;
@@ -97,23 +100,31 @@ export async function watchDraft(key: string): Promise<() => void> {
   });
   const [saved, attachments] = await Promise.all([read(key), read([key, "attachments"])]);
   const recovered = recoverStored(saved, attachments);
+  /**
+   * A queue this browser saved before the server kept it: shown on hold, handed to the server once
+   * (session/chat.ts oldQueueRead), and kept here until the server has it, so an update never drops
+   * a message that was waiting. Once the browser's queue is the server's, a save's copy of it is
+   * stale and read as nothing, unless the save says the server still owes it.
+   */
+  let legacy: readonly Queued[] = recovered === undefined || queueOnServer() && record(saved)?.["owed"] !== true ? [] : recovered.queued;
   if (recovered) {
     const savedEditor = recovered.queued.find(q => q.id === recovered.editing);
     const draftKey = recovered.threadId !== undefined ? recovered.threadId : recovered.sendThreadId ?? savedEditor?.threadId ?? before.threadId;
     const restored = restoreDrafts(recovered.slots ?? [{ key: draftKey, draft: { text: recovered.draft, images: recovered.images, sendId: recovered.sendId ?? null,
       ...(recovered.editing !== null ? { beforeEdit: { text: "", images: [], sendId: null } } : {}) } }]);
     const current = getState();
-    const queued = current.queued === before.queued ? recovered.queued : current.queued;
-    const row = queued.find(q => q.id === recovered.editing);
-    const editing = row && restored.has(row.threadId) && current.threadId === row.threadId &&
-      (current.editingQueued === null || current.editingQueued === row.id) ? row : undefined;
-    if (savedEditor && restored.has(savedEditor.threadId) && savedEditor.threadId !== editing?.threadId) cancelQueuedDraft(savedEditor.threadId);
+    // the edit's chat: its row's when an old save holds it, else the chat open at the save (an edit ends on leaving its chat)
+    const editThread = recovered.editing === null ? undefined : savedEditor?.threadId ?? recovered.threadId ?? undefined;
+    const editing = editThread !== undefined && restored.has(editThread) && current.threadId === editThread &&
+      (current.editingQueued === null || current.editingQueued === recovered.editing) ? recovered.editing : null;
+    if (editThread !== undefined && restored.has(editThread) && editing === null) cancelQueuedDraft(editThread);
     setState(s => ({
-      ...(editing ? { editingQueued: editing.id } : {}),
-      ...(s.queued === before.queued ? { queued: recovered.queued } : {}),
-      ...(recovered.queued.length ? { notice: "Your queued messages were restored on hold. Use Send now when you are ready." } : {}),
+      ...(editing !== null ? { editingQueued: editing } : {}),
+      ...(s.queued === before.queued && legacy.length ? { queued: legacy } : {}),
+      ...(legacy.length ? { notice: "Your queued messages were restored on hold. Use Send now when you are ready." } : {}),
     }));
   }
+  oldQueueRead(legacy);
   let last = getState();
   let lastRevision = draftRevision();
   let committed = record(saved)?.["format"] === 2 ? recovered : undefined;
@@ -182,7 +193,9 @@ export async function watchDraft(key: string): Promise<() => void> {
     last = s;
     const slots = savedDrafts();
     const draft = slots.find(slot => slot.key === s.threadId)?.draft ?? { text: "", images: [], sendId: null };
-    pending = { draft: draft.text, images: draft.images, slots, threadId: s.threadId, queued: s.queued, editing: s.editingQueued, ...(draft.sendId ? { sendId: draft.sendId, sendThreadId: s.threadId ?? undefined } : {}) };
+    // an old saved queue is forgotten here once the server has each message (or refused it, which said so)
+    if (legacy.length > 0) legacy = legacy.filter(q => stillOwed(q.id));
+    pending = { draft: draft.text, images: draft.images, slots, threadId: s.threadId, queued: legacy, ...(legacy.length ? { owed: true as const } : {}), editing: s.editingQueued, ...(draft.sendId ? { sendId: draft.sendId, sendThreadId: s.threadId ?? undefined } : {}) };
     pump();
   };
   const off = subscribe(update);

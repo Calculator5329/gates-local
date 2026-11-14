@@ -1,6 +1,6 @@
 import * as S from "effect/Schema";
 import { createTools, runLoop, toolBlock, type LibraryEntry, type ModelEvent, type ModelMessage, type ToolCall, type ToolResult } from "../../../../packages/harness/src/index.ts";
-import { streamTurn, usageFigures, type StreamTurnInput } from "./stream.ts";
+import { STREAM_LINE_LIMIT, STREAM_LINE_TOO_LONG, streamTurn, usageFigures, type StreamTurnInput } from "./stream.ts";
 import type { ChatEvent as PlainChatEvent } from "./types.ts";
 import type { ShellStatus } from "@gates-local/contracts";
 import { contextWords, estimateTokens, fitRound, fitToWindow } from "./window.ts";
@@ -16,8 +16,6 @@ export interface ToolTurnInput extends StreamTurnInput {
   image?: boolean;
   /** The shell sandbox's probe on this machine; off leaves the shell tool out and says so in the turn. */
   shell?: ShellStatus;
-  /** The shell is the only reason this is a tool turn: nothing in the Library and no picture tool. */
-  shellOnly?: boolean;
   execute?: (call: ToolCall, signal: AbortSignal) => Promise<ToolResult>;
 }
 const decodeShow = S.decodeUnknownSync(S.Struct({ capabilities: S.optional(S.Array(S.String)) }));
@@ -39,10 +37,8 @@ export async function* streamToolTurn(input: ToolTurnInput): AsyncGenerator<Chat
     signal.throwIfAborted();
     const response = await sendSpan("tools-show", () => fetcher(new URL("/api/show", input.baseUrl), { method: "POST", body: JSON.stringify({ model: input.model }), headers: { "content-type": "application/json" }, signal }));
     if (!response.ok) throw new Error(`Model capabilities request failed (HTTP ${response.status})`);
+    // A model with no tool calling of its own writes its calls as text; its answer still streams (createTextView).
     const native = decodeShow(await response.json()).capabilities?.includes("tools") ?? false;
-    // A model with no tool calling of its own writes its calls as text, and a text-mode reply is shown only once it is
-    // whole. With the shell as the only tool on offer that is every reply arriving at once, so such a turn is the plain one.
-    if (!native && input.shellOnly) { yield* streamTurn(input); return; }
     const windows = (input.platform ?? process.platform) === "win32";
     const shellOff = !windows && input.shell?.state === "off";
     const tools = createTools({ sources: input.sources, platform: input.platform, queueImage: input.queueImage, image: input.image === true, ...(shellOff ? { shell: false } : {}) });
@@ -124,9 +120,10 @@ async function* ollamaStep(deps: { input: ToolTurnInput; fetcher: typeof fetch; 
       signal.throwIfAborted();
       const chunk = await reader.read();
       buffer += decoder.decode(chunk.value, { stream: !chunk.done });
-      if (buffer.length > 1000000) throw new Error("Model stream line exceeded its size limit");
       const lines = buffer.split("\n"); buffer = chunk.done ? "" : lines.pop() ?? "";
+      if (buffer.length > STREAM_LINE_LIMIT) throw new Error(STREAM_LINE_TOO_LONG);
       for (const line of lines) {
+        if (line.length > STREAM_LINE_LIMIT) throw new Error(STREAM_LINE_TOO_LONG);
         if (!line.trim()) continue;
         const value = decodeChunk(JSON.parse(line));
         if (value.error) throw new Error(value.error);

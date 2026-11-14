@@ -107,6 +107,8 @@ export interface Queued {
   readonly retry?: "running" | "failed";
   /** Send now: it goes as soon as the reply in its way has ended. */
   readonly now?: true;
+  /** Open in a composer, in this window or another: it waits until that edit ends. */
+  readonly editing?: true;
   /** Typed with Image on: it goes to this image model and size, not to a chat model. */
   readonly draw?: ImageChoice;
 }

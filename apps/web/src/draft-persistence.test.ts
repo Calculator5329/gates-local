@@ -171,7 +171,8 @@ it("CI-01: ten edits retain one in-flight write and submit unchanged attachments
     const reloaded = await freshWatcher();
     expect(reloaded.observed()).toMatchObject({ draft: "", draftImages: [], queued: [] });
     const resume = await reloaded.watchDraft("scope");
-    expect(reloaded.observed()).toMatchObject({ draft: "edit 9", draftImages: images, queued: [expect.objectContaining({ images: [queuedImage] })] });
+    // the window's copy of the server's queue is not this save's to keep
+    expect(reloaded.observed()).toMatchObject({ draft: "edit 9", draftImages: images, queued: [] });
     resume();
   } finally { stop(); }
 });
@@ -192,7 +193,7 @@ it("CI-02: hiding the page requests an early commit of the active write", async 
   } finally { stop(); }
 });
 
-it("legacy drafts migrate atomically, and queued text changes reuse their attachments", async () => {
+it("legacy drafts migrate atomically, and the old queue stays saved as it was until the server has it", async () => {
   reset();
   setState({ threadId: "t", view: "thread" });
   const fixture = draftDatabase();
@@ -210,7 +211,8 @@ it("legacy drafts migrate atomically, and queued text changes reuse their attach
   expect(fixture.writes.reduce((n, put) => n + put.bytes, 0) - bytes).toBeLessThan(1024);
   stop(); reset(); setState({ threadId: "t", view: "thread" });
   const resume = await watchDraft("legacy");
-  expect(observed()).toMatchObject({ draft: "new", draftImages: [image], editingQueued: "q", queued: [expect.objectContaining({ text: "edited queue", images: [image], held: true })] });
+  // a change to the shown row is the server's to keep; what is owed is still the saved row, with its image
+  expect(observed()).toMatchObject({ draft: "new", draftImages: [image], editingQueued: "q", queued: [expect.objectContaining({ text: "queued", images: [image], held: true })] });
   resume();
 });
 
@@ -265,7 +267,7 @@ it.each(["replaced", "cleared"])("CI-03: completed %s attachments in another wat
     expect(reloaded.observed()).toMatchObject({ draft: "", draftImages: [], queued: [] });
     const stopReloaded = await reloaded.watchDraft("shared");
     try {
-      expect(reloaded.observed()).toMatchObject({ draft: "A final words", draftImages: ["image-A"], queued: [expect.objectContaining({ id: "a", images: ["queued-A"], held: true })] });
+      expect(reloaded.observed()).toMatchObject({ draft: "A final words", draftImages: ["image-A"], queued: [] });
     } finally { stopReloaded(); }
   } finally { stopA(); stopB(); }
 });
@@ -294,10 +296,11 @@ it("format-2 drafts without a revision migrate before metadata-only reuse", asyn
 const file = (n: number) => ({ path: `files/att-0f8b5c1e-3a2d-4c7e-9b1a-2d3e4f5a6b7${n}`, name: `notes-${n}.txt`, size: n, type: "text/plain" });
 it("attached files reload in the open draft, another chat's draft and a queued message (chat row 3)", async () => {
   const fixture = draftDatabase(), a = await freshWatcher();
+  // a queue saved by a build from before the server kept it, still owed to the server
+  fixture.records.set(JSON.stringify("files"), { draft: "", images: [], queued: [{ id: "q", threadId: "A", text: "queued", at: 1, files: [file(3)] }], editing: null });
   a.replaceDraft("B", { text: "other", files: [file(2)] }); a.setState({ threadId: "A" });
   const stop = await a.watchDraft("files");
   a.replaceDraft("A", { text: "open", files: [file(1)] });
-  a.setState({ queued: [{ id: "q", threadId: "A", text: "queued", at: 1, waitFor: "reply", files: [file(3)] }] });
   while (fixture.pending.length) { fixture.pending[0]!.finish(); await settled(); }
   stop();
   const b = await freshWatcher(); b.setState({ threadId: "A" });
@@ -311,6 +314,38 @@ it("attached files reload in the open draft, another chat's draft and a queued m
 it("a stored attached file that is not one of the server's own names is dropped, never sent", () => {
   const recovered = recoverDraft({ draft: "", images: [], queued: [{ id: "q", threadId: "A", text: "x", at: 1, files: [{ path: "../secret", name: "s", size: 1, type: "" }] }] });
   expect(recovered?.queued[0]?.files).toBeUndefined();
+});
+
+const movedBrowser = () => {
+  const storage = new Map([["gates-local.queue-on-server", "1"]]);
+  vi.stubGlobal("localStorage", { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => void storage.set(k, v) });
+};
+const waiting = { id: "w", threadId: "A", text: "waiting", at: 1, waitFor: "reply" as const };
+
+it("a browser whose queue is the server's saves none of it, and reads an older copy as nothing", async () => {
+  const fixture = draftDatabase(); movedBrowser();
+  fixture.records.set(JSON.stringify("moved"), { draft: "", images: [], queued: [{ ...waiting, id: "stale" }], editing: null });
+  const a = await freshWatcher(); a.setState({ threadId: "A" });
+  const stop = await a.watchDraft("moved");
+  expect(a.getState().queued, "a copy of the server's queue, some of it sent since").toEqual([]);
+  a.setState({ queued: [waiting] }); a.editDraft("words");
+  while (fixture.pending.length) { fixture.pending[0]!.finish(); await settled(); }
+  stop();
+  expect(fixture.records.get(JSON.stringify("moved"))).toMatchObject({ queued: [] });
+  expect(fixture.records.get(JSON.stringify("moved"))).not.toHaveProperty("owed");
+});
+
+it("a saved queue the server has yet to take is read back even once the browser is marked moved", async () => {
+  const fixture = draftDatabase(); movedBrowser();
+  fixture.records.set(JSON.stringify("owed"), { draft: "", images: [], queued: [waiting], owed: true, editing: null });
+  const a = await freshWatcher(); a.setState({ threadId: "A" });
+  const stop = await a.watchDraft("owed");
+  expect(a.getState().queued).toMatchObject([{ id: "w", held: true }]);
+  // no connection yet: still owed, so still saved
+  a.editDraft("words");
+  while (fixture.pending.length) { fixture.pending[0]!.finish(); await settled(); }
+  stop();
+  expect(fixture.records.get(JSON.stringify("owed"))).toMatchObject({ owed: true, queued: [expect.objectContaining({ id: "w" })] });
 });
 
 it("a lifecycle commit waits for the metadata read to submit its writes", async () => {

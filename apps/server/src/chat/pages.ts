@@ -6,12 +6,13 @@ import { pageBlocks, pageTitle } from "@gates-local/contracts";
 /**
  * Sent with every chat turn: the turn that first asks for a page cannot be told
  * apart in advance, and a follow-up needs the rule to send the whole page again.
- * Two rules ride with it: a question is answered in words in the chat, never as a page,
- * and a reply that carries a page also says in a sentence what it made.
- * 312 characters: 82 tokens by the app's own estimate (chat/window.ts).
+ * Three rules ride with it: a question is answered in words in the chat, never as a page;
+ * a reply that carries a page also says in a sentence what it made; and a page acts through
+ * buttons or handlers, since its scripts run by a one-time code and a javascript: link has none.
+ * 362 characters: 95 tokens by the app's own estimate (chat/window.ts).
  */
 export const PAGE_RULE =
-  "Answer a question in words here, never as a page. Only when asked for a page, app, tool or chart to look at or use, say in one sentence what you made, then send one complete HTML document in one ```html block, CSS and JavaScript inline, no outside files, links or requests. To change a page, send it whole again.";
+  "Answer a question in words here, never as a page. Only when asked for a page, app, tool or chart to look at or use, say in one sentence what you made, then send one complete HTML document in one ```html block, CSS and JavaScript inline, no outside files, links or requests. Use buttons or handlers, never javascript: links. To change a page, send it whole again.";
 
 /** One short line in place of an older version of a page. */
 export const pageStandIn = (title: string): string => `[An earlier version of the page "${title}" was here.]`;

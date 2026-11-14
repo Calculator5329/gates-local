@@ -4,12 +4,13 @@
 // system memory carries the slower mark, once. Nothing runs: one line of numbers, the GPU's and system
 // memory's apart, and the memory details behind one control. The server works the offer out from the
 // reading that refused (fit/alternatives.ts); the note shows it and holds no verdict of its own.
+import type { FitWords } from "@gates-local/contracts";
 import { CONTEXT_SIZES, describeModel, gb, k } from "./format.ts";
 import { openFit } from "./fit-actions.ts";
 import { Icon } from "./icons.tsx";
 import { MakerMark } from "./MakerMark.tsx";
 import { getDraft } from "./drafts.ts";
-import { pickModel, send, sendQueuedNow, setContext } from "./session.ts";
+import { chooseForQueued, pickModel, send, sendQueuedNow, setContext } from "./session.ts";
 import { NA, type NoticeOffer, type State, getState, setState, useStore } from "./store.ts";
 import { closeTip } from "./ui.tsx";
 
@@ -38,12 +39,16 @@ export function takeOffer(kind: "context" | "model"): void {
   }
   const held = s.queued.find((q) => q.threadId === s.threadId && q.held === true && q.waitFor === "reply");
   if (held === undefined) return;
-  setState((st) => ({ queued: st.queued.map((q) => (q.id === held.id ? { ...q, model } : q)) }));
+  chooseForQueued(held.id, model, choice.numCtx);
   sendQueuedNow(held.id);
 }
 
-/** The slower mark: part of the model runs in system memory. Its tip names it and nothing more. */
-const Slower = () => <span className="co-slow" role="img" aria-label="slower" data-tip="Slower" data-testid="chat.composer.offer-slower"><Icon id="gauge" /></span>;
+/**
+ * The slower mark, where the server judged the choice to run partly in system memory: its name and tip
+ * are the server's short word ("Slower", "System memory" with no supported GPU) and nothing more.
+ */
+const Slower = ({ words }: { words: FitWords | undefined }) =>
+  words?.k !== "spill" ? null : <span className="co-slow" role="img" aria-label={words.short} data-tip={words.short} data-testid="chat.composer.offer-slower"><Icon id="gauge" /></span>;
 
 export function RefusalNote({ o }: { o: NoticeOffer }) {
   const catalog = useStore(catalogOf);
@@ -69,7 +74,7 @@ export function RefusalNote({ o }: { o: NoticeOffer }) {
           {context === undefined ? null : (
             <button type="button" className="co-act" data-testid="chat.composer.offer-context" onClick={() => takeOffer("context")}>
               <span>{k(context.numCtx)}</span>
-              {context.verdict === "spills" ? <Slower /> : null}
+              <Slower words={context.words} />
             </button>
           )}
           {model === undefined ? null : (
@@ -77,7 +82,7 @@ export function RefusalNote({ o }: { o: NoticeOffer }) {
               <MakerMark tag={model.model} />
               <span>{name(model.model)}</span>
               <small>{k(model.numCtx)}</small>
-              {model.verdict === "spills" ? <Slower /> : null}
+              <Slower words={model.words} />
             </button>
           )}
         </>

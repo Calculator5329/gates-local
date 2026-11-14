@@ -109,6 +109,23 @@ describe("the server's queue", () => {
     expect(heard).toHaveLength(2);
   });
 
+  it("a removed message is not queued again, even by a window that missed the removal, and a restart keeps that", () => {
+    const root = path.join(os.homedir(), ".cache", "gates-local-tests");
+    mkdirSync(root, { recursive: true });
+    const dir = mkdtempSync(path.join(root, "queue-"));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    const file = path.join(dir, "queue.json");
+    const { q } = queue(file);
+    q.add(entry("a"));
+    expect(q.remove("a")).toBe(true);
+    expect(q.add(entry("a")), "a window that queued it before the removal asks again").toBe("removed");
+    expect(q.list()).toEqual([]);
+    expect(queue(file).q.add(entry("a")), "after a restart too").toBe("removed");
+    expect(q.add(entry("b"))).toBe("ok");
+    q.dropThread("t1");
+    expect(q.add(entry("a", "t2")), "a deleted chat's memory goes with it").toBe("ok");
+  });
+
   it("is kept on disk; one a closed app left comes back on hold, with nothing open or on its way", () => {
     const root = path.join(os.homedir(), ".cache", "gates-local-tests");
     mkdirSync(root, { recursive: true });

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import * as toolTransport from "./tools.ts";
 import { estimateTokens, OMITTED_IMAGE } from "./window.ts";
+import { STREAM_LINE_LIMIT, STREAM_LINE_TOO_LONG, streamTurn } from "./stream.ts";
 import { createSources } from "../sources/index.ts";
 import { createApp } from "../app.ts";
 import { sendStarted } from "./send-started.ts";
@@ -23,6 +24,8 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 const sentMessages = (bodies: Record<string, unknown>[]) => (bodies[0]?.["messages"] ?? []) as { role: string; content: string }[];
 
 const ndjson = (items: unknown[]) => new Response(items.map(i => JSON.stringify(i)).join("\n") + "\n");
+/** A whole reply in one stream line, then the done line. */
+const big = (text: string) => ndjson([{ message: { content: text } }, { message: { content: "" }, done: true }]);
 /** No ComfyUI is up, so chat.send has nothing to free before its claim. */
 const noComfy = () => ({ state: "stopped", owner: "none" });
 /** An image module over the app's real lease, shaped like image/module.ts: generate returns the id at once and the job claims the GPU alone. */
@@ -206,6 +209,39 @@ describe("tool chat transport", () => {
     expect(bodies[0]!.messages[0]!.content).toContain("books: books.db (sqlite): can't be read, Run commands is off on this machine");
     expect(events.at(-1)).toMatchObject({ type: "done", message: { content: "ok", tools: [{ name: "note", summary: "Run commands is off on this machine (sandbox check failed), so databases in your Library can't be read" }] } });
   });
+  it("a model with no tool calling, asked to run a command with nothing in the Library, runs it through the shell", async () => {
+    const requests: Record<string, unknown>[] = [];
+    const executed: unknown[] = [];
+    const fetcher = vi.fn(async (url, init) => {
+      if (String(url).endsWith("/api/show")) return Response.json({ capabilities: ["completion"] });
+      requests.push(JSON.parse(String(init?.body)));
+      return requests.length === 1
+        ? ndjson([{ message: { content: '<tool_call>{"name":"shell","arguments":{"command":"uname -s"}}</tool_call>' } }, { message: { content: "" }, done: true }])
+        : ndjson([{ message: { content: "It is " } }, { message: { content: "Linux." } }, { message: { content: "" }, done: true }]);
+    });
+    const events = [];
+    for await (const e of streamToolTurn({ baseUrl: "http://fake", model: "m", messages: [{ role: "user", content: "run uname -s" }], numCtx: 16384, sources: [], platform: "linux", shell: { state: "ready" }, fetch: fetcher,
+      execute: async (call) => { executed.push(call); return { output: "Linux", summary: "Ran a command" }; } })) events.push(e);
+    expect(executed).toEqual([{ name: "shell", input: { command: "uname -s" } }]);
+    expect(events.filter(e => e.type === "delta").map(e => (e as { text: string }).text)).toEqual(["It is", " Linux."]);
+    expect(events.at(-1)).toMatchObject({ type: "done", message: { content: "It is Linux.", tools: [{ name: "shell", state: "done" }] } });
+  });
+  it("one stream line limit on both paths, above the largest page: a 2.2 MB line is read, a line past the limit is refused", async () => {
+    const page = `Here.\n\n\`\`\`html\n<p>${"a".repeat(2_200_000)}</p>\n\`\`\``;
+    for (const capabilities of [["completion", "tools"], ["completion"]]) {
+      const fetcher = vi.fn(async (url: string | URL | Request) => String(url).endsWith("/api/show") ? Response.json({ capabilities }) : big(page));
+      const events = [];
+      for await (const e of streamToolTurn({ baseUrl: "http://fake", model: "m", messages: [{ role: "user", content: "make the big page" }], numCtx: 16384, sources: [], fetch: fetcher, execute: noRun })) events.push(e);
+      expect(events.at(-1), capabilities.join()).toMatchObject({ type: "done", message: { content: page } });
+      const over = vi.fn(async (url: string | URL | Request) => String(url).endsWith("/api/show") ? Response.json({ capabilities }) : big("b".repeat(STREAM_LINE_LIMIT)));
+      const refused = [];
+      for await (const e of streamToolTurn({ baseUrl: "http://fake", model: "m", messages: [{ role: "user", content: "x" }], numCtx: 16384, sources: [], fetch: over, execute: noRun })) refused.push(e);
+      expect(refused.at(-1)).toMatchObject({ type: "error", message: STREAM_LINE_TOO_LONG });
+    }
+    const plain = [];
+    for await (const e of streamTurn({ baseUrl: "http://fake", model: "m", messages: [{ role: "user", content: "x" }], numCtx: 16384, fetch: vi.fn(async () => big("b".repeat(STREAM_LINE_LIMIT))) })) plain.push(e);
+    expect(plain.at(-1)).toMatchObject({ type: "error", code: "malformed-stream", message: STREAM_LINE_TOO_LONG });
+  });
   it("uses text calls for gemma and refuses truncated native calls", async () => {
     for (const native of [true, false]) {
       const execute = vi.fn();
@@ -375,9 +411,8 @@ describe("tool chat transport", () => {
       } finally { await app.shutdown(); store.close(); vi.unstubAllGlobals(); }
     });
   }
-  // a model with no tool calling of its own writes calls as text, and text mode shows a reply only once it is
-  // whole; with the shell as the only tool on offer that would be every reply arriving at once
-  it.skipIf(process.platform === "win32")("an empty Library with Run commands ready keeps the plain turn, word by word, for a model with no tool calling of its own", async () => {
+  // a model with no tool calling of its own writes calls as text; it is offered the shell too, and its answer streams
+  it.skipIf(process.platform === "win32")("an empty Library with Run commands ready offers the shell in text mode, and the answer still comes word by word, for a model with no tool calling of its own", async () => {
     const root = scratch("gl-shell-only-text-");
     const sources = createSources({ dataDir: path.join(root, "data") });
     const store = openThreadStore(path.join(root, "threads.db"));
@@ -401,9 +436,11 @@ describe("tool chat transport", () => {
       const thread = store.createThread();
       await sendStarted(app, { threadId: thread.id, content: "how often do I water basil", model: "m", numCtx: 16384, think: false, tools: true }, { clientId: 1 });
       await vi.waitFor(() => expect(app.activeTurns()).toBe(0));
-      // this model cannot think either, so the request carries no think flag: the plain turn and nothing else
-      expect(chatBodies).toEqual([{ model: "m", messages: [{ role: "user", content: "how often do I water basil" }], stream: true, options: { num_ctx: 16384 } }]);
-      expect(deltas).toEqual(["Twice ", "a week."]);
+      expect(chatBodies).toHaveLength(1);
+      const body = chatBodies[0] as { tools?: unknown; messages: { role: string; content: string }[] };
+      expect(body.tools).toBeUndefined();
+      expect(body.messages[0]).toMatchObject({ role: "system", content: expect.stringContaining('"name":"shell"') });
+      expect(deltas).toEqual(["Twice", " a week."]);
       expect(store.getThread(thread.id).messages.at(-1)).toMatchObject({ role: "assistant", content: "Twice a week." });
     } finally { await app.shutdown(); store.close(); vi.unstubAllGlobals(); }
   });

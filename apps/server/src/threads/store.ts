@@ -48,6 +48,13 @@ export interface ThreadStore {
   listThreads(): Thread[];
   createThread(input?: { title?: string }): Thread;
   getThread(threadId: string): ThreadWithMessages;
+  /**
+   * One page of a thread, read from disk alone: up to `limit` messages before `before` (else the
+   * newest), widened back to a question so no reply shows without the one it answers, and how
+   * many come before the page. `skip`: a message no page shows (a reply still streaming).
+   * Undefined when `before` is not one of the thread's shown messages.
+   */
+  getThreadPage(threadId: string, page: { before?: string; limit?: number; skip?: string }): (ThreadWithMessages & { earlier: number }) | undefined;
   renameThread(threadId: string, title: string): Thread;
   /** Keep the image model and size this thread sends with; the list order stays (it is not an edit). */
   setImageChoice(threadId: string, choice: ImageChoice): Thread;
@@ -140,6 +147,11 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
   const choiceColumn = `COALESCE(image_choice_json, (SELECT json_extract(m.image_job_json, '$.choice') FROM messages m
     WHERE m.thread_id = threads.id AND json_extract(m.image_job_json, '$.state') = 'done'
     ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1)) AS image_choice_json`;
+  const messageColumns = `id, thread_id, role, content, thinking, model, created_at,
+              prompt_tokens, completion_tokens, duration_ms, num_ctx,
+              tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms, interrupted, image_job_json, context_notice, times_json, files_json`;
+  // A page's rows in thread order are those under a (created_at, seq) key, on messages_by_thread_time.
+  const shown = "thread_id = ? AND id IS NOT ?";
   const stmt = {
     listThreads: db.prepare(`SELECT id, title, created_at, updated_at, image_count, ${choiceColumn} FROM threads ORDER BY updated_at DESC, id`),
     getThread: db.prepare(`SELECT id, title, created_at, updated_at, image_count, ${choiceColumn} FROM threads WHERE id = ?`),
@@ -159,12 +171,12 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
                              tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms, interrupted, context_notice, times_json, files_json)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
-    listMessages: db.prepare(
-      `SELECT id, thread_id, role, content, thinking, model, created_at,
-              prompt_tokens, completion_tokens, duration_ms, num_ctx,
-              tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms, interrupted, image_job_json, context_notice, times_json, files_json
-       FROM messages WHERE thread_id = ? ORDER BY created_at, seq`,
-    ),
+    listMessages: db.prepare(`SELECT ${messageColumns} FROM messages WHERE thread_id = ? ORDER BY created_at, seq`),
+    pageKey: db.prepare("SELECT created_at, seq FROM messages WHERE id = ? AND thread_id = ?"),
+    pageNewest: db.prepare(`SELECT ${messageColumns}, seq FROM messages WHERE ${shown} AND (created_at, seq) < (?, ?) ORDER BY created_at DESC, seq DESC LIMIT ?`),
+    pageQuestion: db.prepare(`SELECT created_at, seq FROM messages WHERE ${shown} AND role = 'user' AND (created_at, seq) <= (?, ?) ORDER BY created_at DESC, seq DESC LIMIT 1`),
+    pageBetween: db.prepare(`SELECT ${messageColumns} FROM messages WHERE ${shown} AND (created_at, seq) >= (?, ?) AND (created_at, seq) < (?, ?) ORDER BY created_at, seq`),
+    pageEarlier: db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE ${shown} AND (created_at, seq) < (?, ?)`),
     stampTimes: db.prepare("UPDATE messages SET times_json = ? WHERE id = ? AND thread_id = ?"),
     insertImageCard: db.prepare("INSERT INTO messages (id, thread_id, role, content, created_at, image_job_json) VALUES (?, ?, 'assistant', ?, ?, ?) ON CONFLICT(id) DO NOTHING"),
     updateImageCard: db.prepare("UPDATE messages SET image_job_json = ?, images_json = ? WHERE id = ? AND thread_id = ?"),
@@ -289,6 +301,43 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
         const messages = stmt.listMessages.all(threadId).map(messageFromRow);
         db.exec("COMMIT");
         return { thread, messages };
+      } catch (err) {
+        if (db.isTransaction) db.exec("ROLLBACK");
+        throw err;
+      }
+    },
+
+    getThreadPage(threadId, { before, limit, skip }) {
+      guard();
+      checkId("threadId", threadId);
+      const hide = skip ?? null;
+      db.exec("BEGIN");
+      try {
+        const thread = loadThread(threadId);
+        let end: [number, number] = [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER];
+        if (before !== undefined) {
+          const key = before === skip ? undefined : stmt.pageKey.get(before, threadId);
+          if (!key) { db.exec("COMMIT"); return undefined; }
+          end = [num(key, "created_at"), num(key, "seq")];
+        }
+        // the page, newest first; a full one widens back to its question when it starts on a reply
+        const rows = stmt.pageNewest.all(threadId, hide, ...end, limit ?? -1).toReversed();
+        const oldest = rows[0];
+        let page = rows;
+        let earlier = 0;
+        // a page shorter than asked reaches the thread's first message
+        if (limit !== undefined && oldest !== undefined && rows.length === limit) {
+          let start: [number, number] = [num(oldest, "created_at"), num(oldest, "seq")];
+          if (oldest["role"] !== "user") {
+            const question = stmt.pageQuestion.get(threadId, hide, ...start);
+            start = question === undefined ? [Number.MIN_SAFE_INTEGER, Number.MIN_SAFE_INTEGER] : [num(question, "created_at"), num(question, "seq")];
+            page = stmt.pageBetween.all(threadId, hide, ...start, ...end);
+          }
+          earlier = num(stmt.pageEarlier.get(threadId, hide, ...start) ?? { n: 0 }, "n");
+        }
+        const messages = page.map(messageFromRow);
+        db.exec("COMMIT");
+        return { thread, messages, earlier };
       } catch (err) {
         if (db.isTransaction) db.exec("ROLLBACK");
         throw err;
