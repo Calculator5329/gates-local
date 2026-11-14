@@ -137,7 +137,8 @@ export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
       if (dir === undefined) throw new Error("The image engine is not installed.");
       const files = engineFiles(dir, layout);
       endLeftover();
-      mkdirSync(engineDataDir(opts.appDataDir), { recursive: true });
+      // ComfyUI lists <base>/custom_nodes before it serves and exits when the folder is missing.
+      mkdirSync(path.join(engineDataDir(opts.appDataDir), "custom_nodes"), { recursive: true });
       mkdirSync(runtimeDir(opts.appDataDir), { recursive: true });
       const picked = opts.extraModels?.();
       const extra = path.join(runtimeDir(opts.appDataDir), "comfyui-extra-models.yaml");

@@ -136,6 +136,25 @@ it("hydration answers older than a runtime change keep neither the old list nor 
   expect(store.getState().runtime).toMatchObject({ state: "ready", baseUrl: "http://runtime-b", version: "0.40.4" });
 });
 
+it("the catalog is asked again when the app's own Ollama turns ready, so first run can recommend a model", async () => {
+  // First launch: the catalog is read while Ollama is still being fetched, so nothing in it is recommended.
+  const sample = methodSamples["models.catalog"].result;
+  const unmarked = sample.map((c) => ({ ...c, recommended: false }));
+  const marked = sample.map((c, i) => ({ ...c, recommended: i === 0 }));
+  let asked = 0;
+  const { store, push, calls, hydrated } = await boot({
+    "runtime.status": async () => ({ state: "installing", owner: "app" }),
+    "models.list": async () => [],
+    "models.refresh": async () => [],
+    "models.catalog": async () => (asked++ === 0 ? unmarked : marked),
+  });
+  await hydrated();
+  await vi.waitFor(() => expect(store.getState().catalog).toEqual(unmarked));
+  push("runtime.changed", { state: "ready", owner: "app", baseUrl: "http://own", version: "0.40.15" });
+  await vi.waitFor(() => expect(calls.filter((m) => m === "models.catalog")).toHaveLength(2));
+  await vi.waitFor(() => expect(store.getState().catalog).toEqual(marked));
+});
+
 it("a catalog asked before a later models.changed never lands over the newer one", async () => {
   const sample = methodSamples["models.catalog"].result;
   const stale = sample.map((c) => ({ ...c, installed: true }));

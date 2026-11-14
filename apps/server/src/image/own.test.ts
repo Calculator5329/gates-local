@@ -15,6 +15,8 @@ const http = require("node:http");
 const fs = require("node:fs");
 const port = Number(process.argv[process.argv.indexOf("--port") + 1]);
 fs.writeFileSync(process.env.FAKE_ENGINE_ARGS, JSON.stringify(process.argv.slice(2)));
+// ComfyUI 0.44 lists <base>/custom_nodes before it serves, and exits when it is missing.
+fs.readdirSync(require("node:path").join(process.argv[process.argv.indexOf("--base-directory") + 1], "custom_nodes"));
 http.createServer((req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end('{"devices":[]}'); }).listen(port, "127.0.0.1");
 process.on("SIGTERM", () => process.exit(0));
 `;

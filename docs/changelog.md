@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-14: The app's own image engine starts on a fresh install
+
+- From the fresh-install test on Linux. After "Set up images" finished,
+  the first picture failed with "ComfyUI did not start", and every Try
+  again failed the same way. ComfyUI lists a custom_nodes folder in its
+  data folder before it serves and exits when the folder is missing; the
+  app never made it. The app now makes it before starting the engine.
+
 ## 2026-11-14: First run offers the download once Ollama is in
 
 - On a computer with no Ollama, first run installs the app's own copy,
