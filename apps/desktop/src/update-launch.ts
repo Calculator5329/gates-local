@@ -1,4 +1,4 @@
-// "Update and restart": how main starts the updater (scripts/update.ts)
+// "Restart to update": how main starts the updater (scripts/update.ts)
 // before it quits. Pure, so it is tested without Electron.
 //
 // The updater runs on the `node` on PATH, never on Electron's own binary:
@@ -151,7 +151,7 @@ export async function launchApprovedUpdate(request: UpdateInstallRequest, contro
   return result;
 }
 
-/** Why "Update and restart" cannot start here, or null when it can. */
+/** Why "Restart to update" cannot start here, or null when it can. */
 export function cannotUpdate(o: { readonly packaged: boolean; readonly repoRoot: string; readonly exists: (file: string) => boolean }): string | null {
   if (o.packaged) return "This installed copy of Gates Local cannot update itself yet. Download the new version from the release page.";
   if (!o.exists(path.join(o.repoRoot, "scripts", "update.ts")) || !o.exists(path.join(o.repoRoot, ".git"))) {

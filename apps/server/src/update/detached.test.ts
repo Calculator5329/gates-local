@@ -1,4 +1,4 @@
-// "Update and restart": the updater the desktop app starts must not touch the
+// "Restart to update": the updater the desktop app starts must not touch the
 // clone until the app's process has exited. A real child process stands in
 // for the app.
 import { spawn } from "node:child_process";

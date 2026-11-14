@@ -147,7 +147,7 @@ const troubled = (check: UpdateCheck | null) => check?.state === "cannot-check" 
 interface StateProps {
   readonly check: UpdateCheck | null;
   readonly automatic: boolean;
-  /** Update and restart, or Restart to update: the desktop app, with control. */
+  /** Restart to update: the desktop app, with control. */
   readonly canUpdate: boolean;
   readonly checking: boolean;
   readonly updating: boolean;

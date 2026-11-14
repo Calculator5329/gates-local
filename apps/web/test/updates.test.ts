@@ -307,7 +307,6 @@ describe("the Updates group of an installed copy", () => {
     for (const line of check.lines) expect(plain).toContain(line);
     expect(html.includes(link)).toBe(linked);
     expect(plain).not.toContain("Could not check for updates.");
-    expect(plain).not.toContain("Update and restart");
     expect(plain).not.toMatch(/git|pnpm/i);
   });
 
@@ -545,7 +544,7 @@ describe("the check runs only on a click", () => {
     expect(store.getState().update).toBe("na");
   });
 
-  it("the desktop bridge's Update and restart is used when it is there", async () => {
+  it("the desktop bridge's Restart to update is used when it is there", async () => {
     const updateAndRestart = vi.fn(async () => ({ ok: false as const, message: "This folder is not a git clone of Gates Local, so it cannot update itself." }));
     vi.stubGlobal("gatesLocal", { updateApprovalVersion: 2, getServerUrl: async () => "ws://127.0.0.1:1/?token=t", updateAndRestart });
     b.server.answer("update.status", () => OFFERED);

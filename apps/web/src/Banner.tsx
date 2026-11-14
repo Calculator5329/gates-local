@@ -177,7 +177,7 @@ export function Banner() {
       return (
         <Shell icon={<Icon id="alert" cls="warn" />} role="alert" title="Ollama isn't installed">
           <div className="bm">
-            {own === "" ? "Install Ollama system-wide, then retry. Installing Gates Local's own copy is not available in this build." : `${own} Install Ollama from ollama.com, then retry.`}
+            {own === "" ? "" : `${own} `}Install Ollama from ollama.com, then retry.
           </div>
           <div className="ba">
             <RetryButton primary />

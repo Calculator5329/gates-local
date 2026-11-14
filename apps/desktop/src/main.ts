@@ -48,7 +48,7 @@ const DEV_WEB_URL = "http://127.0.0.1:5187/";
 
 // out/main.cjs -> apps/desktop
 const desktopDir = path.resolve(__dirname, "..");
-// The clone, for "Update and restart" (apps/desktop -> the repo root).
+// The clone, for "Restart to update" (apps/desktop -> the repo root).
 const repoRoot = path.resolve(desktopDir, "..", "..");
 
 app.setName("gates-local");

@@ -136,9 +136,9 @@ again by itself: it is tried again when the signed list changes, when the
 person uses Check for updates, or on Download. With the switch off,
 Settings offers a Download button. Turning the switch off stops a download
 and deletes downloaded versions, and a newer signed list deletes the folders
-of older versions. Nothing installs yet: Settings says the version is
-downloaded and checked and links the release page, and Update and restart
-answers that this installed copy cannot update itself yet.
+of older versions. Once a version is downloaded and checked, a copy that can
+install it offers **Restart to update** (see "Restart to update on Windows"
+below); a copy that cannot says so and links the release page.
 
 A copy whose version is not a
 plain release (`0.0.0-dev`) is a development build and does not check; a

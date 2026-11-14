@@ -1,4 +1,4 @@
-// "Update and restart" (src/update-launch.ts, src/running.ts): the command
+// "Restart to update" (src/update-launch.ts, src/running.ts): the command
 // main starts before it quits, and the pid file the updater reads to tell
 // the app is open.
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -119,7 +119,7 @@ function pendingStart() {
   return { start, ends, count: () => starts };
 }
 
-describe("one Update and restart per click", () => {
+describe("one Restart to update per click", () => {
   it("starts once when two calls arrive before the first has spawned, and both get its answer", async () => {
     const p = pendingStart();
     const click = onceUntilFailed(p.start);

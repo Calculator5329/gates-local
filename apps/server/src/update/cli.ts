@@ -6,7 +6,7 @@
 //   pnpm run app-update --check         say what an update would bring; change nothing
 //   pnpm run app-update --channel main  every change on the branch, not only releases
 //
-// The desktop app's "Update and restart" starts this detached with
+// The desktop app's "Restart to update" starts this detached with
 // --wait-pid <its pid> --restart: the command waits for the app to exit,
 // updates, writes the result for the app's next start and opens the app
 // again with --relaunch-cwd and the --relaunch-arg list it was given.
