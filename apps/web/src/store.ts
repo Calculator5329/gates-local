@@ -27,6 +27,7 @@ import type {
   Settings,
   ShellStatus,
   Source,
+  SuggestedList,
   Thread,
   ToolStep,
   UpdateStatus,
@@ -204,6 +205,8 @@ export interface State {
   readonly settings: Maybe<Settings>;
   readonly gpu: Maybe<GpuStatus>;
   readonly catalog: Maybe<readonly CatalogEntry[]>;
+  /** The chat list in use (models.suggested): maker groups and example names. */
+  readonly suggested: Maybe<SuggestedList>;
   /** Measured decode speed by model name without ":latest"; a model with no entry shows no number (model-speed.tsx). */
   readonly speeds: Maybe<Readonly<Record<string, ModelSpeed>>>;
   /** Models measured on this computer, by name (Settings › Models, Measure; session/measures.ts). */
@@ -280,6 +283,7 @@ const initial: State = {
   settings: undefined,
   gpu: undefined,
   catalog: undefined,
+  suggested: undefined,
   speeds: undefined,
   measures: undefined,
   measuring: {},

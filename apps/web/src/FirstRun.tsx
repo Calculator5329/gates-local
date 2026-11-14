@@ -4,7 +4,7 @@
 // progress and Cancel; the chat can open to draft while it downloads.
 import { type ReactNode, useEffect, useState } from "react";
 import type { CatalogEntry } from "@gates-local/contracts";
-import { EXAMPLE_MODEL } from "./picker-models.ts";
+import { suggestedOf } from "./picker-models.ts";
 import { CONNECTING, booting, ownCopyNote, portOf, rtOf, unread } from "./Banner.tsx";
 import { DlButton, canCancelPull } from "./ModelDownloads.tsx";
 import { ctxFor, describeModel, etaText, gb, k, noGpu, verdictOf } from "./format.ts";
@@ -139,6 +139,7 @@ function NoModels() {
   const entry = useStore(recommendedEntry);
   const catalogNA = useStore((s) => s.catalog === NA);
   const pullNA = useStore((s) => s.unavailable["models.pull"] === true);
+  const example = useStore((s) => suggestedOf(s)?.example);
   const canCancel = useStore(canCancelPull);
   const active = useStore(firstPull);
   const p = useStore((s) => (active === undefined ? undefined : s.pulls[active]));
@@ -197,7 +198,7 @@ function NoModels() {
       <Shell st={st} title={pullNA ? "No model installed yet" : "Download your first model"}>
         <p className="fr-note na">
           {pullNA || catalogNA ? "Gates Local can't download models from here. " : ""}
-          On the computer, download one with Ollama, for example <span className="mono">ollama pull {EXAMPLE_MODEL}</span>, then press Retry.
+          On the computer, download one with Ollama{example === undefined ? "" : <>, for example <span className="mono">ollama pull {example}</span></>}, then press Retry.
         </p>
         <Cta label="Retry" onGo={() => void recheckRuntime()} />
       </Shell>

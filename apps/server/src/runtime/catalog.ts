@@ -8,7 +8,7 @@ import { cardRamBytes, decideFit, estimateBeforeDownload, surveyFit, type FitDep
 import { defaultMeminfo, defaultNvidiaSmi, GPU_REUSE_MS, readGpu, readMemory } from "../fit/gpu.ts";
 import type { RegistryLookup } from "./registry-size.ts";
 import type { SettingsReader } from "../settings/store.ts";
-import { canonicalTag, CURATED_MODELS, curated, modelLabel, OWN_MODEL_PURPOSE } from "./recommended.ts";
+import { canonicalTag, curated, curatedModels, modelLabel, OWN_MODEL_PURPOSE } from "./recommended.ts";
 import { canChat } from "./pick.ts";
 import { tierFor, type Tier } from "./tiers.ts";
 import type { ModelInfo } from "./types.ts";
@@ -63,7 +63,7 @@ export function catalogModels(listed: readonly ModelInfo[]): CatalogModel[] {
   const installedTags = new Set(listed.map((m) => canonicalTag(m.name)));
   const models: CatalogModel[] = [];
   const byTag = new Map(installed.map((m) => [canonicalTag(m.name), m]));
-  for (const c of CURATED_MODELS) {
+  for (const c of curatedModels()) {
     const own = byTag.get(c.name);
     if (own) models.push({ name: own.name, label: c.label, purpose: c.purpose, downloadBytes: own.sizeBytes, installed: true });
     else if (c.pullable && !installedTags.has(c.name)) models.push({ name: c.name, label: c.label, purpose: c.purpose, downloadBytes: c.downloadBytes, installed: false });

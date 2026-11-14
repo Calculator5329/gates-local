@@ -9,7 +9,7 @@ import { answers, canPick, cardFit, fitFor, stopsChat } from "./fit-table.ts";
 import { MakerMark } from "./MakerMark.tsx";
 import { ModelSpeed, speedWords } from "./model-speed.tsx";
 import { Icon } from "./icons.tsx";
-import { activeEntry, contextRuler, MAKERS, makerOf, pickerEntries, type Maker } from "./picker-models.ts";
+import { activeEntry, contextRuler, makerGroups, makerOf, pickerEntries, suggestedOf, type Maker } from "./picker-models.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { openSettings, pickModel, setContext } from "./session.ts";
 import { NA, chatReady, getState, setState, useStore } from "./store.ts";
@@ -53,6 +53,7 @@ export function Picker() {
   const models = useStore(s => s.models);
   const pullNA = useStore(s => s.unavailable["models.pull"] === true);
   const catalogRaw = useStore(s => s.catalog);
+  const makers = useStore(s => suggestedOf(s)?.makers);
   const table = useStore(s => s.fitTable);
   // an empty or unreadable table reads as no table: placeholders, and nothing pickable yet
   const answered = answers(table);
@@ -82,13 +83,13 @@ export function Picker() {
   const rows: Row[] = pickerEntries(models, pulls, catalog, selected).map(({ pull, ...entry }) => ({ ...entry, v: report(entry.tag),
     ...pull ? { downloading: pull.totalBytes ? Math.round(pull.completedBytes / pull.totalBytes * 100) : 0, frees: false } : { frees: stopsChat(fitOf(entry.tag)) } }));
   const q = query.toLowerCase().trim();
-  const filtered = rows.filter(r => q ? `${r.label} ${r.tag}`.toLowerCase().includes(q) : group === "all" || (group === "favorites" ? favorites.includes(r.tag) : makerOf(r.tag) === group));
+  const filtered = rows.filter(r => q ? `${r.label} ${r.tag}`.toLowerCase().includes(q) : group === "all" || (group === "favorites" ? favorites.includes(r.tag) : makerOf(r.tag, makers) === group));
   const limit = phone ? 5 : 6; // Leave room for Show more alongside the phone's 44 px rows.
   const visible = q || expanded ? filtered : filtered.slice(0, limit);
   const active = activeEntry(visible, selected, highlight);
   const activeMax = active?.info?.maxContext;
   const actual = active ? ctxFor(numCtx, models, active.tag) : numCtx;
-  const present = new Set([...rows.map(r => makerOf(r.tag)), ...(catalog ?? []).map(c => makerOf(c.name))]);
+  const present = new Set([...rows.map(r => makerOf(r.tag, makers)), ...(catalog ?? []).map(c => makerOf(c.name, makers))]);
   // The first view waits for the model list only; fit values before the first table are skeletons.
   const prepared = !readyForFits || models !== undefined || settled;
   useLayoutEffect(() => {
@@ -198,7 +199,7 @@ export function Picker() {
         <button className="pk-fam" data-testid="models.picker.favorites" aria-label="Favorites" aria-pressed={group === "favorites"} data-tip="Favorites" onClick={() => { setGroup("favorites"); setQuery(""); setHighlight(null); setExpanded(false); }}><Icon id="star" /></button>
         <span className="pk-rail-line" />
         <button className="pk-fam" data-testid="models.picker.all" aria-label="All models" aria-pressed={group === "all"} data-tip="All models" onClick={() => { setGroup("all"); setQuery(""); setHighlight(null); setExpanded(false); }}><svg className="mark"><use href="#i-mark" /></svg></button>
-        {MAKERS.filter(m => present.has(m)).map(m => <button key={m} className="pk-fam" data-testid="models.picker.maker" aria-label={m} aria-pressed={group === m} data-tip={esc(m)} onClick={() => { setGroup(m); setQuery(""); setHighlight(null); setExpanded(false); input.current?.focus({ preventScroll: true }); }}><MakerMark tag={m === "Phi" ? "phi4" : m} /></button>)}
+        {makerGroups(makers).filter(m => present.has(m)).map(m => <button key={m} className="pk-fam" data-testid="models.picker.maker" aria-label={m} aria-pressed={group === m} data-tip={esc(m)} onClick={() => { setGroup(m); setQuery(""); setHighlight(null); setExpanded(false); input.current?.focus({ preventScroll: true }); }}><MakerMark tag={m === "Phi" ? "phi4" : m} /></button>)}
       </nav>
       <div className="pk-main">
         <div className="pk-search"><Icon id="search" /><input ref={input} id="pkSearch" role="combobox" placeholder="Search models…" aria-label="Search models" data-testid="models.picker.search" aria-controls="pkList" aria-expanded={!!pop} aria-autocomplete="list" aria-activedescendant={highlight && visible.some(r => r.tag === highlight) ? `pk-opt-${visible.findIndex(r => r.tag === highlight)}` : undefined} value={query} onChange={e => { setQuery(e.target.value); setHighlight(null); closeTip(); }} onKeyDown={modelKeys} /><button className="pk-close" data-testid="models.picker.close" aria-label="Close" onClick={() => closePop(true)}><Icon id="x" /></button></div>

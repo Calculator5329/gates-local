@@ -12,7 +12,7 @@ import { ctxFor, describeModel, gb, k, modelFacts, noGpu, verdictOf } from "./fo
 import { DownloadBar, LoadRing } from "./LoadBar.tsx";
 import { loadGuess } from "./load-times.ts";
 import { MakerMark } from "./MakerMark.tsx";
-import { EXAMPLE_LABEL, pickerLabels } from "./picker-models.ts";
+import { pickerLabels, suggestedOf } from "./picker-models.ts";
 import { imagePickerScreen, pickerScreen, threadScreen } from "./screen-loaders.ts";
 import { chosenImage, imageCount, imageMode, imagesUnset, sizeLabel } from "./image-choice.ts";
 import { ImageMark } from "./ImageMark.tsx";
@@ -66,9 +66,9 @@ function usedTokens(s: State): number {
  * depends on the model's "thinking" capability, so it waits for a chat
  * model to be installed (F70) and greys for a model without it.
  */
-export function thinkUnavailable(model: ModelInfo | undefined, name: string, downloading: boolean): string | null {
+export function thinkUnavailable(model: ModelInfo | undefined, name: string, downloading: boolean, example?: string): string | null {
   if (downloading || model === undefined) return "Available when the model finishes downloading.";
-  if (!canThink(model)) return `<b>Thinking</b> is not available: ${esc(name)} does not reason before answering. Pick a model that does, such as ${esc(EXAMPLE_LABEL)}.`;
+  if (!canThink(model)) return `<b>Thinking</b> is not available: ${esc(name)} does not reason before answering. Pick a model that does${example === undefined ? "" : `, such as ${esc(example)}`}.`;
   return null;
 }
 
@@ -113,6 +113,7 @@ export function Composer() {
   const notice = useStore((s) => s.notice);
   const fit = useStore((s) => fitFor(s.fitTable, s.model, ctxFor(s.numCtx, s.models, s.model)));
   const models = useStore((s) => s.models);
+  const exampleLabel = useStore((s) => suggestedOf(s)?.exampleLabel);
   const catalog = useStore(catalogOf);
   const imageGen = useStore(imageGenOf);
   const isStreaming = useStore(streamingHere);
@@ -180,7 +181,7 @@ export function Composer() {
   const why = chatBlockedReason(models, model); // a download would not help: old Ollama, or the model is still being checked
   const noModel = (model === undefined || why !== undefined) && !queueable;
   // During setup the gate style already greys every control; otherwise the pill says why it is off.
-  const thinkNa = blocked ? null : thinkUnavailable(models?.find((m) => m.name === model), name, first !== undefined);
+  const thinkNa = blocked ? null : thinkUnavailable(models?.find((m) => m.name === model), name, first !== undefined, exampleLabel);
 
   // the label is the name and nothing else, so the button keeps its width (chat rows 28, 29): a download
   // is the bar on its edge, and its percent, like a download still to come, is in the tip

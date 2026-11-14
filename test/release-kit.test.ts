@@ -307,3 +307,49 @@ test("artifact uses the native packager and records only a successful clean buil
   writeFileSync(path.join(repo, "dirty"), "changed");
   expect(run(repo, args, env)).toMatchObject({ status: 1, output: expect.stringContaining("untracked or changed files") });
 });
+
+// The chat model list an installed copy fetches beside release.json (apps/server/src/update/installed/models-list.ts).
+function modelsCheckout(trusted: boolean) {
+  const dir = scratch();
+  const key = path.join(dir, "private.pem");
+  const pair = generateKeyPairSync("ed25519");
+  writeFileSync(key, pair.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
+  const publicKey = pair.publicKey.export({ type: "spki", format: "der" }).toString("base64");
+  const repo = path.join(dir, "repo"); checkout(repo);
+  const trustFile = path.join(repo, "apps/server/src/update/release-manifest.ts"); mkdirSync(path.dirname(trustFile), { recursive: true });
+  writeFileSync(trustFile, `export const TRUSTED_RELEASE_KEYS = ${JSON.stringify(trusted ? [publicKey] : [])};\n`);
+  const list = path.join(repo, "packages/contracts/src/chat-models.json"); mkdirSync(path.dirname(list), { recursive: true });
+  const real = path.join(import.meta.dirname, "../packages/contracts/src/chat-models.json");
+  const source: unknown = JSON.parse(readFileSync(real, "utf8"));
+  writeFileSync(list, JSON.stringify(source, null, 2) + "\n");
+  commit(repo);
+  return { dir, repo, key, list, publicKey, out: path.join(dir, "release") };
+}
+test("models builds and signs a list the installed copy's reader accepts", async () => {
+  const f = modelsCheckout(true);
+  const result = run(f.repo, ["models", "--key", f.key, f.out]);
+  expect(result).toMatchObject({ status: 0, output: expect.stringContaining("models.json signature: written") });
+  expect(result.output).not.toContain("PRIVATE KEY");
+  const { verifySigned } = await import(pathToFileURL(path.join(import.meta.dirname, "../apps/server/src/update/release-manifest.ts")).href);
+  const { parseModelsFile } = await import(pathToFileURL(path.join(import.meta.dirname, "../apps/server/src/update/installed/models-list.ts")).href);
+  const bytes = readFileSync(path.join(f.out, "models.json"));
+  verifySigned(bytes, readFileSync(path.join(f.out, "models.json.sig")), [f.publicKey]);
+  const { parseChatModels } = await import(pathToFileURL(path.join(import.meta.dirname, "../packages/contracts/src/chat-models.ts")).href);
+  // The same reader as the built-in list; notes such as "about" are not published.
+  expect(parseModelsFile(bytes)).toEqual(parseChatModels(JSON.parse(readFileSync(f.list, "utf8"))));
+  // Never overwritten: a second run refuses and leaves the first pair alone.
+  expect(run(f.repo, ["models", "--key", f.key, f.out])).toMatchObject({ status: 1 });
+  expect(readFileSync(path.join(f.out, "models.json"))).toEqual(bytes);
+});
+test.each(["uncommitted list", "untrusted key", "broken list", "no checkout"] as const)("models refuses %s and writes nothing", (scenario) => {
+  const f = modelsCheckout(scenario !== "untrusted key");
+  if (scenario === "uncommitted list" || scenario === "broken list") {
+    const source = JSON.parse(readFileSync(f.list, "utf8")) as Record<string, unknown>;
+    writeFileSync(f.list, JSON.stringify({ ...source, revision: scenario === "broken list" ? 0 : Number(source["revision"]) + 1 }));
+    if (scenario === "broken list") commit(f.repo);
+  }
+  const message = { "uncommitted list": "commit it", "untrusted key": "TRUSTED_RELEASE_KEYS", "broken list": "revision", "no checkout": "checkout" }[scenario];
+  expect(run(scenario === "no checkout" ? f.dir : f.repo, ["models", "--key", f.key, f.out])).toMatchObject({ status: 1, output: expect.stringContaining(message) });
+  expect(existsSync(path.join(f.out, "models.json"))).toBe(false);
+  expect(existsSync(path.join(f.out, "models.json.sig"))).toBe(false);
+});

@@ -41,6 +41,8 @@ export function listFor(version: string, bytes: Buffer, key: KeyObject, over: { 
 export const BASE = new URL("https://feed.example.invalid/owner/repo/releases");
 export const LIST_URL = `${BASE.href}/latest/download/release.json`;
 export const SIG_URL = `${LIST_URL}.sig`;
+export const MODELS_URL = `${BASE.href}/latest/download/models.json`;
+export const MODELS_SIG_URL = `${MODELS_URL}.sig`;
 
 /** An in-memory feed: what each address answers, and every address read. */
 export function memoryFeed(answers: Record<string, Fetched> = {}): { readonly get: Get; readonly reads: string[]; answer(url: string, fetched: Fetched): void; serve(files: { list: Buffer; sig: Buffer }): void } {

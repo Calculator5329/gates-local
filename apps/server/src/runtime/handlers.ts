@@ -1,6 +1,8 @@
-// models.catalog, models.pulls, models.pull, models.cancelPull, models.remove and
-// models.load. models.list and models.refresh stay in app.ts (slice 1).
+// models.catalog, models.suggested, models.pulls, models.pull, models.cancelPull,
+// models.remove and models.load. models.list and models.refresh stay in app.ts (slice 1).
+import { suggestedList } from "@gates-local/contracts";
 import type { FitDeps } from "../fit/fit.ts";
+import { chatList } from "./chat-list.ts";
 import type { SettingsReader } from "../settings/store.ts";
 import type { Handlers } from "../ws/server.ts";
 import { buildCatalog, estimateTyped } from "./catalog.ts";
@@ -58,6 +60,7 @@ export function createRuntimeHandlers(deps: RuntimeHandlerDeps) {
         ...(deps.fit ? { fit: deps.fit } : {}),
         ...(deps.log ? { log: deps.log } : {}),
       }),
+    "models.suggested": () => suggestedList(chatList()),
     "models.estimate": ({ name, numCtx }) =>
       estimateTyped({ ...(deps.lookup ? { lookup: deps.lookup } : {}), ...(deps.fit ? { fit: deps.fit } : {}) }, name, numCtx, AbortSignal.timeout(10_000)),
     "models.pulls": () => deps.pulls.pending(),

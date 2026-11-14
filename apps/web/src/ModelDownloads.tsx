@@ -3,7 +3,8 @@
 // Models page's Download tab shows these as they are, and first run and the
 // Installed tab share the progress bar and timing words.
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { CHAT_MODELS, type CatalogEntry, type FitReport, type ModelEstimate, type PullProgress } from "@gates-local/contracts";
+import type { CatalogEntry, FitReport, ModelEstimate, PullProgress } from "@gates-local/contracts";
+import { suggestedOf } from "./picker-models.ts";
 import { shortGpu } from "./FitPanel.tsx";
 import { type Verdict, etaText, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
@@ -244,6 +245,7 @@ function CustomPull({ actions, numCtx }: { actions: DownloadActions; numCtx: num
   const [typed, setTyped] = useState<Typed>();
   const [menu, setMenu] = useState(false);
   const cpu = useStore((s) => noGpu(s.gpu));
+  const typedExample = useStore((s) => suggestedOf(s)?.typedExample);
   const box = useRef<HTMLDivElement>(null);
   useOutside(box, menu, () => setMenu(false));
   // the row menu keys as the Installed menu's do: focus goes in, Escape closes the menu and not the pop-up
@@ -298,7 +300,7 @@ function CustomPull({ actions, numCtx }: { actions: DownloadActions; numCtx: num
         )
       }
     >
-      <input className="inp" placeholder={`Model name, e.g. ${CHAT_MODELS.typedExample}`} aria-label="Model name" data-testid="models.custom.name" value={name} onChange={(e) => setName(e.target.value)} />
+      <input className="inp" placeholder={typedExample === undefined ? "Model name" : `Model name, e.g. ${typedExample}`} aria-label="Model name" data-testid="models.custom.name" value={name} onChange={(e) => setName(e.target.value)} />
       <div className="dl-typed-a" ref={box} data-testid="models.custom.actions" onKeyDown={(e) => menu && walk(e, box.current, "[role=menuitem]", closeMenu)}>
         <DlButton
           size={answer?.downloadBytes === undefined ? undefined : gb(answer.downloadBytes)}

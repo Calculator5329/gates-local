@@ -219,6 +219,6 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
       });
   }
 
-  return { modelsOrder, runtimeOrder, catalogOrder, catalogLands, refreshModels,
+  return { modelsOrder, runtimeOrder, catalogOrder, catalogLands, refreshModels, refreshCatalog,
     pickModel, typedInComposer, pull, cancelPull, removeModel, recheckRuntime, runtimeChanged, modelsChanged, pullChanged, loadChanged };
 }

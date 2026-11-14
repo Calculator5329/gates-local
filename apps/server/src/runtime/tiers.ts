@@ -17,16 +17,17 @@
 // quick large pick once there is room for it. On 12 and 16 GB cards the 9B stays first: a quick
 // download that leaves the card room for a longer context and for the GPU's other apps (speech,
 // images); the larger models follow it as alternates. The picks themselves are data, in
-// packages/contracts/src/chat-models.json.
-import { CHAT_MODELS } from "@gates-local/contracts";
+// packages/contracts/src/chat-models.json or the newer signed list in use (chat-list.ts).
+import type { ChatModels } from "@gates-local/contracts";
 import { GIB } from "../fit/constants.ts";
+import { chatList } from "./chat-list.ts";
 
 export interface Tier {
   /** "gpu" places by the GPU's memory; "system" by system memory on a computer with no supported GPU. */
   readonly by: "gpu" | "system";
   /** The memory the tier starts at, as its label says it ("8 GB"). */
   readonly gb: number;
-  /** Ollama tags from CURATED_MODELS: the first pick, then up to two alternates. */
+  /** Ollama tags from curatedModels(): the first pick, then up to two alternates. */
   readonly picks: readonly [string, ...string[]];
 }
 
@@ -36,7 +37,18 @@ const tier = (by: Tier["by"]) => (row: { readonly gb: number; readonly picks: re
   return { by, gb: row.gb, picks: [first, ...rest] };
 };
 
-export const TIERS: readonly Tier[] = [...CHAT_MODELS.tiers.system.map(tier("system")), ...CHAT_MODELS.tiers.gpu.map(tier("gpu"))];
+const made = new WeakMap<ChatModels, readonly Tier[]>();
+
+/** Every tier of the list in use, system ones first. */
+export function tiers(): readonly Tier[] {
+  const list = chatList();
+  let rows = made.get(list);
+  if (rows === undefined) {
+    rows = [...list.tiers.system.map(tier("system")), ...list.tiers.gpu.map(tier("gpu"))];
+    made.set(list, rows);
+  }
+  return rows;
+}
 
 /**
  * A memory reading is a little under its label: a "16 GB" card reads 15.9 GiB and an "8 GB"
@@ -51,8 +63,8 @@ const reaches = (bytes: number, gb: number) => bytes >= gb * GIB * 0.9;
 export function tierFor(memory: { gpuCount: number; gpuTotalBytes: number; systemTotalBytes: number }): Tier {
   const by = memory.gpuCount > 0 ? "gpu" : "system";
   const bytes = by === "gpu" ? memory.gpuTotalBytes : memory.systemTotalBytes;
-  const tiers = TIERS.filter((t) => t.by === by).toSorted((a, b) => a.gb - b.gb);
-  const smallest = tiers[0];
+  const rows = tiers().filter((t) => t.by === by).toSorted((a, b) => a.gb - b.gb);
+  const smallest = rows[0];
   if (smallest === undefined) throw new Error(`no ${by} tier`);
-  return tiers.findLast((t) => reaches(bytes, t.gb)) ?? smallest;
+  return rows.findLast((t) => reaches(bytes, t.gb)) ?? smallest;
 }

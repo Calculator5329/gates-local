@@ -1,7 +1,8 @@
 {
   "format": 1,
+  "revision": 1,
   "checked": "2026-11-11",
-  "about": "The chat models Gates Local suggests. Edit this file to change the list: no code names a model. Each model must be one anyone can fetch with ollama pull. downloadBytes is the sum of layer and config sizes in the registry manifest (registry.ollama.ai/v2/<name>/manifests/<tag>); an installed model uses its own size instead. purpose is four words or fewer and must hold on any computer (no GPU words). The order of models is the rank the app picks a chat model by.",
+  "about": "The chat models Gates Local suggests. Edit this file to change the list: no code names a model. Raise revision by one with every edit: an installed copy takes a list from the release page (models.json) only when its revision is higher than the one it has. Each model must be one anyone can fetch with ollama pull. downloadBytes is the sum of layer and config sizes in the registry manifest (registry.ollama.ai/v2/<name>/manifests/<tag>); an installed model uses its own size instead. purpose is four words or fewer and must hold on any computer (no GPU words). The order of models is the rank the app picks a chat model by.",
   "models": [
     { "name": "qwen3.5:9b", "label": "Qwen 3.5 9B", "purpose": "Fast everyday answers", "downloadBytes": 6550825550 },
     { "name": "gemma4:12b", "label": "Gemma 4 12B", "purpose": "Careful longer answers", "downloadBytes": 8021618941 },

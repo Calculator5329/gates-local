@@ -19,6 +19,8 @@ export const FEED_LIMITS = {
   redirects: 5,
   listBytes: 64 * 1024,
   signatureBytes: 1024,
+  /** The signed chat model list (models.json); the built-in one is under 4 KiB. */
+  modelsBytes: 64 * 1024,
   /** Connecting, and any silence after: one socket timeout covers both. */
   idleMs: 30_000,
   /** The whole read, every redirect included. */

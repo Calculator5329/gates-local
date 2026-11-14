@@ -38,6 +38,7 @@ import { parseReleaseKey, type ReleaseArtifact, TRUSTED_RELEASE_KEYS } from "../
 import { checkInstalled, type InstalledOutcome } from "./check.ts";
 import { type DownloadOutcome, downloadRelease, listHash, preparedRelease, removeVersions, type Space, verifyKept } from "./download.ts";
 import { boundedGet, type Get, refusedAddress, type Stream, streamGet } from "./feed.ts";
+import type { ModelLists } from "./models-list.ts";
 
 export const INSTALLED_VERSION_ENV = "GATES_LOCAL_INSTALLED_VERSION";
 export const FEED_ENV = "GATES_LOCAL_UPDATE_FEED";
@@ -223,6 +224,12 @@ export interface InstalledModuleDeps {
   readonly resultPollMs?: number;
   /** Tests pass a fake; the real one is boundedGet. */
   readonly get?: Get;
+  /**
+   * The chat model list from the release page (models-list.ts): the kept one
+   * is read when the module starts, a newer one after each check whose
+   * release.json verified. Absent, the copy uses its built-in list only.
+   */
+  readonly models?: ModelLists;
   /** The artifact's read; the real one is streamGet with the feed's rules. */
   readonly stream?: Stream;
   /** Tests pretend a full disk. */
@@ -269,6 +276,10 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     queue = next.catch(() => undefined);
     return next;
   };
+
+  // The kept chat model list, checked again before use: it survives a restart with no network.
+  try { deps.models?.loadStored(); }
+  catch (error) { log(`chat model list: ${error instanceof Error ? error.message : String(error)}`); }
 
   const restart = deps.restart ?? "none";
   // Windows: set once the running version's kept installer has been looked for.
@@ -458,6 +469,10 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
       .catch((error: unknown): InstalledOutcome => ({ kind: "unreachable", detail: error instanceof Error ? error.message : String(error) }));
     if ("detail" in outcome) log(`update check: ${outcome.kind}: ${outcome.detail}`);
     await settle(outcome);
+    // The chat model list rides on a release.json that verified; whatever it does, the verdict below is the check's own.
+    if (deps.models !== undefined && (outcome.kind === "none-found" || outcome.kind === "newer") && !closed) {
+      await deps.models.refresh(controller.signal).catch((error: unknown) => log(`chat model list: ${error instanceof Error ? error.message : String(error)}`));
+    }
     return installedCheck(outcome, { version: deps.version, page: deps.feed.page, checkedAt });
   };
 

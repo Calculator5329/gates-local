@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-13: The suggested chat models update with the hourly check
+
+- An installed copy picks up a new list of suggested chat models (the
+  Models list, the tiers, the maker groups and the example names) from
+  the release page at its hourly update check, with no new version of
+  the app. The list is signed with the release key and checked the same
+  way as the release list; a copy keeps it across restarts and checks it
+  again on every start.
+- A missing list changes nothing and shows nothing. A list that fails its
+  signature, its size limit or its format is ignored and logged once, and
+  an older list never replaces a newer one. The update check's own answer
+  never depends on the list.
+- `pnpm release:models` builds and signs the list from the committed
+  `chat-models.json`.
+- Why: the suggested models go stale between releases, and a release only
+  to change a list of names is a whole build on two systems.
+
 ## 2026-11-13: The release check runs as two halves
 
 - `pnpm release:check --part correctness` runs the unit tests and the
@@ -8,8 +25,8 @@
 - A release is tagged from the correctness report. A timing-only report
   ran no tests and cannot tag.
 - Why: the timed half needs a machine to itself and the tests do not. As
-  one job the whole check held that machine for about twenty minutes; the
-  timed half alone takes about seven.
+  one job the whole check held that machine for about 46 minutes at the
+  last release; the timed half alone takes about seven.
 
 ## 2026-11-13: The bug finder's past bugs survive landings
 

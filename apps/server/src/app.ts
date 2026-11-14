@@ -13,7 +13,7 @@ import { checkFiles, fileLifecycle, fileLine, fileSources, saveFile } from "./ch
 import type { LibraryEntry } from "../../../packages/harness/src/index.ts";
 import { readThumbnail } from "./pictures/thumbs.ts";
 import { fitToWindow, OMITTED_IMAGE } from "./chat/window.ts";
-import type { AttachedFile, BlockingTurn, Channel, ImageChoice, Message, Params, Payload, ShellStatus, SyncChange, ToolStep, TurnEnded } from "@gates-local/contracts";
+import { suggestedList, type AttachedFile, type BlockingTurn, type Channel, type ImageChoice, type Message, type Params, type Payload, type ShellStatus, type SyncChange, type ToolStep, type TurnEnded } from "@gates-local/contracts";
 import { streamTurn, type UsageFigures } from "./chat/stream.ts";
 import { streamToolTurn } from "./chat/tools.ts";
 import { turnClock, type TurnClock } from "./chat/times.ts";
@@ -27,6 +27,7 @@ import { fetchShow, sameModel } from "./fit/ollama.ts";
 import { createFitTable, type FitTableSource } from "./fit/table.ts";
 import type { FitReport } from "./fit/types.ts";
 import { catalogModels } from "./runtime/catalog.ts";
+import { onChatList } from "./runtime/chat-list.ts";
 import { AdmitCancelled, ModelActionError, type ModelLoader, type TurnLoad, type TurnReservation } from "./runtime/load.ts";
 import type { ModelCatalog } from "./runtime/models.ts";
 import type { RuntimeSwitch } from "./runtime/switch.ts";
@@ -315,6 +316,11 @@ export function createApp(deps: AppDeps): App {
   });
   const offCatalog = catalog.onChange((models) => {
     push("models.changed", models);
+    fitTable.changed();
+  });
+  // A newer chat list from the release page: the clients read the catalog again, the fit table lists its models.
+  const offChatList = onChatList((list) => {
+    push("models.suggested", suggestedList(list));
     fitTable.changed();
   });
   /** Measured speeds change only when a finished reply is saved or replies are deleted; one read then, never per word. */
@@ -1166,6 +1172,7 @@ export function createApp(deps: AppDeps): App {
       attachedFiles?.stop();
       offRuntime();
       offCatalog();
+      offChatList();
       offSources?.();
       offImports?.();
       deps.libraryImports?.close();

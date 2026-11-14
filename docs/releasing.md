@@ -607,6 +607,25 @@ for that version and run by absolute path without a shell. Someone controlling
 the download page can keep serving an old, validly signed list, hiding newer
 versions. Nothing here uploads; publishing is a separate step the owner decides.
 
+### The chat model list
+
+Installed copies also read a signed chat model list, `models.json` and
+`models.json.sig`, from the same release page, after `release.json` has
+verified. To publish a new list, raise `revision` in
+`packages/contracts/src/chat-models.json`, commit it, then from that
+checkout run
+`pnpm release:models --key "$HOME/.local/share/gates-release-signing/release.pem" "$HOME/.cache/gates-models/<revision>"`
+and upload both files to the latest release. Upload them to every new release
+as well: the page serves the latest release's copy, and a release without one
+leaves installed copies on the list they already have. The command refuses an
+uncommitted list, a key the checkout does not trust and an existing output
+file, then checks its own signature with the app's reader. A copy takes the
+list only when its `schema` is 1 and its `revision` is higher than the list
+in use; it reads at most 64 KiB, and keeps the verified pair in
+`<data dir>/models-list/`, checking it again on every start. A missing list is
+silent; a bad one is logged once and ignored. The list names models,
+tiers and makers only, never a file to download or code to run.
+
 ## Clone release checks and tags
 
 A release is an annotated `vX.Y.Z` tag on `main`. There is no hosted CI;

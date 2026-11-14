@@ -155,6 +155,8 @@ async function hydrateWith(
   on("chat.event", onChatEvent);
   on("runtime.changed", modelsSession.runtimeChanged);
   on("models.changed", modelsSession.modelsChanged);
+  // A newer chat list arrived with the update check: its makers and names, then the catalog it changes.
+  on("models.suggested", (suggested) => { applyServerEvent({ suggested }); void modelsSession.refreshCatalog(); });
   on("threads.changed", ({ threadId }) => threadSession.threadsChanged(threadId));
   on("gpu.changed", (gpu) => applyServerEvent({ gpu }));
   on("fit.changed", fitTableArrived);
@@ -196,7 +198,7 @@ async function hydrateWith(
   const ticket = modelsOrder.next();
   const statusTicket = runtimeOrder.next();
   const listTicket = threadSession.listOrder.next();
-  const [status, listed, threads, snapshot, active, pendingPulls] = await Promise.all([
+  const [status, listed, threads, snapshot, active, pendingPulls, suggested] = await Promise.all([
     call("runtime.status", {}),
     call("models.list", {}).catch(() => undefined),
     call("threads.list", {}),
@@ -207,6 +209,8 @@ async function hydrateWith(
       : probe("settings.get", {}, { onResult: settingsSession.acceptSettings }),
     call("turns.active", {}),
     probe("models.pulls", {}),
+    // The makers and example names come with the models, so a maker mark never draws "?" first.
+    probe("models.suggested", {}),
   ]);
   const models = modelsOrder.current(ticket) ? listed : undefined;
   const runtime = runtimeOrder.current(statusTicket) ? status : undefined;
@@ -215,7 +219,7 @@ async function hydrateWith(
   applyServerEvent((s) => {
     const withSettings = settings === NA || settings === undefined ? { settings } : settingsPatch(s, settings, true);
     const ordered = threadSession.listOrder.current(listTicket) ? sortThreads(threads) : s.threads;
-    const next: State = { ...s, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(reconcilePulls(s.pulls, pendingPulls), models ?? s.models), threads: ordered, ...activeTurns(s, active), ...withSettings };
+    const next: State = { ...s, suggested: suggested ?? s.suggested, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(reconcilePulls(s.pulls, pendingPulls), models ?? s.models), threads: ordered, ...activeTurns(s, active), ...withSettings };
     return { ...next, ...decided(modelChoice(next)) };
   });
   if (settings !== NA && settings !== undefined) settingsSession.seedContext();

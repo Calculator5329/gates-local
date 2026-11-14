@@ -1146,6 +1146,12 @@ RS-03 remains dropped.
       *Accept:* the move acts on the file that was checked, or the design states the limit.
 - [ ] <!-- workspace:id=work:5bd68647-099d-5fd3-8daa-7a2ff0f582aa --> Installed update downloads the whole program file each time (about 90 MB). Downloading only the parts that changed would make updates smaller.
       *Accept:* a measured size for an update between two real versions, and a decision from it.
+- [ ] Chat model list from the release page: the list is published by hand (`pnpm release:models`, then an upload to the release). A list with the same revision as the one built into the app changes nothing, so the first upload that does anything is revision 2. Nothing has read a list from a real release page yet.
+      *Accept:* every release page carries `models.json` and `models.json.sig`, and an installed copy has been seen taking a revision 2 list from one.
+- [ ] Chat model list from the release page: the list is read inside the update check, so a page that answers for `release.json` and then stalls keeps "Checking…" showing up to 60 seconds longer.
+      *Accept:* the check's answer shows before the list is read.
+- [ ] Image setups are not in the list from the release page. A setup names the node code that runs and the files that get downloaded, so a downloaded image list needs a decision on what it may do: add a new setup, or only change numbers in setups the app already ships.
+      *Accept:* that decision; if a list may add a setup, an allow-list of node types and download hosts limited to the ones built in.
 - [ ] <!-- workspace:id=work:dc5b68a0-32a1-577a-a58a-6dcc57461a2e --> No check runs an older released version's data through the current version. Chat store upgrades are tested from fixtures built by the current code.
       *Accept:* a test opens a store, settings file and profile written by each released version and reads the chats back; it runs before a release is tagged.
 - [ ] <!-- workspace:id=work:4bf733c7-09c2-59b9-82e7-2a1d4ab6e964 --> Public repository: needs Ethan's explicit go for the visibility change

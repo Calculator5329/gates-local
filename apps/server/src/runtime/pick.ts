@@ -20,7 +20,7 @@
 //   A model whose capabilities are unknown (/api/show failed) cannot chat
 //   until discovery succeeds, so it is never ranked.
 import type { FitReport, FitVerdict } from "../fit/types.ts";
-import { canonicalTag, CURATED_MODELS } from "./recommended.ts";
+import { canonicalTag, curatedModels } from "./recommended.ts";
 import type { ModelInfo } from "./types.ts";
 
 /**
@@ -32,8 +32,6 @@ export type ChatPick = { name: string; pick: { numCtx: number; verdict?: FitVerd
 
 export const canChat = (m: { readonly capabilities: readonly string[] }): boolean => m.capabilities.includes("completion");
 
-const curatedIndex = new Map(CURATED_MODELS.map((c, i) => [c.name, i]));
-
 /** "9.7B" → 9.7e9, "137M" → 1.37e8; unknown sizes rank last. */
 export function parameterCount(size: string | undefined): number {
   const m = size === undefined ? null : /^([\d.]+)\s*([KMBT])?$/i.exec(size.trim());
@@ -43,10 +41,11 @@ export function parameterCount(size: string | undefined): number {
   return Number(m[1]) * scale;
 }
 
-const curatedRank = (m: ModelInfo) => curatedIndex.get(canonicalTag(m.name)) ?? CURATED_MODELS.length;
-
 /** Chat models, best first: curated order, then larger parameter count, then name. */
 export function rankChatModels(models: readonly ModelInfo[]): ModelInfo[] {
+  const curated = curatedModels();
+  const curatedIndex = new Map(curated.map((c, i) => [c.name, i]));
+  const curatedRank = (m: ModelInfo) => curatedIndex.get(canonicalTag(m.name)) ?? curated.length;
   return models
     .filter(canChat)
     .toSorted((a, b) => curatedRank(a) - curatedRank(b) || parameterCount(b.parameterSize) - parameterCount(a.parameterSize) || a.name.localeCompare(b.name));

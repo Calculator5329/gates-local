@@ -4,6 +4,7 @@
 import * as Result from "effect/Result";
 import * as S from "effect/Schema";
 import { SyncDomain, SyncMetadata, SyncNegotiation } from "./sync.ts";
+import { SuggestedList } from "./chat-models.ts";
 import {
   AttachedFile,
   BlockingTurn,
@@ -262,6 +263,8 @@ export const methods = {
   "settings.modelDefaults": { params: S.Struct({ model: S.String.check(S.isMinLength(1)) }), result: ModelDefaults, phone: "allow" },
   "gpu.status": { params: NoParams, result: GpuStatus, phone: "allow" },
   "models.catalog": { params: NoParams, result: S.Array(CatalogEntry), phone: "allow" },
+  /** The chat list in use (built in, or a newer signed one from the release page): maker groups and example names. */
+  "models.suggested": { params: NoParams, result: SuggestedList, phone: "allow" },
   /** A typed name's size and fit before any download (Models › Download, "Something else"). */
   "models.estimate": { params: S.Struct({ name: S.String.check(S.isMinLength(1)), numCtx: NumCtx }), result: ModelEstimate, phone: "allow" },
   /** Download jobs still known to the server; reconnect reconciles missed terminal pushes. */
@@ -341,6 +344,8 @@ export const pushes = {
   "chat.event": { payload: S.Struct({ turnId: S.String, threadId: S.String, event: ChatEvent }) },
   "runtime.changed": { payload: RuntimeStatus },
   "models.changed": { payload: S.Array(ModelInfo) },
+  /** The chat list in use changed: a newer signed list arrived with the update check. The catalog changes with it. */
+  "models.suggested": { payload: SuggestedList },
   "threads.changed": { payload: ThreadRef },
   // ---- v2 surface (2026-11-07)
   // Transient provenance, never persisted in Settings. A client can distinguish

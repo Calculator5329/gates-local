@@ -1,3 +1,4 @@
+import { CHAT_MODELS } from "@gates-local/contracts";
 import { describe, expect, it } from "vitest";
 import { makerOf, memoryRuler, pickerLabel, pickerLabels } from "./picker-models.ts";
 
@@ -32,13 +33,18 @@ describe("model picker presentation", () => {
     for (const [tag, label] of examples) expect(pickerLabel(tag ?? "")).toBe(label);
   });
   it("groups raw and hosted variants under a stable maker, including downloads", () => {
-    expect(makerOf("gemma4-abliterated:26b")).toBe("Gemma");
-    expect(makerOf("hf.co/person/Qwen3.8-custom-GGUF:Q4_K_M")).toBe("Qwen");
-    expect(makerOf("milo-e4b-v4:latest")).toBe("Milo");
-    expect(makerOf("mistral-small3.2:24b")).toBe("Mistral");
-    expect(makerOf("phi4:latest")).toBe("Phi");
-    expect(makerOf("gpt-oss:20b")).toBe("gpt-oss");
-    expect(makerOf("an-unknown-local-name:latest")).toBe("Other");
+    const makers = CHAT_MODELS.makers;
+    expect(makerOf("gemma4-abliterated:26b", makers)).toBe("Gemma");
+    expect(makerOf("hf.co/person/Qwen3.8-custom-GGUF:Q4_K_M", makers)).toBe("Qwen");
+    expect(makerOf("milo-e4b-v4:latest", makers)).toBe("Milo");
+    expect(makerOf("mistral-small3.2:24b", makers)).toBe("Mistral");
+    expect(makerOf("phi4:latest", makers)).toBe("Phi");
+    expect(makerOf("gpt-oss:20b", makers)).toBe("gpt-oss");
+    expect(makerOf("an-unknown-local-name:latest", makers)).toBe("Other");
+  });
+  it("takes its makers from the list the server sends, and names none before it arrives", () => {
+    expect(makerOf("newco-7b:latest", [{ name: "Newco", match: "^newco" }])).toBe("Newco");
+    expect(makerOf("gemma4:12b", undefined)).toBe("Other");
   });
   it("scales to usable memory, exposes overflow, and keeps a bounded display", () => {
     const fitting = memoryRuler(7.64, 11.56);

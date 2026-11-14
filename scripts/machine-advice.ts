@@ -7,7 +7,7 @@ import { defaultNvidiaSmi, readGpu } from "../apps/server/src/fit/gpu.ts";
 import type { NvidiaSmiRunner } from "../apps/server/src/fit/types.ts";
 import { cardBytes, NO_GPU, presetFiles, PRESETS, tiersFor } from "../apps/server/src/image/presets.ts";
 import { markRecommended } from "../apps/server/src/runtime/catalog.ts";
-import { CURATED_MODELS } from "../apps/server/src/runtime/recommended.ts";
+import { curatedModels } from "../apps/server/src/runtime/recommended.ts";
 import { tierFor } from "../apps/server/src/runtime/tiers.ts";
 import { defaultSettings } from "../apps/server/src/settings/store.ts";
 
@@ -48,7 +48,7 @@ const download = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
 /** Judged as the app judges: against the GPU's memory and the system memory the machine has, by its tier. */
 function catalog(machine: MachineReadings, numCtx: number): CatalogEntry[] {
   const gpuTotalBytes = machine.gpu.kind === "nvidia" ? machine.gpu.totalBytes : 0;
-  const entries = CURATED_MODELS.filter((c) => c.pullable).map((c) => ({
+  const entries = curatedModels().filter((c) => c.pullable).map((c) => ({
     name: c.name,
     label: c.label,
     purpose: c.purpose,

@@ -1,10 +1,15 @@
 import { execFileSync, spawn } from "node:child_process";
-import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, type KeyObject } from "node:crypto";
 import { constants, copyFileSync, createReadStream, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { encodeManifest, parseManifest, signManifest, TRUSTED_RELEASE_KEYS, validateReleaseVersion, verifyManifest, type ReleaseArtifact, type ReleaseManifest } from "../apps/server/src/update/release-manifest.ts";
+import { FEED_LIMITS } from "../apps/server/src/update/installed/feed.ts";
+import { encodeModelsFile, MODELS_FILE, MODELS_SIGNATURE_FILE, parseModelsFile } from "../apps/server/src/update/installed/models-list.ts";
+import { encodeManifest, parseManifest, signManifest, TRUSTED_RELEASE_KEYS, validateReleaseVersion, verifyManifest, verifySigned, type ReleaseArtifact, type ReleaseManifest } from "../apps/server/src/update/release-manifest.ts";
+import { parseChatModels } from "../packages/contracts/src/chat-models.ts";
+
+const LIST_PATH = "packages/contracts/src/chat-models.json";
 
 interface ArtifactRecord extends ReleaseArtifact { version: string; commit: string; commitFrom: "git" | "given" }
 
@@ -160,17 +165,25 @@ function keygen(args: string[]) {
   writeFileSync(file, privateKey.export({ type: "pkcs8", format: "pem" }), { flag: "wx", mode: 0o600 });
   console.log(publicKey.export({ type: "spki", format: "der" }).toString("base64"));
 }
-async function sign(args: string[]) {
-  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { key: { type: "string" }, "allow-single-platform": { type: "boolean" }, "allow-untrusted-key": { type: "boolean" } } });
-  count(positionals, 1, "release:sign --key FILE DIR");
-  const file = path.resolve(required(values.key, "--key"));
+function readKey(value: string | undefined) {
+  const file = path.resolve(required(value, "--key"));
   outsideCheckout(file);
   const info = lstatSync(file);
   if (!info.isFile()) throw new Error("Release key must be a regular file, not a link or directory");
   if (process.platform !== "win32" && (info.mode & 0o077) !== 0) throw new Error("Release key is readable by others; restrict it to owner-only permissions (chmod 600)");
-  let key;
-  try { key = createPrivateKey(readFileSync(file)); }
+  try { return createPrivateKey(readFileSync(file)); }
   catch { throw new Error("Cannot read release private key; provide an Ed25519 PKCS8 PEM file"); }
+}
+async function checkTrusted(cwd: string, key: KeyObject) {
+  const source: unknown = await import(pathToFileURL(path.join(cwd, "apps/server/src/update/release-manifest.ts")).href);
+  if (typeof source !== "object" || source === null || !("TRUSTED_RELEASE_KEYS" in source) || !Array.isArray(source.TRUSTED_RELEASE_KEYS)) throw new Error("Checkout must export TRUSTED_RELEASE_KEYS");
+  const publicKey = createPublicKey(key).export({ type: "spki", format: "der" }).toString("base64");
+  if (!source.TRUSTED_RELEASE_KEYS.some((entry: unknown) => entry === publicKey)) throw new Error("Signing key is not in this checkout's TRUSTED_RELEASE_KEYS; add its public key and land that commit before building");
+}
+async function sign(args: string[]) {
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { key: { type: "string" }, "allow-single-platform": { type: "boolean" }, "allow-untrusted-key": { type: "boolean" } } });
+  count(positionals, 1, "release:sign --key FILE DIR");
+  const key = readKey(values.key);
   const dir = path.resolve(required(positionals[0], "DIR"));
   const bytes = readFileSync(path.join(dir, "release.json"));
   const manifest = parseManifest(bytes);
@@ -182,13 +195,40 @@ async function sign(args: string[]) {
     const cwd = process.cwd();
     if (!existsSync(path.join(cwd, ".git"))) throw new Error("Signing requires a checkout at the release commit");
     if (cleanCommit(cwd) !== manifest.commit) throw new Error("Signing checkout commit does not match release.json commit");
-    const source: unknown = await import(pathToFileURL(path.join(cwd, "apps/server/src/update/release-manifest.ts")).href);
-    if (typeof source !== "object" || source === null || !("TRUSTED_RELEASE_KEYS" in source) || !Array.isArray(source.TRUSTED_RELEASE_KEYS)) throw new Error("Checkout must export TRUSTED_RELEASE_KEYS");
-    const publicKey = createPublicKey(key).export({ type: "spki", format: "der" }).toString("base64");
-    if (!source.TRUSTED_RELEASE_KEYS.some((entry: unknown) => entry === publicKey)) throw new Error("Signing key is not in this checkout's TRUSTED_RELEASE_KEYS; add its public key and land that commit before building");
+    await checkTrusted(cwd, key);
   }
   writeFileSync(path.join(dir, "release.json.sig"), signManifest(bytes, key), { flag: "wx" });
   console.log("release.json signature: written");
+}
+// The chat model list installed copies fetch beside release.json: the committed
+// chat-models.json, wrapped and signed with the release key.
+async function models(args: string[]) {
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { key: { type: "string" }, "allow-untrusted-key": { type: "boolean" } } });
+  count(positionals, 1, "release:models --key FILE DIR");
+  const key = readKey(values.key);
+  const dir = path.resolve(required(positionals[0], "DIR"));
+  const cwd = process.cwd();
+  const list = path.join(cwd, LIST_PATH);
+  if (values["allow-untrusted-key"]) {
+    console.log("Proof signing: installed copies will not accept this list unless they already trust this key; checkout and key trust checks skipped");
+  } else {
+    if (!existsSync(path.join(cwd, ".git"))) throw new Error("Building the model list requires a checkout holding the list to publish");
+    if (git(cwd, ["status", "--porcelain", "--", LIST_PATH])) throw new Error(`${LIST_PATH} has uncommitted changes; commit it first so the published list is one a commit holds`);
+    await checkTrusted(cwd, key);
+  }
+  const chat = parseChatModels(JSON.parse(readFileSync(list, "utf8")), LIST_PATH);
+  const bytes = encodeModelsFile(chat);
+  if (bytes.length > FEED_LIMITS.modelsBytes) throw new Error(`models.json is ${bytes.length} bytes; installed copies read at most ${FEED_LIMITS.modelsBytes}`);
+  const target = path.join(dir, MODELS_FILE), signatureTarget = path.join(dir, MODELS_SIGNATURE_FILE);
+  if (existsSync(target) || existsSync(signatureTarget)) throw new Error(`${MODELS_FILE} or its signature already exists in ${dir}; choose a new directory`);
+  const signature = signManifest(bytes, key);
+  verifySigned(bytes, signature, [createPublicKey(key).export({ type: "spki", format: "der" }).toString("base64")]);
+  parseModelsFile(bytes);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(target, bytes, { flag: "wx" });
+  writeFileSync(signatureTarget, signature, { flag: "wx" });
+  console.log(`models.json: revision ${chat.revision}, ${chat.models.length} models, ${bytes.length} bytes`);
+  console.log("models.json signature: written");
 }
 async function verify(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { "public-key": { type: "string" } } });
@@ -214,7 +254,8 @@ try {
     case "keygen": keygen(args); break;
     case "sign": await sign(args); break;
     case "verify": await verify(args); break;
-    default: throw new Error("Choose a release command: artifact, assemble, keygen, sign or verify");
+    case "models": await models(args); break;
+    default: throw new Error("Choose a release command: artifact, assemble, keygen, sign, verify or models");
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : "Release command failed");

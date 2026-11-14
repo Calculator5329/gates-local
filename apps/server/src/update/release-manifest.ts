@@ -108,6 +108,16 @@ export function signManifest(bytes: Uint8Array, key: KeyObject): Buffer {
 
 /** Authenticate exact bytes before JSON parsing; never reserialize to verify. */
 export function verifyManifest(bytes: Uint8Array, signature: Uint8Array, trustedKeys: readonly string[]): ReleaseManifest {
+  verifySigned(bytes, signature, trustedKeys);
+  return parseManifest(bytes);
+}
+
+/**
+ * The release key's check of exact bytes, for every file the release page
+ * signs (release.json, models.json): one canonical base64 Ed25519 line that a
+ * trusted key verifies. Throws with the reason; parse only after it returns.
+ */
+export function verifySigned(bytes: Uint8Array, signature: Uint8Array, trustedKeys: readonly string[]): void {
   if (trustedKeys.length === 0) throw new Error("This build has no release key and cannot check updates");
   const line = Buffer.from(signature).toString("utf8");
   if (!/^[A-Za-z0-9+/]{86}==\n$/.test(line)) throw new Error("release signature must be base64 of a 64-byte Ed25519 signature followed by LF");
@@ -115,5 +125,4 @@ export function verifyManifest(bytes: Uint8Array, signature: Uint8Array, trusted
   if (decoded.length !== 64 || decoded.toString("base64") + "\n" !== line) throw new Error("release signature must be canonical base64 of a 64-byte Ed25519 signature");
   const candidates = trustedKeys.map(parseReleaseKey);
   if (!candidates.some((key) => verify(null, bytes, key, decoded))) throw new Error("release signature does not match a trusted public key");
-  return parseManifest(bytes);
 }

@@ -39,7 +39,7 @@ function abortAfter(ms: number): AbortSignal {
 
 describe("the release list read", () => {
   it("has the contract's bounds", () => {
-    expect(FEED_LIMITS).toEqual({ redirects: 5, listBytes: 65_536, signatureBytes: 1024, idleMs: 30_000, totalMs: 60_000 });
+    expect(FEED_LIMITS).toEqual({ redirects: 5, listBytes: 65_536, signatureBytes: 1024, modelsBytes: 65_536, idleMs: 30_000, totalMs: 60_000 });
     expect(USER_AGENT).toBe("Gates-Local");
   });
 

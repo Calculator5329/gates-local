@@ -1,6 +1,7 @@
 // Sample values for every method and push channel. The mapped types make
 // a new method or channel without a sample a type error, so round-trip
 // tests that walk these tables cover every channel by construction.
+import { CHAT_MODELS, suggestedList } from "./chat-models.ts";
 import type { ImageFitAnswer, ImageFitInput } from "./image-fit.ts";
 import type { Channel, MethodName, Params, Payload, ResultOf } from "./protocol.ts";
 import type {
@@ -217,6 +218,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
       },
     ],
   },
+  "models.suggested": { params: {}, result: suggestedList(CHAT_MODELS) },
   "models.estimate": { params: { name: "gemma4:26b", numCtx: 16384 }, result: { name: "gemma4:26b", found: "yes", downloadBytes: 17_400_000_000 } },
   "models.pull": { params: { name: "qwen3.5:14b" }, result: { ...pull, state: "queued", completedBytes: 0 } },
   "models.cancelPull": { params: { name: "qwen3.5:14b" }, result: { cancelled: true } },
@@ -346,6 +348,7 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
   ],
   "runtime.changed": [runtime, { state: "missing", owner: "none", baseUrl: "http://127.0.0.1:11434", detail: "no answer" }],
   "models.changed": [models, []],
+  "models.suggested": [suggestedList(CHAT_MODELS)],
   "threads.changed": [{ threadId: "t1" }],
   "settings.changed": [settings],
   "gpu.changed": [gpu, { vendor: "none", occupants: [], systemMemoryAvailableBytes: 9_000_000_000, measuredAt: 1 }],

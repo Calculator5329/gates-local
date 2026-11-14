@@ -382,6 +382,25 @@ describe("the catalog follows the model list", () => {
       return Array.isArray(c) && c.every((e) => !e.installed);
     }, 2000, "a refreshed catalog");
   });
+  it("the makers arrive with the installed models, so no maker mark shows ? and then changes", async () => {
+    await boot();
+    const withModels = published.filter((s) => (s.models?.length ?? 0) > 0);
+    expect(withModels.length).toBeGreaterThan(0);
+    expect(withModels.every((s) => s.suggested !== undefined)).toBe(true);
+  });
+  it("a downloaded chat model list replaces the one in use and reloads the catalog, so a model only it names shows in Models", async () => {
+    await boot();
+    expect(store.getState().suggested).toEqual(methodSamples["models.suggested"].result);
+    const entry = { ...methodSamples["models.catalog"].result[0]!, name: "newco:7b", label: "Newco 7B", installed: false };
+    b.server.answer("models.catalog", () => [entry]);
+    const list = { ...methodSamples["models.suggested"].result, revision: 2, makers: [{ name: "Newco", match: "^newco" }] };
+    b.server.push("models.suggested", list);
+    await until(() => {
+      const c = store.getState().catalog;
+      return Array.isArray(c) && c.some((e) => e.name === "newco:7b");
+    }, 2000, "the catalog from the new list");
+    expect(store.getState().suggested).toEqual(list);
+  });
 });
 
 describe("reconnect reconciles cached threads (W-04)", () => {

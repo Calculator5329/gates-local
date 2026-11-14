@@ -6,8 +6,8 @@ import type { NvidiaSmiRunner } from "../fit/types.ts";
 import { defaultSettings } from "../settings/store.ts";
 import { buildCatalog, estimateTyped, markRecommended } from "./catalog.ts";
 import { listModels } from "./models.ts";
-import { CURATED_MODELS } from "./recommended.ts";
-import { tierFor, TIERS } from "./tiers.ts";
+import { curatedModels } from "./recommended.ts";
+import { tierFor, tiers } from "./tiers.ts";
 
 const fitFixture = (name: string) => readFileSync(new URL(`../fit/fixtures/${name}`, import.meta.url), "utf8");
 const GPU = fitFixture("nvidia-smi-gpu.machine.txt"); // 16303 total, 9468 MiB free
@@ -91,7 +91,7 @@ describe("models.catalog", () => {
     const tier = tierFor({ gpuCount: 1, gpuTotalBytes: 16303 * 1024 ** 2, systemTotalBytes: 0 });
     expect(tier.gb).toBe(16);
     expect(picks(entries)).toEqual(tier.picks);
-    const outside = CURATED_MODELS.find((m) => !tier.picks.includes(m.name));
+    const outside = curatedModels().find((m) => !tier.picks.includes(m.name));
     expect(outside, "a curated model outside the 16 GB tier").toBeDefined();
     expect(e.get(outside?.name ?? "")?.recommended).toBe(false);
   });
@@ -128,8 +128,8 @@ describe("models.catalog", () => {
     expect(entries.length).toBeGreaterThan(0);
     expect(entries.every((x) => !x.installed && x.fit === undefined && !x.recommended)).toBe(true);
     // Every curated model can be downloaded, so all of them list.
-    expect(entries.map((x) => x.name)).toEqual(CURATED_MODELS.map((m) => m.name));
-    expect(CURATED_MODELS.every((m) => m.pullable)).toBe(true);
+    expect(entries.map((x) => x.name)).toEqual(curatedModels().map((m) => m.name));
+    expect(curatedModels().every((m) => m.pullable)).toBe(true);
   });
 });
 
@@ -157,7 +157,7 @@ describe("recommended by the computer's tier (row 21)", () => {
   // Cards read a little under their label (a "16 GB" card is 16303 MiB here); system memory too.
   // The picks are data (chat-models.json): every tier there, at a card a little under its label,
   // recommends all its picks in order, so a pick that would not run at its own tier fails here.
-  const gpuTiers: [string, number, readonly string[]][] = TIERS.filter((t) => t.by === "gpu").map((t) => [`${t.gb} GB card`, t.gb === 16 ? 16303 : t.gb * MIB_PER_GB - 150, t.picks]);
+  const gpuTiers: [string, number, readonly string[]][] = tiers().filter((t) => t.by === "gpu").map((t) => [`${t.gb} GB card`, t.gb === 16 ? 16303 : t.gb * MIB_PER_GB - 150, t.picks]);
   for (const [label, totalMib, expected] of gpuTiers) {
     it(`a ${label} recommends its tier's picks, first pick first`, async () => {
       expect(picks(await catalogOn(card(totalMib), meminfo(31.25)))).toEqual(expected);
@@ -165,7 +165,7 @@ describe("recommended by the computer's tier (row 21)", () => {
   }
 
   // System memory reads about 5% under its label (an "8 GB" computer is 7.6 GiB).
-  const systemTiers: [string, number, readonly string[]][] = TIERS.filter((t) => t.by === "system").map((t) => [`${t.gb} GB`, t.gb * 0.95, t.picks]);
+  const systemTiers: [string, number, readonly string[]][] = tiers().filter((t) => t.by === "system").map((t) => [`${t.gb} GB`, t.gb * 0.95, t.picks]);
   for (const [label, totalGib, expected] of systemTiers) {
     it(`with no GPU and ${label} of memory, recommends that tier's picks`, async () => {
       expect(picks(await catalogOn(noNvidia, meminfo(totalGib)))).toEqual(expected);

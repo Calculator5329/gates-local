@@ -84,6 +84,9 @@ import { createShellStatus } from "./chat/shell.ts";
 import { probeSandbox } from "../../../packages/harness/src/sandbox/index.ts";
 import { createNvidiaSmiRunner, forgetGpuReadings, parseMemTotal } from "./fit/gpu.ts";
 import { OLLAMA_REGISTRY } from "./runtime/registry-size.ts";
+import { chatList, useChatList } from "./runtime/chat-list.ts";
+import { boundedGet } from "./update/installed/feed.ts";
+import { createModelLists } from "./update/installed/models-list.ts";
 import { createModelServices, type ModelServices } from "./runtime/services.ts";
 import { createSources } from "./sources/index.ts";
 import { createImportActivity, withImportAdmission } from "./sources/activity.ts";
@@ -338,35 +341,43 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
   // One automatic checker for the supervised desktop server; browser-only servers never fetch on a timer.
   // An installed copy (the desktop app says its version) checks the signed release list instead.
   const update = chooseUpdateModule(process.env, {
-    installed: (version) => createInstalledUpdateModule({
-      version,
-      platform: process.platform,
-      arch: process.arch,
-      feed: installedFeed(process.env, { testBuild, log: (line) => log(`update ${line}`) }),
-      dataDir,
-      automatic: {
-        enabled: () => services.settings.get().updateAutomatic !== false,
-        onChange: (listener) => services.settings.onChange((next, previous) => {
-          if (next.updateAutomatic !== previous.updateAutomatic) listener();
+    installed: (version) => {
+      const feed = installedFeed(process.env, { testBuild, log: (line) => log(`update ${line}`) });
+      return createInstalledUpdateModule({
+        version,
+        platform: process.platform,
+        arch: process.arch,
+        feed,
+        dataDir,
+        // The chat model list beside release.json: a newer signed one is used without a release.
+        models: createModelLists({
+          dataDir, base: feed.base, keys: feed.keys, get: boundedGet({ allowLoopbackHttp: feed.allowLoopbackHttp }),
+          inUse: chatList, use: useChatList, log: (line) => log(`update ${line}`),
         }),
-      },
-      // An unfinished update's download stays: the watcher proves and moves it.
-      keep: () => {
-        try {
-          const tx = readTransaction(transactionFile(dataDir));
-          return tx === null ? [] : [tx.to];
-        } catch {
-          return [];
-        }
-      },
-      restart: parseRestart(process.env[RESTART_ENV]),
-      admission,
-      activity,
-      uninterruptible,
-      ...(startupToken === "" ? {} : { startupToken }),
-      changed: (status) => server?.push("update.changed", status),
-      log: (line) => log(`update ${line}`),
-    }),
+        automatic: {
+          enabled: () => services.settings.get().updateAutomatic !== false,
+          onChange: (listener) => services.settings.onChange((next, previous) => {
+            if (next.updateAutomatic !== previous.updateAutomatic) listener();
+          }),
+        },
+        // An unfinished update's download stays: the watcher proves and moves it.
+        keep: () => {
+          try {
+            const tx = readTransaction(transactionFile(dataDir));
+            return tx === null ? [] : [tx.to];
+          } catch {
+            return [];
+          }
+        },
+        restart: parseRestart(process.env[RESTART_ENV]),
+        admission,
+        activity,
+        uninterruptible,
+        ...(startupToken === "" ? {} : { startupToken }),
+        changed: (status) => server?.push("update.changed", status),
+        log: (line) => log(`update ${line}`),
+      });
+    },
     clone: () => createUpdateModule({
       admission,
       root: REPO_ROOT,

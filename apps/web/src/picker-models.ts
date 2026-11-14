@@ -1,19 +1,23 @@
-import { CHAT_MODELS, type CatalogEntry, type ModelInfo, type PullProgress } from "@gates-local/contracts";
+import { makerIn, type CatalogEntry, type MakerRule, type ModelInfo, type PullProgress, type SuggestedList } from "@gates-local/contracts";
 import { friendlyName, type Verdict } from "./format.ts";
 import { chatModels, pendingDownload } from "./pick.ts";
+import { NA, type State } from "./store.ts";
 
-/** A maker from chat-models.json, or "Other". */
+/** A maker from the chat list in use, or "Other". */
 export type Maker = string;
 
+/**
+ * The chat list in use as the server sent it (models.suggested): built in, or a newer signed
+ * list from the release page. The client never reads its own copy of chat-models.json for
+ * these, so a list that arrives with the update check shows here too.
+ */
+export const suggestedOf = (s: Pick<State, "suggested">): SuggestedList | undefined => (s.suggested === NA ? undefined : s.suggested);
+
 /** Display brands stay stable across local aliases, quantizations and hosted variants; the patterns are data. */
-export { makerOf } from "@gates-local/contracts";
+export const makerOf = (tag: string, makers: readonly MakerRule[] | undefined): Maker => (makers === undefined ? "Other" : makerIn(makers, tag));
 
-/** The model the app names when it needs an example ("such as …", "ollama pull …"), from chat-models.json. */
-export const EXAMPLE_MODEL = CHAT_MODELS.example;
-export const EXAMPLE_LABEL = CHAT_MODELS.models.find(m => m.name === EXAMPLE_MODEL)?.label ?? EXAMPLE_MODEL;
-
-/** The picker's groups: the data file's makers in its order, then Other. */
-export const MAKERS: readonly Maker[] = [...CHAT_MODELS.makers.map(m => m.name), "Other"];
+/** The picker's groups: the list's makers in its order, then Other. */
+export const makerGroups = (makers: readonly MakerRule[] | undefined): readonly Maker[] => [...(makers ?? []).map(m => m.name), "Other"];
 
 /**
  * Tags remain the identity and tooltip; packaging words do not become the visible name. A
