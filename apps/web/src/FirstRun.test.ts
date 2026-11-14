@@ -16,6 +16,70 @@ vi.mock("./Settings.tsx", () => ({ DlDetail: () => null }));
 vi.mock("./ui.tsx", () => ({ VLabel: () => null }));
 
 const { FirstRun, installStep, installWords } = await import("./FirstRun.tsx");
+const { Banner, INSTALL_STALL_MS, figuresMoved, installStalled } = await import("./Banner.tsx");
+const plain = (state: unknown, el: typeof FirstRun | typeof Banner) => {
+  store.state = state;
+  return renderToStaticMarkup(createElement(el)).replaceAll(/<[^>]*>/g, " ").replaceAll(/\s+/g, " ");
+};
+
+// Guards a bug seen on a fresh install: a download that stopped kept its last figures on screen
+// with nothing to press, in the first window and the banner alike.
+describe("an engine download whose figures stop moving says so and offers Retry", () => {
+  const total = 1_543_547_172;
+  const at = (receivedBytes: number) => ({ receivedBytes, totalBytes: total, diskBytes: 2_528_731_874 });
+  const installing = (receivedBytes: number, view = "firstrun") => ({
+    conn: { kind: "open" },
+    runtime: { state: "installing", owner: "app", install: at(receivedBytes) },
+    view,
+    hydrationSettled: true,
+    unavailable: {},
+    pulls: {},
+    queued: [],
+    threadId: null,
+    settings: {},
+  });
+  // A fresh install starts its own copy right after the download: nothing is being looked for then.
+  it("the app starting its own Ollama says so, not that it is looking for one", () => {
+    const [own, other] = ["app", "none"].map((owner) => plain({ ...installing(0), runtime: { state: "starting", owner } }, FirstRun));
+    expect(own).toContain("Starting Ollama");
+    expect(own).not.toContain("Looking for Ollama");
+    expect(other).toContain("Looking for Ollama");
+  });
+
+  it("after the app's stall time with no new bytes, and not before; unpacking never stalls", () => {
+    expect(INSTALL_STALL_MS).toBe(5000);
+    expect(installStalled(at(10), 0, INSTALL_STALL_MS - 1)).toBe(false);
+    expect(installStalled(at(10), 0, INSTALL_STALL_MS)).toBe(true);
+    // a stall at 0 bytes (the connection hung before the first byte) is a stall too
+    expect(installStalled(at(0), 0, INSTALL_STALL_MS)).toBe(true);
+    expect(installStalled(at(total), 0, 60_000)).toBe(false);
+    expect(installStalled(undefined, 0, 60_000)).toBe(false);
+  });
+
+  it("the figures' last move is kept while they hold, and a Retry counts as a move", () => {
+    expect(figuresMoved(7, 1000)).toBe(1000);
+    expect(figuresMoved(7, 4000)).toBe(1000);
+    expect(figuresMoved(8, 4000)).toBe(4000);
+    expect(figuresMoved(8, 9000, true)).toBe(9000);
+  });
+
+  it("the first window and the banner say the download stalled and show Retry; a moving one shows neither", () => {
+    figuresMoved(300_000_000, Date.now() - INSTALL_STALL_MS - 1);
+    for (const [el, view] of [[FirstRun, "firstrun"], [Banner, "new"]] as const) {
+      const t = plain(installing(300_000_000, view), el);
+      expect(t, view).toContain("Download stalled");
+      expect(t, view).toContain("Retry");
+      expect(t, view).toMatch(/0\.3\sof\s1\.4\sGB/);
+    }
+    figuresMoved(400_000_000, Date.now());
+    for (const [el, view] of [[FirstRun, "firstrun"], [Banner, "new"]] as const) {
+      const t = plain(installing(400_000_000, view), el);
+      expect(t, view).toContain("Downloading Ollama");
+      expect(t, view).not.toContain("stalled");
+      expect(t, view).not.toContain("Retry");
+    }
+  });
+});
 
 describe("the app's own Ollama installing says its size and progress (FIRST-USE-08)", () => {
   const total = 1_543_547_172;

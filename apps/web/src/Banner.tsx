@@ -2,10 +2,13 @@
 // Runtime words (shell.md F01, F18, F22, F42): the sidebar footer row, the
 // composer placeholder and the banner docked above the composer, one entry
 // per RuntimeStatus state plus "offline" for a dropped server connection.
-import type { ReactNode } from "react";
-import { NBSP, etaText, gb } from "./format.ts";
+import { type ReactNode, useEffect, useState } from "react";
+import type { CatalogEntry } from "@gates-local/contracts";
+import { NBSP, describeModel, etaText, gb } from "./format.ts";
+import { rowOf } from "./fit-table.ts";
 import { Icon } from "./icons.tsx";
-import { recheckRuntime } from "./session.ts";
+import { canChat, chatBlockedReason } from "./pick.ts";
+import { firstPull, pull, recheckRuntime } from "./session.ts";
 import { NA, type State, useStore } from "./store.ts";
 
 export type Rt = "ready" | "installing" | "starting" | "missing" | "wrong" | "stopped" | "error" | "offline";
@@ -100,6 +103,57 @@ export function installWords(i: InstallSize | undefined): string | undefined {
   return [...etaText(p, { speed: false }).split(" · "), ...disk].map(whole).join(" · ");
 }
 
+/**
+ * No new bytes of the engine download for this long is a stall: the server's own bound
+ * (runtime STALL_MS), after which its speed and time left leave the status and a Retry
+ * starts the download again.
+ */
+export const INSTALL_STALL_MS = 5000;
+
+/** When the download's figures last moved, shared, so the first window and the banner see one stall. */
+const lastMove = { bytes: Number.NaN, at: 0 };
+
+/** Note the figures read at `now` and return when they last moved. A Retry counts as a move: its new attempt gets the whole stall time. */
+export function figuresMoved(bytes: number, now: number, retried = false): number {
+  if (retried || bytes !== lastMove.bytes) {
+    lastMove.bytes = bytes;
+    lastMove.at = now;
+  }
+  return lastMove.at;
+}
+
+/** A download (not the unpack) whose figures have not moved since `movedAt` for the stall time. */
+export function installStalled(i: InstallSize | undefined, movedAt: number, now: number): boolean {
+  return i !== undefined && i.receivedBytes < i.totalBytes && now - movedAt >= INSTALL_STALL_MS;
+}
+
+/** The step's words once the download has stalled, in the first window and the banner. */
+export const STALLED = "Download stalled";
+
+/**
+ * The stall as a screen sees it: true once the figures have held for the stall time, and the
+ * Retry that ends it (the server starts a stalled download again; the new attempt gets the whole
+ * stall time). `words` are the figures without the time left, which a stalled speed does not give.
+ */
+export function useInstallStall(i: InstallSize | undefined): { stalled: boolean; words: string | undefined; retry: () => void } {
+  const [now, setNow] = useState(Date.now);
+  const at = i === undefined ? now : figuresMoved(i.receivedBytes, Date.now());
+  const downloading = i !== undefined && i.receivedBytes < i.totalBytes;
+  const stalled = installStalled(i, at, now);
+  useEffect(() => {
+    if (!downloading || stalled) return;
+    // wake when the stall time passes with the figures where they are
+    const t = setTimeout(() => setNow(Date.now()), Math.max(0, at + INSTALL_STALL_MS - Date.now()));
+    return () => clearTimeout(t);
+  }, [downloading, stalled, at, now]);
+  const retry = () => {
+    setNow(figuresMoved(i?.receivedBytes ?? 0, Date.now(), true));
+    void recheckRuntime();
+  };
+  const { bytesPerSecond: _, ...still } = i ?? { receivedBytes: 0, totalBytes: 0 };
+  return { stalled, words: installWords(stalled ? still : i), retry };
+}
+
 /** The engine install's title, the same in the first window and the banner. */
 export const INSTALL_TITLE = "Getting the chat engine ready";
 
@@ -169,7 +223,76 @@ const RetryButton = ({ primary }: { primary?: boolean }) => (
   </button>
 );
 
-/** The banner for the current runtime state; nothing when chat is ready. */
+/** The model to recommend when none is installed: the first pick of the computer's tier that runs here. */
+export function recommendedEntry(s: State): CatalogEntry | undefined {
+  if (s.catalog === NA || s.catalog === undefined) return undefined;
+  const picks = s.catalog.filter((c) => c.recommended).toSorted((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
+  return picks.find((c) => rowOf(s, c.name)?.verdict !== "refuse") ?? picks[0];
+}
+
+/**
+ * The first model to offer, read from the state and never from a stored flag: Ollama answers, its
+ * list is in and holds no chat model, and a download here would give one. Undefined otherwise (an
+ * Ollama too old to say which models chat, a build that cannot download).
+ */
+export function firstModelOffer(s: State): CatalogEntry | undefined {
+  if (s.runtime?.state !== "ready" || s.models === undefined || s.models.some(canChat)) return undefined;
+  if (chatBlockedReason(s.models, undefined) !== undefined || s.unavailable["models.pull"] === true) return undefined;
+  return recommendedEntry(s);
+}
+
+/** A message in the open chat that waits for a chat model (a picture does not). */
+const waitsHere = (s: State): boolean => s.threadId !== null && s.queued.some((q) => q.threadId === s.threadId && q.draw === undefined);
+
+/**
+ * Ollama is ready with no chat model: the first window's offer, in its words and sizes, wherever
+ * the person is (first run left early, the new chat, a message waiting), until a model exists.
+ * Once its download runs the model button's bar and a waiting message's row show it, so the
+ * banner says nothing more.
+ */
+function FirstModel() {
+  const entry = useStore(firstModelOffer);
+  const downloading = useStore((s) => firstPull(s) !== undefined);
+  const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
+  const waits = useStore(waitsHere);
+  if (entry === undefined || downloading) return null;
+  return (
+    <Shell icon={<Icon id="download" />} role="status" title={waits ? "Your message waits for a model" : "Download your first model"}>
+      <div className="bm">
+        {describeModel(entry.name, catalog).name}
+        <span className="fig"> · {gb(entry.downloadBytes)} download</span>
+      </div>
+      <div className="ba">
+        <button type="button" className="btn primary" data-testid="chat.banner.first-model" onClick={() => void pull(entry.name)}>
+          Download and start
+        </button>
+      </div>
+    </Shell>
+  );
+}
+
+/** The engine install: the step and its numbers as the first window says them; a stalled download says so and shows Retry. */
+function Installing({ install }: { install: InstallSize | undefined }) {
+  const { stalled, words, retry } = useInstallStall(install);
+  return (
+    <Shell icon={stalled ? <Icon id="alert" cls="warn" /> : <Icon id="download" />} role="status" title={INSTALL_TITLE}>
+      {/* words in full, figures in the app's font */}
+      <div className="bm">
+        {stalled ? STALLED : installStep(install)}
+        {words === undefined ? null : <span className="fig"> · {words}</span>}
+      </div>
+      {stalled ? (
+        <div className="ba">
+          <button type="button" className="btn primary" data-testid="chat.banner.retry" onClick={retry}>
+            Retry
+          </button>
+        </div>
+      ) : null}
+    </Shell>
+  );
+}
+
+/** The banner for the current runtime state; nothing when chat is ready and a chat model is in. */
 export function Banner() {
   const rt = useStore(rtOf);
   const baseUrl = useStore((s) => s.runtime?.baseUrl);
@@ -177,7 +300,6 @@ export function Banner() {
   const own = useStore(ownCopyNote);
   const install = useStore((s) => s.runtime?.install);
   const failure = useStore((s) => s.runtime?.failure);
-  const words = installWords(install);
   // first run tells the runtime story itself; the banner under it stays quiet
   const firstRun = useStore((s) => s.view === "firstrun");
   const boot = useStore(booting);
@@ -187,17 +309,9 @@ export function Banner() {
   if (firstRun || boot || none) return null;
   switch (rt) {
     case "ready":
-      return null;
+      return <FirstModel />;
     case "installing":
-      return (
-        <Shell icon={<Icon id="download" />} role="status" title={INSTALL_TITLE}>
-          {/* the step and its numbers as the first window says them: words in full, figures in the app's font */}
-          <div className="bm">
-            {installStep(install)}
-            {words === undefined ? null : <span className="fig"> · {words}</span>}
-          </div>
-        </Shell>
-      );
+      return <Installing install={install} />;
     case "wrong":
       return (
         <Shell icon={<Icon id="alert" cls="err" />} role="alert" title={`Port ${port} answers, but not as Ollama`}>

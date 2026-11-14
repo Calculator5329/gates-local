@@ -1,16 +1,20 @@
 // Own-folder Ollama install (D1): download the pinned asset into a staging
 // directory, verify sha256 while streaming, extract, then rename the tree
-// into runtime/ollama/<version>/ in one step. Any failure removes staging, so
-// no half-installed version is ever visible. No root, no package manager.
+// into runtime/ollama/<version>/ in one step. A failure removes staging, so
+// no half-installed version is ever visible, except a refused final move:
+// its checked tree stays in staging (still invisible) for the Retry to move.
+// No root, no package manager.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
-import { access, constants, mkdir, mkdtemp, open, readdir, rename, rm } from "node:fs/promises";
+import { access, constants, mkdir, mkdtemp, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import zlib from "node:zlib";
 import { NBSP, gb } from "@gates-local/contracts";
+import { volumeFree } from "../image/download.ts";
+import { shortDisk } from "../image/setup.ts";
 import { binaryIn, installRoot, installedBinary, runtimeDir } from "./paths.ts";
 import type { InstallManifest } from "./schemas.ts";
 import type { InstallProgress } from "./types.ts";
@@ -20,7 +24,9 @@ export type InstallErrorCode =
   | "download-failed"
   | "interrupted"
   | "hash-mismatch"
-  | "extract-failed";
+  | "extract-failed"
+  | "disk-full"
+  | "move-failed";
 
 export class InstallError extends Error {
   readonly code: InstallErrorCode;
@@ -70,7 +76,86 @@ export type InstallOptions = {
   progressIntervalMs?: number;
   /** The download ends as interrupted after this long with no bytes (DOWNLOAD_IDLE_MS when absent). */
   idleMs?: number;
+  /** Free bytes on the drive that holds `dir`; tests pretend a short disk. The real volume when absent. */
+  freeBytes?: (dir: string) => Promise<number>;
+  /** Whether a refused final move is tried again, as a scanner on Windows refuses one (process.platform when absent). */
+  windows?: boolean;
+  /** How long a refused move is tried again (MOVE_RETRY_MS when absent). */
+  moveRetryMs?: number;
 };
+
+/**
+ * The final move. On Windows a scanner may hold a fresh .exe or .dll open for a moment and the
+ * move is refused (EPERM, EACCES or EBUSY), so it is tried again for MOVE_RETRY_MS, as the update
+ * download does with its own (update/installed/download.ts renameLast). A tree of hundreds of
+ * libraries gives a scanner more to read than one release folder, so the bound is longer.
+ * Elsewhere the same codes are a real permission problem and fail at once.
+ */
+export const MOVE_RETRY_MS = 5_000;
+const MOVE_WAIT_MS = 100;
+const MOVE_RETRY_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+
+async function moveLast(from: string, to: string, windows: boolean, retryMs: number): Promise<void> {
+  const deadline = Date.now() + retryMs;
+  for (;;) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (error) {
+      const code = String((error as { code?: unknown }).code);
+      if (!windows || !MOVE_RETRY_CODES.has(code) || Date.now() >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(MOVE_WAIT_MS, Math.max(0, deadline - Date.now()))));
+    }
+  }
+}
+
+/** In a staging folder whose tree was checked: which release it is, so a Retry after a refused move uses it with no download. */
+const CHECKED_NOTE = "checked.json";
+type CheckedNote = { version: string; sha256: string };
+
+const hashFile = async (file: string): Promise<string> => {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(file)) hash.update(chunk as Buffer);
+  return hash.digest("hex");
+};
+
+/** What a kept staging folder still holds for this release: its tree whole, or only its archive. */
+type Kept = { staging: string; tree: boolean };
+
+/**
+ * The staging folder a refused move left for this release: its tree, when it is still whole, or
+ * its archive, when it still hashes to the pin. Undefined when there is none.
+ */
+async function keptStaging(stagingRoot: string, manifest: InstallManifest, target: InstallTarget): Promise<Kept | undefined> {
+  let entries: string[];
+  try {
+    entries = await readdir(stagingRoot);
+  } catch {
+    return undefined;
+  }
+  const pin = manifest.sha256.toLowerCase();
+  for (const e of entries.filter((x) => x.startsWith(STAGING_PREFIX))) {
+    const staging = path.join(stagingRoot, e);
+    const note = await readFile(path.join(staging, CHECKED_NOTE), "utf8").then((t) => JSON.parse(t) as Partial<CheckedNote>, () => undefined);
+    if (note?.version !== manifest.version || note.sha256?.toLowerCase() !== pin) continue;
+    if (await target.check(path.join(staging, "tree")).then(() => true, () => false)) return { staging, tree: true };
+    if ((await hashFile(path.join(staging, "asset")).catch(() => undefined)) === pin) return { staging, tree: false };
+  }
+  return undefined;
+}
+
+/**
+ * The disk an install takes at once: the archive and, beside it until staging goes, the unpacked
+ * copy. Where the unpacked size was never measured, at least the archive's size again.
+ */
+export const installNeed = (m: Pick<InstallManifest, "sizeBytes" | "unpackedBytes">): number => m.sizeBytes + (m.unpackedBytes ?? m.sizeBytes);
+
+/** A write refused for a full disk (or a full quota), as an error code or in tar's words. */
+const diskFull = (e: unknown): boolean => {
+  const code = (e as { code?: unknown } | undefined)?.code;
+  return code === "ENOSPC" || code === "EDQUOT" || /no space left on device|disk quota exceeded/i.test(String((e as Error | undefined)?.message));
+};
+
 
 /**
  * No bytes for this long ends a download. Node's fetch would wait 300 s (undici's bodyTimeout and
@@ -86,7 +171,7 @@ export function isInstalled(appDataDir: string, version: string): boolean {
   return existsSync(installedBinary(appDataDir, version));
 }
 
-async function removeStaleStaging(stagingRoot: string): Promise<void> {
+async function removeStaleStaging(stagingRoot: string, keep?: string): Promise<void> {
   let entries: string[];
   try {
     entries = await readdir(stagingRoot);
@@ -95,7 +180,7 @@ async function removeStaleStaging(stagingRoot: string): Promise<void> {
   }
   await Promise.all(
     entries
-      .filter((e) => e.startsWith(STAGING_PREFIX))
+      .filter((e) => e.startsWith(STAGING_PREFIX) && path.join(stagingRoot, e) !== keep)
       .map((e) => rm(path.join(stagingRoot, e), { recursive: true, force: true })),
   );
 }
@@ -156,6 +241,8 @@ async function download(opts: InstallOptions & { target: InstallTarget }, file: 
     }
   } catch (e) {
     if (e instanceof InstallError) throw e;
+    // the disk, not the network: installPinned says how much it needs once staging is gone
+    if (diskFull(e)) throw new InstallError("disk-full", "The disk is full.");
     throw new InstallError(
       "interrupted",
       `The ${label} download stopped at ${sofar(received, manifest.sizeBytes)} (${reason(e)}). ${retry}`,
@@ -228,9 +315,9 @@ function extract(archive: string, format: InstallManifest["format"], into: strin
  * InstallError with a message a user can act on.
  */
 export async function installPinned(opts: InstallOptions): Promise<InstallResult> {
-  const { appDataDir, manifest, onProgress } = opts;
+  const { appDataDir, manifest } = opts;
   const target = opts.target ?? ollamaTarget(appDataDir);
-  const { label, name } = target;
+  const { label } = target;
   const dir = path.join(target.root, manifest.version);
   const ollama = opts.target === undefined;
   const binary = ollama ? installedBinary(appDataDir, manifest.version) : dir;
@@ -245,42 +332,85 @@ export async function installPinned(opts: InstallOptions): Promise<InstallResult
     );
   }
   await mkdir(target.stagingRoot, { recursive: true });
-  await removeStaleStaging(target.stagingRoot);
-  const staging = await mkdtemp(path.join(target.stagingRoot, STAGING_PREFIX));
+  // a refused move's checked tree (or archive) is used again; any other staging is an earlier crash's
+  const kept = await keptStaging(target.stagingRoot, manifest, target);
+  await removeStaleStaging(target.stagingRoot, kept?.staging);
+  // the archive and the unpacked copy sit on the disk together: a disk short of both is said before a byte downloads
+  const need = kept === undefined ? installNeed(manifest) : kept.tree ? 0 : installNeed(manifest) - manifest.sizeBytes;
+  const free = () => (opts.freeBytes ?? volumeFree)(target.stagingRoot).catch(() => undefined);
+  const before = need === 0 ? undefined : await free();
+  if (before !== undefined && before < need) throw new InstallError("disk-full", shortDisk(need, before));
+  const staging = kept?.staging ?? (await mkdtemp(path.join(target.stagingRoot, STAGING_PREFIX)));
+  const place: Place = { target, dir, binary, present, keep: false };
   try {
-    const archive = path.join(staging, "asset");
+    return await placed(opts, staging, place, kept);
+  } catch (e) {
+    if (!diskFull(e) && !(e instanceof InstallError && e.code === "disk-full")) throw e;
+    // what the attempt wrote goes first, so the free figure is the disk's own
+    place.keep = false;
+    await rm(staging, { recursive: true, force: true });
+    const now = await free();
+    throw new InstallError("disk-full", now === undefined ? `The disk is full. Needs ${gb(installNeed(manifest))} free.` : `The disk is full. ${shortDisk(installNeed(manifest), now)}`);
+  } finally {
+    if (!place.keep) await rm(staging, { recursive: true, force: true });
+  }
+}
+
+/** Where one release goes, whether it is there, and whether its staging is kept for a Retry. */
+type Place = { target: InstallTarget; dir: string; binary: string; present: () => Promise<boolean>; keep: boolean };
+
+/** Download, check, unpack and move one release through its staging folder; `kept` skips what a refused move left. */
+async function placed(opts: InstallOptions, staging: string, place: Place, kept: Kept | undefined): Promise<InstallResult> {
+  const { appDataDir, manifest, onProgress } = opts;
+  const { target, dir, binary, present } = place;
+  const { label, name } = target;
+  const archive = path.join(staging, "asset");
+  const tree = path.join(staging, "tree");
+  const whole = { version: manifest.version, receivedBytes: manifest.sizeBytes, totalBytes: manifest.sizeBytes };
+  if (kept === undefined) {
     const digest = await download({ ...opts, target }, archive);
-    onProgress?.({ phase: "verify", version: manifest.version, receivedBytes: manifest.sizeBytes, totalBytes: manifest.sizeBytes });
+    onProgress?.({ phase: "verify", ...whole });
     if (digest !== manifest.sha256.toLowerCase()) {
       throw new InstallError(
         "hash-mismatch",
         `The ${label} download did not match its pinned checksum (expected sha256 ${manifest.sha256}, got ${digest}). Nothing was installed. Retry once; if it fails again the release file changed and the pinned manifest needs updating.`,
       );
     }
-    onProgress?.({ phase: "extract", version: manifest.version, receivedBytes: manifest.sizeBytes, totalBytes: manifest.sizeBytes });
-    const tree = path.join(staging, "tree");
+  }
+  onProgress?.({ phase: "extract", ...whole });
+  if (kept?.tree !== true) {
+    // a kept archive's tree was not whole: it unpacks again from the start
+    await rm(tree, { recursive: true, force: true });
     await mkdir(tree);
     try {
       await extract(archive, manifest.format, tree);
       await target.check(tree);
     } catch (e) {
+      if (diskFull(e)) throw e;
       throw new InstallError(
         "extract-failed",
         `Unpacking ${name} failed (${(e as Error).message}). Nothing was installed; check free disk space in ${appDataDir} and retry.`,
       );
     }
-    await mkdir(target.root, { recursive: true });
-    try {
-      await rename(tree, dir);
-    } catch (e) {
-      // Another install finished first; keep its tree.
-      if (!(await present())) throw e;
-    }
-    onProgress?.({ phase: "done", version: manifest.version, receivedBytes: manifest.sizeBytes, totalBytes: manifest.sizeBytes });
-    return { version: manifest.version, dir, binary, alreadyInstalled: false };
-  } finally {
-    await rm(staging, { recursive: true, force: true });
+    const note: CheckedNote = { version: manifest.version, sha256: manifest.sha256.toLowerCase() };
+    await writeFile(path.join(staging, CHECKED_NOTE), JSON.stringify(note));
   }
+  await mkdir(target.root, { recursive: true });
+  try {
+    await moveLast(tree, dir, opts.windows ?? process.platform === "win32", opts.moveRetryMs ?? MOVE_RETRY_MS);
+  } catch (e) {
+    // Another install finished first; keep its tree.
+    if (!(await present())) {
+      // the checked tree stays in staging, so a Retry moves it without downloading again
+      place.keep = true;
+      throw new InstallError(
+        "move-failed",
+        `${label} could not be moved into place (${(e as Error).message}). Another program, often a virus scanner, may be holding one of its files. The download is kept; Retry moves it again.`,
+      );
+    }
+  }
+  onProgress?.({ phase: "done", version: manifest.version, receivedBytes: manifest.sizeBytes, totalBytes: manifest.sizeBytes });
+  return { version: manifest.version, dir, binary, alreadyInstalled: false };
 }
 
 /** Newest version directory under runtime/ollama/ that holds a binary. */

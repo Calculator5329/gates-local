@@ -5,7 +5,7 @@
 import { type ReactNode, useEffect, useState } from "react";
 import type { CatalogEntry } from "@gates-local/contracts";
 import { suggestedOf } from "./picker-models.ts";
-import { CONNECTING, INSTALL_TITLE, booting, failWords, installStep, installWords, ownCopyNote, portOf, rtOf, underTitle, unread } from "./Banner.tsx";
+import { CONNECTING, INSTALL_TITLE, STALLED, booting, failWords, installStep, installWords, ownCopyNote, portOf, recommendedEntry, rtOf, underTitle, unread, useInstallStall } from "./Banner.tsx";
 import { DlButton, canCancelPull } from "./ModelDownloads.tsx";
 import { type Verdict, cardGb, ctxFor, describeModel, etaText, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
@@ -112,13 +112,6 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
 }
 
 const rtOfState = (s: State) => rtOf(s);
-
-/** The model to recommend when none is installed: the first pick of the computer's tier (row 21) that runs here. */
-function recommendedEntry(s: State): CatalogEntry | undefined {
-  if (s.catalog === NA || s.catalog === undefined) return undefined;
-  const picks = s.catalog.filter((c) => c.recommended).toSorted((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
-  return picks.find((c) => rowOf(s, c.name)?.verdict !== "refuse") ?? picks[0];
-}
 
 function NoModels() {
   const [cancelled, setCancelled] = useState(false);
@@ -309,14 +302,16 @@ function Waiting({ installing }: { installing: boolean }) {
   // the runtime has not answered once: no Ollama words yet
   const none = useStore(unread);
   const install = useStore((s) => s.runtime?.install);
-  const words = installWords(install);
+  const { stalled, words, retry } = useInstallStall(installing ? install : undefined);
+  // the app's own copy starting (after its download) is not a search
+  const own = useStore((s) => s.runtime?.state === "starting" && s.runtime.owner === "app");
   if (none) return <Connecting />;
   return (
     <Shell
       st={
         <>
-          <span className="dot run" />
-          {installing ? installStep(install) : "Looking for Ollama"}
+          <span className={stalled ? "dot warn" : "dot run"} />
+          {stalled ? STALLED : installing ? installStep(install) : own ? "Starting Ollama" : "Looking for Ollama"}
         </>
       }
       title={installing ? INSTALL_TITLE : "Starting up"}
@@ -324,8 +319,13 @@ function Waiting({ installing }: { installing: boolean }) {
     >
       {installing ? (
         <>
-          <Cta label="Start chatting" onGo={startChat} link="Settings" onLink={() => finishFirstRun("general")} />
-          <p className="fr-note">You can type now; replies start when setup finishes.</p>
+          {/* a stalled download's one act is Retry; chatting early stays beside it */}
+          {stalled ? (
+            <Cta label="Retry" onGo={retry} link="Start chatting" onLink={startChat} />
+          ) : (
+            <Cta label="Start chatting" onGo={startChat} link="Settings" onLink={() => finishFirstRun("general")} />
+          )}
+          <p className="fr-note">You can type now; replies start once the engine and a first model are in.</p>
         </>
       ) : null}
     </Shell>

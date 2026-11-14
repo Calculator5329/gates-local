@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-11-14: First run keeps its offer, says a full disk, and shows a stalled download
+
+- Leaving the first window while the chat engine downloads no longer ends
+  first run's offer for good. Once the engine is in and no chat model is,
+  the banner in the chat offers the first model with its one button, in
+  the first window's words and sizes ("Your message waits for a model"
+  when one is waiting). One click downloads it and the waiting message
+  gets its reply. The offer follows the state, not a stored flag.
+- The first window's note under Start chatting says replies start once the
+  engine and a first model are in, which is when they start.
+- The engine download checks free space first, as picture and update
+  downloads do: it needs the archive plus the unpacked copy. A disk that
+  fills during the download says the disk is full and how much is needed,
+  never "Check the network".
+- On Windows, moving the unpacked engine into place is tried again for a
+  few seconds when a virus scanner holds a file. If it still refuses, the
+  checked copy is kept and Retry moves it without downloading again.
+- An engine download whose figures have not moved for 5 s says "Download
+  stalled" in the first window and the banner, and shows Retry.
+- While the app starts its own Ollama, the first window says "Starting
+  Ollama", not "Looking for Ollama".
+
 ## 2026-11-14: An update never removes the program that is running
 
 - On Linux, a copy started from the AppImage an earlier update left in

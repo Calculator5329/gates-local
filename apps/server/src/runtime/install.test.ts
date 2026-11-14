@@ -1,14 +1,45 @@
 import { createHash } from "node:crypto";
 import { accessSync, constants, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { InstallError, installPinned } from "./install.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { shortDisk } from "../image/setup.ts";
+import { InstallError, installNeed, installPinned } from "./install.ts";
 import { installDir, installedBinary, runtimeDir } from "./paths.ts";
 import type { InstallManifest } from "./schemas.ts";
 import { FAKE_RELEASE_FORMAT, FAKE_RELEASE_LIB, type ReleaseServer, buildFakeRelease, removeDir, startReleaseServer, tmpDir } from "./test-fakes.ts";
 import type { InstallProgress } from "./types.ts";
 
 const sha256 = (b: Buffer) => createHash("sha256").update(b).digest("hex");
+
+// The disk and the folder moves, as a full disk or a virus scanner on Windows would answer them.
+const fsFaults = vi.hoisted(() => ({ write: undefined as Error | undefined, moveRefusals: 0, moves: 0 }));
+vi.mock("node:fs/promises", async (real) => {
+  const fs = await real<typeof import("node:fs/promises")>();
+  // the unpacked tree's move into place: refused while refusals are left, as a scanner holding a file refuses it
+  const rename: typeof fs.rename = async (from, to) => {
+    if (path.basename(String(from)) !== "tree") return fs.rename(from, to);
+    fsFaults.moves += 1;
+    if (fsFaults.moveRefusals > 0) {
+      fsFaults.moveRefusals -= 1;
+      throw Object.assign(new Error(`EPERM: operation not permitted, rename '${String(from)}'`), { code: "EPERM" });
+    }
+    return fs.rename(from, to);
+  };
+  const open: typeof fs.open = async (...args) => {
+    const handle = await fs.open(...args);
+    const fault = fsFaults.write;
+    if (fault === undefined) return handle;
+    return new Proxy(handle, {
+      get(t, key) {
+        if (key === "write") return () => Promise.reject(fault);
+        const v: unknown = Reflect.get(t, key, t);
+        return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(t) : v;
+      },
+    });
+  };
+  return { ...fs, default: { ...fs, open, rename }, open, rename };
+});
+const errno = (code: string, message: string) => Object.assign(new Error(`${code}: ${message}`), { code });
 
 let work: string;
 let appDataDir: string;
@@ -28,12 +59,18 @@ function manifest(over: Partial<InstallManifest> = {}): InstallManifest {
   };
 }
 
-/** Nothing half-installed: no version dir, no staging dirs. */
-function expectNothingInstalled(version = "9.9.9-test") {
-  expect(existsSync(installDir(appDataDir, version))).toBe(false);
+/** No staging dirs left. */
+function noStaging() {
   const left = existsSync(runtimeDir(appDataDir)) ? readdirSync(runtimeDir(appDataDir)).filter((e) => e.startsWith(".staging-")) : [];
   expect(left).toEqual([]);
 }
+
+/** Nothing half-installed: no version dir, no staging dirs. */
+function expectNothingInstalled(version = "9.9.9-test") {
+  expect(existsSync(installDir(appDataDir, version))).toBe(false);
+  noStaging();
+}
+expectNothingInstalled.staging = noStaging;
 
 async function expectInstallError(p: Promise<unknown>, code: string): Promise<InstallError> {
   const e = await p.then(
@@ -54,6 +91,9 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  fsFaults.write = undefined;
+  fsFaults.moveRefusals = 0;
+  fsFaults.moves = 0;
   await server.close();
   removeDir(work);
 });
@@ -107,6 +147,46 @@ describe("installPinned", () => {
     expect(e.message).toMatch(/^The Ollama download stopped at \d+\.\d of \d+\.\d GB \(no data for 0\.3 s\)\. Check the network and retry/);
     expectNothingInstalled();
   }, 10_000);
+
+  // Guards a bug seen on a fresh install: a full disk read as a network problem, and Retry repeated it.
+  it("a disk short of the archive and its unpacked copy refuses before a byte downloads, in the picture setup's words", async () => {
+    const m = manifest({ unpackedBytes: 3 * tarball.length });
+    const e = await expectInstallError(installPinned({ appDataDir, manifest: m, freeBytes: () => Promise.resolve(tarball.length) }), "disk-full");
+    expect(installNeed(m)).toBe(4 * tarball.length);
+    expect(e.message).toBe(shortDisk(4 * tarball.length, tarball.length));
+    expect(server.hits).toBe(0);
+    expectNothingInstalled();
+  });
+
+  it("a write refused for a full disk says the disk is full and what is needed, not the network", async () => {
+    fsFaults.write = errno("ENOSPC", "no space left on device, write");
+    const e = await expectInstallError(installPinned({ appDataDir, manifest: manifest() }), "disk-full");
+    expect(e.message).toMatch(/^The disk is full\. Needs \S+ GB free; \S+ GB is free on this drive\.$/);
+    expect(e.message).not.toMatch(/network/i);
+    expectNothingInstalled();
+  });
+
+  // Guards the Windows case the update download already handles: a scanner holds a fresh file for a moment.
+  it("on Windows a move into place refused twice is tried again and the install lands", async () => {
+    fsFaults.moveRefusals = 2;
+    const r = await installPinned({ appDataDir, manifest: manifest(), windows: true });
+    expect(fsFaults.moves).toBe(3);
+    accessSync(r.binary, constants.X_OK);
+    expectNothingInstalled.staging();
+  });
+
+  it("a Retry after a refused move moves the checked tree it kept, with no second download", async () => {
+    fsFaults.moveRefusals = Number.POSITIVE_INFINITY;
+    const e = await expectInstallError(installPinned({ appDataDir, manifest: manifest(), windows: true, moveRetryMs: 300 }), "move-failed");
+    expect(e.message).not.toMatch(/network/i);
+    expect(existsSync(installDir(appDataDir, "9.9.9-test"))).toBe(false);
+    expect(server.hits).toBe(1);
+    fsFaults.moveRefusals = 0;
+    const r = await installPinned({ appDataDir, manifest: manifest(), windows: true });
+    expect(server.hits).toBe(1);
+    accessSync(r.binary, constants.X_OK);
+    expectNothingInstalled.staging();
+  });
 
   it("a download longer than the pinned size is refused before it is hashed to completion", async () => {
     const e = await expectInstallError(installPinned({ appDataDir, manifest: manifest({ sizeBytes: tarball.length - 10 }) }), "hash-mismatch");
