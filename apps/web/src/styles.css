@@ -1135,6 +1135,17 @@ a.btn{text-decoration:none}
 .mm.gpu .mm-bar i{background:var(--green)}.mm.spill .mm-bar i{background:var(--amber)}.mm.no .mm-bar i{background:var(--faint)}
 .mm-n{flex:none;width:78px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .mm.no .mm-n{color:var(--muted-foreground)}
+/* Measure (row 29): Speed and Score after the mark on the installed list, one button across both until
+   measured; a downloading row keeps its menu in the last column */
+.mp-card.ms{--mp-cols:minmax(0,1fr) 80px 200px 84px 56px 40px}
+.mp-card.ms .mp-row>.mp-acts{grid-column:-2}
+.mp-spd,.mp-score{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;font-size:13.5px}
+.mp-row>.mp-spd{color:var(--muted-foreground);cursor:default}
+.mp-row>.mp-score{font-weight:600;color:var(--foreground);cursor:default;border-radius:var(--r-sm)}
+.mp-th .mp-spd,.mp-th .mp-score{font-size:inherit}
+.mp-meas{grid-column:span 2;display:flex;justify-content:flex-end;min-width:0;padding-left:12px}
+.mp-mbtn{width:100%;height:28px;padding:0 8px;gap:6px;justify-content:center;font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.btn.mp-mbtn.running:disabled,.btn.mp-mbtn.running:disabled:hover{color:var(--foreground);border-color:var(--border-strong);cursor:progress}
 .mp-others{margin:10px 0 0;color:var(--muted-foreground);font-size:13px}
 .mp-nm{min-width:0;display:flex;flex-direction:column;justify-content:center;padding-right:16px}
 .mp-l1{display:flex;align-items:center;gap:8px;min-width:0;line-height:20px;white-space:nowrap}
@@ -1145,7 +1156,7 @@ a.btn{text-decoration:none}
 .mp-t{flex:none}
 .mp-row.cant .mp-nmn{color:var(--muted-foreground)}
 .mp-p{color:var(--muted-foreground);font-size:13px;line-height:18px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mp-meta{display:none}
+.mp-meta,.mp-mline{display:none}
 .mp-l1 .tps{flex:none;margin-left:auto;padding-left:6px}
 .mp-chip{display:inline-flex;align-items:center;gap:4px;flex:none;padding:0 7px 0 5px;border-radius:var(--r-sm);background:var(--selected);font-size:12px;font-weight:600;line-height:18px;color:var(--foreground)}
 .mp-chip .ic{color:var(--green)}
@@ -1288,9 +1299,11 @@ button.dl-btn:disabled,button.dl-btn:disabled:hover{opacity:.45;cursor:not-allow
   .mp-row{grid-template-columns:minmax(0,1fr) auto;min-height:60px;padding:9px 2px 9px 14px;column-gap:4px}
   .mp-row .mp-nm{padding-right:0}
   .mp-nm>:not(.mp-l1){padding-left:0}
-  .mp-row>.mp-sz,.mp-row>.mp-fitc{display:none}
+  .mp-row>.mp-sz,.mp-row>.mp-fitc,.mp-row>.mp-spd,.mp-row>.mp-score,.mp-row>.mp-meas{display:none}
+  .mp-card.ms .mp-row>.mp-acts{grid-column:auto}
   .mp-meta{display:flex;align-items:center;gap:6px;min-width:0;margin-top:2px;color:var(--muted-foreground);font-size:14px;line-height:18px;white-space:nowrap}
   .mp-meta .mp-fit{font-size:14px}
+  .mp-mline{display:block;margin-top:2px;color:var(--muted-foreground);font-size:14px;line-height:18px;white-space:nowrap;font-variant-numeric:tabular-nums}
   .mp-meta .mp-fit.x{padding:13px 0;margin:-13px 0}
   .mp-kebab{min-width:44px;min-height:44px}
   .mp-acts{gap:4px}

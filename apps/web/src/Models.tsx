@@ -35,6 +35,8 @@ import { awaitingInstall, canChat, notForChat, pickedModel } from "./pick.ts";
 import { MakerMark } from "./MakerMark.tsx";
 import { MemoryMark } from "./MemoryMark.tsx";
 import { ModelSpeed } from "./model-speed.tsx";
+import { MeasureCells, MeasureFail, MeasureMeta, canMeasure, useMeasureItem } from "./ModelMeasure.tsx";
+import { measureOf } from "./session/measures.ts";
 import { DialogHead } from "./Panel.tsx";
 import { leaveSettings, pull } from "./session.ts";
 import { PathText } from "./settings-controls.tsx";
@@ -214,6 +216,7 @@ function Installed() {
   const shown = q === "" ? listed : listed.filter((r) => r.display.toLowerCase().includes(q) || r.name.toLowerCase().includes(q));
   const total = models.reduce((sum, m) => sum + m.sizeBytes, 0);
   const shownDef = settingsNA ? undefined : def;
+  const measureShown = useStore(canMeasure);
   return (
     <>
       {rows.some((r) => r.chat) ? <DefaultCard rows={rows} def={def} disabled={settingsNA} /> : null}
@@ -221,11 +224,17 @@ function Installed() {
       {filterShows(listed.length, filter) ? (
         <Field value={filter} onChange={setFilter} placeholder="Filter installed models" label="Filter installed models" cls="mp-filter" />
       ) : null}
-      <div className="mp-card">
+      <div className={measureShown ? "mp-card ms" : "mp-card"}>
         <div className="mp-th" aria-hidden="true">
           <span className="mp-thn">Model</span>
           <span className="mp-sz">Size</span>
           <span className="mp-fitc">On this computer</span>
+          {measureShown ? (
+            <>
+              <span className="mp-spd">Speed</span>
+              <span className="mp-score">Score</span>
+            </>
+          ) : null}
           <span />
         </div>
         {shown.map((r) => "progress" in r ? (
@@ -254,6 +263,8 @@ function Installed() {
 
 function ModelRowView({ r, def, saved, onRemove }: { r: InstalledRow; def: string | undefined; saved: string | undefined; onRemove: (back: HTMLElement | null) => void }) {
   const isDef = r.name === def;
+  const measured = useStore((s) => measureOf(s, r.name) !== undefined);
+  const measureShown = useStore(canMeasure);
   const why = r.chat ? undefined : notForChat(r.info);
   const fit = why ? (
     <span className="mp-fit none" data-tip={esc(why.tip)}>
@@ -279,7 +290,8 @@ function ModelRowView({ r, def, saved, onRemove }: { r: InstalledRow; def: strin
           <MakerMark tag={r.name} />
           <span className="mp-nmn">{r.label.text}</span>
           {chip}
-          <ModelSpeed tag={r.name} />
+          {/* the measured speed says it once, in its own column (row 29) */}
+          {measured ? null : <ModelSpeed tag={r.name} />}
         </div>
         {r.label.purpose ? (
           <div className="mp-p">{r.label.purpose}</div>
@@ -293,10 +305,13 @@ function ModelRowView({ r, def, saved, onRemove }: { r: InstalledRow; def: strin
           <span aria-hidden="true">·</span>
           {fit}
         </div>
+        <MeasureMeta name={r.name} />
+        <MeasureFail name={r.name} />
       </div>
       <span className="mp-sz">{sizeText(r.info.sizeBytes)}</span>
       {/* A fit check is long by nature: its words may change, its box does not (docs/design.md). */}
       <span className="mp-fitc" data-wait="">{fit}</span>
+      {measureShown ? r.chat ? <MeasureCells name={r.name} label={r.label.text} /> : <span className="mp-meas" /> : null}
       <RowMenu r={r} saved={saved} onRemove={onRemove} />
     </div>
   );
@@ -312,6 +327,8 @@ function RowMenu({ r, saved, onRemove }: { r: InstalledRow; saved: string | unde
   const btn = useRef<HTMLButtonElement>(null);
   const canRemove = useStore((s) => s.unavailable["models.remove"] !== true);
   const settingsNA = useStore(cannotSaveDefault);
+  const measureItem = useMeasureItem(r.name);
+  const canMeasureHere = useStore(canMeasure) && r.chat;
   const close = (refocus = true) => {
     setOpen(false);
     setCopied(null);
@@ -390,6 +407,21 @@ function RowMenu({ r, saved, onRemove }: { r: InstalledRow; saved: string | unde
                 <span className="mp-k">frees {sizeText(r.info.sizeBytes)}</span>
               </button>
             </>
+          ) : null}
+          {measureItem && canMeasureHere ? (
+            <button
+              type="button"
+              role="menuitem"
+              className="mp-mi"
+              data-testid="models.row-menu.measure"
+              onClick={() => {
+                close();
+                measureItem.act();
+              }}
+            >
+              <Icon id="speed" />
+              {measureItem.text}
+            </button>
           ) : null}
           <Fail err={err} />
         </div>

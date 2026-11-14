@@ -25,6 +25,8 @@ import {
   Message,
   ModelInfo,
   ModelSpeed,
+  ModelMeasure,
+  MeasureRun,
   NumCtx,
   ModelLoad,
   PullProgress,
@@ -271,6 +273,14 @@ export const methods = {
   "models.load": { params: S.Struct({ model: S.String, numCtx: NumCtx }), result: ModelLoad, phone: "allow" },
   /** Each model's measured speed from saved replies (ModelSpeed); later changes come on the models.speed push. */
   "models.speed": { params: NoParams, result: S.Array(ModelSpeed), phone: "allow" },
+  /** Every model measured on this computer (ModelMeasure); a new one comes on the models.measures push. */
+  "models.measures": { params: NoParams, result: S.Array(ModelMeasure), phone: "allow" },
+  /**
+   * Start measuring one installed model: it holds the GPU alone for a short check. Answers once the
+   * run starts (it can take minutes); its steps, a late failure and the end come on models.measuring,
+   * the numbers on models.measures.
+   */
+  "models.measure": { params: ModelRef, result: MeasureRun, phone: "deny" },
   "sources.list": { params: NoParams, result: S.Array(Source), phone: "allow" },
   "sources.add": { params: S.Struct({ kind: SourceKind, path: S.String, label: S.optional(S.String) }), result: Source, phone: "deny" },
   "sources.remove": { params: SourceRef, result: SourceRef, phone: "deny" },
@@ -344,6 +354,10 @@ export const pushes = {
   "models.load": { payload: ModelLoad },
   /** The whole list again, after a finished reply or a deletion changed what it counts. */
   "models.speed": { payload: S.Array(ModelSpeed) },
+  /** The whole list again, after a Measure run finished. */
+  "models.measures": { payload: S.Array(ModelMeasure) },
+  /** A Measure run's steps: waiting, running with steps done, then done or error. */
+  "models.measuring": { payload: MeasureRun },
   "sources.changed": { payload: S.Array(Source) },
   "sources.imports": { payload: SourceImports },
   "image.status": { payload: ImageStatus },

@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-13: Measure a model on this computer
+
+- Settings › Models has Speed and Score columns. A model nobody has
+  measured shows a Measure button there. One click runs a short check
+  against this computer:
+  - a reply to time its speed;
+  - three tool-use questions;
+  - five questions about a small shop database, answered in SQL.
+  The button counts its steps, "Measuring 4 of 9".
+- After a run, the row keeps the speed ("61.4 TPS") and a score out of
+  100. Hover the score to see which checks passed. The numbers stay after
+  a restart, until the model's weights change.
+- Nothing runs unless asked. Only one model is measured at a time. A run
+  waits for a reply in progress, and a new message waits for the run.
+- "Measure again" is in the row's menu, and it is the way in on a phone.
+
 ## 2026-11-13: Settings sections switch at full speed again
 
 - Each Settings section switch took about 182 ms where 0.2.2 took about

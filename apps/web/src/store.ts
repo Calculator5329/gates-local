@@ -20,6 +20,8 @@ import type {
   ModelInfo,
   ModelLoad,
   ModelSpeed,
+  ModelMeasure,
+  MeasureRun,
   PullProgress,
   RuntimeStatus,
   Settings,
@@ -204,6 +206,10 @@ export interface State {
   readonly catalog: Maybe<readonly CatalogEntry[]>;
   /** Measured decode speed by model name without ":latest"; a model with no entry shows no number (model-speed.tsx). */
   readonly speeds: Maybe<Readonly<Record<string, ModelSpeed>>>;
+  /** Models measured on this computer, by name (Settings › Models, Measure; session/measures.ts). */
+  readonly measures: Maybe<Readonly<Record<string, ModelMeasure>>>;
+  /** Measure runs going now, and ones that failed, by model name. */
+  readonly measuring: Readonly<Record<string, MeasureRun>>;
   readonly pulls: Readonly<Record<string, PullProgress>>;
   readonly sources: Maybe<readonly Source[]>;
   readonly imageStatus: Maybe<ImageStatus>;
@@ -275,6 +281,8 @@ const initial: State = {
   gpu: undefined,
   catalog: undefined,
   speeds: undefined,
+  measures: undefined,
+  measuring: {},
   pulls: {},
   sources: undefined,
   imageStatus: undefined,

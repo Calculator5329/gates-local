@@ -23,6 +23,7 @@ import { createSettingsReads } from "./session/settings-reads.ts";
 import { createNavigation, enterScreen, exitScreen, onScreenEntry } from "./session/navigation.ts";
 import { createUpdates } from "./session/updates.ts";
 import { speedsChanged, speedsRead } from "./session/speed.ts";
+import { measureRefused, measureStarted, measuresChanged, measuresRead, measuringChanged } from "./session/measures.ts";
 import { createUsage } from "./session/usage.ts";
 import { createPictures } from "./session/pictures.ts";
 import { type ActionResult, codeOf, createConnection, failure, isNA } from "./session/connection.ts";
@@ -102,7 +103,7 @@ const { settingsPatch } = settingsSession;
 // ---------------------------------------------------------------- hydrate and pushes
 
 /** Channels whose snapshot the second hydrate batch reads (gpu.status, sources.list, models.speed). */
-const SECOND_BATCH: ReadonlySet<Channel> = new Set<Channel>(["gpu.changed", "fit.changed", "sources.changed", "update.changed", "models.speed"]);
+const SECOND_BATCH: ReadonlySet<Channel> = new Set<Channel>(["gpu.changed", "fit.changed", "sources.changed", "update.changed", "models.speed", "models.measures"]);
 
 async function hydrate(c: Client): Promise<void> {
   settingsSession.beginHydration();
@@ -160,6 +161,8 @@ async function hydrateWith(
   on("models.pull", modelsSession.pullChanged);
   on("models.load", modelsSession.loadChanged);
   on("models.speed", (list) => applyServerEvent((s) => speedsChanged(s, list)));
+  on("models.measures", (list) => applyServerEvent(measuresChanged(list)));
+  on("models.measuring", (run) => applyServerEvent((s) => measuringChanged(s, run)));
   on("sources.changed", (sources) => applyServerEvent({ sources }));
   on("update.changed", updatesSession.receiveUpdate);
   on("usage.changed", () => usageSession.usageChanged());
@@ -242,14 +245,15 @@ async function hydrateWith(
     // A download push from before the reconnect may be stale (its server restarted, or its end missed): the list says what runs now.
     applyServerEvent({ imagePresets, ...imagePresets === NA ? {} : { imageDownload: imagePresets.download } });
   });
-  const [gpu, catalog, sources, update, speeds] = await Promise.all([
+  const [gpu, catalog, sources, update, speeds, measures] = await Promise.all([
     probe("gpu.status", {}),
     probe("models.catalog", {}),
     probe("sources.list", {}),
     probe("update.status", {}),
     probe("models.speed", {}),
+    probe("models.measures", {}),
   ]);
-  applyServerEvent((s) => ({ gpu, sources, ...(updateOrder.current(updateTicket) ? { update } : {}), ...(catalogLands(catalogTicket) ? { catalog } : {}), ...speedsRead(s, speeds) }));
+  applyServerEvent((s) => ({ gpu, sources, ...(updateOrder.current(updateTicket) ? { update } : {}), ...(catalogLands(catalogTicket) ? { catalog } : {}), ...speedsRead(s, speeds), ...measuresRead(measures) }));
   release("none");
   void settingsReads.read();
   // A model's thoughts take minutes in system memory, so Thinking starts off with no GPU; the composer's button still turns it on.
@@ -458,6 +462,12 @@ export async function addSource(kind: "folder" | "file" | "sqlite", path: string
   if (path.trim() === "") return null;
   const r = await act("sources.add", { kind, path: path.trim() }, `add this ${SOURCE_WORDS[kind]}`, "check it and try again");
   return r.ok ? null : r.message;
+}
+
+/** Settings › Models, Measure: starts the run; its steps and numbers arrive as pushes, a refusal shows on the row. */
+export async function measureModel(name: string): Promise<void> {
+  const r = await act("models.measure", { name }, `measure ${name}`);
+  applyServerEvent((s) => (r.ok ? measureStarted(s, r.value) : measureRefused(s, name, r.message)));
 }
 
 export async function removeSource(id: string): Promise<ActionResult> {

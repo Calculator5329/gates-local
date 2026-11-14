@@ -155,7 +155,17 @@ const source: Source = {
   state: "ready",
 };
 
-const imageReady: ImageStatus = { state: "ready", owner: "external", baseUrl: "http://127.0.0.1:8188" };
+const measured = {
+  model: "qwen3.5:9b",
+  digest: "sha256:6a0746a1ec1a",
+  at: 1_762_500_008_000,
+  numCtx: 4096,
+  tokensPerSecond: 61.4,
+  score: 75,
+  checks: [{ id: "tools-weather", kind: "tools" as const, ok: true }, { id: "sql-count", kind: "sql" as const, ok: false }],
+};
+
+const imageReady: ImageStatus ={ state: "ready", owner: "external", baseUrl: "http://127.0.0.1:8188" };
 
 const runtime: RuntimeStatus = { state: "ready", owner: "external", baseUrl: "http://127.0.0.1:11434", version: "0.40.4" };
 
@@ -215,6 +225,8 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "models.load": { params: { model: "qwen3.5:9b", numCtx: 16384 }, result: { model: "qwen3.5:9b", numCtx: 16384, state: "ready" } },
   // None measured by default, so a client test that does not ask about speed sees none.
   "models.speed": { params: {}, result: [] },
+  "models.measures": { params: {}, result: [measured] },
+  "models.measure": { params: { name: "qwen3.5:9b" }, result: { model: "qwen3.5:9b", state: "waiting", done: 0, total: 9 } },
   "sources.list": { params: {}, result: [source] },
   "sources.add": { params: { kind: "sqlite", path: "/home/me/library.db" }, result: source },
   "sources.remove": { params: { id: "s1" }, result: { id: "s1" } },
@@ -345,6 +357,8 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
     { model: "qwen3.5:9b", numCtx: 32768, state: "error", message: "Not enough memory at 32k" },
   ],
   "models.speed": [[{ model: "qwen3.5:9b", tokensPerSecond: 101.6, replies: 8 }, { model: "gemma3:4b", tokensPerSecond: 8.4, replies: 1 }], []],
+  "models.measures": [[measured], []],
+  "models.measuring": [{ model: "qwen3.5:9b", state: "running", done: 3, total: 9 }, { model: "qwen3.5:9b", state: "error", done: 0, total: 9, message: "Ollama is not running." }],
   "sources.changed": [[source], []],
   "sources.imports": [{ samples: [], jobs: [] }],
   "image.status": [imageReady, { state: "off", owner: "none" }],

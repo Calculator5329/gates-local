@@ -1883,6 +1883,17 @@
       ]
     },
     {
+      "id": "models.row-menu.measure",
+      "file": "src/Models.tsx",
+      "line": 416,
+      "element": "jsx-prop",
+      "attribute": "data-testid",
+      "tag": "button",
+      "actions": [
+        "click"
+      ]
+    },
+    {
       "id": "models.row-menu.open",
       "file": "src/Models.tsx",
       "line": 331,
@@ -3217,6 +3228,16 @@
       "pattern": "settings.library.add-*",
       "file": "src/Settings.tsx",
       "line": 587,
+      "attribute": "data-testid",
+      "tag": "button",
+      "actions": [
+        "click"
+      ]
+    },
+    {
+      "pattern": "settings.models.measure-*",
+      "file": "src/ModelMeasure.tsx",
+      "line": 80,
       "attribute": "data-testid",
       "tag": "button",
       "actions": [

@@ -57,7 +57,8 @@ const noGpuComputer = (over: object) => ({
   ...over,
 });
 const render = (state: object) => {
-  store.state = state;
+  // the store's own empty run table (store.ts), which the Measure cells read
+  store.state = { measuring: {}, ...state };
   return renderToStaticMarkup(createElement(ModelsPage));
 };
 /** Every mention of a GPU left once the page's own "no supported GPU" is set aside, with its surroundings. */

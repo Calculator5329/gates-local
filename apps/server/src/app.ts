@@ -37,6 +37,7 @@ import { createImageHandlers } from "./image/handlers.ts";
 import type { ImageSetupModule } from "./image/setup.ts";
 import { IMAGES_UNSET, type ImageModule } from "./image/module.ts";
 import type { GpuLease } from "./gpu/lease.ts";
+import { createMeasure } from "./measure/handlers.ts";
 import { createUpdateHandlers, type UpdateModule } from "./update/module.ts";
 import type { Usage } from "./usage/index.ts";
 import type { SettingsReader } from "./settings/store.ts";
@@ -297,6 +298,15 @@ export function createApp(deps: AppDeps): App {
     comfyPid: () => reclaimableComfy(),
     push: (table) => push("fit.changed", table),
     log,
+  });
+  // Measure (Settings › Models): only on its RPC, holding the GPU alone, at a fixed small window.
+  const measure = deps.dataDir === undefined ? undefined : createMeasure({
+    dataDir: deps.dataDir,
+    baseUrl: () => runtime.baseUrl(),
+    installed: async () => catalog.current() ?? (await catalog.refresh()).models,
+    plan: async (baseUrl, model, numCtx, signal) => (await planBeside(baseUrl, model, numCtx, { signal })).report,
+    push,
+    ...(deps.lease ? { lease: deps.lease } : {}),
   });
   const offRuntime = runtime.onChange((status) => {
     push("runtime.changed", status);
@@ -758,6 +768,7 @@ export function createApp(deps: AppDeps): App {
     ...(deps.sources ? createSourcesHandlers({ sources: deps.sources }) : {}),
     ...deps.libraryImports?.handlers,
     ...(deps.update ? createUpdateHandlers(deps.update) : {}),
+    ...measure?.handlers,
     // Settings › Tools says Ready for Run commands only after this probe ran a command in the sandbox.
     "tools.shell": async () => deps.shellStatus ? await deps.shellStatus() : { state: "off" as const, word: "Not checked" },
     "threads.list": () => store.listThreads(),
@@ -1158,6 +1169,7 @@ export function createApp(deps: AppDeps): App {
       offSources?.();
       offImports?.();
       deps.libraryImports?.close();
+      measure?.close();
       const pending = [...turns.values()];
       for (const t of pending) t.halt(new AppError("cancelled", "Gates Local is closing. The reply written so far was saved."));
       await Promise.all(pending.map((t) => t.ended));

@@ -230,6 +230,40 @@ export const ModelSpeed = S.Struct({
 });
 export type ModelSpeed = typeof ModelSpeed.Type;
 
+/** One check of a Measure run: a tool-use prompt or a question against the built-in database. */
+export const MeasureCheck = S.Struct({ id: S.String, kind: S.Literals(["tools", "sql"]), ok: S.Boolean });
+export type MeasureCheck = typeof MeasureCheck.Type;
+
+/**
+ * A model measured on this computer when the person asked (Settings › Models, Measure): its
+ * reply speed and the share of checks it passed. Kept per model and digest, so a re-pulled
+ * model with new weights is measured again.
+ */
+export const ModelMeasure = S.Struct({
+  model: S.String,
+  digest: S.String,
+  /** When it was measured, ms since 1970. */
+  at: S.Finite,
+  /** The window the checks ran at. */
+  numCtx: S.Int,
+  tokensPerSecond: S.Finite.check(S.isGreaterThanOrEqualTo(0)),
+  /** 0 to 100: passed over total, rounded. */
+  score: S.Int.check(S.isBetween({ minimum: 0, maximum: 100 })),
+  checks: S.Array(MeasureCheck),
+});
+export type ModelMeasure = typeof ModelMeasure.Type;
+
+/** A Measure run while it goes: waiting for the GPU, then each step; ends done or error. */
+export const MeasureRun = S.Struct({
+  model: S.String,
+  state: S.Literals(["waiting", "running", "done", "error"]),
+  /** Steps finished, of `total` (one speed request and every check). */
+  done: S.Int,
+  total: S.Int,
+  message: S.optional(S.String),
+});
+export type MeasureRun = typeof MeasureRun.Type;
+
 export const RuntimeState = S.Literals([
   "ready",
   "starting",
