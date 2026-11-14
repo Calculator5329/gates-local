@@ -5,5 +5,5 @@
   "undo": "by hand: Writing drawn under the growing words again, not over the reply",
   "screens": ["reply"],
   "shows": "A first reply streaming in: the Writing label is pushed down with every new line",
-  "catch": [{ "screen": "reply", "kind": "moves", "element": ".writing" }]
+  "catch": [{ "screen": "reply", "kind": "moves", "element": ".think.run" }]
 }

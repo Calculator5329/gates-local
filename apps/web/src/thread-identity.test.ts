@@ -60,7 +60,6 @@ it("marks a reply the person stopped with the stop square and its seconds in its
 it.each([
   ["Stopped so Qwen 3.5 9B could load.", "preempted", { code: "preempted", message: "Another model needed the memory", neededBy: "qwen3.5:9b" }],
   ["Stopped when the Ollama runtime changed.", "preempted", { code: "runtime-changed", message: "The runtime changed" }],
-  ["The reply didn't finish. The model crashed.", "failed", { code: "model-error", message: "the model crashed" }],
 ] as const)("shows only the known stop reason, in its own words, with the stop square: %s", (reason, ended, why) => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
@@ -73,6 +72,17 @@ it.each([
   expect(html).not.toMatch(OLD_WORDS);
   expect(html).toContain("A retained partial answer");
   expect(html).toContain('aria-label="Interrupted reply"');
+});
+
+it("a reply that did not finish is never drawn as stopped: no square, its words, Retry and the runtime's text in the tip (decision 7)", () => {
+  vi.stubGlobal("window", {});
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  setState({ turns: {}, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "A retained partial answer", createdAt: 1, interrupted: true, times: times("failed", 9, { why: { code: "model-error", message: "the model crashed" } }) }] } });
+  const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
+  expect(html).toMatch(/data-testid="chat.reply.failed" data-tip="the model crashed"><svg[\s\S]*?<span>The reply didn&#x27;t finish.<\/span><button[^>]*data-testid="chat.reply.retry"/);
+  expect(html).not.toContain(MARK);
+  expect(html).not.toContain('class="stop-note"');
+  expect(html).toContain("A retained partial answer");
 });
 
 it("keeps a reason under a question with no reply as words alone: there is no reply for the model not to see", () => {
@@ -103,7 +113,9 @@ it("draws the saved reply's row the moment Stop ends a reply: the mark, then Reg
 it("a reply stopped while thinking keeps Stop's seconds on the thought's pill, not on the square too, live and saved", () => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
-  const live = { threadId: "proof", gen: 1, model: "m", startedAt: 1, text: "", thinking: "The question is short", tools: [], pendingUser: null, end: { kind: "stopped", secs: 4 } };
+  // the server's record held still where Stop ended it (decision 33)
+  const reply = { stage: "ended", startedAt: 1, readyAt: 1, workMs: 4_000, toolMs: 0, attempt: 1, spans: [], callsAt: {} };
+  const live = { threadId: "proof", gen: 1, model: "m", startedAt: 1, text: "", thinking: "The question is short", tools: [], pendingUser: null, end: { kind: "stopped", secs: 4 }, reply, replyAt: 5_000 };
   setState({ messages: { proof: [] }, turns: { proof: live as never } });
   const liveHtml = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
   setState({ turns: {}, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "", thinking: "The question is short", createdAt: 1, interrupted: true, times: times("stopped", 4, { thoughtMs: 4_000, spans: [{ from: 0, ms: 4_000 }] }) }] } });
@@ -123,7 +135,9 @@ it("chat row 32: a finished reply's thought and first-token times come from its 
   setState({ turns: {}, messages: { proof: [reply] } });
   const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
   expect(html).toContain("Thought for 3 s");
-  expect(html).toContain("3.2 s to first token");
+  // the numbers under the reply are its work and speed, never the wait for the first word (decision 4)
+  expect(html).toContain('<span class="meta">2.6 s</span>');
+  expect(html).not.toContain("to first token");
 });
 
 const at = (id: string, role: "user" | "assistant", more: object = {}) => ({ id, threadId: "proof", role, content: `Words of ${id}`, createdAt: 1, ...more });
@@ -141,8 +155,10 @@ it("marks exactly the turns with a stop note under them, whatever state the turn
   });
   const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
   const classes = [...html.matchAll(/<div class="(turn [^"]*|stop-note[^"]*)"/g)].map((m) => m[1]);
-  // a reply the person stopped carries its mark in its own actions row, so it has no note and keeps its gap
-  expect(classes).toEqual(["turn u", "turn a done", "turn u", "turn a done noted", "stop-note", "turn u", "turn a interrupted", "turn u noted", "stop-note under-u"]);
+  // a reply the person stopped carries its mark in its own actions row, so it has no note and keeps its gap;
+  // a failed reply says so inside itself, with Retry (decision 7), so it has no note either
+  expect(classes).toEqual(["turn u", "turn a done", "turn u", "turn a done", "turn u", "turn a interrupted", "turn u noted", "stop-note under-u"]);
+  expect(html.match(/data-testid="chat.reply.failed"/g)).toHaveLength(1);
 });
 
 function child(node: unknown, index: number): unknown {

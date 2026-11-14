@@ -165,10 +165,13 @@ export function modelFacts(m: ModelInfo | undefined): { quant: string; disk: str
   return { quant: m?.quantization ?? "", disk: m ? `${gb(m.sizeBytes)} on disk` : "" };
 }
 
-/** The meta line under a finished reply: "Qwen 3.5 9B · 2.9 s to first token · 38 tok/s". */
-export function replyMeta(name: string, msg: Pick<Message, "stats">, firstTokenMs?: number): string {
-  const parts = [name];
-  if (firstTokenMs !== undefined) parts.push(`${(firstTokenMs / 1000).toFixed(1)} s to first token`);
+/**
+ * The meta line under a finished reply, numbers only (decision 4): "4.5 s · 38 tok/s". The seconds
+ * are the reply's work (thinking and tool time, decision 2); a reply that did no work has none.
+ */
+export function replyMeta(msg: Pick<Message, "stats">, workMs?: number): string {
+  const parts: string[] = [];
+  if (workMs !== undefined && workMs >= 50) parts.push(`${(workMs / 1000).toFixed(1)} s`);
   const speed = decodeSpeed(msg.stats);
   if (speed !== undefined) parts.push(`${speed} tok/s`);
   return parts.join(" · ");

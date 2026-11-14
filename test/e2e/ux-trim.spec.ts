@@ -125,7 +125,7 @@ test.describe("a reply the person stopped", () => {
     await stack.scenario("models", { tokenDelayMs: 120 });
     await sendMessage(page, "Tell me about cron");
     const reply = page.locator(".turn.a").last();
-    await expect(reply.locator(".writing")).toBeVisible();
+    await expect(reply.locator(".think.run")).toBeVisible();
     await expect.poll(async () => (await reply.locator(".md").innerText()).split(/\s+/).length).toBeGreaterThan(8);
     // where the reply's last block sits in the column, before Stop, right after, once saved, after a reload
     const blocks = reply.locator(".md > *");
@@ -136,7 +136,7 @@ test.describe("a reply the person stopped", () => {
     });
     const before = await box();
     await page.getByRole("button", { name: "Stop", exact: true }).click();
-    await expect(reply.locator(".writing")).toHaveCount(0);
+    await expect(reply.locator(".think.run")).toHaveCount(0);
     const stopped = await box();
     await expect(page.locator(".turn.a.interrupted")).toHaveCount(1);
     await expect(reply.locator(".a-act")).toHaveCount(1);

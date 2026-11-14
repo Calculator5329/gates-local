@@ -8,7 +8,7 @@ import { drawChoice, imageMode } from "../image-choice.ts";
 import { releaseFiles } from "../file-holds.ts";
 import { type Draft, beginQueuedDraft, cancelQueuedDraft, clearDraft, currentDraftKey, getDraft, moveDraft, replaceDraft } from "../drafts.ts";
 import type { ServerEvent } from "./server-state.ts";
-import { type ChatEvent, type TurnEvent, endReason, leaveThinking, reduceTurn, startClock, stopThinking, thoughtSecsAt, unfinished, withTurn } from "./turn.ts";
+import { type ChatEvent, type TurnEvent, endReason, reduceTurn, unfinished, withTurn, workMsAt } from "./turn.ts";
 import { stopReason as stopWords } from "./times.ts";
 
 declare global {
@@ -131,20 +131,18 @@ const stopReason = (event: { readonly code: string; readonly neededBy?: string |
 
 /**
  * A live turn's times, as a row of words kept here carries them when the server saved none (a
- * reply retired before its end came): the same shape the server stamps, so it draws the same way.
+ * reply retired before its end came): the same shape the server stamps, from its last record.
  */
 function localTimes(l: LiveTurn, end: NonNullable<LiveTurn["end"]>, now: number): ReplyTimes {
-  const thought = l.thinkingSecs ?? (l.firstTokenAt === undefined || l.thinking === "" ? undefined : thoughtSecsAt(l, l.firstTokenAt));
-  const clock = l.clock === undefined ? undefined : stopThinking(l.clock, now);
+  const work = workMsAt(l, now);
   return {
     startedAt: l.startedAt,
-    ...(l.firstTokenAt === undefined ? {} : { firstTokenAt: l.firstTokenAt }),
-    ...(thought === undefined ? {} : { thoughtMs: thought * 1000 }),
-    spans: clock?.spans ?? [],
-    callsAt: clock?.at ?? {},
-    // a Stop keeps the seconds this client showed; a failure says only that the reply didn't finish
+    spans: l.reply?.spans ?? [],
+    callsAt: l.reply?.callsAt ?? {},
+    ...(work === undefined ? {} : { workMs: Math.round(work) }),
+    // a Stop keeps the seconds this client showed; a failure keeps the runtime's text for its tip (decision 7)
     ended: end.kind === "stopped" ? { reason: "stopped", at: l.startedAt + end.secs * 1000 } : { reason: "failed", at: now },
-    ...(end.kind === "error" ? { why: { code: end.code, message: "" } } : {}),
+    ...(end.kind === "error" ? { why: { code: end.code, message: end.message } } : {}),
   };
 }
 
@@ -159,16 +157,19 @@ function retriedRows(messages: readonly Message[]): readonly Message[] {
 
 /** The reply these messages waited for stopped or failed: they wait for Send now instead of going out on their own. */
 function holdQueue(threadId: string): void {
-  const waiting = (q: Queued) => q.threadId === threadId && q.waitFor === "reply" && q.now !== true;
+  const waiting = waitsBehind(threadId);
   setState((s) => (s.queued.some(waiting) ? { queued: s.queued.map((q) => (waiting(q) ? { ...q, held: true as const } : q)) } : {}));
 }
 
-const waitsBehind = (threadId: string) => (q: Queued) => q.threadId === threadId && q.waitFor === "reply" && q.now !== true;
+/** A queued message that goes out on its own once this thread's reply ends. */
+function waitsBehind(threadId: string): (q: Queued) => boolean {
+  return (q) => q.threadId === threadId && q.waitFor === "reply" && q.now !== true;
+}
 
 /**
- * The queue behind a reply the app retries on its own: on hold while the retry runs ("running"),
- * still on hold when it failed too ("failed"), sent as usual when it finished (undefined: no longer held).
- * A stop during the retry leaves it held with no retry word.
+ * The queue behind a failed reply the server runs once more (decision 7): on hold while the second
+ * attempt runs ("running"), still on hold when it failed too ("failed"), sent as usual when it
+ * finished (undefined: no longer held). A stop during the second attempt leaves it held with no word.
  */
 function markRetry(threadId: string, retry: "running" | "failed" | "finished" | "stopped"): void {
   const waiting = waitsBehind(threadId);
@@ -225,24 +226,13 @@ interface Waiting {
   readonly gen: number;
   text: string;
   thinking: string;
-  /** When the first of these words arrived: a first word's time is when it came, not when it reached the screen. */
-  textAt?: number;
-  /** When the first of the thinking words arrived: a thought starts when it came, also in a chat not on screen. */
-  thinkingAt?: number;
 }
 
-/**
- * The turn with the words that waited for a frame applied at the times they came:
- * the thinking runs from its first waiting word and stops at `answerAt` when answer words waited too.
- */
-function withWaiting(turn: LiveTurn, w: Waiting, now: number, answerAt: number): LiveTurn {
-  const thought = reduceTurn(turn, { type: "thinking", text: w.thinking }, w.thinkingAt ?? now) ?? turn;
-  const answering = w.text === "" ? thought : leaveThinking(thought, answerAt);
-  return reduceTurn(answering, { type: "delta", text: w.text }, w.textAt ?? now) ?? answering;
+/** The turn with the words that waited for a frame. */
+function withWaiting(turn: LiveTurn, w: Waiting, now: number): LiveTurn {
+  const thought = reduceTurn(turn, { type: "thinking", text: w.thinking }, now) ?? turn;
+  return reduceTurn(thought, { type: "delta", text: w.text }, now) ?? thought;
 }
-
-/** The model is loading into memory now, by the server's models.load: a turn starting on it is not ready yet. */
-const loadingNow = (s: State, model: string): boolean => s.loads[model]?.state === "loading";
 
 /** History, navigation, fit and RPC operations are wired by session.ts. */
 export function createChat({ applyServerEvent, call, codeOf, createThread, creatingDraft, loadThread, loading, noteMessage, withMessage, untrackedDone, openThread, blockingFor }: ChatEffects) {
@@ -286,7 +276,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     applyServerEvent((s) => {
       const turn = s.turns[threadId];
       if (turn === undefined || turn.gen !== gen) return;
-      return { turns: withTurn(s.turns, threadId, reduceTurn(turn, event, Date.now(), event.type === "start" && loadingNow(s, event.model))) };
+      return { turns: withTurn(s.turns, threadId, reduceTurn(turn, event, Date.now())) };
     });
   }
 
@@ -396,7 +386,16 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     out = { ...out, messageId: out.messageId ?? queueId() };
     asking = true;
     // a picture loads no chat model, so it stops no other chat's reply (the image job keeps its own GPU rules)
-    const blocking = out.draw === undefined ? await blockingFor(out.model, getState().numCtx) : [];
+    let blocking: readonly BlockingTurn[] = [];
+    if (out.draw === undefined) {
+      // the server plans beside the running replies, which can take a second: Send shows it is on its way
+      setState({ asking: true });
+      try {
+        blocking = await blockingFor(out.model, getState().numCtx);
+      } finally {
+        setState({ asking: undefined });
+      }
+    }
     asking = false;
     if (gone(out)) return;
     if (blocking.length > 0 && !stopOthersOk()) {
@@ -476,7 +475,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const fresh = opts.out?.threadId === null;
     const drawCount = draw === undefined ? undefined : fresh ? s.imageCountNew : s.threads.find((t) => t.id === threadId)?.imageCount ?? 1;
     const startedAt = Date.now();
-    const turn: LiveTurn = { gen, threadId, turnId: null, model: draw?.preset ?? model, startedAt, clock: startClock(startedAt), thinking: "", text: "", tools: [], pendingUser: content, pendingImages: images, ...(files.length ? { pendingFiles: files } : {}), ...(draw === undefined ? {} : { image: true as const }) };
+    const turn: LiveTurn = { gen, threadId, turnId: null, model: draw?.preset ?? model, startedAt, thinking: "", text: "", tools: [], pendingUser: content, pendingImages: images, ...(files.length ? { pendingFiles: files } : {}), ...(draw === undefined ? {} : { image: true as const }) };
     // Using is a turn that starts: a send, a queued send, Retry or Regenerate, after any warning was answered.
     // The next new chat starts on this model (navigation.ts newThread). An Image send uses no chat model.
     setState(st => ({ ...(opts.from ? { queued: st.queued.filter(q => q.id !== opts.from?.q.id) } : {}), turns: withTurn(st.turns, threadId, turn), ...(model === "" || draw !== undefined ? {} : { chosen: model }) }));
@@ -546,8 +545,6 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
 
   /** chat.send was refused, or the turn ended before its start: nothing was saved. */
   function notStarted(e: unknown, gen: number, threadId: string, content: string, model: string, opts: TurnOptions): void {
-    // the app's own retry was refused: that counts as its one try
-    if (opts.out?.regenerate === true) retryEnded(threadId, "failed");
     notSent(e, gen, threadId, content, model, opts);
     flushQueued();
   }
@@ -624,37 +621,6 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
   }
 
   /**
-   * Threads whose failed reply the app is retrying once on its own, because a message
-   * waits behind it (owner ruling, chat row 23). A second failure is not retried.
-   */
-  const retrying = new Set<string>();
-
-  /** A reply that failed with a message queued behind it in its chat: retried once, the way Retry would, in that chat whether it is open or not. */
-  function retryBehindQueue(threadId: string, model: string): boolean {
-    if (retrying.has(threadId) || !getState().queued.some(waitsBehind(threadId))) return false;
-    retrying.add(threadId);
-    markRetry(threadId, "running");
-    void (async () => {
-      if (getState().messages[threadId] === undefined) await loadThread(threadId);
-      const s = getState();
-      const last = (s.messages[threadId] ?? []).findLast((m) => m.role === "user");
-      if (last === undefined || !retrying.has(threadId) || unfinished(s.turns[threadId]) || s.turns[threadId]?.ending === true) {
-        if (retrying.delete(threadId)) markRetry(threadId, "failed");
-        flushQueued();
-        return;
-      }
-      // the model that failed, as Retry would send it from that chat
-      await admit({ content: last.content, images: last.images, ...(last.files ? { files: last.files } : {}), model: model !== "" ? model : last.model ?? s.model ?? "", threadId, keepDraft: true, regenerate: true });
-    })();
-    return true;
-  }
-
-  /** How a retried reply ended: a finish sends the queue behind it, a failure keeps it held and says so, a stop just holds it. */
-  function retryEnded(threadId: string, how: "finished" | "failed" | "stopped"): void {
-    if (retrying.delete(threadId)) markRetry(threadId, how);
-  }
-
-  /**
    * A dropped connection loses every stream. The open chat keeps its reply,
    * marked cut off; a reply behind another chat is let go, and the next visit
    * to its thread reloads what was saved. A send still waiting for its answer
@@ -689,15 +655,19 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
    * event, so a listed turn ends here, at the next hydration that does not list
    * it (or when the connection drops).
    */
-  function activeTurns(s: State, active: readonly { readonly threadId: string; readonly turnId: string }[]): Pick<State, "turns"> {
+  function activeTurns(s: State, active: ResultOf<"turns.active">): Pick<State, "turns"> {
     const ids = new Set(active.map((a) => a.turnId));
     let turns = s.turns;
+    const now = Date.now();
     for (const turn of Object.values(s.turns)) if (turn.listed === true && (turn.turnId === null || !ids.has(turn.turnId))) turns = withTurn(turns, turn.threadId, null);
-    for (const { threadId, turnId } of active) {
+    for (const { threadId, turnId, reply } of active) {
       const turn = turns[threadId];
       if (oldTurns.has(turnId)) continue;
-      if (turn?.turnId === turnId) turns = withTurn(turns, threadId, reduceTurn(turn, { type: "running" }, Date.now()));
-      else if (turn === undefined) turns = withTurn(turns, threadId, { gen: ++turnGen, threadId, turnId, model: "", startedAt: Date.now(), thinking: "", text: "", tools: [], pendingUser: null, listed: true });
+      // running again, with the record as it is now (decision 33)
+      if (turn?.turnId === turnId) {
+        const running = reduceTurn(turn, { type: "running" }, now) ?? turn;
+        turns = withTurn(turns, threadId, reduceTurn(running, { type: "reply", reply }, now));
+      } else if (turn === undefined) turns = withTurn(turns, threadId, { gen: ++turnGen, threadId, turnId, model: "", startedAt: now, reply, replyAt: now, thinking: "", text: "", tools: [], pendingUser: null, listed: true });
       // any other turn there is this client's own: its send's answer, or the snapshot's start, settles it
     }
     return { turns };
@@ -718,9 +688,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     applyServerEvent((s) => {
       const turn = s.turns[threadId];
       if (turn === undefined || turn.gen !== w.gen) return;
-      const now = Date.now();
-      // the thinking stops when the answer's words reach the store, never before a time the chip already showed
-      return { turns: withTurn(s.turns, threadId, withWaiting(turn, w, now, now)) };
+      return { turns: withTurn(s.turns, threadId, withWaiting(turn, w, Date.now())) };
     });
   }
 
@@ -736,15 +704,8 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     if (turn.end?.kind === "stopped") return;
     let w = waiting.get(turn.threadId);
     if (w === undefined || w.gen !== turn.gen) waiting.set(turn.threadId, (w = { gen: turn.gen, text: "", thinking: "" }));
-    if (kind === "text" && w.textAt === undefined) w.textAt = Date.now();
-    if (kind === "thinking" && w.thinkingAt === undefined) w.thinkingAt = Date.now();
     w[kind] += t;
-    if (getState().threadId === turn.threadId) {
-      if (raf === 0) raf = requestAnimationFrame(frame);
-    } else if (kind === "text" && (turn.firstTokenAt === undefined || (turn.thinkingSecs === undefined && turn.thinking + w.thinking !== ""))) {
-      // the first word ends the thinking: the chat's turn changes phase now, not when the chat is opened
-      flushWords(turn.threadId);
-    }
+    if (getState().threadId === turn.threadId && raf === 0) raf = requestAnimationFrame(frame);
   }
 
   /** Opening a chat shows every word its reply wrote meanwhile; a reply coming back to the screen moves ended ones on. */
@@ -794,6 +755,14 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
       case "tool":
         flushWords(threadId);
         return update(threadId, turn.gen, event);
+      case "reply":
+        // a second attempt starts over (decision 7): the first one's waiting words are dropped, and the queue behind it waits
+        if (turn.reply !== undefined && event.reply.attempt > turn.reply.attempt) {
+          waiting.delete(threadId);
+          markRetry(threadId, "running");
+        } else if (!open) flushWords(threadId);
+        // the open chat's words land in their own frame (one flush a frame); a chat off screen takes them at the phase change
+        return update(threadId, turn.gen, event);
       case "start":
         noteMessage(threadId, event.userMessage);
         if (getState().messages[threadId] !== undefined) applyServerEvent((s) => ({ messages: withMessage(s, threadId, event.userMessage) }));
@@ -818,8 +787,8 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         // a chat not on screen reloads: its cached history may be behind
         if (!open) untrackedDone(threadId, msg);
         // the person said stop: a Stop that lost the race to the last token holds the queue like any other
-        if (turn.end?.kind === "stopped") { holdQueue(threadId); retryEnded(threadId, "stopped"); }
-        else retryEnded(threadId, "finished");
+        if (turn.end?.kind === "stopped") { holdQueue(threadId); markRetry(threadId, "stopped"); }
+        else markRetry(threadId, "finished");
         flushQueued();
         return;
       }
@@ -846,8 +815,8 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         }
         // a reply the person stopped, or the server halted to make way for something, is not retried
         const stopped = turn.end?.kind === "stopped" || endReason(event) !== "failed";
-        if (retrying.has(threadId)) retryEnded(threadId, stopped ? "stopped" : "failed");
-        else if (!stopped && turn.image !== true && retryBehindQueue(threadId, turn.model)) return;
+        // the server already ran it once more (decision 7): the queue says the second try failed too
+        markRetry(threadId, !stopped && (turn.reply?.attempt ?? 1) > 1 ? "failed" : "stopped");
         flushQueued();
         return;
       }
@@ -891,12 +860,8 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     if (event.type !== "start" || oldTurns.has(turnId)) return;
     noteMessage(threadId, event.userMessage);
     retire(getState().turns[threadId]);
-    const startedAt = Date.now();
-    // a start sent again to this client as it connected: the turn began before it was here
-    const clock = event.replayed === true ? {} : { clock: startClock(startedAt) };
-    // its model still loading: ready at its first token, as for a turn of this client's own
-    const ready = loadingNow(getState(), event.model) ? {} : { readyAt: startedAt };
-    const turn: LiveTurn = { gen: ++turnGen, threadId, turnId, userMessageId: event.userMessage.id, model: event.model, startedAt, ...clock, ...ready, thinking: "", text: "", tools: [], pendingUser: null, ...(event.image === true ? { image: true as const } : {}) };
+    // what it is doing and its seconds come in the server's record that follows the start
+    const turn: LiveTurn = { gen: ++turnGen, threadId, turnId, userMessageId: event.userMessage.id, model: event.model, startedAt: Date.now(), thinking: "", text: "", tools: [], pendingUser: null, ...(event.image === true ? { image: true as const } : {}) };
     applyServerEvent((st) => ({
       ...(st.messages[threadId] !== undefined ? { messages: withMessage(st, threadId, event.userMessage) } : {}),
       turns: withTurn(st.turns, threadId, turn),

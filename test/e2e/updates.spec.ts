@@ -106,7 +106,7 @@ test("a reply running: one ask, in the footer's panel, that names the reply; can
   await open();
   await waitReady(page);
   await sendMessage(page, "A slow reply");
-  await expect(page.locator(".writing")).toBeVisible();
+  await expect(page.locator(".think.run")).toBeVisible();
   update.work(["1 running reply (including other windows)"]);
   update.show();
   const button = page.getByRole("button", { name: "Update to def5678", exact: true });
@@ -116,7 +116,7 @@ test("a reply running: one ask, in the footer's panel, that names the reply; can
   await expect(ask).toContainText("Update to def5678 and restart?");
   await ask.getByRole("button", { name: "Cancel" }).click();
   await expect(ask).toHaveCount(0);
-  await expect(page.locator(".writing")).toBeVisible();
+  await expect(page.locator(".think.run")).toBeVisible();
   await expect(page.locator("html")).not.toHaveAttribute("data-update-started", "yes");
   await button.click();
   await ask.getByTestId("sidebar.update.go").click();

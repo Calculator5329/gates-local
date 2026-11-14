@@ -1,12 +1,12 @@
 [
   {
     "file": "apps/web/src/Thread.tsx",
-    "find": ") : writing ? <WritingLabel over /> : null}",
-    "replace": ") : null}"
+    "find": "      ) : streaming ? (\n        <div className=\"fold-line\"><div className=\"think fold run\"><LiveLine turn={live} tools={calls} chevron={false} /></div></div>\n      ) : slot ?",
+    "replace": "      ) : slot ?"
   },
   {
     "file": "apps/web/src/Thread.tsx",
     "find": "      {(msg?.imageJob ? [] : msg?.images ?? []).map(",
-    "replace": "      {/* finder case: the chat row 30 fix undone (Writing below the growing words) */}\n      {!folded && writing ? <WritingLabel /> : null}\n      {(msg?.imageJob ? [] : msg?.images ?? []).map("
+    "replace": "      {/* finder case: the chat row 30 fix undone (Writing below the growing words) */}\n      {!folded && streaming ? <div className=\"fold-line\"><div className=\"think fold run\"><LiveLine turn={live} tools={calls} chevron={false} /></div></div> : null}\n      {(msg?.imageJob ? [] : msg?.images ?? []).map("
   }
 ]

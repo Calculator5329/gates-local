@@ -138,11 +138,49 @@ export const ReplyTimes = S.Struct({
   spans: S.Array(S.Struct({ from: Count, ms: Count })),
   /** The thinking's length when each call first arrived: where the call came in the thinking. */
   callsAt: S.Record(S.String, Count),
+  /**
+   * The reply's work: its thinking plus its tool calls, never its load or its writing (the one
+   * clock every window shows). Absent on rows saved before 2026-11-14.
+   */
+  workMs: S.optional(Count),
   ended: TurnEnded,
   /** Preempted or failed: the error the turn ended with, for the note under it. */
   why: S.optional(S.Struct({ code: S.String, message: S.String, neededBy: S.optional(S.String) })),
 });
 export type ReplyTimes = typeof ReplyTimes.Type;
+
+/**
+ * What a running reply is doing: waiting for the GPU or the load gate, loading its model,
+ * thinking (from the model being ready, also while it reads a call's result), running a call,
+ * writing its answer, or ended.
+ */
+export const ReplyStage = S.Literals(["waiting", "loading", "thinking", "tool", "writing", "ended"]);
+export type ReplyStage = typeof ReplyStage.Type;
+
+/**
+ * A running reply as the server keeps it (decision 33): one record per turn, pushed to every
+ * window at each change, and the only thing a window draws the live line from. Its times are
+ * the server's; `workMs` is as of the push, and grows on the window's own clock only while the
+ * stage is thinking or tool. The saved row's ReplyTimes are this record at the end.
+ */
+export const ReplyRecord = S.Struct({
+  stage: ReplyStage,
+  startedAt: Millis,
+  /** The model is ready for this reply: at the start of a warm turn, at the first token or call of a cold one. */
+  readyAt: S.optional(Millis),
+  firstTokenAt: S.optional(Millis),
+  /** Thinking plus tool time so far, as of the push. */
+  workMs: Count,
+  /** Tool time so far, as of the push. */
+  toolMs: Count,
+  /** 1, then 2 while the server runs a failed reply again (it does so once). */
+  attempt: PositiveInt,
+  /** The closed thinking spans and where each call came, for the fold's rounds; as on ReplyTimes. */
+  spans: S.Array(S.Struct({ from: Count, ms: Count })),
+  callsAt: S.Record(S.String, Count),
+  ended: S.optional(TurnEnded),
+});
+export type ReplyRecord = typeof ReplyRecord.Type;
 
 /**
  * A non-image file attached to a message: the server's own copy in its data folder. The model
@@ -451,6 +489,8 @@ export const ChatEvent = S.Union([
   }),
   // A tool call started, finished or failed; the same callId updates one step row.
   S.Struct({ type: S.Literal("tool"), step: ToolStep }),
+  // The turn's reply record changed (decision 33): its stage, its times, or a second attempt. Added 2026-11-14.
+  S.Struct({ type: S.Literal("reply"), reply: ReplyRecord }),
 ]);
 export type ChatEvent = typeof ChatEvent.Type;
 

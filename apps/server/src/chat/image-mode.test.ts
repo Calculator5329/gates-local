@@ -74,7 +74,8 @@ async function rig(options: { imageTool?: ImageChoice; hold?: boolean; firstDone
     runtime: { status: () => ready, baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ready, lookIfDown: async () => ready },
     catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
     push: (channel, payload) => {
-      if (channel === "chat.event") events.push((payload as { event: { type: string } }).event);
+      // the turn's events; its reply records (decision 33) are not what these cases read
+      if (channel === "chat.event" && (payload as { event: { type: string } }).event.type !== "reply") events.push((payload as { event: { type: string } }).event);
       if (channel === "threads.changed") changed.push((payload as { threadId: string }).threadId);
     },
     fit: { runNvidiaSmi: async (args) => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
@@ -159,7 +160,7 @@ describe("Image mode: the typed words go straight to the image model", () => {
     const t = await rig({ hold: true });
     try {
       const { turnId } = await t.send({ draw: DRAWN });
-      expect(await t.app.handlers["turns.active"]!({}, { clientId: 1 })).toEqual([{ turnId, threadId: t.thread.id }]);
+      expect(await t.app.handlers["turns.active"]!({}, { clientId: 1 })).toEqual([{ turnId, threadId: t.thread.id, reply: expect.objectContaining({ attempt: 1 }) }]);
       await expect(t.send({ draw: DRAWN })).rejects.toMatchObject({ code: "turn-active" });
       expect(await t.app.handlers["chat.cancel"]({ turnId }, { clientId: 1 })).toEqual({ cancelled: true });
       await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));

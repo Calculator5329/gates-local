@@ -65,7 +65,7 @@ it("a failure that lands after Stop, on screen, is the failure and not the Stop"
   await tick();
   expect(st().turns["A"]?.end).toEqual({ kind: "error", code: "model-not-found", message: notFound.message });
   // the stamped question is in place, and its note waits while the turn shows its own error line
-  expect(noteOn("A", "u-A")).toEqual({ kind: "said", words: "The reply didn't finish." });
+  expect(noteOn("A", "u-A")).toEqual({ kind: "failed", why: notFoundWhy.message });
 });
 
 it("a failure that lands after Stop, off screen, leaves its note under the question", async () => {
@@ -77,7 +77,7 @@ it("a failure that lands after Stop, off screen, leaves its note under the quest
   await tick();
   expect(st().turns["A"]).toBeUndefined();
   // the note a failure off screen leaves without a Stop
-  expect(noteOn("A", "u-A")).toEqual({ kind: "said", words: "The reply didn't finish." });
+  expect(noteOn("A", "u-A")).toEqual({ kind: "failed", why: notFoundWhy.message });
 });
 
 const cancelled = { type: "error", code: "cancelled", message: "cancelled mid-stream; no done event", ended: { reason: "stopped", at: 4_000 }, question: { ...userMsg("u-A", "A", "hello A"), times: stamped("stopped") } } as const;
@@ -127,7 +127,7 @@ it("leaving without a send: a failure after Stop leaves its note under the quest
   chat(a, "A", notFound);
   await tick();
   expect(st().turns["A"]).toBeUndefined();
-  expect(noteOn("A", "u-A")).toEqual({ kind: "said", words: "The reply didn't finish." });
+  expect(noteOn("A", "u-A")).toEqual({ kind: "failed", why: notFoundWhy.message });
 });
 
 it("a failure with saved words after Stop keeps the failure's words, not Stop's seconds", async () => {
@@ -141,7 +141,7 @@ it("a failure with saved words after Stop keeps the failure's words, not Stop's 
   const partial: Message = { id: "p-A", threadId: "A", role: "assistant", content: "Partly", interrupted: true, createdAt: 2, times: stamped("failed", why) };
   chat(a, "A", { type: "error", ...why, partial, ended: { reason: "failed", at: 4_000 } });
   await tick();
-  expect(noteOn("A", "p-A")).toEqual({ kind: "said", words: "The reply didn't finish. Stream broke." });
+  expect(noteOn("A", "p-A")).toEqual({ kind: "failed", why: "stream broke" });
 });
 
 it("a call cut by Stop, kept in this chat without a saved row, is kept as stopped, not failed", async () => {
@@ -176,7 +176,7 @@ it("first words that come after Stop set no first-word time on the saved reply",
   chat(a, "A", { type: "error", code: "cancelled", message: "cancelled mid-stream; no done event", ended: { reason: "stopped", at: 4_000 },
     partial: { ...partial, times: { ...stamped("stopped"), thoughtMs: 3_000, spans: [{ from: 0, ms: 3_000 }] } } });
   await tick();
-  // the pill would read the late word's time; the square keeps Stop's seconds, the only time shown
+  // the work stops at the Stop, not at the late word; the square keeps Stop's seconds
   const row = st().messages["A"]?.find((m) => m.id === "p-A");
-  expect(row === undefined ? "missing" : drawTimes(row, undefined)).toMatchObject({ firstTokenMs: undefined, thoughtSecs: 3, note: { kind: "stopped", secs: 3 } });
+  expect(row === undefined ? "missing" : drawTimes(row, undefined)).toMatchObject({ workMs: 3_000, note: { kind: "stopped", secs: 3 } });
 });

@@ -338,7 +338,7 @@ async function streamFlushes(page: Page, open: (hash?: string) => Promise<void>,
   await sendMessage(page, "Stream something");
   // read once the reply has finished: a flush at the terminal event counts too (WF-05)
   await expect(page.locator(".turn.a.done")).toHaveCount(1, { timeout: 10_000 });
-  await expect(page.locator(".writing")).toHaveCount(0);
+  await expect(page.locator(".think.run")).toHaveCount(0);
   await expect(page.locator(".turn.a.done .md")).toContainText("so streaming takes a");
   const r = await page.evaluate(() => {
     const w = window as unknown as FlushProbe;
@@ -376,7 +376,7 @@ test("streaming flushes at most once in any frame", async ({ page, open }) => {
   expect(oneFlushPerFrame(r), JSON.stringify(r)).toBe(true);
 });
 
-/** Renders of the 6 seeded rows from "Writing" showing until well into the reply; bust turns the control on. */
+/** Renders of the 6 seeded rows from the live line showing until well into the reply; bust turns the control on. */
 async function seededRenders(page: Page, open: (hash?: string) => Promise<void>, thread: string | null, bust: boolean) {
   // window.glRows: the row-render test flag in apps/web/src/Thread.tsx
   await page.addInitScript((b) => {
@@ -390,7 +390,8 @@ async function seededRenders(page: Page, open: (hash?: string) => Promise<void>,
   await stack.scenario("models", { tokenDelayMs: 30 });
   await sendMessage(page, "Stream beside the old turns");
   const live = page.locator(".turn.a").last();
-  await expect(live.locator(".writing")).toBeVisible();
+  // from the first word, as when "Writing" was its own mark: the start before it settles the live row's owner
+  await expect(live.locator(".think.run .lv-w > span").first()).toHaveText("Writing");
   const before = await page.evaluate(() => {
     const w = window as unknown as Probe;
     if (w.glRows) w.glRows.renders = {};
@@ -400,12 +401,12 @@ async function seededRenders(page: Page, open: (hash?: string) => Promise<void>,
   // the live turn shows no text until it ends), and still streaming when the count is read
   await page.waitForFunction((d) => ((window as unknown as Probe).glPerf?.deltas ?? 0) >= d + 12, before.deltas);
   const renders = await page.evaluate((ids) => ids.reduce((a, id) => a + ((window as unknown as Probe).glRows?.renders[id] ?? 0), 0), seeded);
-  await expect(live.locator(".writing")).toBeVisible();
+  await expect(live.locator(".think.run")).toBeVisible();
   const flushes = (await page.evaluate(() => (window as unknown as Probe).glPerf?.flushes ?? 0)) - before.flushes;
   report(`seeded row renders while streaming${bust ? " (memo busted)" : ""}`, renders, "renders");
   report("flushes in the same window", flushes, "flushes");
   expect(flushes).toBeGreaterThan(5);
-  await expect(page.locator(".writing")).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.locator(".think.run")).toHaveCount(0, { timeout: 10_000 });
   return renders;
 }
 
@@ -464,7 +465,7 @@ test("typing preserves every character while idle, streaming and busy", async ({
   // Keep the fake reply active throughout this functional journey; no speed budget is asserted here.
   await stack.scenario("models", { tokenDelayMs: 120, replyWords: 180 });
   await sendMessage(page, "A slow reply please");
-  const writing = page.locator(".writing");
+  const writing = page.locator(".think.run");
   await expect(writing).toBeVisible();
   await ta.focus();
   await typeFreely(page, typed);
@@ -496,8 +497,8 @@ test("typing during a stream: p95 key event, input to paint", { tag: "@timing" }
   // slow tokens so the stream outlasts the typing and the control after it
   reportLoad();
   await stack.scenario("models", { tokenDelayMs: 120 });
-  // "Writing" shows from the first token until the reply ends, whether or not a whole block has shown yet
-  const writing = page.locator(".writing");
+  // the live line shows from the send until the reply ends, whether or not a whole block has shown yet
+  const writing = page.locator(".think.run");
   /** A reply streaming now: the one already running, else a new one. */
   const streaming = async () => {
     if (await writing.isVisible()) return;

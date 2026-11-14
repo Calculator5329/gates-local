@@ -112,7 +112,7 @@ test("GPU memory distinguishes available from free memory and leaves context fit
   await sendMessage(page, "Load it");
   // the reply first: the send opens its new thread, which would leave Settings if it were already open
   await expect(page.locator(".turn.a").last().locator(".md")).toContainText("You asked: Load it");
-  await expect(page.locator(".writing")).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.locator(".think.run")).toHaveCount(0, { timeout: 10_000 });
   await openGpuMemory(page);
   await expect(panel.locator(".legend")).toContainText("Currently free");
 });
@@ -125,7 +125,7 @@ test.describe("decode speed", () => {
     await open();
     await waitReady(page);
     await sendMessage(page, "Count the tokens");
-    await expect(page.locator(".writing")).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.locator(".think.run")).toHaveCount(0, { timeout: 15_000 });
     // The fake decodes a token every 12 ms (about 80 tok/s); over the whole 3+ s turn it would be under 25.
     const meta = await page.locator(".turn.a").last().locator(".meta").textContent();
     const replyTps = Number(/(\d+) tok\/s/.exec(meta ?? "")?.[1]);

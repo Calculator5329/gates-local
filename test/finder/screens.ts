@@ -85,7 +85,7 @@ export const NAMES: Readonly<Record<string, string>> = {
   ".qt": "queue tray",
   ".fold-now": "Writing word",
   ".lv-w": "work line words",
-  ".fold-line:has(.lv-dot)": "live work line",
+  ".fold-line:has(.run-dot)": "live work line",
   ".sb-foot > *": "footer icon",
   ".hdr": "thread header",
   ".hdr h2": "thread title",
@@ -93,7 +93,7 @@ export const NAMES: Readonly<Record<string, string>> = {
   ".snav button": "Settings nav item",
   "#modelBtn": "model button",
   ".sb-search": "sidebar search",
-  ".writing": "Writing label",
+  ".think.run": "live line",
   "#picker": "model picker",
   "#imagePicker": "image picker",
 };
@@ -204,7 +204,7 @@ export const SCREENS: readonly Screen[] = [
       name: "the first reply streams in",
       root: ".main",
       free: [".turn", ".composer", ".cf-l > *", ".cf-r > *", ".composer button.send"],
-      track: [".writing"],
+      track: [".think.run"],
       max: 12_000,
       // a model that does not think, so Writing is not on a thought's line (as the fix's own test runs it)
       before: async (c) => {
@@ -228,7 +228,7 @@ export const SCREENS: readonly Screen[] = [
       root: ".tl",
       // the reply streams in and the view follows it: only blinks, words and cuts count here
       free: [".turn", "details", ".fold-now", ".lv-w", ".cf-r > *", ".composer button.send"],
-      track: [".lv-w", ".fold-line:has(.lv-dot)"],
+      track: [".lv-w", ".fold-line:has(.run-dot)"],
       max: 15_000,
       before: (c) => c.scenario("slow-drip", { toolCalls: 2, quietToolRounds: 1, tokenDelayMs: 15, firstTokenDelayMs: 900 }),
       // the watch runs until the reply ends: the page is quiet while the model reads a result, so a quiet page is not the end

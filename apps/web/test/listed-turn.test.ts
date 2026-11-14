@@ -7,13 +7,15 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import type { Message, Payload } from "@gates-local/contracts";
+import type { Message, Payload, ReplyRecord } from "@gates-local/contracts";
 import { createApp } from "../../server/src/app.ts";
 import { sendStarted } from "../../server/src/chat/send-started.ts";
 import { openThreadStore } from "../../server/src/threads/store.ts";
 import { installBrowser, tick, until } from "./harness.ts";
 
 const cleanups: (() => void)[] = [];
+/** The server's reply record of a turn still waiting (decision 33). */
+const record: ReplyRecord = { stage: "waiting", startedAt: 0, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {} };
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -127,7 +129,7 @@ it("a listed turn that fails before its start puts the sidebar's dot out, holds 
   }
 });
 
-it("a listed turn's clock starts at its own start, not at the hydration that listed it", async () => {
+it("a listed turn draws the server's record: the one turns.active gave, then each one pushed (decision 33)", async () => {
   const b = installBrowser();
   let skew = 0;
   const realNow = Date.now.bind(Date);
@@ -135,7 +137,7 @@ it("a listed turn's clock starts at its own start, not at the hydration that lis
   const question: Message = { id: "their-question", threadId: "A", role: "user", content: "theirs", createdAt: 1 };
   const answer: Message = { id: "their-answer", threadId: "A", role: "assistant", content: "First words", createdAt: 2 };
   const chat = (event: Payload<"chat.event">["event"]) => b.server.push("chat.event", { threadId: "A", turnId: "other", event });
-  b.server.answer("turns.active", () => [{ threadId: "A", turnId: "other" }]);
+  b.server.answer("turns.active", () => [{ threadId: "A", turnId: "other", reply: { ...record, stage: "loading" } }]);
   b.server.answer("threads.get", ({ threadId }) => ({ thread: { id: threadId, title: threadId, createdAt: 1, updatedAt: 1 }, messages: [] }));
   vi.resetModules();
   const session = await import("../src/session.ts");
@@ -145,16 +147,18 @@ it("a listed turn's clock starts at its own start, not at the hydration that lis
     await until(() => store.getState().imageStatus !== undefined);
     session.openThread("A");
     await tick();
-    expect(store.getState().turns.A?.listed).toBe(true);
+    expect(store.getState().turns.A).toMatchObject({ listed: true, reply: { stage: "loading" } });
     // another client's question waits 20 s before the model starts on it
     skew += 20_000;
     chat({ type: "start", model: "qwen3.5:9b", userMessage: question });
+    chat({ type: "reply", reply: { ...record, stage: "thinking", readyAt: 20_000 } });
     chat({ type: "thinking", text: "Let me think" });
     await tick(); b.frame();
     skew += 5_000;
+    chat({ type: "reply", reply: { ...record, stage: "writing", readyAt: 20_000, firstTokenAt: 25_000, workMs: 5000 } });
     chat({ type: "delta", text: "First words" });
     await tick(); b.frame();
-    expect(store.getState().turns.A?.thinkingSecs, "it thought from its start to its first word").toBe(5);
+    expect(store.getState().turns.A?.reply, "the server's work seconds, not a guess here").toMatchObject({ stage: "writing", workMs: 5000 });
     chat({ type: "done", message: answer, stopReason: "stop" });
     await tick();
     // the saved reply's first-token time is the server's, stamped on its row (chat row 32)
@@ -177,7 +181,7 @@ it("a hydration whose turns.active no longer lists a listed turn drops it, with 
     applyServerEvent: never, call: never, codeOf: () => "", createThread: never, creatingDraft: () => false, loadThread: never, loading: () => false,
     noteMessage: never, withMessage: never, untrackedDone: never, openThread: never, blockingFor: never,
   });
-  const listing = [{ threadId: "A", turnId: "other" }];
+  const listing = [{ threadId: "A", turnId: "other", reply: record }];
   store.setState(chat.activeTurns(store.getState(), listing));
   expect(store.getState().turns.A?.listed).toBe(true);
   store.setState(chat.activeTurns(store.getState(), listing));

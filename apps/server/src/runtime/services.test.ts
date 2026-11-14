@@ -392,7 +392,8 @@ async function rig(routes: Record<string, Route>, options: RigOptions = {}) {
     push: (channel, payload) => {
       if (channel === "chat.event") {
         const { turnId, event } = payload as { turnId: string; event: { type: string } };
-        events.push({ ...event, turnId });
+        // the reply records (decision 33) are their own stream; these cases read the turn's events
+        if (event.type !== "reply") events.push({ ...event, turnId });
         options.onEvent?.(event);
       }
     },

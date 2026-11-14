@@ -18,7 +18,7 @@ import { imagePickerScreen, pickerScreen, threadScreen } from "./screen-loaders.
 import { chosenImage, imageCount, imageMode, imagesUnset, sizeLabel } from "./image-choice.ts";
 import { ImageMark } from "./ImageMark.tsx";
 import { Icon, SendArrow } from "./icons.tsx";
-import { canThink, chatBlockedReason, chatModels } from "./pick.ts";
+import { canThink, chatBlockedReason, chatModels, sendableModel } from "./pick.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { AttachedFiles, AttachmentImages, RefusedFiles } from "./attachment-images.tsx";
 import { DropMarker } from "./file-drop.tsx";
@@ -42,7 +42,13 @@ import {
 } from "./session.ts";
 import { NA, type Queued, type State, getState, runningTurn, setState, streamingHere, useStore } from "./store.ts";
 import { editDraft, getDraft, useDraft } from "./drafts.ts";
-import { SheetHead, Skel, closePop, closeTip, esc, isTouch, place, togglePop, useMedia } from "./ui.tsx";
+import { PHONE, SheetHead, Skel, closePop, closeTip, esc, isTouch, openTip, place, togglePop, useMedia } from "./ui.tsx";
+
+/**
+ * A phone-sized touch screen: the one place Enter adds a new line and the Send arrow sends.
+ * Everywhere a keyboard is likely, a remote desktop with no hover included, Enter sends.
+ */
+const PHONE_TOUCH = `(pointer: coarse) and ${PHONE}`;
 import { Speaker, Voice } from "./Voice.tsx";
 import { useTalk } from "./talk.ts";
 
@@ -108,6 +114,7 @@ export function Composer() {
   const refused = useRefused().length;
   const replacement = useDraft(d => d.version);
   const pasting = useStore((s) => s.pasting);
+  const askingNow = useStore((s) => s.asking === true);
   const notice = useStore((s) => s.notice);
   const noticeOffer = useStore((s) => s.noticeOffer);
   const fit =useStore((s) => fitFor(s.fitTable, s.model, ctxFor(s.numCtx, s.models, s.model)));
@@ -119,7 +126,8 @@ export function Composer() {
   const editing = editingId !== null;
   const running = useStore((s) => runningTurn(s, s.threadId)?.gen ?? null);
   const drawingNow = useStore(runningKind) === "image";
-  const touch = useMedia("(hover: none)");
+  // Enter adds a new line only on a phone-sized touch screen; with no hover over a remote desktop it still sends
+  const touch = useMedia(PHONE_TOUCH);
   const freed = stopsChat(fit);
   const wait = useStore(queueReason);
   const first = useStore(firstPull);
@@ -216,6 +224,12 @@ export function Composer() {
     if (memNo) sendTip = `Not enough memory at ${k(ctx)}`;
     else if (text && freed) sendTip = `Send${enter}. Another chat's reply stops first`;
   }
+  // Not ready and nothing queues: once typed words hide the placeholder, the tip is what it said is awaited
+  // (owner, 2026-11-14: "enter to send message is sometimes not working"); with the box empty the placeholder says it
+  if (!drawing && text && ((blocked && !queueable) || noModel)) sendTip = boot ? CONNECTING : placeholder;
+  // the model list not read yet, or the model not in it: send() would hold the message with nothing said
+  const unlisted = !drawing && ready && !queueable && !noModel && model !== undefined && sendableModel(models, model) === undefined;
+  if (unlisted) sendTip = models === undefined ? "Reading the models…" : models.some((m) => m.name === model) ? `${name} can't chat` : `${name} isn't installed`;
   if (imageNo !== null) sendTip = "This model can't see images";
   if (refused) sendTip = `Remove the file${refused === 1 ? "" : "s"} marked not sent`;
   if (pasting) sendTip = "Attaching…";
@@ -223,9 +237,9 @@ export function Composer() {
   const drawNo = !drawing ? null : images.length > 0 || files.length > 0 ? "Image takes words only" : !online ? "Gates Local isn't answering" : unset ? "Images are not set up" : pictured === undefined ? "Reading the image models…" : null;
   if (drawing && !editing && !isStreaming && !refused && !pasting) sendTip = drawNo ?? `Make image${enter}`;
   const sendDisabled = drawing ? !text || drawNo !== null || refused > 0 || pasting > 0
-    : (blocked && !queueable) || (!blocked && memNo) || noModel || !text || imageNo !== null || refused > 0 || pasting > 0;
+    : (blocked && !queueable) || (!blocked && memNo) || noModel || unlisted || !text || imageNo !== null || refused > 0 || pasting > 0;
   // Refused for memory: the button stays focusable and clickable, and the click opens the why.
-  const memRefused = !drawing && !blocked && !queueable && !noModel && memNo && imageNo === null && !refused && !pasting;
+  const memRefused = !drawing && !blocked && !queueable && !noModel && !unlisted && memNo && imageNo === null && !refused && !pasting;
   // T3 Code's composer: Enter never stops a reply; the words queue behind it.
   const sendLabel = editing ? "Update queued message" : isStreaming ? "Queue message" : "Send message";
   // Touch Enter inserts a newline, so a draft needs the queue arrow: on touch, Stop and the arrow hold
@@ -243,6 +257,15 @@ export function Composer() {
   const submit = () => {
     if (sendDisabled) return;
     void send(getDraft().text);
+  };
+  // Enter is never met by nothing: with words typed it does what a click on Send does, and where Send is off it says why
+  const enterSend = () => {
+    const answer = enterAnswer({ sendDisabled, memRefused, text, showStop });
+    if (answer === "send") submit();
+    else if (answer === "fit") openFit();
+    else if (answer === "tip") openTip(primary.current);
+    // Stop holds Send's place while a reply runs: the reason goes in the note over the box, which the next edit clears
+    else if (answer === "note") setState({ notice: sendTip });
   };
   // talk mode sends after the transcript is drawn, with Send's latest judgement of the draft
   const latestSubmit = useRef(submit);
@@ -297,7 +320,7 @@ export function Composer() {
             void attachFiles(chosen);
           }}
         />
-        <DraftTextarea key={voiceThread} textarea={ta} placeholder={placeholder} submit={submit} />
+        <DraftTextarea key={voiceThread} textarea={ta} placeholder={placeholder} submit={enterSend} />
         <div className="cf">
           <div className="cf-l">
             <button
@@ -340,7 +363,6 @@ export function Composer() {
                 className={`meter${pct > 0.85 ? " hi" : ""}`}
                 data-testid="chat.composer.context-meter"
                 aria-label="Context used"
-                data-tip={`Context used: ${(used / 1000).toFixed(1)}k of ${k(ctx)} tokens`}
               >
                 <span>Context {Math.round(pct * 100)}% used</span>
               </button>
@@ -423,16 +445,17 @@ export function Composer() {
               data-tip={showStop ? stopTip : sendTip}
               // Keep the same focusable node through empty, running and finished states.
               aria-disabled={!showStop && sendDisabled ? true : undefined}
+              aria-busy={askingNow && !showStop ? true : undefined}
               {...primaryPress}
             >
               {showStop ? <span className="sqr" /> : <SendArrow />}
-              {waitsOnLoad ? <LoadRing key={loadSince} since={loadSince} ms={loadMs} /> : null}
+              {waitsOnLoad ? <LoadRing key={loadSince} since={loadSince} ms={loadMs} /> : askingNow && !showStop ? <LoadRing since={undefined} ms={undefined} ask /> : null}
             </button>
           </div>
         </div>
       </form>
       {notice !== null && noticeOffer?.notice === notice ? <RefusalNote o={noticeOffer} /> : notice !== null ? (
-        <p className={`na c-note${memNo ? " no" : ""}`} data-testid="chat.composer.notice" role="status" tabIndex={0} data-tip={esc(notice)}>
+        <p className={`na c-note${memNo ? " no" : ""}`} data-testid="chat.composer.notice" role="status">
           {notice}
         </p>
       ) : null}
@@ -449,6 +472,7 @@ export function Composer() {
 const sizesItself = typeof CSS !== "undefined" && CSS.supports("field-sizing", "content");
 
 function DraftTextarea({ textarea, placeholder, submit }: { textarea: RefObject<HTMLTextAreaElement | null>; placeholder: string; submit: () => void }) {
+  const newlineOnEnter = useMedia(PHONE_TOUCH);
   const draft = useDraft(d => d.text);
   const version = useDraft(d => d.version);
   useLayoutEffect(() => {
@@ -467,7 +491,7 @@ function DraftTextarea({ textarea, placeholder, submit }: { textarea: RefObject<
       // the first key starts the thread's model loading while the person writes (chat row 39)
       if (e.target.value !== "") typedInComposer();
     }} onKeyDown={e => {
-      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !isTouch()) { e.preventDefault(); submit(); }
+      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !newlineOnEnter) { e.preventDefault(); submit(); }
     }} />;
 }
 
@@ -476,10 +500,20 @@ function DraftTextarea({ textarea, placeholder, submit }: { textarea: RefObject<
 /** Why Ctrl+Shift+Space does not start dictation while Stop holds Dictate's square. */
 const VOICE_HELD = "Dictate comes back when this reply ends or you finish editing the queued message.";
 
-/** The tray's "Download stopped" word in full, as its tip: the row is too narrow for the sentence on a phone. */
-export const DOWNLOAD_STOPPED_TIP = "Download stopped. Download a model to send this.";
-
 /** A queued message's state in a word or two, only where being in the queue does not already say it: null while it waits for the reply, and while it is edited (the pressed pencil says that). */
+/**
+ * What Enter in the message box does (owner, 2026-11-14: "enter to send message is sometimes not
+ * working"): with Send on, send; with words typed and Send off for memory, what the click does
+ * (the memory panel); otherwise Send's reason at Send, or in the note over the box while Stop holds
+ * Send's place. Nothing only with nothing typed.
+ */
+export function enterAnswer(s: { readonly sendDisabled: boolean; readonly memRefused: boolean; readonly text: boolean; readonly showStop: boolean }): "send" | "fit" | "tip" | "note" | null {
+  if (!s.sendDisabled) return "send";
+  if (!s.text) return null;
+  if (s.memRefused) return "fit";
+  return s.showStop ? "note" : "tip";
+}
+
 export function queueWords(q: Queued, editing: boolean, first: string | undefined, model: string | undefined): string | null {
   if (editing) return null;
   if (q.waitFor === "download") return first === undefined && (q.model ?? model) === undefined ? "Download stopped" : AFTER_DOWNLOAD;
@@ -489,15 +523,15 @@ export function queueWords(q: Queued, editing: boolean, first: string | undefine
   return q.held ? "On hold" : null;
 }
 
-/** The owner's words for a queue behind a failed reply the app retries once (chat row 23); the tip carries them where the row cuts them. */
+/** The owner's words for a queue behind a failed reply the server runs once more (chat row 23, decision 7). */
 const RETRYING = "Retrying the reply before it";
 const RETRY_FAILED = "On hold: the reply before it didn't finish";
 /** A message waiting for the first download: the row shows a clock, and this is its tip and its spoken words (chat row 29). */
 export const AFTER_DOWNLOAD = "Sends when the download finishes";
 /** The same clock for a message waiting for setup (chat row 31). */
 export const AFTER_SETUP = "Sends when setup finishes";
+/** The clock is the row's only mark for these, so its tip names it; a word on the row has no tip (decision 19). */
 const CLOCKED = new Set<string | null>([AFTER_DOWNLOAD, AFTER_SETUP]);
-const tipFor = (words: string | null) => words === "Download stopped" ? DOWNLOAD_STOPPED_TIP : words === RETRYING || words === RETRY_FAILED || CLOCKED.has(words) ? words ?? undefined : undefined;
 
 /** What is running in the open chat, as a word, so a reader re-renders when that changes and not at every token. */
 const runningKind = (s: State): "image" | "reply" | null => {
@@ -549,7 +583,7 @@ function QueueTray() {
             {q.draw === undefined ? null : <span className="qt-k" data-tip="Image"><Icon id="image" cls="s14" /></span>}
             <span className="qt-t">{q.text}{q.images?.length ? ` · ${q.images.length} image${q.images.length === 1 ? "" : "s"}` : ""}{q.files?.length ? ` · ${q.files.length} file${q.files.length === 1 ? "" : "s"}` : ""}</span>
             {/* always there, empty while the message just waits, so a reader announces the word when it appears */}
-            <span className="qt-s" role="status" data-tip={tipFor(words)}>
+            <span className="qt-s" role="status" data-tip={CLOCKED.has(words) ? words ?? undefined : undefined}>
               {CLOCKED.has(words) ? <><Icon id="clock" cls="s14" /><span className="vh">{words}</span></> : words ?? ""}
             </span>
             {q.waitFor === "reply" && !editing ? (

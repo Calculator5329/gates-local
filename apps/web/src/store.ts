@@ -4,8 +4,8 @@
 import { useSyncExternalStore } from "react";
 import { dropDraft } from "./drafts.ts";
 import { readLoadTimes } from "./load-times.ts";
-import type { WorkClock } from "./session/turn.ts";
 import type {
+  ReplyRecord,
   BlockingTurn,
   CatalogEntry,
   ContextSize,
@@ -62,17 +62,13 @@ export interface LiveTurn {
   readonly model: string;
   readonly startedAt: number;
   /**
-   * When the model could start on this reply: its start, or, when its model was still
-   * loading then, its first token or call (the server ends the load there). Thinking
-   * time counts from here, never the load (owner, chat row 21).
+   * The server's reply record (decision 33): the live line's stage and seconds come from it and
+   * nothing else. Absent until its first push; frozen here at this client's Stop.
    */
-  readonly readyAt?: number;
-  readonly firstTokenAt?: number;
+  readonly reply?: ReplyRecord;
+  /** This client's time when `reply` arrived: its work grows from then while it thinks or runs a call. */
+  readonly replyAt?: number;
   readonly thinking: string;
-  /** "Thought for": from readyAt to the first answer word, or to Stop. */
-  readonly thinkingSecs?: number;
-  /** How long it thought, kept as its events arrive; absent when this client did not see it start. */
-  readonly clock?: WorkClock;
   readonly text: string;
   readonly tools: readonly ToolStep[];
   /** The user's text, shown until the turn's start brings the saved message. */
@@ -107,7 +103,7 @@ export interface Queued {
   readonly model?: string;
   /** Its reply was stopped or failed: it waits for Send now, like a queue after an interrupt in T3 Code. */
   readonly held?: true;
-  /** Held behind a failed reply the app is retrying once on its own ("running"), or whose retry failed too ("failed"). */
+  /** Held behind a failed reply the server is running once more ("running"), or whose second attempt failed too ("failed"). */
   readonly retry?: "running" | "failed";
   /** Send now: it goes as soon as the reply in its way has ended. */
   readonly now?: true;
@@ -135,8 +131,15 @@ export interface StopAsk {
   readonly draw?: ImageChoice;
 }
 
-/** Why a reply stopped: the person pressed Stop this many seconds in (a mark, no words), or a reason they did not cause, in its own words. */
-export type StopNote = { readonly kind: "stopped"; readonly secs: number } | { readonly kind: "said"; readonly words: string };
+/**
+ * Why a reply stopped: the person pressed Stop this many seconds in (a mark, no words), a reason
+ * they did not cause in its own words, or a failure (decision 7): the alert, "The reply didn't
+ * finish." and Retry, with the runtime's own text in the tip.
+ */
+export type StopNote =
+  | { readonly kind: "stopped"; readonly secs: number }
+  | { readonly kind: "said"; readonly words: string }
+  | { readonly kind: "failed"; readonly why: string };
 
 /** A refusal for memory and what runs instead: `notice` the note's words it belongs to, `model` and `numCtx` what was refused. */
 export interface NoticeOffer {
@@ -186,6 +189,8 @@ export interface State {
   /** On a phone, Settings shows its section list as its own screen instead of a section. */
   readonly setList: boolean;
   readonly pasting: number;
+  /** A send is asking the server what it would stop (turns.blocking): Send turns its ring, so a second Enter is not met by nothing. */
+  readonly asking?: true;
   /** Tracks new speech actions; older local save completions do not supersede them. */
   readonly voiceConnectionVersion: number;
   /** The header title is an input (thread menu › Rename). */

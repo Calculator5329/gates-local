@@ -157,7 +157,9 @@ describe("decode speed", () => {
     // A cold turn: 4 s total (3.5 s of it loading the model), 60 tokens decoded in 0.5 s.
     const m = msg({ completionTokens: 60, durationMs: 4000, evalDurationMs: 500 });
     expect(decodeSpeed(m.stats)).toBe(120);
-    expect(replyMeta("Qwen 3.5 9B", m, 2900)).toBe("Qwen 3.5 9B · 2.9 s to first token · 120 tok/s");
+    expect(replyMeta(m, 4500)).toBe("4.5 s · 120 tok/s");
+    // a reply that did no thinking or tool work says its speed alone
+    expect(replyMeta(m, 0)).toBe("120 tok/s");
   });
 
   it("falls back to the total for a reply saved before decode time was kept", () => {

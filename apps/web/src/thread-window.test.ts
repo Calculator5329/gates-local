@@ -28,14 +28,19 @@ async function render(n: number): Promise<string> {
   return renderToStaticMarkup(createElement(Timeline, { threadId: T }));
 }
 
-const button = (html: string) => /<button[^>]*data-testid="chat.thread.earlier"[^>]*>([\s\S]*?)<\/button>/.exec(html)?.[1]?.replace(/<[^>]+>/g, "");
+/** The button's arrow and number, and its tip; undefined when there is no button. */
+const button = (html: string) => {
+  const m = /<button[^>]*data-testid="chat.thread.earlier"[^>]*data-tip="([^"]*)"[^>]*>([\s\S]*?)<\/button>/.exec(html);
+  return m === null ? undefined : { arrow: m[2]?.includes("#i-up") === true, says: m[2]?.replace(/<[^>]+>/g, ""), tip: m[1] };
+};
 
+// decision 5: the arrow and the number the press adds; how many there are is in the tip
 it("a 2,000-message thread opens with a button for the 200 before its window, of the 1,800 there are", async () => {
-  expect(button(await render(2000))).toBe("200 earlier of 1,800");
+  expect(button(await render(2000))).toEqual({ arrow: true, says: "200", tip: "1,800 earlier" });
 });
 
 it("fewer earlier turns than a press adds says how many there are", async () => {
-  expect(button(await render(260))).toBe("60 earlier of 60");
+  expect(button(await render(260))).toEqual({ arrow: true, says: "60", tip: "60 earlier" });
 });
 
 it("a thread that fits in the window has no button", async () => {

@@ -13,7 +13,7 @@ test("a stopped reply survives a reload and Regenerate replaces it without a sec
   await sendMessage(page, "Tell me about cron");
 
   const live = page.locator(".turn.a").last();
-  await expect(live.locator(".writing")).toBeVisible();
+  await expect(live.locator(".think.run")).toBeVisible();
   await expect(live.locator(".md")).not.toBeEmpty();
   await page.getByRole("button", { name: "Stop" }).click();
 
@@ -22,7 +22,7 @@ test("a stopped reply survives a reload and Regenerate replaces it without a sec
   const secs = (await live.locator(".stop-mark .s").innerText()).trim();
   await expect(live.getByRole("img", { name: UNSEEN, exact: true })).toBeVisible();
   await expect(page.locator(".stop-note")).toHaveCount(0);
-  await expect(page.locator(".writing")).toHaveCount(0);
+  await expect(page.locator(".think.run")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();
   await expect(page.locator(".turn.a")).toHaveCount(1);
   const stopped = (await live.locator(".md").innerText()).trim();
@@ -44,18 +44,21 @@ test("a stopped reply survives a reload and Regenerate replaces it without a sec
   const again = page.locator(".turn.a").last();
   // the fake's full reply is 60 words and ends here
   await expect(again.locator(".md")).toContainText("so streaming takes a", { timeout: 10_000 });
-  await expect(page.locator(".writing")).toHaveCount(0);
+  await expect(page.locator(".think.run")).toHaveCount(0);
   await expect(page.locator(".turn.u")).toHaveCount(1);
   await expect(page.locator(".turn.a")).toHaveCount(1);
   await expect(page.locator(".turn.a.interrupted")).toHaveCount(0);
   await expect(page.locator(".stop-note")).toHaveCount(0);
 
-  // a reply that breaks after some words: one note, right away, with the real reason
+  // a reply that breaks after some words, and again on the server's one more try: one line with the
+  // alert, the short words and Retry, the runtime's own words in its tip, never the stop square (decision 7)
   await stack.scenario("mid-stream-error");
   await sendMessage(page, "And at boot?");
-  await expect(page.locator(".turn.a.interrupted .md")).not.toBeEmpty();
-  await expect(page.locator(".stop-note")).toHaveCount(1);
-  await expect(page.locator(".stop-note")).toHaveText(/^The reply didn't finish\. .*unexpected EOF/);
-  await expect(page.locator(".stop-note")).not.toContainText("excluded from later model prompts");
-  await expect(page.locator(".stop-note").getByRole("img", { name: UNSEEN, exact: true })).toBeVisible();
+  const failed = page.getByTestId("chat.reply.failed");
+  await expect(failed).toHaveCount(1, { timeout: 15_000 });
+  await expect(failed).toHaveText(/^The reply didn't finish\.\s*Retry$/);
+  await expect(failed).toHaveAttribute("data-tip", /unexpected EOF/);
+  await expect(page.getByTestId("chat.reply.retry")).toBeVisible();
+  await expect(page.locator(".turn.a").last().getByRole("img", { name: UNSEEN, exact: true })).toHaveCount(0);
+  await expect(page.locator(".stop-note")).toHaveCount(0);
 });

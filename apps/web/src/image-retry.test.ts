@@ -18,7 +18,7 @@ it("names image generation while a chat is waiting to be admitted behind it", as
   const { Timeline } = await import("./Thread.tsx");
   setState({ threadId: "chat", turns: { chat: { gen: 1, threadId: "chat", turnId: null, model: "tiny-chat:2k", startedAt: Date.now(), thinking: "", text: "", tools: [], pendingUser: "hello" } },
     imageStatus: { state: "busy", owner: "external" } });
-  expect(renderToStaticMarkup(createElement(Timeline, { threadId: "chat" }))).toContain("Waiting for image generation");
+  expect(renderToStaticMarkup(createElement(Timeline, { threadId: "chat" }))).toContain("<span>Waiting for an image</span>");
 });
 
 // Send answers at once, so a waiting turn has its id long before its start: the start is what ends the wait.
@@ -34,14 +34,14 @@ describe("a chat sent while a picture renders", () => {
 
   it("names image generation once the server has answered the send, until the turn starts", async () => {
     const html = await line(waiting);
-    expect(html).toContain("Waiting for image generation");
-    expect(html).not.toContain("Waiting for Ollama");
+    expect(html).toContain("<span>Waiting for an image</span>");
   });
 
-  it("names Ollama once the turn has started, whatever the image engine is doing", async () => {
-    const html = await line({ ...waiting, pendingUser: null, userMessageId: "saved" });
-    expect(html).toContain("Waiting for Ollama");
-    expect(html).not.toContain("Waiting for image generation");
+  // the line's words fit one fixed box (decision 6): a plain wait no longer names the runtime
+  it("says a plain wait once the turn has started, whatever the image engine is doing", async () => {
+    const html = await line({ ...waiting, startedAt: Date.now() - 2000, pendingUser: null, userMessageId: "saved" });
+    expect(html).toContain("<span>Waiting</span>");
+    expect(html).not.toContain("an image");
   });
 });
 

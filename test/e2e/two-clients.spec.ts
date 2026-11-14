@@ -28,16 +28,16 @@ test("a reply sent from one client streams in a second client with the same thre
   await sendMessage(page, "Stream to both windows");
   for (const p of [page, other]) {
     const live = p.locator(".turn.a:not(.done)");
-    await expect(live.locator(".writing")).toBeVisible();
+    await expect(live.locator(".think.run")).toBeVisible();
     await expect(live.locator(".md")).toContainText("Here is how to check the free disk space");
     await expect(live.locator(".md")).not.toContainText("Keep some room for the context cache.");
     await expect(p.locator(".turn.u").last()).toContainText("Stream to both windows");
   }
   // partial in both, not yet saved: the live turn is still there in each
-  for (const p of [page, other]) await expect(p.locator(".turn.a:not(.done) .writing")).toBeVisible();
+  for (const p of [page, other]) await expect(p.locator(".turn.a:not(.done) .think.run")).toBeVisible();
 
   for (const p of [page, other]) {
-    await expect(p.locator(".writing")).toHaveCount(0, { timeout: 20_000 });
+    await expect(p.locator(".think.run")).toHaveCount(0, { timeout: 20_000 });
     await expect(p.locator(".turn.a.done")).toHaveCount(2);
     await expect(p.locator(".turn.u")).toHaveCount(2);
     await expect(p.locator(".turn.a.done").last().locator(".md")).toContainText("Keep some room for the context cache.");

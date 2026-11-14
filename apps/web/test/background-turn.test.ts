@@ -49,13 +49,16 @@ async function answering(id: string): Promise<string> {
   return st().turns[id]?.turnId ?? "";
 }
 
-it("shows the time a reply thought, even when it stopped thinking while its chat was not open", async () => {
+it("keeps the server's record of a reply that went on while its chat was not open (decision 33)", async () => {
   const a = await answering("A");
+  const record = { startedAt: 1, toolMs: 0, attempt: 1, spans: [], callsAt: {} } as const;
+  chat(a, "A", { type: "reply", reply: { ...record, stage: "thinking", workMs: 0 } });
   chat(a, "A", { type: "thinking", text: "Let me think" });
   await tick(); b.frame();
   // the person starts a second chat; A goes on behind it
   await answering("B");
   skew += 5_000;
+  chat(a, "A", { type: "reply", reply: { ...record, stage: "writing", workMs: 5000 } });
   chat(a, "A", { type: "delta", text: "First words" });
   await tick(); b.frame();
   // a minute later the person comes back to A, and more words arrive
@@ -63,24 +66,7 @@ it("shows the time a reply thought, even when it stopped thinking while its chat
   session.openThread("A");
   chat(a, "A", { type: "delta", text: " and more" });
   await tick(); b.frame();
-  expect(st().turns["A"]).toMatchObject({ threadId: "A", text: "First words and more" });
-  expect(st().turns["A"]?.thinkingSecs, "Thought for: the five seconds before the first word, not the time until the next frame here").toBe(5);
-});
-
-it("shows the time a reply thought when the person left before its first word reached the screen", async () => {
-  const a = await answering("A");
-  chat(a, "A", { type: "thinking", text: "Let me think" });
-  await tick(); b.frame();
-  skew += 5_000;
-  chat(a, "A", { type: "delta", text: "First words" });
-  await tick();
-  // the person leaves before the frame that would show the word
-  session.newThread();
-  b.frame();
-  skew += 60_000;
-  session.openThread("A");
-  expect(st().turns["A"]?.text).toBe("First words");
-  expect(st().turns["A"]?.thinkingSecs, "the first word arrived after five seconds").toBe(5);
+  expect(st().turns["A"]).toMatchObject({ threadId: "A", text: "First words and more", reply: { stage: "writing", workMs: 5000 } });
 });
 
 it("a reply streaming in a chat that is not open costs the open chat no store update per word", async () => {

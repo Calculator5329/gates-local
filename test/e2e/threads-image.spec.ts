@@ -67,7 +67,7 @@ test("chat behind image: the reply names image generation and sends to Ollama on
   await pick(page, SMALL[0] ?? "tiny-chat:2k");
   await sendMessage(page, "chat behind image");
   await expect(page.locator(".turn.u .bubble")).toHaveText("chat behind image");
-  await expect(page.locator(".working")).toContainText("Waiting for image generation");
+  await expect(page.locator(".think.run .lv-w > span").first()).toHaveText("Waiting for an image");
   expect((await state()).turns).toHaveLength(before);
   expect(comfy.state()[0]?.endedAt).toBeUndefined();
   await shot(page, "chat-waiting-for-image");

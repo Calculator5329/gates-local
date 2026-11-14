@@ -64,9 +64,11 @@ function rig(admit: () => Promise<void> = async () => {}) {
     }) } },
   });
   cleanups.push(async () => { gate.resolve(); await app.shutdown(); db.close(); });
+  // the turn's events but its reply records (decision 33), a stream of their own
   const events = (turnId: string) => pushes
     .filter((p) => p.channel === "chat.event" && (p.payload as Payload<"chat.event">).turnId === turnId)
-    .map((p) => (p.payload as Payload<"chat.event">).event);
+    .map((p) => (p.payload as Payload<"chat.event">).event)
+    .filter((e) => e.type !== "reply");
   return { app, db, thread, gate, events };
 }
 
@@ -80,7 +82,8 @@ it("chat.send answers with the turn id while the turn waits to be admitted, and 
   expect(r.events(answer.turnId), "nothing has started yet").toEqual([]);
   const listActive = r.app.handlers["turns.active"];
   if (listActive === undefined) throw new Error("the server has no turns.active");
-  expect(await listActive({}, { clientId: 2 }), "another window sees the reply coming").toEqual([{ turnId: answer.turnId, threadId: r.thread.id }]);
+  // with the record as it is: still waiting for the model (decision 33)
+  expect(await listActive({}, { clientId: 2 }), "another window sees the reply coming").toEqual([{ turnId: answer.turnId, threadId: r.thread.id, reply: expect.objectContaining({ stage: "waiting", workMs: 0 }) }]);
   r.gate.resolve();
   await until(() => r.events(answer.turnId).some((e) => e.type === "start"), "the start");
   expect(r.events(answer.turnId)[0]).toMatchObject({ type: "start", model: MODEL, userMessage: { role: "user", content: "hi" } });

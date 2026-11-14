@@ -20,7 +20,7 @@ vi.mock("./FitPanel.tsx", () => ({ openFit: vi.fn() }));
 vi.mock("./Sidebar.tsx", () => ({ focusComposer: vi.fn() }));
 vi.mock("./ui.tsx", async (original) => ({ ...await original<typeof import("./ui.tsx")>(), useMedia: () => device.touch, isTouch: () => device.touch }));
 
-const { Composer } = await import("./Composer.tsx");
+const { Composer, enterAnswer } = await import("./Composer.tsx");
 const { getState, setState } = await import("./store.ts");
 const initial = getState();
 afterEach(() => { clearDraft("thread"); clearDraft(null); setState(initial); device.touch = false; });
@@ -227,4 +227,53 @@ it("after the two-second bound with nothing read, the composer says Connecting o
   expect(html).toMatch(/placeholder="Connecting…"/);
   expect(html.split("Connecting…").length - 1, "said once").toBe(1);
   expect(html).not.toMatch(/Ollama/);
+});
+
+// Owner, 2026-11-14: "enter to send message is sometimes not working". Enter with words typed is never silent:
+// it sends, opens the fit panel on a memory refusal, or shows Send's reason at Send.
+const sendTag = (html: string) => html.match(/<button\b[^>]*class="send(?: [^"]*)?"[^>]*>/)?.[0] ?? "";
+describe("Enter with words typed", () => {
+  it.each([
+    ["sends when Send is on", { sendDisabled: false, memRefused: false, text: true, showStop: false }, "send"],
+    ["does nothing in an empty box", { sendDisabled: true, memRefused: false, text: false, showStop: false }, null],
+    ["opens the fit panel on a memory refusal", { sendDisabled: true, memRefused: true, text: true, showStop: false }, "fit"],
+    ["shows Send's reason at Send", { sendDisabled: true, memRefused: false, text: true, showStop: false }, "tip"],
+    ["says the reason in the notice while Stop holds Send's place", { sendDisabled: true, memRefused: false, text: true, showStop: true }, "note"],
+  ] as const)("%s", (_, state, answer) => {
+    expect(enterAnswer(state)).toBe(answer);
+  });
+  it("while disconnected, Send's reason is the placeholder's words, not Send · Enter", () => {
+    setFixture({ ...ready, conn: { kind: "down", since: 0 }, draft: "hello" });
+    const tag = sendTag(renderToStaticMarkup(createElement(Composer)));
+    expect(tag).toMatch(/aria-disabled="true"/);
+    expect(tag).toMatch(/data-tip="Chat starts when Gates Local reconnects…"/);
+  });
+  it("with the box empty the placeholder says it, and Send keeps its name", () => {
+    setFixture({ ...ready, conn: { kind: "down", since: 0 } });
+    const html = renderToStaticMarkup(createElement(Composer));
+    expect(html).toMatch(/placeholder="Chat starts when Gates Local reconnects…"/);
+    expect(sendTag(html)).toMatch(/data-tip="Send · Enter"/);
+  });
+  it("before the model list is read, Send is off and says so", () => {
+    setFixture({ ...ready, models: undefined, draft: "hello" });
+    const tag = sendTag(renderToStaticMarkup(createElement(Composer)));
+    expect(tag).toMatch(/aria-disabled="true"/);
+    expect(tag).toMatch(/data-tip="Reading the models…"/);
+  });
+  it("a chosen model that is not installed is named in Send's tip", () => {
+    setFixture({ ...ready, model: "gone:1b", draft: "hello" });
+    const tag = sendTag(renderToStaticMarkup(createElement(Composer)));
+    expect(tag).toMatch(/aria-disabled="true"/);
+    expect(tag).toMatch(/data-tip="gone 1B isn&#x27;t installed"/);
+  });
+  it("while a send asks the server what it would stop, Send is busy and turns its ring", () => {
+    setFixture({ ...ready, asking: true, draft: "hello" });
+    const html = renderToStaticMarkup(createElement(Composer));
+    expect(sendTag(html)).toMatch(/aria-busy="true"/);
+    expect(html).toMatch(/class="ldring wait ask"/);
+    setFixture({ ...ready, asking: undefined, draft: "hello" });
+    const idle = renderToStaticMarkup(createElement(Composer));
+    expect(sendTag(idle)).not.toMatch(/aria-busy/);
+    expect(idle).not.toMatch(/ldring/);
+  });
 });

@@ -1,4 +1,4 @@
-// A compact notice must retain its full error for focus and hover.
+// The composer's notice keeps its full error on screen.
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
@@ -26,14 +26,11 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it("keeps the full error and makes the status keyboard focusable", () => {
+// decision 19 B: the notice wraps, so its whole text is on screen and a tip would only say it again
+it("shows the full error once, in the notice itself, with no tip repeating it", () => {
   const html = notice();
   expect(html).toContain(detail);
-  expect(html).toContain('tabindex="0"');
-});
-
-it("offers the same complete text through the existing tooltip", () => {
-  expect(notice()).toContain(`data-tip="${detail}"`);
+  expect(html).not.toContain("data-tip");
 });
 
 it("has no notice when there is no failure", () => {

@@ -43,7 +43,7 @@ test("a 5 s load and 2 s of thinking say Thought for 2 s, and the load is a ring
   await configure({ loadDelayMs: 5000, tokenDelayMs: 105 });
   await sendMessage(page, "Why is the sky blue");
   const reply = page.locator(".turn.a").last();
-  await expect(reply.locator(".working .ph")).toHaveText(/^Loading into/);
+  await expect(reply.locator(".think.run .lv-w > span").first()).toHaveText(/^Loading into/);
   await page.waitForTimeout(2000);
   await shot(page, info, "measured-load");
   // a message is waiting: the ring is on the button being waited on, filling over the first load's time

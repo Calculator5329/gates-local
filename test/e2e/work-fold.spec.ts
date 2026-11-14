@@ -72,13 +72,13 @@ test.describe("live", () => {
     await sendMessage(page, "Use a tool to check my notes");
     const reply = page.locator(".turn.a").last();
     const chip = reply.locator("button.think");
-    // the first round is held inside its thinking: the thought line, its bulb in the box the lit mark takes
-    await expect(chip).toHaveClass(/\blive\b/);
-    const bulb = await placeIn(chip.locator(".th-i"));
+    // the first round is held inside its thinking: the live line, the breathing dot first (decision 1)
+    await expect(chip).toHaveClass(/\brun\b/);
+    const dot = await placeIn(chip.locator(".run-dot"));
     await untilCalls(chip, 1);
     await expect(chip).toHaveClass(/\bfold\b/);
-    // chat row 37: one live line, the lit mark where the bulb was, what it does now and the time in the line itself
-    expect(at(await placeIn(chip.locator(".lv-dot"))), "the lit mark sits where the bulb was").toEqual(at(bulb));
+    // chat row 37: one live line, the dot where it was, what it does now and the time in the line itself
+    expect(at(await placeIn(chip.locator(".run-dot"))), "the dot holds its place").toEqual(at(dot));
     await expect(chip.locator(".lv-w")).toBeVisible();
     await expect(chip.locator(".lv-t")).toHaveText(/^ · \d+ s$/);
     await shoot(page, "row37-live-line", chip);
@@ -92,19 +92,21 @@ test.describe("live", () => {
       await expect(reply.locator("[data-tool-row]").first()).toBeHidden();
     }
     await expect.poll(async () => { await release(); return reply.evaluate((n) => n.classList.contains("done")); }, { timeout: 20_000, intervals: [50] }).toBe(true);
-    // done: the same place, the time and the step count, still closed; failed calls counted in red, no sentence
+    // done: the same place, the icon and chevron at rest (decision 3), still closed; failed calls make the icon red, no sentence
     expect(at(await placeIn(chip)), "the line's place once done").toEqual(start);
-    await expect(chip.locator(".lv-dot")).toHaveCount(0);
-    await expect(chip.locator(".lv-n")).toHaveText("10 steps");
+    await expect(chip.locator(".run-dot")).toHaveCount(0);
+    await expect(chip.locator(".lv-h")).toBeHidden();
     await expect(chip).toHaveAttribute("aria-expanded", "false");
-    await expect(chip).toHaveAccessibleName(/^Thinking \d+ seconds?, 10 tool calls, \d+ failed$/);
-    await expect(chip.locator(".lv-bad")).toHaveCount(1);
+    await expect(chip).toHaveAccessibleName(/^\d+ s · 10 steps, \d+ failed$/);
+    await expect(chip.locator(".lv-i.bad")).toBeVisible();
+    await chip.hover();
+    await expect(chip.locator(".lv-h")).toHaveText(/^\d+ s · 10 steps · \d+ failed$/);
     await expect(reply).not.toContainText("Tool could not finish");
     await shoot(page, "row37-done-line", chip);
     await chip.click();
     await expect(reply.locator("[data-tool-row]").first()).toBeVisible();
-    // a failed step's mark is red: the same colour as the count of failed on the line
-    const red = await chip.locator(".lv-bad").evaluate((n) => getComputedStyle(n).color);
+    // a failed step's mark is red: the same colour as the line's icon
+    const red = await chip.locator(".lv-i.bad").evaluate((n) => getComputedStyle(n).color);
     await expect(reply.locator('[data-tool-row] .wr-st[data-st="rej"]').first()).toHaveCSS("color", red);
     await shoot(page, "row37-done-open", reply.getByRole("list", { name: "Steps" }));
   });

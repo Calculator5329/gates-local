@@ -11,6 +11,7 @@ import {
   CatalogEntry,
   ModelEstimate,
   ChatEvent,
+  ReplyRecord,
   type FitOffer,
   FitTable,
   GpuStatus,
@@ -245,10 +246,14 @@ export const methods = {
      */
     result: S.Struct({ turnId: S.String, userMessage: S.optional(Message), replayed: S.optional(S.Boolean) }),
   },
-  /** Authoritative running replies when a client connects or reconnects, from the moment chat.send took each (also while it waits to start); later changes use chat.event. */
+  /**
+   * Authoritative running replies when a client connects or reconnects, from the moment chat.send
+   * took each (also while it waits to start), each with its reply record as it is now; later
+   * changes use chat.event.
+   */
   "turns.active": {
     params: NoParams,
-    result: S.Array(S.Struct({ turnId: S.String, threadId: S.String })),
+    result: S.Array(S.Struct({ turnId: S.String, threadId: S.String, reply: ReplyRecord })),
     phone: "allow",
   },
   /**

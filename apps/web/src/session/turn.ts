@@ -3,6 +3,9 @@
 // runs the side effects (saved rows, notes, the queue) after it. The two ends
 // that save a row, done and an error with a partial, are applied in chat.ts
 // with that row in one store update; reduceTurn gives null for them too.
+//
+// What the reply is doing and its seconds are the server's reply record
+// (decision 33): this client keeps no clock of its own and guesses no stage.
 import type { Payload, ToolStep, TurnEnded } from "@gates-local/contracts";
 import type { LiveTurn, State } from "../store.ts";
 
@@ -27,91 +30,31 @@ const CLOSED = { kind: "error", code: "closed", message: "The connection dropped
 /** Cut off by a dropped connection; the server may still be writing it. */
 const closed = (turn: LiveTurn) => turn.end?.kind === "error" && turn.end.code === "closed";
 
-const secsSince =(turn: LiveTurn, now: number) => Math.round((now - turn.startedAt) / 1000);
-
-/** Where "Thinking" counts from: the model ready for this reply, else (a turn that never said) its start. */
-export const thoughtOrigin = (turn: LiveTurn): number => turn.readyAt ?? turn.startedAt;
-
-/** "Thought for" at `at` (the first answer word, or Stop): whole seconds from the model being ready, at least one. */
-export const thoughtSecsAt = (turn: LiveTurn, at: number): number => Math.max(1, Math.round((at - thoughtOrigin(turn)) / 1000));
-
-/** Stopped while thinking, here or by another client: the thought lasted until the stop. */
-const stoppedThinking = (turn: LiveTurn, now: number) =>
-  turn.thinking !== "" && turn.thinkingSecs === undefined && turn.text === "" ? { thinkingSecs: thoughtSecsAt(turn, now) } : {};
+const secsSince = (turn: LiveTurn, now: number) => Math.round((now - turn.startedAt) / 1000);
 
 /**
- * When the model is ready for this reply, if `event` says so first: the start, unless its
- * model was loading then; otherwise the first token or call, where the server ends a load.
+ * The reply's work at `now`, in milliseconds (decision 2): thinking plus tool time, never the
+ * load and never the writing. The record's own figure, grown on this client's clock from when the
+ * record arrived, only while it thinks or runs a call and has not ended here. Undefined before
+ * the first record.
  */
-function readyOn(turn: LiveTurn, event: TurnEvent, now: number, loading: boolean): number | undefined {
-  if (turn.readyAt !== undefined) return turn.readyAt;
-  if (event.type === "start") return loading ? undefined : now;
-  if (event.type === "thinking" || event.type === "delta") return event.text === "" || turn.end !== undefined ? undefined : now;
-  return event.type === "tool" ? now : undefined;
+export function workMsAt(turn: Pick<LiveTurn, "reply" | "replyAt" | "end">, now: number): number | undefined {
+  const r = turn.reply;
+  if (r === undefined) return undefined;
+  const growing = turn.end === undefined && (r.stage === "thinking" || r.stage === "tool");
+  return r.workMs + (growing ? Math.max(0, now - (turn.replyAt ?? now)) : 0);
+}
+
+/** The record held still at `now`: the turn ended here (Stop, a failure, a dropped connection) before the server said so. */
+function frozen(turn: LiveTurn, now: number): Pick<LiveTurn, "reply" | "replyAt"> {
+  const work = workMsAt(turn, now);
+  return turn.reply === undefined || work === undefined ? {} : { reply: { ...turn.reply, stage: "ended", workMs: Math.round(work) }, replyAt: now };
 }
 
 type TurnEnd = Extract<ChatEvent, { type: "done" | "error" }>;
 
 /** How the server says the turn ended (chat row 32); an end without the word, from an older server, counts as a failure, which is said. */
 export const endReason = (event: TurnEnd): TurnEnded["reason"] => event.ended?.reason ?? (event.type === "done" ? "done" : "failed");
-
-/**
- * How long a reply thought, kept as its events arrive, so every screen that
- * shows it reads the same number and a remount rebuilds nothing. A span of
- * thinking opens with its first words and closes when a call, the answer or
- * the end arrives; it never closes before a time already shown, so the total
- * never goes down. A turn this client did not watch from its start has none.
- */
-export interface WorkClock {
-  /** Thinking since `since`; otherwise a call, the answer, or waiting. */
-  readonly thinking: boolean;
-  readonly since: number;
-  /** Where the open span's words start in the thinking. */
-  readonly from: number;
-  /** Milliseconds in closed spans. */
-  readonly total: number;
-  /** Each closed span: where its words start in the thinking, and how long it ran. */
-  readonly spans: readonly { readonly from: number; readonly ms: number }[];
-  /** The thinking's length when each call first arrived: where it came in the thinking. */
-  readonly at: Readonly<Record<string, number>>;
-}
-
-export const startClock = (now: number): WorkClock => ({ thinking: false, since: now, from: 0, total: 0, spans: [], at: {} });
-
-/** The clock once the thinking stops at `now`. */
-export function stopThinking(clock: WorkClock, now: number): WorkClock {
-  if (!clock.thinking) return clock;
-  const ms = Math.max(0, now - clock.since);
-  return { ...clock, thinking: false, since: now, total: clock.total + ms, spans: [...clock.spans, { from: clock.from, ms }] };
-}
-
-/** Whole seconds of thinking at `now`, at least one. */
-export const thoughtSecs = (clock: WorkClock, now: number): number =>
-  Math.max(1, Math.round((clock.total + (clock.thinking ? Math.max(0, now - clock.since) : 0)) / 1000));
-
-/** The turn with its thinking stopped at `now`: a call, the answer or the end came. */
-export function leaveThinking(turn: LiveTurn, now: number): LiveTurn {
-  return turn.clock?.thinking === true ? { ...turn, clock: stopThinking(turn.clock, now) } : turn;
-}
-
-function clockOn(turn: LiveTurn, event: TurnEvent, now: number): WorkClock | undefined {
-  const c = turn.clock;
-  if (c === undefined) return undefined;
-  switch (event.type) {
-    case "thinking":
-      return c.thinking || event.text === "" ? c : { ...c, thinking: true, since: now, from: turn.thinking.length };
-    case "tool":
-      return { ...stopThinking(c, now), at: c.at[event.step.callId] === undefined ? { ...c.at, [event.step.callId]: turn.thinking.length } : c.at };
-    case "delta":
-      return event.text === "" ? c : stopThinking(c, now);
-    case "stop":
-    case "error":
-    case "lost":
-      return stopThinking(c, now);
-    default:
-      return c;
-  }
-}
 
 function upsertStep(steps: readonly ToolStep[], step: ToolStep): ToolStep[] {
   const i = steps.findIndex((x) => x.callId === step.callId);
@@ -121,23 +64,13 @@ function upsertStep(steps: readonly ToolStep[], step: ToolStep): ToolStep[] {
 /**
  * The turn after `event` at time `now`; null when the turn is over and its
  * saved row takes its place. Words that come after the turn ended here are
- * dropped (W-05); a tool step still lands. `loading`: the turn's model was
- * loading into memory when this event came (models.load said so).
+ * dropped (W-05); a tool step still lands.
  */
-export function reduceTurn(turn: LiveTurn, event: TurnEvent, now: number, loading = false): LiveTurn | null {
-  const readyAt = readyOn(turn, event, now, loading);
-  const advanced = advance(readyAt === turn.readyAt ? turn : { ...turn, readyAt }, event, now);
-  if (advanced === null) return null;
-  const clock = event.type === "start"
-    // heard of at its start: watched from there; a start sent again to a client that connected
-    // mid-reply, and words the start replaces, were not watched
-    ? event.replayed === true ? undefined : turn.listed === true ? startClock(now) : turn.thinking !== "" || turn.text !== "" || turn.tools.length > 0 ? undefined : turn.clock
-    // words after the end are dropped, and so is their time
-    : turn.end !== undefined && (event.type === "thinking" || event.type === "delta") ? turn.clock : clockOn(turn, event, now);
-  const next = clock === advanced.clock ? advanced : { ...advanced, clock };
-  if (next.listed !== true || event.type === "running") return next;
-  // its own first event makes a turn known only from turns.active a turn like any
-  // other; its start also starts its clock, as for a turn first heard of at its start
+export function reduceTurn(turn: LiveTurn, event: TurnEvent, now: number): LiveTurn | null {
+  const next = advance(turn, event, now);
+  // a record alone does not make a listed turn one that shows: its start does
+  if (next === null || next.listed !== true || event.type === "running" || event.type === "reply") return next;
+  // its own first event makes a turn known only from turns.active a turn like any other
   return { ...next, listed: undefined, ...(event.type === "start" ? { startedAt: now } : {}) };
 }
 
@@ -155,42 +88,40 @@ function advance(turn: LiveTurn, event: TurnEvent, now: number): LiveTurn | null
         ...(event.image === true ? { image: true as const } : {}),
         ...(turn.end === undefined || closed(turn) ? { end: undefined, text: "", thinking: "", tools: [] } : {}),
       };
+    case "reply": {
+      // a reply that ended here keeps the time it ended with; one the connection cut off takes the server's again
+      if (turn.end !== undefined && !closed(turn)) return turn;
+      // the server runs a failed reply once more (decision 7): the second attempt starts over in the same place
+      const again = turn.reply !== undefined && event.reply.attempt > turn.reply.attempt;
+      return { ...turn, reply: event.reply, replyAt: now, ...(again ? { text: "", thinking: "", tools: [] } : {}) };
+    }
     case "thinking":
       return turn.end !== undefined || event.text === "" ? turn : { ...turn, thinking: turn.thinking + event.text };
-    case "delta": {
-      if (turn.end !== undefined || event.text === "") return turn;
-      return {
-        ...turn,
-        text: turn.text + event.text,
-        ...(turn.firstTokenAt === undefined ? { firstTokenAt: now } : {}),
-        // Thought for: from the model being ready until the first word after thinking, measured when that word arrives
-        ...(turn.thinking !== "" && turn.thinkingSecs === undefined ? { thinkingSecs: thoughtSecsAt(turn, now) } : {}),
-      };
-    }
+    case "delta":
+      return turn.end !== undefined || event.text === "" ? turn : { ...turn, text: turn.text + event.text };
     case "tool":
       return { ...turn, tools: upsertStep(turn.tools, event.step) };
     case "done":
       return null;
     case "error": {
       if (event.partial !== undefined) return null;
-      const ended = { ...turn, ending: undefined };
+      // held at this client's time: the record's arrival was on this clock, the server's `at` is not
+      const ended = { ...turn, ending: undefined, ...(turn.end === undefined ? frozen(turn, now) : {}) };
       // the server says why it ended: a Stop keeps the time this client's Stop showed, or is the time the server
       // took it; a halt or a failure is said, also when it beat this client's Stop to the server
       if (endReason(event) !== "stopped") return { ...ended, end: { kind: "error", code: event.code, message: event.message } };
       if (turn.end?.kind === "stopped") return { ...ended, end: turn.end };
-      const at = event.ended?.at ?? now;
-      return { ...ended, end: { kind: "stopped", secs: secsSince(turn, at) }, ...stoppedThinking(turn, at) };
+      return { ...ended, end: { kind: "stopped", secs: secsSince(turn, event.ended?.at ?? now) } };
     }
     case "sent":
       return { ...turn, turnId: event.turnId };
     case "stop":
       if (turn.end !== undefined) return turn;
-      // stopped while thinking: the thought lasted until Stop, counted from the model being ready
-      return { ...turn, end: { kind: "stopped", secs: secsSince(turn, now) }, ending: true, ...stoppedThinking(turn, now) };
+      return { ...turn, end: { kind: "stopped", secs: secsSince(turn, now) }, ending: true, ...frozen(turn, now) };
     case "refused":
       return { ...turn, pendingUser: null, ending: undefined };
     case "lost":
-      if (turn.end === undefined) return { ...turn, end: CLOSED };
+      if (turn.end === undefined) return { ...turn, end: CLOSED, ...frozen(turn, now) };
       return turn.ending === true ? { ...turn, ending: undefined } : turn;
     case "running":
       return closed(turn) ? { ...turn, end: undefined } : turn;

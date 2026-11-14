@@ -1,5 +1,41 @@
 # Changelog
 
+## 2026-11-14: A running reply shows one mark and the server's time
+
+- Fixes from the audit of 0.2.4.
+- The server keeps one record per reply: waiting, loading, thinking,
+  using a tool, writing, ended, and its times. Every window draws from
+  it, so two windows, or one opened halfway through a reply, show the
+  same stage and the same seconds.
+- One working mark: the sidebar's breathing dot, now also at the start
+  of the reply's line. No spinner, no pulsing bulb, no blinking word, and
+  no "Waiting for Ollama" flash before the model answers.
+- One clock: the seconds are thinking plus tool time. Loading the model
+  and writing the answer are not counted, so the number stops when the
+  words start.
+- The live line's words sit in a fixed-width box, so the seconds and
+  the chevron hold still while the words change.
+- A finished reply's line is its icon and chevron; the words come back
+  when you point at it or tab to it.
+- Under a reply: only numbers, "4.5 s · 14 tok/s". The model name and
+  "to first token" are gone.
+- A reply that fails is tried once more by itself. If that fails too,
+  it says "The reply didn't finish." with Retry; the runtime's own text
+  is in the tip. It is never drawn as stopped, and the sidebar stops
+  showing it as working.
+- The earlier-messages button reads "↑ 200"; how many there are in all
+  is in its tip.
+- Enter sends wherever there is a keyboard. Only a phone-sized touch
+  screen keeps Enter as a new line.
+- Enter with words typed is never silent. When Send is off, Enter
+  opens the memory panel on a memory refusal, or shows Send's reason at
+  Send: the placeholder's words while Gates Local is not ready, "Reading
+  the models…" before the model list arrives, or that the chosen model
+  isn't installed. While a send waits on the server for more than a
+  moment, a ring turns on Send.
+- A model loading cold says "Loading into GPU memory" again, also when
+  typing had already started the load.
+
 ## 2026-11-14: Settings and Models: fewer controls, no explaining tooltips
 
 - Models has no "Default for new chats" card. The Default chip marks the

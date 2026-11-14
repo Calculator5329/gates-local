@@ -152,13 +152,15 @@ test("a 2,000-message thread opens at its end as a window, keeps the turn in vie
 
   // Load earlier: the window before it goes in at once, and the turn that was first stays where it is
   const earlier = page.getByTestId("chat.thread.earlier");
-  await expect(earlier).toHaveText(`200 earlier of ${(TURNS - WINDOW).toLocaleString("en-US")}`);
+  // decision 5: the arrow and the number a press adds; how many there are is in the tip
+  await expect(earlier).toHaveText("200");
+  await expect(earlier).toHaveAttribute("data-tip", `${(TURNS - WINDOW).toLocaleString("en-US")} earlier`);
   const was = turns.filter({ hasText: `Question ${(TURNS - WINDOW) / 2 + 1}:` }).first();
   const before = await was.evaluate((n) => n.getBoundingClientRect().top);
   await earlier.click();
   await expect(turns).toHaveCount(2 * WINDOW);
   expect(Math.abs((await was.evaluate((n) => n.getBoundingClientRect().top)) - before), "the turn in view stayed where it was").toBeLessThanOrEqual(1);
-  await expect(earlier).toHaveText(`200 earlier of ${(TURNS - 2 * WINDOW).toLocaleString("en-US")}`);
+  await expect(earlier).toHaveAttribute("data-tip", `${(TURNS - 2 * WINDOW).toLocaleString("en-US")} earlier`);
   await page.screenshot({ path: test.info().outputPath("row40-after-load-earlier.png") });
   await tl.evaluate((n) => { n.scrollTop = 0; });
   await page.screenshot({ path: test.info().outputPath("row40-button.png") });

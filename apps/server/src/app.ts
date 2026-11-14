@@ -131,6 +131,20 @@ const haltedEnd = (reason: AppError): TurnFailure => ({ type: "error", code: rea
  * a halt made way for something; a Stop, or deleting its question, stopped it; else done or failed.
  * A failure of its own that lands after a Stop is said as one.
  */
+const ENDED_EARLY: TurnFailure = { type: "error", code: "internal", message: "the reply ended without finishing" };
+
+/** Failures a second attempt cannot change: a setting, a missing model, a cancel. */
+const NO_SECOND_TRY = new Set(["num-ctx-invalid", "context-too-small", "cancelled", "model-not-found"]);
+
+/**
+ * A reply that failed on its own runs once more (decision 7): never one the person stopped, a
+ * halt ended or a delete dropped, and never one whose calls already ran, since a second attempt
+ * would run them again (a shell command, a queued picture).
+ */
+const runsAgain = (turn: Turn, failed: TurnFailure): boolean =>
+  !NO_SECOND_TRY.has(failed.code) && turn.halted === undefined && turn.stoppedAt === undefined && !turn.dropReply
+  && !turn.controller.signal.aborted && turn.steps.size === 0;
+
 const endedOf = (turn: Turn, event: TurnEnd, now: number): TurnEnded => {
   if (event.type === "done") return { reason: "done", at: now };
   if (turn.halted !== undefined) return { reason: "preempted", at: now };
@@ -245,6 +259,8 @@ interface Turn {
   stoppedAt?: number;
   /** Its times from reserve(), saved on the reply (chat row 32). */
   readonly clock: TurnClock;
+  /** chat.send has answered for it: its record may be pushed before its start. */
+  answered?: boolean;
   text: string;
   thinking: string;
   readonly steps: Map<string, ToolStep>;
@@ -290,6 +306,23 @@ export function createApp(deps: AppDeps): App {
     } catch (e) {
       log(`push ${channel} failed: ${(e as Error).message}`);
     }
+  };
+
+  /** The turn's reply record as it is now, to every window (decision 33). */
+  const pushReply = (turn: Turn) => push("chat.event", { turnId: turn.turnId, threadId: turn.threadId, event: { type: "reply", reply: turn.clock.record(Date.now()) } });
+
+  /** Models a models.load says are loading now (a preload the first key started, or another window's). */
+  const loadingModels = new Set<string>();
+  /** A turn that waits while its own model loads says "loading", not "waiting" (decision 33). */
+  const waitsOnLoad = (turn: Turn) => {
+    if (turn.terminal || turn.start !== undefined || turn.answered !== true) return;
+    if (![...loadingModels].some((m) => sameModel(m, turn.model))) return;
+    if (turn.clock.loading()) pushReply(turn);
+  };
+  const modelLoad = (l: Payload<"models.load">) => {
+    if (l.state === "loading") loadingModels.add(l.model);
+    else loadingModels.delete(l.model);
+    if (l.state === "loading") for (const turn of turns.values()) waitsOnLoad(turn);
   };
 
   const refreshModels = () => {
@@ -428,15 +461,17 @@ export function createApp(deps: AppDeps): App {
   const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad, options: { tools?: boolean; think?: boolean; settings?: TurnSettings; files?: readonly LibraryEntry[] } = {}) => {
     const { turnId, threadId, controller } = turn;
     let counted = false;
-    const emit = (event: Exclude<WireEvent, TurnEnd>) => {
+    const emit = (event: Exclude<WireEvent, TurnEnd | { type: "reply" }>) => {
       if (turn.terminal) return;
       // Only text means the model answered; an error, cancel or end goes through end() below.
       if (event.type === "delta" || event.type === "thinking") load?.firstToken();
-      if (event.type !== "start") turn.clock.see(event, Date.now(), turn.thinking);
+      const changed = event.type !== "start" && turn.clock.see(event, Date.now(), turn.thinking);
       if (event.type === "delta") turn.text += event.text;
       if (event.type === "thinking") turn.thinking += event.text;
       if (event.type === "tool") turn.steps.set(event.step.callId, event.step);
       push("chat.event", { turnId, threadId, event });
+      // the record after the event that changed it: a window has the words before the stage that names them
+      if (changed) pushReply(turn);
       keepDraft();
     };
     const nothingYet = () => turn.text === "" && turn.thinking === "" && turn.steps.size === 0;
@@ -570,34 +605,61 @@ export function createApp(deps: AppDeps): App {
           counted = true;
         } } : {}),
       };
-      const events = useTools ? streamToolTurn({ ...input, sources, image, ...(shell ? { shell } : {}), ...(imageChoice ? { queueImage: queueImageFor(threadId, controller.signal, imageChoice) } : {}) }) : streamTurn(input);
-      const iterator = events[Symbol.asyncIterator]();
-      let dropped = false;
-      try {
-        for (;;) {
-          const step = await untilHalted(iterator.next());
-          if (step === HALTED || turn.halted) {
-            dropped = step === HALTED;
-            finish(haltedEnd(turn.halted!));
-            return;
+      // A reply that fails on its own runs once more (decision 7): the person sees the second
+      // attempt start over in the same place, and only its failure is said.
+      for (let attempt = 1; ; attempt++) {
+        const events = useTools ? streamToolTurn({ ...input, sources, image, ...(shell ? { shell } : {}), ...(imageChoice ? { queueImage: queueImageFor(threadId, controller.signal, imageChoice) } : {}) }) : streamTurn(input);
+        const iterator = events[Symbol.asyncIterator]();
+        let dropped = false;
+        let failed: TurnFailure | undefined;
+        try {
+          for (;;) {
+            const step = await untilHalted(iterator.next());
+            if (step === HALTED || turn.halted) {
+              dropped = step === HALTED;
+              finish(haltedEnd(turn.halted!));
+              return;
+            }
+            const event = step.done === true ? ENDED_EARLY : step.value;
+            // A Stop that lands with the done line keeps the finished reply: the done event wins.
+            if (event.type === "done") {
+              finish(event);
+              return;
+            }
+            if (event.type === "error") {
+              failed = event;
+              break;
+            }
+            emit(event);
           }
-          if (step.done === true) {
-            finish({ type: "error", code: "internal", message: "the reply ended without finishing" });
-            return;
-          }
-          const event = step.value;
-          // A Stop that lands with the done line keeps the finished reply: the done event wins.
-          if (event.type === "done" || event.type === "error") {
-            finish(event);
-            return;
-          }
-          emit(event);
+        } finally {
+          // The generator's own cleanup (its finally: the socket, a queued image's take-back) runs on
+          // every exit. A step a halt dropped is still pending, so that cleanup runs when it settles.
+          const cleanup = iterator.return(undefined).catch(() => undefined);
+          if (!dropped) await cleanup;
         }
-      } finally {
-        // The generator's own cleanup (its finally: the socket, a queued image's take-back) runs on
-        // every exit. A step a halt dropped is still pending, so that cleanup runs when it settles.
-        const cleanup = iterator.return(undefined).catch(() => undefined);
-        if (!dropped) await cleanup;
+        // the loop above leaves only by a failure; `?? ENDED_EARLY` is for the type checker
+        if (failed === undefined || attempt > 1 || !runsAgain(turn, failed)) {
+          finish(failed ?? ENDED_EARLY);
+          return;
+        }
+        log(`turn ${turnId}: the reply failed (${failed.code}: ${failed.message}); running it once more`);
+        // the second attempt starts over: no words of the first stay, on screen or on disk
+        clearTimeout(draftTimer);
+        draftTimer = undefined;
+        drafted = false;
+        if (turn.draftId !== undefined) {
+          try {
+            store.deleteMessage(threadId, turn.draftId);
+          } catch (e) {
+            log(`turn ${turnId}: first attempt's words not removed: ${(e as Error).message}`);
+          }
+          turn.draftId = undefined;
+        }
+        turn.text = "";
+        turn.thinking = "";
+        turn.clock.retry(Date.now());
+        pushReply(turn);
       }
     } catch (e) {
       if (turn.halted) finish(haltedEnd(turn.halted));
@@ -886,7 +948,7 @@ export function createApp(deps: AppDeps): App {
     // From the moment chat.send took each turn, also while it waits for the GPU or a load.
     "turns.active": () => [...turns.values()]
       .filter((turn) => !turn.terminal && !turn.controller.signal.aborted)
-      .map(({ turnId, threadId }) => ({ turnId, threadId })),
+      .map(({ turnId, threadId, clock }) => ({ turnId, threadId, reply: clock.record(Date.now()) })),
     "turns.blocking": async ({ model, numCtx }) => {
       if (![...turns.values()].some((t) => t.started)) return [];
       const baseUrl = runtime.baseUrl();
@@ -940,6 +1002,8 @@ export function createApp(deps: AppDeps): App {
       turn.stoppedAt = Date.now();
       // words already on their way when the Stop landed change no time on the row
       turn.clock.stop(turn.stoppedAt, turn.thinking);
+      // every window stops its clock at the Stop, not when the stream winds down
+      if (turn.start !== undefined) pushReply(turn);
       turn.controller.abort();
       return { cancelled: true };
     },
@@ -969,6 +1033,11 @@ export function createApp(deps: AppDeps): App {
     try {
       try {
         await new Promise((resolve) => setImmediate(resolve));
+        // waiting for its files, the GPU and the load gate is the record's first stage: turns.active has it, and
+        // no event of the turn reaches a socket before chat.send's answer. From here a load of its model that it
+        // waits behind (the preload its first key started) is said as loading, also before its start.
+        turn.answered = true;
+        waitsOnLoad(turn);
         await imageReady;
         const files = deps.dataDir ? await checkFiles(deps.dataDir, attaching, { threadId, owners: store.fileOwners() }).catch(attachError) : [];
         // The thread's files, this message's included, open by label in this turn when tools are on.
@@ -1096,8 +1165,10 @@ export function createApp(deps: AppDeps): App {
         // Every client (also one that did not send this) learns of the question here.
         turn.start = { type: "start", model, userMessage };
         // a model it loads is ready at its first token; one already in memory, now
-        if (load?.cold !== true) turn.clock.ready(Date.now());
+        if (load?.cold === true) turn.clock.loading();
+        else turn.clock.ready(Date.now());
         push("chat.event", { turnId: turn.turnId, threadId, event: turn.start });
+        pushReply(turn);
         // the plan read the GPU a moment ago: the table takes that reading (chat row 33)
         fitTable.changed({ afterPlan: true });
         void runTurn(turn, ending, baseUrl, model, report.numCtx, modelHistory, load, { tools, think, settings, files: [...fileEntries.values()] });
@@ -1149,7 +1220,13 @@ export function createApp(deps: AppDeps): App {
 
   return {
     handlers,
-    fitTable,
+    fitTable: {
+      changed: (...a) => fitTable.changed(...a),
+      load(l) {
+        fitTable.load(l);
+        modelLoad(l);
+      },
+    },
     thumbnail: async (jobId) => (deps.dataDir && imageFiles ? readThumbnail(deps.dataDir, jobId, imageFiles.queue) : undefined),
     activeTurns: () => turns.size,
     admission: (turnId) => turns.get(turnId)?.admission,
@@ -1158,6 +1235,8 @@ export function createApp(deps: AppDeps): App {
         if (turn.start === undefined || turn.terminal) continue;
         const send = (event: WireEvent) => target("chat.event", { turnId: turn.turnId, threadId: turn.threadId, event });
         send({ ...turn.start, replayed: true });
+        // the record as it is now: a window that joins mid-reply draws the same stage and seconds
+        send({ type: "reply", reply: turn.clock.record(Date.now()) });
         if (turn.thinking !== "") send({ type: "thinking", text: turn.thinking });
         for (const step of turn.steps.values()) send({ type: "tool", step });
         if (turn.text !== "") send({ type: "delta", text: turn.text });

@@ -26,7 +26,7 @@ test("background life: return mid-reply, finish away, and keep exact ordered wor
   expect(page.url()).toBe(alpha);
   await expect.poll(() => page.locator(".turn.a:not(.done) .md p").count()).toBeGreaterThanOrEqual(4);
   await expect(page.locator(".turn.a .md")).not.toContainText("beta");
-  await expect(page.locator(".writing")).toBeVisible();
+  await expect(page.locator(".think.run")).toBeVisible();
   await finished(page, "alpha");
   await expect(page.locator(".sb-row", { hasText: "alpha" }).getByLabel("Reply in progress")).toHaveCount(0);
   await expect(page.locator(".sb-row", { hasText: "beta" }).getByLabel("Reply in progress")).toBeVisible();
@@ -77,7 +77,7 @@ test.describe("same-model screen proof", () => {
       await expect.poll(async () => (await state()).turns.length).toBe(2);
       if (parallelLimit === 1) {
         expect((await state()).turns[1]?.startedAt).toBeUndefined();
-        await expect(page.locator(".working")).toContainText("Waiting for Ollama");
+        await expect(page.locator(".think.run .lv-w > span").first()).toHaveText("Waiting");
         await release("alpha");
       }
       await expect(page.locator(".turn.a .md p")).toHaveCount(3);
@@ -97,6 +97,9 @@ test.describe("same-model screen proof", () => {
   }
 });
 
+/** How many of alpha's tries broke, as the fake runtime counts them. */
+const broken = async () => (await state()).turns.filter((t) => t.prompt === "alpha" && t.outcome === "error").length;
+
 // Guards a shipped bug fix: a reply that failed in the background lost its words.
 test("a background error stays visible with its partial words when returning", async ({ page, open }) => {
   await open(); await waitReady(page);
@@ -108,15 +111,19 @@ test("a background error stays visible with its partial words when returning", a
   await page.getByTestId("sidebar.top.new-thread").click();
   await start(page, "beta", SMALL[1]);
   await release("alpha");
-  await expect.poll(async () => (await state()).turns.find((t) => t.prompt === "alpha")?.outcome).toBe("error");
+  // the server tries a broken reply once more by itself (decision 7); the second try breaks too
+  await expect.poll(broken).toBe(1);
+  await expect.poll(async () => (await state()).turns.filter((t) => t.prompt === "alpha").length).toBe(2);
+  await release("alpha");
+  await expect.poll(broken).toBe(2);
   await page.locator(".sb-row", { hasText: "alpha" }).click();
-  await expect(page.locator(".stop-note, .err-line")).toContainText("The reply didn't finish.");
+  await expect(page.getByTestId("chat.reply.failed")).toContainText("The reply didn't finish.");
   await expect(page.locator(".turn.a .md")).toContainText("Reply 1 for alpha.");
   await expect(page.locator(".turn.a .md")).not.toContainText("beta");
   // This client never loaded alpha's history before it failed off screen.
   await observer.locator(".sb-row", { hasText: "alpha" }).click();
   await expect(observer.locator(".turn.u .bubble")).toHaveText("alpha");
   await expect(observer.locator(".turn.a .md")).toContainText("Reply 1 for alpha.");
-  await expect(observer.locator(".stop-note")).toContainText("The reply didn't finish.");
+  await expect(observer.getByTestId("chat.reply.failed")).toContainText("The reply didn't finish.");
   await observer.close();
 });

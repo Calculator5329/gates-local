@@ -435,7 +435,7 @@ export function errorSavedPartial(): ReplayScenario<World> {
       expect(state.turns["t1"]).toBeUndefined();
       expect(state.messages["t1"]?.filter((m) => m.role === "assistant")).toMatchObject([{ id: "reply-turn-1", content: "so far", interrupted: true }]);
       const reply = state.messages["t1"]?.find((m) => m.id === "reply-turn-1");
-      expect(reply === undefined ? undefined : drawTimes(reply, undefined).note).toEqual({ kind: "said", words: "The reply didn't finish. The model runner crashed." });
+      expect(reply === undefined ? undefined : drawTimes(reply, undefined).note).toEqual({ kind: "failed", why: "the model runner crashed" });
     },
   };
 }
@@ -571,7 +571,7 @@ it("TL-01: active-turn hydration restores ongoing replies and orders terminal ev
       name: `active turns: ${ending}`,
       create: async () => {
         const w = await OrderingWorld.create(false);
-        w.server.answer("turns.active", () => [...w.server.turns].map(([turnId, message]) => ({ turnId, threadId: message.threadId })));
+        w.server.answer("turns.active", () => [...w.server.turns].map(([turnId, message]) => ({ turnId, threadId: message.threadId, reply: { stage: "thinking", startedAt: 1, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {} } })));
         w.server.turns.set("existing", { id: "user-existing", threadId: "t1", role: "user", content: "hello", createdAt: 1 });
         await w.step(() => w.server.chatPush("existing", w.a.socket));
         expect(runningIds(w.a.store)).toEqual({ t1: "existing" });

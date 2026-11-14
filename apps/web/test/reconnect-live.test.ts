@@ -85,7 +85,7 @@ it("TE-03: replay revives a closed reply, replaces its snapshot once and survive
 });
 
 it("TE-03: a reply the server lists as still running gets its words replaced by the snapshot, not doubled", async () => {
-  browser.server.answer("turns.active", () => [{ threadId: "t1", turnId: "turn-live" }]);
+  browser.server.answer("turns.active", () => [{ threadId: "t1", turnId: "turn-live", reply: { stage: "writing", startedAt: 1, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {} } }]);
   const held = await dropConnection();
   held.batch.respond(methodSamples["models.list"].result);
   (await held.thread).respond(history([question]));

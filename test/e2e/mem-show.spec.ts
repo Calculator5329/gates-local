@@ -37,7 +37,7 @@ async function replies(page: Page, n: number): Promise<void> {
   await expect(page.locator(".turn.a")).toHaveCount(n, { timeout: 15_000 });
   // the fake's reply ends with these words: a turn waiting for its model has none
   await expect(page.locator(".turn.a").last()).toContainText("streaming takes", { timeout: 15_000 });
-  await expect(page.locator(".writing")).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.locator(".think.run")).toHaveCount(0, { timeout: 15_000 });
 }
 
 test("the model button on a new chat with another model in memory, and a thread whose model changes twice", async ({ page, open }, info) => {

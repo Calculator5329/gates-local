@@ -63,7 +63,7 @@ test("WIN-MEM-02: no context of the picked model fits: the note offers the insta
   await expect(page.getByTestId("chat.composer.offer-slower")).toHaveCount(0);
   await other.click();
   await expect(page.locator(".turn.a")).toHaveCount(1);
-  await expect(page.locator(".writing")).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.locator(".think.run")).toHaveCount(0, { timeout: 10_000 });
   await expect.poll(async () => (await turns()).at(-1)).toMatchObject({ model: "qwen3.5:4b", numCtx: 16384 });
   await expect(page.locator("#modelBtn")).toContainText("Qwen 3.5 4B");
   await expect(note).toHaveCount(0);
@@ -83,7 +83,7 @@ test("WIN-MEM-02: a smaller context runs, partly in system memory: the note offe
   await expect(smaller.getByTestId("chat.composer.offer-slower")).toHaveCount(1);
   await smaller.click();
   await expect(page.locator(".turn.a")).toHaveCount(1);
-  await expect(page.locator(".writing")).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.locator(".think.run")).toHaveCount(0, { timeout: 10_000 });
   await expect.poll(async () => (await turns()).at(-1)).toMatchObject({ model: "qwen3.5:9b", numCtx: 8192 });
   await expect(page.locator("#modelBtn")).toContainText("8k");
   await expect(note).toHaveCount(0);

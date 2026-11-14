@@ -1,39 +1,42 @@
 import { describe, expect, it } from "vitest";
-import type { Message } from "@gates-local/contracts";
+import type { Message, ReplyRecord } from "@gates-local/contracts";
 import type { LiveTurn } from "../store.ts";
-import { reduceTurn, unfinished, withTurn } from "./turn.ts";
+import { reduceTurn, unfinished, withTurn, workMsAt } from "./turn.ts";
 
 const T0 = 1_000_000;
 const turn = (patch: Partial<LiveTurn> = {}): LiveTurn => ({ gen: 1, threadId: "A", turnId: "t1", model: "m", startedAt: T0, thinking: "", text: "", tools: [], pendingUser: null, ...patch });
 const question: Message = { id: "u1", threadId: "A", role: "user", content: "hi", createdAt: 1 };
 const answer: Message = { id: "a1", threadId: "A", role: "assistant", content: "done", createdAt: 2 };
 const at = (secs: number) => T0 + secs * 1000;
+const record = (patch: Partial<ReplyRecord> = {}): ReplyRecord => ({ stage: "waiting", startedAt: T0, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {}, ...patch });
 
 describe("reduceTurn", () => {
-  it("measures thinking from the start to the first word, when that word arrives", () => {
-    let t = reduceTurn(turn(), { type: "start", model: "m", userMessage: question }, at(0));
-    t = reduceTurn(t!, { type: "thinking", text: "hmm" }, at(1));
-    t = reduceTurn(t!, { type: "delta", text: "Hi" }, at(5));
-    expect(t).toMatchObject({ thinking: "hmm", text: "Hi", firstTokenAt: at(5), thinkingSecs: 5 });
-    t = reduceTurn(t!, { type: "delta", text: " there" }, at(65));
-    expect(t).toMatchObject({ text: "Hi there", firstTokenAt: at(5), thinkingSecs: 5 });
+  // decision 33: the stage and the seconds are the server's record; this client only grows the work between pushes
+  it("takes the server's reply record, and grows its work on this clock only while it thinks or runs a call", () => {
+    const t = reduceTurn(turn(), { type: "reply", reply: record({ stage: "thinking", workMs: 2000 }) }, at(10))!;
+    expect(t).toMatchObject({ reply: { stage: "thinking", workMs: 2000 }, replyAt: at(10) });
+    expect(workMsAt(t, at(13))).toBe(5000);
+    const writing = reduceTurn(t, { type: "reply", reply: record({ stage: "writing", workMs: 4000 }) }, at(12))!;
+    expect(workMsAt(writing, at(30)), "the writing is not work").toBe(4000);
+    expect(workMsAt(turn(), at(30)), "no record, no number").toBeUndefined();
   });
 
-  it("leaves the model's load out of the thinking: it counts from the first token (owner, chat row 21)", () => {
-    let t = reduceTurn(turn(), { type: "start", model: "m", userMessage: question }, at(0), true);
-    expect(t?.readyAt).toBeUndefined();
-    t = reduceTurn(t!, { type: "thinking", text: "hmm" }, at(5));
-    t = reduceTurn(t!, { type: "delta", text: "Hi" }, at(7));
-    expect(t).toMatchObject({ readyAt: at(5), thinkingSecs: 2 });
-    // stopped while still thinking after a load: the same origin
-    t = reduceTurn(turn(), { type: "start", model: "m", userMessage: question }, at(0), true);
-    t = reduceTurn(t!, { type: "thinking", text: "hmm" }, at(5));
-    expect(reduceTurn(t!, { type: "stop" }, at(8))?.thinkingSecs).toBe(3);
+  it("a second attempt starts the reply over in the same place (decision 7)", () => {
+    const first = turn({ text: "half", thinking: "t", tools: [{ callId: "c", name: "read", state: "done", summary: "Read" }], reply: record({ stage: "writing" }) });
+    expect(reduceTurn(first, { type: "reply", reply: record({ stage: "writing", workMs: 3000 }) }, at(5))).toMatchObject({ text: "half", thinking: "t" });
+    expect(reduceTurn(first, { type: "reply", reply: record({ stage: "waiting", attempt: 2 }) }, at(5))).toMatchObject({ text: "", thinking: "", tools: [], reply: { attempt: 2 } });
   });
 
-  it("gives no thinking time to a reply that did not think, and at least one second to one that did", () => {
-    expect(reduceTurn(turn(), { type: "delta", text: "Hi" }, at(3))?.thinkingSecs).toBeUndefined();
-    expect(reduceTurn(turn({ thinking: "x" }), { type: "delta", text: "Hi" }, at(0.2))?.thinkingSecs).toBe(1);
+  it("a reply ended here holds its record still, and takes no later one", () => {
+    const thinking = reduceTurn(turn(), { type: "reply", reply: record({ stage: "thinking", workMs: 1000 }) }, at(10))!;
+    const stopped = reduceTurn(thinking, { type: "stop" }, at(12))!;
+    expect(stopped.reply).toMatchObject({ stage: "ended", workMs: 3000 });
+    expect(workMsAt(stopped, at(40))).toBe(3000);
+    expect(reduceTurn(stopped, { type: "reply", reply: record({ stage: "thinking", workMs: 9000 }) }, at(13))).toBe(stopped);
+    expect(reduceTurn(thinking, { type: "error", code: "stream-error", message: "x" }, at(14))?.reply).toMatchObject({ stage: "ended", workMs: 5000 });
+    // a reply the connection cut off takes the server's record again
+    const cut = reduceTurn(thinking, { type: "lost" }, at(11))!;
+    expect(reduceTurn(cut, { type: "reply", reply: record({ stage: "writing", workMs: 6000 }) }, at(20))?.reply).toMatchObject({ stage: "writing", workMs: 6000 });
   });
 
   it("drops words after the turn ended here, but keeps a tool step", () => {

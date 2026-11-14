@@ -315,8 +315,12 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
   return { app, server, client, store, runtime, ollama, gpu, lease, setChat: (r) => (chat = r), setShow: (r) => (show = r), pushes, storedAtDonePush, replayedAtDone, catalog, setTags: (t) => (tags = t), waitFor, ps, memory, loader };
 }
 
-const events = (r: Rig, turnId: string) =>
+const turnEvents = (r: Rig, turnId: string) =>
   r.pushes.filter((p) => p.channel === "chat.event" && (p.payload as Payload<"chat.event">).turnId === turnId).map((p) => (p.payload as Payload<"chat.event">).event);
+/** The turn's events but its reply records (decision 33), which `stages` reads on their own. */
+const events = (r: Rig, turnId: string) => turnEvents(r, turnId).filter((e) => e.type !== "reply");
+/** The stages the turn's reply records went through, in order. */
+const stages = (r: Rig, turnId: string) => turnEvents(r, turnId).flatMap((e) => (e.type === "reply" ? [e.reply.stage] : []));
 
 /**
  * chat.send over the socket, then the turn's start (chat row 32): the answer names the turn, its
@@ -632,7 +636,9 @@ describe("chat.send", () => {
     // returned before any reply byte; the start push came first, for every client (PH-02)
     expect(events(r, sent.turnId)).toEqual([{ type: "start", model: MODEL, userMessage: sent.userMessage }]);
     expect(r.app.activeTurns()).toBe(1);
-    expect(await r.client.call("turns.active", {})).toEqual([{ threadId: t.id, turnId: sent.turnId }]);
+    // a window that opens now gets the reply's record as it is: the model was in memory, but nothing has come back yet,
+    // and the runtime may be holding it behind another reply, so it is waiting
+    expect(await r.client.call("turns.active", {})).toEqual([{ threadId: t.id, turnId: sent.turnId, reply: expect.objectContaining({ stage: "waiting", attempt: 1 }) }]);
 
     // The store already has the user message; the turn is streaming.
     expect((await r.client.call("threads.get", { threadId: t.id })).messages.map((m) => m.role)).toEqual(["user"]);
@@ -645,6 +651,8 @@ describe("chat.send", () => {
     expect(r.replayedAtDone).toEqual([]);
 
     expect(events(r, sent.turnId).map((e) => e.type)).toEqual(["start", "delta", "delta", "done"]);
+    // every window drew the stage from the server: after the start, and once at the first word, not at every word
+    expect(stages(r, sent.turnId)).toEqual(["waiting", "writing"]);
     if (done.event.type !== "done") throw new Error("unreachable");
     expect(done.event.stopReason).toBe("stop");
     expect(done.event.message).toMatchObject({

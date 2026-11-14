@@ -39,7 +39,7 @@ test.describe("first run", () => {
     await sendMessage(page, "Say hello");
     const reply = page.locator(".turn.a").last();
     await expect(reply.locator(".md")).toContainText("You asked: Say hello");
-    await expect(page.locator(".writing")).toHaveCount(0, { timeout: 10_000 });
+    await expect(page.locator(".think.run")).toHaveCount(0, { timeout: 10_000 });
     await expect(page.locator(".c-note")).toHaveCount(0);
   });
 

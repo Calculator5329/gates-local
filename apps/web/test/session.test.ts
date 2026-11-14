@@ -863,7 +863,7 @@ describe("background turn endings", () => {
       await tick();
       const kept = store.getState().messages["t1"]?.find((m) => m.content === "Keep these partial words");
       expect(kept).toMatchObject({ thinking: "Reasoning before words" });
-      expect(kept === undefined ? undefined : drawTimes(kept, undefined).note).toEqual(code === "cancelled" ? { kind: "stopped", secs: expect.any(Number) } : { kind: "said", words: expect.stringMatching(/^The reply didn't finish\./) });
+      expect(kept === undefined ? undefined : drawTimes(kept, undefined).note).toEqual(code === "cancelled" ? { kind: "stopped", secs: expect.any(Number) } : { kind: "failed", why: "The reply ended" });
     });
   }
 

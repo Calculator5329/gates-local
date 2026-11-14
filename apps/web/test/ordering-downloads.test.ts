@@ -26,7 +26,7 @@ const frame = (socket: string, event: string) => ({ socket, event });
 const noop = () => {};
 const MESSAGE = "waiting for the first model";
 const STOPPED = "Download stopped";
-const STOPPED_TIP = 'data-tip="Download stopped. Download a model to send this."';
+const STOPPED_TIP = 'data-tip="Download stopped';
 // the row shows a clock; these are its tip and its words for a screen reader (chat row 29)
 const WAITING = "Sends when the download finishes";
 type QueueWords = typeof import("../src/Composer.tsx")["queueWords"];
@@ -193,7 +193,8 @@ it.each(["error", "cancelled"] as const)("RS-01: connected %s keeps the message 
     const stopped = tray();
     expect(stopped).toContain(MESSAGE);
     expect(stopped).toContain(`>${STOPPED}<`);
-    expect(stopped, "the full sentence is the word's tip").toContain(STOPPED_TIP);
+    // decision 19 B: a word has no tip; the composer's placeholder says a model is missing
+    expect(stopped, "no tip repeats the word").not.toContain(STOPPED_TIP);
     expect(stopped).not.toContain(WAITING);
     expect(stopped).toContain("data-edit-queued");
     expect(stopped).toContain("data-unqueue");

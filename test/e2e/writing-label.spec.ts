@@ -1,7 +1,8 @@
 /// <reference lib="dom" />
-// "Writing" sits above a streaming reply and holds still (owner, chat row 30: "the blinking
-// Writing text should be above instead of below. I think that is how t3 code does it").
-// Every frame of one streamed reply is sampled: the label's top and the text's top. The label
+// The live line ("Writing" with the breathing dot, decisions 1 and 33) sits above a streaming
+// reply and holds still (owner, chat row 30: "the blinking Writing text should be above instead
+// of below. I think that is how t3 code does it").
+// Every frame of one streamed reply is sampled: the line's top and the text's top. The line
 // stays above the text at one place while the text grows under it, and the text does not move
 // when the label leaves. The run is recorded for the before and after.
 import { expect, sendMessage, test, waitReady } from "./fixtures.ts";
@@ -24,7 +25,7 @@ test("Writing sits above the streaming reply and holds still, and the text stays
       // measured from the top of the timeline's column, so following the reply down does not count as a move
       const top = document.querySelector(".col")?.getBoundingClientRect().top ?? 0;
       const reply = [...document.querySelectorAll(".turn.a")].at(-1);
-      const label = reply?.querySelector(".writing")?.getBoundingClientRect();
+      const label = reply?.querySelector(".think.run")?.getBoundingClientRect();
       const text = reply?.querySelector(".md")?.getBoundingClientRect();
       frames.push({ label: label === undefined ? null : label.top - top, labelBottom: label === undefined ? null : label.bottom - top, text: text === undefined ? null : text.top - top, chars: reply?.querySelector(".md")?.textContent?.length ?? 0 });
       requestAnimationFrame(tick);
@@ -33,7 +34,7 @@ test("Writing sits above the streaming reply and holds still, and the text stays
   });
   await sendMessage(page, "Write a paragraph on climate change");
   const reply = page.locator(".turn.a").last();
-  await expect(reply.locator(".writing")).toBeVisible();
+  await expect(reply.locator(".think.run")).toBeVisible();
   await expect(reply).toHaveClass(/\bdone\b/, { timeout: 30_000 });
   await page.waitForTimeout(600);
   const frames = await page.evaluate(() => (window as unknown as { wrFrames: Frame[] }).wrFrames);

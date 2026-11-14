@@ -16,11 +16,11 @@ test("first run finds Ollama and its models, then a streamed reply shows thinkin
   await expect(page.locator("#ta")).toBeFocused();
   await sendMessage(page, "What is a context window");
 
-  // "Writing" shows while the reply streams, then the turn settles
-  await expect(page.locator(".writing")).toBeVisible();
+  // the live line shows while the reply runs, then the turn settles
+  await expect(page.locator(".think.run")).toBeVisible();
   const reply = page.locator(".turn.a").last();
   await expect(reply.locator(".md")).toContainText("You asked: What is a context window");
-  await expect(page.locator(".writing")).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.locator(".think.run")).toHaveCount(0, { timeout: 10_000 });
   await expect(page).toHaveURL(/#thread=/);
 
   // thinking is one collapsed line that opens on click

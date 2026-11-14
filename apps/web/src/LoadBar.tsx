@@ -13,11 +13,12 @@ interface Load {
   readonly ms: number | undefined;
 }
 
-export function LoadRing({ since, ms }: Load) {
+export function LoadRing({ since, ms, ask = false }: Load & { readonly ask?: boolean }) {
   // started before this mounted (another screen, a remount): the fill is already that far along
   const [delay] = useState(() => (since === undefined ? 0 : Math.min(0, since - Date.now())));
+  // ask: a send asking the server what it would stop; the turning arc shows only if that takes a moment
   return (
-    <svg className={ms === undefined ? "ldring wait" : "ldring"} viewBox="0 0 40 40" aria-hidden="true">
+    <svg className={ms === undefined ? `ldring wait${ask ? " ask" : ""}` : "ldring"} viewBox="0 0 40 40" aria-hidden="true">
       <circle className="ldring-t" cx="20" cy="20" r="18.75" />
       <circle className="ldring-f" cx="20" cy="20" r="18.75" pathLength="100" style={ms === undefined ? undefined : { animationDuration: `${ms}ms`, animationDelay: `${delay}ms` }} />
     </svg>
