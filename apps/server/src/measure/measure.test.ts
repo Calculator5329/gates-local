@@ -6,6 +6,8 @@ import { runSnapshotQuery } from "../../../../packages/harness/src/sql.ts";
 import { CASES, MEASURE_CTX, ensureShopDb, measureModel } from "./suite.ts";
 import { measureStore } from "./store.ts";
 import { createMeasure } from "./handlers.ts";
+import { createMemoryOwner } from "../gpu/memory.ts";
+import type { LoadedModel } from "../runtime/types.ts";
 import type { FitReport, MeasureRun, ModelInfo } from "@gates-local/contracts";
 import type { Push } from "../app.ts";
 
@@ -161,6 +163,59 @@ describe("models.measure", () => {
     const t = setup("fits");
     await expect(t.measure.handlers["models.measure"]({ name: "other" })).rejects.toMatchObject({ code: "not-installed" });
     expect(t.kinds).toEqual([]);
+  });
+
+  /** The memory owner over a runtime where `idle` sits in memory until it is asked to leave. */
+  function withOwner(verdict: "fits" | "refuse") {
+    const order: string[] = [];
+    let listed: LoadedModel[] = [{ name: "idle:7b", sizeBytes: 1, sizeVramBytes: 1 }];
+    const rt = fakeRuntime(["completion", "tools"], goodAnswer);
+    const fetcher = (async (url: URL | string, init?: RequestInit) => {
+      if (new URL(String(url)).pathname === "/api/generate") {
+        const body = JSON.parse(String(init?.body)) as { model: string; keep_alive: number };
+        order.push(`unload ${body.model}`);
+        listed = listed.filter((m) => m.name !== body.model);
+        return Response.json({ done: true });
+      }
+      return rt.fetcher(url, init);
+    }) as typeof fetch;
+    const owner = createMemoryOwner({ ollamaUrl: () => "http://runtime", listLoaded: async () => listed, replying: () => [], fetch: fetcher, waitMs: 50, pollMs: 1 });
+    const pushes: [string, unknown][] = [];
+    const measure = createMeasure({
+      dataDir: dir(),
+      baseUrl: () => "http://runtime",
+      installed: async () => [info],
+      plan: async (_b, _m, _n, _s, measured) => {
+        order.push(`plan ${measured === true ? "measured" : "beside"}`);
+        return { verdict, message: verdict === "refuse" ? "m needs 20 GB; this computer has 16 GB." : undefined } as unknown as FitReport;
+      },
+      push: ((channel: string, payload: unknown) => pushes.push([channel, payload])) as Push,
+      lease: { acquire: async (kind) => { order.push(`lease ${kind}`); return () => undefined; } },
+      memory: owner,
+      fetch: fetcher,
+    });
+    const ended = () => new Promise<void>((resolve) => {
+      const tick = () => pushes.some(([c, p]) => c === "models.measuring" && ["done", "error"].includes((p as MeasureRun).state)) ? resolve() : setTimeout(tick, 5);
+      tick();
+    });
+    return { measure, owner, order, rt, ended };
+  }
+
+  it("asks an idle model in memory to leave before it plans and loads, and then says the measured model is the one in memory", async () => {
+    const t = withOwner("fits");
+    await t.measure.handlers["models.measure"]({ name: "m" });
+    await t.ended();
+    expect(t.order).toEqual(["lease bench", "unload idle:7b", "plan measured"]);
+    expect(t.owner.status()).toEqual({ resident: { kind: "chat", model: "m:latest", numCtx: MEASURE_CTX, since: expect.any(Number) } });
+  });
+
+  it("a refused measure loads nothing and leaves no handoff open", async () => {
+    const t = withOwner("refuse");
+    await t.measure.handlers["models.measure"]({ name: "m" });
+    await t.ended();
+    expect(t.rt.bodies).toEqual([]);
+    expect(t.order).toEqual(["lease bench", "unload idle:7b", "plan measured"]);
+    expect(t.owner.status()).toEqual({});
   });
 });
 

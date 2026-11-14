@@ -1,9 +1,11 @@
 // models.measures and models.measure (row 29). A measure runs only on its RPC: it takes the
-// GPU lease alone ("bench"), so it waits for running replies and a send waits for it; it checks
-// the fit at the measure's window, runs the suite, saves the numbers and pushes the new list.
-// One model at a time.
+// GPU lease alone ("bench"), so it waits for running replies and a send waits for it. Then, in
+// the lock order a send uses (lease, then the memory owner's load gate), the owner's handoff asks
+// everything else in memory to leave, and the fit at the measure's window is decided from a new
+// reading. It runs the suite, saves the numbers and pushes the new list. One model at a time.
 import type { FitReport, MeasureRun, ModelInfo, ModelMeasure } from "@gates-local/contracts";
 import type { GpuLease } from "../gpu/lease.ts";
+import type { MemoryOwner, Want } from "../gpu/memory.ts";
 import type { Push } from "../app.ts";
 import { CASES, MEASURE_CTX, ensureShopDb, measureModel } from "./suite.ts";
 import { measureStore } from "./store.ts";
@@ -21,9 +23,12 @@ export interface MeasureDeps {
   readonly dataDir: string;
   readonly baseUrl: () => string | undefined;
   readonly installed: () => Promise<readonly ModelInfo[]>;
-  readonly plan: (baseUrl: string, model: string, numCtx: number, signal: AbortSignal) => Promise<FitReport>;
+  /** `measured`: after the handoff, inside the load gate, the reading alone decides (app.ts planBeside). */
+  readonly plan: (baseUrl: string, model: string, numCtx: number, signal: AbortSignal, measured?: boolean) => Promise<FitReport>;
   readonly push: Push;
   readonly lease?: Pick<GpuLease, "acquire">;
+  /** The one owner of what is in memory: Measure hands off through it as a send does. */
+  readonly memory?: Pick<MemoryOwner, "gate" | "handoff" | "stage" | "settled" | "ended">;
   readonly fetch?: typeof fetch;
 }
 
@@ -58,14 +63,38 @@ export function createMeasure(deps: MeasureDeps) {
     try {
       const release = await deps.lease?.acquire("bench", signal);
       try {
-        const report = await deps.plan(baseUrl, model, MEASURE_CTX, signal);
-        if (report.verdict === "refuse") throw new MeasureError("wont-fit", report.message ?? `${model} does not fit in memory here.`);
+        const memory = deps.memory;
+        const want: Want = { kind: "chat", model, numCtx: MEASURE_CTX };
+        const decide = async () => {
+          const report = await deps.plan(baseUrl, model, MEASURE_CTX, signal, memory !== undefined);
+          if (report.verdict === "refuse") throw new MeasureError("wont-fit", report.message ?? `${model} does not fit in memory here.`);
+        };
+        if (memory === undefined) await decide();
+        else {
+          await memory.gate(async () => {
+            try {
+              await memory.handoff(want, signal);
+              await decide();
+            } catch (e) {
+              memory.ended();
+              throw e;
+            }
+            memory.stage(want, "loading");
+          });
+        }
         deps.push("models.measuring", { model, state: "running", done: 0, total });
-        const result = await measureModel({
-          baseUrl, model, signal, dbFile: ensureShopDb(deps.dataDir),
-          ...(deps.fetch ? { fetch: deps.fetch } : {}),
-          onStep: (done) => deps.push("models.measuring", { model, state: "running", done, total }),
-        });
+        let result: Awaited<ReturnType<typeof measureModel>>;
+        try {
+          result = await measureModel({
+            baseUrl, model, signal, dbFile: ensureShopDb(deps.dataDir),
+            ...(deps.fetch ? { fetch: deps.fetch } : {}),
+            onStep: (done) => deps.push("models.measuring", { model, state: "running", done, total }),
+          });
+        } catch (e) {
+          memory?.ended();
+          throw e;
+        }
+        memory?.settled(want);
         const saved: ModelMeasure = { model, digest, ...result };
         deps.push("models.measures", store.put(saved));
         deps.push("models.measuring", { model, state: "done", done: total, total });

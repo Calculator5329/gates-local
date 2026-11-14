@@ -39,7 +39,7 @@ import { createImageHandlers } from "./image/handlers.ts";
 import type { ImageSetupModule } from "./image/setup.ts";
 import { IMAGES_UNSET, notRunning, type ImageModule } from "./image/module.ts";
 import type { GpuLease } from "./gpu/lease.ts";
-import { createMeasure } from "./measure/handlers.ts";
+import { createMeasure, type MeasureDeps } from "./measure/handlers.ts";
 import { createUpdateHandlers, type UpdateModule } from "./update/module.ts";
 import type { Usage } from "./usage/index.ts";
 import type { SettingsReader } from "./settings/store.ts";
@@ -186,6 +186,8 @@ export interface AppDeps {
    * its reservation to its end, so an image job never runs beside a stream.
    */
   readonly lease?: Pick<GpuLease, "acquire">;
+  /** The one owner of what is in memory (gpu/memory.ts): Measure hands off through it. Sends reach it through the loader. */
+  readonly memory?: MeasureDeps["memory"];
   /** Settings › Updates: the version, the one-click check and the last update's result (update/module.ts). */
   readonly update?: UpdateModule;
   /** Token counts per hour and model (usage/); each model request's done line records here. */
@@ -308,9 +310,10 @@ export function createApp(deps: AppDeps): App {
     dataDir: deps.dataDir,
     baseUrl: () => runtime.baseUrl(),
     installed: async () => catalog.current() ?? (await catalog.refresh()).models,
-    plan: async (baseUrl, model, numCtx, signal) => (await planBeside(baseUrl, model, numCtx, { signal })).report,
+    plan: async (baseUrl, model, numCtx, signal, measured) => (await planBeside(baseUrl, model, numCtx, { signal, ...measured === true ? { measured } : {} })).report,
     push,
     ...(deps.lease ? { lease: deps.lease } : {}),
+    ...(deps.memory ? { memory: deps.memory } : {}),
   });
   const offRuntime = runtime.onChange((status) => {
     push("runtime.changed", status);

@@ -28,6 +28,8 @@ export function getDraft(key: DraftKey = currentDraftKey()): Draft {
   if (!draft) { draft = { text: "", images: emptyImages, sendId: null, version: ++version }; slots.set(key, draft); }
   return draft;
 }
+/** The draft has words, images or files in it: the person is writing. */
+export const draftHolds = (key: DraftKey): boolean => holds(getDraft(key));
 export const draftRevision = () => revision;
 export function subscribeDrafts(listener: () => void): () => void {
   listeners.add(listener);

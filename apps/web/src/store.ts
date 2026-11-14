@@ -10,6 +10,7 @@ import type {
   CatalogEntry,
   ContextSize,
   FitOffer,
+  MemoryState,
   FitTable,
   GpuStatus,
   ImageChoice,
@@ -210,6 +211,15 @@ export interface State {
   readonly loadSince: Readonly<Record<string, number>>;
   /** Each model's last load on this machine, in milliseconds (load-times.ts). */
   readonly loadTimes: Readonly<Record<string, number>>;
+  /** What is in memory (the server's gpu/memory.ts, by memory.status and memory.changed); undefined before the first read. */
+  readonly memory: MemoryState | undefined;
+  /**
+   * The chat model in memory a new chat starts on, as memory named it: taken when the chat opens, and when a
+   * load ends while its box is empty and the list is closed; never while the person types (session/models.ts).
+   */
+  readonly newChatResident: string | undefined;
+  /** The person picked a model in this new chat: what is in memory no longer moves its button. */
+  readonly newChatPicked: boolean;
 
   readonly settings: Maybe<Settings>;
   readonly gpu: Maybe<GpuStatus>;
@@ -291,6 +301,9 @@ const initial: State = {
   loads: {},
   loadSince: {},
   loadTimes: readLoadTimes(),
+  memory: undefined,
+  newChatResident: undefined,
+  newChatPicked: false,
   settings: undefined,
   gpu: undefined,
   catalog: undefined,

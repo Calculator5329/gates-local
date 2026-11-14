@@ -37,12 +37,17 @@ try {
   const packaged = await electron.evaluate(({ app }) => app.isPackaged);
   expect(packaged).toBe(true);
   const page = await electron.firstWindow();
-  await expect.poll(async () => page.evaluate(async () => {
-    const state = await (globalThis as unknown as { gatesLocal?: GatesLocalBridge }).gatesLocal?.getState();
-    return state?.status;
-  }), { timeout: 30_000 }).toMatch(/^(ready|crashed)$/);
-  const state = await page.evaluate(() => (globalThis as unknown as { gatesLocal: GatesLocalBridge }).gatesLocal.getState());
-  if (state.status !== "ready") throw new Error("Packaged server did not become ready");
+  // The window moves from the status page to the app while this polls, which destroys the page's
+  // context under an evaluate: that read is "not yet", never a failure (the first 0.2.4 Linux round).
+  let status: string | undefined;
+  await expect.poll(async () => {
+    status = await page.evaluate(async () => {
+      const state = await (globalThis as unknown as { gatesLocal?: GatesLocalBridge }).gatesLocal?.getState();
+      return state?.status;
+    }).catch(() => undefined);
+    return status;
+  }, { timeout: 30_000 }).toMatch(/^(ready|crashed)$/);
+  if (status !== "ready") throw new Error(`Packaged server did not become ready: ${status}`);
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.name));
   await expect(page.locator(".fr h1")).toContainText("Ollama", { timeout: 30_000 });

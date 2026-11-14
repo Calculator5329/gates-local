@@ -1,6 +1,7 @@
 // Runtime/model reads, local model choice, catalog and download actions.
-import type { BlockingTurn, MethodName, Params, Payload, ResultOf } from "@gates-local/contracts";
-import { type ModelDecision, modelChoice as pickChoice, modelNameKey, newestOnly } from "../pick.ts";
+import type { BlockingTurn, MemoryState, MethodName, Params, Payload, ResultOf } from "@gates-local/contracts";
+import { draftHolds } from "../drafts.ts";
+import { type ModelDecision, choosable, modelChoice as pickChoice, modelNameKey, newestOnly } from "../pick.ts";
 import { describeModel, k } from "../format.ts";
 import { imageMode } from "../image-choice.ts";
 import { saveLoadTimes } from "../load-times.ts";
@@ -53,7 +54,45 @@ export function chooseModel(): void {
  * only a new chat the user has not picked for follows the pick (MP-02).
  */
 export function modelChoice(s: State): ModelDecision {
-  return pickChoice(s.models, s.model, s.threadId === null ? s.chosen : (s.threadModels[s.threadId] ?? s.model));
+  return pickChoice(s.models, s.model, s.threadId === null ? newChatWant(s) : (s.threadModels[s.threadId] ?? s.model));
+}
+
+/** The chat model memory holds, as memory names it; undefined when it holds an image setup or nothing. */
+export const residentChat = (s: Pick<State, "memory">): string | undefined =>
+  s.memory?.resident?.kind === "chat" ? s.memory.resident.model : undefined;
+
+/**
+ * What a new chat starts on (owner, 2026-11-13: the model in memory is the default): the chat model
+ * in memory when the chat opened or a load ended under an empty box, as the installed list names it,
+ * unless the person picked in this chat; else the model used last (`chosen`), else the server's pick.
+ */
+export function newChatWant(s: State): string | undefined {
+  if (s.newChatPicked || s.newChatResident === undefined) return s.chosen;
+  const key = modelNameKey(s.newChatResident);
+  return s.models?.find((m) => modelNameKey(m.name) === key && choosable(m))?.name ?? s.chosen;
+}
+
+/** A new chat's model, from what memory holds now: the snapshot it keeps until the person picks or a load ends under an empty box. */
+export function newChatModel(s: State): Partial<State> {
+  // An image setup in memory keeps the chat model the button had; nothing in memory is today's default.
+  const resident = s.memory?.resident === undefined ? undefined : (residentChat(s) ?? s.newChatResident);
+  const fresh: State = { ...s, threadId: null, newChatPicked: false, newChatResident: resident };
+  return { newChatPicked: false, newChatResident: fresh.newChatResident, ...decided(pickChoice(s.models, s.model, newChatWant(fresh))) };
+}
+
+/**
+ * What is in memory changed. A new chat's button takes a chat model that is now in memory only while
+ * the box is empty, the list is closed and the person has not picked here: it never changes under
+ * their hand. An image setup in memory leaves the chat button as it is.
+ */
+export function memoryChanged(memory: MemoryState): void {
+  setState((s) => {
+    const model = residentChat({ memory });
+    const take = model !== undefined && s.threadId === null && !s.newChatPicked && s.pop?.id !== "picker" && !draftHolds(null);
+    if (!take) return { memory };
+    const next: State = { ...s, memory, newChatResident: model };
+    return { memory, newChatResident: model, ...decided(modelChoice(next)) };
+  });
 }
 
 export const decided = (d: ModelDecision): Partial<State> => (d.kind === "keep" ? {} : { model: d.kind === "set" ? d.model : undefined });
@@ -91,6 +130,7 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
     setState((st) => ({
       model,
       chosen: model,
+      ...(st.threadId === null ? { newChatPicked: true } : {}),
       ...(st.threadId === null ? {} : { threadModels: { ...st.threadModels, [st.threadId]: model } }),
       ...(refusal !== null && st.notice === refusal && st.model !== model ? { notice: null } : {}),
     }));

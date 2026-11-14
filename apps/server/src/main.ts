@@ -412,6 +412,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     image,
     imageSetup,
     lease: gpuLease,
+    memory: services.memory,
     store,
     sources,
     settings: services.settings,

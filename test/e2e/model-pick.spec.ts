@@ -85,13 +85,16 @@ test("the picker never lists the embedding model and is a connected combobox and
   await expect(list.getByRole("option", { selected: true })).toHaveAttribute("data-m", "qwen3.5:9b");
   await expect(box).not.toHaveAttribute("aria-activedescendant", /./);
 
+  // the arrow keys move from the model in use, so the first one lands on the row after it
+  const at = Number(await list.getByRole("option", { selected: true }).getAttribute("data-i"));
+  const next = (at + 1) % 3, after = (at + 2) % 3;
   await box.press("ArrowDown");
-  await expect(box).toHaveAttribute("aria-activedescendant", "pk-opt-0");
-  await expect(page.locator("#pk-opt-0")).toHaveAttribute("aria-selected", "true");
+  await expect(box).toHaveAttribute("aria-activedescendant", `pk-opt-${next}`);
+  await expect(page.locator(`#pk-opt-${next}`)).toHaveAttribute("aria-selected", "true");
   await box.press("ArrowDown");
-  await expect(box).toHaveAttribute("aria-activedescendant", "pk-opt-1");
-  await expect(page.locator("#pk-opt-1")).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator("#pk-opt-0")).toHaveAttribute("aria-selected", "false");
+  await expect(box).toHaveAttribute("aria-activedescendant", `pk-opt-${after}`);
+  await expect(page.locator(`#pk-opt-${after}`)).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(`#pk-opt-${next}`)).toHaveAttribute("aria-selected", "false");
   await expect(list.getByRole("option", { selected: true })).toHaveCount(1);
   // the 27B cannot load at 16k: an option a reader hears as unavailable
   await expect(list.locator('.pk-r.dis[data-m="qwen3.8-abliterated:27b"]')).toHaveAttribute("aria-disabled", "true");

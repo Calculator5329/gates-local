@@ -60,8 +60,13 @@ export const sizeLabel = (width: number, height: number): string => `${width}×$
 
 /** A setup's full name as the server last listed it, else its id (a setup ComfyUI no longer has). */
 export function presetName(s: State, id: string): string {
+  return presetOf(s, id)?.name ?? id;
+}
+
+/** A preset the server listed, by id; undefined before the list or for one it no longer has. */
+export function presetOf(s: State, id: string) {
   const listed = s.imagePresets === undefined || s.imagePresets === NA ? undefined : s.imagePresets;
-  return [...listed?.presets ?? [], ...listed?.others ?? [], ...listed ? [listed.current.preset] : []].find((p) => p.id === id)?.name ?? id;
+  return [...listed?.presets ?? [], ...listed?.others ?? [], ...listed ? [listed.current.preset] : []].find((p) => p.id === id);
 }
 
 const held = (gpu: GpuStatus, keep: (o: GpuStatus["occupants"][number]) => boolean) => gpu.occupants.filter(keep).reduce((n, o) => n + o.bytes, 0);

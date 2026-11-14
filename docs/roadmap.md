@@ -7,6 +7,19 @@ never shows a whisper stop, start or restart.
 
 ## Now: slice 1, desktop chat and models
 
+*2026-11-13, owed from the Windows low-memory fixes (0.2.4):*
+
+- [ ] A real load on a 6 GB card with 16 GB of system memory has not been measured for the Windows low-memory fixes (WIN-MEM-01 to WIN-MEM-07); every check so far ran against fakes.
+      *Accept:* one measured send that spills, one image after a chat and one chat after an image on that machine, with the readings.
+- [ ] The refusal's offer tries only the fit table's context sizes, so 4k is never offered even when it is the one that runs.
+      *Accept:* a model that runs only at 4k is offered at 4k.
+- [ ] A download folder picked with the person's own ComfyUI: nothing tells that ComfyUI to look there, so the files are on disk and the engine does not see them.
+      *Accept:* the row says so, or the folder is offered to that ComfyUI's model paths.
+- [ ] Disk planning before a download, the folder dialog and the image live line have not been run on Windows.
+      *Accept:* one Windows run of each, with screenshots.
+- [ ] "A version that cannot start is put back" (IU-W2) has not been observed on Windows: its run stopped before the click.
+      *Accept:* one Windows run of IU-W2 with its report.
+
 *2026-11-11, picker freshness:* The first opening waits for current fit answers
 after a GPU change or completed model load, including when intent had already
 warmed the old answers. Explicit errors settle the barrier; failed startup

@@ -1,8 +1,10 @@
 // Models moving into memory, and which of them this app put there.
 //
 // models.load reads /api/ps first: a model already resident that the app
-// did not load is someone else's (a terminal `ollama run`, another app), so
-// it reports "ready" and is never preloaded or claimed. An /api/ps that
+// did not load (a terminal `ollama run`, another app) reports "ready" and is
+// not preloaded again or counted in appLoadedModels(). It is still the one
+// thing in memory, and the memory owner asks it to leave, as it asks any
+// model, when something else is wanted (gpu/memory.ts). An /api/ps that
 // cannot be read is not "nothing loaded": the load refuses rather than claim
 // a model that may be someone else's. Otherwise it runs the fit check and,
 // unless it refuses or is already resident at that context, preloads with an empty /api/generate.
@@ -382,8 +384,9 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       if (afterPs) return finish(afterPs);
       if (!here.ok) return finish({ model, numCtx, state: "error", message: PS_UNREADABLE_MESSAGE });
       if (here.models.has(tag) && !owned.has(tag)) {
-        // Someone else's: say it is ready, never preload it, never claim it.
-        return finish({ model, numCtx, state: "ready", message: `${model} is already in memory, loaded by another program; the app leaves it to that program.` });
+        // Another program's: ready as it is, not preloaded again and not counted as the app's own load.
+        // The owner still asks it to leave for the next thing (gpu/memory.ts), so the answer promises nothing more.
+        return finish({ model, numCtx, state: "ready", message: `${model} is already in memory, loaded by another program.` });
       }
       const report = withBusyNote(await deps.fit(model, numCtx, baseUrl, signal), handoff);
       const afterFit = stopped();

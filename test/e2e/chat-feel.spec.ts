@@ -252,6 +252,10 @@ test("a send refused for memory says why and its click opens Settings > Advanced
     const request = decodeRequest(frame.payload);
     if (request.ok && request.value.method === "chat.send") sends++;
   }));
+  // An 8 GB computer: 5 GiB of spill, and Gemma 4 12B at 64k needs about 18.6 GiB by the server's
+  // estimate. Beside the whole card (15.4 GiB) it spills; beside what the card has free now (11.5,
+  // after the fake's resident programs) it won't fit. On the fixture's 32 GB both run.
+  await stack.computer(8);
   await open();
   await waitReady(page);
   await page.locator("#modelBtn").click();

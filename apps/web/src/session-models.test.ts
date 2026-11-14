@@ -637,3 +637,56 @@ describe("the phone's image pick, which cannot write Settings (IR3-62, IR3-63)",
     expect(store.getState().imagePick).toEqual(moss);
   });
 });
+
+const inMemory = (model: string) => ({ resident: { kind: "chat", model, numCtx: 16384, since: 1 } });
+
+// Owner, 2026-11-13: "whatever model is in memory is the one that's defaulting on the model picker bar thing."
+describe("the model button starts on the chat model in memory", () => {
+  const imageInMemory = { resident: { kind: "image", setup: "z-image-int8 1024x1024", since: 1 } };
+
+  it("a new chat at open shows the model in memory, not the server's pick", async () => {
+    const { store, hydrated } = await boot({ "memory.status": async () => inMemory(GEMMA) });
+    await hydrated();
+    expect(store.getState().model).toBe(GEMMA);
+  });
+
+  it("a load that ends while the box is empty moves the button; one that ends while the person types does not", async () => {
+    const { session, store, push, hydrated } = await boot({ "memory.status": async () => inMemory(GEMMA) });
+    await hydrated();
+    push("memory.changed", inMemory(QWEN));
+    expect(store.getState().model).toBe(QWEN);
+    const drafts = await import("./drafts.ts");
+    drafts.replaceDraft(null, { text: "Hel" }, true);
+    push("memory.changed", inMemory(GEMMA));
+    expect(store.getState().model, "never under the person's hand").toBe(QWEN);
+    drafts.clearDraft(null);
+    store.setState({ pop: { id: "picker", kb: false } });
+    push("memory.changed", inMemory(LLAMA));
+    expect(store.getState().model, "never while the list is open").toBe(QWEN);
+    store.setState({ pop: null });
+    push("memory.changed", imageInMemory);
+    expect(store.getState().model, "an image setup in memory leaves the chat model").toBe(QWEN);
+    session.newThread();
+    expect(store.getState().model, "a new chat with only an image in memory keeps the chat button").toBe(QWEN);
+  });
+
+  it("a pick in the new chat or a thread's own model stays when memory changes", async () => {
+    const { session, store, push, hydrated } = await boot({ "memory.status": async () => inMemory(GEMMA), "threads.get": async () => savedReply(QWEN) });
+    await hydrated();
+    session.pickModel(LLAMA);
+    push("memory.changed", inMemory(GEMMA));
+    expect(store.getState().model).toBe(LLAMA);
+    session.openThread("A");
+    await vi.waitFor(() => expect(store.getState().model).toBe(QWEN));
+    push("memory.changed", inMemory(GEMMA));
+    expect(store.getState().model).toBe(QWEN);
+    session.newThread();
+    expect(store.getState().model, "a new chat opens on what is in memory again").toBe(GEMMA);
+  });
+
+  it("with nothing in memory a new chat keeps today's default", async () => {
+    const { store, hydrated } = await boot({ "memory.status": async () => ({}) });
+    await hydrated();
+    expect(store.getState().model).toBe(LLAMA);
+  });
+});

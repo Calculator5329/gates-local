@@ -22,6 +22,8 @@ import { thoughtOrigin, thoughtSecs, thoughtSecsAt, type WorkClock } from "./ses
 import { type Drawn, drawTimes } from "./session/times.ts";
 import { currentDraftKey, replaceDraft } from "./drafts.ts";
 import { TurnSkel, closeTip, esc } from "./ui.tsx";
+import { type Answerer, LIVE_QUESTION, modelChanges } from "./model-change.ts";
+import { ModelChange } from "./ModelChange.tsx";
 
 const EMPTY: readonly Message[] = [];
 const NO_TOOLS: readonly ToolStep[] = [];
@@ -887,6 +889,14 @@ function whenIdle(fn: (timeLeft: () => number) => void): () => void {
   return () => clearTimeout(id);
 }
 
+/** modelChanges with the live turn, given as "kind\nmodel\nquestion id" (the Timeline's selector answer). */
+function liveChanges(messages: readonly Message[], liveBy: string | null) {
+  if (liveBy === null) return modelChanges(messages);
+  const [kind, name = "", question = ""] = liveBy.split("\n");
+  const by: Answerer = kind === "image" ? { kind: "image", preset: name } : { kind: "chat", model: name };
+  return modelChanges(messages, { questionId: question === "" ? undefined : question, by });
+}
+
 /** The open thread: `.tl > .col`. Follows the end while the reader is near it (120 px). */
 export function Timeline({ threadId }: { threadId: string }) {
   const messages = useStore((s) => s.messages[threadId] ?? EMPTY);
@@ -921,6 +931,14 @@ export function Timeline({ threadId }: { threadId: string }) {
   if (liveOwner !== null) turns.push({ msg: undefined, key: `reply:${liveOwner}` });
   // A retry shows in the box of the card it retries, never as a second box.
   const retries = retryRows(messages);
+  // What the live turn was sent to, as one string so the selector's answer compares by value.
+  const liveBy = useStore((s) => {
+    const turn = turnOf(s, threadId);
+    return turn === undefined ? null : `${turn.image === true ? "image" : "chat"}\n${turn.model}\n${turn.userMessageId ?? ""}`;
+  });
+  // A line above each turn answered by another thing than the one before, from the turn's first frame.
+  // One pass over the messages; the timeline renders when they or the live turn's owner change, not per token.
+  const changes = liveChanges(messages, liveBy);
   // A reply that was live while this timeline was open stays a LiveReply once
   // it is saved: a different component under its key would remount it.
   const [wasLive] = useState(() => new Set<string>());
@@ -1093,8 +1111,11 @@ export function Timeline({ threadId }: { threadId: string }) {
           const times = m === undefined ? undefined : drawTimes(m, catalog);
           // a question's note waits while its ended turn still shows its own error line: said once
           const why = m?.role === "user" && m.id === liveOwner ? undefined : times?.note;
+          // a question's line by its id; a live question not saved yet by LIVE_QUESTION, above its pending bubble
+          const change = m?.role === "user" ? changes.get(m.id) : m === undefined ? changes.get(LIVE_QUESTION) : undefined;
           return (
             <Fragment key={key}>
+              {change === undefined ? null : <ModelChange change={change} />}
               {m?.role === "user" ? <UserTurn msg={row(m)} noted={why?.kind === "said"} />
                 : m === undefined || times === undefined || wasLive.has(key) ? <LiveReply threadId={threadId} msg={m === undefined ? undefined : row(m)} last={last} origin={origin} token={token} />
                 : <SavedReply msg={row(m)} last={last} thread={readsThread(m) ? messages : EMPTY} catalog={catalog} times={times} origin={origin} token={token} />}

@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-11-13: The screen says what is in memory
+
+- A new chat's model button starts on the chat model that is in memory
+  now, so opening a chat never makes the app swap models by itself. When
+  a load ends while the message box is empty and the list is closed, the
+  button follows it; it never changes while you type, after you picked
+  a model in that chat, or because an image setup is what is in memory.
+  With nothing in memory the default is what it was. A thread keeps its
+  own model.
+- Where a thread changes what answers it (one chat model to another, a
+  chat model to an image setup, or back), one quiet line above that turn
+  shows the old and new marks and names with an arrow between. It is
+  read from what each reply already records, so older threads show it
+  too. It is there from the turn's first frame; the first turn has none.
+- Measure (Settings › Models) now asks the chat model or image setup in
+  memory to leave before it loads the model it measures, as a send does,
+  so it never holds two at once.
+- The packaged-app smoke check no longer fails when the window moves
+  from the status page to the app while it waits for the server.
+- Why: the owner's rule from the same evening, "whatever model is in
+  memory is the one that's defaulting on the model picker bar", and "it
+  tells you in a chat if you've changed models mid-chat".
+
 ## 2026-11-13: One thing in GPU memory at a time
 
 - A send, a model load or an image job first asks everything else to

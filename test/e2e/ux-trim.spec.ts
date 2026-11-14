@@ -42,14 +42,15 @@ test("a model row and a context row open no tooltip; a row still names its model
   await expect(page.locator("#tip.open")).toBeVisible();
 });
 
-// Guards the owner's ruling (N07): the context header does not repeat the model name the list shows.
-test("the wide picker's context header says only Context length; the size group still names its model", async ({ page, open }) => {
+// N07 had the context header say only "Context length". WIN-MEM-07 (a tester read another row's
+// numbers as the selected model's) replaced it: the header names, once, the row whose numbers it shows.
+test("the wide picker's context header names the model whose numbers it shows, once; the size group names it too", async ({ page, open }) => {
   await open(); await waitReady(page);
   const picker = await openPicker(page);
   await picker.locator('.pk-r[data-m="gemma4:12b"] .pk-n').hover();
   const head = picker.locator(".pk-context-head");
-  await expect(head.locator("small"), "the model list beside it already names the model").toHaveCount(0);
-  await expect(head).toHaveText("Context length");
+  await expect(head.locator("small")).toHaveCount(0);
+  await expect(head).toHaveText("Gemma 4 12B");
   await expect(picker.getByRole("radiogroup")).toHaveAccessibleName("Context length for Gemma 4 12B");
 });
 

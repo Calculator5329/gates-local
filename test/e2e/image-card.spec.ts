@@ -72,25 +72,20 @@ test("image card: waiting, making, done", async ({ page, open }, info) => {
   }
 });
 
-test("image card: refused for memory a chat model holds", async ({ page, open }, info) => {
+// A chat model in memory no longer refuses an image: the handoff asks it to leave, whoever loaded it
+// (gpu/memory.ts). Another program's memory is only measured, never freed, so that one refuses.
+test("image card: refused for memory another program holds", async ({ page, open }, info) => {
   const { client, threadId } = await start(page, open);
   try {
-    // a chat model is resident, and after a restart this app did not load it
-    await client.call("chat.send", { threadId, content: "hello", model: "qwen3.5:9b", numCtx: 16384 });
-    await expect.poll(async () => (await client.call("threads.get", { threadId })).messages.length, { timeout: 30_000 }).toBeGreaterThanOrEqual(2);
-  } finally { client.close(); }
-  await stack.restart();
-  await open(`#thread=${threadId}`); await waitReady(page);
-  const server = new URL(page.url()).searchParams.get("server");
-  if (!server) throw new Error("No test server URL");
-  const again = createClient(new WebSocket(server));
-  try {
+    // the card's 16 GB less the fake's resident programs, less this: about 0.5 GB free
+    await stack.gpu(11_800);
+    await open(`#thread=${threadId}`); await waitReady(page);
     comfy.gpu();
-    await again.call("image.generate", { threadId, prompt: "a sci fi background" });
+    await client.call("image.generate", { threadId, prompt: "a sci fi background" });
     const card = page.locator("[data-image-job]");
     await expect(card).toHaveAttribute("data-fit", "refuse");
     await shot(page, "image-card-refused.png", n => info.outputPath(n));
-  } finally { again.close(); }
+  } finally { client.close(); }
 });
 
 test("image card: a failed card retried", async ({ page, open }, info) => {

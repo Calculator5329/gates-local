@@ -9,13 +9,13 @@ import {
   type ImageChoice,
   type Payload,
 } from "@gates-local/contracts";
-import { modelChoice as pickChoice, newestOnly } from "./pick.ts";
+import { newestOnly } from "./pick.ts";
 import { NA, type State, getState, overChat, setState } from "./store.ts";
 import { createChat } from "./session/chat.ts";
 import { KEEP_EVERY_MS, keepHeldFiles, setFileCalls } from "./file-holds.ts";
 import { createServerState } from "./session/server-state.ts";
 import { createSettings } from "./session/settings.ts";
-import { chooseModel, createModels, decided, modelChoice, reconcilePulls, settlePulls } from "./session/models.ts";
+import { chooseModel, createModels, decided, memoryChanged, modelChoice, newChatModel, reconcilePulls, residentChat, settlePulls } from "./session/models.ts";
 import { newerTable } from "./fit-table.ts";
 import { createThreads, sortThreads, withMessage } from "./session/threads.ts";
 import { applyAccent, applyTheme, dataFolder, serverUrl, webServerUrl } from "./session/platform.ts";
@@ -162,6 +162,7 @@ async function hydrateWith(
   on("fit.changed", fitTableArrived);
   on("models.pull", modelsSession.pullChanged);
   on("models.load", modelsSession.loadChanged);
+  on("memory.changed", memoryChanged);
   on("models.speed", (list) => applyServerEvent((s) => speedsChanged(s, list)));
   on("models.measures", (list) => applyServerEvent(measuresChanged(list)));
   on("models.measuring", (run) => applyServerEvent((s) => measuringChanged(s, run)));
@@ -198,7 +199,7 @@ async function hydrateWith(
   const ticket = modelsOrder.next();
   const statusTicket = runtimeOrder.next();
   const listTicket = threadSession.listOrder.next();
-  const [status, listed, threads, snapshot, active, pendingPulls, suggested] = await Promise.all([
+  const [status, listed, threads, snapshot, active, pendingPulls, suggested, memory] = await Promise.all([
     call("runtime.status", {}),
     call("models.list", {}).catch(() => undefined),
     call("threads.list", {}),
@@ -211,6 +212,8 @@ async function hydrateWith(
     probe("models.pulls", {}),
     // The makers and example names come with the models, so a maker mark never draws "?" first.
     probe("models.suggested", {}),
+    // What is in memory: a new chat's button starts on its chat model (memory.changed keeps it current).
+    probe("memory.status", {}),
   ]);
   const models = modelsOrder.current(ticket) ? listed : undefined;
   const runtime = runtimeOrder.current(statusTicket) ? status : undefined;
@@ -219,7 +222,8 @@ async function hydrateWith(
   applyServerEvent((s) => {
     const withSettings = settings === NA || settings === undefined ? { settings } : settingsPatch(s, settings, true);
     const ordered = threadSession.listOrder.current(listTicket) ? sortThreads(threads) : s.threads;
-    const next: State = { ...s, suggested: suggested ?? s.suggested, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(reconcilePulls(s.pulls, pendingPulls), models ?? s.models), threads: ordered, ...activeTurns(s, active), ...withSettings };
+    const held = memory === NA || memory === undefined ? {} : { memory, ...(s.threadId === null && !s.newChatPicked ? { newChatResident: residentChat({ memory }) } : {}) };
+    const next: State = { ...s, suggested: suggested ?? s.suggested, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(reconcilePulls(s.pulls, pendingPulls), models ?? s.models), threads: ordered, ...activeTurns(s, active), ...withSettings, ...held };
     return { ...next, ...decided(modelChoice(next)) };
   });
   if (settings !== NA && settings !== undefined) settingsSession.seedContext();
@@ -299,7 +303,7 @@ const navigation = createNavigation({
   picturesData: () => pictures.enter(),
   // usageSession is made below; this runs only on a navigation, long after
   dropPendingPanel: () => usageSession.dropPendingOpen(),
-  newChatModel: (s) => decided(pickChoice(s.models, s.model, s.chosen)),
+  newChatModel,
 });
 export const { openThread, newThread, openSettings, leaveSettings, closeSettings, toggleSettings, toggleModels, cancelPendingSettings, initialView, finishFirstRun, leavePictures, togglePictures } = navigation;
 export { spareScreenEntry } from "./session/navigation.ts";
