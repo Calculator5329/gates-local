@@ -7,7 +7,7 @@ import type { CatalogEntry } from "@gates-local/contracts";
 import { suggestedOf } from "./picker-models.ts";
 import { CONNECTING, INSTALL_TITLE, booting, failWords, installStep, installWords, ownCopyNote, portOf, rtOf, underTitle, unread } from "./Banner.tsx";
 import { DlButton, canCancelPull } from "./ModelDownloads.tsx";
-import { cardGb, ctxFor, describeModel, etaText, gb, k, noGpu, verdictOf } from "./format.ts";
+import { type Verdict, cardGb, ctxFor, describeModel, etaText, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { type RowPhase, phaseOf, rowOf } from "./fit-table.ts";
 import { finishFirstRun, firstPull, openSettings, pull, cancelPull, recheckRuntime } from "./session.ts";
@@ -41,9 +41,6 @@ function startChat(): void {
 
 /** The card's verdict slot before the table has this model: the table is on its way, or it has no reading for it. */
 const pendingWord = (phase: RowPhase): string => (phase === "checking" ? "Checking…" : "Couldn't check");
-
-/** No supported GPU, said only where the card's verdict would claim one (the table plans no-GPU models in system memory, so rarely). */
-const NO_GPU_SUB = "This computer has no supported GPU, so models run in system memory and replies are slower.";
 
 /**
  * The recommended model card: name and verdict, a download's size when it is
@@ -140,9 +137,9 @@ function NoModels() {
   const st = "\u00A0";
   // An Ollama that does not report capabilities: a download would not help, so say what would.
   const tooOld = useStore((s) => chatBlockedReason(s.models, undefined));
-  // a sentence only for what the title and the card's verdict do not say: the step. No GPU is the card's
-  // verdict ("Uses system memory · slower"), said again only where the card would claim a GPU.
-  const sub = tooOld ?? (fresh?.verdict === "refuse" ? "Not enough memory at this context. Choose a smaller model or context in Settings." : cpu && fresh?.verdict === "fits" ? NO_GPU_SUB : undefined);
+  // a sentence only for what the title and the card's verdict do not say, in the server's words: the
+  // number a refusal turns on, or system memory where the card's word would name a GPU
+  const sub = tooOld ?? (fresh === undefined ? undefined : foundWords(verdictOf(fresh), cpu).sub);
   if (active !== undefined && p !== undefined) {
     return (
       <Shell st={st} title="Downloading your first model" sub={sub}>
@@ -213,16 +210,19 @@ function NoModels() {
   );
 }
 
+/** The server's words as one sentence: "needs 2.0 GB more" reads "Needs 2.0 GB more."; nothing when it sent none. */
+const sentence = (words: string): { sub?: string } => (words === "" ? {} : { sub: `${words.charAt(0).toUpperCase()}${words.slice(1)}.` });
+
 /**
- * The selected model's current verdict. A refusal says nothing about the other
- * installed models. The title and the card's verdict say whether it runs; a
- * sentence is added only for the number a refusal turns on, or for why every
- * reply will be slower.
+ * The model's verdict in the server's words (FitReport.words, printed as sent, as the model row
+ * prints them; the client makes no fit sentence of its own). A refusal says nothing about the other
+ * installed models. The title and the card's verdict say whether it runs; a sentence is added only
+ * for the number a refusal turns on, or, on a computer with no supported GPU where the card's word
+ * would name one, the server's label.
  */
-export function foundWords(verdict: "fits" | "spills" | "refuse" | undefined, numCtx: number, cpu = false, name = "This model"): { title: string; sub?: string } {
-  if (verdict === "refuse") return { title: "Choose another model", sub: `${name} doesn't fit at ${k(numCtx)}. A smaller context may fit.` };
-  // no supported GPU: the card's "Uses system memory · slower" says it; a sentence only where the card would promise a GPU
-  if (cpu && verdict === "fits") return { title: "Ready to chat", sub: NO_GPU_SUB };
+export function foundWords(v: Pick<Verdict, "k" | "label" | "detail"> | undefined, cpu = false): { title: string; sub?: string } {
+  if (v?.k === "no") return { title: "Choose another model", ...sentence(v.detail) };
+  if (cpu && v?.k === "gpu") return { title: "Ready to chat", ...sentence(v.label) };
   return { title: "Ready to chat" };
 }
 
@@ -231,15 +231,12 @@ function Found() {
   const picked = useStore((s) => pickedModel(s.models));
   // The composer starts on the same model (session.ts reads the same pick).
   const tag = useStore((s) => s.model ?? picked?.name);
-  const catalog = useStore(s => s.catalog === NA ? undefined : s.catalog);
-  const name = tag === undefined ? "This model" : describeModel(tag, catalog).name;
-  const numCtx = useStore((s) => s.numCtx);
   const cpu = useStore((s) => noGpu(s.gpu));
   const fresh = useStore(s => rowOf(s, tag));
   const phase = useStore(s => phaseOf(s.fitTable, rowOf(s, tag)));
   // no row for it: the title says what the card's slot says (still checking, or the table has no
   // reading for it); no sentence, never "Ready"
-  const words = fresh !== undefined ? foundWords(fresh.verdict, numCtx, cpu, name) : { title: phase === "checking" ? "Checking memory" : "Couldn't check memory" };
+  const words = fresh !== undefined ? foundWords(verdictOf(fresh), cpu) : { title: phase === "checking" ? "Checking memory" : "Couldn't check memory" };
   const dot = fresh === undefined ? (phase === "checking" ? "run" : "warn") : fresh.verdict === "refuse" ? "err" : "ok";
   return (
     <Shell

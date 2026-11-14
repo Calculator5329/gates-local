@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-14: The first window holds still and counts in one unit
+
+- The first window's heading stays at one height from the moment it opens
+  to the first chat: looking for Ollama, Ollama missing, Ollama
+  downloading, the first model offered, downloading and ready. The window
+  used to be centred, so the heading jumped (by as much as 126 px on a
+  fresh install) each time the screen changed.
+- An Ollama download that stopped says how far it got in the same figures
+  it counted in while it ran: "Stopped at 0.6 of 1.5 GB", not "620.0 MiB
+  of 1540.1 MiB", in the first window, the banner and Settings > Runtime.
+- On a phone, a figure and its unit stay on one line in the banner
+  ("2.1 GB on disk", "about 2 min left", "0.6 of 1.5 GB"); a line breaks
+  only between figures.
+- When the first model won't fit, the first window says what the model
+  list says: the memory it is short ("Needs 2.0 GB more."), not a sentence
+  of its own. On a computer with no supported GPU it says the list's
+  "Should run in system memory."
+
 ## 2026-11-14: Settings' picture setup row is right on its first frame
 
 - Settings > Image generation used to open with a placeholder row and a

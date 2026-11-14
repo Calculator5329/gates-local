@@ -4,6 +4,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { fitWords } from "@gates-local/contracts";
 
 const store = vi.hoisted(() => ({ state: undefined as unknown }));
 vi.mock("./store.ts", () => ({ NA: "na", useStore: (fn: (s: unknown) => unknown) => fn(store.state) }));
@@ -21,11 +22,23 @@ describe("the app's own Ollama installing says its size and progress (FIRST-USE-
   const disk = 2_528_731_874;
   it("how far and the time left, with the disk it takes, then unpacking", () => {
     expect(installWords(undefined)).toBeUndefined();
-    expect(installWords({ receivedBytes: 0, totalBytes: total, diskBytes: disk })).toMatch(/^0\.0 of 1\.4\sGB · 2\.4\sGB on disk$/);
-    expect(installWords({ receivedBytes: 2 ** 29, totalBytes: total, bytesPerSecond: 10e6, diskBytes: disk })).toMatch(/^0\.5 of 1\.4\sGB · about \d+ min left · 2\.4\sGB on disk$/);
-    expect(installWords({ receivedBytes: total, totalBytes: total, diskBytes: disk })).toMatch(/^1\.4\sGB downloaded · 2\.4\sGB on disk$/);
+    expect(installWords({ receivedBytes: 0, totalBytes: total, diskBytes: disk })).toMatch(/^0\.0\sof\s1\.4\sGB · 2\.4\sGB\son\sdisk$/);
+    expect(installWords({ receivedBytes: 2 ** 29, totalBytes: total, bytesPerSecond: 10e6, diskBytes: disk })).toMatch(/^0\.5\sof\s1\.4\sGB · about\s\d+\smin\sleft · 2\.4\sGB\son\sdisk$/);
+    expect(installWords({ receivedBytes: total, totalBytes: total, diskBytes: disk })).toMatch(/^1\.4\sGB\sdownloaded · 2\.4\sGB\son\sdisk$/);
     // a release nobody measured says no disk figure rather than a guessed one
-    expect(installWords({ receivedBytes: 0, totalBytes: total })).toMatch(/^0\.0 of 1\.4\sGB$/);
+    expect(installWords({ receivedBytes: 0, totalBytes: total })).toMatch(/^0\.0\sof\s1\.4\sGB$/);
+  });
+  // A bug seen on a phone: the banner wrapped "2.1 GB / on disk" in the middle of the figure.
+  it("a figure and its unit never break apart: lines break only between the figures", () => {
+    for (const i of [
+      { receivedBytes: 2 ** 29, totalBytes: total, bytesPerSecond: 10e6, diskBytes: disk },
+      { receivedBytes: 2 ** 29, totalBytes: total, bytesPerSecond: 1e9, diskBytes: disk },
+      { receivedBytes: total, totalBytes: total, diskBytes: disk },
+    ]) {
+      const parts = installWords(i)?.split(" · ") ?? [];
+      expect(parts.length).toBeGreaterThan(1);
+      for (const p of parts) expect(p, "only no-break spaces inside a figure").not.toContain(" ");
+    }
   });
   it("names Ollama once, on the status line, with the step", () => {
     expect(installStep({ receivedBytes: 0, totalBytes: total })).toBe("Downloading Ollama");
@@ -62,7 +75,11 @@ const tableOf = (rows: readonly object[]) => ({
   memory: { kind: "gpu", freeBytes: 0, usableBytes: 0 },
   rows: rows.map((r) => ({ stops: [], ...r })),
 });
-const row = (model: string, verdict: string) => ({ model, numCtx: 16384, verdict, needVramBytes: 1, freeVramBytes: 0, spillRamBytes: 1, source: "estimate" });
+/** A row as the server sends it: the verdict and its words, made where it judged (a refusal is 2.0 GB short). */
+const row = (model: string, verdict: "fits" | "spills" | "refuse", cpu = false) => {
+  const r = { model, numCtx: 16384, verdict, needVramBytes: 8 * 2 ** 30, freeVramBytes: 6 * 2 ** 30, spillRamBytes: 2 ** 30, source: "estimate" } as const;
+  return { ...r, words: fitWords(r, "card", cpu) };
+};
 
 describe("first run on a phone, where downloads and installs belong to the computer", () => {
   const phone = { ...oldOllama([]), models: [], unavailable: { "models.pull": true } };
@@ -124,7 +141,7 @@ const cpuOnly = (verdict: "fits" | "spills" | "refuse") => ({
   runtime: { state: "ready", owner: "external", version: "0.40.15" },
   models: [{ name: "qwen3.5:4b", digest: "q", sizeBytes: 1, modifiedAt: "", capabilities: ["completion"], pick: { numCtx: 16384, verdict } }],
   gpu: { vendor: "none" },
-  fitTable: tableOf([row("qwen3.5:4b", verdict)]),
+  fitTable: tableOf([row("qwen3.5:4b", verdict, true)]),
 });
 
 describe("first run on a computer with no supported GPU", () => {
@@ -132,10 +149,10 @@ describe("first run on a computer with no supported GPU", () => {
     it(`never promises a GPU when the pick ${verdict}`, () => {
       const t = text(cpuOnly(verdict));
       expect(t).not.toMatch(/your GPU|GPU fit/);
-      if (verdict === "refuse") expect(t).toContain("Qwen 3.5 4B doesn't fit at 16k. A smaller context may fit.");
-      // the card's verdict says system memory once; the sentence only where the card would say GPU (FIRST-USE-15)
-      if (verdict === "spills") expect(t).not.toContain("This computer has no supported GPU");
-      if (verdict === "fits") expect(t).toContain("This computer has no supported GPU, so models run in system memory");
+      if (verdict === "refuse") expect(t).toContain("Needs 2.0 GB more.");
+      // the card's verdict says system memory once; the server's label only where the card would say GPU (FIRST-USE-15)
+      if (verdict === "spills") expect(t).not.toContain("Should run in system memory");
+      if (verdict === "fits") expect(t).toContain("Should run in system memory.");
       // the tooltip is an attribute, which text() strips (W1-03)
       expect(raw(cpuOnly(verdict))).not.toContain("fits your GPU");
     });
@@ -166,7 +183,10 @@ it("SR-07: a selected model's refusal names that model when another installed mo
     fitTable: tableOf([row(model.name, "refuse"), row(gemma.name, "fits")]),
   };
   const t = text(state);
-  expect(t).toContain("Qwen 3.5 4B doesn't fit at 16k. A smaller context may fit.");
+  // the card names the model; the sentence is the server's number for the refusal
+  expect(t).toContain("Qwen 3.5 4B");
+  expect(t).toContain("Choose another model");
+  expect(t).toContain("Needs 2.0 GB more.");
   expect(t).not.toMatch(/None of your models|Download a smaller/);
   expect(t).toContain("Choose a model");
 });
@@ -185,7 +205,28 @@ for (const have of [false, true]) {
     // the next table refuses it: the verdict changes in place, the catalog and the pick no longer count
     const t = text({ ...state, fitTable: { ...tableOf([row(name, "refuse")]), reading: { boot: "b", seq: 2, measuredAt: 0 } } });
     expect(t).not.toContain("Ready to chat");
-    expect(t).toContain(have ? "doesn't fit at 16k" : "Not enough memory");
+    expect(t).toContain(have ? "Choose another model" : "Download your first model");
+    expect(t).toContain("Needs 2.0 GB more.");
+  });
+}
+
+// The server makes a verdict's words where it judges (FitReport.words); the first window prints them as sent, as the model row does.
+for (const have of [false, true]) {
+  it(`first run prints the server's fit words as sent, ${have ? "for the installed pick" : "for the offered download"}`, () => {
+    const name = "qwen3.5:9b";
+    const sent = (verdict: "refuse" | "fits", cpu: boolean) => ({ ...row(name, verdict, cpu), words: { ...fitWords(row(name, verdict, cpu), "card", cpu), detail: "needs 9.9 GB more, as sent", label: "Runs as sent" } });
+    const at = (verdict: "refuse" | "fits", cpu: boolean) => text({
+      ...oldOllama([{ ...gemma, name, label: "Qwen 3.5 9B", installed: have }], "0.40.15"),
+      models: have ? [{ name, digest: "q", sizeBytes: 1, modifiedAt: "", capabilities: ["completion"], pick: { numCtx: 16384, verdict } }] : [],
+      gpu: { vendor: cpu ? "none" : "nvidia" },
+      fitTable: tableOf([sent(verdict, cpu)]),
+    });
+    const refused = at("refuse", false);
+    expect(refused).toContain("Needs 9.9 GB more, as sent.");
+    expect(refused, "no fit sentence of the client's own").not.toMatch(/doesn't fit at|Not enough memory at this context|smaller context may fit/);
+    const cpu = at("fits", true);
+    expect(cpu).toContain("Runs as sent.");
+    expect(cpu, "no fit sentence of the client's own").not.toContain("no supported GPU, so models run in system memory");
   });
 }
 

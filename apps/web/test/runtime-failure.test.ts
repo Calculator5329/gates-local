@@ -14,7 +14,7 @@ const { getState, setState } = await import("../src/store.ts");
 const initial = getState();
 
 const base = { state: "error", owner: "none", baseUrl: "http://127.0.0.1:5288" } as const;
-const stopped = { ...base, failure: "download", detail: "The Ollama download stopped at 40.0 MiB of 80.0 MiB (no data for 30 s). Check the network and retry; nothing was installed." } as const;
+const stopped = { ...base, failure: "download", detail: "The Ollama download stopped at 0.6 of 1.5 GB (no data for 30 s). Check the network and retry; nothing was installed." } as const;
 const exited = { ...base, failure: "start", detail: "Ollama exited during startup." } as const;
 
 beforeEach(() => {
@@ -49,7 +49,8 @@ it("a download that stopped says so everywhere, with Retry, and never that Ollam
   for (const where of ["banner", "first", "settings"]) expect(p[where], where).toContain("Retry");
   // the download is named once: the detail under the title starts at "Stopped at"
   for (const where of ["banner", "first", "settings"]) {
-    expect(p[where], where).toContain("Stopped at 40.0 MiB of 80.0 MiB");
+    // the figures the running download counted in (text() folds the no-break space)
+    expect(p[where], where).toContain("Stopped at 0.6 of 1.5 GB");
     expect(p[where]?.match(/Ollama download/g)?.length ?? 0, where).toBeLessThanOrEqual(1);
   }
 });

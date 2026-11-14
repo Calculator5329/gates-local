@@ -3,7 +3,7 @@
 // composer placeholder and the banner docked above the composer, one entry
 // per RuntimeStatus state plus "offline" for a dropped server connection.
 import type { ReactNode } from "react";
-import { etaText, gb } from "./format.ts";
+import { NBSP, etaText, gb } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { recheckRuntime } from "./session.ts";
 import { NA, type State, useStore } from "./store.ts";
@@ -87,13 +87,17 @@ type InstallSize = { receivedBytes: number; totalBytes: number; bytesPerSecond?:
 /** The step while the app's own Ollama installs, as the first window, the banner and the sidebar tip say it. */
 export const installStep = (i: InstallSize | undefined): string => (i !== undefined && i.receivedBytes >= i.totalBytes ? "Unpacking Ollama" : "Downloading Ollama");
 
+/** One figure with its words ("2.1 GB on disk") held together: a narrow line breaks only at the " · " between figures. */
+const whole = (part: string): string => part.replaceAll(" ", NBSP);
+
 /** Numbers only, after the step: how far the download is and the time left, then the disk the copy takes. */
 export function installWords(i: InstallSize | undefined): string | undefined {
   if (i === undefined) return undefined;
   const disk = i.diskBytes === undefined ? [] : [`${gb(i.diskBytes)} on disk`];
-  if (i.receivedBytes >= i.totalBytes) return [`${gb(i.totalBytes)} downloaded`, ...disk].join(" · ");
+  if (i.receivedBytes >= i.totalBytes) return [`${gb(i.totalBytes)} downloaded`, ...disk].map(whole).join(" · ");
   const p = { name: "ollama", state: "downloading" as const, completedBytes: i.receivedBytes, totalBytes: i.totalBytes, ...(i.bytesPerSecond === undefined ? {} : { bytesPerSecond: i.bytesPerSecond }) };
-  return [etaText(p, { speed: false }), ...disk].join(" · ");
+  // etaText's own " · " is the break between its figures; each figure inside it stays whole
+  return [...etaText(p, { speed: false }).split(" · "), ...disk].map(whole).join(" · ");
 }
 
 /** The engine install's title, the same in the first window and the banner. */

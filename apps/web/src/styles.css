@@ -817,11 +817,13 @@ a.btn{text-decoration:none}
 .snav .back:hover{color:var(--foreground)}
 
 /* ---------- first run (F20) ---------- */
-.first{position:fixed;inset:0;z-index:40;background:var(--background);display:flex;align-items:center;justify-content:center;padding:24px;overflow-y:auto}
+/* the block hangs from a fixed top, never centred: the heading stays put as the states below it grow and shrink */
+.first{position:fixed;inset:0;z-index:40;background:var(--background);display:flex;align-items:flex-start;justify-content:center;padding:max(24px,14vh) 24px 24px;overflow-y:auto}
 .fr{width:100%;max-width:540px}
 .fr-brand{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;margin-bottom:32px}
 .fr-brand .mark{width:22px;height:22px}
-.fr-st{display:inline-flex;align-items:center;gap:8px;font-size:13.5px;color:var(--muted-foreground);margin-bottom:12px}
+/* one line's height whether it holds words, a dot alone or nothing: a block row, so no baseline (a dot's or a word's) sets where it sits */
+.fr-st{display:flex;align-items:center;gap:8px;min-height:1.5em;font-size:13.5px;color:var(--muted-foreground);margin-bottom:12px}
 .fr-st .dot{width:7px;height:7px;border-radius:50%}
 .fr h1,.fr-h{font-size:26px;font-weight:600;letter-spacing:-.02em;line-height:1.25;margin:0}
 /* first run before its first read: placeholders at the found screen's line heights */

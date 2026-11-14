@@ -10,6 +10,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import zlib from "node:zlib";
+import { NBSP, gb } from "@gates-local/contracts";
 import { binaryIn, installRoot, installedBinary, runtimeDir } from "./paths.ts";
 import type { InstallManifest } from "./schemas.ts";
 import type { InstallProgress } from "./types.ts";
@@ -99,7 +100,8 @@ async function removeStaleStaging(stagingRoot: string): Promise<void> {
   );
 }
 
-const mib = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MiB`;
+/** "0.6 of 1.5 GB": how far a download got, in the figures the app counted it in while it ran (gb, the one size helper); one piece that never wraps. */
+const sofar = (received: number, total: number) => `${(received / 1024 ** 3).toFixed(1)}${NBSP}of${NBSP}${gb(total)}`;
 
 async function download(opts: InstallOptions & { target: InstallTarget }, file: string): Promise<string> {
   const { manifest, onProgress, signal } = opts;
@@ -112,7 +114,7 @@ async function download(opts: InstallOptions & { target: InstallTarget }, file: 
   let timer: ReturnType<typeof setTimeout> | undefined;
   const arm = () => {
     clearTimeout(timer);
-    timer = setTimeout(() => idle.abort(new Error(`no data for ${(idleMs / 1000).toFixed(idleMs < 1000 ? 1 : 0)} s`)), idleMs);
+    timer = setTimeout(() => idle.abort(new Error(`no data for ${(idleMs / 1000).toFixed(idleMs < 1000 ? 1 : 0)}${NBSP}s`)), idleMs);
   };
   const reason = (e: unknown) => (idle.signal.aborted ? (idle.signal.reason as Error).message : (e as Error).message);
   arm();
@@ -156,7 +158,7 @@ async function download(opts: InstallOptions & { target: InstallTarget }, file: 
     if (e instanceof InstallError) throw e;
     throw new InstallError(
       "interrupted",
-      `The ${label} download stopped at ${mib(received)} of ${mib(manifest.sizeBytes)} (${reason(e)}). ${retry}`,
+      `The ${label} download stopped at ${sofar(received, manifest.sizeBytes)} (${reason(e)}). ${retry}`,
     );
   } finally {
     clearTimeout(timer);
@@ -166,7 +168,7 @@ async function download(opts: InstallOptions & { target: InstallTarget }, file: 
   if (received !== manifest.sizeBytes) {
     throw new InstallError(
       "interrupted",
-      `The ${label} download ended early: ${mib(received)} of ${mib(manifest.sizeBytes)}. ${retry}`,
+      `The ${label} download ended early: ${sofar(received, manifest.sizeBytes)}. ${retry}`,
     );
   }
   return hash.digest("hex");

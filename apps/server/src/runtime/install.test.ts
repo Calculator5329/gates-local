@@ -103,7 +103,8 @@ describe("installPinned", () => {
     const t0 = Date.now();
     const e = await expectInstallError(installPinned({ appDataDir, manifest: manifest(), idleMs: 300 }), "interrupted");
     expect(Date.now() - t0).toBeLessThan(3000);
-    expect(e.message).toMatch(/^The Ollama download stopped at .* \(no data for 0\.3 s\)\. Check the network and retry/);
+    // the figures the running download counted in ("0.6 of 1.5 GB"), never MiB; a figure keeps its unit on its line
+    expect(e.message).toMatch(/^The Ollama download stopped at \d+\.\d of \d+\.\d GB \(no data for 0\.3 s\)\. Check the network and retry/);
     expectNothingInstalled();
   }, 10_000);
 
