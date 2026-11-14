@@ -61,29 +61,47 @@ Bundled JavaScript dependencies' licenses are included in
 Optional features still require their own tools and runtimes, such as
 Ollama, ComfyUI and Git for repository imports.
 
-The Linux AppImage needs a FUSE 2 compatibility package on most distributions.
-On Ubuntu 24.04 and newer, the one-line fix is `sudo apt install libfuse2t64`;
-older Ubuntu/Debian systems use `libfuse2`, and Arch uses `fuse2`.
-Mark the AppImage executable in its file properties, then open it.
-Normal execution failed in the test Linux environment before Electron
-started because `libfuse.so.2` was absent. See the
+The AppImage is built with the AppImage static runtime (electron-builder's
+`toolsets.appimage` 1.0.3 in `apps/desktop/scripts/package.ts`). It carries
+its own FUSE code and needs no FUSE 2 package (`libfuse2`, `libfuse2t64`);
+it needs only `/dev/fuse` and the `fusermount3` (or `fusermount`) helper,
+which a stock Ubuntu 24.04 desktop has from its `fuse3` package. Versions
+0.2.4 and earlier used the older runtime and need
+`libfuse.so.2`: on a stock Ubuntu 24.04 they exit at once with nothing on
+screen. Mark the AppImage executable in its file properties, then open it.
+On 2026-11-14 a build with the static runtime opened its window on a stock
+Ubuntu 24.04 with no `libfuse2` installed (run with no arguments under Xvfb
+in a new empty home folder); the build before it exited 1 with
+`dlopen(): error loading libfuse.so.2`. See the
 [AppImage FUSE instructions](https://docs.appimage.org/user-guide/troubleshooting/fuse.html).
 No system libraries or kernel settings were changed during the check.
 
-If FUSE cannot be installed, AppImage documents this fallback:
+Where FUSE is unavailable (some containers and locked-down machines),
+AppImage documents this fallback:
 
 ```sh
 ./Gates-Local-0.0.0-dev-x86_64.AppImage --appimage-extract-and-run
 ```
 
-The fallback requests FUSE-free extraction without requesting that
-Chromium's sandbox be disabled. Do not add
-`--no-sandbox` to user launch instructions. The earlier test-only captures
-used that flag, so they do not establish a sandboxed desktop launch.
-The builder's launcher can itself add `--no-sandbox` when user
-namespaces are unavailable, and its generated desktop entry defaults to
-that flag. BrowserWindow's sandbox setting alone does not prove Chromium
-sandboxing is active. No application-menu integration is installed by this build.
+It unpacks about 320 MB into the temp folder on every launch; the
+runtime's help says it removes that copy when the app exits. The static
+runtime prints nothing while it unpacks (the older one printed every path).
+
+Do not add `--no-sandbox` to user launch instructions. The builder's
+launcher (`AppRun`) adds it by itself when `unshare -Ur true` fails, which
+it does on a stock Ubuntu 24.04 (unprivileged user namespaces are
+restricted by AppArmor there). Measured 2026-11-14 on Ubuntu 24.04 with
+that restriction on and `unshare` failing as it does on a stock system,
+with FUSE and with the fallback: every process of the app ran with
+`--no-sandbox`, in the system's own user namespace, so Chromium's sandbox
+is off on that system. Where user namespaces are allowed, the launcher
+does not add the flag. On a machine where `unshare` is allowed but the
+app's Electron is not, the launcher does not add the flag and Electron
+stops at once with "The SUID sandbox helper binary was found, but is not
+configured correctly". The AppImage's own desktop entry no longer carries
+`--no-sandbox` (the static toolset drops the builder's default).
+BrowserWindow's sandbox setting alone does not prove Chromium sandboxing
+is active. No application-menu integration is installed by this build.
 
 Packaged app data stays outside the image at
 `$XDG_DATA_HOME/gates-local-installed` (default

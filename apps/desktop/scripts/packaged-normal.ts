@@ -56,7 +56,7 @@ try {
   report = { launched: false, callerNoSandbox: false, extractionMode: false,
     cause: /fuse/i.test(stderr) ? "FUSE unavailable" : /sandbox|namespace/i.test(stderr) ? "Chromium sandbox unavailable" : "Launch failed; needs further diagnosis",
     missingFuseLibrary: /libfuse\.so\.2/.test(stderr),
-    diagnosticLines: stderr.split("\n").filter(line => /libfuse|AppImages require FUSE|Cannot mount AppImage|fuse:|No usable sandbox|SUID sandbox helper|Failed to move to new namespace/.test(line)).map(line => line.replaceAll(homedir(), "<home>")),
+    diagnosticLines: stderr.split("\n").filter(line => /libfuse|AppImages require FUSE|Cannot mount AppImage|fusermount|fuse:|No usable sandbox|SUID sandbox helper|Failed to move to new namespace/.test(line)).map(line => line.replaceAll(homedir(), "<home>")),
   };
 } finally {
   if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");

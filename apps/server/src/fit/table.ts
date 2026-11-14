@@ -133,6 +133,8 @@ export function createFitTable(deps: FitTableDeps): FitTableSource {
   let again = false;
   /** The next build may take a GPU reading up to GPU_REUSE_MS old: only when every trigger since the last build said so. */
   let reuseNext: boolean | undefined;
+  /** The last build's failure, said once: while the app fetches its runtime the table rebuilds every second or so. */
+  let lastFailure: string | undefined;
   /** Open models.load notices by model. */
   const loading = new Map<string, number>();
   const now = deps.fit?.now ?? Date.now;
@@ -151,9 +153,12 @@ export function createFitTable(deps: FitTableDeps): FitTableSource {
       deps.fit?.baseline?.observe(r.gpu, own);
       const memory = memoryOf(r.gpu, margin, deps.fit?.baseline, own, r.memTotalBytes);
       const rows = await rowsFrom(deps, baseUrl, r, await deps.models());
+      lastFailure = undefined;
       return { reading: { boot, seq: at, measuredAt: r.gpu.measuredAt }, memory, rows };
     } catch (e) {
-      deps.log?.(`fit table: ${(e as Error).message}`);
+      const failure = (e as Error).message;
+      if (failure !== lastFailure) deps.log?.(`fit table: ${failure}`);
+      lastFailure = failure;
       // nvidia-smi and the runtime disagree: neither line can be trusted.
       if (e instanceof FitError && e.code === "gpu-unreadable") return unreadable(at, e.message);
       // No runtime to ask: no rows, and the footer's line from the GPU alone.

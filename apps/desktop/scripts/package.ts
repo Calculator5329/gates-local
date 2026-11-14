@@ -84,7 +84,11 @@ await packageApp({
     nsis: { oneClick: true, perMachine: false, allowElevation: false, packElevateHelper: false, deleteAppDataOnUninstall: false, runAfterFinish: true, include: path.join(desktop, "build", "installer.nsh") },
     // Linux cross-builds need Wine to extract NSIS's generated uninstaller.
     // This is a build tool only; it is not shipped or used to test Windows.
-    toolsets: { wine: "1.0.1" },
+    // The AppImage's static runtime (1.0.3, runtime 20251108) carries its own FUSE code and needs only
+    // the fusermount3 helper that stock Ubuntu 24.04 ships; the default (legacy) runtime needs libfuse.so.2,
+    // which 24.04 does not install, so that AppImage exited at once with nothing on screen. The static
+    // toolset also drops the builder's default --no-sandbox from the AppImage's own desktop entry.
+    toolsets: { wine: "1.0.1", appimage: "1.0.3" },
     artifactName: windows ? "Gates-Local-${version}-Setup-${arch}.${ext}" : "Gates-Local-${version}-${arch}.${ext}",
   },
 });

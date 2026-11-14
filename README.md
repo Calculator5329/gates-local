@@ -10,7 +10,7 @@ Ollama, for people who want local models without guessing whether they fit.
 Download from the [latest release](https://github.com/Calculator5329/gates-local/releases/latest):
 
 - **Windows 11 x64:** `Gates-Local-<version>-Setup-x64.exe`. Run it; it installs for your account only. It has no Windows code-signing certificate, so Windows may show an unknown-publisher warning.
-- **Linux x64:** `Gates-Local-<version>-x86_64.AppImage`. Mark it executable in file properties and open it. If FUSE is unavailable, launch it with `--appimage-extract-and-run`. Your distribution may need a FUSE 2 compatibility package.
+- **Linux x64:** `Gates-Local-<version>-x86_64.AppImage`. Mark it executable in file properties and open it. If FUSE is unavailable, launch it with `--appimage-extract-and-run`. Versions 0.2.4 and earlier also need a FUSE 2 compatibility package (`libfuse2t64` on Ubuntu 24.04).
 
 The installed app includes Node and needs neither pnpm nor Git. Ollama runs
 the models; you can use your existing installation or try the app-owned setup.

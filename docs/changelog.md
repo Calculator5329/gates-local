@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-14: The Linux app opens on a stock Ubuntu 24.04
+
+- From the fresh-install test on Linux. Opening the AppImage on a fresh
+  Ubuntu 24.04 did nothing: it needed an old FUSE package that 24.04 no
+  longer installs, and said so only in a terminal. The AppImage now
+  carries its own FUSE support and opens with a double-click, no extra
+  package and no admin password.
+- The fallback launch (`--appimage-extract-and-run`) no longer prints
+  every file it unpacks, and the app no longer repeats "the model runtime
+  is not running" every second while it installs Ollama.
+
 ## 2026-11-14: A fresh install says what it is doing, in numbers
 
 - The first window while the chat engine downloads says it once: the
