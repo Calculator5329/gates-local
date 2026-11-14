@@ -68,6 +68,24 @@ it("stops the rest of a reply when the person talks over it, and reads the next 
   stop();
 });
 
+// Chat row 42 (coordinator default, named to the owner): Stop on a reply also stops its reading,
+// including the sentences already handed to the voice.
+it("Stop on a reply silences it: the sentences waiting in the voice are pulled back and the rest is never read", () => {
+  const waiting: string[] = [];
+  const out = { say: (words: string) => { waiting.push(words); }, cancel: () => { waiting.length = 0; } };
+  setState({ threadId: "t", turns: {}, messages: {} });
+  const stop = startReading(out);
+  setState({ turns: { t: live("t", 1, "One. Two. Thr") } });
+  expect(waiting, "two sentences wait in the voice").toEqual(["One.", "Two."]);
+  setState({ turns: { t: { ...live("t", 1, "One. Two. Three is unfinished"), end: { kind: "stopped", secs: 1 } } } });
+  expect(waiting, "none left speaking after Stop").toEqual([]);
+  setState({ turns: {}, messages: { t: [{ id: "a", threadId: "t", role: "assistant", createdAt: 1, content: "One. Two. Three is unfinished", interrupted: true }] } });
+  expect(waiting, "the saved stopped reply is not read either").toEqual([]);
+  setState({ turns: { t: live("t", 2, "The next answer. ") } });
+  expect(waiting, "the next reply is read").toEqual(["The next answer."]);
+  stop();
+});
+
 it("stops reading when another chat opens and joins its reply at the next sentence; a new chat's first reply is read whole", () => {
   const out = speaker();
   setState({ threadId: "a", turns: { a: live("a", 1, "In chat a. "), b: live("b", 2, "Already said in b. ") }, messages: {} });

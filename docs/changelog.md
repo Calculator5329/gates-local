@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-13: Stop also stops the reading
+
+- In talk mode, Stop on a reply silences it at once, including the
+  sentences the voice was about to say, and the rest of that reply is
+  never read. The next reply is read as usual. A reply that fails is
+  still read to its last word.
+
 ## 2026-11-13: One memory mark for a model, against the whole card
 
 - Models and Download show what a model takes as one mark: a bar that is

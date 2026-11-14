@@ -105,7 +105,7 @@ const speech = (page: import("@playwright/test").Page) => page.evaluate(() => (w
 // Chat row 38, owner pick A (a try-out): hold the microphone or Space to talk, let go to send; the reply
 // is read aloud a sentence at a time, and the speaker icon turns that off. Off until turned on in Settings.
 test("talk mode: hold to talk sends, the reply is read aloud, the speaker turns it off", async ({ page, open }) => {
-  test.info().annotations.push({ type: "budget", description: "Three full spoken turns, each a held recording, a transcription and a streamed reply read to its end." });
+  test.info().annotations.push({ type: "budget", description: "Three spoken turns, each a held recording and a transcription: two replies streamed and read to their end, one stopped as it is read." });
   await page.addInitScript(recordSpeech);
   await open(); await waitReady(page);
   await connect(page);
@@ -153,6 +153,18 @@ test("talk mode: hold to talk sends, the reply is read aloud, the speaker turns 
   await expect(page.locator(".turn.u")).toHaveCount(2);
   expect(whisper.requests, "the tap sent nothing to transcribe").toBe(2);
 
+  // chat row 42: Stop on a reply also stops its reading, and pulls back what waits in the voice
+  const send = page.getByTestId("chat.composer.send");
+  await expect.poll(async () => (await speech(page)).said.filter((s) => s.startsWith("You asked")).length, { timeout: 15_000 }).toBe(2);
+  await expect(send).toHaveAttribute("aria-label", "Stop");
+  const talking = await speech(page);
+  await send.click();
+  const stopped = await speech(page);
+  expect(stopped.cancels, "Stop pulls back the sentences waiting in the voice").toBeGreaterThan(talking.cancels);
+  await expect(send).not.toHaveAttribute("aria-label", "Stop");
+  await expect(page.locator(".turn.a")).toHaveCount(2);
+  expect((await speech(page)).said, "nothing more of the stopped reply is read").toEqual(stopped.said);
+
   // the speaker turns the reading off and stops it now
   const before = (await speech(page)).cancels;
   await speaker.click();
@@ -160,6 +172,8 @@ test("talk mode: hold to talk sends, the reply is read aloud, the speaker turns 
   expect((await speech(page)).cancels).toBeGreaterThan(before);
   await expect(page.getByTestId("chat.composer.send")).not.toHaveAttribute("aria-label", "Stop", { timeout: 30_000 });
   const off = (await speech(page)).said.length;
+  // Space talks from the message box; Stop left the focus on its own button
+  await page.locator("#ta").focus();
   await page.keyboard.down("Space");
   await expect(mic).toHaveAttribute("data-elapsed", /^[1-9]\d*$/);
   await page.keyboard.up("Space");

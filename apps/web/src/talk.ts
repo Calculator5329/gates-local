@@ -4,7 +4,7 @@
 // (speechSynthesis voices marked localService); a voice that would speak through a cloud service is
 // never used, and no voice is bundled yet.
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { getState, runningTurn, subscribe } from "./store.ts";
+import { getState, runningTurn, subscribe, turnOf } from "./store.ts";
 
 export type TalkPrefs = { readonly on: boolean; readonly speak: boolean };
 const KEY = "gates-local.talk";
@@ -104,7 +104,8 @@ export function hush(): void {
 
 /**
  * Reads the replies in the chat on screen to `out`, a sentence at a time, until the returned stop.
- * Thinking is never read. Opening another chat stops the reading; a reply already under way there,
+ * Thinking is never read. Stop on a reply silences it, sentences already handed over included.
+ * Opening another chat stops the reading; a reply already under way there,
  * or when reading starts, is read from its next sentence. A new chat's first reply is read whole.
  */
 export function startReading(out: Speaker): () => void {
@@ -136,9 +137,13 @@ export function startReading(out: Speaker): () => void {
       if (!fresh) { out.cancel(); join(threadId); }
     }
     const live = runningTurn(s, threadId);
-    // saved, stopped or failed: whatever was written is read to its end
     if (live === undefined) {
-      if (gen !== null) finish();
+      if (gen === null) return;
+      const ended = turnOf(s, threadId);
+      // Stop (chat row 42): what waits in the voice is pulled back and nothing more of it is read
+      if (ended?.gen === gen && ended.end?.kind === "stopped") { out.cancel(); gen = null; }
+      // saved or failed: whatever was written is read to its end
+      else finish();
       return;
     }
     if (live.gen !== gen) {
