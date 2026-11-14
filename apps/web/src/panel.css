@@ -18,6 +18,10 @@
 /* centred with margins, not a transform: a transform would hold the fixed layers inside (the Remove confirm) */
 .dlg{position:fixed;z-index:56;inset:0;margin:auto;width:min(calc(100vw - 80px),1280px);height:min(calc(100dvh - 80px),960px);display:flex;flex-direction:column;overflow:hidden;background:var(--popover);color:var(--foreground);border:1px solid var(--popover-border);border-radius:16px;outline:none}
 @media (max-width:1023px){.dlg{width:calc(100vw - 48px);height:calc(100dvh - 48px)}}
+/* In the desktop window the window's own buttons are an opaque box in the top right corner, as
+   tall as the header. The pop-up stays 8 px under it (and as far from the bottom, so it stays
+   centred): at 40 px the buttons covered the pop-up's corner in any window under 1064 px tall. */
+.wco .dlg{height:min(calc(100dvh - 2*(var(--header-h) + 8px)),960px)}
 /* the box takes focus so a key lands inside; it is not a control, so no ring (Ctrl+, drew one) */
 .dlg[tabindex]:focus-visible{outline:none}
 /* the header is one 48 px row: the title at the left, the controls, Close at the right end */

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-14: A pop-up clears the window's buttons
+
+- In the desktop window, Settings, Models and Usage no longer sit under
+  the minimize, maximize and close buttons: the buttons covered the
+  pop-up's top right corner whenever the window was not tall.
+
 ## 2026-11-13: Settings, Models and the pickers say each thing once
 
 - Fixes from the audit of 0.2.4.
