@@ -81,7 +81,7 @@ test("every Settings section is whole on its first frame", async ({ seededThread
     }
     if (delay) await settled(delay, 3000);
     report("back to General, second visit", await watchWhole(page, section("General"), () => page.getByTestId("settings.nav.open-general").click(), delay));
-    // Models is the footer bot's own pop-up (settings row 6), not a section; the footer is under the Settings pop-up's blur
+    // Models is the footer bot's own pop-up (settings row 6), not a section; the footer is under the Settings pop-up's dim
     await page.keyboard.press("Escape");
     await page.locator(".dlg").waitFor({ state: "detached" });
     if (delay) await settled(delay, 3000);

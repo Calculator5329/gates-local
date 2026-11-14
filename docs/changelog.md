@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-13: Settings sections switch at full speed again
+
+- Each Settings section switch took about 182 ms where 0.2.2 took about
+  45. The blur behind a pop-up was repainted on every frame, about 55 ms
+  a frame on a computer that draws without a GPU. The pop-up's backdrop
+  now only dims the window, so a switch, and typing in any pop-up, keeps
+  the display's pace (about 17 ms a frame). The blur came in with the
+  T3-style pop-up on 2026-11-13.
+
 ## 2026-11-13: Download says a model's memory estimate once
 
 - In Models › Download, a model's name and its memory mark had the same

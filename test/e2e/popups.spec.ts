@@ -2,7 +2,7 @@
 // Models, Usage and Settings are one pop-up shell (settings rows 6 and 26), T3 Code's Settings
 // dialog: one box of one size whatever is in it, centred on the window, its content scrolling
 // inside, its header one row (title at the left, controls and Close at the right), over a
-// backdrop that blurs the whole window.
+// backdrop that dims the whole window. Not blurred: a blur cost every frame (settings row 31).
 import type { Locator, Page } from "@playwright/test";
 import { expect, test, waitReady } from "./fixtures.ts";
 
@@ -36,12 +36,12 @@ async function expectOneRow(title: Locator, ...others: Locator[]) {
   }
 }
 
-/** The backdrop covers and blurs the whole window, sidebar included. */
+/** The backdrop covers and dims the whole window, sidebar included, and does not blur it. */
 async function expectBackdrop(page: Page) {
   const vp = page.viewportSize();
   const dim = page.locator(".dlg-dim");
   expect(await box(dim)).toEqual({ x: 0, y: 0, width: vp?.width, height: vp?.height });
-  await expect(dim).toHaveCSS("backdrop-filter", "blur(4px)");
+  await expect(dim).toHaveCSS("backdrop-filter", "none");
 }
 
 const footIcon = (page: Page, n: number) => page.locator(".sb-foot .ibtn").nth(n);
@@ -68,7 +68,7 @@ test("Models is its own pop-up over the chat: the shell's box, tabs and Close in
   const b = await box(models);
   await expectBackdrop(page);
   await expect(page.locator(".sb #searchIn"), "the sidebar keeps its threads").toBeVisible();
-  await expect(page.locator("#ta"), "the chat stays in view under the blur").toBeVisible();
+  await expect(page.locator("#ta"), "the chat stays in view under the dim").toBeVisible();
   await expect(bot, "the bot is lit, not the gear").toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".sb-foot .ibtn").first()).toHaveAttribute("aria-pressed", "false");
 
@@ -122,7 +122,7 @@ test.describe("Usage", () => {
   });
 });
 
-test("Settings is the same pop-up: its sections at its left, the chat and threads in view under the blur", async ({ page, open }) => {
+test("Settings is the same pop-up: its sections at its left, the chat and threads in view under the dim", async ({ page, open }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await open();
   await waitReady(page);
@@ -134,7 +134,7 @@ test("Settings is the same pop-up: its sections at its left, the chat and thread
   const b = await box(set);
   await expectBackdrop(page);
   await expect(page.locator(".sb #searchIn"), "the sidebar keeps its threads").toBeVisible();
-  await expect(page.locator("#ta"), "the chat stays in view under the blur").toBeVisible();
+  await expect(page.locator("#ta"), "the chat stays in view under the dim").toBeVisible();
   await expect(page.locator(".sb-foot .ibtn").first(), "the gear is lit").toHaveAttribute("aria-pressed", "true");
 
   // the sections are inside the pop-up; picking one keeps the box
