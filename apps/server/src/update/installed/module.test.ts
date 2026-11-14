@@ -17,6 +17,12 @@ import { type Stream, streamGet } from "./feed.ts";
 import { chooseUpdateModule, createInstalledUpdateModule, DEFAULT_FEED, downloadLines, INSTALL_REFUSAL, type InstalledModuleDeps, installedFeed, type InstalledFeed } from "./module.ts";
 import { artifactFile, BASE, LIST_URL, listFor, memoryFeed, releaseKey, releasePage, type ReleasePage, sha512, SIG_URL, signedList } from "./testing.ts";
 
+/** How long a wait for the module may take. A download ends with disk syncs, which a busy machine can
+ *  hold for seconds: vi.waitFor's own second failed twice in full runs ("expected 'downloading' to be 'ready'"). */
+const WAIT = { timeout: 5_000 } as const;
+/** Until the check passes. Every wait in this file is for something the module does, so each gets WAIT. */
+const eventually = <T>(check: () => T) => vi.waitFor(check, WAIT);
+
 /** A data folder under ~/.cache, removed by the test that made it. */
 function tempDataDir(): string {
   const cache = path.join(homedir(), ".cache");
@@ -156,7 +162,7 @@ describe("the installed module's checks", () => {
       get: (_url, _max, signal) => { seen = signal; return new Promise((resolve) => signal.addEventListener("abort", () => resolve({ kind: "failed", detail: "stopped" }))); },
     });
     const pending = module.check();
-    await vi.waitFor(() => expect(seen).toBeDefined());
+    await eventually(() => expect(seen).toBeDefined());
     await module.close();
     expect(seen?.aborted).toBe(true);
     expect((await pending).state).toBe("cannot-check");
@@ -189,7 +195,7 @@ describe("the installed module's checks", () => {
         feed: { base, page: `${base.href}/latest`, keys: [key.publicKey], allowLoopbackHttp: true },
       });
       const pending = module.check();
-      await vi.waitFor(() => expect(hungUp).toHaveLength(1));
+      await eventually(() => expect(hungUp).toHaveLength(1));
       const closing = Date.now();
       await module.close();
       expect(Date.now() - closing).toBeLessThan(500);
@@ -283,7 +289,7 @@ function shown(module: UpdateModule) {
 const settled = (module: UpdateModule) => vi.waitFor(() => {
   const download = shown(module).download;
   if (download === undefined || download === "downloading") throw new Error(`still ${String(download)}`);
-}, { timeout: 5_000 });
+}, WAIT);
 /** The progress lines among the pushes Settings received. */
 const downloading = (pushes: readonly UpdateStatus[]) => pushes.flatMap((s) => (s.lastCheck?.state === "newer" && s.lastCheck.download === "downloading" ? s.lastCheck.lines : []));
 
@@ -466,10 +472,10 @@ describe("downloading a newer version", () => {
     hold();
     await module.check();
     // The retry's request has reached the page (a .part file alone does not say so), so hangUps[1] is its socket.
-    await vi.waitFor(() => expect(artifactRequests()).toBe(2));
+    await eventually(() => expect(artifactRequests()).toBe(2));
     sw.set(false);
     await page.hangUps[1];
-    await vi.waitFor(() => expect(fs.existsSync(folder())).toBe(false));
+    await eventually(() => expect(fs.existsSync(folder())).toBe(false));
     sw.set(true);
     await module.check(true);
     expect(shown(module).download).toBe("bad");
@@ -495,8 +501,8 @@ describe("downloading a newer version", () => {
       });
     }
     await module.check(true);
-    if (how === "ready") await vi.waitFor(() => expect(shown(module).download).toBe("ready"));
-    if (how === "held") await vi.waitFor(() => expect(page.requests).toContain(otherPath));
+    if (how === "ready") await eventually(() => expect(shown(module).download).toBe("ready"));
+    if (how === "held") await eventually(() => expect(page.requests).toContain(otherPath));
     // That list is withdrawn and the first one's exact bytes come back.
     page.serve(files);
     if (how !== "held") fixFile();
@@ -520,12 +526,12 @@ describe("downloading a newer version", () => {
     });
     const { module } = installed(true);
     await module.check(true);
-    await vi.waitFor(() => expect(fs.existsSync(path.join(folder(), `${FILE}.part`))).toBe(true));
+    await eventually(() => expect(fs.existsSync(path.join(folder(), `${FILE}.part`))).toBe(true));
     const other = randomBytes(BYTES.length);
     const resigned = listFor(VERSION, other, key.privateKey);
     page.serve(resigned, { file: FILE, bytes: other });
     await module.check(true);
-    await vi.waitFor(() => expect(artifactRequests()).toBe(2));
+    await eventually(() => expect(artifactRequests()).toBe(2));
     await page.hangUps[0];
     await settled(module);
     expect(shown(module).download).toBe("ready");
@@ -607,12 +613,12 @@ describe("downloading a newer version", () => {
     hold();
     const { module, sw } = installed(true);
     await module.check();
-    await vi.waitFor(() => expect(page.hangUps).toHaveLength(1));
-    await vi.waitFor(() => expect(fs.existsSync(path.join(folder(), `${FILE}.part`))).toBe(true));
+    await eventually(() => expect(page.hangUps).toHaveLength(1));
+    await eventually(() => expect(fs.existsSync(path.join(folder(), `${FILE}.part`))).toBe(true));
     sw.set(false);
     await page.hangUps[0];
-    await vi.waitFor(() => expect(fs.existsSync(folder())).toBe(false));
-    await vi.waitFor(() => expect(shown(module)).not.toHaveProperty("download"));
+    await eventually(() => expect(fs.existsSync(folder())).toBe(false));
+    await eventually(() => expect(shown(module)).not.toHaveProperty("download"));
     expect(shown(module).lines).toEqual(["Version 1.3.0 is available."]);
     await module.close();
   });
@@ -622,7 +628,7 @@ describe("downloading a newer version", () => {
     hold();
     const { module } = installed(true);
     await module.check();
-    await vi.waitFor(() => expect(fs.existsSync(path.join(folder(), `${FILE}.part`))).toBe(true));
+    await eventually(() => expect(fs.existsSync(path.join(folder(), `${FILE}.part`))).toBe(true));
     const closing = Date.now();
     await module.close();
     expect(Date.now() - closing).toBeLessThan(1_000);
@@ -642,7 +648,7 @@ describe("downloading a newer version", () => {
     expect(shown(module).download).toBe("ready");
     expect(fs.readdirSync(path.join(dataDir, "updates")).toSorted()).toEqual(["1.1.0", "1.3.0"]);
     sw.set(false);
-    await vi.waitFor(() => expect(fs.readdirSync(path.join(dataDir, "updates"))).toEqual(["1.1.0"]));
+    await eventually(() => expect(fs.readdirSync(path.join(dataDir, "updates"))).toEqual(["1.1.0"]));
     expect(fs.readFileSync(path.join(folder("1.1.0"), "note"), "utf8")).toBe("1.1.0");
     await module.close();
   });
@@ -759,7 +765,7 @@ describe("downloading a newer version", () => {
         const { module } = windows();
         await module.check();
         await settled(module);
-        await vi.waitFor(() => { if (shown(module).restart !== true) throw new Error("no Restart yet"); });
+        await eventually(() => { if (shown(module).restart !== true) throw new Error("no Restart yet"); });
         expect(shown(module)).toMatchObject({
           download: "ready", restart: true,
           lines: ["Version 1.3.0 is downloaded and checked.", `If version 1.3.0 does not start, Gates Local will not go back by itself. To go back, run ${kept}.`],
@@ -777,7 +783,7 @@ describe("downloading a newer version", () => {
           const { module } = windows();
           await module.check();
           await settled(module);
-          await vi.waitFor(() => { if (shown(module).restart !== true) throw new Error("no Restart yet"); });
+          await eventually(() => { if (shown(module).restart !== true) throw new Error("no Restart yet"); });
           expect(shown(module).lines).toEqual([
             "Version 1.3.0 is downloaded and checked.",
             `If version 1.3.0 does not start, Gates Local will not go back by itself. To go back, download version 1.2.3 from ${page.base.href}/tag/v1.2.3.`,
@@ -792,7 +798,7 @@ describe("downloading a newer version", () => {
         const { module } = windows({ admission });
         await module.check();
         await settled(module);
-        await vi.waitFor(() => { if (module.status().approval === undefined) throw new Error("no approval yet"); });
+        await eventually(() => { if (module.status().approval === undefined) throw new Error("no approval yet"); });
         const prepared = await module.prepare(module.status().approval!);
         expect(prepared).toEqual({ state: "ready", reservation: expect.any(String), target: identityOf(files) });
         await module.close();
@@ -805,7 +811,7 @@ describe("downloading a newer version", () => {
         await module.check();
         await settled(module);
         sw.set(false);
-        await vi.waitFor(() => { if (fs.existsSync(folder())) throw new Error("download still there"); });
+        await eventually(() => { if (fs.existsSync(folder())) throw new Error("download still there"); });
         expect(fs.existsSync(kept)).toBe(true);
         await module.close();
       });
