@@ -329,7 +329,7 @@ describe("the Updates group of an installed copy", () => {
   });
 
   it("checking a download this copy cannot install says Checking… in the line's own space, so the row keeps its height", () => {
-    const line = "Update 1.3.0 is downloaded and checked. Put it in place of /apps/Gates-Local-1.2.3-x86_64.AppImage.";
+    const line = "Update 1.3.0 is downloaded and checked. Gates Local has no permission to change the folder of /apps/Gates-Local-1.2.3-x86_64.AppImage, so put the new file in its place yourself.";
     const ready = installedWith({ state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: [line], page: PAGE, download: "ready" });
     // A browser tab: no folder to open, so the control is Check for updates.
     for (const over of [{ checking: true }, { checkErr: "Gates Local is not answering. Try again in a moment.", checkErrSince: AT }]) {
@@ -352,6 +352,24 @@ describe("the Updates group of an installed copy", () => {
     expect(text(view({ canUpdate: true, updating: true, ...ready }))).toContain("Closing to update…");
     // A browser tab or the phone never gets the button.
     expect(text(view({ canUpdate: false, ...ready }))).not.toContain("Restart to update");
+  });
+
+  it("a download Windows will install while its go-back installer is still checked: Checking…, the Restart button held in its place, never the cannot-install words", async () => {
+    const { updateIcon } = await import("../src/update-state.ts");
+    const coming = installedWith({ state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Update 1.3.0 is downloaded and checked."], page: PAGE, download: "ready", restart: false });
+    const html = view({ canUpdate: true, canShow: true, ...coming });
+    expect(stateLine(html)?.[2]).toBe("Checking…");
+    expect(html).toMatch(/<button[^>]*data-testid="settings\.updates\.restart"[^>]*disabled=""[^>]*>Restart to update<\/button>/);
+    expect(html).not.toContain("settings.updates.folder");
+    expect(html.includes(link)).toBe(false);
+    // The footer says it is checking, with nothing to click.
+    expect(updateIcon({ status: coming.status, desktop: true })).toMatchObject({ state: "checking", label: "Checking for updates…", click: null });
+    // Then it settles once: the same button, now on, and the line the server sends.
+    const settled = installedWith({ ...(coming.status.lastCheck as Extract<UpdateCheck, { state: "newer" }>), restart: true });
+    const after = view({ canUpdate: true, canShow: true, ...settled });
+    expect(stateLine(after)?.[2]).toBe("Update 1.3.0 is downloaded and checked.");
+    expect(after).toMatch(/<button[^>]*data-testid="settings\.updates\.restart"[^>]*>Restart to update<\/button>/);
+    expect(after).not.toMatch(/data-testid="settings\.updates\.restart"[^>]*disabled/);
   });
 
   const newer = (over: Partial<UpdateCheck & { state: "newer" }> = {}): UpdateCheck => ({ state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Version 1.3.0 is available."], page: PAGE, ...over });

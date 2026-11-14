@@ -70,16 +70,32 @@ describe("section 8, word for word", () => {
       .toEqual({ text: wTitle, detail: fill(lead + tail, { ...v, "release page link": "https://example.test/releases/tag/v1.4.0" }) });
   });
 
-  it("the three reasons a copy cannot replace its own file", () => {
-    const text = quoted(cell("read-only / no-permission / not-appimage"))[0] ?? "";
+  it("a kept download says why this copy leaves it to the person, in a few words, and names a file only when there is one", () => {
+    const [lead, windows] = quoted(cell("kept download"));
+    const program = "/apps/Gates-Local.AppImage";
+    expect(words.downloaded("1.5.0")).toEqual({ text: fill(lead ?? "", v) });
+    expect(words.keptDownload("1.5.0", "read-only", { platform: "win32", program: null })).toEqual({ text: `${fill(lead ?? "", v)} ${windows}` });
+    const rows = [["read-only", "kept: read-only"], ["no-permission", "kept: no-permission"], ["not-appimage", "kept: not-appimage"], ["download-folder", "kept: download-folder"], ["pinned", "kept: pinned data folder"]] as const;
+    for (const [reason, state] of rows) {
+      const why = fill(quoted(cell(state))[0] ?? "", { path: program });
+      expect(words.keptDownload("1.5.0", reason, { platform: "linux", program })).toEqual({ text: `${fill(lead ?? "", v)} ${why}` });
+    }
+    // Not started from an AppImage file: no file of its own is pointed at.
+    expect(words.keptDownload("1.5.0", "not-appimage", { platform: "linux", program: null }).text).not.toMatch(/started Gates Local from|in its place|in place of/);
+  });
+
+  it("the four reasons a copy cannot replace its own file", () => {
+    const state = "read-only / no-permission / not-appimage / download-folder";
+    const text = quoted(cell(state))[0] ?? "";
     const [head, rest] = text.split("because its folder is read-only / ");
     const reasons = ["because its folder is read-only", ...(rest ?? "").split(". Download")[0]!.split(" / ")];
     const tail = `. Download${text.split(". Download")[1]}`;
-    const cases = [["read-only", reasons[0]], ["no-permission", reasons[1]], ["not-appimage", reasons[2]]] as const;
+    const cases = [["read-only", reasons[0]], ["no-permission", reasons[1]], ["not-appimage", reasons[2]], ["download-folder", reasons[3]]] as const;
     for (const [reason, clause] of cases) {
+      expect(clause).toBeDefined();
       expect(words.cannotReplace(reason, "1.5.0")).toEqual({ text: fill(`${head}${clause}${tail}`, v), link: true });
     }
-    expect(links("read-only / no-permission / not-appimage")).toBe(true);
+    expect(links(state)).toBe(true);
     expect(words.pinnedDataFolder("1.5.0")).toEqual({ text: fill(quoted(cell("pinned data folder"))[0] ?? "", v), link: true });
   });
 

@@ -60,7 +60,7 @@ function linksPage(check: UpdateCheck, folder: boolean): string | undefined {
   if (check.state !== "newer") return undefined;
   if (!check.forThisCopy) return check.page;
   // A checked download this copy cannot install: its folder, or the page where the desktop app cannot open one.
-  return check.download === "ready" && check.restart !== true && !folder ? check.page : undefined;
+  return check.download === "ready" && check.restart === undefined && !folder ? check.page : undefined;
 }
 
 /** A server line as the grey line: one that led into a list ends as a sentence, not on a colon. */
@@ -72,7 +72,7 @@ const whole = (line: string) => line.replace(/:$/, ".");
  * install, whose line says what to do with it and is never cut off.
  */
 function stateLine(check: UpdateCheck | null, checking: boolean, control: boolean, canUpdate: boolean): string {
-  if (checking) return "Checking…";
+  if (checking || restartComing(check)) return "Checking…";
   if (check === null) return control ? "Not checked yet." : "Check and install updates on the computer running Gates Local.";
   switch (check.state) {
     case "up-to-date":
@@ -113,8 +113,10 @@ function StateLine({ text, err, calm, kept }: { text: string; err: string | null
 /** A check that failed, or a download that did: said as an alert. */
 const troubled = (check: UpdateCheck | null) => check?.state === "cannot-check" || (check?.state === "newer" && (check.download === "bad" || check.download === "failed" || check.download === "disk"));
 
-/** A checked download this copy cannot install by itself (decision 24). */
-const keptDownload = (check: UpdateCheck | null): check is Extract<UpdateCheck, { state: "newer" }> => check?.state === "newer" && check.forThisCopy && check.download === "ready" && check.restart !== true;
+/** A checked download this copy cannot install by itself (decision 24). restart false is one it can, once its own check ends. */
+const keptDownload = (check: UpdateCheck | null): check is Extract<UpdateCheck, { state: "newer" }> => check?.state === "newer" && check.forThisCopy && check.download === "ready" && check.restart === undefined;
+/** A checked download this copy will install, while a check of its own still runs (Windows: the kept installer). */
+const restartComing = (check: UpdateCheck | null) => check?.state === "newer" && check.download === "ready" && check.restart === false;
 
 interface StateProps {
   readonly check: UpdateCheck | null;
@@ -141,9 +143,10 @@ function StateAction({ check, automatic, canUpdate, canShow, checking, updating,
       </button>
     );
   }
-  if (check?.state === "newer" && check.restart === true && canUpdate) {
+  if (check?.state === "newer" && check.restart !== undefined && canUpdate) {
+    // Held off while restart is false, so the button that comes is already the one in its place.
     return (
-      <button type="button" className="btn primary" data-testid="settings.updates.restart" disabled={updating} onClick={onUpdate}>
+      <button type="button" className="btn primary" data-testid="settings.updates.restart" disabled={updating || check.restart === false} onClick={onUpdate}>
         {updating ? "Closing to update…" : RESTART}
       </button>
     );

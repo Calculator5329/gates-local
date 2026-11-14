@@ -1196,7 +1196,7 @@ export const UpdateCheck = S.Union([
    */
   S.Struct({
     state: S.Literal("newer"), checkedAt: Millis, current: S.String, target: S.String, forThisCopy: S.Boolean, lines: S.Array(S.String), page: S.String, download: S.optional(UpdateDownload),
-    /** The download is ready and this copy can replace its own file: Restart to update. */
+    /** True: the download is ready and this copy can replace its own file (Restart to update). False: it can, once the check of its own go-back file ends. Absent: it cannot. */
     restart: S.optional(S.Boolean),
   }),
 ]);

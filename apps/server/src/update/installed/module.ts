@@ -30,14 +30,14 @@
 import type { UpdateCheck, UpdateCommitRequest, UpdateDownload, UpdatePreparation, UpdateResult, UpdateStatus } from "@gates-local/contracts";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
-import { cannotReplace, type CannotReplace, earlierFailure, pinnedDataFolder, readyWindows } from "../../../../desktop/src/installed-update/words.ts";
+import { cannotReplace, type CannotReplace, downloaded, earlierFailure, keptDownload, pinnedDataFolder, readyWindows } from "../../../../desktop/src/installed-update/words.ts";
 import { createUpdateAdmission, FINISHING, UPDATE_PAUSED, type UpdateAdmission } from "../admission.ts";
 import { REPO_URL } from "../cli.ts";
 import type { UpdateModule } from "../module.ts";
 import { readRecord, removeRecord, takeRecord, type UpdateRecord, writeRecord } from "../record.ts";
 import { parseReleaseKey, type ReleaseArtifact, TRUSTED_RELEASE_KEYS } from "../release-manifest.ts";
 import { checkInstalled, type InstalledOutcome } from "./check.ts";
-import { type DownloadOutcome, downloadRelease, listHash, preparedRelease, removeVersions, type Space, verifyKept } from "./download.ts";
+import { type DownloadOutcome, downloadRelease, inUpdatesFolder, listHash, preparedRelease, removeVersions, type Space, type Verified, verifyKept } from "./download.ts";
 import { boundedGet, type Get, refusedAddress, type Stream, streamGet } from "./feed.ts";
 import type { ModelLists } from "./models-list.ts";
 
@@ -102,7 +102,7 @@ export const RESTART_ENV = "GATES_LOCAL_INSTALLED_RESTART";
  * step, which keeps the old words.
  */
 export type Restart = "yes" | "windows" | "none" | "pinned" | CannotReplace;
-const RESTARTS: readonly Restart[] = ["yes", "windows", "none", "pinned", "read-only", "no-permission", "not-appimage"];
+const RESTARTS: readonly Restart[] = ["yes", "windows", "none", "pinned", "read-only", "no-permission", "not-appimage", "download-folder"];
 export const parseRestart = (value: string | undefined): Restart => RESTARTS.find((r) => r === value) ?? "none";
 /** Restart to update is offered: an AppImage that can replace its file, or a Windows install. */
 export const canRestart = (restart: Restart): restart is "yes" | "windows" => restart === "yes" || restart === "windows";
@@ -163,9 +163,6 @@ function mb(bytes: number, round: (n: number) => number = Math.round): string {
   return value < 10 ? (round(value * 10) / 10).toFixed(1) : String(round(value));
 }
 
-/** The one sentence for a finished, checked download, on every copy; Settings shows it as the server sends it. */
-export const downloadedLine = (target: string) => `Update ${target} is downloaded and checked.`;
-
 /** The download's words, in place of "Version <new> is available.".
  *  Ready: a copy that can restart into it says so beside its Restart button (a Windows copy also says how to go back). Any other
  *  keeps the checked file and says, in one line that fits the card, what to do with it; Settings opens its folder. */
@@ -181,13 +178,13 @@ export function downloadLines(target: string, fetch: Fetch, restart: Restart = "
       // Needed rounds up and free rounds down, so the two never read equal when the space is short.
       return [`Not enough free space on ${fetch.volume} for version ${target} (needs ${mb(fetch.needed, Math.ceil)} MB, ${mb(fetch.free, Math.floor)} MB free). Free some space, then use Check for updates.`];
     case "ready":
-      if (restart === "yes") return [downloadedLine(target)];
+      if (restart === "yes") return [downloaded(target).text];
       if (restart === "windows") {
         const detail = goBack === undefined ? undefined : readyWindows(target, goBack).detail;
-        return [downloadedLine(target), ...(detail === undefined ? [] : [detail])];
+        return [downloaded(target).text, ...(detail === undefined ? [] : [detail])];
       }
-      // Nothing is downloaded twice: the person uses the file already here (Windows: the installer; Linux: the AppImage, put where the running one is).
-      return [`${downloadedLine(target)} ${platform === "win32" ? "Run this installer to update." : `Put it in place of ${program ?? "the file you started Gates Local from"}.`}`];
+      // Nothing is downloaded twice: the person uses the file already here (Windows: the installer; Linux: the AppImage), told why in a few words.
+      return [keptDownload(target, restart, { platform, program }).text];
   }
 }
 
@@ -253,6 +250,8 @@ export interface InstalledModuleDeps {
   readonly stream?: Stream;
   /** Tests pretend a full disk. */
   readonly freeSpace?: (folder: string) => Promise<Space>;
+  /** Windows: the check of the running version's kept installer; tests hold it. Default verifyKept. */
+  readonly keptInstaller?: (version: string) => Promise<Verified>;
   /** Least time between two progress pushes; default a second. */
   readonly progressMs?: number;
   readonly now?: () => number;
@@ -274,7 +273,10 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
   const get = deps.get ?? boundedGet({ allowLoopbackHttp: deps.feed.allowLoopbackHttp });
   const stream = deps.stream ?? streamGet({ allowLoopbackHttp: deps.feed.allowLoopbackHttp });
   const progressMs = deps.progressMs ?? 1_000;
-  const identity = { dataDir: deps.dataDir, running: deps.version, keys: deps.feed.keys, platform: deps.platform, arch: deps.arch };
+  const program = deps.program === undefined ? (deps.platform === "linux" ? runningAppImage(process.env) : null) : deps.program;
+  // No delete removes a folder holding the running program: the AppImage, or this process's executable.
+  const programs = [...(program === null ? [] : [program]), process.execPath];
+  const identity = { dataDir: deps.dataDir, running: deps.version, keys: deps.feed.keys, platform: deps.platform, arch: deps.arch, programs };
   const controller = new AbortController();
   let lastCheck: UpdateCheck | null = null;
   let running: Promise<UpdateCheck> | undefined;
@@ -300,8 +302,8 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
   try { deps.models?.loadStored(); }
   catch (error) { log(`chat model list: ${error instanceof Error ? error.message : String(error)}`); }
 
-  const restart = deps.restart ?? "none";
-  const program = deps.program === undefined ? (deps.platform === "linux" ? runningAppImage(process.env) : null) : deps.program;
+  // A copy started from inside updates/ never replaces itself: that folder is this updater's to fill and clean.
+  const restart = deps.restart === "yes" && program !== null && inUpdatesFolder(deps.dataDir, program) ? "download-folder" : deps.restart ?? "none";
   // Windows: set once the running version's kept installer has been looked for.
   let goBack: GoBack | undefined;
   const admission =deps.admission ?? createUpdateAdmission({ finishing: deps.startupToken !== undefined });
@@ -354,8 +356,10 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     // An undismissed rollback-failed note refuses the update: no button, and the row says why.
     // Windows: the button turns on once the kept installer has been looked for (section 3, W-A step 2).
     const ready = checked && failed === undefined && (restart !== "windows" || goBack !== undefined);
+    // Until then restart is false: the button is coming, still being checked, so nothing offers the file as one this copy cannot install.
+    const coming = checked && failed === undefined && !ready;
     const lines = checked && failed !== undefined ? [earlierFailure().text] : downloadLines(c.target, fetch.fetch, restart, goBack, deps.platform, program);
-    return { ...c, lines, download: fetch.fetch.state, ...(ready ? { restart: true } : {}) };
+    return { ...c, lines, download: fetch.fetch.state, ...(ready ? { restart: true } : coming ? { restart: false } : {}) };
   };
   let offer: { readonly token: string; readonly fingerprint: string } | undefined;
   /** The admission target of the found version, when it is the checked, ready one Restart would install. */
@@ -380,7 +384,7 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
   if (restart === "windows") {
     // Looked for once: cleanup never deletes it while this version runs.
     const releasePage = `${deps.feed.base.href.replace(/\/+$/, "")}/tag/v${deps.version}`;
-    void verifyKept({ ...identity, version: deps.version })
+    void (deps.keptInstaller ?? ((version: string) => verifyKept({ ...identity, version })))(deps.version)
       .catch((error: unknown) => ({ ok: false as const, reason: error instanceof Error ? error.message : String(error) }))
       .then((kept) => {
         if (!kept.ok) log(`no kept installer for ${deps.version}: ${kept.reason}`);
@@ -459,7 +463,7 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     if (active !== undefined && active.target !== f.target) await cancelActive(`version ${f.target} replaced version ${active.target}`);
     else if (active !== undefined && active.list !== list) await cancelActive(`a new signed list for version ${f.target} replaced the one being downloaded`);
     if (refused !== list) refused = undefined;
-    await removeVersions(deps.dataDir, [f.target, ...kept()]).catch((error: unknown) => log(`update cleanup: ${error instanceof Error ? error.message : String(error)}`));
+    await removeVersions(deps.dataDir, [f.target, ...kept()], programs).catch((error: unknown) => log(`update cleanup: ${error instanceof Error ? error.message : String(error)}`));
     if (active !== undefined) return;
     // A folder left by an earlier start is ready only after it checks out again, holding this very list.
     const prepared = await preparedRelease({ ...identity, version: f.target, list: f.list }).catch(() => null);
@@ -482,7 +486,7 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
   const switchedOff = () => serial(async () => {
     await cancelActive("automatic checks were turned off");
     const ready = fetch?.fetch.state === "ready" ? [fetch.target] : [];
-    await removeVersions(deps.dataDir, [...kept(), ...ready]).catch((error: unknown) => log(`update cleanup: ${error instanceof Error ? error.message : String(error)}`));
+    await removeVersions(deps.dataDir, [...kept(), ...ready], programs).catch((error: unknown) => log(`update cleanup: ${error instanceof Error ? error.message : String(error)}`));
     if (ready.length === 0) fetch = undefined;
     push();
   });

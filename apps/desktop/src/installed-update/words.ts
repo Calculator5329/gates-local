@@ -41,12 +41,34 @@ const CANNOT_REPLACE = {
   "read-only": "because its folder is read-only",
   "no-permission": "because you do not have permission to change its folder",
   "not-appimage": "because it was not started from an AppImage file",
+  "download-folder": "because it runs from its download folder",
 } as const;
 export type CannotReplace = keyof typeof CANNOT_REPLACE;
 export const cannotReplace = (reason: CannotReplace, version: string): Words =>
   withLink(`Gates Local cannot replace its own file ${CANNOT_REPLACE[reason]}. Download version ${version} from the release page and replace the file yourself.`);
 export const pinnedDataFolder = (version: string): Words =>
   withLink(`This copy keeps its data in a folder set by GATES_LOCAL_DATA_DIR, so it cannot update itself. Download version ${version} from the release page.`);
+
+/** A finished download that passed its checks, on every copy. */
+export const downloaded = (version: string): Words => say(`Update ${version} is downloaded and checked.`);
+/** Why a copy leaves its checked download for the person to use instead of putting it in place itself. */
+export type KeptReason = CannotReplace | "pinned" | "none";
+const ELSEWHERE = "put the new file where you keep programs and start it from there";
+function keptLinux(reason: KeptReason, program: string | null): string {
+  // Only a copy started from an AppImage has a file to name; none of these reasons arises without one.
+  const file = program ?? "the file you started Gates Local from";
+  switch (reason) {
+    case "read-only": return `The folder of ${file} is read-only, so put the new file in its place yourself.`;
+    case "no-permission": return `Gates Local has no permission to change the folder of ${file}, so put the new file in its place yourself.`;
+    case "not-appimage": return `This copy was not started from an AppImage file, so ${ELSEWHERE}.`;
+    case "download-folder": return `This copy runs from its download folder, so ${ELSEWHERE}.`;
+    case "pinned": return `This copy keeps its data in a folder set by GATES_LOCAL_DATA_DIR, so put the new file in place of ${file} yourself.`;
+    case "none": return `Put the new file in place of ${file}.`;
+  }
+}
+/** One line: the download is checked, then why this copy does not put it in place itself and what to do with the file. Settings opens its folder. */
+export const keptDownload = (version: string, reason: KeptReason, o: { readonly platform: string; readonly program: string | null }): Words =>
+  say(`${downloaded(version).text} ${o.platform === "win32" ? "Run this installer to update." : keptLinux(reason, o.program)}`);
 
 export const updateStartup = (): Words => say("Gates Local is finishing an update.");
 export const watcherDied = (): Words => say("Close Gates Local and start it again to finish the update.");

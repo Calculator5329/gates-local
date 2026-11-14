@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-11-14: An update never removes the program that is running
+
+- On Linux, a copy started from the AppImage an earlier update left in
+  Gates Local's download folder was removed by the next update's
+  cleanup, and Restart then ended on "found a file it did not put". No
+  delete in the updater removes a folder that holds the running program
+  now, on any system. A copy running from the download folder says so
+  ("This copy runs from its download folder, so put the new file where
+  you keep programs and start it from there.") and does not replace
+  itself; each later version still downloads and says the same.
+- A Linux copy that cannot replace its own file says why in a few words
+  beside its checked download: its folder is read-only, Gates Local has
+  no permission to change it, it was not started from an AppImage file
+  (then it names no file of its own and says to put the new one where
+  you keep programs), or it keeps its data in a folder set by
+  GATES_LOCAL_DATA_DIR.
+- On Windows, a ready update no longer shows "Update 0.2.2 waiting" with
+  Open folder for the first moments after startup and then switches to
+  Restart to update. While Gates Local still checks the installer it
+  keeps for going back, Settings says "Checking…" with the Restart
+  button in place but off, and the footer shows it checking; then it
+  settles once, and the card keeps its size.
+
 ## 2026-11-14: The queue keeps its word at the edges
 
 - Stop now holds what is queued behind a reply even when the reply's last

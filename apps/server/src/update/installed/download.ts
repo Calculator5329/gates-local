@@ -15,7 +15,8 @@
 // artifact's hash) before anything calls it ready, and deleted if it fails.
 // Nothing outside <data dir>/updates/ is ever deleted: every recursive delete
 // resolves its version folder first and refuses a name that is not
-// major.minor.patch. That holds by path. If the person made updates/ itself a
+// major.minor.patch. That holds by path. A version folder that holds the
+// running program (a person started an AppImage from it) is never deleted. If the person made updates/ itself a
 // link, the deletes follow it to wherever it points; a version folder or an
 // artifact that is a link is never trusted, and deleting one removes only
 // the link.
@@ -53,6 +54,8 @@ export interface Identity {
   readonly keys: readonly string[];
   readonly platform: string;
   readonly arch: string;
+  /** The running program's files: no delete removes a version folder that holds one. */
+  readonly programs?: readonly string[];
 }
 
 /** A folder verifyPrepared has just checked from its bytes on disk. */
@@ -126,9 +129,37 @@ export function versionFolder(dataDir: string, version: string): string {
  * Windows a scanner may hold a fresh file for a moment; the retries keep that
  * from turning "did not match" into "could not download".
  */
-async function removeVersion(dataDir: string, version: string): Promise<void> {
+async function removeVersion(dataDir: string, version: string, programs: readonly string[] | undefined): Promise<boolean> {
   const folder = versionFolder(dataDir, version);
+  if (holdsProgram(folder, programs ?? [])) return false;
   await fs.promises.rm(folder, { recursive: true, force: true, maxRetries: 3 });
+  return true;
+}
+
+/** The real path, or the resolved one when it cannot be read (a file already gone). */
+function real(file: string): string {
+  try { return fs.realpathSync(file); } catch { return path.resolve(file); }
+}
+
+/**
+ * Whether one of programs is inside folder, by real paths. A folder that is a
+ * link is not holding anything: deleting it removes only the link.
+ */
+function holdsProgram(folder: string, programs: readonly string[]): boolean {
+  if (programs.length === 0) return false;
+  let inside: string;
+  try {
+    if (fs.lstatSync(folder).isSymbolicLink()) return false;
+    inside = `${fs.realpathSync(folder)}${path.sep}`;
+  } catch {
+    return false;
+  }
+  return programs.some((file) => real(file).startsWith(inside));
+}
+
+/** Whether file runs from inside <data dir>/updates/, the folder this updater downloads into and cleans. */
+export function inUpdatesFolder(dataDir: string, file: string): boolean {
+  return real(file).startsWith(`${real(updatesRoot(dataDir))}${path.sep}`);
 }
 
 /** The listed file's path in folder, or a throw when the name is not a plain name inside it. Called before any file is opened. */
@@ -183,7 +214,7 @@ export async function verifyPrepared(o: Identity & { readonly version: string })
   catch (error) { return { ok: false, reason: message(error) }; }
   const reason = await check(folder, o).catch((error: unknown) => `the folder could not be read: ${message(error)}`);
   if (typeof reason !== "string") return { ok: true, prepared: reason };
-  await removeVersion(o.dataDir, o.version);
+  await removeVersion(o.dataDir, o.version, o.programs);
   return { ok: false, reason };
 }
 
@@ -234,12 +265,12 @@ export async function preparedRelease(o: Identity & { readonly version: string; 
   if (!exists) return null;
   const verified = await verifyPrepared(o);
   if (!verified.ok || verified.prepared.listSha512 === listHash(o.list)) return verified;
-  await removeVersion(o.dataDir, o.version);
+  await removeVersion(o.dataDir, o.version, o.programs);
   return { ok: false, reason: "the folder holds another signed list for this version" };
 }
 
-/** Deletes every version folder under updates/ that keep does not name. Returns the versions deleted. */
-export async function removeVersions(dataDir: string, keep: readonly string[]): Promise<readonly string[]> {
+/** Deletes every version folder under updates/ that keep does not name and no running program is inside. Returns the versions deleted. */
+export async function removeVersions(dataDir: string, keep: readonly string[], programs: readonly string[] = []): Promise<readonly string[]> {
   const entries = await fs.promises.readdir(updatesRoot(dataDir), { withFileTypes: true }).catch((error: unknown) => {
     if (errorCode(error) === "ENOENT") return [];
     throw error;
@@ -249,8 +280,7 @@ export async function removeVersions(dataDir: string, keep: readonly string[]): 
     if (!entry.isDirectory() || keep.includes(entry.name)) continue;
     // Only a name versionFolder accepts is ever deleted; anything else in updates/ is not ours.
     try { versionFolder(dataDir, entry.name); } catch { continue; }
-    await removeVersion(dataDir, entry.name);
-    removed.push(entry.name);
+    if (await removeVersion(dataDir, entry.name, programs)) removed.push(entry.name);
   }
   return removed;
 }
@@ -378,15 +408,15 @@ export async function downloadRelease(o: DownloadOptions): Promise<DownloadOutco
     const existing = await preparedRelease(o);
     if (existing?.ok === true) return { kind: "ready", prepared: existing.prepared, fetched: false };
     // preparedRelease deleted a folder that failed; anything else left is not trusted either.
-    await removeVersion(o.dataDir, o.version);
+    if (!(await removeVersion(o.dataDir, o.version, o.programs))) return { kind: "could-not-download", detail: "its folder holds the running program" };
     if (o.signal.aborted) return { kind: "cancelled" };
     const outcome = await fetchInto(folder, final, artifact, o);
     if (outcome !== undefined) {
-      await removeVersion(o.dataDir, o.version);
+      await removeVersion(o.dataDir, o.version, o.programs);
       return outcome;
     }
   } catch (error) {
-    await removeVersion(o.dataDir, o.version).catch(() => undefined);
+    await removeVersion(o.dataDir, o.version, o.programs).catch(() => undefined);
     if (o.signal.aborted) return { kind: "cancelled" };
     if (errorCode(error) === "ENOSPC") return disk(o, artifact);
     return { kind: "could-not-download", detail: message(error) };

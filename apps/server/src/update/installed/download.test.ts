@@ -374,6 +374,23 @@ describe("the folder's place", () => {
     expect(fs.readdirSync(updates).toSorted()).toEqual(["1.1.0", "installed-update.json", "notes"]);
   });
 
+  it("never deletes a folder that holds the running program, whatever asked for it", async () => {
+    const updates = path.join(dataDir, "updates");
+    for (const v of ["1.0.0", "1.1.0"]) complete(good(), BYTES, path.join(updates, v));
+    const running = path.join(updates, "1.1.0", "deeper", "Gates-Local.AppImage");
+    fs.mkdirSync(path.dirname(running), { recursive: true });
+    fs.writeFileSync(running, "the running program");
+    expect(await removeVersions(dataDir, [], [running])).toEqual(["1.0.0"]);
+    expect(fs.readFileSync(running, "utf8")).toBe("the running program");
+    // The check that deletes a folder failing its checks keeps this one too, and still says it failed.
+    const programs = [path.join(folder(), FILE)];
+    complete(good(), Buffer.from("not the listed bytes"));
+    expect(await verifyPrepared({ ...identity(), version: VERSION, programs })).toMatchObject({ ok: false });
+    expect(inFolder()).toEqual([FILE, LIST_FILE, SIGNATURE_FILE].toSorted());
+    expect(await preparedRelease({ ...identity(), version: VERSION, list: good().list, programs })).toMatchObject({ ok: false });
+    expect(fs.existsSync(folder())).toBe(true);
+  });
+
   it("does nothing when there is no updates folder", async () => {
     expect(await removeVersions(dataDir, [])).toEqual([]);
   });

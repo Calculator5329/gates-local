@@ -12,7 +12,7 @@ import type { UpdateModule } from "../module.ts";
 import { TRUSTED_RELEASE_KEYS } from "../release-manifest.ts";
 import { createUpdateAdmission, FINISHING, UPDATE_PAUSED } from "../admission.ts";
 import { readRecord, RECORD_FILE, writeRecord } from "../record.ts";
-import { LIST_FILE, SIGNATURE_FILE } from "./download.ts";
+import { LIST_FILE, SIGNATURE_FILE, verifyKept } from "./download.ts";
 import { type Stream, streamGet } from "./feed.ts";
 import { chooseUpdateModule, createInstalledUpdateModule, DEFAULT_FEED, downloadLines, INSTALL_REFUSAL, type InstalledModuleDeps, installedFeed, type InstalledFeed } from "./module.ts";
 import { artifactFile, BASE, LIST_URL, listFor, memoryFeed, releaseKey, releasePage, type ReleasePage, sha512, SIG_URL, signedList } from "./testing.ts";
@@ -274,11 +274,13 @@ describe("the download's words", () => {
     expect(downloadLines("1.3.0", { state: "bad" })).toEqual(["The download of version 1.3.0 did not match the signed release list, so it was deleted."]);
     expect(downloadLines("1.3.0", { state: "failed" })).toEqual(["Could not download version 1.3.0. Check your connection."]);
     expect(downloadLines("1.3.0", { state: "disk", volume: "/home", needed: 98_100_000, free: 97_900_000 })).toEqual(["Not enough free space on /home for version 1.3.0 (needs 99 MB, 97 MB free). Free some space, then use Check for updates."]);
-    // A copy that cannot install it keeps the file and says what to do with it, in one line.
-    // On Linux the sentence names the running file, the one to put the download in place of.
-    expect(downloadLines("1.3.0", { state: "ready" }, "no-permission", undefined, "linux", PROGRAM)).toEqual([`Update 1.3.0 is downloaded and checked. Put it in place of ${PROGRAM}.`]);
-    expect(downloadLines("1.3.0", { state: "ready" }, "read-only", undefined, "linux", PROGRAM)).toEqual([`Update 1.3.0 is downloaded and checked. Put it in place of ${PROGRAM}.`]);
-    expect(downloadLines("1.3.0", { state: "ready" }, "not-appimage", undefined, "linux")).toEqual(["Update 1.3.0 is downloaded and checked. Put it in place of the file you started Gates Local from."]);
+    // A copy that cannot install it keeps the file and says, in one line, why and what to do with it.
+    // On Linux the sentence names the running file when there is one to put the download in place of.
+    expect(downloadLines("1.3.0", { state: "ready" }, "no-permission", undefined, "linux", PROGRAM)).toEqual([`Update 1.3.0 is downloaded and checked. Gates Local has no permission to change the folder of ${PROGRAM}, so put the new file in its place yourself.`]);
+    expect(downloadLines("1.3.0", { state: "ready" }, "read-only", undefined, "linux", PROGRAM)).toEqual([`Update 1.3.0 is downloaded and checked. The folder of ${PROGRAM} is read-only, so put the new file in its place yourself.`]);
+    expect(downloadLines("1.3.0", { state: "ready" }, "not-appimage", undefined, "linux")).toEqual(["Update 1.3.0 is downloaded and checked. This copy was not started from an AppImage file, so put the new file where you keep programs and start it from there."]);
+    expect(downloadLines("1.3.0", { state: "ready" }, "download-folder", undefined, "linux", PROGRAM)).toEqual(["Update 1.3.0 is downloaded and checked. This copy runs from its download folder, so put the new file where you keep programs and start it from there."]);
+    expect(downloadLines("1.3.0", { state: "ready" }, "pinned", undefined, "linux", PROGRAM)).toEqual([`Update 1.3.0 is downloaded and checked. This copy keeps its data in a folder set by GATES_LOCAL_DATA_DIR, so put the new file in place of ${PROGRAM} yourself.`]);
     expect(downloadLines("1.3.0", { state: "ready" }, "none", undefined, "win32")).toEqual(["Update 1.3.0 is downloaded and checked. Run this installer to update."]);
     expect(downloadLines("1.3.0", { state: "ready" }, "pinned", undefined, "win32")).toEqual(["Update 1.3.0 is downloaded and checked. Run this installer to update."]);
   });
@@ -344,7 +346,7 @@ describe("downloading a newer version", () => {
     const { module } = installed(true);
     expect(await module.check()).toMatchObject({ state: "newer", download: "downloading" });
     await settled(module);
-    expect(shown(module)).toMatchObject({ download: "ready", lines: ["Update 1.3.0 is downloaded and checked. Put it in place of /apps/Gates-Local-1.2.3-x86_64.AppImage."], page: `${page.base.href}/latest` });
+    expect(shown(module)).toMatchObject({ download: "ready", lines: ["Update 1.3.0 is downloaded and checked. Put the new file in place of /apps/Gates-Local-1.2.3-x86_64.AppImage."], page: `${page.base.href}/latest` });
     expect(fs.readdirSync(folder()).toSorted()).toEqual([FILE, LIST_FILE, SIGNATURE_FILE]);
     expect(sha512(fs.readFileSync(path.join(folder(), FILE)))).toBe(sha512(BYTES));
     expect(artifactRequests()).toBe(1);
@@ -663,6 +665,29 @@ describe("downloading a newer version", () => {
     await module.close();
   });
 
+  it("a copy started from inside its own download folder keeps that folder, is told so, and still gets the next version", async () => {
+    // The person double-clicked the AppImage an earlier update left in updates/1.2.3/; that folder is writable.
+    const running = path.join(folder("1.2.3"), artifactFile("1.2.3"));
+    fs.mkdirSync(folder("1.2.3"), { recursive: true });
+    fs.writeFileSync(running, "the running program");
+    serveGood();
+    const { module, sw } = installed(true, { restart: "yes", program: running });
+    await module.check();
+    await settled(module);
+    expect(fs.readFileSync(running, "utf8")).toBe("the running program");
+    expect(fs.readdirSync(path.join(dataDir, "updates")).toSorted()).toEqual(["1.2.3", VERSION]);
+    const check = shown(module);
+    expect(check).toMatchObject({ download: "ready", lines: ["Update 1.3.0 is downloaded and checked. This copy runs from its download folder, so put the new file where you keep programs and start it from there."] });
+    expect(check).not.toHaveProperty("restart");
+    expect(module.status()).not.toHaveProperty("approval");
+    expect(await module.prepare("anything")).toEqual({ state: "blocked", message: "Gates Local cannot replace its own file because it runs from its download folder. Download version 1.3.0 from the release page and replace the file yourself." });
+    // The switch's cleanup keeps it too.
+    sw.set(false);
+    await eventually(async () => { await module.check(); expect(shown(module).download).toBe("ready"); });
+    expect(fs.readFileSync(running, "utf8")).toBe("the running program");
+    await module.close();
+  });
+
   it("sends progress at most about once a second", async () => {
     serveGood();
     page.route((p, res) => {
@@ -729,19 +754,25 @@ describe("downloading a newer version", () => {
     });
 
     it("IM-02 a copy that cannot replace its file keeps the download, says what to do with it, refuses the click with why, and offers no approval", async () => {
+      const PROGRAM = "/apps/Gates-Local-1.2.3-x86_64.AppImage";
+      const READY = "Update 1.3.0 is downloaded and checked.";
       const cases = [
-        ["read-only", "Gates Local cannot replace its own file because its folder is read-only. Download version 1.3.0 from the release page and replace the file yourself."],
-        ["no-permission", "Gates Local cannot replace its own file because you do not have permission to change its folder. Download version 1.3.0 from the release page and replace the file yourself."],
-        ["not-appimage", "Gates Local cannot replace its own file because it was not started from an AppImage file. Download version 1.3.0 from the release page and replace the file yourself."],
-        ["pinned", "This copy keeps its data in a folder set by GATES_LOCAL_DATA_DIR, so it cannot update itself. Download version 1.3.0 from the release page."],
+        ["read-only", "Gates Local cannot replace its own file because its folder is read-only. Download version 1.3.0 from the release page and replace the file yourself.",
+          `${READY} The folder of ${PROGRAM} is read-only, so put the new file in its place yourself.`],
+        ["no-permission", "Gates Local cannot replace its own file because you do not have permission to change its folder. Download version 1.3.0 from the release page and replace the file yourself.",
+          `${READY} Gates Local has no permission to change the folder of ${PROGRAM}, so put the new file in its place yourself.`],
+        ["not-appimage", "Gates Local cannot replace its own file because it was not started from an AppImage file. Download version 1.3.0 from the release page and replace the file yourself.",
+          `${READY} This copy was not started from an AppImage file, so put the new file where you keep programs and start it from there.`],
+        ["pinned", "This copy keeps its data in a folder set by GATES_LOCAL_DATA_DIR, so it cannot update itself. Download version 1.3.0 from the release page.",
+          `${READY} This copy keeps its data in a folder set by GATES_LOCAL_DATA_DIR, so put the new file in place of ${PROGRAM} yourself.`],
       ] as const;
       serveGood();
-      for (const [restart, sentence] of cases) {
-        const { module } = installed(true, { restart });
+      for (const [restart, sentence, line] of cases) {
+        const { module } = installed(true, { restart, ...(restart === "not-appimage" ? { program: null } : {}) });
         await module.check();
         await settled(module);
         const check = shown(module);
-        expect(check).toMatchObject({ download: "ready", lines: ["Update 1.3.0 is downloaded and checked. Put it in place of /apps/Gates-Local-1.2.3-x86_64.AppImage."], page: `${page.base.href}/latest` });
+        expect(check).toMatchObject({ download: "ready", lines: [line], page: `${page.base.href}/latest` });
         expect(check).not.toHaveProperty("restart");
         expect(module.status()).not.toHaveProperty("approval");
         expect(await module.prepare("anything")).toEqual({ state: "blocked", message: sentence });
@@ -800,6 +831,28 @@ describe("downloading a newer version", () => {
           ]);
           await module.close();
         }
+      });
+
+      it("IM-W5 while the kept installer is still being checked, a ready download says Restart is coming, never that this copy cannot install it", async () => {
+        const kept = keepInstaller();
+        serveWin();
+        // The kept installer's check (about 122 MB hashed at startup) ends when the test says.
+        const gate: { open?: () => void } = {};
+        const held = new Promise<void>((resolve) => { gate.open = resolve; });
+        const { module, pushes } = windows({ keptInstaller: async (version) => { await held; return verifyKept({ dataDir, running: RUNNING, keys: [key.publicKey], platform: "win32", arch: "x64", version }); } });
+        await module.check();
+        await settled(module);
+        expect(shown(module)).toMatchObject({ download: "ready", restart: false, lines: ["Update 1.3.0 is downloaded and checked."] });
+        expect(module.status()).not.toHaveProperty("approval");
+        gate.open?.();
+        await eventually(() => { if (shown(module).restart !== true) throw new Error("no Restart yet"); });
+        expect(shown(module).lines).toEqual(["Update 1.3.0 is downloaded and checked.", `If version 1.3.0 does not start, Gates Local will not go back by itself. To go back, run ${kept}.`]);
+        // Settled once: no push ever offered the ready download as one this copy cannot install.
+        const ready = pushes.flatMap((s) => (s.lastCheck?.state === "newer" && s.lastCheck.download === "ready" ? [s.lastCheck.restart] : []));
+        expect(ready.length).toBeGreaterThan(0);
+        expect(ready).not.toContain(undefined);
+        expect(ready.at(-1)).toBe(true);
+        await module.close();
       });
 
       it("IM-W3 the click reserves admission for the version and the exact list, as on Linux", async () => {

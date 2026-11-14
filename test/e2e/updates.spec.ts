@@ -304,7 +304,7 @@ test.describe("Version with the update state, then the automatic switch", () => 
   for (const width of [1280, 390]) test(`a download this copy cannot install at ${width}px: the footer says it waits and opens Settings, a check keeps the card's size`, async ({ page, open }, info) => {
     await page.setViewportSize({ width, height: 844 });
     const PAGE = "https://example.invalid/releases/latest";
-    const kept: UpdateCheck = { state: "newer", checkedAt: CHECKED, current: "0.2.1", target: "0.2.2", forThisCopy: true, lines: ["Update 0.2.2 is downloaded and checked. Put it in place of /apps/Gates-Local-0.2.1-x86_64.AppImage."], page: PAGE, download: "ready" };
+    const kept: UpdateCheck = { state: "newer", checkedAt: CHECKED, current: "0.2.1", target: "0.2.2", forThisCopy: true, lines: ["Update 0.2.2 is downloaded and checked. Gates Local has no permission to change the folder of /apps/Gates-Local-0.2.1-x86_64.AppImage, so put the new file in its place yourself."], page: PAGE, download: "ready" };
     let lastCheck: UpdateCheck = kept;
     let answer: ((next: UpdateCheck) => void) | undefined;
     // The desktop app, with no folder to open (the Linux copy that cannot replace its own file).
@@ -441,6 +441,56 @@ test.describe("Version with the update state, then the automatic switch", () => 
     await expect(row).not.toContainText("download it from the release page");
     await expect(group.locator(".tipped")).toHaveCount(0);
     await group.screenshot({ path: test.info().outputPath("update-windows-row2-after.png") });
+  });
+
+  // A bug seen on Windows: until the kept go-back installer had been hashed at startup, a ready download showed as
+  // "Update 0.2.2 waiting" with Open folder, then switched to Restart. Now it says it is checking and settles once, the card keeping its size.
+  for (const width of [1280, 390]) test(`a Windows download whose go-back installer is still checked at ${width}px: Checking…, then Restart to update, the card keeping its size`, async ({ page, open }, info) => {
+    await page.setViewportSize({ width, height: 844 });
+    await page.addInitScript(() => {
+      Object.assign(window, { gatesLocal: { updateApprovalVersion: 2, getServerUrl: async () => new URLSearchParams(location.search).get("server"), onState: () => () => undefined, updateAndRestart: async () => ({ ok: true }), canShowUpdate: true, showUpdate: async () => ({ ok: true }) } });
+    });
+    const ready = { state: "newer", checkedAt: Date.UTC(2026, 10, 14, 7, 0), current: "0.2.1", target: "0.2.2", forThisCopy: true, page: "https://example.invalid/releases/latest", download: "ready" } as const;
+    const coming: UpdateCheck = { ...ready, restart: false, lines: ["Update 0.2.2 is downloaded and checked."] };
+    const settled: UpdateCheck = { ...ready, restart: true, lines: ["Update 0.2.2 is downloaded and checked.", "If version 0.2.2 does not start, Gates Local will not go back by itself. To go back, run C:\\Users\\me\\AppData\\Local\\gates-local\\updates\\0.2.1\\Gates-Local-0.2.1-Setup-x64.exe."] };
+    const idle: UpdateStatus = { version: { kind: "installed", version: "0.2.1" }, result: null, lastCheck: coming, activity: [] };
+    let route: WebSocketRoute | undefined;
+    await page.routeWebSocket(/\/\?token=/, (socket) => {
+      route = socket;
+      const server = socket.connectToServer();
+      socket.onMessage((raw) => {
+        const message = JSON.parse(String(raw)) as { method?: string; id: string };
+        if (message.method === "update.status") socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result: { ...idle, canControl: true } }));
+        else server.send(raw);
+      });
+    });
+    await open(); await waitReady(page);
+    const chip = page.locator(".sb-foot .upd");
+    if (width === 1280) await expect(chip).toHaveAccessibleName("Checking for updates…");
+    await page.keyboard.press("Control+Comma");
+    const general = page.getByTestId("settings.sections.open-general");
+    if (await general.isVisible()) await general.click();
+    await expect(page.locator(".set .set-h h1")).toHaveText("General");
+    const group = page.locator(".grp").filter({ has: page.locator(".grp-t", { hasText: /^Updates$/ }) });
+    const card = group.locator(".box");
+    const line = group.locator(".srow").first().locator(".src-help");
+    const restart = group.getByTestId("settings.updates.restart");
+    await expect(line).toHaveText("Checking…");
+    await expect(restart).toBeDisabled();
+    await expect(group.getByTestId("settings.updates.folder")).toHaveCount(0);
+    await expect(group).not.toContainText("waiting");
+    await group.scrollIntoViewIfNeeded();
+    await group.screenshot({ path: info.outputPath(`update-windows-checking-${width}.png`), animations: "disabled" });
+    const box = () => card.evaluate((el) => { const r = el.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; });
+    const before = await box();
+    const button = await restart.evaluate((el) => el.getBoundingClientRect().width);
+    route?.send(JSON.stringify({ type: "push", channel: "update.changed", payload: { ...idle, lastCheck: settled, approval: "approval-1", canControl: true } }));
+    await expect(restart).toBeEnabled();
+    await expect(line).toHaveText("Update 0.2.2 is downloaded and checked.");
+    expect(await box(), "the Updates card moved or changed size when Restart turned on").toEqual(before);
+    expect(await restart.evaluate((el) => el.getBoundingClientRect().width)).toBe(button);
+    if (width === 1280) await expect(chip).toHaveAccessibleName("Restart to update");
+    await group.screenshot({ path: info.outputPath(`update-windows-settled-${width}.png`), animations: "disabled" });
   });
 
   // Guards the owner's ruling (updates row 10): a listener's row keeps its height. The release page is not offered there (decision 19: no tips).

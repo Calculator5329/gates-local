@@ -134,6 +134,8 @@ function installedIcon(check: Extract<UpdateCheck, { state: "newer" }>, canResta
     case "ready":
       // Ready is the green up-arrow alone, no dot (audit of 0.2.4, decision 22). A copy that cannot install it says the
       // update waits and opens Settings › Updates, whose line says what to do and whose Open folder opens the file's folder.
+      // restart false: this copy can install it once a check of its own ends (Windows: the kept installer), so it says it is still checking.
+      if (check.restart === false) return icon("checking", "Checking for updates…", null);
       if (canRestart) return icon("ready", RESTART, "restart");
       return icon("waiting", `Update ${target} waiting`, "settings", { dot: "amber" });
     case "bad":

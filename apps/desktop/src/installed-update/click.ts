@@ -2,7 +2,7 @@
 // the server has committed the person's approval of `<version>:<list digest>`:
 // re-verify the download from its bytes, check it is the approved list, build
 // the approval with this app's process records, begin, and quit.
-import type { Verified } from "../../../server/src/update/installed/download.ts";
+import { inUpdatesFolder, type Verified } from "../../../server/src/update/installed/download.ts";
 import { INSTALL_REFUSAL, type Restart } from "../../../server/src/update/installed/module.ts";
 import type { ProcessRecord } from "../../../server/src/update/identity.ts";
 import type { UpdateAndRestartResult } from "../bridge.ts";
@@ -41,6 +41,8 @@ export async function startInstalledUpdate(target: string, o: InstalledClick): P
   if (match === null) return { ok: false, message: "An exact checked version and current server approval are required. Check for updates again." };
   const [, version, digest] = match as unknown as [string, string, string];
   if (o.restart !== "yes" || o.copy === null) return { ok: false, message: cannot(o.restart === "yes" ? "not-appimage" : o.restart, version) };
+  // The server refuses this first; a program inside the download folder is never replaced in place.
+  if (inUpdatesFolder(o.copy.dataDir, o.copy.program)) return { ok: false, message: cannot("download-folder", version) };
   if (o.serverPid === undefined) return { ok: false, message: NOT_READY };
   const verified = await o.verify(version);
   if (!verified.ok || verified.prepared.listSha512 !== digest || verified.prepared.version !== version) {

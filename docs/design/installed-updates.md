@@ -60,6 +60,7 @@ Phone approval stays impossible. The enforcement is `phoneMay` in ws/server.ts:2
 | Read-only folder | a probe write in the program file's folder fails with `EROFS` | "read-only" sentence (section 8) |
 | A folder the person cannot write | the probe fails with `EACCES`/`EPERM` | "no-permission" sentence. The app never asks for a password. |
 | Not an AppImage | `APPIMAGE` unset | "not-appimage" sentence |
+| Started from the download folder | the real path of `APPIMAGE` is inside `<data dir>/updates/` (the server decides, from the program and its data folder) | "download-folder" sentence. It never replaces itself: that folder is the updater's to fill and clean, and a replaced file there would sit under the old version's name. Each later version still downloads and says the same. |
 | Data folder pinned by `GATES_LOCAL_DATA_DIR`, outside the test-build rule | data-dir.ts `serverDataDir` returns the pin first | refused (see below) |
 
 The pinned data folder is refused because it is the only way two Electron profiles share one data folder. `GATES_LOCAL_USER_DATA` alone puts data inside that profile (data-dir.ts `serverDataDir`). The default packaged data folder belongs to the default packaged profile, so Electron's profile lock already keeps out a second writer. No smaller rule covers sharing.
@@ -149,7 +150,7 @@ The install over the top was observed once, `0.0.8-native` → `0.0.9-native` (r
 ### W-A, the default: verified installer, no automatic go-back
 
 1. The verified download completes (section 6).
-2. Before the button turns on, the app looks for the current version's verified installer in `updates/<current>/`, kept from the last update it applied. It names that path in the dialog, or names `releases/tag/v<current>` if there is none.
+2. Before the button turns on, the app looks for the current version's verified installer in `updates/<current>/`, kept from the last update it applied. It names that path in the dialog, or names `releases/tag/v<current>` if there is none. While that look runs (it hashes about 122 MB at startup), the status carries `restart: false`: Settings says "Checking…" with the Restart button in its place but off, and the footer shows the checking icon. It never shows the words for a copy that cannot install the update first; the state settles once.
 3. The person clicks "Restart to update".
 4. After the admission commit, main re-verifies the list and hashes the installer, holding its server connection so the lease cannot lapse. It writes `updates/windows-pending.json` with the version and list digest (fsync), spawns `Setup.exe /S --updated --force-run` detached, and quits.
 5. The installer's running-app check (replaced, see below) waits for this install's processes to exit. It uninstalls the old version, installs the new one and starts it.
@@ -240,7 +241,7 @@ A release that breaks the rule on one platform publishes a list without that pla
 | Chats | The download streams in the server and holds no admission. Admission closes only at the click. |
 | Without asking | yes, when the automatic switch is on (owner decision D1) |
 | Switch off | cancels the retry timer and any download in flight, and deletes that download's folder and any other prepared folder that is not the finished, checked download of the current target and that neither an unfinished transaction nor an undismissed `rollback-failed` result names (decision 29: a finished download is kept, a half-finished one starts over). With nothing ready, "Check for updates" then offers "Download". |
-| Cleanup | When a newer list verifies, delete other versions' folders, except one named by an unfinished transaction or by an undismissed `rollback-failed` result, and, on Windows, the kept go-back installer |
+| Cleanup | When a newer list verifies, delete other versions' folders, except one named by an unfinished transaction or by an undismissed `rollback-failed` result, and, on Windows, the kept go-back installer. On every system, and for every delete (cleanup, the switch, a folder that fails its checks), a folder that holds the running program's file (the AppImage, or the executable) stays |
 
 ## 7. Admission and the handoff deadline (roadmap `a34578dc`)
 
@@ -275,7 +276,13 @@ L1 names the copy **"Installed copy"**. It replaces "Not a git clone" (SettingsU
 | disk | "Not enough free space on <volume> for version <new> (needs <n> MB, <m> MB free). Free some space, then use Check for updates." |
 | ready, Linux | "Restart to update" — "Gates Local will close, update and reopen." |
 | ready, Windows | "Restart to update" — "If version <new> does not start, Gates Local will not go back by itself. To go back, run <path>." (or "…download version <current> from <release page link>.") |
-| read-only / no-permission / not-appimage | "Gates Local cannot replace its own file because its folder is read-only / because you do not have permission to change its folder / because it was not started from an AppImage file. Download version <new> from the release page and replace the file yourself." + link |
+| kept download | "Update <new> is downloaded and checked." then, on the same line, "Run this installer to update." on Windows, or on Linux the sentence for why this copy does not put it in place itself (the kept rows below). Settings opens the download's folder. |
+| kept: read-only | "The folder of <path> is read-only, so put the new file in its place yourself." |
+| kept: no-permission | "Gates Local has no permission to change the folder of <path>, so put the new file in its place yourself." |
+| kept: not-appimage | "This copy was not started from an AppImage file, so put the new file where you keep programs and start it from there." |
+| kept: download-folder | "This copy runs from its download folder, so put the new file where you keep programs and start it from there." |
+| kept: pinned data folder | "This copy keeps its data in a folder set by GATES_LOCAL_DATA_DIR, so put the new file in place of <path> yourself." |
+| read-only / no-permission / not-appimage / download-folder | "Gates Local cannot replace its own file because its folder is read-only / because you do not have permission to change its folder / because it was not started from an AppImage file / because it runs from its download folder. Download version <new> from the release page and replace the file yourself." + link |
 | pinned data folder | "This copy keeps its data in a folder set by GATES_LOCAL_DATA_DIR, so it cannot update itself. Download version <new> from the release page." + link |
 | update startup | "Gates Local is finishing an update." |
 | watcher died | "Close Gates Local and start it again to finish the update." |

@@ -65,6 +65,10 @@ describe("Restart to update, installed", () => {
       expect(await startInstalledUpdate(TARGET, c.o)).toEqual({ ok: false, message });
       expect(c.verifiedVersions).toEqual([]);
     }
+    // Started from inside its own download folder: never replaced in place.
+    const inside = click({ copy: { program: "/d/updates/1.2.3/G.AppImage", dataDir: "/d" } });
+    expect(await startInstalledUpdate(TARGET, inside.o)).toEqual({ ok: false, message: "Gates Local cannot replace its own file because it runs from its download folder. Download version 1.3.0 from the release page and replace the file yourself." });
+    expect(inside.verifiedVersions).toEqual([]);
   });
 
   it("CL-04 no server process, a refused begin, or a target that is not an installed one: refused, no quit", async () => {
