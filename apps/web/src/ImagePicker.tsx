@@ -13,9 +13,9 @@ import "./picker.css";
 import "./image-picker.css";
 import { type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ImageChoice, ImageDownload, ImagePreset } from "@gates-local/contracts";
-import { gb, noGpu, timeLeft } from "./format.ts";
+import { cardGb, gb, noGpu, timeLeft } from "./format.ts";
 import { Icon } from "./icons.tsx";
-import { chosenImage, imageFit, sizeLabel } from "./image-choice.ts";
+import { chosenImage, imageCard, sizeLabel } from "./image-choice.ts";
 import { ImageMark } from "./ImageMark.tsx";
 import { memoryRuler } from "./picker-models.ts";
 import { focusComposer } from "./Sidebar.tsx";
@@ -98,34 +98,18 @@ function sizeFor(preset: ImagePreset, width: number, height: number) {
   return preset.sizes.find((z) => z.width === width && z.height === height) ?? preset.sizes[0]!;
 }
 
-type Fit = ReturnType<typeof imageFit>;
-/** gpu fits in what is free now; held fits in memory ComfyUI already holds; spill stops the chat model first; no is too big. */
-type Kind = "pending" | "gpu" | "held" | "spill" | "no";
-
-function fitKind(bytes: number, fit: Fit, free: number | undefined): Kind {
-  if (fit === undefined) return "pending";
-  if (fit.v.k === "no") return "no";
-  if (fit.frees) return "spill";
-  return free !== undefined && bytes > free ? "held" : "gpu";
-}
-
-/** What the size row's mark means, for its tooltip and its label. */
-function fitWord(kind: Kind, fit: Fit, cpu: boolean): string {
-  if (fit === undefined) return "No GPU reading";
-  if (cpu) return "Runs in system memory";
-  if (fit.v.k === "no") return `Too big: ${gb(fit.v.amt)} short`;
-  return kind === "spill" ? "Stops the chat model first" : kind === "held" ? "Uses memory ComfyUI holds" : "Fits on the GPU";
-}
-
 /**
- * A size row's memory: the chat picker's ruler against what is free now, green only when the
- * size fits in it; amber when it needs memory ComfyUI holds or the chat model stopped, red when
- * it is too big. The number is on the row only when the sizes differ; else the head says it once.
+ * A size row's memory: the chat picker's ruler against the card's size, green when the size fits
+ * the card, red past its edge when it does not. Judged by the card, never by what is free this
+ * second: the chat model leaves before an image loads. The number is on the row only when the
+ * sizes differ; else the head says it once. Its words are its name for a screen reader, no tip.
  */
-function SizeMemory({ bytes, fit, free, cpu, number }: { bytes: number; fit: Fit; free: number | undefined; cpu: boolean; number: boolean }) {
-  const k = fitKind(bytes, fit, free);
-  const ruler = fit === undefined || cpu || free === undefined ? undefined : memoryRuler(bytes, free);
-  return <span className={`pk-cost ${k}`} role="img" aria-label={`${gb(bytes)} estimated; ${fitWord(k, fit, cpu)}`}>
+function SizeMemory({ bytes, card, cpu, number }: { bytes: number; card: number | undefined; cpu: boolean; number: boolean }) {
+  const fits = card === undefined ? undefined : bytes <= card;
+  const k = fits === undefined ? "pending" : fits ? "gpu" : "no";
+  const word = cpu ? "runs in system memory" : fits === undefined ? "no GPU reading" : fits ? "fits the GPU" : `${gb(bytes - card!)} more than the GPU has`;
+  const ruler = card === undefined || cpu ? undefined : memoryRuler(bytes, card);
+  return <span className={`pk-cost ${k}`} role="img" aria-label={`${gb(bytes)} estimated; ${word}`}>
     {number ? <span className="pk-cost-caption"><span>{gb(bytes)}</span></span> : null}
     {ruler === undefined ? null : <span className="pk-cost-track"><i className="pk-cost-room" /><i className="pk-cost-fill" style={{ width: `${ruler.fill}%` }} />{ruler.overflow > 0 ? <i className="pk-cost-over" style={{ width: `${ruler.overflow}%` }} /> : null}<i className="pk-cost-edge" />{ruler.continues ? <b>→</b> : null}</span>}
   </span>;
@@ -363,13 +347,13 @@ export function ImagePicker() {
         ? <input className="pk-disk-field" data-testid="image.picker.folder-field" aria-label="Download folder" value={folderField} autoFocus spellCheck={false}
             onChange={(e) => setFolderField(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void saveFolder(folderField); } else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setFolderField(null); setFolderError(null); } }} />
-        : <span className="pk-disk-folder" data-testid="image.picker.disk-folder" data-tipt={disk.folder}>{disk.folder === undefined ? "No folder yet" : middle(disk.folder)}</span>}
-      {folderError === null ? numbers : <span className="pk-disk-n short" role="status" data-tipt={folderError}>{folderError}</span>}
+        : <span className="pk-disk-folder" data-testid="image.picker.disk-folder">{disk.folder === undefined ? "No folder yet" : middle(disk.folder)}</span>}
+      {folderError === null ? numbers : <span className="pk-disk-n short" role="status">{folderError}</span>}
     </div>;
   }
 
   if (pop === null) return null;
-  const free = gpu && gpu !== NA ? gpu.freeBytes : undefined;
+  const card = imageCard(gpu);
   const disk = diskRow();
   const close = <button className="pk-close" data-testid="image.picker.close" aria-label="Close" onClick={() => closePop(true)}><Icon id="x" /></button>;
   if (listed.length === 0) {
@@ -414,7 +398,8 @@ export function ImagePicker() {
         </div>
       </div>
       <section className="pk-context" aria-label="Size" inert={phone && step !== "sizes"}>
-        <header className="pk-context-head"><button className="pk-back" data-testid="image.picker.back" aria-label="Back to image models" onClick={back}><Icon id="left" /></button><span>{active?.name}</span>{same === undefined ? null : <small>{gb(same)}</small>}</header>
+        {/* the model alone: the row and the composer button already say the style */}
+        <header className="pk-context-head"><button className="pk-back" data-testid="image.picker.back" aria-label="Back to image models" onClick={back}><Icon id="left" /></button><span data-testid="image.picker.model">{active?.model ?? active?.name}</span>{same === undefined ? null : <small>{gb(same)}</small>}</header>
         <div className="pk-context-rows" role="radiogroup" aria-label="Size" data-testid="image.picker.sizes" onKeyDown={(e) => {
           if (e.key === "ArrowLeft") { e.preventDefault(); back(); return; }
           if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -424,10 +409,9 @@ export function ImagePicker() {
         }}>
           {active?.sizes.map((z) => {
             const on = active.id === chosen?.preset.id && z.width === width && z.height === height;
-            const fit = imageFit(z.bytes, gpu);
-            return <button key={`${z.width}x${z.height}`} className="pk-ctx-row" role="radio" data-testid={`image.picker.size-${z.width}x${z.height}`} aria-checked={on} tabIndex={on ? 0 : -1} disabled={!active.ready} data-size={`${z.width}x${z.height}`} data-tip={fitWord(fitKind(z.bytes, fit, free), fit, cpu)} onClick={() => void pick({ preset: active.id, width: z.width, height: z.height })}>
+            return <button key={`${z.width}x${z.height}`} className="pk-ctx-row" role="radio" data-testid={`image.picker.size-${z.width}x${z.height}`} aria-checked={on} tabIndex={on ? 0 : -1} disabled={!active.ready} data-size={`${z.width}x${z.height}`} onClick={() => void pick({ preset: active.id, width: z.width, height: z.height })}>
               <span>{sizeLabel(z.width, z.height)}</span>
-              <SizeMemory bytes={z.bytes} fit={fit} free={free} cpu={cpu} number={same === undefined} />
+              <SizeMemory bytes={z.bytes} card={card} cpu={cpu} number={same === undefined} />
               <span className="pk-context-check">{on ? <Icon id="check" cls="s12" /> : null}</span>
             </button>;
           })}
@@ -435,11 +419,11 @@ export function ImagePicker() {
         {error === null ? null : <p className="pk-help pk-choice" role="status">{error}</p>}
       </section>
     </div>
-    {/* one footer row, as the chat picker's: where downloads go, under 4 GB no default or on the CPU how slow (said once), and the GPU figure at the end when there is one */}
+    {/* one footer row, as the chat picker's: where downloads go, under 4 GB no default or on the CPU how slow (said once), and the card the sizes are judged by at the end */}
     <footer className="pk-bottom">
       {disk}
       {disk === null || note !== undefined ? <span className="pk-nogpu" role={note === undefined ? undefined : "status"}>{note}</span> : null}
-      <span className="pk-gpu">{note !== undefined && (cpu || free === undefined) ? null : cpu ? "Runs in system memory" : free === undefined ? "GPU reading unavailable" : `${gb(free)} free`}</span>
+      <span className="pk-gpu" data-testid="image.picker.card">{note !== undefined && (cpu || card === undefined) ? null : cpu ? "Runs in system memory" : card === undefined ? "GPU reading unavailable" : `${cardGb(card)} GPU`}</span>
     </footer>
   </div>;
 }

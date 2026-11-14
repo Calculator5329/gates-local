@@ -729,6 +729,12 @@ export const ImageStatus = S.Struct({
   detail: S.optional(S.String),
   /** The address is the one the person set in Settings (not the app's own engine or the default): nothing answering there means "not running", never "not set up". */
   addressSet: S.optional(S.Boolean),
+  /**
+   * With image generation off: no image engine anywhere (none of the app's, no address set, no
+   * ComfyUI service, nothing answering at the default address). Settings then offers Set up images
+   * in place of the switch.
+   */
+  nowhere: S.optional(S.Boolean),
 });
 export type ImageStatus = typeof ImageStatus.Type;
 
@@ -761,6 +767,8 @@ export const ImagePreset = S.Struct({
   tier: S.optional(S.String),
   /** Set on a Defaults row: the style it is the default for at this machine's level ("general", "portraits", "pixel-art"…). */
   style: S.optional(S.String),
+  /** The model alone ("FLUX.2 Klein 4B"), where `name` adds a style: the picker's sizes head says this. Absent: `name` is the model. */
+  model: S.optional(S.String),
   sizes: S.Array(ImageSize),
   /** False: the bytes are an estimate, not a measured peak. */
   measured: S.Boolean,
@@ -846,9 +854,11 @@ export const ImagePresets = S.Struct({
   /**
    * Where image downloads go and the room there, read before any transfer: `folder` absent means
    * there is no folder to put them in until the person picks one (an engine that never said where
-   * its models are). `picked`: Settings' imageFolder.
+   * its models are). `picked`: Settings' imageFolder. `line`: set when the folder was picked and
+   * the ComfyUI on this computer is the person's own, not the app's: the one line to add to its
+   * extra_model_paths.yaml so it reads the folder (the app never writes that file).
    */
-  disk: S.optional(S.Struct({ folder: S.optional(S.String), freeBytes: S.optional(Count), picked: S.Boolean })),
+  disk: S.optional(S.Struct({ folder: S.optional(S.String), freeBytes: S.optional(Count), picked: S.Boolean, line: S.optional(S.String) })),
 });
 export type ImagePresets = typeof ImagePresets.Type;
 

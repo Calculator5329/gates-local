@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-11-14: Images are judged by your card, and set up from Settings
+
+- FLUX.2 Klein 4B is one row. The app runs the full setup on a card of
+  8 GB or more and the compact one below; a card that only has the
+  compact files runs those.
+- Image sizes are judged by your graphics card's size, as chat models
+  are, not by what is free this second: the chat model leaves the GPU
+  before a picture is made. The picker's footer names the card
+  ("16 GB GPU"). A picture still says so if another program holds the
+  memory when it starts.
+- The top of the sizes pane names the model alone, "FLUX.2 Klein 4B";
+  the row already says the style.
+- With no image engine anywhere, Settings › Image generation has no
+  switch. In its place is the one download that sets images up, its
+  size and "Set up images".
+- When you pick the download folder and run your own ComfyUI, Settings
+  shows the one line to add to ComfyUI's extra_model_paths.yaml so it
+  finds the files, with a copy button. The app never edits that file.
+- Size rows and the download folder have no tooltips; a size row's
+  words are read out to screen readers.
+
 ## 2026-11-14: Updates take one click and say each thing once
 
 - When an update is downloaded and ready, the mark at the right of the

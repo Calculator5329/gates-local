@@ -5,8 +5,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import type { GpuStatus, ImagePreset, ImagePresets, ModelInfo, Settings } from "@gates-local/contracts";
-import { imageFitEdges, methodSamples } from "@gates-local/contracts/testing";
-import { imageFit } from "../src/image-choice.ts";
+import { methodSamples } from "@gates-local/contracts/testing";
+import { imageCard } from "../src/image-choice.ts";
 import type { State } from "../src/store.ts";
 
 vi.mock("../src/store.ts", async (original) => {
@@ -109,14 +109,12 @@ it.each([
   expect(html).not.toContain("1024×1024");
 });
 
-it.each(imageFitEdges)("the picker's answer at the fit's edge, $name: $verdict, the server's answer (module.test.ts reads the same table)", ({ estimateBytes, freeBytes, creditedBytes, freeableBytes = 0, verdict }) => {
-  const gpu: GpuStatus = { ...methodSamples["gpu.status"].result, freeBytes, occupants: [
-    { label: "ComfyUI", bytes: creditedBytes, kind: "image", protected: false },
-    { label: "Qwen 3.5 9B", bytes: freeableBytes, kind: "chat-model", protected: false },
-    { label: "Whisper", bytes: 2 * GIB, kind: "whisper", protected: true },
-  ] };
-  const fit = imageFit(estimateBytes, gpu);
-  expect(fit?.v.k === "no" ? "refuse" : fit?.frees ? "frees" : "fits").toBe(verdict);
+it("the card the picker judges sizes by: its total to the nearest GB, whatever is free", () => {
+  const sample = methodSamples["gpu.status"].result;
+  expect(imageCard({ ...sample, totalBytes: 8188 * 1024 ** 2, freeBytes: GIB })).toBe(8 * GIB);
+  expect(imageCard({ ...sample, totalBytes: 16303 * 1024 ** 2, freeBytes: 0 })).toBe(16 * GIB);
+  expect(imageCard({ ...sample, totalBytes: undefined })).toBeUndefined();
+  expect(imageCard(undefined)).toBeUndefined();
 });
 
 it("Image on: the button says the short name beside the family mark, its tip the full name", () => {
@@ -135,7 +133,8 @@ it("the picker says each size's GB once, on its size row, with a mark and no wor
   const sizes = html.slice(html.indexOf('class="pk-context"'));
   expect(sizes.match(/>\d+\.\d GB</g)).toHaveLength(PIXEL.sizes.length);
   expect(html.replace(/<[^>]*>/g, " "), "no word on screen; the tip and the label say it").not.toMatch(/Fits|Too big|Stops chat/);
-  expect(sizes).toContain('data-tip="Fits on the GPU"');
+  expect(sizes, "a value has no tip").not.toContain("data-tip=");
+  expect(sizes).toContain("fits the GPU");
   expect(html).not.toContain("usable");
 });
 
@@ -144,17 +143,20 @@ const warm = (guarded: boolean): GpuStatus => ({ ...methodSamples["gpu.status"].
   { label: "Qwen 3.5 9B", bytes: 7 * GIB, kind: "chat-model", protected: guarded },
   { label: "Whisper", bytes: 2 * GIB, kind: "whisper", protected: true },
 ] });
-/** The first size row's cost mark, with the warm model's occupant guarded or not. */
-const warmRow = (guarded: boolean) => {
-  setState({ image: true, pop: { id: "images", kb: false }, imagePresets: presetsOf(PIXEL), gpu: warm(guarded) });
+/** The first size row's cost mark on a card of this many GB, with a warm chat model holding most of it. */
+const warmRow = (guarded: boolean, cardGb = 16) => {
+  setState({ image: true, pop: { id: "images", kb: false }, imagePresets: presetsOf(PIXEL), gpu: { ...warm(guarded), totalBytes: cardGb * GIB } });
   const html = picker();
   return html.slice(html.indexOf('class="pk-context"')).match(/<span class="pk-cost [^"]*"[^>]*>/)?.[0] ?? "";
 };
 
-it("a warm chat model a turn answered on: the status calls it unprotected, so the size row says it stops the chat model, not Too big", () => {
-  expect(warmRow(false)).toContain('class="pk-cost spill"');
-  expect(warmRow(false)).toContain("Stops the chat model first");
-  expect(warmRow(true),"another program's model: the server will not free it either").toContain('class="pk-cost no"');
+it("sizes are judged by the card, not by what a warm chat model leaves free: it leaves the GPU before an image loads", () => {
+  for (const guarded of [false, true]) {
+    expect(warmRow(guarded)).toContain('class="pk-cost gpu"');
+    expect(warmRow(guarded)).toContain("fits the GPU");
+  }
+  expect(warmRow(false, 8), "a 9 GB size on an 8 GB card").toContain('class="pk-cost no"');
+  expect(warmRow(false, 8)).toContain("more than the GPU has");
 });
 
 it("the default ComfyUI lists is named, as the first row", () => {
@@ -198,7 +200,7 @@ it("a style's setup is listed once: in Defaults, not again in Other models", () 
 
 const NO_GPU = "Image mode needs a GPU with 4 GB.";
 it.each([
-  ["with 3 GB free", { ...methodSamples["gpu.status"].result, freeBytes: 3 * GIB, occupants: [] } as GpuStatus, "3.0 GB free"],
+  ["on a 3 GB card", { ...methodSamples["gpu.status"].result, totalBytes: 3 * GIB, freeBytes: 3 * GIB, occupants: [] } as GpuStatus, "3 GB GPU"],
 ])("%s: no default is named or marked, and the picker says why once", (_, gpu, figure) => {
   // what the server answers below 4 GB: Klein listed by its files, no tier rows, the reason
   const imagePresets: ImagePresets = { presets: [KLEIN, MOSS], readAt: 1, current: { preset: KLEIN, width: 1024, height: 1024 }, noGpu: NO_GPU };

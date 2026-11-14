@@ -585,22 +585,23 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
       const f = await fixture({ requiredBytes: undefined,
         readGpu: async () => ({ freeBytes, holders: "steam", tenants: [{ pid: 9, label: "steam", role: "occupant", usedBytes: 5 * gib }] }) });
       f.files({ flux: true }); f.choose(choice);
-      expect((await f.module.presets()).presets.map((p) => p.id), "the list the picker shows").toEqual([...PRESETS, ...cellsFor("16")].map((p) => p.id));
+      expect((await f.module.presets()).presets.map((p) => p.id), "the list the picker shows").toEqual([...PRESETS.filter((p) => p.id !== "flux2-klein-4b-compact"), ...cellsFor("16")].map((p) => p.id));
       const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
       expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "wont-fit" });
       return f.events.at(-1)?.message;
     };
-    it("Klein refused where its compact setup fits: names it, once", async () => {
+    // Klein is one row: the compact setup is not the picker's on this card, so the way out is the next listed setup that fits
+    it("Klein refused where a smaller listed setup fits: names it, once", async () => {
       expect(await refused({ preset: "flux2-klein-4b", width: 1024, height: 768 }, 7.5 * gib))
-        .toBe("The image needs 8.0 GiB and 7.5 GiB is free; steam holds 5.0 GiB, close it; FLUX.2 Klein 4B compact 1024×1024 would fit.");
+        .toBe("The image needs 8.0 GiB and 7.5 GiB is free; steam holds 5.0 GiB, close it; Z-Image Turbo int8 1024×1024 would fit.");
     });
     it("Klein refused where every smaller setup needs more than is free: offers nothing", async () => {
       expect(await refused({ preset: "flux2-klein-4b", width: 1024, height: 1024 }, 3 * gib))
         .toBe("The image needs 8.0 GiB and 3.0 GiB is free; steam holds 5.0 GiB, close it.");
     });
-    it("Klein refused with free memory exactly the compact setup's need: offers it", async () => {
+    it("Klein refused with free memory exactly a listed setup's need: offers it", async () => {
       expect(await refused({ preset: "flux2-klein-4b", width: 1024, height: 1024 }, 4 * gib))
-        .toBe("The image needs 8.0 GiB and 4.0 GiB is free; steam holds 5.0 GiB, close it; FLUX.2 Klein 4B compact 1024×1024 would fit.");
+        .toBe("The image needs 8.0 GiB and 4.0 GiB is free; steam holds 5.0 GiB, close it; MOSS-Image 1024×1024 would fit.");
     });
     it("the smallest setup refused: says what holds the memory and nothing about size", async () => {
       expect(await refused({ preset: "moss-image", width: 1024, height: 1024 }, 3 * gib))
@@ -1131,7 +1132,7 @@ describe("image presets (fake ComfyUI file lists)", () => {
     const f = await fixture();
     f.files({ flux: true });
     const shorts = (await f.module.presets()).presets.map((p) => p.short ?? "");
-    expect(shorts).toEqual(["Klein 4B", "Compact", "Z-Image", "MOSS", "General", "Faces", "Heroes", "Retro pixel", "Sprites", "Backgrounds", "Icons", "Text", "Painterly"]);
+    expect(shorts).toEqual(["Klein 4B", "Z-Image", "MOSS", "General", "Faces", "Heroes", "Retro pixel", "Sprites", "Backgrounds", "Icons", "Text", "Painterly"]);
     expect(new Set(shorts.map((s) => s.slice(0, 1).toLowerCase())).size).toBe(shorts.length);
   });
 
@@ -1149,7 +1150,7 @@ describe("image presets (fake ComfyUI file lists)", () => {
     expect(await ids(f)).toEqual([]);
     f.configure({ missingModel: false }); f.files({ noMoss: false, flux: true });
     // the General group's tier setups, then the card level's style cells in the Defaults menu's order
-    expect(await ids(f)).toEqual(["flux2-klein-4b", "flux2-klein-4b-compact", "z-image-int8", "moss-image", ...cells16]);
+    expect(await ids(f)).toEqual(["flux2-klein-4b", "z-image-int8", "moss-image", ...cells16]);
     expect(cells16.map((id) => id.split("--")[0])).toEqual(["general", "portraits", "characters", "pixel-art", "sprites", "backgrounds", "icons", "text-logos", "painterly"]);
     // Off is off: nothing is read from ComfyUI.
     f.configure({ enabled: false }); f.calls.length = 0;
@@ -1171,7 +1172,7 @@ describe("image presets (fake ComfyUI file lists)", () => {
     expect((await f.module.presets()).current).toMatchObject({ preset: { id: "z-image-int8" }, width: 1024, height: 1024 });
     const fresh = await fixture();
     fresh.configure({ answering: false });
-    expect(await fresh.module.presets()).toMatchObject({ presets: [], current: { preset: { id: general16.preset, name: "FLUX.2 Klein 4B compact general" }, width: 896, height: 896 } });
+    expect(await fresh.module.presets()).toMatchObject({ presets: [], current: { preset: { id: general16.preset, name: "FLUX.2 Klein 4B general" }, width: 896, height: 896 } });
   });
 
   it("keeps ComfyUI's last file list while it is not running, also after a restart, and never starts it to read one", async () => {
@@ -1421,7 +1422,8 @@ describe("image presets (fake ComfyUI file lists)", () => {
         // the picker's row says the same two numbers before anything is pressed
         const listed = await f.module.presets();
         expect(listed.disk).toEqual({ folder: root, freeBytes: Math.round(4.6 * GiB), picked: false });
-        expect(listed.others?.find((p) => p.id === "flux2-klein-4b-compact")?.needs).toMatchObject({ download: true, bytes: left, leftBytes: left });
+        // (Klein is one row, the full one, on a card of unknown size: the General cell runs on the same three files)
+        expect(listed.others?.find((p) => p.id === "general--r2-2a-klein-compact8")?.needs).toMatchObject({ download: true, bytes: left, leftBytes: left });
         free = 876 * GiB;
         expect((await f.module.download("flux2-klein-4b-compact")).files).toHaveLength(3);
         await vi.waitFor(() => expect(served[0]).toMatch(/^HEAD .*flux-2-klein-4b-fp8\.safetensors$/));
@@ -1443,7 +1445,8 @@ describe("image presets (fake ComfyUI file lists)", () => {
         await expect(fresh.module.download("flux2-klein-4b-compact")).rejects.toMatchObject({ code: "image-folder" });
         const picked = await mkdtemp(path.join(tmpdir(), "gates-image-picked-")); dirs.push(picked);
         fresh.pickFolder(picked);
-        expect((await fresh.module.presets()).disk).toEqual({ folder: picked, freeBytes: 10 ** 12, picked: true });
+        // a picked folder and the person's own ComfyUI: the one line its extra_model_paths.yaml needs (decision 21)
+        expect((await fresh.module.presets()).disk).toEqual({ folder: picked, freeBytes: 10 ** 12, picked: true, line: expect.stringContaining(`base_path: '${picked}'`) });
         await fresh.module.download("flux2-klein-4b-compact");
         await vi.waitFor(() => expect(fresh.downloads.at(-1)).toMatchObject({ state: "done", ended: true }));
         expect(await readdir(path.join(picked, "diffusion_models", "gates-local"))).toEqual(["flux-2-klein-4b-fp8.safetensors"]);
@@ -1919,7 +1922,8 @@ describe("the card Image mode is judged by: each tier's row by its memory, no de
     expect(listed.noGpu).toBeUndefined();
     expect(listed.slow).toBe(SLOW);
     expect([...listed.presets, ...listed.others ?? []].filter((p) => p.tier !== undefined)).toEqual([]);
-    expect(listed.presets.map((p) => p.id)).toEqual(["flux2-klein-4b", "flux2-klein-4b-compact", "z-image-int8", "moss-image", ...cellsFor("cpu").map((c) => c.id)]);
+    // Klein's one row on the CPU is the compact setup: the full one fits no card here
+    expect(listed.presets.map((p) => p.id)).toEqual(["flux2-klein-4b-compact", "z-image-int8", "moss-image", ...cellsFor("cpu").map((c) => c.id)]);
     const cpuGeneral = { preset: "general--cpu-klein-fp4-768-2", width: 768, height: 768 };
     expect(listed.current).toMatchObject({ preset: { id: cpuGeneral.preset }, width: 768, height: 768 });
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);

@@ -3,8 +3,7 @@
 // new thread starts from; on the phone, which cannot write Settings, a new thread's own pick first. The server's image.presets lists the presets ComfyUI has every file for
 // and names what a send runs now; a choice saved since that read wins, so the button follows a
 // pick at once.
-import { imageFitVerdict, type GpuStatus, type ImageChoice, type ImagePreset, type ImagePresets } from "@gates-local/contracts";
-import type { Verdict } from "./format.ts";
+import { cardBytes, type GpuStatus, type ImageChoice, type ImagePreset, type ImagePresets } from "@gates-local/contracts";
 import { type Maybe, NA, type State } from "./store.ts";
 
 export interface ImageView {
@@ -23,6 +22,17 @@ export const imageMode = (s: State): boolean => s.image && s.settings !== NA && 
 
 /** No ComfyUI answered and the app has none to start: Image mode is not reachable until one does. */
 export const imagesUnset = (s: State): boolean => s.imageStatus !== undefined && s.imageStatus !== NA && s.imageStatus.state === "missing";
+
+/**
+ * No image engine anywhere: with generation on, none answered, there is none to start and no
+ * address is set; with it off, the server's look found none. Settings then offers Set up images
+ * and no Generate images switch.
+ */
+export const noImageEngine = (s: Pick<State, "imageStatus">): boolean => {
+  const st = s.imageStatus;
+  if (st === undefined || st === NA) return false;
+  return st.state === "off" ? st.nowhere === true : st.state === "missing" && st.addressSet !== true;
+};
 
 /** The last answer, so a store selector gets the same object back until its inputs change. */
 let lastView: { presets: ImagePresets; saved: ImageChoice | undefined; view: ImageView } | undefined;
@@ -69,20 +79,12 @@ export function presetOf(s: State, id: string) {
   return [...listed?.presets ?? [], ...listed?.others ?? [], ...listed ? [listed.current.preset] : []].find((p) => p.id === id);
 }
 
-const held = (gpu: GpuStatus, keep: (o: GpuStatus["occupants"][number]) => boolean) => gpu.occupants.filter(keep).reduce((n, o) => n + o.bytes, 0);
-
 /**
- * How a job at `bytes` sits in GPU memory now, by the server's own fit (contracts/image-fit.ts):
- * ComfyUI's own resident memory is credited, and an idle chat model the app loaded is stopped
- * when that makes room (`frees`). Every byte count is the preset's estimate. Undefined
- * without a GPU reading.
+ * The card image sizes are judged by: its memory to the nearest GB (contracts/image-fit.ts), never
+ * what is free this second, since the chat model leaves the GPU before an image loads (one thing
+ * in memory at a time). A size fits when its estimate is at most this. Undefined without a
+ * reading of the card's size.
  */
-export function imageFit(bytes: number, gpu: Maybe<GpuStatus>): { readonly v: Verdict; readonly frees: boolean } | undefined {
-  if (gpu === undefined || gpu === NA || gpu.freeBytes === undefined) return undefined;
-  const credited = held(gpu, (o) => o.kind === "image");
-  const freeable = held(gpu, (o) => o.kind === "chat-model" && !o.protected);
-  const fit = imageFitVerdict({ estimateBytes: bytes, freeBytes: gpu.freeBytes, creditedBytes: credited, freeableBytes: freeable });
-  const base = { need: bytes, avail: gpu.freeBytes + credited, measured: false, chip: "", word: "", detail: "" };
-  if (fit.verdict === "refuse") return { v: { ...base, k: "no", amt: fit.shortBytes }, frees: false };
-  return { v: { ...base, k: "gpu", amt: 0 }, frees: fit.verdict === "frees" };
+export function imageCard(gpu: Maybe<GpuStatus>): number | undefined {
+  return gpu === undefined || gpu === NA || gpu.totalBytes === undefined ? undefined : cardBytes(gpu.totalBytes);
 }

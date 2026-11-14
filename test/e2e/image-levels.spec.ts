@@ -2,7 +2,7 @@
 // tier offers (its tag on the row, the tier rows first in General), Defaults' General row (the
 // style bench's winner at the card's level) and what the composer button sends unset. The levels
 // go by the card's memory, never by what is free now: a 16 GB card that another program holds
-// 11 GB of keeps the 16 GB setups, and the footer says what is free. Under 4 GB there is no
+// 11 GB of keeps the 16 GB setups, and the footer names the card. Under 4 GB there is no
 // default: the button says "Image model", no row is checked and the picker says why. On the CPU
 // the basic-PC General setup is the default and the picker says once how slow it is. The fake
 // card is 16303 MiB unless stack.gpu names another size.
@@ -38,17 +38,18 @@ async function shot(page: Page, path: string) {
   await marked.evaluateAll((els) => { for (const el of els) { (el as HTMLElement).style.outline = ""; (el as HTMLElement).style.outlineOffset = ""; } });
 }
 
-// Other models' General rows on an 8 GB card or bigger: the tier rows in tier order, then compact
-const TIERS = ["flux2-klein-4b Fast", "z-image-int8 Balanced", "moss-image Best", "flux2-klein-4b-compact"];
+// Other models' General rows on an 8 GB card or bigger: the tier rows in tier order; Klein is one
+// row (decision 14), the full setup from 8 GB up and the compact one below
+const TIERS = ["flux2-klein-4b Fast", "z-image-int8 Balanced", "moss-image Best"];
 // no tier and no style setup: General has no Defaults row
-const NONE = ["flux2-klein-4b", "flux2-klein-4b-compact", "z-image-int8", "moss-image"];
+const NONE = ["flux2-klein-4b-compact", "z-image-int8", "moss-image"];
 /** A card's size as nvidia-smi reports it (an "8 GB" card says 8188 MiB), and another program's MiB on it. */
 const LEVELS: readonly { name: string; gpu?: { other: number; card?: number }; rows: readonly string[]; button?: string; note?: string; shot?: string }[] = [
   { name: "a 16 GB card", gpu: { other: 0 }, rows: ["General: general--r2-2a-klein-compact8", ...TIERS], button: "General896×896", shot: "image-11-after-16gb.png" },
   { name: "a 16 GB card another program holds 11 GB of", gpu: { other: 11_264 }, rows: ["General: general--r2-2a-klein-compact8", ...TIERS], button: "General896×896" },
   { name: "an 8 GB card", gpu: { other: 0, card: 8188 }, rows: ["General: general--fit-8b-klein-compact8", ...TIERS], button: "General512×512", shot: "image-11-after-8gb.png" },
-  { name: "a 6 GB card", gpu: { other: 0, card: 6144 }, rows: ["General: general--fit-8b-klein-compact8", "flux2-klein-4b-compact Fast", "z-image-int8 Balanced", "moss-image Best", "flux2-klein-4b"], button: "General512×512" },
-  { name: "a 4 GB card", gpu: { other: 0, card: 4096 }, rows: ["General: general--fit-4a-klein-compact8", "flux2-klein-4b-compact Fast and balanced", "moss-image Best", "flux2-klein-4b", "z-image-int8"], button: "General512×512" },
+  { name: "a 6 GB card", gpu: { other: 0, card: 6144 }, rows: ["General: general--fit-8b-klein-compact8", "flux2-klein-4b-compact Fast", "z-image-int8 Balanced", "moss-image Best"], button: "General512×512" },
+  { name: "a 4 GB card", gpu: { other: 0, card: 4096 }, rows: ["General: general--fit-4a-klein-compact8", "flux2-klein-4b-compact Fast and balanced", "moss-image Best", "z-image-int8"], button: "General512×512" },
   { name: "a 3 GB card", gpu: { other: 0, card: 3072 }, rows: NONE, note: NO_GPU },
   { name: "the CPU", rows: ["General: general--cpu-klein-fp4-768-2", ...NONE], button: "General768×768", note: SLOW, shot: "image-11-after-cpu.png" },
 ];
@@ -80,8 +81,8 @@ for (const level of LEVELS) {
     } else {
       await expect(footer.getByRole("status")).toHaveCount(0);
       await expect(footer).not.toContainText(NO_GPU);
-      // what is free now is said as information, and on the busy card it is under a gigabyte
-      await expect(footer).toContainText((level.gpu?.other ?? 0) > 0 ? /\b0\.\d\sGB free/ : /\d+\.\d\sGB free/);
+      // the footer names the card the sizes are judged by, busy or not (decision 15)
+      await expect(footer.getByTestId("image.picker.card")).toHaveText(/^\d+\sGB GPU$/);
     }
   });
 }

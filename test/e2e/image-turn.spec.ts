@@ -214,11 +214,11 @@ test("after a restart, one chat turn on the model that stayed loaded lets the ne
   try {
     await again.call("chat.send", { threadId, content: "and again", model: "qwen3.5:9b", numCtx: 16384 });
     await replies(again, threadId, 4);
-    // Before Send the picker says what the server will do: the model the turn ran on is freed, not Too big.
+    // Before Send the picker judges by the card (decision 15): the chat model leaves first, so no size says Too big.
     await page.getByTestId("chat.composer.image").click();
     await page.locator("#modelBtn").click();
     const sizes = page.locator("#imagePicker .pk-context");
-    await expect(sizes.locator(".pk-cost.spill").first(), "the size row marks that it stops the chat model").toBeVisible();
+    await expect(sizes.locator(".pk-cost.gpu").first(), "the size row fits the card").toBeVisible();
     await expect(sizes.locator(".pk-cost.no"), "no size row says Too big for an image the server will make").toHaveCount(0);
     await page.keyboard.press("Escape");
     comfy.gpu();

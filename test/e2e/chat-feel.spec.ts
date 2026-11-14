@@ -4,7 +4,7 @@
 // the runtime needs the user, the context size inside the model picker, and
 // GPU memory under Settings > Advanced.
 import { DRIP_REPLY } from "../fake-ollama/fake-ollama.ts";
-import { decodeRequest } from "@gates-local/contracts";
+import { createClient, decodeRequest } from "@gates-local/contracts";
 import { FAKE_URL } from "./env.ts";
 import { blockPrefix, type BlockSnap } from "./block-prefix.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
@@ -122,10 +122,11 @@ test("a finished thinking row keeps its label and chevron at rest", async ({ pag
 test("composer Thinking keeps its size on hover and focus, so its neighbours never move", async ({ page, open }) => {
   await open();
   await waitReady(page);
-  await page.keyboard.press("Control+Comma");
-  await page.getByTestId("settings.nav.open-images").click();
-  await page.getByTestId("settings.images.enable").click();
-  await page.keyboard.press("Escape");
+  // no image engine answers here, so Settings offers Set up images and no switch: turn generation on directly
+  const server = new URL(page.url()).searchParams.get("server");
+  if (!server) throw new Error("No test server URL");
+  const client = createClient(new WebSocket(server));
+  try { await client.call("settings.update", { imageGen: true }); } finally { client.close(); }
   const pill = page.locator('.cf-l button[aria-label="Thinking"]');
   const label = pill.locator(".plbl");
   await expect(label).toBeHidden();

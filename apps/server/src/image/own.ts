@@ -49,6 +49,15 @@ export function extraModelPaths(folder: string): string {
   return ["gates_local:", `  base_path: ${quoted}`, ...MODEL_KINDS.map((k) => `  ${k}: ${k}`), ""].join("\n");
 }
 
+/**
+ * The same entry as one line of YAML (a flow mapping), for a person's own ComfyUI: they add it to
+ * its extra_model_paths.yaml themselves. The app never writes their file.
+ */
+export function extraModelPathsLine(folder: string): string {
+  const quoted = `'${folder.replaceAll("'", "''")}'`;
+  return `gates_local: { base_path: ${quoted}, ${MODEL_KINDS.map((k) => `${k}: ${k}`).join(", ")} }`;
+}
+
 /** A local TCP port free now, for the engine to listen on (picked once at startup). */
 export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {

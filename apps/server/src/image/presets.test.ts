@@ -11,7 +11,9 @@ import files from "./setups/files.json" with { type: "json" };
 const GIB = 1024 ** 3;
 const ids = (rows: readonly { id: string }[]) => rows.map((r) => r.id);
 const template = (name: string): unknown => JSON.parse(readFileSync(new URL(`../../test/comfy/templates/${name}.json`, import.meta.url), "utf8"));
-const GENERAL_IDS = ["flux2-klein-4b", "flux2-klein-4b-compact", "z-image-int8", "moss-image"];
+// Klein is one row: the full setup on a card of 8 GB or more, or one whose size is not known
+const GENERAL_IDS = ["flux2-klein-4b", "z-image-int8", "moss-image"];
+const APP_ROWS = PRESETS.filter((p) => p.id !== "flux2-klein-4b-compact");
 // The style bench's winners on a 16 GB card (or one whose size is not known), in the styles' order
 const KLEIN_CELLS = ["general--r2-2a-klein-compact8", "characters--klein-official4", "pixel-art--r2-1a-klein-compact8"];
 const MOSS_CELLS = ["portraits--moss-official25", "sprites--r2-1a-moss-official25", "backgrounds--r2-1b-moss-official25", "icons--r2-2a-moss-official25", "text-logos--moss-official25", "painterly--r2-2a-moss-official25"];
@@ -26,10 +28,10 @@ describe("listPresets", () => {
     const { ready, others } = listPresets(lists(KLEIN_FILES));
     // Klein with the full encoder: the plain setup and the Characters cell; every other cell needs the FP4 encoder or MOSS
     expect(ids(ready)).toEqual(["flux2-klein-4b", "characters--klein-official4"]);
-    expect(ids(others)).toEqual(["flux2-klein-4b-compact", "z-image-int8", "moss-image", ...without(CELLS, "characters--klein-official4")]);
+    expect(ids(others)).toEqual(["z-image-int8", "moss-image", ...without(CELLS, "characters--klein-official4")]);
     // the sizes are the app's own record of each file (setups/files.json)
-    expect(others[0]).toMatchObject({ needs: { files: ["qwen_3_4b_fp4_flux2.safetensors"], bytes: 3_848_213_998, download: true } });
-    expect(others[2]).toMatchObject({ needs: { files: ["moss_image_sft_int8_convrot.safetensors", "qwen3.5_9b_w4a8_gptq.safetensors"], bytes: 5_413_698_958 + 7_343_591_088, download: true } });
+    expect(others.find((p) => p.id === "general--r2-2a-klein-compact8")).toMatchObject({ needs: { files: ["qwen_3_4b_fp4_flux2.safetensors"], bytes: 3_848_213_998, download: true } });
+    expect(others[1]).toMatchObject({ needs: { files: ["moss_image_sft_int8_convrot.safetensors", "qwen3.5_9b_w4a8_gptq.safetensors"], bytes: 5_413_698_958 + 7_343_591_088, download: true } });
   });
 
   it("refuses a setup whose node class this ComfyUI does not list, and says which", () => {
@@ -37,7 +39,7 @@ describe("listPresets", () => {
     delete info["Flux2Scheduler"];
     const { ready, others } = listPresets(comfyLists(info));
     expect(ids(ready)).toEqual(["z-image-int8", "moss-image", ...MOSS_CELLS]);
-    expect(ids(others)).toEqual(["flux2-klein-4b", "flux2-klein-4b-compact", ...KLEIN_CELLS]);
+    expect(ids(others)).toEqual(["flux2-klein-4b", ...KLEIN_CELLS]);
     expect(others[0]).toMatchObject({ id: "flux2-klein-4b", why: "Needs a node this ComfyUI does not have: Flux2Scheduler (a custom node, or one from a newer ComfyUI)." });
   });
 
@@ -56,6 +58,15 @@ describe("listPresets", () => {
     expect(cells(0)).toEqual(ids(cellsFor("cpu")));
     expect(cells(0).every((id) => id.includes("--cpu-"))).toBe(true);
     expect(cells(3 * GIB)).toEqual([]);
+    // Klein's one row with both setups on disk: the full one where it fits the card, the compact one below
+    const klein = (gib: number) => ids(listPresets(all, [], gib * GIB).ready).filter((id) => id.startsWith("flux2-klein-4b"));
+    expect(klein(16)).toEqual(["flux2-klein-4b"]);
+    expect(klein(8)).toEqual(["flux2-klein-4b"]);
+    expect(klein(6)).toEqual(["flux2-klein-4b-compact"]);
+    // on the CPU there is no card to judge by: the Klein that runs is the row
+    const fullOnly = lists(KLEIN_FILES);
+    expect(ids(listPresets(fullOnly, [], 0).ready).filter((id) => id.startsWith("flux2-klein-4b"))).toEqual(["flux2-klein-4b"]);
+    expect(ids(listPresets(fullOnly, [], 6 * GIB).ready).filter((id) => id.startsWith("flux2-klein-4b"))).toEqual([]);
   });
 
   it("with the setup's one download (compact Klein), every style has a ready cell at every level; MOSS and the full encoder are offered", () => {
@@ -64,6 +75,8 @@ describe("listPresets", () => {
       const { ready, others } = listPresets(compact, [], gib * GIB);
       const cells = ready.filter((p) => p.id.includes("--"));
       expect(cells.map((c) => c.id.split("--")[0]), `${gib} GiB`).toEqual(CELLS.map((id) => id.split("--")[0]));
+      // Klein is one row, the setup on disk: the full one would be a download, and the compact one fits every card
+      expect([...ready, ...others].filter((p) => p.id.startsWith("flux2-klein-4b")).map((p) => p.id), `${gib} GiB`).toEqual(["flux2-klein-4b-compact"]);
       expect(cells.every((c) => c.id.includes("klein-compact")), `${gib} GiB`).toBe(true);
       // the level's own winner, where it is not Klein compact, is the second download
       for (const won of cellsFor(String(gib) as "16").filter((c) => !c.id.includes("klein-compact"))) {
@@ -217,7 +230,7 @@ describe("themes", () => {
   });
 
   it("the composer's short names start with letters no other setup of the app's uses", () => {
-    const firsts = PRESETS.map((p) => p.short[0]!.toLowerCase());
+    const firsts = APP_ROWS.map((p) => p.short[0]!.toLowerCase());
     expect(new Set(firsts).size).toBe(firsts.length);
   });
 });
@@ -232,7 +245,7 @@ describe("workflows ComfyUI has", () => {
 
   it("come after the app's own, ready, needing files, or refused with the reason", () => {
     const { ready, others } = listPresets(comfyLists(info), extra);
-    const own = [...PRESETS, ...cellsFor("16")];
+    const own = [...APP_ROWS, ...cellsFor("16")];
     expect(ids(ready)).toEqual([]);
     expect(ids(others.slice(0, own.length))).toEqual(ids(own));
     expect(others.slice(own.length)).toEqual([

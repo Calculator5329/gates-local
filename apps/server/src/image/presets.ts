@@ -10,7 +10,7 @@
 // bench's winner for each style at this machine's level, whose words go before the person's. The
 // setups ComfyUI has (its templates and the person's saved workflows, sources.ts) come after them,
 // and then the model files already in its folders (installed.ts).
-import type { ImageChoice, ImagePreset, Settings } from "@gates-local/contracts";
+import { cardBytes, type ImageChoice, type ImagePreset, type Settings } from "@gates-local/contracts";
 import * as Option from "effect/Option";
 import * as S from "effect/Schema";
 import { applyControls, findControls } from "./controls.ts";
@@ -41,6 +41,8 @@ export interface Preset {
   readonly measured: boolean;
   /** The picker's group: a theme for the app's own setups, where it came from for the rest. */
   readonly group: string;
+  /** The model alone, where `name` adds a style (a style cell); absent when `name` is the model. */
+  readonly model?: string;
   /** Words written around the person's prompt (a theme's wrapping). */
   readonly wrap?: { readonly prefix: string; readonly suffix: string };
   /** Where a file it loads can be downloaded from, by the name the workflow gives. */
@@ -70,11 +72,14 @@ const kleinSizes = sized(8);
 const square = [[1024, 1024], [1024, 768], [768, 1024]] as const;
 const klein4b = { family: "flux", sources: APP_FILES, measured: false } as const;
 
-/** Other models' rows from the app: the General group's tier setups (TIERS). */
+/**
+ * Other models' rows from the app: the General group's tier setups (TIERS). Klein is one row
+ * under one name: the full setup on a card of 8 GB or more, the compact one below (kleinFor).
+ */
 export const PRESETS: readonly Preset[] = [
   { ...klein4b, id: "flux2-klein-4b", name: "FLUX.2 Klein 4B", short: "Klein 4B", group: GROUPS.general, workflow: klein, sizes: kleinSizes(square) },
-  // The same model with the FP4 text encoder and 12 steps (the matrix's compact-12): for a card with under 8 GiB free.
-  { ...klein4b, id: "flux2-klein-4b-compact", name: "FLUX.2 Klein 4B compact", short: "Compact", group: GROUPS.general, workflow: kleinCompact, sizes: sized(4)(square) },
+  // The same model with the FP4 text encoder and 12 steps (the matrix's compact-12): for a card under 8 GB.
+  { ...klein4b, id: "flux2-klein-4b-compact", name: "FLUX.2 Klein 4B", short: "Klein 4B", group: GROUPS.general, workflow: kleinCompact, sizes: sized(4)(square) },
   { id: "z-image-int8", name: "Z-Image Turbo int8", short: "Z-Image", family: "zimage", group: GROUPS.general, workflow: zImage, sizes: sized(6)(square), sources: APP_FILES, measured: false },
   { id: "moss-image", name: "MOSS-Image", short: "MOSS", family: "moss", group: GROUPS.general, workflow: moss, sizes: sized(4)(square), sources: APP_FILES, measured: false },
 ];
@@ -131,11 +136,11 @@ export const NO_GPU = "Image mode needs a GPU with 4 GB.";
 export const SLOW = "No GPU: a picture takes 2 to 4 minutes.";
 
 /**
- * A card's size from nvidia-smi's total, to the nearest GB as cards are sold: 8188 MiB is an 8 GB
- * card, 16303 MiB a 16 GB one. The tiers and the default go by it, never by what is free now
- * (owner ruling 2026-11-13); the job's own fit check judges what is free when it runs.
+ * A card's size from nvidia-smi's total, to the nearest GB as cards are sold (contracts'
+ * image-fit.ts, which the picker judges sizes by). The tiers and the default go by it, never by
+ * what is free now (owner ruling 2026-11-13); the job's own fit check judges what is free when it runs.
  */
-export const cardBytes = (totalBytes: number): number => Math.round(totalBytes / GIB) * GIB;
+export { cardBytes };
 
 /**
  * The quality tiers of the owner's picks (2026-11-13): each takes the first of its setups whose
@@ -156,9 +161,26 @@ export const TIERS: readonly { readonly name: string; readonly presets: readonly
 export const MOSS_RAM = 30 * GIB;
 const mossFits = (ram: number | undefined): boolean => ram === undefined || ram >= MOSS_RAM;
 
-const firstBytes = (id: string): number => PRESETS.find((p) => p.id === id)!.sizes[0]!.bytes;
+const presetById = (id: string): Preset => PRESETS.find((p) => p.id === id)!;
+const firstBytes = (id: string): number => presetById(id).sizes[0]!.bytes;
 /** Room unknown (no reading, or a ComfyUI on another machine) fits everything; the job's own check still runs. */
 const fits = (bytes: number, room: number | undefined): boolean => room === undefined || bytes <= room;
+
+const KLEIN = ["flux2-klein-4b", "flux2-klein-4b-compact"] as const;
+/** Klein's one row for a card of `room` bytes (cardBytes): the full setup where it fits the card, else the compact one. */
+export const kleinFor = (room: number | undefined): (typeof KLEIN)[number] => fits(firstBytes(KLEIN[0]), room) ? KLEIN[0] : KLEIN[1];
+const isKlein = (id: string): boolean => (KLEIN as readonly string[]).includes(id);
+/** Two ids that are one row of the picker: the same setup, or the two Klein setups. */
+export const sameRow = (a: string, b: string): boolean => a === b || isKlein(a) && isKlein(b);
+/**
+ * Klein's one row: the card's (kleinFor), unless only the other one runs now and it fits the card
+ * too (a 16 GB card that has the compact setup's files only runs that, not a download). With no
+ * card (room 0, the CPU) there is nothing to judge by, so whichever one runs is the row.
+ */
+function kleinRow(room: number | undefined, runs: (p: Preset) => boolean): string {
+  const card = kleinFor(room), other = card === KLEIN[0] ? KLEIN[1] : KLEIN[0];
+  return !runs(presetById(card)) && runs(presetById(other)) && (room === 0 || fits(firstBytes(other), room)) ? other : card;
+}
 
 /**
  * Each tier's setup for a card of `room` bytes (cardBytes), in tier order, with its label ("Fast",
@@ -276,6 +298,7 @@ function judge(preset: Preset, lists: ComfyLists): { graph: ApiGraph; missing: G
 
 const row = (p: Preset): ImagePreset => ({
   id: p.id, name: p.name, short: p.short, family: p.family, group: p.group, measured: p.measured, sizes: p.sizes.map((s) => ({ ...s })),
+  ...p.model === undefined ? {} : { model: p.model },
   ...(p as Partial<StyleCell>).style === undefined ? {} : { style: (p as StyleCell).style },
 });
 
@@ -297,7 +320,8 @@ function needs(preset: Preset, missing: readonly GraphFile[]): NonNullable<Image
 }
 
 /**
- * Every setup as the picker lists it: the ready ones, and the rest with what stops them. The style
+ * Every setup as the picker lists it: the ready ones, and the rest with what stops them. Klein is
+ * one row, the card's (kleinRow). The style
  * cells are the ones of the level a card of `room` bytes runs at (levelOf; unknown: the top level).
  * With `ram` bytes of system memory under MOSS_RAM, a MOSS cell is listed without its style (the
  * picker shows it under Other models) and its style's compact Klein cell takes its place.
@@ -309,7 +333,8 @@ export function listPresets(lists: ComfyLists, extra: readonly Preset[] = [], ro
   const runs = (p: Preset) => { try { return judge(p, lists).missing.length === 0; } catch { return false; } };
   // too little memory for MOSS: its cell's style goes to the compact Klein cell, listed first
   const unstyled = new Set<Preset>(mossFits(ram) || level === undefined ? [] : cellsFor(level).filter((c) => c.family === "moss" && compactStandIn(c, level) !== undefined));
-  const list = [...PRESETS, ...cellsFor(level), ...extra].flatMap((p) => unstyled.has(p) ? [compactStandIn(p as StyleCell, level!)!, p] : [p]);
+  const kleinId = kleinRow(room, runs);
+  const list = [...PRESETS.filter((p) => !isKlein(p.id) || p.id === kleinId), ...cellsFor(level), ...extra].flatMap((p) => unstyled.has(p) ? [compactStandIn(p as StyleCell, level!)!, p] : [p]);
   const listed = (p: Preset): ImagePreset => { const r = row(p); if (!unstyled.has(p)) return r; const { style: _, ...rest } = r; return rest; };
   for (const p of list) {
     try {
@@ -328,6 +353,20 @@ export function listPresets(lists: ComfyLists, extra: readonly Preset[] = [], ro
     }
   }
   return { ready, others };
+}
+
+/**
+ * One setup judged as listPresets judges it, whether this card lists it or not: the setup's one
+ * download fetches the compact Klein on any card, where the picker's one Klein row is the full one.
+ */
+export function judgeRow(lists: ComfyLists, p: Preset): ImagePreset {
+  try {
+    const { missing } = judge(p, lists);
+    return missing.length === 0 ? row(p) : { ...row(p), needs: needs(p, missing) };
+  } catch (error) {
+    if (!(error instanceof WorkflowRefusal)) throw error;
+    return { ...row(p), why: error.message };
+  }
 }
 
 /** The presets ComfyUI has every class and file for, as the picker shows them. */

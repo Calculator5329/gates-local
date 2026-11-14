@@ -245,8 +245,9 @@ const SETTINGS_PAGES: readonly (readonly [string, string, ((page: Page) => Promi
     "image-generation-on",
     "Image generation",
     async (p) => {
-      await p.getByTestId("settings.images.enable").click();
-      await expect(p.locator(".srow", { hasText: "Not connected" })).toBeVisible();
+      // nothing answers at this address and the app has no engine: Set up images, no switch
+      await expect(p.getByText("Set up images").first()).toBeVisible();
+      await expect(p.getByTestId("settings.images.enable")).toHaveCount(0);
     },
   ],
   ["runtime", "Runtime"],

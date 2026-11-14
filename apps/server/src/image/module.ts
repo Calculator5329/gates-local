@@ -19,9 +19,9 @@ import type { ThreadStore } from "../threads/store.ts";
 import { createComfyClient, type ComfyClientDeps } from "./client.ts";
 import { downloadFile, haveFile, partBytes, sizeOf, volumeFree, volumeOf, type DownloadOptions } from "./download.ts";
 import { isLocalComfy } from "./installed.ts";
-import { appPreset, cardBytes, DEFAULT_CHOICE, defaultChoice, describeChoice, isDefaultChoice, listPresets, MIN_ROOM, NO_GPU, presetFiles, resolveChoice, SLOW, smallerFit, tiersFor, workflowPreset, type ComfyLists, type KnownWorkflow, type Preset } from "./presets.ts";
+import { appPreset, cardBytes, DEFAULT_CHOICE, defaultChoice, describeChoice, isDefaultChoice, judgeRow, listPresets, MIN_ROOM, NO_GPU, presetFiles, resolveChoice, sameRow, SLOW, smallerFit, tiersFor, workflowPreset, type ComfyLists, type KnownWorkflow, type Preset } from "./presets.ts";
 import { createComfyService, type ComfyService } from "./service.ts";
-import { MODEL_KINDS, type OwnComfy } from "./own.ts";
+import { extraModelPathsLine, MODEL_KINDS, type OwnComfy } from "./own.ts";
 
 /** The deepest folder every one of `dirs` is in (the first itself, when there is one). */
 export function sharedFolder(dirs: readonly string[]): string {
@@ -379,9 +379,20 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     }); }, deps.idleMs ?? 300_000);
     idleTimer.unref();
   };
+  /**
+   * With image generation off: is there no engine anywhere? None of the app's, no address set, no
+   * service to start, and nothing answering at the default address. Unsure is never "nowhere".
+   */
+  const nowhere = async (cfg: ReturnType<typeof config>): Promise<boolean> => {
+    if (cfg.addressSet || deps.own?.installed() === true) return false;
+    try {
+      if (cfg.managed && (await serviceAt(cfg.baseUrl).inspect()).present) return false;
+      return !await client(cfg.baseUrl).healthy();
+    } catch { return false; }
+  };
   const discover = async (): Promise<ImageStatus> => {
     const cfg = config();
-    if (!cfg.enabled) return update({ state: "off", owner: owned ? "app" : "none" });
+    if (!cfg.enabled) return update({ state: "off", owner: owned ? "app" : "none", ...await nowhere(cfg) ? { nowhere: true } : {} });
     if (jobs.size > 0) return status;
     if (await client(cfg.baseUrl).healthy()) {
       if (jobs.size > 0) return status;
@@ -524,7 +535,9 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     if (place === undefined) return undefined;
     if (place.root === undefined) return { picked: place.picked };
     const free = await freeAt(place.root).catch(() => undefined);
-    return { folder: place.root, ...free === undefined ? {} : { freeBytes: free }, picked: place.picked };
+    // the app's own engine is started reading a picked folder; the person's own ComfyUI is told by them
+    const line = place.picked && serviceAt(cfg.baseUrl) !== deps.own ? { line: extraModelPathsLine(place.root) } : {};
+    return { folder: place.root, ...free === undefined ? {} : { freeBytes: free }, picked: place.picked, ...line };
   };
   /** One file of a download's plan: its address, and its folder here. */
   interface Planned { readonly name: string; readonly url: string; readonly dir: string; readonly sha256?: string; readonly bytes?: number }
@@ -650,14 +663,18 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       if (last === undefined) return { presets: [], current: currentChoice(), ...roomWords(room), ...onDisk };
       const { ready, others } = listPresets(last, extras(), room, lastRam);
       const tiers = tiersFor(room);
-      const tag = <T extends { id: string }>(p: T): T => { const t = tiers.find((x) => x.preset === p.id); return t === undefined ? p : { ...p, tier: t.tier }; };
+      const tag = <T extends { id: string }>(p: T): T => { const t = tiers.find((x) => sameRow(x.preset, p.id)); return t === undefined ? p : { ...p, tier: t.tier }; };
       const download = lastDownload?.ended === true ? undefined : lastDownload;
       const counted = await Promise.all(others.map(async (p) => {
         if (p.needs?.download !== true) return p;
         const left = await leftToFetch(p.id, p.needs.files, cfg);
         return left === undefined ? p : { ...p, needs: { ...p.needs, leftBytes: left } };
       }));
-      return { presets: ready.map(tag), ...counted.length > 0 ? { others: counted.map(tag) } : {}, readAt: last.readAt, current: currentChoice(), ...roomWords(room), ...download === undefined ? {} : { download }, ...onDisk };
+      // a pick of the Klein setup this card does not list runs as the one it lists: Klein is one row
+      const chosen = currentChoice();
+      const row = ready.find((p) => p.id !== chosen.preset.id && sameRow(p.id, chosen.preset.id) && p.sizes.some((z) => z.width === chosen.width && z.height === chosen.height));
+      const current = row === undefined ? chosen : { ...chosen, preset: row };
+      return { presets: ready.map(tag), ...counted.length > 0 ? { others: counted.map(tag) } : {}, readAt: last.readAt, current,...roomWords(room), ...download === undefined ? {} : { download }, ...onDisk };
     },
     async start() {
       if (closed) throw imageError("shutting-down", "Image generation is shutting down.");
@@ -960,9 +977,11 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     if (!isLocalComfy(cfg.baseUrl)) throw imageError("image-download", "Start ComfyUI on this computer first: downloads go into its model folders.");
     await module.presets();
     const last = knownFiles();
-    const row = last && listPresets(last, extras(), lastRoom, lastRam).others.find((p) => p.id === id);
     const preset = appPreset(id) ?? extras().find((p) => p.id === id);
     if (preset === undefined) throw imageError("image-model", `There is no image setup ${id}.`);
+    // a setup this card does not list (the other Klein: the setup's download) is judged on its own
+    const listed = last && listPresets(last, extras(), lastRoom, lastRam);
+    const row = last && listed && ([...listed.ready, ...listed.others].find((p) => p.id === id) ?? (appPreset(id) === undefined ? undefined : judgeRow(last, preset)));
     if (row?.why !== undefined) throw imageError("image-model", `${preset.name}: ${row.why}`);
     // never read from this ComfyUI: every file the setup loads (those already in the folder are passed over below)
     const names = last === undefined ? [...new Set(presetFiles(preset))] : row?.needs?.files ?? [];

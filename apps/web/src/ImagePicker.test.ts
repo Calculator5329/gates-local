@@ -24,11 +24,11 @@ vi.mock("./Sidebar.tsx", () => ({ focusComposer: () => undefined }));
 vi.mock("./icons.tsx", () => ({ Icon: () => null }));
 vi.mock("./ImageMark.tsx", () => ({ ImageMark: () => null }));
 vi.mock("./picker-models.ts", () => ({ memoryRuler: () => undefined }));
-vi.mock("./image-choice.ts", () => ({ chosenImage: () => undefined, imageFit: () => undefined, sizeLabel: (w: number, h: number) => `${w}×${h}` }));
+vi.mock("./image-choice.ts", () => ({ chosenImage: () => undefined, imageCard: (gpu?: { totalBytes?: number }) => gpu?.totalBytes, sizeLabel: (w: number, h: number) => `${w}×${h}` }));
 vi.mock("./ui.tsx", () => ({ PHONE: "", closePop: () => undefined, closeTip: () => undefined, isTouch: () => false, tabStops: () => [], useMedia: () => false }));
 
 const { ImagePicker, middle, needsText } = await import("./ImagePicker.tsx");
-const { gb, timeLeft } = await import("./format.ts");
+const { cardGb, gb, timeLeft } = await import("./format.ts");
 const GIB = 1024 ** 3;
 
 type Node = ReactElement<Record<string, unknown>>;
@@ -99,7 +99,7 @@ it("WIN-SETUP-01: before any download the disk row says where the files go, what
   const shown = row0.all.find((n) => n.props["data-testid"] === "image.picker.disk-folder")!;
   expect(text(shown)).toBe(middle(folder));
   expect(text(shown).length).toBeLessThan(folder.length);
-  expect(shown.props["data-tipt"]).toBe(folder);
+  expect(shown.props["data-tipt"], "a value has no tip").toBeUndefined();
   expect(text(row0.node)).toContain(`${gb(left)} to fetch · ${gb(4.6 * GIB)} free on disk`);
   expect(row0.all.find((n) => n.props["data-testid"] === "image.picker.disk-free")?.props["className"]).toBe("short");
   expect(labels(row0.all)).toContain("Change the download folder");
@@ -108,13 +108,14 @@ it("WIN-SETUP-01: before any download the disk row says where the files go, what
   expect(disk().all.find((n) => n.props["data-testid"] === "image.picker.disk-free")?.props["className"]).toBeUndefined();
 });
 
-it("with no free figure for the folder, what is left to fetch ends the disk row with no stray dot, and the GPU figure shares the one footer row", () => {
+it("with no free figure for the folder, what is left to fetch ends the disk row with no stray dot, and the card's size shares the one footer row", () => {
   const klein = { ...others[0]!, needs: { files: KLEIN_FILES, download: true, bytes: 8 * GIB, leftBytes: 8 * GIB } };
-  picker({ imagePresets: { presets: [], others: [klein], readAt: 1, disk: { picked: false } }, gpu: { vendor: "nvidia", freeBytes: 12 * GIB } });
+  picker({ imagePresets: { presets: [], others: [klein], readAt: 1, disk: { picked: false } }, gpu: { vendor: "nvidia", totalBytes: 16 * GIB, freeBytes: 2 * GIB } });
   expect(text(disk().node)).toBe(`No folder yet${gb(8 * GIB)} to fetch`);
   const footer = tree().find((n) => n.type === "footer")!;
   expect(nodes(footer.props["children"]).some((n) => n.props["data-testid"] === "image.picker.disk")).toBe(true);
-  expect(text(footer)).toContain(`${gb(12 * GIB)} free`);
+  expect(text(footer)).toContain(`${cardGb(16 * GIB)} GPU`);
+  expect(text(footer), "the card, not what is free this second").not.toContain("free");
 });
 
 it("a row with its Download button says the size alone; without the button, or with no size known, the words say what it needs", () => {

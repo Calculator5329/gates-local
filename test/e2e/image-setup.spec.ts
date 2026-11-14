@@ -48,7 +48,7 @@ async function openPopUp(page: Page, open: (hash?: string) => Promise<void>, car
 test("one click sets up images: the pop-up shows the one download, Set up images fetches the engine and the model, and Image turns on", async ({ page, open }, info) => {
   const { imageBtn, pop } = await openPopUp(page, open);
   const plan = pop.locator("#imageSetupPlan");
-  await expect(plan).toContainText("FLUX.2 Klein 4B compact");
+  await expect(plan).toContainText("FLUX.2 Klein 4B");
   await expect(plan).toContainText("With the image engine (ComfyUI 0.0.0-test)");
   const setUp = pop.getByTestId("image.unset.set-up");
   await expect(setUp).toBeVisible();

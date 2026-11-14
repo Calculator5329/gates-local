@@ -4,16 +4,17 @@
 // for what is rare or destructive. A control the server cannot back is left
 // out instead of being shown switched off.
 import { type CSSProperties, useEffect, useRef, useState } from "react";
-import type { Accent, ImageStatus, ShellStatus, Source, Theme } from "@gates-local/contracts";
+import type { Accent, ImageSetupProgress, ImageStatus, ShellStatus, Source, Theme } from "@gates-local/contracts";
 import { portOf, rtInfo, rtOf } from "./Banner.tsx";
 import { GpuMemory } from "./FitPanel.tsx";
-import { count, folderWords, noGpu, sourceDetail } from "./format.ts";
+import { count, folderWords, gb, noGpu, sourceDetail } from "./format.ts";
+import { noImageEngine } from "./image-choice.ts";
 import { handleKey } from "./handles.ts";
 import { Icon, type IconId } from "./icons.tsx";
 import LibraryImports from "./LibraryImports.tsx";
 import { ModelsPage } from "./Models.tsx";
 import { sizeText } from "./models-rules.ts";
-import { addSource, canOpenFolder, checkImageStatus, checkShell, dataFolder, folderDialog, openDataFolder, openSettings, refreshSource, removeSource, resetSettings, saveImageFolder, settingsReads, updateSettings } from "./session.ts";
+import { addSource, canOpenFolder, checkImageStatus, checkShell, dataFolder, folderDialog, loadImageSetup, openDataFolder, openSettings, refreshSource, removeSource, resetSettings, saveImageFolder, settingsReads, startImageSetup, updateSettings } from "./session.ts";
 import { NA, setState, useStore } from "./store.ts";
 import { CopyButton, PathText, Status } from "./settings-controls.tsx";
 import { type LibraryTool, libraryToolCanUse } from "./settings-rules.ts";
@@ -352,6 +353,57 @@ const SetupLink = () => (
   </a>
 );
 
+const SETUP_STEP: Record<ImageSetupProgress["step"], string> = {
+  engine: "Downloading the image engine",
+  starting: "Starting the image engine",
+  model: "Downloading the image model",
+  done: "Images are set up",
+  error: "Setup stopped",
+};
+
+/**
+ * No image engine anywhere: in place of the Generate images switch, the one download that sets
+ * images up here (the app's own ComfyUI and the recommended model for this card), its size, and
+ * Set up images, which turns image generation on (the download needs it) and starts. Where the
+ * app cannot set images up here, the one sentence why and the guide for a ComfyUI of one's own.
+ */
+function ImageSetUp() {
+  const setup = useStore((s) => s.imageSetup);
+  const canSetUp = useStore((s) => s.unavailable["image.setup"] !== true);
+  const [err, run] = useAct();
+  useEffect(() => { void loadImageSetup(); }, []);
+  if (setup?.why !== undefined || !canSetUp) {
+    return (
+      <Row label="Set up images" desc={setup?.why}>
+        <SetupLink />
+      </Row>
+    );
+  }
+  const progress = setup?.progress;
+  const running = progress !== undefined && progress.step !== "done" && progress.step !== "error";
+  const total = setup === undefined ? undefined : (setup.engine !== undefined && !setup.engine.installed ? setup.engine.bytes : 0) + (setup.model?.bytes ?? 0);
+  const short = setup?.freeBytes !== undefined && setup.needBytes !== undefined && setup.freeBytes < setup.needBytes;
+  // one grey line, the most pressing: the step while it runs, a drive too full, how slow the processor is
+  const desc = running || progress?.step === "error" ? SETUP_STEP[progress.step]
+    : short ? `Needs ${gb(setup.needBytes!)} free; ${gb(setup.freeBytes!)} is free.`
+    : setup?.cpu !== undefined ? `No GPU: a picture takes ${Math.round(setup.cpu.low / 60)} to ${Math.round(setup.cpu.high / 60)} minutes.`
+    : undefined;
+  const go = async () => {
+    if (await run(updateSettings({ imageGen: true }))) await run(startImageSetup());
+  };
+  return (
+    <Row label={setup?.model?.name ?? <Skel w="9em" />} desc={desc} err={err ?? (progress?.step === "error" ? progress.message ?? null : null)} busy={setup === undefined}>
+      <span className="mono" data-testid="settings.images.setup-size">{total === undefined ? <Skel w="4em" /> : running ? `${gb(progress.completedBytes)} of ${gb(total)}` : gb(total)}</span>
+      <button type="button" className="btn" data-testid="settings.images.set-up" disabled={setup === undefined || running || short} onClick={() => void go()}>
+        <span className="steady">
+          <span aria-hidden={running}>{progress?.step === "error" ? "Try again" : "Set up images"}</span>
+          <span aria-hidden={!running}>Setting up…</span>
+        </span>
+      </button>
+    </Row>
+  );
+}
+
 /**
  * ComfyUI's state in words, for this page's status row and the Tools row. Three cases the
  * person can tell apart (WIN-MEM-04): no engine known (Not connected), an address they set that
@@ -404,6 +456,7 @@ function Images() {
   const [testing, setTesting] = useState(false);
   const [genErr, runGen] = useAct();
   const [urlErr, runUrl] = useAct();
+  const none = useStore(noImageEngine);
   const on = settings !== NA && settings?.imageGen === true;
   const comfy = settings === NA ? undefined : settings?.comfyUrl;
   const address = (status !== undefined && status !== NA ? status.baseUrl : undefined) ?? comfy ?? "http://127.0.0.1:8188";
@@ -419,36 +472,44 @@ function Images() {
     if (await save()) await runUrl(checkImageStatus());
     setTesting(false);
   };
+  const addressRow = locked ? null : (
+    <Row label="ComfyUI address" err={urlErr}>
+      <input className="inp" data-testid="settings.images.address" aria-label="ComfyUI address" placeholder="http://127.0.0.1:8188" value={url ?? comfy ?? ""} onChange={(e) => setUrl(e.target.value)} onBlur={() => void save()} />
+      <button type="button" className="btn outline" data-testid="settings.images.test-connection" disabled={testing} onClick={() => void test()}>
+        <span className="steady">
+          <span aria-hidden={testing}>Test connection</span>
+          <span aria-hidden={!testing}>Testing…</span>
+        </span>
+      </button>
+    </Row>
+  );
+  // No engine anywhere: no switch to a thing that cannot work, the set-up in its place; a ComfyUI
+  // of the person's own elsewhere is still one address away.
+  if (none && !locked && settings !== NA && settings !== undefined) {
+    return (
+      <>
+        <Head title="Image generation" />
+        <Grp>
+          <ImageSetUp />
+        </Grp>
+        <Grp title="Connection">{addressRow}</Grp>
+      </>
+    );
+  }
   return (
     <>
       <Head title="Image generation" />
       {settings === NA || settings === undefined ? null : (
         <Grp>
-          <Row label="Generate images" desc={locked ? `${on ? "On" : "Off"}. ${COMPUTER_ONLY}` : "The chat model unloads while an image renders."} tip="Images are made on this computer. Turn Image on in a chat's message box." err={genErr}>
+          <Row label="Generate images" desc={locked ? `${on ? "On" : "Off"}. ${COMPUTER_ONLY}` : "The chat model unloads while an image renders."} err={genErr}>
             {locked ? null : <button type="button" className="switch" role="switch" data-testid="settings.images.enable" aria-checked={on} aria-label="Generate images" onClick={() => void runGen(updateSettings({ imageGen: !on }))} />}
           </Row>
-          {/* an address set is the person's own ComfyUI: nothing to install */}
-          {comfy === undefined ? (
-            <Row label="Set up ComfyUI">
-              <SetupLink />
-            </Row>
-          ) : null}
         </Grp>
       )}
       {on ? (
         <Grp title="Connection">
           <ImageState address={address} />
-          {locked ? null : (
-            <Row label="ComfyUI address" err={urlErr}>
-              <input className="inp" data-testid="settings.images.address" aria-label="ComfyUI address" placeholder="http://127.0.0.1:8188" value={url ?? comfy ?? ""} onChange={(e) => setUrl(e.target.value)} onBlur={() => void save()} />
-              <button type="button" className="btn outline" data-testid="settings.images.test-connection" disabled={testing} onClick={() => void test()}>
-                <span className="steady">
-                  <span aria-hidden={testing}>Test connection</span>
-                  <span aria-hidden={!testing}>Testing…</span>
-                </span>
-              </button>
-            </Row>
-          )}
+          {addressRow}
           {locked ? null : <ImageFolder />}
         </Grp>
       ) : null}
@@ -470,14 +531,22 @@ function ImageFolder() {
   const dialog = folderDialog();
   const save = async (folder: string | null) => { if (await run(saveImageFolder(folder))) setValue(null); };
   return (
-    <Row label="Download folder" desc="New downloads go here; nothing downloaded moves." err={err}>
-      <input className="inp" data-testid="settings.images.folder" aria-label="Image download folder" placeholder={disk?.picked === false && disk.folder !== undefined ? disk.folder : "ComfyUI's model folders"} spellCheck={false} value={value ?? saved ?? ""} onChange={(e) => setValue(e.target.value)} onBlur={() => { if (value !== null) void save(value.trim() === "" ? null : value.trim()); }} />
-      {dialog === undefined ? null : (
-        <button type="button" className="btn outline" data-testid="settings.images.choose-folder" aria-label="Choose the download folder" data-tip="Choose folder" onClick={() => void dialog(saved ?? disk?.folder).then((picked) => picked === null ? undefined : save(picked)).catch(() => undefined)}>
-          <Icon id="folder" />
-        </button>
+    <>
+      <Row label="Download folder" desc="New downloads go here; nothing downloaded moves." err={err}>
+        <input className="inp" data-testid="settings.images.folder" aria-label="Image download folder" placeholder={disk?.picked === false && disk.folder !== undefined ? disk.folder : "ComfyUI's model folders"} spellCheck={false} value={value ?? saved ?? ""} onChange={(e) => setValue(e.target.value)} onBlur={() => { if (value !== null) void save(value.trim() === "" ? null : value.trim()); }} />
+        {dialog === undefined ? null : (
+          <button type="button" className="btn outline" data-testid="settings.images.choose-folder" aria-label="Choose the download folder" data-tip="Choose folder" onClick={() => void dialog(saved ?? disk?.folder).then((picked) => picked === null ? undefined : save(picked)).catch(() => undefined)}>
+            <Icon id="folder" />
+          </button>
+        )}
+      </Row>
+      {/* a picked folder and the person's own ComfyUI: the line that makes it read the folder; the app never writes their file */}
+      {disk?.line === undefined ? null : (
+        <Row label="Add to extra_model_paths.yaml" desc={<code className="mono yaml-line" data-testid="settings.images.folder-line">{disk.line}</code>}>
+          <CopyButton text={disk.line} label="Copy the line" handle="image-folder-line" />
+        </Row>
       )}
-    </Row>
+    </>
   );
 }
 

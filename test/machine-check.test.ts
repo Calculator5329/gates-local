@@ -8,7 +8,8 @@ import { advise, formatReport, type GpuReading, type MachineReadings, readGpuRea
 
 const GIB = 1024 ** 3;
 const KLEIN = { tier: "Fast", name: "FLUX.2 Klein 4B", files: ["flux-2-klein-4b-fp8.safetensors", "qwen_3_4b.safetensors", "flux2-vae.safetensors"] };
-const COMPACT = { tier: "Fast", name: "FLUX.2 Klein 4B compact", files: ["flux-2-klein-4b-fp8.safetensors", "qwen_3_4b_fp4_flux2.safetensors", "flux2-vae.safetensors"] };
+// Klein is one name: the app picks the full or compact setup by the card
+const COMPACT = { tier: "Fast", name: "FLUX.2 Klein 4B", files: ["flux-2-klein-4b-fp8.safetensors", "qwen_3_4b_fp4_flux2.safetensors", "flux2-vae.safetensors"] };
 const Z_IMAGE = { tier: "Balanced", name: "Z-Image Turbo int8", files: ["qwen_3_4b_fp8_mixed.safetensors", "ae.safetensors", "z_image_turbo_int8_convrot.safetensors"] };
 const MOSS = { tier: "Best", name: "MOSS-Image", files: ["moss_image_sft_int8_convrot.safetensors", "qwen3.5_9b_w4a8_gptq.safetensors", "flux2-vae.safetensors"] };
 const root = path.resolve(import.meta.dirname, "..");

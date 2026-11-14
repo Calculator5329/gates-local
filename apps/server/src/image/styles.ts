@@ -47,10 +47,11 @@ export type Style = keyof typeof STYLES;
  * The models a cell runs on. klein: FLUX.2 Klein 4B with the compact FP4 text encoder, which ran
  * under 4 GiB in the GPU matrix; klein-full: with the full encoder, under 8; moss: MOSS-Image
  * int8, under 4; cpu: Klein with the FP4 encoder and its weights kept in fp8 (the basic-PC
- * finalists). The memory is a cap the matrix ran under, never a measured peak.
+ * finalists). The memory is a cap the matrix ran under, never a measured peak. Klein is one name
+ * whichever encoder a cell runs: the app picks it by the card, the person never does.
  */
 const MODELS = {
-  klein: { name: "FLUX.2 Klein 4B compact", family: "flux", graph: kleinStyle, encoder: "qwen_3_4b_fp4_flux2.safetensors", gib: 4 },
+  klein: { name: "FLUX.2 Klein 4B", family: "flux", graph: kleinStyle, encoder: "qwen_3_4b_fp4_flux2.safetensors", gib: 4 },
   "klein-full": { name: "FLUX.2 Klein 4B", family: "flux", graph: kleinStyle, encoder: undefined, gib: 8 },
   moss: { name: "MOSS-Image", family: "moss", graph: moss, encoder: undefined, gib: 4 },
   cpu: { name: "FLUX.2 Klein 4B", where: " on the CPU", family: "flux", graph: kleinStyle, encoder: "qwen_3_4b_fp4_flux2.safetensors", gib: 4, dtype: "fp8_e4m3fn" },
@@ -165,6 +166,7 @@ export const STYLE_CELLS: readonly StyleCell[] = RECIPES.map((r) => {
   return {
     id: `${r.style}--${r.approach}`,
     name: `${model.name} ${style.word}${"where" in model ? model.where : ""}`,
+    model: model.name,
     short: style.short,
     family: model.family,
     group: style.group,

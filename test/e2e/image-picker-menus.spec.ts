@@ -109,7 +109,8 @@ test("(b) a Defaults row is the style's name alone, its setup in the size pane o
   await expect(general).toHaveAttribute("data-preset", "general--r2-2a-klein-compact8");
   await expect(general).toHaveAttribute("aria-selected", "true");
   await general.hover();
-  await expect(picker.locator(".pk-context-head")).toContainText("FLUX.2 Klein 4B compact general");
+  // the sizes head names the model only (decision 16): the row already says the style
+  await expect(picker.getByTestId("image.picker.model")).toHaveText("FLUX.2 Klein 4B");
   // the pointer stays on General past the tooltip delay: the shot shows whether one comes up
   await page.waitForTimeout(900);
   await page.screenshot({ path: info.outputPath("finding-15.png"), animations: "disabled" });
@@ -117,15 +118,15 @@ test("(b) a Defaults row is the style's name alone, its setup in the size pane o
   await expect(page.locator("#tip")).not.toBeVisible();
   const pixel = defaults.locator('.pk-r[data-preset="pixel-art--r2-1a-klein-compact8"]');
   await pixel.hover();
-  await expect(picker.locator(".pk-context-head")).toContainText("FLUX.2 Klein 4B compact pixel art");
+  await expect(picker.getByTestId("image.picker.model")).toHaveText("FLUX.2 Klein 4B");
 
   // Other models: the General tier setups, marked and tagged as before; no style repeats
   await picker.getByTestId("image.picker.other").click();
   const other = picker.getByTestId("image.picker.other-list");
   expect(await other.locator("[role=group]").evaluateAll((gs) => gs.map((g) => [g.getAttribute("aria-label"), ...[...g.querySelectorAll("[data-preset]")].map((r) => r.getAttribute("data-preset"))]))).toEqual([
-    ["General", "flux2-klein-4b", "z-image-int8", "moss-image", "flux2-klein-4b-compact"],
+    ["General", "flux2-klein-4b", "z-image-int8", "moss-image"],
   ]);
-  await expect(other.locator(".pk-r .maker-mark")).toHaveCount(4);
+  await expect(other.locator(".pk-r .maker-mark")).toHaveCount(3);
   // a pick from Other models runs that setup, and the picker opens on its menu next time
   await other.locator('.pk-r[data-preset="moss-image"] .pk-select').click();
   await expect(picker).toBeHidden();
@@ -136,33 +137,30 @@ test("(b) a Defaults row is the style's name alone, its setup in the size pane o
 });
 
 // Guards the owner's report (c): every size said the same number and a bar was green that did not fit.
-test("(c) with 3.0 GB free every size of an 8 GB setup is red and says Too big, the number is said once, and the server refuses it the same way", async ({ page, open }, info) => {
+// Decision 15: sizes are judged by the card ("the measure for a model is not what is available now
+// its based on the ram in the card"); only the job, after the chat model has left, checks what is free.
+test("(c) with 3.0 GB free on the 16 GB card every size of an 8 GB setup fits the card, the number is said once, and the job still refuses for what another program holds", async ({ page, open }, info) => {
   // Klein's files alone: the General style setup needs the FP4 encoder, so the default is Klein, 8 GB at three sizes
   const picker = await openPicker(page, open, THREE_GB_FREE);
-  await expect(picker.locator(".pk-bottom")).toContainText(/3\.0\sGB free/);
+  await expect(picker.getByTestId("image.picker.card")).toHaveText(/^16\sGB GPU$/);
+  await expect(picker.locator(".pk-bottom"), "the card, not what is free this second").not.toContainText(/GB free\b(?! on disk)/);
   const sizes = picker.locator(".pk-context");
   await shot(page, info, "finding-c.png", picker.locator(".pk-context, .pk-bottom"));
-  await expect(page.locator("#modelBtn"), "the card's tier still picks Klein; free memory is information").toContainText("Klein 4B");
+  await expect(page.locator("#modelBtn"), "the card's tier picks Klein").toContainText("Klein 4B");
   const rows = sizes.locator(".pk-ctx-row");
   await expect(rows).toHaveCount(3);
   for (const row of await rows.all()) {
-    await expect(row.locator(".pk-cost")).toHaveClass(/\bno\b/);
-    await expect(row).toHaveAttribute("data-tip", /^Too big: \d+\.\d\sGB short$/);
-    await expect(row.locator(".pk-cost")).toHaveAttribute("aria-label", /^8\.0\sGB estimated; Too big/);
+    await expect(row.locator(".pk-cost")).toHaveClass(/\bgpu\b/);
+    await expect(row).not.toHaveAttribute("data-tip");
+    await expect(row.locator(".pk-cost")).toHaveAttribute("aria-label", /^8\.0\sGB estimated; fits the GPU$/);
   }
-  await expect(sizes.locator(".pk-cost.gpu, .pk-cost.held"), "no size is shown as fitting").toHaveCount(0);
-  // no green on any bar: the filled part paints red
-  const red = await paint(page, "--red"), green = await paint(page, "--green");
-  for (const fill of await sizes.locator(".pk-cost-fill").all()) {
-    const c = await fill.evaluate((el) => getComputedStyle(el).backgroundColor);
-    expect(c).not.toBe(green);
-    expect(c).toBe(red);
-  }
+  const green = await paint(page, "--green");
+  for (const fill of await sizes.locator(".pk-cost-fill").all()) expect(await fill.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(green);
   // the same 8.0 GB at every size is said once, in the head
   expect(((await sizes.innerText()).match(/8\.0\sGB/g) ?? []).length).toBe(1);
   await expect(picker.locator(".pk-context-head")).toContainText(/8\.0\sGB/);
 
-  // the server's answer is the same function's: a send at this size is refused for memory
+  // the job's own check after the handoff: another program holds the memory, so a send is refused
   await page.keyboard.press("Escape");
   await sendMessage(page, "a tree");
   await expect(page.locator("[data-image-job]")).toHaveAttribute("data-fit", "refuse", { timeout: 15_000 });
@@ -176,7 +174,8 @@ test("(c) with room free the same sizes are green and fit", async ({ page, open 
   await expect(sizes.locator(".pk-cost.gpu")).toHaveCount(3);
   const green = await paint(page, "--green");
   for (const fill of await sizes.locator(".pk-cost-fill").all()) expect(await fill.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(green);
-  for (const row of await sizes.locator(".pk-ctx-row").all()) await expect(row).toHaveAttribute("data-tip", "Fits on the GPU");
+  for (const row of await sizes.locator(".pk-ctx-row").all()) await expect(row).not.toHaveAttribute("data-tip");
+  for (const cost of await sizes.locator(".pk-cost").all()) await expect(cost).toHaveAttribute("aria-label", /fits the GPU$/);
 });
 
 // Guards the owner's report (d): a greyed row's reason was cut off.

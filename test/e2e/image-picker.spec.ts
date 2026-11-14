@@ -63,9 +63,9 @@ test("Image on: the button names the image model and size where the chat model w
   await button.click();
   const picker = page.locator("#imagePicker");
   await expect(picker).toBeVisible();
-  await expect(picker.locator(".pk-r")).toHaveCount(STYLES_16.length + 4);
+  await expect(picker.locator(".pk-r")).toHaveCount(STYLES_16.length + 3);
   // Defaults: one setup per style, the bench's winner at this level; Other models: General's setups in tier order
-  expect(await picker.locator(".pk-r").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual([...STYLES_16, "flux2-klein-4b", "z-image-int8", "moss-image", "flux2-klein-4b-compact"]);
+  expect(await picker.locator(".pk-r").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual([...STYLES_16, "flux2-klein-4b", "z-image-int8", "moss-image"]);
   await expect(picker.locator(".pk-rail").getByRole("button"), "the rail is the two menus").toHaveText(["", ""]);
   await expect(picker.locator(".pk-rail").getByRole("button").nth(0)).toHaveAccessibleName("Defaults");
   await expect(picker.locator(".pk-rail").getByRole("button").nth(1)).toHaveAccessibleName("Other models");
@@ -156,12 +156,12 @@ test("the picker groups setups by theme, greys what ComfyUI lacks with the reaso
   // Defaults: each style's setup, downloaded or not; the styles live there, not in Other models
   expect(await groups(page)).toEqual([
     ["Defaults", ...STYLES_16],
-    ["Other models", ["General", "flux2-klein-4b", "z-image-int8", "moss-image", "flux2-klein-4b-compact"]],
+    ["Other models", ["General", "flux2-klein-4b", "z-image-int8", "moss-image"]],
   ]);
   const defaults = picker.getByTestId("image.picker.defaults-list");
   await expect(defaults.locator(".pk-nm")).toHaveText(["General", "People", "Characters", "Pixel art", "Game sprites", "Backgrounds", "Icons", "Text and logos", "Painterly and concept art"]);
   // each Other tier setup says its tier, downloaded or not; a style row is the style alone
-  expect(await picker.locator(".pk-r").evaluateAll((rows) => rows.map((r) => r.querySelector(".pk-variant")?.textContent ?? null))).toEqual([...STYLES_16.map(() => null), "Fast", "Balanced", "Best", null]);
+  expect(await picker.locator(".pk-r").evaluateAll((rows) => rows.map((r) => r.querySelector(".pk-variant")?.textContent ?? null))).toEqual([...STYLES_16.map(() => null), "Fast", "Balanced", "Best"]);
   await expect(picker.locator(".pk-title"), "no heading saying the button's name again").toHaveCount(0);
   await expect(picker).not.toContainText("Image model");
   // Klein is in Other models; the Characters style setup loads the same three files
@@ -175,7 +175,8 @@ test("the picker groups setups by theme, greys what ComfyUI lacks with the reaso
 
   // before any download, one row: where the files go (ComfyUI's own folder), what is left to fetch, what is free there
   const disk = picker.getByTestId("image.picker.disk");
-  await expect(disk.getByTestId("image.picker.disk-folder")).toHaveAttribute("data-tipt", /models/);
+  await expect(disk.getByTestId("image.picker.disk-folder")).toHaveText(/models/);
+  await expect(disk.getByTestId("image.picker.disk-folder"), "a value has no tip").not.toHaveAttribute("data-tipt");
   await expect(disk.getByTestId("image.picker.disk-left")).toHaveText(/^\d+\.\d\sGB to fetch/);
   await expect(disk.getByTestId("image.picker.disk-free")).toHaveText(/^\d+\.\d\sGB free on disk$/);
   await expect(disk.getByTestId("image.picker.change-folder")).toBeVisible();
@@ -217,9 +218,9 @@ test("the picker groups setups by theme, greys what ComfyUI lacks with the reaso
   await picker.getByTestId("image.picker.defaults").click();
   await expect(characters).not.toHaveClass(/\boff\b/);
   await picker.getByTestId("image.picker.other").click();
-  // compact, Z-Image and MOSS need their own files
+  // Z-Image and MOSS need their own files; Klein is one row, so no compact row (decision 14)
   const other = picker.getByTestId("image.picker.other-list");
-  expect(await other.locator(".pk-r.off").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual(["z-image-int8", "moss-image", "flux2-klein-4b-compact"]);
+  expect(await other.locator(".pk-r.off").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual(["z-image-int8", "moss-image"]);
   await klein.locator(".pk-select").click();
   await expect(picker).toBeHidden();
   await expect(page.locator("#modelBtn")).toContainText("Klein 4B");

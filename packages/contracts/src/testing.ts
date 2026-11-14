@@ -254,7 +254,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "image.stopDownload": { params: { preset: "flux2-klein-4b" }, result: { stopped: true } },
   "image.setupInfo": {
     params: {},
-    result: { engine: { version: "0.44.0", bytes: 2_054_400_000, installed: false }, model: { preset: "flux2-klein-4b-compact", name: "FLUX.2 Klein 4B compact", bytes: 8_260_000_000 }, cpu: { low: 100, high: 235 }, freeBytes: 120_000_000_000, needBytes: 16_477_600_000 },
+    result: { engine: { version: "0.44.0", bytes: 2_054_400_000, installed: false }, model: { preset: "flux2-klein-4b-compact", name: "FLUX.2 Klein 4B", bytes: 8_260_000_000 }, cpu: { low: 100, high: 235 }, freeBytes: 120_000_000_000, needBytes: 16_477_600_000 },
   },
   "image.setup": { params: {}, result: { started: true } },
   "image.start": {
