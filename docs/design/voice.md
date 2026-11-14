@@ -79,3 +79,42 @@ per-client request identity, abort propagation and late-result rejection open
 for this loop. It deliberately adds no continuous listening, auto-send,
 sentence scheduler, TTS runtime or history policy. Those remain stage 2 work,
 with first-audio and interruption measurements required before acceptance.
+
+## What a bundled voice would ship, and its licence
+
+Read 2026-11-13 (chat row 43) for the four voices on the listening page, before
+anything is bundled into this MIT app. Sources are the licence files inside
+the downloaded wheels and the projects' model cards, as they read that day.
+Where a source says nothing, the row says unclear; nothing here is legal advice.
+"Ship" means: may this file go inside the Gates Local installer next to MIT code.
+
+| Voice | Item (version read) | Licence | Where the licence text is | Ship inside the MIT installer? | Notice it needs |
+| --- | --- | --- | --- | --- | --- |
+| Pocket TTS | `pocket-tts` Python package 3.1.0 | MIT | `LICENSE` in the wheel; MIT on the GitHub repository | Yes | The MIT text. The wheel's copy has no copyright line. |
+| Pocket TTS | Weights and tokenizer, `kyutai/pocket-tts-without-voice-cloning`, English (219.0 MB) | CC BY 4.0 | Model card metadata only; no licence file in the download | Yes, with attribution | Credit Kyutai, name CC BY 4.0 with a link, say if changed. The model card also lists prohibited uses (impersonation or cloning without consent, misinformation, fraud, harassment); whether that list binds beyond CC BY is unclear. |
+| Pocket TTS | Voice `marius` (state from `voice-donations/Selfie.wav`, per `pocket_tts/utils/utils.py`) | Source audio CC0; the state file sits in the CC BY 4.0 weights repository | `kyutai/tts-voices` README: voice donations "licensed as CC0" | Yes, as far as stated; the state file's own licence is not stated (unclear) | None for CC0 (a citation is asked only for academic work); covered by the weights' CC BY notice |
+| Pocket TTS | Voice `javert` (state from `voice-donations/Butter.wav`) | Same as marius | Same as marius | Same as marius | Same as marius |
+| Pocket TTS | PyTorch CPU 2.8.0 | BSD-3-Clause, with many bundled third-party licences | `LICENSE` (491 KB, includes the third-party texts) and `NOTICE` in the wheel | Yes | Ship `LICENSE` and `NOTICE` as they are |
+| Kokoro | Kokoro-82M weights | Apache 2.0 | Model card metadata only; no licence file in the download | Yes | The Apache 2.0 text. The card lists CC BY training audio (Koniwa tnc, CC BY 3.0; SIWIS, CC BY 4.0); whether the weights must credit it is unclear. |
+| Kokoro | `kokoro-v1.0.onnx`, the ONNX conversion from the kokoro-onnx GitHub release | Not stated | Release page says only "optimized f32 version from taylorchu/kokoro-onnx" | Unclear | Unclear |
+| Kokoro | Voice `af_heart` in `voices-v1.0.bin` (54 voices) | Not stated | `VOICES.md` states no licence for voice files; the repository label is apache-2.0; the release that ships the file states none | Unclear | Unclear |
+| Kokoro | `kokoro-onnx` Python package 0.6.1 | MIT | `LICENSE` in the wheel | Yes | The MIT text |
+| Kokoro | `phonemizer` 3.4.0, required by kokoro-onnx | GPL-3.0-or-later | `LICENSE` in the wheel and its metadata | Unclear: GPL allows shipping with its source and licence, but it loads into the same process as the voice code, and what that means for the rest of the installer is a legal question | GPL 3 text and a source offer |
+| Kokoro | `espeakng-loader` 0.2.4 with `libespeak-ng.so` and `espeak-ng-data` | Loader: MIT (GitHub label; the wheel states none). espeak-ng: GPL-3.0-or-later; the data files' licence is not stated separately | espeak-ng README | Unclear, as phonemizer | GPL 3 text and a source offer |
+| Piper | `piper-tts` 1.8.0 (OHF-Voice/piper1-gpl), with `espeakbridge.so` and `espeak-ng-data` inside | GPL-3.0-or-later, plus one Apache 2.0 file (g2pW) | `COPYING` and `licenses/LICENSE.g2pW-Apache-2.0` in the wheel | Unclear, as phonemizer. The older MIT `rhasspy/piper` was not checked. | GPL 3 text, the Apache 2.0 text, a source offer |
+| Piper | `en_US-lessac-high.onnx` (113.9 MB) | Repository label MIT; trained on the Blizzard 2013 Lessac corpus, whose licence is research only | `rhasspy/piper-voices` metadata; `MODEL_CARD` links the dataset licence at cstr.ed.ac.uk | Unclear. The dataset licence allows "Research Purposes only", excludes "the development, marketing, commercialisation, sale or licencing of voice synthesis" products, and forbids letting third parties use the materials. It does not say whether that reaches a model trained on them. | Unclear |
+| Kokoro, Piper | ONNX Runtime 1.30 and 1.32 | MIT | `LICENSE` and `ThirdPartyNotices.txt` in the wheel | Yes | The MIT text and `ThirdPartyNotices.txt` |
+
+What this means for the pick, without deciding it: Pocket TTS with marius or
+javert is the only set with no GPL part and no file whose licence is wholly
+unstated. Its open points are the voice state files' own licence (their
+source audio is CC0, the repository they ship in is CC BY 4.0) and the model
+card's use list. Kokoro as packaged here brings GPL
+phonemizing and two files with no stated licence. Piper brings a GPL runtime
+and a voice trained on research-only data.
+
+Not read: the Python dependencies under each voice besides the rows above
+(Pocket TTS: numpy, scipy, sentencepiece, safetensors, einops, huggingface-hub,
+fastapi, uvicorn, pydantic, typer, requests and their own dependencies), a
+Python interpreter if one ships, and any non-Python runtime (for example ONNX
+Runtime for Node) that a bundled voice might use instead of these wheels.
