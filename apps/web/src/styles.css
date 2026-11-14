@@ -479,11 +479,10 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .cf{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 12px 12px}
 .cf-l{display:flex;align-items:center;gap:2px;min-width:0;flex:none}
 .cf-l>*{flex:none}
-/* The model trigger keeps one width while the app starts, while a model downloads or loads, and when Image
-   turns on (chat rows 28, 29): at least the room a usual chat name or image name and size take, with the words
-   at its right end; a longer name widens it up to 240 px, past which it is cut (the tag is its tooltip). */
-.cf-r>#modelBtn{flex:0 1 auto;min-width:13em;max-width:240px;justify-content:flex-end}
-#modelBtn>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+/* Size to the label, with equal padding at both edges. Long names give way to
+   the fixed maker mark and context value; the tooltip keeps the full name. */
+.cf-r>#modelBtn{flex:0 1 auto;min-width:0;max-width:240px;justify-content:flex-start}
+#modelBtn>.picker-trigger-name,#modelBtn>.t{min-width:0;overflow:hidden;text-overflow:ellipsis}
 /* a download (LoadBar.tsx): 2 px on the model button's bottom edge, filled to its percent */
 #modelBtn{position:relative;overflow:hidden}
 .ldbar{position:absolute;left:0;bottom:0;width:100%;height:2px;background:var(--accent);transform-origin:left;transition:transform .25s linear;pointer-events:none}
@@ -978,7 +977,7 @@ a.btn{text-decoration:none}
 #modelBtn span{overflow:hidden;text-overflow:ellipsis}
 /* while a reply runs a touch row holds Stop and Send both: 44 px targets 2 px apart keep it inside 360 px */
 .cf-r{gap:2px}
-.cf-r>#modelBtn{min-width:80px;overflow:hidden}
+.cf-r>#modelBtn{min-width:0;overflow:hidden}
 .draft{padding:16px 12px 0}
 .draft-in{flex:1 0 auto;display:flex;flex-direction:column}
 /* the mark sits low in the free space, the setup icons just above the docked bar, in thumb reach */

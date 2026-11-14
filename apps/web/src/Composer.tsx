@@ -397,6 +397,12 @@ export function Composer() {
               onPointerEnter={pickerIntent}
               onFocus={pickerFocus}
               onPointerDown={pickerIntent}
+              onKeyDown={e => {
+                if (e.key !== "ArrowDown") return;
+                e.preventDefault();
+                pickerIntent();
+                if (pop !== (drawing ? "images" : "picker")) togglePop(drawing ? "images" : "picker", true);
+              }}
               onClick={() => togglePop(drawing ? "images" : "picker")}
             >
               {/* Image on: the image model and size Send uses, in the same box */}
@@ -407,7 +413,7 @@ export function Composer() {
               </> : boot && shownTag === undefined ? <Skel w="8.5em" /> : <>
                 {/* a load changes nothing here (owner's pick D): it is the ring around Send, and its time is in this button's tip */}
                 {shownTag === undefined ? null : <MakerMark tag={shownTag} busy={pickerPending} />}
-                <span>{name}</span>
+                <span className="picker-trigger-name">{name}</span>
                 <small className="picker-trigger-ctx">{k(ctx)}</small>
                 {first === undefined ? null : <DownloadBar pct={firstProgress} />}
               </>}

@@ -17,6 +17,10 @@
 .model-picker .pk-r.hl,.model-picker .pk-r:hover{background:var(--selected)}
 /* the size column is as wide as its words, so a long model name gets the rest of the row */
 .pk-select{height:34px;width:100%;display:grid;grid-template-columns:16px minmax(0,1fr) auto;gap:8px;align-items:center;padding:0 8px;text-align:left;font-size:14px}
+.pk-select>.maker-mark{grid-column:1;grid-row:1}
+.pk-select>.pk-name{grid-column:2;grid-row:1}
+.pk-select>.pk-v{grid-column:3;grid-row:1}
+.pk-maker-name{max-width:100%;padding:0 2px;font-size:10px;line-height:12px;overflow-wrap:anywhere;text-align:center}
 .pk-name{display:flex;align-items:center;min-width:0;gap:4px}
 .pk-name .pk-nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pk-name .pk-variant{flex:none;font-size:11px;font-weight:400;color:var(--muted-foreground);white-space:nowrap}
