@@ -110,19 +110,18 @@ export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasu
       }
     };
     const messages: TurnMessage[] = [...(system ? [{ role: "system" as const, content: system }] : []), ...c.history ?? [], { role: "user", content: c.prompt }];
-    let answer = "";
-    let steps: Turn["steps"] = [];
-    let failed: string | undefined;
     const end = await turnEnd(streamToolTurn({
       baseUrl: input.baseUrl, model: input.model, messages, numCtx: input.numCtx, signal: input.signal, fetch: metered,
       sources, execute, ...(input.platform ? { platform: input.platform } : {}), ...(input.shell ? { shell: input.shell } : {}),
       ...(think === undefined ? {} : { think }), ...(input.settings ? { settings: input.settings } : {}),
     }));
     input.signal.throwIfAborted();
-    if (end.type === "done") ({ answer, steps } = end);
-    else failed = end.message;
+    // A turn that failed (the runtime crashed or went away, the model did not load, the stream
+    // broke) says nothing about the model: the run stops, and nothing it measured is kept.
+    if (end.type === "error") throw new Error(`Measure stopped at check ${checks.length + 1} of ${CASES.length}: ${end.message}`);
+    const { answer, steps } = end;
     if (meter.firstMs !== undefined) firstWords.push(meter.firstMs);
-    checks.push(grade(c, { answer, steps: steps.filter((s) => s.name !== "note") }, failed, {
+    checks.push(grade(c, { answer, steps: steps.filter((s) => s.name !== "note") }, {
       ...(answer ? { reply: headTail(answer) } : {}),
       ...(calls.length ? { calls } : {}),
       tokens: meter.used, ms: Math.round(now() - meter.start), ...(meter.cut ? { cut: true } : {}),
@@ -144,9 +143,8 @@ export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasu
 
 type Evidence = Pick<MeasureCheck, "reply" | "calls" | "tokens" | "ms" | "cut">;
 
-function grade(c: MeasureCase, turn: Turn, failed: string | undefined, evidence: Evidence): MeasureCheck {
+function grade(c: MeasureCase, turn: Turn, evidence: Evidence): MeasureCheck {
   const base = { id: c.id, kind: c.part, needs: c.needs, ...evidence };
-  if (failed !== undefined) return { ...base, ok: false, why: `The turn failed: ${failed}` };
   if (c.kind === "answer") {
     const wrong = turn.answer.trim() || evidence.cut ? c.grade(turn) : "It gave no answer.";
     const why = wrong && evidence.cut ? "It used its whole token budget before it answered." : wrong;

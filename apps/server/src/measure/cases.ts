@@ -61,7 +61,14 @@ const all = (...rules: [boolean | ((t: Turn) => boolean), string][]): Grade => (
   for (const [rule, why] of rules) if (!(typeof rule === "function" ? rule(t) : rule)) return why;
   return undefined;
 };
-const says = (n: number) => (t: Turn) => hasNumber(t.answer, n);
+const WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty"];
+/**
+ * A small whole number written as a word ("Fourteen. OVER"), not as part of a bigger one: not
+ * "twenty-four" for four, "fourteen hundred" or "fourteen point five".
+ */
+const hasWord = (text: string, n: number) => Number.isInteger(n) && WORDS[n] !== undefined
+  && new RegExp(`(?<![\\w-])${WORDS[n]}(?![\\w-])(?!\\s+(?:hundred|thousand|million|billion|point|and\\s+a\\s+half)\\b)`, "i").test(text);
+const says = (n: number) => (t: Turn) => hasNumber(t.answer, n) || hasWord(t.answer, n);
 const names = (phrase: string) => (t: Turn) => hasWords(t.answer, phrase);
 const queried = (t: Turn) => ran(t, DB_TOOLS);
 const readFiles = (t: Turn) => ran(t, FILE_TOOLS);

@@ -228,7 +228,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "models.load": { params: { model: "qwen3.5:9b", numCtx: 16384 }, result: { model: "qwen3.5:9b", numCtx: 16384, state: "ready" } },
   // None measured by default, so a client test that does not ask about speed sees none.
   "models.speed": { params: {}, result: [] },
-  "models.measures": { params: {}, result: [measured] },
+  "models.measures": { params: {}, result: { measures: [measured] } },
   "models.measure": { params: { name: "qwen3.5:9b" }, result: { model: "qwen3.5:9b", state: "waiting", done: 0, total: 9 } },
   "models.measurePages": { params: { model: "qwen3.5:9b", at: measured.at, pages: [{ id: "page-counter", seen: ["0", "3"] }] }, result: measured },
   "sources.list": { params: {}, result: [source] },

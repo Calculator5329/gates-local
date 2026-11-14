@@ -350,6 +350,8 @@ export function createApp(deps: AppDeps): App {
     push,
     ...(deps.lease ? { lease: deps.lease } : {}),
     ...(deps.memory ? { memory: deps.memory } : {}),
+    // a runtime switch stops a running measure as it ends a chat turn, and waits for its end
+    ...(deps.models?.loader ? { loader: deps.models.loader } : {}),
   });
   const offRuntime = runtime.onChange((status) => {
     push("runtime.changed", status);

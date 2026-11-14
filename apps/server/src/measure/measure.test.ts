@@ -1,14 +1,16 @@
-import { mkdtempSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import * as S from "effect/Schema";
 import { describe, expect, it } from "vitest";
 import { runSnapshotQuery } from "../../../../packages/harness/src/sql.ts";
 import { BUDGET, CASES, WEIGHTS, ensureFixtures, numbersIn, pageIn, toolCallOf, type MeasureCase } from "./cases.ts";
 import { STEPS, measureModel, type MeasureInput } from "./suite.ts";
 import { gradePages, partsOf, scoreOf } from "./score.ts";
 import { measureStore } from "./store.ts";
-import { createMeasure } from "./handlers.ts";
+import { PAGES_UNRUN, createMeasure, type MeasureDeps } from "./handlers.ts";
 import { createMemoryOwner } from "../gpu/memory.ts";
+import { ModelActionError, type TurnReservation } from "../runtime/load.ts";
 import type { LoadedModel } from "../runtime/types.ts";
 import type { FitReport, MeasureRun, ModelInfo, ModelMeasure } from "@gates-local/contracts";
 import type { Push } from "../app.ts";
@@ -102,6 +104,21 @@ describe("grading words", () => {
     expect(pageIn("```css\np{}\n```\n```HTML\n<p>c</p>\n```")).toBe("<p>c</p>");
     expect(pageIn("Sure. <!DOCTYPE html><html><p>d</p></html>")).toBe("<!DOCTYPE html><html><p>d</p></html>");
     expect(pageIn("No page here.")).toBeUndefined();
+  });
+
+  it("takes a small whole number written as a word, and stays strict otherwise", () => {
+    const carry = CASES.find((c) => c.id === "instr-carry")! as Extract<MeasureCase, { kind: "answer" }>;
+    const graded = (answer: string) => carry.grade({ answer, steps: [] });
+    // a night run's reply, marked "The answer was not 14."
+    expect(graded("Fourteen. OVER")).toBeUndefined();
+    expect(graded("It is fourteen OVER")).toBeUndefined();
+    expect(graded("Fourteen hundred. OVER")).toBe("The answer was not 14.");
+    expect(graded("14.5 OVER")).toBe("The answer was not 14.");
+    expect(graded("Twenty-fourteen OVER")).toBe("The answer was not 14.");
+    const count = CASES.find((c) => c.id === "tools-count")! as Extract<MeasureCase, { kind: "answer" }>;
+    const read = [{ callId: "1", name: "read", state: "done" as const, summary: "" }];
+    expect(count.grade({ answer: "There are six files.", steps: read })).toBeUndefined();
+    expect(count.grade({ answer: "There are sixty files.", steps: read })).toBe("The count, 6, was not given.");
   });
 });
 
@@ -224,9 +241,26 @@ describe("measureModel", () => {
       new URL(String(url)).pathname === "/api/show" ? Response.json({ capabilities: [] }) : new Response("model requires more system memory", { status: 500 })) as typeof fetch;
     await expect(measureModel({ baseUrl: "http://runtime", model: "m", fetch: fetcher, signal: new AbortController().signal, sources: [], numCtx: 4096 })).rejects.toThrow(/more system memory/);
   });
+
+  it("stops at a check whose turn failed on the runtime, rather than grading it wrong", async () => {
+    const rt = fakeRuntime(["completion", "tools"], reference(true));
+    const fifth = CASES[4]!.prompt;
+    const fetcher = (async (url: URL | string, init?: RequestInit) => {
+      // the runtime goes away at the fifth check: every request from there fails
+      if (String(init?.body ?? "").includes(JSON.stringify(fifth).slice(1, -1)) || rt.checks().some((b) => b.messages.some((m) => m.content === fifth))) throw new TypeError("fetch failed");
+      return rt.fetcher(url, init);
+    }) as typeof fetch;
+    await expect(run({ ...rt, fetcher })).rejects.toThrow(/^Measure stopped at check 5 of 20: fetch failed$/);
+  });
 });
 
 const pending = async () => run(fakeRuntime(["completion", "tools"], reference(true)));
+
+/** Waits for the n-th run to end (done or error). */
+const endings = (pushes: [string, unknown][], n: number) => new Promise<void>((resolve) => {
+  const tick = () => pushes.filter(([c, p]) => c === "models.measuring" && ["done", "error"].includes((p as MeasureRun).state)).length >= n ? resolve() : setTimeout(tick, 5);
+  tick();
+});
 
 describe("page grading", () => {
   it("passes each page on what a window saw, fails one that did wrong or could not run, and scores again", async () => {
@@ -249,13 +283,26 @@ describe("page grading", () => {
 
 describe("models.measure", () => {
   const info = { name: "m", digest: "sha256:abc", sizeBytes: 1, maxContext: 4096 } as unknown as ModelInfo;
-  function setup(verdict: "fits" | "refuse", pageWaitMs = 5_000) {
+  function setup(verdict: "fits" | "refuse", pageWaitMs = 5_000, extra: Pick<MeasureDeps, "loader"> = {}) {
     const pushes: [string, unknown][] = [];
     const kinds: string[] = [];
     let released = 0;
     const rt = fakeRuntime(["completion", "tools", "thinking"], reference(true));
+    /** `at`: from the request that asks this check on, the runtime is gone. `onCheck`: runs at each check's first request. */
+    const broken: { at?: string; onCheck?: () => void } = {};
+    let failing = false;
+    const fetcher = (async (url: URL | string, init?: RequestInit) => {
+      const body = String(init?.body ?? "");
+      const asks = CASES.some((c) => body.includes(JSON.stringify(c.prompt).slice(1, -1)));
+      if (asks) broken.onCheck?.();
+      if (broken.at !== undefined && body.includes(JSON.stringify(broken.at).slice(1, -1))) failing = true;
+      if (failing && (asks || new URL(String(url)).pathname === "/api/show")) throw new TypeError("fetch failed");
+      return rt.fetcher(url, init);
+    }) as typeof fetch;
+    const dataDir = dir();
     const measure = createMeasure({
-      dataDir: dir(),
+      ...extra,
+      dataDir,
       baseUrl: () => "http://runtime",
       installed: async () => [info],
       plan: async () => ({ verdict, message: verdict === "refuse" ? "m needs 20 GB; this computer has 16 GB." : undefined }) as unknown as FitReport,
@@ -263,7 +310,7 @@ describe("models.measure", () => {
       lease: { acquire: async (kind) => { kinds.push(kind); return () => { released += 1; }; } },
       settings: { get: () => ({ defaultNumCtx: 8192, thinking: false, theme: "dark", runtimeMode: "system", tools: true, imageGen: false, systemPrompt: "Talk like a pirate." }) },
       platform: "win32",
-      fetch: rt.fetcher,
+      fetch: fetcher,
       pageWaitMs,
     });
     const until = (states: string[]) => new Promise<void>((resolve) => {
@@ -271,10 +318,10 @@ describe("models.measure", () => {
       tick();
     });
     const saved = () => new Promise<ModelMeasure>((resolve) => {
-      const tick = () => { const s = measure.handlers["models.measures"]()[0]; if (s) resolve(s); else setTimeout(tick, 5); };
+      const tick = () => { const s = measure.handlers["models.measures"]().measures[0]; if (s) resolve(s); else setTimeout(tick, 5); };
       tick();
     });
-    return { measure, pushes, kinds, released: () => released, ended: () => until(["done", "error"]), saved, rt };
+    return { measure, pushes, kinds, released: () => released, ended: () => until(["done", "error"]), saved, rt, broken, dataDir };
   }
 
   it("answers at once, holds the GPU alone, measures at the chat's window and setting, then waits for a window to run its pages", async () => {
@@ -304,15 +351,78 @@ describe("models.measure", () => {
     await expect(t.measure.handlers["models.measure"]({ name: "m" })).resolves.toMatchObject({ state: "waiting" });
   });
 
-  it("ends with the pages pending when no window runs them, and a window opened later still can", async () => {
+  it("skips the pages no window ran while it waited, says why, leaves them out of the score, and refuses them later", async () => {
     const t = setup("fits", 10);
     await t.measure.handlers["models.measure"]({ name: "m" });
     await t.ended();
-    const [saved] = t.measure.handlers["models.measures"]();
-    expect(saved!.checks.filter((c) => c.state === "pending")).toHaveLength(3);
+    const { measures: [saved] } = t.measure.handlers["models.measures"]();
+    expect(saved!.checks.filter((c) => c.kind === "pages").map((c) => [c.state, c.why])).toEqual(Array.from({ length: 3 }, () => ["skipped", PAGES_UNRUN]));
+    expect(saved!.parts?.map((p) => p.part)).toEqual(["tools", "files", "database", "instructions"]);
+    expect(saved!.score).toBe(100);
+    expect(t.pushes.filter(([c]) => c === "models.measures").at(-1)?.[1]).toEqual([saved]);
     expect(t.pushes.filter(([c]) => c === "models.measuring").at(-1)?.[1]).toMatchObject({ state: "done" });
-    const later = t.measure.handlers["models.measurePages"]({ model: "m", at: saved!.at, pages: [{ id: "page-counter", seen: ["0", "3"] }] });
-    expect(check(later, "page-counter").ok).toBe(true);
+    expect(() => t.measure.handlers["models.measurePages"]({ model: "m", at: saved!.at, pages: [{ id: "page-counter", seen: ["0", "3"] }] })).toThrow(expect.objectContaining({ code: "not-waiting" }));
+  });
+
+  it("shows a page an earlier build left waiting as skipped", () => {
+    const d = dir();
+    const waiting = { model: "w", digest: "d", at: 1, version: 2 as const, numCtx: 4096, tokensPerSecond: 50, score: 100, checks: [{ id: "page-counter", kind: "pages" as const, ok: false, state: "pending" as const, page: "<p></p>", script: [] }] };
+    measureStore(d).put(waiting);
+    const measure = createMeasure({ dataDir: d, baseUrl: () => undefined, installed: async () => [], plan: async () => ({}) as FitReport, push: (() => undefined) as Push });
+    expect(measure.handlers["models.measures"]().measures[0]!.checks[0]).toMatchObject({ state: "skipped", why: PAGES_UNRUN });
+  });
+
+  it("answers the measures read with the run going now, and with none once it is done", async () => {
+    const t = setup("fits");
+    expect(t.measure.handlers["models.measures"]()).toEqual({ measures: [] });
+    await t.measure.handlers["models.measure"]({ name: "m" });
+    expect(t.measure.handlers["models.measures"]().run).toEqual({ model: "m", state: "waiting", done: 0, total: STEPS + 1 });
+    const saved = await t.saved();
+    await new Promise((r) => setTimeout(r, 20));
+    // waiting for its pages: the run's last step
+    expect(t.measure.handlers["models.measures"]()).toEqual({ measures: [saved], run: { model: "m", state: "running", done: STEPS, total: STEPS + 1 } });
+    t.measure.handlers["models.measurePages"]({ model: "m", at: saved.at, pages: [{ id: "page-counter", seen: ["0", "3"] }, { id: "page-filter", seen: [] }, { id: "page-total", seen: [] }] });
+    await t.ended();
+    expect(t.measure.handlers["models.measures"]().run).toBeUndefined();
+  });
+
+  it("a run whose turns fail on the runtime ends as an error, saves nothing, and the earlier measure stays", async () => {
+    const t = setup("fits", 10);
+    await t.measure.handlers["models.measure"]({ name: "m" });
+    await endings(t.pushes, 1);
+    const earlier = t.measure.handlers["models.measures"]().measures;
+    expect(earlier).toHaveLength(1);
+    // the runtime crashes: every check's request fails from the first one
+    t.broken.at = CASES[0]!.prompt;
+    await t.measure.handlers["models.measure"]({ name: "m" });
+    await endings(t.pushes, 2);
+    const stopped = { model: "m", state: "error", done: 0, total: STEPS + 1, message: "Measure stopped at check 1 of 20: fetch failed" };
+    expect(t.pushes.filter(([c]) => c === "models.measuring").at(-1)?.[1]).toEqual(stopped);
+    expect(t.measure.handlers["models.measures"]()).toEqual({ measures: earlier, run: stopped });
+    expect(measureStore(t.dataDir).list()).toEqual(earlier);
+    expect(t.pushes.filter(([c]) => c === "models.measures")).toHaveLength(2);
+  });
+
+  it("a runtime switch stops a running measure the way it ends a chat turn, and waits for its end", async () => {
+    const gone = new AbortController();
+    let ends = 0;
+    const loader = { reserve: () => ({ signal: gone.signal, end: () => { ends += 1; } }) as unknown as TurnReservation };
+    const t = setup("fits", 10, { loader });
+    t.broken.onCheck = () => gone.abort(new Error("The runtime is switching."));
+    await t.measure.handlers["models.measure"]({ name: "m" });
+    await t.ended();
+    expect(t.pushes.filter(([c]) => c === "models.measuring").at(-1)?.[1]).toMatchObject({ state: "error", message: "The Ollama runtime changed while Measure ran, so it stopped." });
+    expect(ends).toBe(1);
+    expect(t.released()).toBe(1);
+    expect(t.measure.handlers["models.measures"]().measures).toEqual([]);
+  });
+
+  it("refuses to start while the runtime switches", async () => {
+    const loader = { reserve: () => { throw new ModelActionError("runtime-switching", "The Ollama runtime is switching. Try again in a moment."); } };
+    const t = setup("fits", 10, { loader });
+    await expect(t.measure.handlers["models.measure"]({ name: "m" })).rejects.toMatchObject({ code: "runtime-switching" });
+    expect(t.kinds).toEqual([]);
+    await expect(t.measure.handlers["models.measure"]({ name: "m" })).rejects.toMatchObject({ code: "runtime-switching" });
   });
 
   it("sends nothing to the model when the fit check refuses, and says why", async () => {
@@ -322,7 +432,7 @@ describe("models.measure", () => {
     expect(t.rt.bodies).toEqual([]);
     expect(t.pushes.filter(([c]) => c === "models.measuring").at(-1)?.[1]).toMatchObject({ state: "error", message: "m needs 20 GB; this computer has 16 GB." });
     expect(t.released()).toBe(1);
-    expect(t.measure.handlers["models.measures"]()).toEqual([]);
+    expect(t.measure.handlers["models.measures"]().measures).toEqual([]);
   });
 
   it("refuses a model that is not installed before taking anything", async () => {
@@ -387,7 +497,54 @@ describe("models.measure", () => {
   });
 });
 
+/**
+ * v0.2.4's measures file, as that release reads it (`git show v0.2.4:packages/contracts/src/shapes.ts`
+ * and `git show v0.2.4:apps/server/src/measure/store.ts`): one check it cannot read and the whole file
+ * reads as empty there, and its next Measure rewrites the file with one result.
+ */
+const V024Check = S.Struct({ id: S.String, kind: S.Literals(["tools", "sql"]), ok: S.Boolean });
+const V024Measure = S.Struct({
+  model: S.String,
+  digest: S.String,
+  at: S.Finite,
+  numCtx: S.Int,
+  tokensPerSecond: S.Finite.check(S.isGreaterThanOrEqualTo(0)),
+  score: S.Int.check(S.isBetween({ minimum: 0, maximum: 100 })),
+  checks: S.Array(V024Check),
+});
+const decodeV024 = S.decodeUnknownSync(S.Struct({ version: S.Literal(1), measures: S.Array(V024Measure) }));
+
 describe("measureStore", () => {
+  it("never writes a check 0.2.4 cannot read into the file 0.2.4 reads, and reads that file for older measures", async () => {
+    const d = dir();
+    const old = { model: "old", digest: "d", at: 1, numCtx: 4096, tokensPerSecond: 50, score: 75, checks: [{ id: "tools-weather", kind: "tools" as const, ok: true }] };
+    writeFileSync(path.join(d, "measures.json"), `${JSON.stringify({ version: 1, measures: [old] })}\n`);
+    const store = measureStore(d);
+    store.put({ model: "m", digest: "d", ...await run(fakeRuntime(["completion", "tools"], reference(true))) });
+    // rolled back to 0.2.4: its file still reads, with its measure
+    expect(decodeV024(JSON.parse(readFileSync(path.join(d, "measures.json"), "utf8"))).measures).toEqual([old]);
+    // this build: the new measure, and the older one from the old file
+    expect(measureStore(d).list().map((m) => [m.model, m.version])).toEqual([["old", undefined], ["m", 2]]);
+    // a new measure of the old file's model wins over the old one
+    store.put({ ...old, version: 2, score: 90 });
+    expect(measureStore(d).list().map((m) => [m.model, m.score])).toEqual([["m", 100], ["old", 90]]);
+    expect(decodeV024(JSON.parse(readFileSync(path.join(d, "measures.json"), "utf8"))).measures).toEqual([old]);
+  });
+
+  it("keeps a saved measure it cannot read when it writes the file again", () => {
+    const d = dir();
+    const later = { model: "later", digest: "d", at: 1, version: 3, numCtx: 4096, tokensPerSecond: 50, score: 75, checks: [{ id: "x", kind: "video", ok: true }] };
+    const store = measureStore(d);
+    store.put({ model: "a", digest: "d", at: 1, numCtx: 4096, tokensPerSecond: 50, score: 80, checks: [] });
+    const file = readdirSync(d).find((f) => f !== "measures.json" && f.startsWith("measures"))!;
+    const saved = JSON.parse(readFileSync(path.join(d, file), "utf8")) as { measures: unknown[] };
+    writeFileSync(path.join(d, file), JSON.stringify({ ...saved, measures: [...saved.measures, later] }));
+    const again = measureStore(d);
+    expect(again.list().map((m) => m.model)).toEqual(["a"]);
+    again.put({ model: "b", digest: "d", at: 1, numCtx: 4096, tokensPerSecond: 50, score: 80, checks: [] });
+    expect((JSON.parse(readFileSync(path.join(d, file), "utf8")) as { measures: { model: string }[] }).measures.map((m) => m.model)).toEqual(["a", "b", "later"]);
+  });
+
   it("keeps one measure per model, newest wins, and reads it back from disk", () => {
     const d = dir();
     const base = { digest: "d1", at: 1, numCtx: 4096, tokensPerSecond: 50, score: 80, checks: [] };

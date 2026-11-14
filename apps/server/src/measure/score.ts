@@ -23,6 +23,18 @@ export function scoreOf(parts: readonly MeasurePartCount[]): number {
 /** How many checks are waiting for a window to run their page. */
 export const pendingPages = (m: ModelMeasure) => m.checks.filter((c) => c.state === "pending").length;
 
+/** The measure with each page still waiting marked skipped, saying why; the score is over the rest. */
+export function skipPages(m: ModelMeasure, why: string): ModelMeasure {
+  if (pendingPages(m) === 0) return m;
+  const checks = m.checks.map((c): MeasureCheck => {
+    if (c.state !== "pending") return c;
+    const { page: _page, script: _script, ...rest } = c;
+    return { ...rest, ok: false, state: "skipped", why };
+  });
+  const parts = partsOf(checks);
+  return { ...m, checks, parts, score: scoreOf(parts) };
+}
+
 /** Words a page showed, as kept with its check. */
 const SEEN_KEPT = 200;
 const clip = (text: string) => text.length > SEEN_KEPT ? `${text.slice(0, SEEN_KEPT)}…` : text;

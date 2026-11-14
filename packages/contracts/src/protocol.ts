@@ -29,6 +29,7 @@ import {
   ModelInfo,
   ModelSpeed,
   ModelMeasure,
+  MeasureList,
   MeasureRun,
   PageSeen,
   NumCtx,
@@ -289,8 +290,11 @@ export const methods = {
   "models.load": { params: S.Struct({ model: S.String, numCtx: NumCtx }), result: ModelLoad, phone: "allow" },
   /** Each model's measured speed from saved replies (ModelSpeed); later changes come on the models.speed push. */
   "models.speed": { params: NoParams, result: S.Array(ModelSpeed), phone: "allow" },
-  /** Every model measured on this computer (ModelMeasure); a new one comes on the models.measures push. */
-  "models.measures": { params: NoParams, result: S.Array(ModelMeasure), phone: "allow" },
+  /**
+   * Every model measured on this computer (ModelMeasure), and the run going now or the one that
+   * last stopped on an error; a new measure comes on the models.measures push, a step on models.measuring.
+   */
+  "models.measures": { params: NoParams, result: MeasureList, phone: "allow" },
   /**
    * Start measuring one installed model: it holds the GPU alone for a short check. Answers once the
    * run starts (it can take minutes); its steps, a late failure and the end come on models.measuring,

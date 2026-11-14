@@ -91,6 +91,54 @@ test("Measure runs only on a click, grades pages in this window, and the score o
   await page.screenshot({ path: info.outputPath("measure-phone.png"), animations: "disabled" });
 });
 
+// Every check failing at once on the runtime's error is not the model's score: the run stops, the
+// earlier measure stays, and the row says the run stopped and why.
+test("a Measure the runtime broke keeps the earlier score, and the row says it stopped and why", async ({ page, open }, info) => {
+  const installed = ["qwen3.5:9b", "gemma4:12b"];
+  await stack.scenario("measure", { installed });
+  await open();
+  await waitReady(page);
+  await openModels(page);
+  const row = page.locator('.mp-card .mp-row[data-dm="qwen3.5:9b"]');
+  const score = page.getByTestId("settings.models.score-qwen3-5-9b");
+  await page.getByTestId("settings.models.measure-qwen3-5-9b").click();
+  await expect(score).toHaveText("90", { timeout: 60_000 });
+  // from here every reply breaks with the runtime's error
+  await stack.scenario("mid-stream-error", { installed });
+  await score.click();
+  await page.getByTestId("models.measure.again").click();
+  // the run's end: the row says why it stopped, or (the bug) a new score took the old one's place
+  await expect(row.locator(".act-err").or(score.filter({ hasNotText: /^90$/ }))).toBeVisible({ timeout: 60_000 });
+  await row.screenshot({ path: info.outputPath("measure-stopped-row.png"), animations: "disabled" });
+  await expect(row.locator(".act-err")).toHaveText(/^Measure stopped at check 1 of 20: .*unexpected EOF/);
+  await expect(score).toHaveText("90");
+});
+
+// The run is the server's: a window opened while it goes sees it, and the pages run only in the
+// window that clicked Measure.
+test("a window opened during a Measure sees the run, and only the window that started it runs the pages", async ({ page, open }, info) => {
+  await stack.scenario("measure", { installed: ["qwen3.5:9b", "gemma4:12b"], loadDelayMs: 6000 });
+  await open();
+  await waitReady(page);
+  await openModels(page);
+  await page.getByTestId("settings.models.measure-qwen3-5-9b").click();
+  await expect(page.getByTestId("settings.models.measure-qwen3-5-9b")).toHaveText(/^(Starting|Measuring \d+ of 22)$/);
+  const second = await page.context().newPage();
+  let frames = 0;
+  second.on("frameattached", () => frames++);
+  await second.goto(page.url());
+  await waitReady(second);
+  await openModels(second);
+  await expect(second.getByTestId("settings.models.measure-gemma4-12b")).toBeVisible();
+  await second.locator(".mp-card").screenshot({ path: info.outputPath("measure-second-window.png"), animations: "disabled" });
+  await expect(second.getByTestId("settings.models.measure-qwen3-5-9b")).toHaveText(/^(Starting|Measuring \d+ of 22)$/);
+  await expect(second.getByTestId("settings.models.measure-gemma4-12b")).toBeDisabled();
+  await expect(page.getByTestId("settings.models.score-qwen3-5-9b")).toHaveText("90", { timeout: 60_000 });
+  await expect(second.getByTestId("settings.models.score-qwen3-5-9b")).toHaveText("90");
+  expect(frames).toBe(0);
+  await second.close();
+});
+
 // A page a model wrote runs in this window; in the browser build the window's address carries the
 // server's token (?server=…token=…). The fake's counter page shows the address it resolves
 // against and its referrer where the check reads, so what the window sends back is what it learnt.

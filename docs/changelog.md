@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-11-14: Measure stops honestly, and its scores survive going back a version
+
+- When Ollama crashes or a turn fails partway through Measure, the run
+  stops there: the row says "Measure stopped at check 5 of 20" and why,
+  nothing is saved, and the model's earlier score stays.
+- Switching the Ollama runtime while Measure runs stops it, the way it
+  stops a chat reply, and says so on the row; the switch waits for it to
+  end.
+- A window opened while Measure runs shows the run and its progress, and
+  a window that lost its connection shows how the run ended once it is
+  back.
+- Measure's pages run only in the window that started it. If that
+  window does not run them in time, the page checks show "Skipped" with
+  the reason, and the detail says "The score leaves Pages out." instead
+  of counting them as failed.
+- A model that answers "Fourteen." where a check asks for 14 now passes.
+  Words count for small whole numbers up to twenty; "fourteen hundred"
+  and "14.5" still fail.
+- Measures are saved in a new file. Going back to 0.2.4 keeps every
+  score measured with it, and this version still reads scores saved by
+  0.2.4.
+
 ## 2026-11-14: The speed check measures long threads the way each release opens them
 
 - Nothing changes in the app. The speed check no longer stalls on a

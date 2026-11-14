@@ -61,7 +61,7 @@ async function measure(model: string): Promise<{ model: string; measure?: ModelM
     const run = await ended;
     process.stderr.write("\n");
     if (run.state === "error") return { model, error: run.message ?? "The measure failed.", ms: Date.now() - started };
-    const kept = (await client.call("models.measures", {})).filter((m) => m.model === model).toSorted((a, b) => b.at - a.at)[0];
+    const kept = (await client.call("models.measures", {})).measures.filter((m) => m.model === model).toSorted((a, b) => b.at - a.at)[0];
     return kept ? { model, measure: kept, ms: Date.now() - started } : { model, error: "The server kept no measure.", ms: Date.now() - started };
   } catch (e) {
     return { model, error: e instanceof Error ? e.message : String(e), ms: Date.now() - started };

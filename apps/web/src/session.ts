@@ -105,7 +105,7 @@ const { settingsPatch } = settingsSession;
 // ---------------------------------------------------------------- hydrate and pushes
 
 /** Channels whose snapshot the second hydrate batch reads (gpu.status, sources.list, models.speed). */
-const SECOND_BATCH: ReadonlySet<Channel> = new Set<Channel>(["gpu.changed", "fit.changed", "sources.changed", "update.changed", "models.speed", "models.measures"]);
+const SECOND_BATCH: ReadonlySet<Channel> = new Set<Channel>(["gpu.changed", "fit.changed", "sources.changed", "update.changed", "models.speed", "models.measures", "models.measuring"]);
 
 async function hydrate(c: Client): Promise<void> {
   settingsSession.beginHydration();
@@ -170,7 +170,10 @@ async function hydrateWith(
     applyServerEvent(measuresChanged(list));
     runMeasurePages(list);
   });
-  on("models.measuring", (run) => applyServerEvent((s) => measuringChanged(s, run)));
+  on("models.measuring", (run) => {
+    if (run.state === "done" || run.state === "error") startedHere.delete(run.model);
+    applyServerEvent((s) => measuringChanged(s, run));
+  });
   on("sources.changed", (sources) => applyServerEvent({ sources }));
   on("update.changed", updatesSession.receiveUpdate);
   on("usage.changed", () => usageSession.usageChanged());
@@ -267,7 +270,7 @@ async function hydrateWith(
     probe("models.measures", {}),
   ]);
   applyServerEvent((s) => ({ gpu, sources, ...(updateOrder.current(updateTicket) ? { update } : {}), ...(catalogLands(catalogTicket) ? { catalog } : {}), ...speedsRead(s, speeds), ...measuresRead(measures) }));
-  if (measures !== undefined && measures !== NA) runMeasurePages(measures);
+  if (measures !== undefined && measures !== NA) runMeasurePages(measures.measures);
   release("none");
   void settingsReads.read();
   // A model's thoughts take minutes in system memory, so Thinking starts off with no GPU; the composer's button still turns it on.
@@ -488,27 +491,31 @@ export async function addSource(kind: "folder" | "file" | "sqlite", path: string
   return r.ok ? null : r.message;
 }
 
-/** Measures whose pages this window has run or is running, so each runs once here. */
-const pagesRun = new Set<string>();
+/**
+ * Models whose running Measure this window started: only their pages run here. The server marks
+ * pages no run waits for as skipped, so a pending page in a push is the running measure's.
+ */
+const startedHere = new Set<string>();
 
 /**
- * A measure's page checks wait for a window to run them (measure-pages.ts): any window but a
- * phone's runs them once and sends back what they showed. The server grades it and pushes the
- * measure again; a second window's answer for a page already graded changes nothing.
+ * A measure's page checks wait for the window that started the run (measure-pages.ts): that window
+ * runs them once, while the run waits, and sends back what they showed. The server grades it and
+ * pushes the measure again. No other window runs a model's page code, and none runs it later.
  */
 function runMeasurePages(list: readonly ModelMeasure[]): void {
   if (getState().unavailable["models.measurePages"] === true) return;
   for (const m of list) {
-    const key = `${m.model}@${m.at}`;
-    if (pagesRun.has(key) || !m.checks.some((c) => c.state === "pending")) continue;
-    pagesRun.add(key);
+    if (!startedHere.has(m.model) || !m.checks.some((c) => c.state === "pending")) continue;
+    startedHere.delete(m.model);
     void runPages(m.checks).then((pages) => act("models.measurePages", { model: m.model, at: m.at, pages }, `check the pages ${m.model} wrote`));
   }
 }
 
 /** Settings › Models, Measure: starts the run; its steps and numbers arrive as pushes, a refusal shows on the row. */
 export async function measureModel(name: string): Promise<void> {
+  startedHere.add(name);
   const r = await act("models.measure", { name }, `measure ${name}`);
+  if (!r.ok) startedHere.delete(name);
   applyServerEvent((s) => (r.ok ? measureStarted(s, r.value) : measureRefused(s, name, r.message)));
 }
 

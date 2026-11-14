@@ -53,6 +53,11 @@ export function MeasureDetail({ name, label, onClose }: { name: string; label: s
   };
   const older = isOlder(m);
   const pending = m.checks.filter((c) => c.state === "pending").length;
+  // Parts whose every check was skipped: the score is over the others, so it says which it left out.
+  const left = older ? [] : ORDER.filter((part) => {
+    const mine = m.checks.filter((c) => partOf(c) === part);
+    return mine.length > 0 && mine.every((c) => c.state === "skipped");
+  });
   return createPortal(
     <div className="mp-scrim" data-testid="models.measure.scrim" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="mp-dlg md" role="dialog" aria-modal="true" aria-labelledby="md-t" data-testid="models.measure.detail" ref={box} tabIndex={-1} onKeyDown={onKey}>
@@ -72,6 +77,7 @@ export function MeasureDetail({ name, label, onClose }: { name: string; label: s
         {older ? <p className="md-old" data-testid="models.measure.older">Older measure: eight checks of tools and a database, before Files, Instructions and Pages. Measure again for the five parts.</p> : null}
         {older ? null : <Parts m={m} />}
         {pending ? <p className="md-old" data-testid="models.measure.pending">{pending === 1 ? "1 page waits" : `${pending} pages wait`} for this app's window to run {pending === 1 ? "it" : "them"}; the score leaves Pages out until then.</p> : null}
+        {left.length ? <p className="md-old" data-testid="models.measure.left-out">The score leaves {left.map((p) => PART[p]).join(" and ")} out.</p> : null}
         <div className="md-checks">
           {ORDER.map((part) => {
             const mine = m.checks.filter((c) => partOf(c) === part);

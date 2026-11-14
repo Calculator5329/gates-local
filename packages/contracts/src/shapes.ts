@@ -373,6 +373,14 @@ export const MeasureRun = S.Struct({
 });
 export type MeasureRun = typeof MeasureRun.Type;
 
+/**
+ * models.measures' answer: every saved measure, and the server's own record of the run, its last
+ * step, while it waits or runs and after it stopped on an error (none once a run is done). A
+ * window that connects mid-run, or missed a run's last push, shows this.
+ */
+export const MeasureList = S.Struct({ measures: S.Array(ModelMeasure), run: S.optional(MeasureRun) });
+export type MeasureList = typeof MeasureList.Type;
+
 export const RuntimeState = S.Literals([
   "ready",
   "starting",

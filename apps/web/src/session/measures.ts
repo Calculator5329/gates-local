@@ -1,13 +1,17 @@
 // Measured models (Settings › Models, Measure; row 29): one read after the first frame, the
 // server's models.measures push when a run finishes, and models.measuring while one runs.
-import type { MeasureRun, ModelMeasure, Payload } from "@gates-local/contracts";
+import type { MeasureList, MeasureRun, ModelMeasure, Payload } from "@gates-local/contracts";
 import { NA, type State } from "../store.ts";
 
 const table = (list: readonly ModelMeasure[]): Readonly<Record<string, ModelMeasure>> => Object.fromEntries(list.map((m) => [m.model, m]));
 
-/** The second hydrate batch's read: NA from a server without it, unchanged when the read failed. */
-export const measuresRead = (read: readonly ModelMeasure[] | typeof NA | undefined): Partial<State> =>
-  read === undefined ? {} : { measures: read === NA ? NA : table(read) };
+/**
+ * The second hydrate batch's read: NA from a server without it, unchanged when the read failed.
+ * The server's record of the run replaces this window's, so a run whose last push was lost (a
+ * dropped connection, a restart) ends here, and a run another window started shows.
+ */
+export const measuresRead = (read: MeasureList | typeof NA | undefined): Partial<State> =>
+  read === undefined ? {} : read === NA ? { measures: NA } : { measures: table(read.measures), measuring: read.run === undefined ? {} : { [read.run.model]: read.run } };
 
 export const measuresChanged = (list: Payload<"models.measures">): Partial<State> => ({ measures: table(list) });
 
