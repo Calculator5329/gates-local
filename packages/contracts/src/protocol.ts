@@ -30,6 +30,7 @@ import {
   ModelSpeed,
   ModelMeasure,
   MeasureRun,
+  PageSeen,
   NumCtx,
   MemoryState,
   ModelLoad,
@@ -296,6 +297,12 @@ export const methods = {
    * the numbers on models.measures.
    */
   "models.measure": { params: ModelRef, result: MeasureRun, phone: "deny" },
+  /**
+   * The window ran a measure's pages (Measure's Pages part) in a sandboxed frame: what it saw on
+   * each. The server grades them, saves the measure and pushes models.measures. A measure that
+   * is not this model's latest, or a page already graded, is left as it is.
+   */
+  "models.measurePages": { params: S.Struct({ model: S.String, at: S.Finite, pages: S.Array(PageSeen) }), result: ModelMeasure, phone: "deny" },
   "sources.list": { params: NoParams, result: S.Array(Source), phone: "allow" },
   "sources.add": { params: S.Struct({ kind: SourceKind, path: S.String, label: S.optional(S.String) }), result: Source, phone: "deny" },
   "sources.remove": { params: SourceRef, result: SourceRef, phone: "deny" },

@@ -283,7 +283,7 @@ function ModelRowView({ r, def, saved, onRemove }: { r: InstalledRow; def: strin
           <span aria-hidden="true">·</span>
           {fit}
         </div>
-        <MeasureMeta name={r.name} />
+        <MeasureMeta name={r.name} label={r.label.text} />
         <MeasureFail name={r.name} />
       </div>
       <span className="mp-sz">{sizeText(r.info.sizeBytes)}</span>

@@ -9,7 +9,7 @@ export type IconId =
   | "x" | "xc" | "clock" | "plus" | "clip" | "alert" | "lock" | "file" | "image" | "bulb" | "copy" | "redo"
   | "spin" | "download" | "more" | "chat" | "book" | "cpu" | "server" | "db" | "folder" | "sliders"
   | "pencil" | "trash" | "box" | "wrench" | "keyboard" | "menu" | "gauge" | "right" | "speed"
-  | "refresh" | "fetch" | "external" | "bot" | "bars";
+  | "refresh" | "fetch" | "external" | "bot" | "bars" | "snail";
 
 export function Icon({ id, cls }: { id: IconId; cls?: string }) {
   return (
@@ -82,6 +82,8 @@ export function Sprite() {
         <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5zM3 8l9 5 9-5M12 13v8" /></symbol>
         {/* client addition: measured speed (Lucide circle-gauge), apart from the context gauge above */}
         <symbol id="i-speed" viewBox="0 0 24 24"><path d="M15.6 2.7a10 10 0 1 0 5.7 5.7" /><circle cx="12" cy="12" r="2" /><path d="M13.4 10.6 19 5" /></symbol>
+        {/* client addition: a measured model too slow to use (Lucide snail) */}
+        <symbol id="i-snail" viewBox="0 0 24 24"><path d="M2 13a6 6 0 1 0 12 0 4 4 0 1 0-8 0 2 2 0 0 0 4 0" /><circle cx="10" cy="13" r="8" /><path d="M2 21h12c4.4 0 8-3.6 8-8V7a2 2 0 1 0-4 0v6" /><path d="M18 3 19.1 5.2" /><path d="M22 3 20.9 5.2" /></symbol>
         {/* client addition: Models everywhere (Lucide bot) and the footer's Usage (Lucide chart-no-axes-column) */}
         <symbol id="i-bot" viewBox="0 0 24 24"><path d="M12 8V4H8" /><rect width="16" height="12" x="4" y="8" rx="2" /><path d="M2 14h2M20 14h2M15 13v2M9 13v2" /></symbol>
         <symbol id="i-bars" viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6" /></symbol>

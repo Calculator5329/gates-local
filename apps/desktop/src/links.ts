@@ -15,6 +15,7 @@ export interface LinkDeps {
 export interface GuardedContents {
   setWindowOpenHandler(handler: (details: { url: string }) => { action: "deny" }): void;
   on(event: "will-navigate", listener: (event: { preventDefault(): void }, url: string) => void): unknown;
+  on(event: "will-frame-navigate", listener: (details: { url: string; isMainFrame: boolean; preventDefault(): void }) => void): unknown;
 }
 
 /**
@@ -55,5 +56,10 @@ export function guardNavigation(contents: GuardedContents, deps: LinkDeps): void
     if (deps.isClientUrl(url)) return;
     event.preventDefault();
     openOutside(url, deps);
+  });
+  // A frame in the window (Measure's page checks) keeps the page it was given: it loads no address.
+  contents.on("will-frame-navigate", (details) => {
+    if (details.isMainFrame || details.url === "about:srcdoc" || details.url === "about:blank") return;
+    details.preventDefault();
   });
 }

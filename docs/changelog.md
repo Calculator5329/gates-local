@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-11-14: Measure checks a model the way a chat uses it
+
+- Measure runs 20 checks through the chat's own tool loop and tools, on a
+  small notes folder and shop database it keeps for itself, at the window
+  and thinking setting a chat with that model gets. Your system prompt is
+  left out so every model meets the same checks.
+- The score is out of 100, from five parts: Tools 25, Files 20, Database
+  20, Follows instructions 15, Pages 20. Each check has a token budget; a
+  model that spends it before answering fails that check.
+- Pages: the model writes a small page, and this app's window runs it in a
+  sealed frame (no network, no storage, no way out), clicks and types in
+  it, and grades what it shows. With no window open, the pages wait and the
+  score leaves Pages out until a window runs them.
+- A snail beside the score marks a model that writes under 10 tokens a
+  second, or takes over 10 seconds to its first word.
+- Click the score (on a phone, the grey line) for the parts, every check,
+  what it needed, and what the model did.
+- Scores from the older eight-check Measure still show, as "6/8", until you
+  measure again.
+- `pnpm measure-models --server <ws url> --out <file.json> [model...]`
+  measures models through a running app and writes the results as JSON.
+
 ## 2026-11-14: A running reply shows one mark and the server's time
 
 - Fixes from the audit of 0.2.4.

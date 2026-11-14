@@ -1,191 +1,226 @@
-// Measure (Settings › Models, row 29): a short check of one model on this computer, run only
-// when the person clicks Measure. One request measures decode speed; then three tool-use
-// prompts and five questions against a small built-in shop database, each one request,
-// graded on the call the model makes. A call is read the way a chat reads it: the runtime's
-// tool_calls, the text call format, or a reply that is only the call as JSON. Each check keeps
-// what the model wrote and what its query returned, so a failed check can be read afterwards.
-// Nothing here takes the GPU lease or checks the fit: the caller does both before it calls
-// measureModel.
-import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
-import path from "node:path";
-import type { MeasureCheck, ModelMeasure } from "@gates-local/contracts";
-import { looseCall, parseTextCalls, repairCall } from "../../../../packages/harness/src/parser.ts";
-import { toolBlock, type ToolDefinition } from "../../../../packages/harness/src/prompt.ts";
-import { runSnapshotQuery } from "../../../../packages/harness/src/sql.ts";
-import type { ToolCall } from "../../../../packages/harness/src/types.ts";
+// Measure (Settings › Models, row 29), version 2: how well one model does the app's own work on
+// this computer, run only when the person clicks Measure. Each check (cases.ts) is one chat turn
+// through the chat's tool turn: the same loop, the same Library tools and sandbox, the window a
+// chat with this model gets, and thinking as the chat's setting has it. A tool's result goes back
+// to the model, so a check can take several steps. The person's own system prompt is left out, so
+// a score says the same thing on every computer; the model's built-in one stays, as in a chat.
+//
+// Every request is metered: a check may write BUDGET tokens over all its requests, thinking
+// included, and is cut there. The decode speed is over every check's requests together, and the
+// time to the first word is the middle check's. A page check ends here with the page it wrote;
+// the window runs it later (score.ts). Nothing here takes the GPU lease or checks the fit: the
+// caller does both before it calls measureModel.
+import type { MeasureCheck, ModelMeasure, ShellStatus } from "@gates-local/contracts";
+import { createTools, type LibraryEntry, type ToolCall, type ToolResult } from "../../../../packages/harness/src/index.ts";
+import { streamToolTurn } from "../chat/tools.ts";
+import type { TurnMessage } from "../chat/types.ts";
+import type { TurnSettings } from "../settings/turn.ts";
+import { BUDGET, CASES, SHOP_ID, pageIn, type MeasureCase, type Turn } from "./cases.ts";
+import { partsOf, scoreOf } from "./score.ts";
 
-/** Every request runs at this window: small enough for any model that runs here, big enough for the schema. */
-export const MEASURE_CTX = 4096;
-const SPEED_PROMPT = "Describe a lighthouse at night in about 150 words.";
-const SPEED_TOKENS = 200;
-const CHECK_TOKENS = 400;
-const QUERY_MS = 5000;
-/** How much of a reply, and of a query's first row or error, a check keeps. */
-const REPLY_KEPT = 600;
-const RESULT_KEPT = 300;
+/** A model this slow writes slower than a person reads: about 250 words a minute is 5.5 tokens a second; twice that. */
+export const SLOW_TOKENS_PER_SECOND = 10;
+/** Past 10 seconds a person stops waiting on a reply and turns to something else (Nielsen's response-time limits). */
+export const SLOW_FIRST_WORD_MS = 10_000;
+/** The same seed every run, so a measure repeats; the chat's other sampling settings stay. */
+export const SEED = 7;
+/** How much of a reply a check keeps: its start and its end. */
+const KEPT = 400;
+const CALL_KEPT = 300;
+const PAGE_KEPT = 30_000;
+
 const clip = (text: string, max: number) => text.length > max ? `${text.slice(0, max)}…` : text;
-
-const fn = (name: string, description: string, properties: Record<string, unknown>, required: string[]): ToolDefinition =>
-  ({ type: "function", function: { name, description, parameters: { type: "object", properties, required, additionalProperties: false } } });
-
-const CHECK_TOOLS = [
-  fn("get_weather", "The current weather in a city.", { city: { type: "string" } }, ["city"]),
-  fn("convert_currency", "Convert an amount of money between currencies given as ISO codes such as USD.", { amount: { type: "number" }, from: { type: "string" }, to: { type: "string" } }, ["amount", "from", "to"]),
-];
-const SQL_TOOLS = [fn("sql", "Run one read-only SQLite query against the shop database and see its rows.", { query: { type: "string" } }, ["query"])];
-
-const SCHEMA = `CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT NOT NULL, city TEXT NOT NULL);
-CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, price REAL NOT NULL);
-CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers(id), ordered_on TEXT NOT NULL);
-CREATE TABLE order_items (order_id INTEGER NOT NULL REFERENCES orders(id), product_id INTEGER NOT NULL REFERENCES products(id), quantity INTEGER NOT NULL);`;
-const ROWS = `INSERT INTO customers VALUES (1,'Ana Silva','Lisbon'),(2,'Ben Okafor','Lagos'),(3,'Chloe Martin','Paris'),(4,'Dev Patel','Lisbon'),(5,'Eva Novak','Prague'),(6,'Finn Berg','Lisbon'),(7,'Gia Romano','Paris');
-INSERT INTO products VALUES (1,'Trowel','Garden',12.5),(2,'Hose','Garden',30),(3,'Seeds','Garden',4),(4,'Lamp','Home',45),(5,'Rug','Home',80),(6,'Kettle','Kitchen',25),(7,'Pan','Kitchen',35),(8,'Knife','Kitchen',20),(9,'Mug','Kitchen',8);
-INSERT INTO orders VALUES (1,1,'2024-02-11'),(2,2,'2024-03-02'),(3,1,'2024-03-15'),(4,3,'2024-03-28'),(5,4,'2024-04-03'),(6,2,'2024-04-19'),(7,5,'2024-03-09'),(8,1,'2024-05-01');
-INSERT INTO order_items VALUES (1,1,2),(1,4,1),(2,5,1),(2,9,4),(3,2,1),(3,3,5),(4,6,1),(5,7,2),(5,1,1),(6,4,2),(7,8,3),(8,5,1);`;
-
-interface Reply { content: string; calls: ToolCall[] }
-type ToolCase = { id: string; kind: "tools"; prompt: string; pass: (r: Reply) => boolean };
-type SqlCase = { id: string; kind: "sql"; prompt: string; answer: string | number; reference: string };
-export type MeasureCase = ToolCase | SqlCase;
-
-const only = (r: Reply, name: string) => r.calls.length === 1 && r.calls[0]!.name === name ? r.calls[0]!.input : undefined;
-const said = (v: unknown, word: RegExp) => typeof v === "string" && word.test(v.trim());
-
-export const CASES: readonly MeasureCase[] = [
-  { id: "tools-weather", kind: "tools", prompt: "What's the weather like in Lisbon right now?", pass: (r) => said(only(r, "get_weather")?.city, /^lisbon\b/i) },
-  {
-    id: "tools-convert", kind: "tools", prompt: "How much is 250 US dollars in euros?",
-    pass: (r) => { const a = only(r, "convert_currency"); return Number(a?.amount) === 250 && said(a?.from, /^usd$/i) && said(a?.to, /^eur$/i); },
-  },
-  { id: "tools-none", kind: "tools", prompt: "What is the capital of France? Answer in one word.", pass: (r) => r.calls.length === 0 && /paris/i.test(r.content) },
-  { id: "sql-count", kind: "sql", prompt: "How many orders were placed in March 2024?", answer: 4, reference: "SELECT COUNT(*) AS n FROM orders WHERE ordered_on >= '2024-03-01' AND ordered_on < '2024-04-01'" },
-  {
-    id: "sql-top", kind: "sql", prompt: "Which customer has spent the most in total, counting price times quantity?", answer: "Ben Okafor",
-    reference: "SELECT c.name, SUM(i.quantity * p.price) AS spent FROM customers c JOIN orders o ON o.customer_id = c.id JOIN order_items i ON i.order_id = o.id JOIN products p ON p.id = i.product_id GROUP BY c.id ORDER BY spent DESC LIMIT 1",
-  },
-  { id: "sql-never", kind: "sql", prompt: "How many customers have never placed an order?", answer: 2, reference: "SELECT COUNT(*) AS n FROM customers WHERE id NOT IN (SELECT customer_id FROM orders)" },
-  {
-    id: "sql-garden", kind: "sql", prompt: "What is the total revenue from Garden products?", answer: 87.5,
-    reference: "SELECT SUM(i.quantity * p.price) AS revenue FROM order_items i JOIN products p ON p.id = i.product_id WHERE p.category = 'Garden'",
-  },
-  { id: "sql-city", kind: "sql", prompt: "Which city has the most customers?", answer: "Lisbon", reference: "SELECT city, COUNT(*) AS n FROM customers GROUP BY city ORDER BY n DESC LIMIT 1" },
-];
-
-/** The shop database under `dir`, built once from the schema and rows above. */
-export function ensureShopDb(dir: string): string {
-  const file = path.join(dir, "measure-shop-v1.db");
-  if (existsSync(file)) return file;
-  mkdirSync(dir, { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  rmSync(tmp, { force: true });
-  const db = new DatabaseSync(tmp);
-  try { db.exec(`${SCHEMA}\n${ROWS}`); } finally { db.close(); }
-  renameSync(tmp, file);
-  return file;
-}
-
-/** A cell that is the answer: the same number to the cent, or the same words. */
-const isAnswer = (cell: unknown, answer: string | number) =>
-  typeof answer === "number" ? Math.abs(Number(cell) - answer) < 0.005 : String(cell).trim().toLowerCase() === answer.toLowerCase();
+/** The start and the end of a reply, with what was between them counted. */
+export const headTail = (text: string) => text.length <= 2 * KEPT ? text
+  : `${text.slice(0, KEPT)}\n… ${text.length - 2 * KEPT} characters …\n${text.slice(-KEPT)}`;
+const median = (xs: readonly number[]) => {
+  const s = xs.toSorted((a, b) => a - b);
+  return s.length === 0 ? undefined : s.length % 2 ? s[(s.length - 1) / 2]! : (s[s.length / 2 - 1]! + s[s.length / 2]!) / 2;
+};
 
 export interface MeasureInput {
   baseUrl: string;
   model: string;
   signal: AbortSignal;
-  /** The shop database (ensureShopDb). */
-  dbFile: string;
+  /** Measure's own Library sources (ensureFixtures). */
+  sources: readonly LibraryEntry[];
+  /** The window a chat with this model gets: the default context, capped at the model's own. */
+  numCtx: number;
+  /** The chat's thinking setting; sent only to a model that can think. */
+  think?: boolean;
+  /** The model's sampling settings, without the person's system prompt. */
+  settings?: TurnSettings;
+  /** The shell sandbox's probe: off on Linux skips the database checks. */
+  shell?: ShellStatus;
+  platform?: NodeJS.Platform;
   fetch?: typeof fetch;
-  /** Steps finished so far, of total: the speed request, then each case. */
+  /** Steps finished so far, of total: loading the model, then each check. */
   onStep?: (done: number, total: number) => void;
   now?: () => number;
 }
 
+/** Loading the model, then one step per check. */
+export const STEPS = CASES.length + 1;
+
+interface Meter { budget: number; used: number; start: number; firstMs?: number; cut: boolean }
+
 export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasure, "model" | "digest">> {
   const fetcher = input.fetch ?? fetch;
-  const total = CASES.length + 1;
+  const now = input.now ?? Date.now;
+  const windows = (input.platform ?? process.platform) === "win32";
+  const noDatabase = !windows && input.shell?.state === "off";
+  const sources = noDatabase ? input.sources.filter((s) => s.id !== SHOP_ID) : input.sources;
+
   const show = await fetcher(new URL("/api/show", input.baseUrl), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: input.model }), signal: input.signal });
   if (!show.ok) throw new Error(`The model's details could not be read (HTTP ${show.status})`);
-  const capabilities = ((await show.json()) as { capabilities?: unknown }).capabilities;
-  const has = (c: string) => Array.isArray(capabilities) && capabilities.includes(c);
-  const native = has("tools");
-
-  const ask = async (messages: { role: string; content: string }[], numPredict: number, tools?: readonly ToolDefinition[]) => {
-    const response = await fetcher(new URL("/api/chat", input.baseUrl), {
-      method: "POST", headers: { "content-type": "application/json" }, signal: input.signal,
-      body: JSON.stringify({
-        model: input.model, messages, stream: true,
-        options: { num_ctx: MEASURE_CTX, temperature: 0, num_predict: numPredict },
-        // A thinking model would think through every check; the measure asks for the answer.
-        ...(has("thinking") ? { think: false } : {}),
-        ...(tools && native ? { tools } : {}),
-      }),
-    });
-    if (!response.ok) throw new Error(`The model did not answer (HTTP ${response.status}): ${(await response.text()).slice(0, 300)}`);
-    let content = "";
-    const raw: unknown[] = [];
-    let figures: { eval_count?: number; eval_duration?: number } = {};
-    for (const line of (await response.text()).split("\n")) {
-      if (!line.trim()) continue;
-      const v = JSON.parse(line) as { error?: string; done?: boolean; eval_count?: number; eval_duration?: number; message?: { content?: string; tool_calls?: unknown[] } };
-      if (v.error) throw new Error(v.error);
-      content += v.message?.content ?? "";
-      if (Array.isArray(v.message?.tool_calls)) raw.push(...v.message.tool_calls);
-      if (v.done) figures = v;
-    }
-    // What the model wrote, before any of it is read as a call.
-    const wrote = clip([content.trim(), ...raw.map((c) => JSON.stringify(c))].filter(Boolean).join("\n"), REPLY_KEPT);
-    if (tools && !native) {
-      const parsed = parseTextCalls(content);
-      raw.push(...parsed.calls);
-      content = parsed.content;
-    }
-    // A chat also runs a reply that is only a call to an offered tool written as JSON.
-    const loose = tools && raw.length === 0 ? looseCall(content, tools) : undefined;
-    if (loose) { raw.push(loose); content = ""; }
-    const calls = raw.flatMap((c) => { try { return [repairCall(c)]; } catch { return []; } });
-    return { reply: { content, calls }, figures, wrote };
-  };
-  const withTools = (system: string, tools: readonly ToolDefinition[]) => native ? system : `${system}\n${toolBlock(tools)}`;
+  const details = (await show.json()) as { capabilities?: unknown; system?: unknown };
+  const capabilities = Array.isArray(details.capabilities) ? details.capabilities : undefined;
+  // As a chat: a model that cannot think gets no flag; a runtime that lists nothing gets it as asked.
+  const think = input.think === undefined || (capabilities !== undefined && !capabilities.includes("thinking")) ? undefined : input.think;
+  const system = typeof details.system === "string" && details.system.trim() ? details.system : undefined;
 
   let done = 0;
-  const step = () => input.onStep?.(++done, total);
-  const speed = await ask([{ role: "user", content: SPEED_PROMPT }], SPEED_TOKENS);
-  const { eval_count: count, eval_duration: ns } = speed.figures;
-  const tokensPerSecond = count && ns ? Math.round((count / (ns / 1e9)) * 10) / 10 : 0;
+  const step = () => input.onStep?.(++done, STEPS);
+  await warmUp(input, fetcher, think);
   step();
 
+  let evalCount = 0;
+  let evalNs = 0;
+  const firstWords: number[] = [];
   const checks: MeasureCheck[] = [];
   for (const c of CASES) {
-    let ok: boolean;
-    let result: string | undefined;
-    let wrote: string;
-    if (c.kind === "tools") {
-      const system = withTools("Use the provided tools when they help; answer directly when they do not.", CHECK_TOOLS);
-      const { reply, ...rest } = await ask([{ role: "system", content: system }, { role: "user", content: c.prompt }], CHECK_TOKENS, CHECK_TOOLS);
-      ok = c.pass(reply);
-      wrote = rest.wrote;
-    } else {
-      const system = withTools(`You answer questions about a shop's SQLite database by calling the sql tool once with one SELECT query. Schema:\n${SCHEMA}`, SQL_TOOLS);
-      const { reply, ...rest } = await ask([{ role: "system", content: system }, { role: "user", content: c.prompt }], CHECK_TOKENS, SQL_TOOLS);
-      wrote = rest.wrote;
-      const query = only(reply, "sql")?.query;
-      ok = false;
-      if (typeof query === "string") {
-        try {
-          const rows = await runSnapshotQuery({ file: input.dbFile, query, limit: 20, signal: input.signal, timeoutMs: QUERY_MS });
-          const first = rows[0];
-          ok = typeof first === "object" && first !== null && Object.values(first).some((cell) => isAnswer(cell, c.answer));
-          result = first === undefined ? "No rows." : JSON.stringify(first);
-        } catch (error) {
-          input.signal.throwIfAborted();
-          result = error instanceof Error ? error.message : String(error);
-        }
-      }
+    if (c.db && noDatabase) {
+      checks.push({ id: c.id, kind: c.part, ok: false, state: "skipped", needs: c.needs, why: "Run commands is off on this machine, so the database can't be read." });
+      step();
+      continue;
     }
-    checks.push({ id: c.id, kind: c.kind, ok, ...(wrote ? { reply: wrote } : {}), ...(result === undefined ? {} : { result: clip(result, RESULT_KEPT) }) });
+    const meter: Meter = { budget: BUDGET[c.part], used: 0, start: now(), cut: false };
+    const metered = meterFetch(fetcher, meter, now, (count, ns) => { evalCount += count; evalNs += ns; });
+    const calls: string[] = [];
+    const tools = createTools({ sources, platform: input.platform, ...(noDatabase ? { shell: false } : {}) });
+    const execute = async (call: ToolCall, signal: AbortSignal): Promise<ToolResult> => {
+      const named = `${call.name} ${clip(JSON.stringify(call.input), CALL_KEPT)}`;
+      try {
+        const result = await tools.execute(call, signal);
+        calls.push(`${named} → ${clip(result.output, CALL_KEPT)}`);
+        return result;
+      } catch (e) {
+        calls.push(`${named} → ${clip((e as Error).message, CALL_KEPT)}`);
+        throw e;
+      }
+    };
+    const messages: TurnMessage[] = [...(system ? [{ role: "system" as const, content: system }] : []), ...c.history ?? [], { role: "user", content: c.prompt }];
+    let answer = "";
+    let steps: Turn["steps"] = [];
+    let failed: string | undefined;
+    const end = await turnEnd(streamToolTurn({
+      baseUrl: input.baseUrl, model: input.model, messages, numCtx: input.numCtx, signal: input.signal, fetch: metered,
+      sources, execute, ...(input.platform ? { platform: input.platform } : {}), ...(input.shell ? { shell: input.shell } : {}),
+      ...(think === undefined ? {} : { think }), ...(input.settings ? { settings: input.settings } : {}),
+    }));
+    input.signal.throwIfAborted();
+    if (end.type === "done") ({ answer, steps } = end);
+    else failed = end.message;
+    if (meter.firstMs !== undefined) firstWords.push(meter.firstMs);
+    checks.push(grade(c, { answer, steps: steps.filter((s) => s.name !== "note") }, failed, {
+      ...(answer ? { reply: headTail(answer) } : {}),
+      ...(calls.length ? { calls } : {}),
+      tokens: meter.used, ms: Math.round(now() - meter.start), ...(meter.cut ? { cut: true } : {}),
+    }));
     step();
   }
-  const passed = checks.filter((c) => c.ok).length;
-  return { at: (input.now ?? Date.now)(), numCtx: MEASURE_CTX, tokensPerSecond, score: Math.round((100 * passed) / checks.length), checks };
+
+  const tokensPerSecond = evalNs > 0 ? Math.round((evalCount / (evalNs / 1e9)) * 10) / 10 : 0;
+  const firstTokenMs = median(firstWords);
+  const slow = tokensPerSecond > 0 && tokensPerSecond < SLOW_TOKENS_PER_SECOND ? "decode" as const
+    : firstTokenMs !== undefined && firstTokenMs > SLOW_FIRST_WORD_MS ? "first-token" as const : undefined;
+  const parts = partsOf(checks);
+  return {
+    at: now(), version: 2, numCtx: input.numCtx, ...(think === undefined ? {} : { think }), tokensPerSecond,
+    ...(firstTokenMs === undefined ? {} : { firstTokenMs: Math.round(firstTokenMs) }), ...(slow ? { slow } : {}),
+    score: scoreOf(parts), parts, checks,
+  };
+}
+
+type Evidence = Pick<MeasureCheck, "reply" | "calls" | "tokens" | "ms" | "cut">;
+
+function grade(c: MeasureCase, turn: Turn, failed: string | undefined, evidence: Evidence): MeasureCheck {
+  const base = { id: c.id, kind: c.part, needs: c.needs, ...evidence };
+  if (failed !== undefined) return { ...base, ok: false, why: `The turn failed: ${failed}` };
+  if (c.kind === "answer") {
+    const wrong = turn.answer.trim() || evidence.cut ? c.grade(turn) : "It gave no answer.";
+    const why = wrong && evidence.cut ? "It used its whole token budget before it answered." : wrong;
+    return { ...base, ok: why === undefined, ...(why ? { why } : {}) };
+  }
+  const page = pageIn(turn.answer);
+  if (page === undefined) return { ...base, ok: false, why: evidence.cut ? "It used its whole token budget before the page was written." : "The reply had no HTML page." };
+  return { ...base, ok: false, state: "pending", page: clip(page, PAGE_KEPT), script: [...c.script] };
+}
+
+/** The turn's one ending: its answer and steps, or why it failed. */
+async function turnEnd(events: ReturnType<typeof streamToolTurn>) {
+  for await (const event of events) {
+    if (event.type === "done") return { type: "done" as const, answer: event.message.content, steps: event.message.tools ?? [] };
+    if (event.type === "error") return { type: "error" as const, message: event.message };
+  }
+  return { type: "error" as const, message: "The turn ended without an answer." };
+}
+
+/** One token at the chat's window and settings, so the model is in memory before the first check is timed. */
+async function warmUp(input: MeasureInput, fetcher: typeof fetch, think: boolean | undefined) {
+  const { systemPrompt: _prompt, keep_alive, ...options } = input.settings ?? {};
+  const response = await fetcher(new URL("/api/chat", input.baseUrl), {
+    method: "POST", headers: { "content-type": "application/json" }, signal: input.signal,
+    body: JSON.stringify({
+      model: input.model, messages: [{ role: "user", content: "Hi" }], stream: true,
+      options: { ...options, num_ctx: input.numCtx, num_predict: 1, seed: SEED },
+      ...(keep_alive === undefined ? {} : { keep_alive }), ...(think === undefined ? {} : { think: false }),
+    }),
+  });
+  if (!response.ok) throw new Error(`The model did not load (HTTP ${response.status}): ${(await response.text()).slice(0, 300)}`);
+  await response.text();
+}
+
+/**
+ * The chat requests of one check, each capped at what is left of its budget and seeded; the first
+ * word's time and each request's counts are read off the stream as it passes. Past the budget a
+ * request is not sent: it ends at once, cut.
+ */
+function meterFetch(base: typeof fetch, meter: Meter, now: () => number, counted: (tokens: number, ns: number) => void): typeof fetch {
+  return async (url, init) => {
+    if (!String(url).endsWith("/api/chat") || typeof init?.body !== "string") return base(url, init);
+    const left = meter.budget - meter.used;
+    if (left <= 0) {
+      meter.cut = true;
+      return new Response(`${JSON.stringify({ message: { role: "assistant", content: "" }, done: true, done_reason: "length", eval_count: 0 })}\n`);
+    }
+    const body = JSON.parse(init.body) as { options?: Record<string, unknown> };
+    body.options = { ...body.options, num_predict: left, seed: SEED };
+    const response = await base(url, { ...init, body: JSON.stringify(body) });
+    if (!response.ok || !response.body) return response;
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const watch = (line: string) => {
+      if (!line.trim()) return;
+      let v: { done?: boolean; done_reason?: string; eval_count?: number; eval_duration?: number; message?: { content?: string; thinking?: string; tool_calls?: unknown[] } };
+      try { v = JSON.parse(line); } catch { return; }
+      if (meter.firstMs === undefined && (v.message?.content || v.message?.thinking || v.message?.tool_calls?.length)) meter.firstMs = now() - meter.start;
+      if (!v.done) return;
+      const count = v.eval_count ?? 0;
+      meter.used += count;
+      counted(count, v.eval_duration ?? 0);
+      if (v.done_reason === "length") meter.cut = true;
+    };
+    const stream = response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, out) {
+        buffer += decoder.decode(chunk, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        lines.forEach(watch);
+        out.enqueue(chunk);
+      },
+      flush() { watch(buffer); },
+    }));
+    return new Response(stream, { status: response.status, statusText: response.statusText, headers: response.headers });
+  };
 }

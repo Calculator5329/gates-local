@@ -21,6 +21,7 @@
 //   image-text-call   streams IMAGE_TEXT_CALL, an image call written as reply text, with no tool_calls
 //   image-batch       "N images of X": one image call with N distinct prompts when the tool is
 //                     offered; without it, the reply says what the system prompt's image line says
+//   measure           Measure's checks played from their references, two of them wrong (measure-reply.ts)
 // A prompt with the word "tool" makes any scenario call the first offered tool
 // once (repeatToolCalls: every round; toolCalls: N, the first N rounds);
 // quietToolRounds ends such a round at the call, with no reply text. When that prompt also names
@@ -32,6 +33,7 @@
 import { writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { DEFAULT_INSTALLED, EMBED_ONLY_INSTALLED, EMBED_SMALLEST_INSTALLED, FAKE_MODELS, LONG_NAME_INSTALLED, findFakeModel, showBody, type FakeModel } from "./models.ts";
+import { measureReply } from "./measure-reply.ts";
 import { createScheduler } from "./scheduler.ts";
 import { STREAM_REPLY } from "./stream-reply.ts";
 
@@ -43,7 +45,7 @@ const SCENARIO_INSTALLED: Readonly<Record<string, readonly string[]>> = {
 };
 const installedFor = (s: string): readonly string[] => SCENARIO_INSTALLED[s] ?? DEFAULT_INSTALLED;
 
-export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest", "embed-only", "slow-drip", "long-name", "threads", "image-turn", "image-claims", "image-text-call", "image-batch"] as const;
+export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest", "embed-only", "slow-drip", "long-name", "threads", "image-turn", "image-claims", "image-text-call", "image-batch", "measure"] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 /** A Gemma 4 12B reply seen 2026-11-11: it wrote its image call as text in a shape of its own. */
 const IMAGE_TEXT_CALL_PROMPT ="A cinematic sci-fi background featuring a massive, high-tech space station orbiting a ringed planet within a vibrant, colorful nebula. The scene includes distant stars, glowing energy fields, and intricate hull details on the station. High-resolution, 8k, photorealistic, epic scale, and dramatic lighting.";
@@ -441,6 +443,24 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
           await sleep(timing.tokenDelayMs, abort.signal);
         }
         line({ ...base(), message: { role: "assistant", content: "" }, done: true, done_reason: "stop" });
+        turn.outcome = "done";
+        res.end(); return;
+      }
+      if (mode === "measure") {
+        // Measure's checks played as a model that gets all but two right (measure-reply.ts). Native
+        // tools when the request offers them, else the call written as text the way the loop reads it.
+        const all = Array.isArray(messages) ? messages : [];
+        const system = all.filter(x => field(x, "role") === "system").map(x => String(field(x, "content"))).join("\n");
+        const named = Array.isArray(tools) ? tools.map(t => str(field(t, "function"), "name")).filter((n): n is string => n !== undefined) : [...system.matchAll(/"name":\s*"(\w+)"/g)].map(x => x[1]!);
+        const play = measureReply(messages, named) ?? { content: "Ready." };
+        const message = "call" in play
+          ? (Array.isArray(tools) ? { role: "assistant", content: "", tool_calls: [{ function: play.call }] } : { role: "assistant", content: `<tool_call>${JSON.stringify(play.call)}</tool_call>` })
+          : { role: "assistant", content: play.content };
+        line({ ...base(), message, done: false });
+        // About 40 tokens a second: a token is about four characters of what it wrote.
+        const sent = Math.max(1, Math.ceil(JSON.stringify(message).length / 4));
+        line({ ...base(), message: { role: "assistant", content: "" }, done: true, done_reason: "stop", prompt_eval_count: 24 + prompt.length, eval_count: sent, eval_duration: sent * 25_000_000 });
+        turn.tokens = sent;
         turn.outcome = "done";
         res.end(); return;
       }

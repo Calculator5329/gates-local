@@ -276,36 +276,91 @@ export const ModelSpeed = S.Struct({
 });
 export type ModelSpeed = typeof ModelSpeed.Type;
 
-/** One check of a Measure run: a tool-use prompt or a question against the built-in database. */
+/** The parts a Measure score is made of (version 2); each has its own count and weight. */
+export const MeasurePart = S.Literals(["tools", "files", "database", "instructions", "pages"]);
+export type MeasurePart = typeof MeasurePart.Type;
+
+/** One thing the window does to a page a model wrote (Measure's Pages part), by CSS selector. */
+export const PageAction = S.Union([
+  S.Struct({ do: S.Literal("click"), target: S.String }),
+  /** Sets an input's value and sends input, keyup and change events. */
+  S.Struct({ do: S.Literal("fill"), target: S.String, text: S.String }),
+  /** Notes the element's value or text. */
+  S.Struct({ do: S.Literal("read"), target: S.String }),
+  /** Notes the text of every matching element that is shown, joined by "|". */
+  S.Struct({ do: S.Literal("visible"), target: S.String }),
+]);
+export type PageAction = typeof PageAction.Type;
+
+/**
+ * One check of a Measure run. A measure saved before version 2 has only id, kind ("tools" or
+ * "sql"), ok, and maybe reply and result.
+ */
 export const MeasureCheck = S.Struct({
   id: S.String,
-  kind: S.Literals(["tools", "sql"]),
+  /** The part it counts toward; "sql" is a database question of a measure saved before version 2. */
+  kind: S.Literals(["tools", "sql", "files", "database", "instructions", "pages"]),
   ok: S.Boolean,
-  /** What the model wrote, its calls included, cut short. Not in a measure saved before 2026-11-14. */
+  /** What the model's answer said: its head and its tail when it is long. */
   reply: S.optional(S.String),
-  /** A database question: the first row its query returned, or why the query did not run. */
+  /** Before version 2: a database question's first row, or why its query did not run. Pages: what the window saw. */
   result: S.optional(S.String),
+  /** pending: a page waiting for the app's window to run it. skipped: it could not run on this computer. Neither counts. */
+  state: S.optional(S.Literals(["pending", "skipped"])),
+  /** What a pass needs, in a few words. */
+  needs: S.optional(S.String),
+  /** Why it failed or was skipped. */
+  why: S.optional(S.String),
+  /** Each tool call and what came back, cut short. */
+  calls: S.optional(S.Array(S.String)),
+  /** Tokens the model wrote for it, thinking included, over all its requests. */
+  tokens: S.optional(S.Int),
+  /** Its tokens reached the check's budget, and the reply was cut there. */
+  cut: S.optional(S.Boolean),
+  ms: S.optional(S.Finite),
+  /** Pages: the page the model wrote, and what the window does to it. */
+  page: S.optional(S.String),
+  script: S.optional(S.Array(PageAction)),
 });
 export type MeasureCheck = typeof MeasureCheck.Type;
+
+/** A part's count: checks passed of the ones that ran, and its weight in the score. */
+export const MeasurePartCount = S.Struct({ part: MeasurePart, passed: S.Int, total: S.Int, weight: S.Int });
+export type MeasurePartCount = typeof MeasurePartCount.Type;
 
 /**
  * A model measured on this computer when the person asked (Settings › Models, Measure): its
  * reply speed and the share of checks it passed. Kept per model and digest, so a re-pulled
- * model with new weights is measured again.
+ * model with new weights is measured again. Without `version` it is an older measure of eight
+ * single-shot checks, kept readable until the model is measured again.
  */
 export const ModelMeasure = S.Struct({
   model: S.String,
   digest: S.String,
   /** When it was measured, ms since 1970. */
   at: S.Finite,
-  /** The window the checks ran at. */
+  /** 2: the checks ran through the chat's own loop and tools, in parts. */
+  version: S.optional(S.Literal(2)),
+  /** The window the checks ran at: version 2 uses the one a chat with this model uses. */
   numCtx: S.Int,
+  /** Version 2: whether the model thought, as a chat with it does. */
+  think: S.optional(S.Boolean),
+  /** Decode speed: version 2 sums every request of the run. */
   tokensPerSecond: S.Finite.check(S.isGreaterThanOrEqualTo(0)),
-  /** 0 to 100: passed over total, rounded. */
+  /** Version 2: the median wait from a request to its first token. */
+  firstTokenMs: S.optional(S.Finite),
+  /** Version 2: too slow to use here, and which number says so. Never part of the score. */
+  slow: S.optional(S.Literals(["decode", "first-token"])),
+  /** Version 2: 0 to 100, each part's share of passes times its weight. Before: passed of 8. */
   score: S.Int.check(S.isBetween({ minimum: 0, maximum: 100 })),
+  parts: S.optional(S.Array(MeasurePartCount)),
   checks: S.Array(MeasureCheck),
 });
 export type ModelMeasure = typeof ModelMeasure.Type;
+
+/** What the window saw on one page: each read or visible action's text, in order, or why it could not run. */
+export const PageSeen = S.Struct({ id: S.String, seen: S.Array(S.String), error: S.optional(S.String) });
+export type PageSeen = typeof PageSeen.Type;
 
 /** A Measure run while it goes: waiting for the GPU, then each step; ends done or error. */
 export const MeasureRun = S.Struct({

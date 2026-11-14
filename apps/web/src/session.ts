@@ -7,8 +7,10 @@ import {
   type Client,
   type BlockingTurn,
   type ImageChoice,
+  type ModelMeasure,
   type Payload,
 } from "@gates-local/contracts";
+import { runPages } from "./measure-pages.ts";
 import { newestOnly } from "./pick.ts";
 import { NA, type State, getState, overChat, setState } from "./store.ts";
 import { createChat } from "./session/chat.ts";
@@ -164,7 +166,10 @@ async function hydrateWith(
   on("models.load", modelsSession.loadChanged);
   on("memory.changed", memoryChanged);
   on("models.speed", (list) => applyServerEvent((s) => speedsChanged(s, list)));
-  on("models.measures", (list) => applyServerEvent(measuresChanged(list)));
+  on("models.measures", (list) => {
+    applyServerEvent(measuresChanged(list));
+    runMeasurePages(list);
+  });
   on("models.measuring", (run) => applyServerEvent((s) => measuringChanged(s, run)));
   on("sources.changed", (sources) => applyServerEvent({ sources }));
   on("update.changed", updatesSession.receiveUpdate);
@@ -262,6 +267,7 @@ async function hydrateWith(
     probe("models.measures", {}),
   ]);
   applyServerEvent((s) => ({ gpu, sources, ...(updateOrder.current(updateTicket) ? { update } : {}), ...(catalogLands(catalogTicket) ? { catalog } : {}), ...speedsRead(s, speeds), ...measuresRead(measures) }));
+  if (measures !== undefined && measures !== NA) runMeasurePages(measures);
   release("none");
   void settingsReads.read();
   // A model's thoughts take minutes in system memory, so Thinking starts off with no GPU; the composer's button still turns it on.
@@ -480,6 +486,24 @@ export async function addSource(kind: "folder" | "file" | "sqlite", path: string
   if (path.trim() === "") return null;
   const r = await act("sources.add", { kind, path: path.trim() }, `add this ${SOURCE_WORDS[kind]}`, "check it and try again");
   return r.ok ? null : r.message;
+}
+
+/** Measures whose pages this window has run or is running, so each runs once here. */
+const pagesRun = new Set<string>();
+
+/**
+ * A measure's page checks wait for a window to run them (measure-pages.ts): any window but a
+ * phone's runs them once and sends back what they showed. The server grades it and pushes the
+ * measure again; a second window's answer for a page already graded changes nothing.
+ */
+function runMeasurePages(list: readonly ModelMeasure[]): void {
+  if (getState().unavailable["models.measurePages"] === true) return;
+  for (const m of list) {
+    const key = `${m.model}@${m.at}`;
+    if (pagesRun.has(key) || !m.checks.some((c) => c.state === "pending")) continue;
+    pagesRun.add(key);
+    void runPages(m.checks).then((pages) => act("models.measurePages", { model: m.model, at: m.at, pages }, `check the pages ${m.model} wrote`));
+  }
 }
 
 /** Settings › Models, Measure: starts the run; its steps and numbers arrive as pushes, a refusal shows on the row. */

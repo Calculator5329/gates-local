@@ -20,10 +20,10 @@ function rig(opts: { openFails?: boolean } = {}) {
     setWindowOpenHandler: (h) => {
       windowOpen = h;
     },
-    on: (event, listener) => {
+    on: (event: string, listener: unknown) => {
       // A listener under any other name would never run on a real navigation.
-      expect(event).toBe("will-navigate");
-      willNavigate = listener;
+      expect(["will-navigate", "will-frame-navigate"]).toContain(event);
+      if (event === "will-navigate") willNavigate = listener as typeof willNavigate;
     },
   };
   guardNavigation(contents, deps);

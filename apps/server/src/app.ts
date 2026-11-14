@@ -338,8 +338,10 @@ export function createApp(deps: AppDeps): App {
     push: (table) => push("fit.changed", table),
     log,
   });
-  // Measure (Settings › Models): only on its RPC, holding the GPU alone, at a fixed small window.
+  // Measure (Settings › Models): only on its RPC, holding the GPU alone, at the chat's window.
   const measure = deps.dataDir === undefined ? undefined : createMeasure({
+    ...(deps.settings ? { settings: deps.settings } : {}),
+    ...(deps.shellStatus ? { shellStatus: deps.shellStatus } : {}),
     dataDir: deps.dataDir,
     baseUrl: () => runtime.baseUrl(),
     installed: async () => catalog.current() ?? (await catalog.refresh()).models,

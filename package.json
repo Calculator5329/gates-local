@@ -23,6 +23,7 @@
     "release:verify": "node scripts/release-kit.ts verify",
     "release:models": "node scripts/release-kit.ts models",
     "machine-check": "node scripts/machine-check.ts",
+    "measure-models": "node scripts/measure-models.ts",
     "test": "vitest run",
     "verify": "pnpm typecheck && pnpm lint && pnpm test",
     "verify:runtime": "vitest run apps/server/src/settings apps/server/src/fit apps/server/src/runtime",

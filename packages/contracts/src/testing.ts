@@ -230,6 +230,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "models.speed": { params: {}, result: [] },
   "models.measures": { params: {}, result: [measured] },
   "models.measure": { params: { name: "qwen3.5:9b" }, result: { model: "qwen3.5:9b", state: "waiting", done: 0, total: 9 } },
+  "models.measurePages": { params: { model: "qwen3.5:9b", at: measured.at, pages: [{ id: "page-counter", seen: ["0", "3"] }] }, result: measured },
   "sources.list": { params: {}, result: [source] },
   "sources.add": { params: { kind: "sqlite", path: "/home/me/library.db" }, result: source },
   "sources.remove": { params: { id: "s1" }, result: { id: "s1" } },

@@ -2,7 +2,10 @@
 // computer when the person asks, kept on its row. Until then the row has a Measure button across
 // both cells; while it runs, the button is the progress. The check runs on the server
 // (apps/server/src/measure); nothing here starts one without a click.
+import { useState } from "react";
+import type { ModelMeasure } from "@gates-local/contracts";
 import { handleKey } from "./handles.ts";
+import { MeasureDetail, SLOW_WORDS, isOlder } from "./MeasureDetail.tsx";
 import { Icon } from "./icons.tsx";
 import { tpsText } from "./model-speed.tsx";
 import { measureModel } from "./session.ts";
@@ -18,14 +21,23 @@ const running = (s: State, name: string) => {
   return run !== undefined && (run.state === "waiting" || run.state === "running") ? run : undefined;
 };
 
-/** The phone's words for a measured model, a grey line of their own under the size and mark. */
-export function MeasureMeta({ name }: { name: string }) {
+/** The score as the row shows it: out of 100, or an older measure's checks passed out of eight. */
+const scoreText = (m: ModelMeasure) => (isOlder(m) ? `${m.checks.filter((c) => c.ok).length}/${m.checks.length}` : String(m.score));
+const scoreWords = (m: ModelMeasure) => `${isOlder(m) ? `Older score, ${scoreText(m)} checks` : `Score ${m.score} of 100`}${m.slow ? `, ${SLOW_WORDS[m.slow]}` : ""}`;
+
+/** The phone's words for a measured model, a grey line of their own under the size and mark; it opens the detail. */
+export function MeasureMeta({ name, label }: { name: string; label: string }) {
   const m = useStore((s) => measureOf(s, name));
+  const [open, setOpen] = useState(false);
   if (m === undefined) return null;
   return (
-    <div className="mp-mline">
-      {tpsText(m.tokensPerSecond) ?? "–"} · score {m.score}
-    </div>
+    <>
+      <button type="button" className="mp-mline" data-testid={`settings.models.measure-line-${handleKey(name)}`} aria-label={`${scoreWords(m)}, ${label}: details`} onClick={() => setOpen(true)}>
+        {tpsText(m.tokensPerSecond) ?? "–"} · score {scoreText(m)}
+        {m.slow ? <Icon id="snail" cls="s14 mp-slow" /> : null}
+      </button>
+      {open ? <MeasureDetail name={name} label={label} onClose={() => setOpen(false)} /> : null}
+    </>
   );
 }
 
@@ -43,11 +55,23 @@ export function MeasureCells({ name, label }: { name: string; label: string }) {
     const now = measuringNow(s);
     return now !== undefined && now !== name;
   });
+  const [open, setOpen] = useState(false);
   if (m !== undefined && run === undefined) {
     return (
       <>
         <span className="mp-spd">{tpsText(m.tokensPerSecond) ?? "–"}</span>
-        <span className="mp-score" aria-label={`Score ${m.score} of 100`}>{m.score}</span>
+        <button
+          type="button"
+          className={`mp-score${isOlder(m) ? " old" : ""}`}
+          data-testid={`settings.models.score-${handleKey(name)}`}
+          aria-label={`${scoreWords(m)}, ${label}: details`}
+          aria-haspopup="dialog"
+          onClick={() => setOpen(true)}
+        >
+          {m.slow ? <Icon id="snail" cls="s14 mp-slow" /> : null}
+          {scoreText(m)}
+        </button>
+        {open ? <MeasureDetail name={name} label={label} onClose={() => setOpen(false)} /> : null}
       </>
     );
   }

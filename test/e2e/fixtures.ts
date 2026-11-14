@@ -5,7 +5,7 @@ import { test as base, expect, type Locator, type Page, type Request } from "@pl
 import { createClient } from "@gates-local/contracts";
 import { CONTROL_URL, SERVER_PORT, TOKEN, appUrl } from "./env.ts";
 
-export type Scenario = "models" | "no-models" | "slow-first-token" | "mid-stream-error" | "wrong-service" | "embed-smallest" | "embed-only" | "slow-drip" | "long-name" | "threads" | "image-turn" | "image-claims" | "image-text-call" | "image-batch";
+export type Scenario = "models" | "no-models" | "slow-first-token" | "mid-stream-error" | "wrong-service" | "embed-smallest" | "embed-only" | "slow-drip" | "long-name" | "threads" | "image-turn" | "image-claims" | "image-text-call" | "image-batch" | "measure";
 /** Settings' runtimeMode: "system" uses the Ollama on its port, "app" the app's own copy. */
 export type RuntimeMode = "system" | "app";
 /** Threads written before the server starts: N messages in one thread, the design's sidebar ("design-code" adds a reply with a long code block, a table and a long URL; "usage" adds a week of three models' usage), the README's demo threads, saved tool turns ("work-fold"), or 0 for none. */
@@ -160,7 +160,8 @@ export const test = base.extend<Fixtures>({
       if (m.type() === "error" && !allowedErrors.some((re) => re.test(m.text()))) logged.push({ text: m.text(), url: m.location().url });
     });
     page.on("pageerror", (e) => logged.push({ text: `pageerror: ${e.message}`, url: "" }));
-    if (skipFirstRun) await page.addInitScript(() => localStorage.setItem("gates-local.first-run-done", "1"));
+    // An init script runs in every frame; a sandboxed one (Measure's pages) has no storage to write.
+    if (skipFirstRun) await page.addInitScript(() => { if (window.top === window) localStorage.setItem("gates-local.first-run-done", "1"); });
     await use(async (hash = "") => {
       await test.step("page load", async () => {
         const target = appUrl(hash);
