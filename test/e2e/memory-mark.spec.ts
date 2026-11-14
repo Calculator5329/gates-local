@@ -60,6 +60,17 @@ test("one memory mark in Models and Download, against the card, with other progr
   await expectMarks(list.locator(".dlrow[data-cat]"), 16);
   await saidOnceUnder(page, list.locator(".dl-others"), list.locator(".grp:not(.dl-bigs) .dlrow[data-cat]").last());
   await page.screenshot({ path: info.outputPath("mark-download.png"), animations: "disabled" });
+  // the estimate is said once, in the name's tooltip; the mark's tooltip only names the mark (row 32)
+  const row = list.locator(".dlrow[data-cat]").first();
+  const tip = page.locator("#tip");
+  await row.locator(".sl").hover();
+  await expect(tip).toContainText("of memory with 16k of context");
+  await page.mouse.move(0, 0);
+  await expect(tip).toBeHidden();
+  await row.locator(".mm").hover();
+  await expect(tip).toBeVisible();
+  await page.screenshot({ path: info.outputPath("mark-download-tip.png"), animations: "disabled" });
+  await expect(tip).toHaveText("Runs on the GPU");
 });
 
 // The computer keeps some of its memory for itself, so a model can be too big while needing less than the whole.

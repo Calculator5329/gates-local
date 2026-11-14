@@ -172,6 +172,9 @@ function markWords(v: Verdict, cpu: boolean): string {
   return v.k === "no" ? "Too big for this computer" : v.k === "gpu" ? "Runs on the GPU" : cpu ? "Runs in system memory, slower" : "Partly in system memory, slower";
 }
 
+/** The memory mark's tooltip: its name and nothing more; the row's own tooltip says the estimate (row 32). */
+const markTip = (v: Verdict, cpu: boolean) => `<b>${esc(markWords(v, cpu))}</b>`;
+
 function DlRow({ c, numCtx, report, mark, actions }: { c: CatalogEntry; numCtx: number; report: FitReport | undefined; mark: boolean; actions: DownloadActions }) {
   const p = useStore(s => Object.values(s.pulls).findLast(progress => downloadKey(progress.name) === downloadKey(c.name) && awaitingInstall(progress)));
   const installed = useStore((s) => c.installed || (s.models ?? []).some((m) => downloadKey(m.name) === downloadKey(c.name)));
@@ -200,7 +203,7 @@ function DlRow({ c, numCtx, report, mark, actions }: { c: CatalogEntry; numCtx: 
           )}
         </span>
       </div>
-      {report && v ? <MemoryMark report={report} words={markWords(v, cpu)} tip={tip} /> : <span className="mm" aria-hidden="true" />}
+      {report && v ? <MemoryMark report={report} words={markWords(v, cpu)} tip={markTip(v, cpu)} /> : <span className="mm" aria-hidden="true" />}
       <DlButton
         size={gb(c.downloadBytes)}
         label={c.label}
@@ -225,7 +228,7 @@ function BigRow({ c, report, numCtx }: { c: CatalogEntry; report: FitReport; num
         <b>{c.label}</b>
         <span className="d">{c.purpose}</span>
       </div>
-      <MemoryMark report={report} words={markWords(v, cpu)} tip={tip} />
+      <MemoryMark report={report} words={markWords(v, cpu)} tip={markTip(v, cpu)} />
     </div>
   );
 }

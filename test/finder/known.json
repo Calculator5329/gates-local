@@ -14,9 +14,5 @@
   {
     "screen": "desktop", "kind": "twice", "element": "fix the backup cron", "real": false, "area": "finder",
     "wrong": "Not a bug: the open thread's row in the sidebar and its title over the chat, as T3 Code shows them; the desktop screen watches the whole window, so both are in view."
-  },
-  {
-    "screen": "models", "step": "Download tab", "kind": "twice", "element": "estimated", "real": true, "area": "settings",
-    "wrong": "Download says each model's memory estimate twice: the row's tooltip and the memory mark's tooltip hold the same sentence."
   }
 ]

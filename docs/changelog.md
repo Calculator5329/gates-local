@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-13: Download says a model's memory estimate once
+
+- In Models › Download, a model's name and its memory mark had the same
+  tooltip, so the memory estimate was said twice. The mark's tooltip now
+  only names what its colour says ("Runs on the GPU"); the estimate stays
+  in the name's tooltip.
+
 ## 2026-11-13: The bug finder tells a box that made room from one that moved
 
 - On a step that says a box is meant to make room (the message box

@@ -177,6 +177,34 @@ it("the download's size is its button, and a running download fills that button 
   expect(running).not.toContain('class="prog"');
 });
 
+const unescape = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&amp;/g, "&");
+/** Each row's tooltips, by its catalog name: the words each one shows, one entry per sentence or line. */
+const rowTips = (html: string) => {
+  const out: Record<string, string[][]> = {};
+  for (const part of html.split('class="dlrow').slice(1)) {
+    const cat = /data-cat="([^"]+)"/.exec(part)?.[1] ?? "?";
+    out[cat] = [...part.matchAll(/data-tip="([^"]*)"/g)].map((m) =>
+      unescape(unescape(m[1]!)).split(/<br>/).map((line) => line.replace(/<[^>]+>/g, "")).flatMap((line) => line.split(/(?<=\.)\s+/)).map((s) => s.trim()).filter((s) => s !== ""));
+  }
+  return out;
+};
+
+it("a row's memory is said once: the memory mark's tooltip names the mark, and the row's tooltip holds the estimate (row 32)", () => {
+  const a = entry("a:1", "A", true, "fits");
+  const b = entry("b:1", "B", false, "spills");
+  const c = entry("c:1", "C", false, "refuse");
+  const html = render(base({ catalog: [a, b, c], fitTable: table(fit("a:1", "fits"), fit("b:1", "spills"), fit("c:1", "refuse")) }));
+  const tips = rowTips(html);
+  expect(Object.keys(tips).toSorted()).toEqual(["a:1", "b:1", "c:1"]);
+  for (const [cat, list] of Object.entries(tips)) {
+    expect(list.length, `${cat}: the name's tooltip and the mark's`).toBeGreaterThanOrEqual(2);
+    const said = list.flat();
+    expect(said.filter((s, i) => said.indexOf(s) !== i), `${cat}: no sentence in two of its tooltips`).toEqual([]);
+    expect(said.filter((s) => /of memory with/.test(s)), `${cat}: the estimate, once`).toHaveLength(1);
+  }
+  expect(html, "the mark's tooltip is its verdict's words").toMatch(/data-cat="a:1"[\s\S]*?class="mm gpu"[^>]*data-tip="&lt;b&gt;Runs on the GPU&lt;\/b&gt;"/);
+});
+
 it("an empty Recommended keeps its header slot for the visit when the placeholder drew one, so what is below stays put", () => {
   vi.useFakeTimers();
   const a = entry("a:1", "A", true, "fits");
