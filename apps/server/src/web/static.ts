@@ -55,10 +55,18 @@ function inside(root: string, file: string): boolean {
   return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
 }
 
-/** index.html with the meta (and a root base) as the first thing in its head. */
-export function withMeta(html: string): string {
+/** The client's own frame policy in index.html, which as built names this computer's loopback page route. */
+const FRAME_POLICY = /(<meta\s+http-equiv="Content-Security-Policy"\s+content=")frame-src [^"]*(")/i;
+
+/**
+ * index.html with the meta (and a root base) as the first thing in its head. Given `pagesOrigin`,
+ * the client's frame policy names that origin's page route and nothing else: a page a model wrote
+ * can move its own frame only where this policy lets a frame go, so it never names a wildcard host.
+ */
+export function withMeta(html: string, pagesOrigin?: string): string {
+  const own = pagesOrigin === undefined ? html : html.replace(FRAME_POLICY, (_, open: string, close: string) => `${open}frame-src ${pagesOrigin}/pages/${close}`);
   const head = /<head(\s[^>]*)?>/i;
-  return head.test(html) ? html.replace(head, (tag) => `${tag}${SAME_ORIGIN_META}${BASE}`) : `${SAME_ORIGIN_META}${BASE}${html}`;
+  return head.test(own) ? own.replace(head, (tag) => `${tag}${SAME_ORIGIN_META}${BASE}`) : `${SAME_ORIGIN_META}${BASE}${own}`;
 }
 
 function send(req: IncomingMessage, res: ServerResponse, status: number, headers: Record<string, string | number>, body: Buffer | string): void {
@@ -67,7 +75,7 @@ function send(req: IncomingMessage, res: ServerResponse, status: number, headers
   res.end(req.method === "HEAD" ? undefined : bytes);
 }
 
-async function sendIndex(req: IncomingMessage, res: ServerResponse, realRoot: string): Promise<void> {
+async function sendIndex(req: IncomingMessage, res: ServerResponse, realRoot: string, pagesOrigin?: string): Promise<void> {
   const file = path.join(realRoot, "index.html");
   let html: string;
   try {
@@ -76,10 +84,11 @@ async function sendIndex(req: IncomingMessage, res: ServerResponse, realRoot: st
   } catch {
     return send(req, res, 503, { "Content-Type": "text/plain; charset=utf-8" }, "The web client is not built.\n");
   }
-  send(req, res, 200, { "Content-Type": TYPES[".html"] ?? "text/html", "Cache-Control": "no-cache" }, withMeta(html));
+  send(req, res, 200, { "Content-Type": TYPES[".html"] ?? "text/html", "Cache-Control": "no-cache" }, withMeta(html, pagesOrigin));
 }
 
-export async function serveClient(req: IncomingMessage, res: ServerResponse, webRoot: string): Promise<void> {
+/** `pagesOrigin` is the listener's own public origin: index.html's frame policy is narrowed to its page route. */
+export async function serveClient(req: IncomingMessage, res: ServerResponse, webRoot: string, pagesOrigin?: string): Promise<void> {
   if (req.method !== "GET" && req.method !== "HEAD") return send(req, res, 405, { Allow: "GET, HEAD" }, "");
   const segments = clientSegments(req.url ?? "/");
   if (segments === null) return send(req, res, 403, {}, "");
@@ -89,18 +98,18 @@ export async function serveClient(req: IncomingMessage, res: ServerResponse, web
   } catch {
     return send(req, res, 503, { "Content-Type": "text/plain; charset=utf-8" }, "The web client is not built.\n");
   }
-  if (segments.length === 0) return sendIndex(req, res, realRoot);
+  if (segments.length === 0) return sendIndex(req, res, realRoot, pagesOrigin);
   let real: string;
   try {
     real = await realpath(path.join(realRoot, ...segments));
   } catch {
-    return sendIndex(req, res, realRoot); // not a file: the client's own route
+    return sendIndex(req, res, realRoot, pagesOrigin); // not a file: the client's own route
   }
   if (!inside(realRoot, real)) return send(req, res, 403, {}, "");
-  if (real === path.join(realRoot, "index.html")) return sendIndex(req, res, realRoot);
+  if (real === path.join(realRoot, "index.html")) return sendIndex(req, res, realRoot, pagesOrigin);
   let bytes: Buffer;
   try {
-    if (!(await stat(real)).isFile()) return sendIndex(req, res, realRoot);
+    if (!(await stat(real)).isFile()) return sendIndex(req, res, realRoot, pagesOrigin);
     bytes = await readFile(real);
   } catch {
     return send(req, res, 404, {}, "");

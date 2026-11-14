@@ -9,6 +9,8 @@ export const NAVIGATE_PROMPT = "make the leaving page";
 export const BIG_PROMPT = "make the big page";
 /** The address the probe and the leaving page try to reach: the app's own web server. */
 export const PROBE_TARGET = "http://127.0.0.1:5287/";
+/** The fake Ollama's own address (FAKE_URL in test/e2e/env.ts), whose request log the tests read. */
+export const FAKE_ORIGIN = "http://127.0.0.1:5288";
 
 export function loanPage(o: { slider?: boolean; total?: boolean } = {}): string {
   const rate = o.slider
@@ -104,8 +106,8 @@ const result = { violations: [] };
 document.addEventListener("securitypolicyviolation", (e) => result.violations.push(e.effectiveDirective));
 const tryIt = (f) => { try { return String(f()); } catch (e) { return "threw " + e.name; } };
 result.referrer = document.referrer;
-result.href = location.href.slice(0, 16);
-// the address it resolves against, whole unless it is its own data: one (that holds this source)
+// its own address and the one it resolves against, cut short if they are a data: one (that holds this source)
+result.href = location.href.startsWith("data:") ? location.href.slice(0, 16) : location.href;
 result.base = document.baseURI.startsWith("data:") ? "data:" : document.baseURI;
 result.parentDocument = tryIt(() => parent.document.title);
 result.parentHref = tryIt(() => parent.location.href);
@@ -115,8 +117,10 @@ result.sessionStorage = tryIt(() => sessionStorage.length);
 result.cookie = tryIt(() => document.cookie);
 result.indexedDB = tryIt(() => indexedDB.open("x") && "opened");
 result.rtc = typeof RTCPeerConnection + "," + typeof webkitRTCPeerConnection + "," + typeof RTCDataChannel;
-// recorded, not refused: a blank frame of its own is a fresh window with the constructors back
+result.rtcNew = tryIt(() => new RTCPeerConnection() && "constructed");
+// a blank frame of its own would be a fresh window with the constructors back
 result.nestedRtc = tryIt(() => { const f = document.createElement("iframe"); document.body.append(f); return typeof f.contentWindow.RTCPeerConnection; });
+result.childFrame = tryIt(() => { const f = document.createElement("iframe"); document.body.append(f); return f.contentDocument === null ? "refused" : "opened"; });
 result.popup = tryIt(() => window.open("${PROBE_TARGET}") === null ? "null" : "opened");
 // the origins of the windows around it, which no referrer policy hides in every browser
 result.ancestors = tryIt(() => location.ancestorOrigins ? [...location.ancestorOrigins].join(",") : "none");
@@ -151,6 +155,31 @@ setTimeout(() => { location.href = "${PROBE_TARGET}"; }, 100);
 </html>`;
 }
 
+/** Where the pages below try to reach once out of their limits: the test's own fake server, which logs every request. */
+export const LEFT_PATH = "/left-the-frame";
+/** A document with no limits of its own that calls the fake server as it loads. */
+const unlimited = (via: string) => `data:text/html,<script>fetch("${FAKE_ORIGIN}${LEFT_PATH}/${via}-fetch",{mode:"no-cors"}).catch(()=>{});new Image().src="${FAKE_ORIGIN}${LEFT_PATH}/${via}-image"</script>`;
+
+/** Pages that try to replace their own document, each a different way, so their limits would not come along. */
+export const MOVING = {
+  "a new document of its own": {
+    prompt: "make the page that swaps its document",
+    code: `<!doctype html><html><head><meta charset="utf-8"><title>Swapping page</title></head><body><p id="out">here</p><script>setTimeout(() => { location.href = ${JSON.stringify(unlimited("data")).replaceAll("</", "<\\/")}; }, 100);</script></body></html>`,
+  },
+  "the fake server's own address": {
+    prompt: "make the page that goes to the server",
+    code: `<!doctype html><html><head><meta charset="utf-8"><title>Going page</title></head><body><p id="out">here</p><script>setTimeout(() => { location.href = "${FAKE_ORIGIN}${LEFT_PATH}/navigation"; }, 100);</script></body></html>`,
+  },
+  "a refresh tag": {
+    prompt: "make the page that refreshes away",
+    code: `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${FAKE_ORIGIN}${LEFT_PATH}/refresh"><title>Refreshing page</title></head><body><p id="out">here</p></body></html>`,
+  },
+  "a refresh tag to a document of its own": {
+    prompt: "make the page that refreshes into a new document",
+    code: `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content='0;url=${unlimited("refresh-data")}'><title>Refreshing page</title></head><body><p id="out">here</p></body></html>`,
+  },
+} as const;
+
 /** A page past what a frame's address can hold (2 MiB in Chromium): one long line, so the stream sends it whole. */
 export function bigPage(): string {
   return `<!doctype html><html><head><meta charset="utf-8"><title>Big page</title></head><body><p id="out">big</p><script>const pad = "${"a".repeat(BIG_PAD)}";</script></body></html>`;
@@ -168,6 +197,9 @@ export function pageReply(prompt: string): string | undefined {
     case PROBE_PROMPT: return fenced("Here is the probe.", probePage(), "It reports what it reached.");
     case NAVIGATE_PROMPT: return fenced("Here is a page that leaves.", leavingPage(), "It tries to go elsewhere.");
     case BIG_PROMPT: return fenced("Here is a big page.", bigPage(), "It is mostly padding.");
-    default: return undefined;
+    default: {
+      const moving = Object.values(MOVING).find((m) => m.prompt === prompt);
+      return moving === undefined ? undefined : fenced("Here is a page that moves.", moving.code, "It tries to go elsewhere.");
+    }
   }
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type FrameNavigation, type GuardedContents, guardNavigation, type LinkDeps, openOutside, PAGE_WINDOW, type WindowOpen } from "../src/links.ts";
+import { type FrameNavigation, type GuardedContents, guardNavigation, isPageFrame, type LinkDeps, openOutside, PAGE_WINDOW, type WindowOpen } from "../src/links.ts";
 
 const CLIENT = "gates-local://app";
 
@@ -50,33 +50,42 @@ function rig(opts: { openFails?: boolean } = {}) {
   return { opened, logged, deps, ...w };
 }
 
-const PAGE = "data:text/html;charset=utf-8,%3C!doctype%20html%3E";
+const PAGE = "http://127.0.0.1:5186/pages/0123456789abcdef0123456789abcdef";
 const TOP = { parent: null };
 const IN_FRAME = { parent: TOP };
 
 describe("pages a reply wrote", () => {
-  it("the window may put a page in a frame", () => {
+  it("the window may put a page in a frame: the server's one-time page address", () => {
     const r = rig();
     expect(r.frameNavigate({ url: PAGE, isMainFrame: false, initiator: TOP })).toBe(false);
+    expect(isPageFrame(PAGE)).toBe(true);
   });
 
   it("a page cannot move its own frame, to the web or to another page", () => {
     const r = rig();
     expect(r.frameNavigate({ url: "https://example.com/collect?x=1", isMainFrame: false, initiator: IN_FRAME })).toBe(true);
     expect(r.frameNavigate({ url: PAGE, isMainFrame: false, initiator: IN_FRAME })).toBe(true);
+    expect(r.frameNavigate({ url: "about:blank", isMainFrame: false, initiator: IN_FRAME })).toBe(true);
     expect(r.opened).toEqual([]);
     expect(r.logged.join("\n")).not.toContain("collect");
   });
 
   it("a frame loads nothing but a page, whoever asks", () => {
     const r = rig();
-    for (const url of ["https://example.com/", `${CLIENT}/index.html`, "blob:gates-local://app/1", "data:image/svg+xml,<svg/>", "about:srcdoc"]) {
-      expect(r.frameNavigate({ url, isMainFrame: false, initiator: TOP })).toBe(true);
+    for (const url of [
+      "https://example.com/", `${CLIENT}/index.html`, "blob:gates-local://app/1", "data:image/svg+xml,<svg/>", "about:srcdoc",
+      // pages were data: addresses before the server served them; none is now
+      "data:text/html;charset=utf-8,%3C!doctype%20html%3E",
+      // the route's shape exactly: no query, no other host, path or id
+      `${PAGE}?token=x`, `${PAGE}/`, PAGE.replace("127.0.0.1", "localhost"), PAGE.replace("http:", "https:"),
+      "http://127.0.0.1:5186/pages/", "http://127.0.0.1:5186/pages/0123", "http://127.0.0.1:5186/files/x.png",
+    ]) {
+      expect(r.frameNavigate({ url, isMainFrame: false, initiator: TOP }), url).toBe(true);
     }
   });
 
-  it("a blank frame stays blank", () => {
-    expect(rig().frameNavigate({ url: "about:blank", isMainFrame: false, initiator: TOP })).toBe(false);
+  it("a blank frame is refused too: the client sets each frame's address before it is in the document", () => {
+    expect(rig().frameNavigate({ url: "about:blank", isMainFrame: false, initiator: TOP })).toBe(true);
   });
 
   it("the window's own navigation is left to will-navigate", () => {

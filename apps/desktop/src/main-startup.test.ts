@@ -17,7 +17,7 @@ const fake = vi.hoisted(() => {
   return { events, opened, contents, openExternal: vi.fn(async (_url: string) => undefined), setApplicationMenu: vi.fn() };
 });
 vi.mock("electron", () => ({
-  app: { setName: vi.fn(), setPath: vi.fn(), getPath: () => ".", requestSingleInstanceLock: () => true, on: vi.fn(), whenReady: () => Promise.resolve(), isPackaged: false, quit: vi.fn() },
+  app: { setName: vi.fn(), setPath: vi.fn(), getPath: () => ".", requestSingleInstanceLock: () => true, on: vi.fn(), whenReady: () => Promise.resolve(), isPackaged: false, quit: vi.fn(), commandLine: { hasSwitch: () => false, appendSwitch: vi.fn() } },
   BrowserWindow: class {
     webContents = fake.contents;
     on = vi.fn(); isDestroyed = () => false; isFocused = () => true; loadURL = vi.fn(async () => undefined);

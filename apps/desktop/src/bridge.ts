@@ -37,6 +37,8 @@ export type BridgeState =
       readonly port: number;
       /** WebSocket URL including the per-launch token; changes on every launch. */
       readonly serverUrl: string;
+      /** Chromium's sandbox is off (the AppImage launcher's --no-sandbox): pages run only on a click, Measure runs none. */
+      readonly sandboxOff?: true;
     }
   | {
       readonly status: "crashed";
@@ -99,11 +101,11 @@ export function serverUrl(port: number, token: string): string {
   return `ws://127.0.0.1:${port}/?token=${token}`;
 }
 
-/** Map the supervisor's internal state to what the renderer may see. */
-export function toBridgeState(state: SupervisorState): BridgeState {
+/** Map the supervisor's internal state to what the renderer may see; `sandboxOff` is main's `app.commandLine.hasSwitch("no-sandbox")`. */
+export function toBridgeState(state: SupervisorState, sandboxOff = false): BridgeState {
   switch (state.status) {
     case "ready":
-      return { status: "ready", launch: state.launch, port: state.port, serverUrl: state.url };
+      return { status: "ready", launch: state.launch, port: state.port, serverUrl: state.url, ...(sandboxOff ? { sandboxOff: true } : {}) };
     case "crashed":
       return {
         status: "crashed",

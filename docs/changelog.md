@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-14: A page's limits come from the server
+
+- A page now runs from the app's own server, at an address good for one
+  load, and its limits come with it as a header, so a page that swaps
+  its own document, or refreshes itself somewhere else, keeps them or
+  stops. The address holds no token, and the app frames nothing else.
+- A page cannot open a frame of its own, so it cannot find a fresh
+  window with WebRTC back in it.
+- The phone address frames its own pages and nothing else.
+- When the desktop app starts with Chromium's sandbox off (the AppImage
+  on newer Ubuntu releases), a page shows its code and runs only when
+  you press Run, with one line saying why. Measure skips its page checks
+  there and says so.
+- A page too big to run still shows its code and its size.
+
 ## 2026-11-14: Tools on can run a command with an empty Library, and the running line stops saying Loading once the model is in
 
 - With Let the model use tools on and nothing in the Library, a chat

@@ -19,6 +19,9 @@
 .pg-head .ibtn[aria-pressed="true"]{background:var(--selected);color:var(--foreground)}
 .pg-frame{flex:1;min-height:0;width:100%;border:0;display:block;background:#0f0f0f}
 .pg-big{flex:none;padding:10px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.pg-held{display:flex;align-items:center;gap:8px;padding-top:7px;padding-bottom:7px}
+.pg-held>span{flex:1;min-width:0}
+.pg-held .btn{height:28px;flex:none}
 .pg-code{flex:1;min-height:0;margin:0;padding:14px 16px;overflow:auto;background:var(--code-bg);font-size:12.5px;line-height:1.55;white-space:pre;tab-size:2}
 
 /* narrow window and phone (cover.ts COVER): the panel covers the chat; close gives it back.

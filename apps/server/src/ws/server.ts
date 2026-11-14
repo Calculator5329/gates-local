@@ -32,6 +32,7 @@ import {
 } from "@gates-local/contracts";
 import { type WebSocket, WebSocketServer } from "ws";
 import { serveImage } from "../image/files.ts";
+import { createPageRoute } from "../pages/route.ts";
 import { isThumbnailRequest, serveThumbnail } from "../pictures/serve.ts";
 import { SECURITY_HEADERS, phoneGate } from "../web/phone.ts";
 import { listenOwnerSocket } from "../web/socket.ts";
@@ -161,7 +162,9 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
   const allowed = new Set(options.allowedOrigins);
   const handlers = options.handlers;
 
+  const pages = createPageRoute();
   const http = createServer((req, res) => {
+    if (pages.matches(req)) { pages.handle(req, res, req.method === "POST" && admits(req).ok); return; }
     if (options.dataDir && (req.url ?? "").startsWith("/files/")) {
       const verdict = admits(req);
       if (!verdict.ok) { res.writeHead(verdict.status).end(); return; }
@@ -205,6 +208,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
   // of the token. Refusals log the reason only, never a header value.
   let phoneHttp: ReturnType<typeof createServer> | null = null;
   if (phone !== undefined && phoneAdmits !== null) {
+    const phonePages = createPageRoute({ frameAncestors: phone.origin });
     phoneHttp = createServer((req, res) => {
       for (const [k, v] of SECURITY_HEADERS) res.setHeader(k, v);
       const verdict = phoneAdmits(req, "request");
@@ -213,6 +217,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
         res.writeHead(403, { "Content-Length": 0 }).end();
         return;
       }
+      if (phonePages.matches(req)) { phonePages.handle(req, res, true); return; }
       const fail = () => { if (!res.headersSent) res.writeHead(500, { "Content-Length": 0 }).end(); };
       if ((req.url ?? "").startsWith("/files/")) {
         if (options.dataDir === undefined) { res.writeHead(404, { "Content-Length": 0 }).end(); return; }
@@ -220,7 +225,9 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
         void serveImage(req, res, options.dataDir).catch(fail);
         return;
       }
-      void serveClient(req, res, phone.webRoot).catch(fail);
+      // the client frames nothing but this listener's own pages
+      res.setHeader("Content-Security-Policy", `frame-src ${phone.origin}/pages/`);
+      void serveClient(req, res, phone.webRoot, phone.origin).catch(fail);
     });
     phoneHttp.on("upgrade", (req, socket, head) => {
       const verdict = phoneAdmits(req, "upgrade");

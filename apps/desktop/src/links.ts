@@ -40,8 +40,8 @@ export interface GuardedContents {
   setWebRTCIPHandlingPolicy(policy: "disable_non_proxied_udp"): void;
 }
 
-/** The one kind of address a frame in the window may load: a page a reply wrote, as the client frames it. */
-const isPageFrame = (url: string): boolean => /^data:text\/html[;,]/i.test(url);
+/** The one kind of address a frame in the window may load: a page a reply wrote, at the server's one-time page address (apps/server/src/pages/route.ts). */
+export const isPageFrame = (url: string): boolean => /^http:\/\/127\.0\.0\.1:\d{1,5}\/pages\/[0-9a-f]{32}$/.test(url);
 
 /**
  * Hand an http(s) link to the system browser; any other URL is dropped.
@@ -93,9 +93,9 @@ export function guardNavigation(contents: GuardedContents, deps: LinkDeps): void
   contents.on("will-frame-navigate", (details) => {
     // the window's own document is will-navigate's
     if (details.isMainFrame) return;
-    // A blank frame stays blank. Pages and Measure's page checks load as data: pages (below); no
-    // frame is a srcdoc one any more, so about:srcdoc is refused like any other address.
-    if (details.url === "about:blank") return;
+    // Pages and Measure's page checks load the server's page address (below), set before their
+    // frame is in the document, so no frame of the client's ever navigates to about:blank or
+    // about:srcdoc: those are refused like any other address.
     const fromWindow = details.initiator === undefined || details.initiator === null || details.initiator.parent === null;
     if (isPageFrame(details.url) && fromWindow) return;
     details.preventDefault();

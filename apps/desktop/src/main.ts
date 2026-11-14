@@ -183,7 +183,7 @@ function run(start: StartApp = {}): void {
   let held: { readonly words: Words; readonly actions: readonly PageAction[] } | null =
     start.page === undefined ? null : { words: start.page, actions: start.hold === true ? ["continue"] : [] };
 
-  const bridgeState = (): BridgeState => toBridgeState(supervisor.state);
+  const bridgeState = (state = supervisor.state): BridgeState => toBridgeState(state, app.commandLine.hasSwitch("no-sandbox"));
 
   function showHeld(): boolean {
     if (held === null) return false;
@@ -268,7 +268,7 @@ function run(start: StartApp = {}): void {
       }
     } catch (error) { console.error(`[desktop] could not acknowledge update startup: ${(error as Error).message}`); }
     if (win === null || win.isDestroyed()) return;
-    win.webContents.send(IPC.state, toBridgeState(state));
+    win.webContents.send(IPC.state, bridgeState(state));
     switch (state.status) {
       case "ready":
         if (!showHeld()) showClient();

@@ -5,7 +5,7 @@
 // The fake's "measure" scenario passes every check but two (test/fake-ollama/measure-reply.ts):
 // Instructions 3 of 4 and Pages 2 of 3, so the score is 90.
 import { expect, openModels, stack, test, waitReady } from "./fixtures.ts";
-import { FAKE_URL, TOKEN } from "./env.ts";
+import { FAKE_URL, SERVER_PORT, TOKEN } from "./env.ts";
 
 const chatRequests = async (model: string) => {
   const state = (await (await fetch(`${FAKE_URL}/__fake/state`)).json()) as { requests: { path: string; body: { model?: string } }[] };
@@ -153,7 +153,7 @@ test("a Measure page learns nothing of the window's address", async ({ page, ope
   await page.getByTestId("settings.models.measure-qwen3-5-9b").click();
   await expect.poll(() => sent.length, { timeout: 60_000 }).toBeGreaterThan(0);
   const told = sent.join("\n");
-  // the page did read where it runs: its own data: address, not the window's
-  expect.soft(told).toContain("at data:text/html");
+  // the page did read where it runs: its own one-time address on the server, not the window's
+  expect.soft(told).toMatch(new RegExp(`at http://127\\.0\\.0\\.1:${SERVER_PORT}/pages/[0-9a-f]{32}`));
   expect(told).not.toContain(TOKEN);
 });

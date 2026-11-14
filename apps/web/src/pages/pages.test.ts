@@ -1,12 +1,14 @@
 // Pages in a reply: the chip, the writing chip, the versions of a chat and the document the frame runs.
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Markdown } from "../markdown.tsx";
+import { SANDBOX_OFF_SKIP, runPage, runPages } from "../measure-pages.ts";
 import { setState } from "../store.ts";
-import { PAGE_POLICY, framedDoc, pageFileName, pageUrl } from "./page-doc.ts";
+import { PAGE_MAX, pageAddress, pageFileName } from "./page-doc.ts";
 import { closePanel, follow, showVersion, shownOf, versionsOf } from "./pages.ts";
 import { PagePanel } from "./PagePanel.tsx";
+import { sandboxOff } from "./sandbox.ts";
 
 const page = (title: string, body = "<p>x</p>") => `<!doctype html>\n<html><head><title>${title}</title></head><body>${body}</body></html>`;
 const block = (code: string) => `\`\`\`html\n${code}\n\`\`\``;
@@ -112,27 +114,84 @@ describe("the panel's state", () => {
     expect(shownOf(undefined, [])).toBeUndefined();
   });
 
-  it("the frame is sandboxed to scripts only, sends no referrer and loads a data: address", () => {
+  it("draws no frame before the server has given the page its address, and no address holds the code", () => {
     setState({ messages: { three: [msg("a", block(page("P")))] } });
     follow("three", vs(1));
     const out = panel("three");
-    expect(out).toMatch(/<iframe[^>]* sandbox="allow-scripts"/);
-    expect(out).toMatch(/<iframe[^>]* referrerPolicy="no-referrer"/i);
-    expect(out).toMatch(/<iframe[^>]* src="data:text\/html;charset=utf-8,/);
+    expect(out).not.toContain("<iframe");
+    expect(out).toContain('<div class="pg-frame" aria-hidden="true"></div>');
+    expect(out).not.toContain("data:");
   });
 });
 
-describe("the framed document", () => {
-  it("puts the policy first, after the doctype", () => {
-    const doc = framedDoc(page("A"));
-    expect(doc.startsWith(`<!doctype html><meta http-equiv="Content-Security-Policy" content="${PAGE_POLICY}">`)).toBe(true);
-    expect(framedDoc("<html><body>x</body></html>").startsWith('<!doctype html><meta http-equiv="Content-Security-Policy"')).toBe(true);
+describe("the frame's address", () => {
+  const SERVER = "http://127.0.0.1:5186";
+  const ID = "0123456789abcdef0123456789abcdef";
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** fetch as the server's page route answers it; the hand-overs are kept. */
+  function route(status = 201, id = ID): Array<{ url: string; init: RequestInit }> {
+    const sent: Array<{ url: string; init: RequestInit }> = [];
+    vi.stubGlobal("fetch", (url: string, init: RequestInit) => {
+      sent.push({ url, init });
+      return Promise.resolve(new Response(status === 201 ? JSON.stringify({ id }) : null, { status }));
+    });
+    return sent;
+  }
+
+  it("is the server's page route under the id it answered, with the token only on the hand-over", async () => {
+    const sent = route();
+    const a = await pageAddress(page("A"), { origin: SERVER, token: "secret-token" });
+    expect(a).toEqual({ url: `${SERVER}/pages/${ID}` });
+    expect(JSON.stringify(a)).not.toContain("secret-token");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.url).toBe(`${SERVER}/pages?token=secret-token`);
+    expect(sent[0]!.init).toMatchObject({ method: "POST", body: page("A"), credentials: "omit", referrerPolicy: "no-referrer" });
   });
 
-  it("is the whole URL, with nothing of the app's address in it", () => {
-    const url = pageUrl(page("A"));
-    expect(url.startsWith("data:text/html;charset=utf-8,")).toBe(true);
-    expect(decodeURIComponent(url.slice(url.indexOf(",") + 1))).toBe(framedDoc(page("A")));
+  it("on the phone (no token) hands over on its own origin", async () => {
+    const sent = route();
+    expect(await pageAddress(page("A"), { origin: "https://hub.example.ts.net", token: null })).toEqual({ url: `https://hub.example.ts.net/pages/${ID}` });
+    expect(sent[0]!.url).toBe("https://hub.example.ts.net/pages");
+  });
+
+  it("a page past the size the server serves is not sent; the server's own refusal reads the same", async () => {
+    const sent = route(413);
+    expect(await pageAddress("a".repeat(PAGE_MAX + 1), { origin: SERVER, token: "t" })).toEqual({ error: "too-big" });
+    expect(sent).toHaveLength(0);
+    expect(await pageAddress("a".repeat(PAGE_MAX), { origin: SERVER, token: "t" })).toEqual({ error: "too-big" });
+    expect(sent).toHaveLength(1);
+  });
+
+  it("an id that is not the server's shape, a refusal or no server gives no address", async () => {
+    route(201, "../../index.html?");
+    expect(await pageAddress(page("A"), { origin: SERVER, token: "t" })).toEqual({ error: "refused" });
+    route(401);
+    expect(await pageAddress(page("A"), { origin: SERVER, token: "t" })).toEqual({ error: "refused" });
+    expect(await pageAddress(page("A"), { origin: null, token: null })).toEqual({ error: "no-server" });
+  });
+
+  it("Measure's page checks take the same route, and none run with the sandbox off", async () => {
+    const sent = route(413);
+    const checks = [{ id: "page-total", state: "pending", page: page("M"), script: [{ do: "read" as const, target: "#out" }] }];
+    const seen = await runPage("page-total", page("M"), checks[0]!.script, 100, { origin: SERVER, token: "t" });
+    expect(sent[0]!.url).toBe(`${SERVER}/pages?token=t`);
+    // what goes to the route is the page with the check's harness after it
+    expect(String(sent[0]!.init.body).startsWith(page("M"))).toBe(true);
+    expect(seen).toEqual({ id: "page-total", seen: [], error: "The page is too big to run here (0.0 MB)." });
+    const skipped = await runPages(checks, () => Promise.resolve(true));
+    expect(skipped).toEqual([{ id: "page-total", seen: [], error: SANDBOX_OFF_SKIP }]);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("the desktop app's sandbox switch is read once its server is ready; a browser has its sandbox", async () => {
+    expect(await sandboxOff()).toBe(false);
+    let push: ((s: { status: string; sandboxOff?: boolean }) => void) | undefined;
+    vi.stubGlobal("window", { gatesLocal: { getState: () => Promise.resolve({ status: "starting" }), onState: (l: typeof push) => { push = l; return () => undefined; } } });
+    const asked = sandboxOff();
+    await Promise.resolve();
+    push?.({ status: "ready", sandboxOff: true });
+    expect(await asked).toBe(true);
   });
 
   it("a save is named after the page", () => {

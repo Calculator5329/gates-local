@@ -15,7 +15,7 @@ const electron = vi.hoisted(() => {
 });
 vi.mock("electron", () => ({
   app: { setName() {}, setPath() {}, getPath: () => "unused", requestSingleInstanceLock: () => true,
-    whenReady: () => Promise.resolve(), on() {}, isPackaged: false },
+    whenReady: () => Promise.resolve(), on() {}, isPackaged: false, commandLine: { hasSwitch: () => false } },
   BrowserWindow: electron.BrowserWindow,
   ipcMain: { handle: (name: string, callback: (event: unknown) => unknown) => electron.handlers.set(name, callback) },
   protocol: { registerSchemesAsPrivileged() {}, handle() {} },

@@ -25,7 +25,7 @@ const fake = vi.hoisted(() => {
   return { handlers, events, frame, contents, document, world, original, Textarea, read: vi.fn(async () => [{ types: ["text/uri-list"], getType: async () => new Blob(["file:///srv/docs/private.pdf"]) }]) };
 });
 vi.mock("electron", () => ({
-  app: { setName: vi.fn(), setPath: vi.fn(), getPath: () => ".", requestSingleInstanceLock: () => true, on: vi.fn(), whenReady: () => Promise.resolve(), isPackaged: false },
+  app: { setName: vi.fn(), setPath: vi.fn(), getPath: () => ".", requestSingleInstanceLock: () => true, on: vi.fn(), whenReady: () => Promise.resolve(), isPackaged: false, commandLine: { hasSwitch: () => false, appendSwitch: vi.fn() } },
   BrowserWindow: class {
     webContents = fake.contents;
     on = vi.fn(); isDestroyed = () => false; isFocused = () => true;

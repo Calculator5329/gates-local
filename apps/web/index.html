@@ -2,8 +2,9 @@
 <html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
-    <!-- nothing is framed here but a page a reply wrote, which runs from a data: address (src/pages/) -->
-    <meta http-equiv="Content-Security-Policy" content="frame-src data:" />
+    <!-- nothing is framed here but a page a reply wrote, from the server's page route (src/pages/page-doc.ts)
+         on this computer's loopback; the phone listener serves this file with its own origin's route here instead -->
+    <meta http-equiv="Content-Security-Policy" content="frame-src http://127.0.0.1:*/pages/" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>Gates Local</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
