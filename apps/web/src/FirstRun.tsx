@@ -147,13 +147,10 @@ function NoModels() {
   const p = useStore((s) => (active === undefined ? undefined : s.pulls[active]));
   const cpu = useStore((s) => noGpu(s.gpu));
   const fresh = useStore(s => entry === undefined ? undefined : rowOf(s, entry.name));
-  const st = (
-    <>
-      <span className="dot ok" />
-      Ollama
-    </>
-  );
-  // the title says there is no model yet, so the status line names only the runtime
+  // Ollama is fine here, so the status line says nothing (it speaks only when Ollama is missing,
+  // stopped, failed or installing). The space keeps the line's height, so the title sits where it
+  // does on every other first-run screen.
+  const st = "\u00A0";
   // An Ollama that does not report capabilities: a download would not help, so say what would.
   const tooOld = useStore((s) => chatBlockedReason(s.models, undefined));
   // a sentence only for what the title and the card's verdict do not say: the step. No GPU is the card's

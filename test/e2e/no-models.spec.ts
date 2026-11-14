@@ -11,8 +11,9 @@ test("no models: download, cancel, download again, then chat", async ({ page, op
   await expect(page.getByRole("heading", { name: "Download your first model" })).toBeVisible();
   await test.step("inspect the first model recommendation", async () => {
   await expect(page.getByRole("heading", { name: "Download your first model" })).toBeVisible();
-  // the heading says there is no model yet; the status line names only the runtime (FIRST-USE-14)
-  await expect(page.locator(".fr-st")).toHaveText("Ollama");
+  // Ollama is fine, so the status line over the heading is empty; it keeps its height so the heading does not move
+  await expect(page.locator(".fr-st")).toHaveText(/^\s*$/);
+  expect((await page.locator(".fr-st").boundingBox())?.height ?? 0).toBeGreaterThan(10);
   await expect(page.locator(".fr")).toContainText("Qwen 3.5 9B");
   await expect(page.getByRole("button", { name: "Download and start" })).toBeEnabled();
   await expect(page.locator(".fr")).not.toContainText("not available in this build");
