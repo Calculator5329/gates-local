@@ -460,17 +460,50 @@ check (`apps/desktop/build/installer.nsh`) waits for this install's processes
 to end and never kills. The next launch turns the note into "Updated to
 version N." or "The update to version N did not finish…".
 
-Each round needs two installers built natively from the branch, as in the
-rounds above (`pnpm release:artifact`, or `GATES_LOCAL_BUILD_VERSION=<v>
-pnpm package:win`), and a signed list for the newer one that the older one
-trusts. A test build's list on a local release page does that without the
-real key. Record every location absent first, and clean them afterwards.
+Each round needs installers built natively from the branch as test builds:
+`GATES_LOCAL_TEST_BUILD=1 GATES_LOCAL_BUILD_VERSION=<v> pnpm package:win`,
+one version per installer (for example a, b, c, d = N, N+1, N+2, N+3). Record
+every location absent first, and clean them afterwards.
+
+`apps/desktop/scripts/packaged-windows-update.ts` runs a round on Windows,
+from the source folder, with no `GATES_LOCAL_*` variable set and no git on
+`PATH`:
+
+```powershell
+node apps/desktop/scripts/packaged-windows-update.ts --round IU-W1 --install <a Setup.exe> --newer <b Setup.exe> --output <dir>
+node apps/desktop/scripts/packaged-windows-update.ts --round IU-W3 --newer <c Setup.exe> --output <dir>
+node apps/desktop/scripts/packaged-windows-update.ts --round IU-W2 --newer <d Setup.exe> --output <dir>
+```
+
+Run them in that order: IU-W1 installs a, the next two start from what the
+round before left. The driver serves the newer installer on a loopback feed
+with a list signed by a key it makes, starts the installed copy with that
+key and with Ollama and ComfyUI pointed nowhere, clicks Restart to update and
+watches the processes about every 150 ms. It writes `report-<round>.json`
+(the checks, the times, every process seen) and screenshots to `<dir>`, and
+exits 1 when a check fails. IU-W2's newer version gets a test fault:
+`GATES_LOCAL_UPDATE_TEST_FAULT=server-exits@<v>` makes that version's server
+exit at start. Uninstall afterwards with the install's own uninstaller and
+move the data folder, the profile and `gates-local-old` aside.
 
 | Round | Steps | Passes when |
 | --- | --- | --- |
 | IU-W1 | Install N with `/S --no-desktop-shortcut`. Launch it, check, download N+1, click Restart to update. Time from the click to the app's exit, from the exit to the installer's end, and to N+1's server `ready`. | `windows-pending.json` is written before the installer starts and gone after N+1 starts; Settings says "Updated to version N+1." once; `updates/` keeps N+1's folder and the next update names it to go back with; no process was killed (installer log has no `Stop-Process` or `taskkill`). The measured app exit sets the check's wait bound (`GATES_LOCAL_WAIT_SECONDS`, 60 s until measured). |
 | IU-W2 | As IU-W1, with N+1 a build whose server exits at start. | Nothing goes back by itself. The status page names the kept installer of N: "To go back, run <path>." Running it puts N back over N+1 with the data kept. |
 | IU-W3 | Copy the installed folder to `%LOCALAPPDATA%\Programs\gates-local-old\` and start that copy. Update the real install as in IU-W1. | The copy is still running after the update: the check matches `<install folder>\` with its separator and waits only for the real install. |
+
+Observed 2026-11-13 on the Windows test machine (test builds 0.2.91 to
+0.2.94, Smart App Control off):
+
+- IU-W1 passed. The click to N's exit took 3.84 s. The installer started
+  1.49 s after the click and ended 8.32 s after the exit. N+1's window came
+  12.37 s after the click and its server 12.84 s after. The installer waits
+  about 2.5 s for N's processes, so the 60 s `GATES_LOCAL_WAIT_SECONDS` stays.
+- IU-W3 passed with the same times within 0.15 s. The copy in
+  `gates-local-old` was still running and its server answered.
+- IU-W2 has not been observed. Its one run stopped before the click, and the
+  driver could not then say where. The driver now logs each phase and has a
+  deadline; IU-W2 still needs a run.
 
 A refused installer (Smart App Control, Defender, a policy) must leave the
 running app as it was. Settings shows "Gates Local could not start the

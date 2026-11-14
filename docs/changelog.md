@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-13: Restart to update observed on Windows
+
+- `apps/desktop/scripts/packaged-windows-update.ts` drives IU-W1, IU-W2 and
+  IU-W3 on Windows. It installs a test build silently, serves the newer one
+  from a loopback feed under a test key, clicks Restart to update, and
+  watches N exit, the installer run and N+1 open. It writes a report and
+  screenshots for each round. docs/releasing.md shows how to run it.
+- IU-W1 and IU-W3 passed. The click took 3.8 s to exit, the installer ran
+  for 10.7 s, and N+1's window came 12.4 s after the click. The thread and
+  the setting were kept on the same data folder. No banner showed: a
+  successful update stays silent. The kept installer is named for going
+  back. The 60 s wait bound stays.
+- Fixed: after going back from a version that never started, the older
+  version said "Updated to version N+1". It now drops a result for another
+  version (unit test IM-06).
+- IU-W2 is not observed yet: its run stopped before the click. The driver
+  now cannot hang there.
+
 ## 2026-11-13: Image downloads plan the disk first and show once
 
 - Before a download, the image picker shows one row: the folder the files

@@ -899,5 +899,16 @@ describe("downloading a newer version", () => {
       expect(installed(false).module.status().result).toMatchObject({ outcome: "rolled-back", line: "Version 1.2.4 did not start, so Gates Local went back to 1.2.3." });
       expect(installed(false).module.status().result).toBeNull();
     });
+
+    it("IM-06 an ordinary start does not say it was updated to a version other than its own", () => {
+      // Windows IU-W2: 1.2.4's desktop turned the click's note into this result, its server died before
+      // taking it, and the kept installer put 1.2.3 back. 1.2.3 must not say "Updated to version 1.2.4."
+      writeRecord(dataDir, { at: 6, outcome: "updated", installed: { id: "tx-5", from: "1.2.3", to: "1.2.4", text: "Updated to version 1.2.4." } });
+      expect(installed(false).module.status().result).toBeNull();
+      expect(readRecord(dataDir)).toBeUndefined();
+      // Its own version's result is still said once.
+      writeRecord(dataDir, { at: 7, outcome: "updated", installed: { id: "tx-6", from: "1.2.2", to: "1.2.3", text: "Updated to version 1.2.3." } });
+      expect(installed(false).module.status().result).toEqual({ at: 7, outcome: "updated", line: "Updated to version 1.2.3." });
+    });
   });
 });

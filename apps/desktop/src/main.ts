@@ -31,7 +31,7 @@ import { uptime } from "node:os";
 import { writeAck } from "./installed-update/ack.ts";
 import { startInstalledUpdate } from "./installed-update/click.ts";
 import { routeInstalled, routeUnreplaceable, updatePageUrl, type StartApp } from "./installed-update/desktop.ts";
-import { bootId, loggedStopAt, logLine, spawnWatcher } from "./installed-update/handoff.ts";
+import { bootId, loggedStopAt, logLine, spawnWatcher, TEST_DEBUG_PORT_ENV } from "./installed-update/handoff.ts";
 import { pageAction, type PageAction } from "./installed-update/page.ts";
 import { replaceability } from "./installed-update/replaceable.ts";
 import { hasEarlierFailure } from "./installed-update/results.ts";
@@ -103,6 +103,15 @@ function isTestBuild(): boolean {
   }
 }
 const testBuild = isTestBuild();
+if (testBuild) {
+  // A test build never reaches this computer's Ollama or ComfyUI unless the probe names where they are:
+  // the copy the Windows installer starts after an update may not carry the probe's environment.
+  const safe = { GATES_LOCAL_RUNTIME: "discover-only", GATES_LOCAL_OLLAMA_BINARY: "none", GATES_LOCAL_OLLAMA_URL: "http://127.0.0.1:19750", GATES_LOCAL_COMFY_URL: "http://127.0.0.1:1" };
+  for (const [key, value] of Object.entries(safe)) process.env[key] ??= value;
+  // The copy the Windows installer starts (--updated) opens DevTools on the probe's port, as a watcher's launch does on Linux (handoff.ts forwardedArgs).
+  const port = process.env[TEST_DEBUG_PORT_ENV] ?? "";
+  if (process.platform === "win32" && process.argv.includes("--updated") && /^\d{2,5}$/.test(port)) app.commandLine.appendSwitch("remote-debugging-port", port);
+}
 // Read before the routing below can move a page-only process to its own profile folder.
 const dataDir = serverDataDir({ platform: process.platform, env: process.env, home: app.getPath("home"), userData: app.getPath("userData"), packaged: app.isPackaged });
 // Whether this copy can replace its own file (an AppImage on Linux, or an install the Windows installer made), and the file.

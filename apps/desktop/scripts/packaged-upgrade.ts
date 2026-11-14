@@ -22,55 +22,26 @@
 //     exists only in this process. Each copy gets its own home folder, removed
 //     at the end with every process it started. report.json and the
 //     screenshots go to output; a failing test exits 1.
-import { _electron, chromium, expect, type Browser, type ElectronApplication, type Locator, type Page } from "@playwright/test";
-import { decodeResult, decodeServerMessage, encodeRequest, type MethodName, type Params, type ResultOf } from "@gates-local/contracts";
+import { _electron, chromium, expect, type Browser, type ElectronApplication, type Page } from "@playwright/test";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { createHash, generateKeyPairSync, type KeyObject } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import { appendFileSync, chmodSync, closeSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 import { homedir } from "node:os";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { defaultSettings, SETTINGS_FILE_NAME, SETTINGS_FILE_VERSION } from "../../server/src/settings/store.ts";
+import { SETTINGS_FILE_NAME } from "../../server/src/settings/store.ts";
 import { openThreadStore } from "../../server/src/threads/store.ts";
-import { encodeManifest, signManifest } from "../../server/src/update/release-manifest.ts";
 import type { GatesLocalBridge } from "../src/bridge.ts";
 import { WATCH_FLAG } from "../src/installed-update/launch-kinds.ts";
 import { rowOf, STOP_POINTS, type Row, type StopPoint } from "../src/installed-update/stop-points.ts";
 import { approve, INSTALLED_APPROVAL_MS, transactionFile, UPDATES_FOLDER, writeIntent } from "../src/installed-update/transaction.ts";
 import { writeResult } from "../src/installed-update/results.ts";
 import { cannotReplace, earlierFailure, otherCopy, rolledBack, secondLaunch, startedTooLate, stuck, updated, watcherDied, type CannotReplace } from "../src/installed-update/words.ts";
-import { findFreePort } from "../src/supervisor.ts";
+import { Checks, freePort, message, openUpdates, pause, personClick, publicKeyBase64, restartButton, rpc, seedData, sha512Of, shoot, shootNote, startFeed, until, waitDownloaded, type IuFeed, type PageDocument } from "./installed-update-probe.ts";
 
 function digest(file: string): string {
   return createHash("sha256").update(readFileSync(file)).digest("hex");
-}
-
-async function rpc<M extends MethodName>(page: Page, method: M, params: Params<M>): Promise<ResultOf<M>> {
-  const url = await page.evaluate(() => (globalThis as unknown as { gatesLocal: GatesLocalBridge }).gatesLocal.getServerUrl());
-  if (!url) throw new Error("Server is not ready");
-  const request = encodeRequest("upgrade-probe", method, params);
-  if (!request.ok) throw new Error("Invalid probe request");
-  const result = await new Promise<unknown>((resolve, reject) => {
-    // No Origin is sent by Node. Renderer-origin admission is checked by packaged-smoke.
-    const ws = new WebSocket(url);
-    const timer = setTimeout(() => { ws.close(); reject(new Error(`Timed out: ${method}`)); }, 10_000);
-    const finish = () => { clearTimeout(timer); ws.close(); };
-    ws.addEventListener("open", () => ws.send(request.value));
-    ws.addEventListener("error", () => { finish(); reject(new Error(`Connection failed: ${method}`)); });
-    ws.addEventListener("message", event => {
-      const message = decodeServerMessage(String(event.data));
-      if (!message.ok || message.value.type !== "response" || message.value.id !== "upgrade-probe") return;
-      finish();
-      if (!message.value.ok) reject(new Error(`Request failed: ${method}`));
-      else resolve(message.value.result);
-    });
-  });
-  const decoded = decodeResult(method, result);
-  if (!decoded.ok) throw new Error(`Invalid result: ${method}`);
-  return decoded.value;
 }
 
 async function buildToBuild(argv: readonly string[]): Promise<void> {
@@ -167,7 +138,7 @@ async function checkUpgrade(developerPage: Page, olderArtifact: string, newerArt
     expect(saved).toMatchObject({ theme: "light", thinking: false, defaultNumCtx: 8192 });
     const thread = await rpc(page, "threads.get", { threadId });
     expect(thread.thread.title).toBe("Upgrade persistence probe");
-    expect(thread.messages.map(message => message.content)).toContain("Saved before replacing the AppImage.");
+    expect(thread.messages.map(m => m.content)).toContain("Saved before replacing the AppImage.");
     expect(await page.evaluate(() => localStorage.getItem("packaging-upgrade-probe"))).toBe("profile persisted");
     expect(await page.evaluate(() => localStorage.getItem("packaging-developer-probe"))).toBeNull();
     expect(digest(modelFixture)).toBe(modelHash);
@@ -234,68 +205,9 @@ const RIG_ENV = "IU_PROBE_RIG";
 const PROGRAM = "Gates-Local.AppImage";
 const EXECUTABLE = "gates-local";
 const RESULT_FILE = "update-result.json";
-// Ports the runtime and ComfyUI own on a real machine; nothing here uses them.
-const FORBIDDEN_PORTS = new Set([8188, ...Array.from({ length: 11 }, (_, i) => 11434 + i)]);
 /** The forward path's rows (watch-matrix.test.ts); a point on no forward row is reached only by going back. */
 const FORWARD_ROWS: readonly Row[] = ["H", "W1", "W2", "S1", "S2", "S3", "L1", "L2", "A", "C"];
 const SEEDED_THREAD = "Kept across the update";
-
-const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-const sha512Of = (bytes: Uint8Array) => createHash("sha512").update(bytes).digest("hex");
-const fileName = (version: string) => `Gates-Local-${version}-x86_64.AppImage`;
-const message = (error: unknown) => (error instanceof Error ? error.message : String(error)).split("\n")[0] ?? "";
-
-async function until<T>(what: string, timeoutMs: number, probe: () => T | null | undefined | false | Promise<T | null | undefined | false>, everyMs = 200): Promise<T> {
-  const end = Date.now() + timeoutMs;
-  for (;;) {
-    const value = await probe();
-    if (value !== null && value !== undefined && value !== false) return value;
-    if (Date.now() >= end) throw new Error(`timed out after ${Math.round(timeoutMs / 1000)} s waiting for ${what}`);
-    await pause(everyMs);
-  }
-}
-
-const handedPorts = new Set<number>();
-async function freePort(): Promise<number> {
-  for (;;) {
-    const port = await findFreePort();
-    if (!FORBIDDEN_PORTS.has(port) && !handedPorts.has(port)) {
-      handedPorts.add(port);
-      return port;
-    }
-  }
-}
-
-interface IuFeed { readonly url: string; readonly requests: string[]; stop(): Promise<void> }
-
-/** The release page: the signed list for N+1 and its artifact, the real N+1 file. */
-async function startFeed(version: string, artifact: Buffer, key: KeyObject): Promise<IuFeed> {
-  const file = fileName(version);
-  const list = encodeManifest({ schema: 1, version, commit: "b".repeat(40), artifacts: [{ platform: "linux", arch: "x64", kind: "appimage", file, size: artifact.length, sha512: sha512Of(artifact) }] });
-  const sig = signManifest(list, key);
-  const requests: string[] = [];
-  const server = http.createServer((req, res) => {
-    const url = req.url ?? "";
-    requests.push(url);
-    if (url === "/latest/download/release.json") { res.writeHead(200).end(list); return; }
-    if (url === "/latest/download/release.json.sig") { res.writeHead(200).end(sig); return; }
-    if (url === `/download/v${version}/${file}`) {
-      res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Length": String(artifact.length) });
-      res.end(artifact);
-      return;
-    }
-    res.writeHead(404).end("not found");
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address: AddressInfo | string | null = server.address();
-  if (address === null || typeof address === "string") throw new Error("The loopback feed has no port.");
-  if (FORBIDDEN_PORTS.has(address.port)) throw new Error(`The loopback feed got a reserved port ${address.port}; run again.`);
-  return {
-    url: `http://127.0.0.1:${address.port}`,
-    requests,
-    stop: () => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }),
-  };
-}
 
 interface Proc { readonly pid: number; readonly args: readonly string[]; readonly exe: string; readonly env: ReadonlyMap<string, string> }
 
@@ -447,12 +359,8 @@ class Rig {
     const rig = new Rig(run, spec, { first: await freePort(), launched: await freePort(), extra: await freePort() });
     mkdirSync(rig.install, { recursive: true });
     mkdirSync(rig.tmp, { recursive: true });
-    mkdirSync(rig.data, { recursive: true });
     // As if the person had turned on automatic checks: N downloads N+1 by itself.
-    writeFileSync(path.join(rig.data, SETTINGS_FILE_NAME), `${JSON.stringify({ version: SETTINGS_FILE_VERSION, settings: { ...defaultSettings("app"), updateAutomatic: true } }, null, 2)}\n`);
-    const store = openThreadStore(path.join(rig.data, "threads.sqlite"));
-    try { store.createThread({ title: SEEDED_THREAD }); } finally { store.close(); }
-    rig.storeBefore = storeVersionOf(path.join(rig.data, "threads.sqlite"));
+    rig.storeBefore = seedData(rig.data, { automatic: true, thread: SEEDED_THREAD });
     copyFileSync(run.older, rig.program);
     chmodSync(rig.program, 0o755);
     activeRigs.add(rig);
@@ -630,120 +538,6 @@ class Rig {
     writeFileSync(path.join(keep, "seen.json"), `${JSON.stringify({ intents: this.intents, navs: this.navs, maxWatchers: this.maxWatchers, maxServers: this.maxServers, maxMains: this.maxMains }, null, 2)}\n`);
     try { rmSync(this.home, { recursive: true, force: true }); } catch { /* a mount still busy; the run's folder goes at the end */ }
   }
-}
-
-function storeVersionOf(file: string): number | null {
-  try {
-    const db = new DatabaseSync(file, { readOnly: true });
-    try { return Number(db.prepare("PRAGMA user_version").get()?.["user_version"]); } finally { db.close(); }
-  } catch {
-    return null;
-  }
-}
-
-/** Collects what is wrong instead of stopping at the first. */
-class Checks {
-  readonly problems: string[] = [];
-  /** A failed step's whole message: Playwright's call log says what it waited for. */
-  readonly full: string[] = [];
-  that(ok: boolean, what: string): void { if (!ok) this.problems.push(what); }
-  async step<T>(what: string, run: () => Promise<T>): Promise<T> {
-    try {
-      return await run();
-    } catch (error) {
-      this.full.push(`${what}: ${(error instanceof Error ? error.message : String(error)).split("\n").filter(l => l.trim() !== "").slice(0, 12).join(" | ")}`);
-      throw new Error(`${what}: ${message(error)}`, { cause: error });
-    }
-  }
-}
-
-const updatesGroup = (page: Page) => page.locator(".grp").filter({ has: page.locator(".grp-t", { hasText: /^Updates$/ }) });
-
-/**
- * A click a person could make. Playwright's click waits for animation frames,
- * which a window the X server does not paint never gives; then, and only when
- * the element is the topmost one at its centre (nothing covers it), the click
- * is sent as an event, and the notes say so with why Playwright's stalled.
- */
-/** The page's document, as far as these checks read it (this script is typed without the DOM). */
-interface PageDocument {
-  readonly visibilityState: string;
-  hasFocus(): boolean;
-  elementFromPoint(x: number, y: number): { readonly tagName: string; readonly className: unknown } | null;
-}
-
-async function personClick(target: Locator, notes: string[]): Promise<void> {
-  try {
-    await target.click({ timeout: 10_000 });
-  } catch (error) {
-    const seen = await target.evaluate((el) => {
-      const doc = (globalThis as unknown as { document: PageDocument }).document;
-      const r = el.getBoundingClientRect();
-      const top = doc.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-      return { topmost: top !== null && (top === (el as unknown) || el.contains(top as never)), at: top === null ? "nothing" : `${top.tagName.toLowerCase()}.${String(top.className)}`, visibility: doc.visibilityState, focused: doc.hasFocus() };
-    }, undefined, { timeout: 5_000 }).catch(() => null);
-    const why = (error instanceof Error ? error.message : String(error)).split("\n").filter(l => l.trim() !== "").slice(0, 8).join(" | ");
-    notes.push(`click on ${String(target)}: ${seen === null ? "no such element" : JSON.stringify(seen)}; ${why}`);
-    if (seen === null || !seen.topmost) throw error;
-    await target.dispatchEvent("click");
-  }
-}
-
-/**
- * Settings › General › Updates (no Ollama here, so the runtime's Retry shows):
- * from the first-run screen's Settings link before the first thread, from the
- * sidebar gear once a thread exists (after the update, the seeded one does).
- */
-async function openUpdates(page: Page, notes: string[], timeoutMs = 90_000): Promise<Locator> {
-  await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible({ timeout: timeoutMs });
-  const firstRun = page.locator(".fr-cta").getByRole("button", { name: "Settings", exact: true });
-  await personClick((await firstRun.count()) > 0 ? firstRun : page.locator("button.ibtn[aria-label^='Settings']"), notes);
-  await personClick(page.locator(".snav").getByRole("button", { name: "General", exact: true }), notes);
-  const group = updatesGroup(page);
-  await expect(group).toBeVisible({ timeout: 15_000 });
-  return group;
-}
-
-/** The download of N+1 is checked: either Restart to update, or the words for a copy that cannot use it. */
-async function waitDownloaded(group: Locator): Promise<string> {
-  // The state is row 2 (its label and its control) and the block under it.
-  await expect(group.locator(".box")).toContainText(/Restart to update|cannot install it by itself|cannot replace its own file|cannot update itself/, { timeout: 180_000 });
-  return await group.locator(".box").innerText();
-}
-
-const restartButton = (group: Locator) => group.getByRole("button", { name: "Restart to update", exact: true });
-
-/** The Updates group at one fixed crop, the result line outlined; and the footer's update icon when the sidebar shows it. */
-async function shoot(page: Page, group: Locator, output: string, name: string): Promise<string[]> {
-  const files: string[] = [];
-  await page.addStyleTag({ content: ".grp .srow:nth-child(2), .ibtn.upd { outline: 3px solid #e5484d !important; outline-offset: -3px; }" });
-  const box = await group.boundingBox();
-  if (box !== null) {
-    const file = path.join(output, `${name}-settings.png`);
-    await page.screenshot({ path: file, clip: { x: Math.max(0, box.x - 12), y: Math.max(0, box.y - 12), width: box.width + 24, height: 340 } });
-    files.push(file);
-  }
-  const icon = page.locator(".ibtn.upd").first();
-  const iconBox = await icon.isVisible() ? await icon.boundingBox() : null;
-  if (iconBox !== null) {
-    const file = path.join(output, `${name}-footer.png`);
-    await page.screenshot({ path: file, clip: { x: Math.max(0, iconBox.x - 120), y: Math.max(0, iconBox.y - 40), width: 280, height: iconBox.height + 80 } });
-    files.push(file);
-  }
-  return files;
-}
-
-/** The update note in the client's main area, outlined, at one fixed crop: its words, and the shot. */
-async function shootNote(page: Page, output: string, name: string): Promise<{ line: string; shot: string | null }> {
-  const note = page.locator(".upd-note").first();
-  await expect(note).toBeVisible({ timeout: 60_000 });
-  const line = await note.locator(".bm").first().innerText();
-  await page.addStyleTag({ content: ".upd-note { outline: 3px solid #e5484d !important; outline-offset: 2px; }" });
-  const box = await note.boundingBox();
-  if (box === null) return { line, shot: null };
-  const file = path.join(output, `${name}.png`);
-  await page.screenshot({ path: file, clip: { x: Math.max(0, box.x - 12), y: Math.max(0, box.y - 12), width: box.width + 24, height: 180 } });
-  return { line, shot: path.relative(output, file) };
 }
 
 /** N starts, downloads N+1 by itself, and shows Restart to update; the person clicks it. */
@@ -1220,7 +1014,7 @@ async function installedUpdate(argv: readonly string[]): Promise<void> {
     older: path.resolve(older), newer: path.resolve(newer), olderVersion, newerVersion,
     olderSha: sha512Of(readFileSync(older)), newerSha: sha512Of(newerBytes),
     output, work, feed, bin, baseEnv, id: path.basename(work),
-    key: key.publicKey.export({ type: "spki", format: "der" }).toString("base64"),
+    key: publicKeyBase64(key.publicKey),
   };
   ticking = setInterval(tick, 250);
   const report: Record<string, unknown> = { olderVersion, newerVersion, parallel };

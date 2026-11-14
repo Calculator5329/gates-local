@@ -54,7 +54,8 @@
 //                                version's server from printing ready, so an update to it goes back;
 //                                first it raises the store's version by one, after the pre-migration
 //                                copy, so going back has a store to restore, and adds a settings key
-//                                the older version does not know
+//                                the older version does not know; "server-exits@<version>" makes that
+//                                version's server exit at start, before it opens the store
 //
 // The phone listener (off unless GATES_LOCAL_WEB_LISTEN is set; src/web/):
 //   GATES_LOCAL_WEB_LISTEN       unix:<absolute path> for a second listener Tailscale Serve proxies
@@ -173,6 +174,9 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
   const phoneResult = phoneConfig(process.env);
   if (!phoneResult.ok) die(phoneResult.message);
   const phone = phoneResult.value;
+  // A test build's version that cannot start at all: it exits before it opens the store (docs/releasing.md, IU-W2).
+  const exitsAt = process.env[INSTALLED_VERSION_ENV] ?? "";
+  if (exitsAt !== "" && existsSync(TEST_BUILD_MARKER) && process.env["GATES_LOCAL_UPDATE_TEST_FAULT"] === `server-exits@${exitsAt}`) die("test fault: server-exits", 1);
 
   const mode = process.env["GATES_LOCAL_RUNTIME"] ?? "";
   if (mode !== "" && mode !== "discover-only") die(`GATES_LOCAL_RUNTIME must be unset or "discover-only", got "${mode}"`);

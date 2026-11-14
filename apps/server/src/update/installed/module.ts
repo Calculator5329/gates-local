@@ -317,7 +317,10 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
       if (left?.outcome === "rollback-failed" && left.installed !== undefined) { failed = left; result = toResult(left); }
       else {
         const taken = takeRecord(deps.dataDir);
-        if (taken !== undefined && taken.installed?.shown !== true) result = toResult(taken);
+        // "Updated to version N+1" taken by N: N+1 never reached its server and N was put back (Windows, IU-W2).
+        const otherVersion = taken?.outcome === "updated" && taken.installed !== undefined && taken.installed.to !== deps.version;
+        if (otherVersion) log(`dropped the result "updated to ${taken.installed?.to ?? ""}": version ${deps.version} runs`);
+        else if (taken !== undefined && taken.installed?.shown !== true) result = toResult(taken);
       }
     }
   } catch (error) {
