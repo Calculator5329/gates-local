@@ -21,7 +21,7 @@ test("one primary button keeps its node, position and keyboard focus across Send
   await action.press("Enter");
   await expect(action).toHaveCount(1);
   await expect(action).toHaveAccessibleName("Stop");
-  await expect(action).toHaveAttribute("data-tip", /Enter queues/);
+  await expect(action).toHaveAttribute("data-tip", "Stop");
   await expect(action).toBeFocused();
   expect(await action.boundingBox()).toEqual(before);
   expect(await action.evaluate((el, original) => el === original, node)).toBe(true);

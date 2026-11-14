@@ -86,7 +86,7 @@ test.describe("a message queued while a picture is being made", () => {
     // the actions are icons, and Send now says what it stops
     for (const name of ["Send now", "Edit", "Remove"]) await expect(row.getByRole("button", { name, exact: true })).toHaveText("");
     await expect(row.getByTestId("chat.queue.send-now-1")).toHaveAttribute("data-tip", "Send now. Cancels the image");
-    await expect(page.locator(".composer button.send"), "the composer's Stop names the picture too").toHaveAttribute("data-tip", "Cancel the image. Enter queues your message after it");
+    await expect(page.locator(".composer button.send"), "the composer's Stop names the picture too").toHaveAttribute("data-tip", "Cancel image");
     comfy.finish();
   });
 });

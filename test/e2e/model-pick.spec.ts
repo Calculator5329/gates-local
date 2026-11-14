@@ -119,7 +119,7 @@ test("the Thinking pill is on for a model that thinks and greyed with a reason f
   await expect(pill).toHaveAttribute("aria-disabled", "true");
   await expect(pill).toHaveAttribute("aria-pressed", "false");
   await expect(pill).toHaveText("Thinking");
-  await expect(pill).toHaveAttribute("data-tip", /Gemma 4 12B does not reason before answering/);
+  await expect(pill).toHaveAttribute("data-tip", "Thinking: not on this model");
   const greyed = await pill.evaluate((el) => ({ opacity: getComputedStyle(el).opacity, cursor: getComputedStyle(el).cursor }));
   expect(greyed).toEqual({ opacity: "0.4", cursor: "not-allowed" });
   const pressed = await pill.getAttribute("aria-pressed");
@@ -149,10 +149,10 @@ test.describe("first download", () => {
     await expect(pill).toHaveAttribute("aria-disabled", "true");
     await expect(pill).toHaveAttribute("aria-pressed", "false");
     await expect(pill).toHaveText("Thinking");
-    await expect(pill).toHaveAttribute("data-tip", "Available when the model finishes downloading.");
+    await expect(pill).toHaveAttribute("data-tip", "Thinking: after the download");
     // Qwen 3.5 9B thinks, so the pill comes on once it is installed
     await expect(pill).not.toHaveAttribute("aria-disabled", /./, { timeout: 20_000 });
-    await expect(pill).toHaveAttribute("data-tip", /^<b>Thinking (on|off)\.<\/b>/);
+    await expect(pill).toHaveAttribute("data-tip", "Thinking");
   });
 });
 

@@ -149,7 +149,7 @@ test("composer Thinking keeps its size on hover and focus, so its neighbours nev
   await pill.click();
   await expect(pill).toHaveAttribute("aria-pressed", "false");
   expect(await pill.evaluate((el) => ({ color: getComputedStyle(el).color, background: getComputedStyle(el).backgroundColor }))).not.toEqual(on);
-  await expect(pill).toHaveAttribute("data-tip", /Thinking off/);
+  await expect(pill, "the tip names the pill; aria-pressed holds on or off").toHaveAttribute("data-tip", "Thinking");
 });
 
 // Guards the footer's Settings icon showing runtime state only when it is true (healthy half).
@@ -270,10 +270,9 @@ test("a send refused for memory says why and its click opens Settings > Advanced
   await page.keyboard.press("Escape");
   await page.locator("#ta").fill("Too big?");
   const sendBtn = page.getByTestId("chat.composer.send");
-  await expect(sendBtn).toHaveAttribute("data-tip", /not enough memory at 64k/);
-  await expect(sendBtn).toHaveAttribute("data-tip", /Settings › Advanced/);
+  await expect(sendBtn).toHaveAttribute("data-tip", "Not enough memory at 64k");
   await sendBtn.hover();
-  await expect(page.locator("#tip")).toContainText("Settings › Advanced");
+  await expect(page.locator("#tip")).toContainText("Not enough memory at 64k");
   const before = sends;
   await sendBtn.dispatchEvent("click");
   await expect(page.locator(".set").getByRole("heading", { name: "Advanced" })).toBeVisible();

@@ -200,7 +200,9 @@ it.each(["error", "cancelled"] as const)("RS-01: connected %s keeps the message 
     const q = queued[0];
     if (!q) throw new Error("Missing queued message");
     client.session.editQueued(q.id);
-    expect(tray()).toContain(">Editing<");
+    // the pressed pencil says it is being edited: no word beside it
+    expect(tray()).toContain("chat.queue.cancel-edit-1");
+    expect(tray()).toContain(`<span class="qt-s" role="status"></span>`);
     client.session.cancelQueuedEdit();
     expect(tray()).toContain(STOPPED);
     void client.session.pull(NAME); await drain();

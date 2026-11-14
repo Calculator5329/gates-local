@@ -162,6 +162,8 @@ function WorkLine({ step, busy, writing, secs }: { step: ChipStep; busy: boolean
       {/* once the answer streams the same node says "Writing" (chat row 30) */}
       <span className="lv-w">{step.words !== "" ? step.words : writing ? "Writing" : "Working"}</span>
       {secs === undefined ? null : <span className="lv-t">{` · ${secs} s`}</span>}
+      {/* the calls so far, there from the first call on, so a call that ends in a blink still shows it ran */}
+      <span className="lv-c"><Icon id="wrench" />{n}</span>
       {chevron}
     </>
   ) : (

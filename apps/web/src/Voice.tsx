@@ -183,14 +183,16 @@ export function Voice({ textarea, held = null, send }: { textarea: RefObject<HTM
   // listening) or a spinner, and the words live in the tooltip, the label and
   // a hidden status line. Seconds stay out of data-tip: a changing tip closes.
   const status = phase === "listening" ? "Listening" : phase === "transcribing" ? "Transcribing" : phase === "asking" ? "Waiting for microphone permission" : "";
-  const tip = talking ? (phase === "listening" ? "Listening. Let go to send. Esc cancels."
-    : phase === "transcribing" ? "Transcribing… Esc cancels."
-    : phase === "asking" ? "Allow microphone access to talk. Esc cancels."
-    : "Hold to talk (or Space). Let go to send.")
-    : phase === "listening" ? "Listening. Click or Ctrl+Shift+Space to stop and transcribe. Esc cancels."
-    : phase === "transcribing" ? "Transcribing… Esc cancels."
-    : phase === "asking" ? "Allow microphone access to dictate. Esc cancels."
-    : unsupported ?? (!enabled ? "Dictate: connect whisper.cpp in Settings › General" : "Dictate (Ctrl+Shift+Space). Click again to stop. Esc cancels.");
+  // The tip names the button and its key, as the app's other tips do. Not set up, the click opens Settings;
+  // a browser that cannot record says so in the notice the click shows.
+  const tip = talking ? (phase === "listening" ? "Listening · Esc"
+    : phase === "transcribing" ? "Transcribing · Esc"
+    : phase === "asking" ? "Allow the microphone · Esc"
+    : "Hold to talk · Space")
+    : phase === "listening" ? "Stop dictation · Ctrl Shift Space"
+    : phase === "transcribing" ? "Transcribing · Esc"
+    : phase === "asking" ? "Allow the microphone · Esc"
+    : unsupported !== null || !enabled ? "Dictate" : "Dictate · Ctrl Shift Space";
   const name = talking ? (phase === "listening" ? "Talk, listening" : phase === "transcribing" ? "Talk, transcribing" : phase === "asking" ? "Talk, waiting for microphone permission" : "Talk")
     : phase === "listening" ? "Stop dictation" : phase === "transcribing" ? "Dictate, transcribing" : phase === "asking" ? "Dictate, waiting for microphone permission" : "Dictate";
   const click = (e?: { detail?: number }) => {

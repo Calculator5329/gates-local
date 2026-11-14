@@ -287,13 +287,15 @@ describe("one live line per reply", () => {
     const during = await live(71_400, t1);
     const line = /<button[^>]*class="think fold"[^>]*>([\s\S]*?)<\/button>/.exec(during)?.[1] ?? "";
     expect(line).toContain('class="lv-dot"');
-    expect(line.replace(/<[^>]+>/g, "")).toBe("Searching your library · 71 s");
+    // then the wrench and the calls so far (the icon is markup, so its 1 follows the seconds here)
+    expect(line.replace(/<[^>]+>/g, "")).toBe("Searching your library · 71 s1");
+    expect(line).toMatch(/class="lv-c"><svg[^>]*><use href="#i-wrench"><\/use><\/svg>1<\/span>/);
     expect(during, "no second node beside it").not.toContain("fold-now");
     // the same nodes when the call ends and it thinks again: words and digits change, nothing else
     const t2 = play(t1, [[72_000, { type: "tool", step: step("a", "done", 67_000) }], [72_000, { type: "thinking", text: " More." }]]);
     const next = /<button[^>]*class="think fold"[^>]*>([\s\S]*?)<\/button>/.exec(await live(73_000, t2))?.[1] ?? "";
     expect(next.replace(/>[^<]*</g, "><")).toBe(line.replace(/>[^<]*</g, "><"));
-    expect(next.replace(/<[^>]+>/g, "")).toBe("Thinking · 73 s");
+    expect(next.replace(/<[^>]+>/g, ""), "the count stays once the call has ended").toBe("Thinking · 73 s1");
   });
 
   it("after: the time, the step count and how many failed, with no sentence for a failed step", async () => {

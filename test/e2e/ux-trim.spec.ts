@@ -103,7 +103,7 @@ test.describe("the reply-running line", () => {
     await expect(primary).toHaveAccessibleName("Update queued message");
     const stop = page.getByRole("button", { name: "Stop", exact: true });
     await expect(stop).toBeVisible();
-    await expect(stop).toHaveAttribute("data-tip", "Stop this reply. Your draft stays here");
+    await expect(stop).toHaveAttribute("data-tip", "Stop");
     expect(await stop.boundingBox(), "Dictate's square").toEqual(v);
     await expect(page.locator(".composer .voice"), "Dictate gives its square to Stop while the edit lasts").toHaveCount(0);
     await stop.click();

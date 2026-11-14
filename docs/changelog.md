@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-11-13: Chat: fewer lines, fewer words
+
+- No grey line under the thread title, none over the sidebar's foot
+  icons, and none between queued messages or under the queue.
+- A queued chat message has no chat icon; only a picture keeps its
+  image icon. The row being edited has no "Editing" word: the pressed
+  pencil says it.
+- While a reply runs, its live line shows a wrench and how many tool
+  calls it has made, from the first call on, so a call that ends in a
+  blink still shows it ran.
+- The message box's tips name the button and nothing more: Add, Image,
+  Thinking, Dictate, Send, Stop, and the model's name and tag. A key
+  shows the way the other tips show one ("Send · Enter"). A button that
+  is refused for a reason nothing else on screen gives keeps a few
+  words ("Not enough memory at 16k", "Thinking: not on this model").
+- Why: the principles audit of 0.2.4, from "ew what is this grey line",
+  "so many duplicate unneeded subtitles", "tool call does not show
+  during it" and "just the hover tip".
+
 ## 2026-11-13: The screen says what is in memory
 
 - A new chat's model button starts on the chat model that is in memory

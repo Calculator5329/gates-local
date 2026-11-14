@@ -50,7 +50,8 @@ test("a queued message can be edited in the composer, removed, or sent now in pl
   // edit: the text comes back to the composer, the row keeps its place
   await rows(page).first().locator("[data-edit-queued]").click();
   await expect(page.locator("#ta")).toHaveValue("First thought");
-  await expect(rows(page).first()).toContainText("Editing");
+  await expect(rows(page).first().getByTestId("chat.queue.cancel-edit-1")).toHaveAttribute("aria-pressed", "true");
+  await expect(rows(page).first()).toHaveText("First thought");
   await expect(page.locator(".composer button.send")).toHaveCount(1);
   await expect(page.locator(".composer button.send")).toHaveAccessibleName("Update queued message");
   await page.locator("#ta").fill("First thought, reworded");

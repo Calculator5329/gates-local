@@ -216,7 +216,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .sb-skel{height:100%;padding-top:8px}
 .sb-skel-r{height:var(--row-h);display:flex;align-items:center;padding:0 10px;font-size:13.5px}
 /* the footer: one row of icon buttons, update icon at the far right; a dot sits clear of the stroke and the ring inside the box */
-.sb-foot{position:relative;flex:none;padding:8px 8px 12px;border-top:1px solid var(--border);display:flex;gap:2px;background:inherit}
+.sb-foot{position:relative;flex:none;padding:8px 8px 12px;display:flex;gap:2px;background:inherit}
 .sb-foot .ibtn{width:32px;height:32px;position:relative}
 .sb-foot .ibtn:active,.sb-foot .on{background:var(--selected);color:var(--foreground)}
 .sb-foot .ibtn[aria-disabled]{background:none;cursor:default}
@@ -229,7 +229,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .dot.off{background:var(--faint)}.dot.ok{background:var(--green)}.dot.warn{background:var(--amber)}.dot.err{background:var(--red)}.dot.run{background:var(--amber);animation:pulse 1.6s infinite steps(6)}
 
 .main{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--background);position:relative}
-.hdr{height:var(--header-h);flex:none;display:flex;align-items:center;gap:4px;padding:0 12px 0 24px;border-bottom:1px solid var(--border)}
+.hdr{height:var(--header-h);flex:none;display:flex;align-items:center;gap:4px;padding:0 12px 0 24px}
 .hdr h2{margin:0;font-size:14px;font-weight:500;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hdr h2.muted{color:var(--muted-foreground);font-weight:400}
 .ibtn{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:var(--r-ctl);color:var(--muted-foreground);transition:background-color .12s,color .12s;flex:none}
@@ -335,6 +335,8 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .lv-i .ic{width:14px;height:14px}
 .lv-i+.lv-t{color:var(--foreground)}
 .lv-n{flex:none}
+.lv-c{flex:none;display:inline-flex;align-items:center;gap:3px;margin-left:8px}
+.lv-c .ic{width:12px;height:12px}
 .lv-bad{flex:none;white-space:pre;color:var(--red)}
 .think.fold .th-x{margin-left:6px}
 /* open: one list in the order things happened, a thinking round's line beside each call's */
@@ -399,9 +401,8 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .a-act.stop>:not(.stop-mark),.a-act.stop .s{opacity:0;transition:opacity .15s}
 .turn.a:hover .a-act.stop>*,.turn.a:hover .a-act.stop .s,.a-act.stop:focus-within>*,.a-act.stop:focus-within .s,.turn.a:focus-visible .a-act.stop>*,.turn.a:focus-visible .a-act.stop .s,.turn.a:has(:focus-visible) .a-act.stop>*,.turn.a:has(:focus-visible) .a-act.stop .s{opacity:1}
 /* messages waiting in this chat: a shelf inside the message box, at its width, one line each (chat row 36) */
-.qt{list-style:none;margin:0;padding:0;border-bottom:1px solid var(--border)}
+.qt{list-style:none;margin:0;padding:0}
 .qt-r{display:flex;align-items:center;gap:8px;min-height:36px;padding:0 8px 0 16px;font-size:13px;color:var(--muted-foreground)}
-.qt-r+.qt-r,.qt-more{border-top:1px solid var(--border)}
 /* more than three: the next two, then a count that opens the rest */
 .qt-more{display:flex;min-height:32px;align-items:center;padding:0 8px 0 12px}
 .qt-more .ibtn{width:auto;min-width:24px;padding:0 6px;font-size:12px;font-variant-numeric:tabular-nums;color:var(--muted-foreground)}

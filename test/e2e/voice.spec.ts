@@ -59,7 +59,7 @@ test("voice: local microphone transcript stays in the draft at the cursor; cance
   await expect(page.getByRole("button", { name: "Stop dictation" })).toHaveClass(/\blistening\b/);
   await expect(page.locator(".voice")).toHaveAttribute("data-elapsed", /^[1-9]\d*$/);
   await expectIconOnly(page, "listening");
-  await expect(page.locator(".voice")).toHaveAttribute("data-tip", /Listening/);
+  await expect(page.locator(".voice")).toHaveAttribute("data-tip", "Stop dictation · Ctrl Shift Space");
   whisper.mode = "slow";
   await page.getByRole("button", { name: "Stop dictation" }).click();
   await expect(page.locator(".voice")).toHaveClass(/\btranscribing\b/);

@@ -81,12 +81,13 @@ describe("the composer's primary action", () => {
         expect(actions, "one primary slot in every state").toHaveLength(1);
         expect(actions[0]).toContain(`aria-label="${touch ? touchLabel : keyboardLabel}"`);
         expect(actions[0], "inactivity must not remove native keyboard focus").not.toMatch(/\sdisabled="/);
-        if (keyboardLabel === "Stop" && !touch) expect(actions[0]).toContain("Enter queues");
-        if (touch) expect(actions[0]).not.toContain("(Enter)");
+        // the tip names the button, and its key on a keyboard
+        if (keyboardLabel === "Stop" && !touch) expect(actions[0]).toContain('data-tip="Stop"');
+        if (touch) expect(actions[0]).not.toContain("Enter");
+        if (name === "typing" && !touch) expect(actions[0]).toContain('data-tip="Send · Enter"');
         if (name === "memory refused") {
           expect(actions[0]).toContain('aria-disabled="true"');
-          expect(actions[0]).toContain("not enough memory at 16k");
-          expect(actions[0]).toContain("Settings › Advanced");
+          expect(actions[0]).toContain('data-tip="Not enough memory at 16k"');
         }
       });
     }
@@ -106,11 +107,11 @@ it("a model that fits once another chat's reply stops can be sent to, and Send s
   const freed = sendButton();
   expect(freed, "no memory refusal").not.toContain('aria-disabled="true"');
   expect(freed).not.toContain("not enough memory");
-  expect(freed).toMatch(/Another chat(?:&#x27;|')s reply is using this memory, so it stops first/);
+  expect(freed).toMatch(/Another chat(?:&#x27;|')s reply stops first/);
   setFixture({ ...ready, draft: "hello", turns: other, fitTable: tooBigUnless([]) });
   const refused = sendButton();
   expect(refused).toContain('aria-disabled="true"');
-  expect(refused).toContain("not enough memory at 16k");
+  expect(refused).toContain("Not enough memory at 16k");
 });
 
 const modelButton = () => renderToStaticMarkup(createElement(Composer)).match(/<button\b[^>]*id="modelBtn"[\s\S]*?<\/button>/)?.[0] ?? "";

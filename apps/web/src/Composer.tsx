@@ -8,12 +8,12 @@ import { useActionPress } from "./composer-press.ts";
 import { CONNECTING, PLACEHOLDER, booting, rtOf, unread } from "./Banner.tsx";
 import { openFit } from "./fit-actions.ts";
 import { fitFor, stopsChat } from "./fit-table.ts";
-import { ctxFor, describeModel, gb, k, modelFacts, noGpu, verdictOf } from "./format.ts";
+import { ctxFor, describeModel, k, noGpu, verdictOf } from "./format.ts";
 import { DownloadBar, LoadRing } from "./LoadBar.tsx";
 import { loadGuess } from "./load-times.ts";
 import { MakerMark } from "./MakerMark.tsx";
 import { RefusalNote } from "./RefusalNote.tsx";
-import { pickerLabels, suggestedOf } from "./picker-models.ts";
+import { pickerLabels } from "./picker-models.ts";
 import { imagePickerScreen, pickerScreen, threadScreen } from "./screen-loaders.ts";
 import { chosenImage, imageCount, imageMode, imagesUnset, sizeLabel } from "./image-choice.ts";
 import { ImageMark } from "./ImageMark.tsx";
@@ -63,14 +63,13 @@ function usedTokens(s: State): number {
 }
 
 /**
- * Why the Thinking pill cannot be used now, or null when it can. It
+ * Why the Thinking pill cannot be used now, as its tip in a few words, or null when it can. It
  * depends on the model's "thinking" capability, so it waits for a chat
  * model to be installed (F70) and greys for a model without it.
  */
-export function thinkUnavailable(model: ModelInfo | undefined, name: string, downloading: boolean, example?: string): string | null {
-  if (downloading || model === undefined) return "Available when the model finishes downloading.";
-  if (!canThink(model)) return `<b>Thinking</b> is not available: ${esc(name)} does not reason before answering. Pick a model that does${example === undefined ? "" : `, such as ${esc(example)}`}.`;
-  return null;
+export function thinkUnavailable(model: ModelInfo | undefined, downloading: boolean): string | null {
+  if (downloading || model === undefined) return "Thinking: after the download";
+  return canThink(model) ? null : "Thinking: not on this model";
 }
 
 /** The same answer as plain words for a phone's menu row, which has no tooltip. */
@@ -79,11 +78,9 @@ function thinkNote(model: ModelInfo | undefined, name: string, downloading: bool
   return canThink(model) ? null : `${name} does not reason before answering`;
 }
 
-function tagTip(name: string, m: ModelInfo | undefined, tag: string): string {
-  const q = modelFacts(m).quant;
-  // a tag the catalog does not know is its own name: say it once, and its quant only when the tag does not
-  const head = name === tag ? `<b class="mono">${esc(tag)}</b>` : `<b>${esc(name)}</b> · <span class="mono">${esc(tag)}</span>`;
-  return `${head}${q && !tag.toLowerCase().includes(q.toLowerCase()) ? ` · ${esc(q)}` : ""}`;
+/** Which model, as the model button's tip: its name and its tag; a tag the catalog does not know is its own name, said once. */
+function tagTip(name: string, tag: string): string {
+  return name === tag ? `<b class="mono">${esc(tag)}</b>` : `<b>${esc(name)}</b> · <span class="mono">${esc(tag)}</span>`;
 }
 
 /** Someone is about to open the picker: load its code. Its fit values are already in the last fit table. */
@@ -115,7 +112,6 @@ export function Composer() {
   const noticeOffer = useStore((s) => s.noticeOffer);
   const fit =useStore((s) => fitFor(s.fitTable, s.model, ctxFor(s.numCtx, s.models, s.model)));
   const models = useStore((s) => s.models);
-  const exampleLabel = useStore((s) => suggestedOf(s)?.exampleLabel);
   const catalog = useStore(catalogOf);
   const imageGen = useStore(imageGenOf);
   const isStreaming = useStore(streamingHere);
@@ -170,7 +166,6 @@ export function Composer() {
   }, [blocked]);
   const queueable = wait !== null;
   const shownTag = first ?? model;
-  const info = models?.find((m) => m.name === shownTag);
   const name = shownTag === undefined ? "No model" : pickerLabels([...chatModels(models ?? []).map(m => m.name), shownTag], catalog).get(shownTag) ?? shownTag;
   const loading = loadState === "loading";
   const loadingNow = loading && first === undefined;
@@ -183,20 +178,20 @@ export function Composer() {
   const why = chatBlockedReason(models, model); // a download would not help: old Ollama, or the model is still being checked
   const noModel = (model === undefined || why !== undefined) && !queueable;
   // During setup the gate style already greys every control; otherwise the pill says why it is off.
-  const thinkNa = blocked ? null : thinkUnavailable(models?.find((m) => m.name === model), name, first !== undefined, exampleLabel);
+  const thinkNa = blocked ? null : thinkUnavailable(models?.find((m) => m.name === model), first !== undefined);
 
   // the label is the name and nothing else, so the button keeps its width (chat rows 28, 29): a download
   // is the bar on its edge, and its percent, like a download still to come, is in the tip
   const modelTip =
     shownTag === undefined
-      ? "No model is installed yet. Download one in Settings › Models."
+      ? "Model"
       : rt === "installing"
-        ? `${tagTip(name, info, shownTag)}<br>Downloads next`
+        ? `${tagTip(name, shownTag)}<br>Downloads next`
         : first !== undefined
-          ? `${tagTip(name, info, shownTag)}<br>Downloading ${firstProgress}%`
+          ? `${tagTip(name, shownTag)}<br>Downloading ${firstProgress}%`
           : loading
-            ? `${tagTip(name, info, shownTag)}<br>Loading into ${cpu ? "memory" : "GPU memory"}${loadMs === undefined ? "" : `, ${loadGuess(loadMs)}`}`
-            : `${tagTip(name, info, shownTag)}${info ? ` · ${gb(info.sizeBytes)} on disk` : ""}`;
+            ? `${tagTip(name, shownTag)}<br>Loading into ${cpu ? "memory" : "GPU memory"}${loadMs === undefined ? "" : `, ${loadGuess(loadMs)}`}`
+            : tagTip(name, shownTag);
 
   const ctx = ctxFor(numCtx, models, model);
   const pct = Math.min(1, used / ctx);
@@ -209,24 +204,24 @@ export function Composer() {
 
   // A message queued behind a reply is checked when it goes, and memory a reply holds may be freed by stopping it.
   const memNo = v?.k === "no" && !isStreaming && !freed && !editing;
-  const enter = touch ? "" : " (Enter)";
+  // The tip names the button and its key, as the app's other tips do ("New thread · Ctrl N"). A refusal says why
+  // in a few words only where nothing else on screen does: the placeholder already says what setup, Ollama or a
+  // missing model is waiting for, and a queued message's row says when it goes.
+  const enter = touch ? "" : " · Enter";
   let sendTip = `Send${enter}`;
-  if (editing) sendTip = text ? `Update the queued message${enter}` : "Type the message to queue";
-  else if (isStreaming && !blocked) sendTip = `${text ? `Queue${enter}. It sends` : "Type now; it sends"} when ${drawingNow ? "the image" : "this reply"} finishes`;
-  else if (queueable) sendTip = `${text ? `Send${enter}. It goes out when ` : "Type now; it sends when "}${wait === "download" ? "the download finishes" : "setup finishes"}`;
-  // before the first read nothing is known, so nothing is claimed
-  else if (boot || none) sendTip = text ? `Send${enter}` : "Type a message to send";
-  else if (blocked) sendTip = "Chat starts when Ollama is ready";
-  else if (noModel) sendTip = why ?? "Download a model to start chatting";
-  else if (memNo) sendTip = `${esc(name)}: not enough memory at ${k(ctx)}. It needs an estimated ${gb(v.amt)} more. Pick a smaller model or context.<br>Click for GPU memory in Settings › Advanced.`;
-  else if (!text) sendTip = "Type a message to send";
-  else if (freed) sendTip = `Send${enter}. Another chat's reply is using this memory, so it stops first`;
-  if (imageNo !== null) sendTip = esc(imageNo);
-  if (refused) sendTip = `Remove the file${refused === 1 ? "" : "s"} marked not sent first.`;
-  if (pasting) sendTip = "Attaching. It will be ready in a moment.";
+  if (editing) sendTip = `Update${enter}`;
+  else if (isStreaming && !blocked) sendTip = `Queue${enter}`;
+  else if (!queueable && !boot && !none && !blocked && !noModel) {
+    // the click opens the why, with its numbers
+    if (memNo) sendTip = `Not enough memory at ${k(ctx)}`;
+    else if (text && freed) sendTip = `Send${enter}. Another chat's reply stops first`;
+  }
+  if (imageNo !== null) sendTip = "This model can't see images";
+  if (refused) sendTip = `Remove the file${refused === 1 ? "" : "s"} marked not sent`;
+  if (pasting) sendTip = "Attaching…";
   // Image on: the words go to the image model, so the chat model's readiness, memory and sight do not count.
-  const drawNo = !drawing ? null : images.length > 0 || files.length > 0 ? "Image makes a picture from words alone. Remove the attachments, or turn Image off." : !online ? "Gates Local isn't answering." : unset ? "Images are not set up on this computer." : pictured === undefined ? "Reading the image models…" : null;
-  if (drawing && !editing && !isStreaming && !refused && !pasting) sendTip = drawNo ?? (text ? `Make the image${enter}` : "Describe the image to make");
+  const drawNo = !drawing ? null : images.length > 0 || files.length > 0 ? "Image takes words only" : !online ? "Gates Local isn't answering" : unset ? "Images are not set up" : pictured === undefined ? "Reading the image models…" : null;
+  if (drawing && !editing && !isStreaming && !refused && !pasting) sendTip = drawNo ?? `Make image${enter}`;
   const sendDisabled = drawing ? !text || drawNo !== null || refused > 0 || pasting > 0
     : (blocked && !queueable) || (!blocked && memNo) || noModel || !text || imageNo !== null || refused > 0 || pasting > 0;
   // Refused for memory: the button stays focusable and clickable, and the click opens the why.
@@ -269,7 +264,9 @@ export function Composer() {
     stopThisReply();
     primary.current?.focus();
   }, { ignoreRepeatedClicks: true });
-  const stopSquare = <button type="button" className="ctl sq stop-sq" data-testid="chat.composer.stop-square" aria-label="Stop" data-tip={drawingNow ? "Cancel the image. Your draft stays here" : "Stop this reply. Your draft stays here"} {...compactStopPress}><span className="sqr" /></button>;
+  // the square stops what runs; it names the picture when a picture is what it stops
+  const stopTip = drawingNow ? "Cancel image" : "Stop";
+  const stopSquare = <button type="button" className="ctl sq stop-sq" data-testid="chat.composer.stop-square" aria-label="Stop" data-tip={stopTip} {...compactStopPress}><span className="sqr" /></button>;
 
   return (
     <>
@@ -311,7 +308,7 @@ export function Composer() {
               aria-haspopup="menu"
               aria-expanded={pop === "plus"}
               aria-label="Add"
-              data-tip="Attach a file, add to your library, images"
+              data-tip="Add"
               onClick={() => togglePop("plus")}
             >
               <Icon id="plus" />
@@ -325,11 +322,7 @@ export function Composer() {
                 aria-pressed={image}
                 aria-label="Image"
                 aria-expanded={!image && unset ? pop === "unset" : undefined}
-                data-tip={
-                  image
-                    ? "<b>Image on.</b> Send makes a picture from your words. Click to turn off."
-                    : unset ? undefined : "<b>Image off.</b> Click to send your words to an image model."
-                }
+                data-tip={!image && unset ? undefined : "Image"}
                 onClick={(e) => {
                   // nothing here can draw: say so instead of entering a mode whose Send cannot work
                   if (!image && unset) { togglePop("unset", e.detail === 0); return; }
@@ -360,12 +353,7 @@ export function Composer() {
               aria-pressed={thinkNa !== null ? false : think}
               aria-label="Thinking"
               aria-disabled={thinkNa !== null ? true : undefined}
-              data-tip={
-                thinkNa ??
-                (think
-                  ? "<b>Thinking on.</b> The model reasons first; shown as one collapsed line. Click to turn off."
-                  : "<b>Thinking off.</b> Faster first token. Click to turn on.")
-              }
+              data-tip={thinkNa ?? "Thinking"}
               onClick={() => {
                 if (thinkNa !== null) return;
                 setState({ think: !think });
@@ -432,7 +420,7 @@ export function Composer() {
               className={showStop ? "send stop" : "send"}
               data-testid="chat.composer.send"
               aria-label={showStop ? "Stop" : sendLabel}
-              data-tip={showStop ? (drawingNow ? "Cancel the image. Enter queues your message after it" : "Stop. Enter queues your message after this reply") : sendTip}
+              data-tip={showStop ? stopTip : sendTip}
               // Keep the same focusable node through empty, running and finished states.
               aria-disabled={!showStop && sendDisabled ? true : undefined}
               {...primaryPress}
@@ -491,9 +479,9 @@ const VOICE_HELD = "Dictate comes back when this reply ends or you finish editin
 /** The tray's "Download stopped" word in full, as its tip: the row is too narrow for the sentence on a phone. */
 export const DOWNLOAD_STOPPED_TIP = "Download stopped. Download a model to send this.";
 
-/** A queued message's state in a word or two, only where being in the queue does not already say it: null while it waits for the reply. */
+/** A queued message's state in a word or two, only where being in the queue does not already say it: null while it waits for the reply, and while it is edited (the pressed pencil says that). */
 export function queueWords(q: Queued, editing: boolean, first: string | undefined, model: string | undefined): string | null {
-  if (editing) return "Editing";
+  if (editing) return null;
   if (q.waitFor === "download") return first === undefined && (q.model ?? model) === undefined ? "Download stopped" : AFTER_DOWNLOAD;
   if (q.waitFor === "setup") return AFTER_SETUP;
   if (q.retry === "running") return RETRYING;
@@ -557,7 +545,8 @@ function QueueTray() {
         const words = queueWords(q, editing, first, model);
         return (
           <li key={q.id} className="qt-r" aria-label={`Queued ${q.draw === undefined ? "message" : "image"} ${i + 1} of ${n}`}>
-            <span className="qt-k" data-tip={q.draw === undefined ? "Chat" : "Image"}><Icon id={q.draw === undefined ? "chat" : "image"} cls="s14" /></span>
+            {/* a chat is the default, so only a picture marks its kind (chat row 19) */}
+            {q.draw === undefined ? null : <span className="qt-k" data-tip="Image"><Icon id="image" cls="s14" /></span>}
             <span className="qt-t">{q.text}{q.images?.length ? ` · ${q.images.length} image${q.images.length === 1 ? "" : "s"}` : ""}{q.files?.length ? ` · ${q.files.length} file${q.files.length === 1 ? "" : "s"}` : ""}</span>
             {/* always there, empty while the message just waits, so a reader announces the word when it appears */}
             <span className="qt-s" role="status" data-tip={tipFor(words)}>
