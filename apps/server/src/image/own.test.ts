@@ -8,13 +8,14 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { removeDir, tmpDir } from "../runtime/test-fakes.ts";
 import { engineDir, engineFiles } from "./engine.ts";
-import { createOwnComfy, type OwnComfy } from "./own.ts";
+import { createOwnComfy, engineChildEnv, type OwnComfy } from "./own.ts";
 
 const FAKE_ENGINE = `
 const http = require("node:http");
 const fs = require("node:fs");
 const port = Number(process.argv[process.argv.indexOf("--port") + 1]);
 fs.writeFileSync(process.env.FAKE_ENGINE_ARGS, JSON.stringify(process.argv.slice(2)));
+fs.writeFileSync(process.env.FAKE_ENGINE_ARGS + ".env", JSON.stringify({ cuda: process.env.CUDA_CACHE_PATH, triton: process.env.TRITON_CACHE_DIR, home: process.env.HOME }));
 // ComfyUI 0.44 lists <base>/custom_nodes before it serves, and exits when it is missing.
 fs.readdirSync(require("node:path").join(process.argv[process.argv.indexOf("--base-directory") + 1], "custom_nodes"));
 http.createServer((req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end('{"devices":[]}'); }).listen(port, "127.0.0.1");
@@ -83,6 +84,19 @@ describe.skipIf(process.platform === "win32")("createOwnComfy", () => {
     await own.stop();
     expect(await own.inspect()).toMatchObject({ active: false, pid: 0 });
     expect(await answers(own.address())).toBe(false);
+  });
+
+  it("keeps the engine's compiled-kernel caches in the app's runtime folder, and leaves its home alone", async () => {
+    installFake();
+    vi.stubEnv("CUDA_CACHE_PATH", "/somewhere/the/person/set");
+    own = createOwnComfy({ appDataDir, port: await freePort(), platform: "linux" });
+    await own.start();
+    await vi.waitFor(async () => expect(await answers(own!.address())).toBe(true), { timeout: 5000 });
+    const seen = JSON.parse(readFileSync(path.join(work, "args.json.env"), "utf8")) as { cuda?: string; triton?: string; home?: string };
+    expect(seen.cuda).toBe(path.join(appDataDir, "runtime", "cuda-cache"));
+    expect(seen.triton).toBe(path.join(appDataDir, "runtime", "triton-cache"));
+    expect(seen.home).toBe(process.env.HOME);
+    expect(engineChildEnv({ PATH: "/bin" }, appDataDir)).toEqual({ PATH: "/bin", CUDA_CACHE_PATH: seen.cuda, TRITON_CACHE_DIR: seen.triton });
   });
 
   it("the shutdown deadline kills only the run it names", async () => {

@@ -58,6 +58,20 @@ export function extraModelPathsLine(folder: string): string {
   return `gates_local: { base_path: ${quoted}, ${MODEL_KINDS.map((k) => `${k}: ${k}`).join(", ")} }`;
 }
 
+/**
+ * The environment of the engine the app starts, so what it compiles stays in the app's data and
+ * leaves with it: the CUDA kernel cache (the same folder the app's chat engine uses; the driver
+ * shares one too) and Triton's, which would be ~/.nv/ComputeCache and ~/.triton/cache. Its home
+ * is left as it is: Python reads much from it. A ComfyUI the person runs never gets this.
+ */
+export function engineChildEnv(env: NodeJS.ProcessEnv, appDataDir: string): NodeJS.ProcessEnv {
+  return {
+    ...env,
+    CUDA_CACHE_PATH: path.join(runtimeDir(appDataDir), "cuda-cache"),
+    TRITON_CACHE_DIR: path.join(runtimeDir(appDataDir), "triton-cache"),
+  };
+}
+
 /** A local TCP port free now, for the engine to listen on (picked once at startup). */
 export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -157,7 +171,7 @@ export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
       const log = openSync(engineLogFile(opts.appDataDir), "a");
       let run: ChildProcess;
       try {
-        run = spawn(files.python, args, { cwd: files.cwd, stdio: ["ignore", log, log], detached: platform !== "win32", windowsHide: true });
+        run = spawn(files.python, args, { cwd: files.cwd, env: engineChildEnv(process.env, opts.appDataDir), stdio: ["ignore", log, log], detached: platform !== "win32", windowsHide: true });
       } finally { closeSync(log); }
       await new Promise<void>((resolve, reject) => {
         run.once("spawn", resolve);

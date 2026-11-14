@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-14: The picture engine keeps its compiled kernels in the app's folder
+
+- The image engine the app starts now writes its CUDA and Triton kernel
+  caches under the app's runtime folder, where the chat engine's already
+  are, not under `~/.nv` and `~/.triton`. Removing the app's data
+  removes them. Caches already in a home folder are left as they are.
+  A ComfyUI you run yourself is not changed.
+
 ## 2026-11-14: Pictures on a Linux computer with no graphics card download 1.05 GB, not 3.87 GB
 
 - On Linux, a computer with no graphics card for pictures, where they
