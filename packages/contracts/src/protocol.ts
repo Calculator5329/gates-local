@@ -303,7 +303,8 @@ export const methods = {
   "models.measure": { params: ModelRef, result: MeasureRun, phone: "deny" },
   /**
    * The window ran a measure's pages (Measure's Pages part) in a sandboxed frame: what it saw on
-   * each. The server grades them, saves the measure and pushes models.measures. A measure that
+   * each, or that it runs none here (a page marked skipped, left out of the score). The server
+   * grades them, saves the measure and pushes models.measures. A measure that
    * is not this model's latest, or a page already graded, is left as it is.
    */
   "models.measurePages": { params: S.Struct({ model: S.String, at: S.Finite, pages: S.Array(PageSeen) }), result: ModelMeasure, phone: "deny" },

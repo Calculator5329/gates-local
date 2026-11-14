@@ -181,7 +181,7 @@ describe("the frame's address", () => {
     expect(String(sent[0]!.init.body).startsWith(page("M"))).toBe(true);
     expect(seen).toEqual({ id: "page-total", seen: [], error: "The page is too big to run here (0.0 MB)." });
     const skipped = await runPages(checks, () => Promise.resolve(true));
-    expect(skipped).toEqual([{ id: "page-total", seen: [], error: SANDBOX_OFF_SKIP }]);
+    expect(skipped).toEqual([{ id: "page-total", seen: [], skipped: SANDBOX_OFF_SKIP }]);
     expect(sent).toHaveLength(1);
   });
 

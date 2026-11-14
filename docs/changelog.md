@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-14: Measure leaves Pages out when it could not run them
+
+- In a desktop app started with Chromium's sandbox off, Measure's page
+  checks now count as skipped, not failed, so the score is the one over
+  the other four parts. The detail says once why pages were not run, and
+  that the score leaves Pages out.
+- A page the app's own server did not take is skipped the same way; a
+  page too big to run still fails, since the model wrote it. If the
+  desktop app does not say in time whether its sandbox is on, Measure
+  skips the pages rather than waiting for ever.
+- A model row's menu lists Measure above Remove, so the destructive item
+  is last.
+
 ## 2026-11-14: A page's frame may load one address
 
 - In a browser tab, the app's frame policy is narrowed to the server it

@@ -279,6 +279,20 @@ describe("page grading", () => {
     expect(check(broken, "page-counter")).toMatchObject({ ok: false, why: "The page left for another address." });
     expect(check(broken, "page-filter").state).toBe("pending");
   });
+
+  it("a page the window skipped is skipped with its reason, and the score is the one with no Pages part, not lower", async () => {
+    const m = { model: "m", digest: "d", ...await pending() };
+    const why = "Pages were not run: Chromium's sandbox is off in this copy.";
+    const skipped = gradePages(m, ["page-counter", "page-filter", "page-total"].map((id) => ({ id, seen: [], skipped: why })));
+    expect(skipped.checks.filter((c) => c.kind === "pages").map((c) => [c.state, c.why, c.ok, c.page, c.script])).toEqual(Array.from({ length: 3 }, () => ["skipped", why, false, undefined, undefined]));
+    const noPages = partsOf(m.checks.filter((c) => c.kind !== "pages"));
+    expect(skipped.parts).toEqual(noPages);
+    expect(skipped.score).toBe(scoreOf(noPages));
+    // a failed page would lower it: the skip does not
+    const failed = gradePages(m, ["page-counter", "page-filter", "page-total"].map((id) => ({ id, seen: [], error: why })));
+    expect(failed.score).toBeLessThan(skipped.score);
+    expect(skipped.score).toBe(100);
+  });
 });
 
 describe("models.measure", () => {
@@ -362,6 +376,21 @@ describe("models.measure", () => {
     expect(t.pushes.filter(([c]) => c === "models.measures").at(-1)?.[1]).toEqual([saved]);
     expect(t.pushes.filter(([c]) => c === "models.measuring").at(-1)?.[1]).toMatchObject({ state: "done" });
     expect(() => t.measure.handlers["models.measurePages"]({ model: "m", at: saved!.at, pages: [{ id: "page-counter", seen: ["0", "3"] }] })).toThrow(expect.objectContaining({ code: "not-waiting" }));
+  });
+
+  it("a window that could not run the pages says so, and the store keeps them skipped with its reason", async () => {
+    const t = setup("fits");
+    await t.measure.handlers["models.measure"]({ name: "m" });
+    const saved = await t.saved();
+    const why = "Pages were not run: Chromium's sandbox is off in this copy.";
+    t.measure.handlers["models.measurePages"]({ model: "m", at: saved.at, pages: ["page-counter", "page-filter", "page-total"].map((id) => ({ id, seen: [], skipped: why })) });
+    // the run does not wait out its time for pages nobody will run
+    await t.ended();
+    const kept = measureStore(t.dataDir).list()[0]!;
+    expect(kept.checks.filter((c) => c.kind === "pages").map((c) => [c.state, c.why])).toEqual(Array.from({ length: 3 }, () => ["skipped", why]));
+    expect(kept.parts?.map((p) => p.part)).toEqual(["tools", "files", "database", "instructions"]);
+    expect(kept.score).toBe(100);
+    expect(t.pushes.filter(([c]) => c === "models.measuring").at(-1)?.[1]).toMatchObject({ state: "done" });
   });
 
   it("shows a page an earlier build left waiting as skipped", () => {

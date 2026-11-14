@@ -34,7 +34,7 @@ const DEFAULT_CTX = 16384;
 /** How long a run waits for a window to run its pages. */
 export const PAGE_WAIT_MS = 30_000;
 /** Why a page check counts for nothing: the window that started the run did not run it in time. */
-export const PAGES_UNRUN = "No window ran this page while Measure waited for it.";
+export const PAGES_UNRUN = "Pages were not run: no window ran them while Measure waited.";
 export const RUNTIME_CHANGED_MEASURE = "The Ollama runtime changed while Measure ran, so it stopped.";
 
 export class MeasureError extends Error {

@@ -7,14 +7,21 @@
 // referrer, with the server's content policy as a header. The frame is laid out but never seen or
 // clicked, and takes no focus from the app. A page that does not finish in time, loads a second
 // document, or is too big for the server to serve, fails. A desktop app started with Chromium's
-// sandbox off runs no pages here (pages/sandbox.ts): each fails with that reason.
+// sandbox off runs no pages here (pages/sandbox.ts): each goes back skipped, with that reason, and
+// the score leaves Pages out rather than counting them failed.
 import type { PageAction, PageSeen } from "@gates-local/contracts";
 import { type PageServer, lockFrame, pageAddress, pageMb } from "./pages/page-doc.ts";
 import { sandboxOff } from "./pages/sandbox.ts";
 import { getState } from "./store.ts";
 
 /** Why Measure ran no page, in a desktop app started with the sandbox off. */
-export const SANDBOX_OFF_SKIP = "Skipped: this copy started with Chromium's sandbox off, so Measure runs no pages.";
+export const SANDBOX_OFF_SKIP = "Pages were not run: Chromium's sandbox is off in this copy.";
+/** Why Measure ran no page when this copy did not say in time whether its sandbox is on. */
+export const SANDBOX_UNKNOWN_SKIP = "Pages were not run: this copy did not say whether Chromium's sandbox is on.";
+/** Why a page did not run when the server did not take it: the app's doing, not the model's. */
+export const SERVER_REFUSED_SKIP = "The server did not take the page, so it was not run.";
+/** How long the pages wait for the desktop app to say whether its sandbox is on. */
+export const SANDBOX_WAIT_MS = 10_000;
 
 /** The server as this window knows it. */
 const server = (): PageServer => ({ origin: getState().serverOrigin, token: getState().fileToken });
@@ -72,8 +79,9 @@ export function framed(page: string, token: string, script: readonly PageAction[
 export async function runPage(id: string, page: string, script: readonly PageAction[], timeoutMs = PAGE_MS, at: PageServer = server()): Promise<PageSeen> {
   const token = crypto.randomUUID();
   const address = await pageAddress(framed(page, token, script), at);
+  // Too big is the model's page; a refusal or a dropped connection is not, so it counts for nothing.
   if ("error" in address) {
-    return { id, seen: [], error: address.error === "too-big" ? `The page is too big to run here (${pageMb(page)} MB).` : "The server did not take the page." };
+    return address.error === "too-big" ? { id, seen: [], error: `The page is too big to run here (${pageMb(page)} MB).` } : { id, seen: [], skipped: SERVER_REFUSED_SKIP };
   }
   return new Promise((resolve) => {
     const frame = document.createElement("iframe");
@@ -110,13 +118,23 @@ export async function runPage(id: string, page: string, script: readonly PageAct
   });
 }
 
-/** Each pending page of a measure, one after another; none with the sandbox off. */
-export async function runPages(checks: readonly { id: string; state?: string; page?: string; script?: readonly PageAction[] }[], off: () => Promise<boolean> = sandboxOff): Promise<PageSeen[]> {
+/**
+ * Each pending page of a measure, one after another; none with the sandbox off, nor when the
+ * desktop app has not said within `waitMs` whether it is on.
+ */
+export async function runPages(
+  checks: readonly { id: string; state?: string; page?: string; script?: readonly PageAction[] }[],
+  off: () => Promise<boolean> = sandboxOff,
+  waitMs = SANDBOX_WAIT_MS,
+): Promise<PageSeen[]> {
   const seen: PageSeen[] = [];
-  const skip = await off();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<string>((resolve) => { timer = setTimeout(() => resolve(SANDBOX_UNKNOWN_SKIP), waitMs); });
+  const skip = await Promise.race([off().then((o) => (o ? SANDBOX_OFF_SKIP : undefined), () => SANDBOX_UNKNOWN_SKIP), late]);
+  clearTimeout(timer);
   for (const c of checks) {
     if (c.state !== "pending") continue;
-    if (skip) seen.push({ id: c.id, seen: [], error: SANDBOX_OFF_SKIP });
+    if (skip !== undefined) seen.push({ id: c.id, seen: [], skipped: skip });
     else seen.push(c.page && c.script ? await runPage(c.id, c.page, c.script) : { id: c.id, seen: [], error: "The page was not kept." });
   }
   return seen;

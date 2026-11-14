@@ -367,6 +367,22 @@ function RowMenu({ r, saved, onRemove }: { r: InstalledRow; saved: string | unde
               {tail ? <span className="mp-t">{tail}</span> : null}
             </span>
           </button>
+          {measureItem && canMeasureHere ? (
+            <button
+              type="button"
+              role="menuitem"
+              className="mp-mi"
+              data-testid="models.row-menu.measure"
+              onClick={() => {
+                close();
+                measureItem.act();
+              }}
+            >
+              <Icon id="speed" />
+              {measureItem.text}
+            </button>
+          ) : null}
+          {/* the destructive item last, under its own line */}
           {canRemove ? (
             <>
               <div className="mp-sep" role="separator" />
@@ -385,21 +401,6 @@ function RowMenu({ r, saved, onRemove }: { r: InstalledRow; saved: string | unde
                 <span className="mp-k">frees {sizeText(r.info.sizeBytes)}</span>
               </button>
             </>
-          ) : null}
-          {measureItem && canMeasureHere ? (
-            <button
-              type="button"
-              role="menuitem"
-              className="mp-mi"
-              data-testid="models.row-menu.measure"
-              onClick={() => {
-                close();
-                measureItem.act();
-              }}
-            >
-              <Icon id="speed" />
-              {measureItem.text}
-            </button>
           ) : null}
           <Fail err={err} />
         </div>

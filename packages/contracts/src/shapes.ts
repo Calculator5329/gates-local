@@ -358,8 +358,12 @@ export const ModelMeasure = S.Struct({
 });
 export type ModelMeasure = typeof ModelMeasure.Type;
 
-/** What the window saw on one page: each read or visible action's text, in order, or why it could not run. */
-export const PageSeen = S.Struct({ id: S.String, seen: S.Array(S.String), error: S.optional(S.String) });
+/**
+ * What the window saw on one page: each read or visible action's text, in order, or why it could
+ * not run (`error`, a fail). `skipped`: the window runs no pages on this computer, and why; the
+ * check counts for nothing either way.
+ */
+export const PageSeen = S.Struct({ id: S.String, seen: S.Array(S.String), error: S.optional(S.String), skipped: S.optional(S.String) });
 export type PageSeen = typeof PageSeen.Type;
 
 /** A Measure run while it goes: waiting for the GPU, then each step; ends done or error. */

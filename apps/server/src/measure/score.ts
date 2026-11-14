@@ -23,14 +23,16 @@ export function scoreOf(parts: readonly MeasurePartCount[]): number {
 /** How many checks are waiting for a window to run their page. */
 export const pendingPages = (m: ModelMeasure) => m.checks.filter((c) => c.state === "pending").length;
 
+/** A pending page check marked skipped, saying why, without the page it no longer needs. */
+const skipped = (c: MeasureCheck, why: string): MeasureCheck => {
+  const { page: _page, script: _script, ...rest } = c;
+  return { ...rest, ok: false, state: "skipped", why };
+};
+
 /** The measure with each page still waiting marked skipped, saying why; the score is over the rest. */
 export function skipPages(m: ModelMeasure, why: string): ModelMeasure {
   if (pendingPages(m) === 0) return m;
-  const checks = m.checks.map((c): MeasureCheck => {
-    if (c.state !== "pending") return c;
-    const { page: _page, script: _script, ...rest } = c;
-    return { ...rest, ok: false, state: "skipped", why };
-  });
+  const checks = m.checks.map((c): MeasureCheck => (c.state === "pending" ? skipped(c, why) : c));
   const parts = partsOf(checks);
   return { ...m, checks, parts, score: scoreOf(parts) };
 }
@@ -41,7 +43,8 @@ const clip = (text: string) => text.length > SEEN_KEPT ? `${text.slice(0, SEEN_K
 
 /**
  * The measure with each pending page graded on what the window saw when it used it. A page the
- * window could not run (`error`) fails with that reason. Pages already graded keep their result.
+ * window could not use (`error`) fails with that reason; one it runs no pages for (`skipped`) is
+ * skipped with its reason and left out of the score. Pages already graded keep their result.
  */
 export function gradePages(m: ModelMeasure, pages: readonly PageSeen[]): ModelMeasure {
   const byId = new Map(pages.map((p) => [p.id, p]));
@@ -49,6 +52,7 @@ export function gradePages(m: ModelMeasure, pages: readonly PageSeen[]): ModelMe
     const seen = c.state === "pending" ? byId.get(c.id) : undefined;
     const kase = CASES.find((k) => k.id === c.id);
     if (!seen || kase?.kind !== "page") return c;
+    if (seen.skipped !== undefined) return skipped(c, seen.skipped);
     const { state: _state, ...rest } = c;
     const why = seen.error ?? kase.expect(seen.seen);
     return { ...rest, ok: why === undefined, result: seen.seen.map(clip).join(" · ") || "Nothing.", ...(why ? { why } : {}) };
