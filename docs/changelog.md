@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-13: The model picker's memory figure has its column and colour back
+
+- In the chat model picker, a model's memory figure had lost its fixed
+  column and its colour (amber when it runs partly in system memory, red
+  when it does not fit). A missing space joined two class names when the
+  speed figure was added on 2026-11-13; no release had it.
+
 ## 2026-11-13: Linux send tests spend less time starting their GPU fixture
 
 - Browser and speed tests read the same fake GPU state through shell and

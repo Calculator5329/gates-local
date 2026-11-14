@@ -66,6 +66,15 @@ describe("approved model picker", () => {
     expect(/<header class="pk-context-head">.*?<\/header>/.exec(html)?.[0]).not.toContain("<small");
     expect(html).toContain("Download models");
   });
+  it("keeps the need cell's own class apart from its verdict class, so the cell keeps its width and its colour", () => {
+    const html = markup();
+    const row = html.slice(html.indexOf('data-m="milo-e4b-v4:latest"'));
+    const classes = /class="(pk-v[^"]*)">/.exec(row)?.[1]?.split(" ");
+    // "pk-vgpu" is no class the stylesheet knows: the cell loses its column width, and a
+    // model that spills or does not fit loses its amber or red.
+    expect(classes?.[0]).toBe("pk-v");
+    expect(classes?.length).toBe(2);
+  });
   it("shows a clean name and estimated memory need instead of disk size as its row metric", () => {
     const html = markup();
     expect(html).toContain("Milo E4B v4");
