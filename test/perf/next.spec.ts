@@ -5,7 +5,7 @@
 // round one profile repetition. Counting and profiling never share a
 // repetition with timing. Input goes straight to the browser, because a
 // locator click runs Playwright's own script in the page during the window.
-import { mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { availableParallelism, freemem, loadavg, totalmem } from "node:os";
 import path from "node:path";
 import { test, expect, type Browser, type CDPSession, type Locator, type Page } from "@playwright/test";
@@ -13,7 +13,7 @@ import { decodeRequest } from "@gates-local/contracts";
 import { CONTROL_URL, FAKE_URL, appUrl } from "../e2e/env.ts";
 import { browserReactHook, costRows, counterRows, emptyNetwork, frameBytes, hotSpots, snapshot, type HotSpot, type MetricSnapshot, type NetworkCounts, type ReactCounts, type Row } from "./counters.ts";
 import type { FixtureIds } from "./fixture.ts";
-import { install, measure, type LaterEnd, type Observation } from "./probe.ts";
+import { install, measure, REPLY_TEXT_SELECTOR, type LaterEnd, type Observation } from "./probe.ts";
 import { COUNTER_REPETITIONS, NEXT_DEFAULT, nextJourneys, repetitionPlan, type RepetitionKind } from "./next-journeys.ts";
 import type { Journey } from "./selection.ts";
 import { metric, type Run } from "./stats.ts";
@@ -33,6 +33,20 @@ const hoverDwellMs = 350;
 type Rows = Map<string, { unit: Row["unit"]; samples: number[] }>;
 const timed: Rows = new Map(), counted: Rows = new Map();
 const hot: Record<string, HotSpot[]> = {};
+
+function recordWindow(name: string, kind: RepetitionKind, repeat: number, observation: Observation) {
+  if (!process.env["GL_PERF_ACCOUNTING"]) return;
+  appendFileSync(path.join(out, "windows.jsonl"), JSON.stringify({ name, kind, repeat, elapsed: observation.elapsed, epochStart: observation.epochStart, epochEnd: observation.epochEnd }) + "\n");
+}
+async function registerBrowser(browser: Browser) {
+  if (!process.env["GL_PERF_ACCOUNTING"]) return;
+  const system = await browser.newBrowserCDPSession();
+  try {
+    const { processInfo } = await system.send("SystemInfo.getProcessInfo");
+    for (const info of processInfo) appendFileSync(path.join(out, "roles.jsonl"), JSON.stringify({ pid: info.id, role: info.type === "renderer" ? "renderer" : "browser-other" }) + "\n");
+    appendFileSync(path.join(out, "roles.jsonl"), JSON.stringify({ pid: process.pid, role: "driver" }) + "\n");
+  } finally { await system.detach(); }
+}
 
 function add(rows: Rows, measured: Row) {
   const entry = rows.get(measured.action) ?? { unit: measured.unit, samples: [] };
@@ -85,7 +99,7 @@ const handDwellMs = 150;
  * later, or keyboard focus and then Enter. `hover-away` hovers and leaves
  * without opening: the one warm-up whose checks no opening uses.
  */
-export async function pickerReplyCase(browser: Browser, kind: RepetitionKind, mode: "hand" | "keyboard" | "hover-away") {
+export async function pickerReplyCase(browser: Browser, kind: RepetitionKind, mode: "hand" | "keyboard" | "hover-away", repeat = 0) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "dark" });
   try {
     const page = await context.newPage(); await install(page);
@@ -124,6 +138,7 @@ export async function pickerReplyCase(browser: Browser, kind: RepetitionKind, mo
       await page.waitForTimeout(handDwellMs);
       observation = await measure(page, () => page.keyboard.press("Enter"), "keydown", "#picker.open");
     }
+    recordWindow(name, kind, repeat, observation);
     if (kind === "timed") add(timed, { action: name, unit: "ms", value: observation.elapsed });
     await expect(page.locator("#pkSearch")).toBeFocused();
     await expect(page.locator("#picker .fit-skel, #picker .pk-cost.skel")).toHaveCount(0);
@@ -133,7 +148,7 @@ export async function pickerReplyCase(browser: Browser, kind: RepetitionKind, mo
 }
 
 /** Each case owns a fresh client session; none warms the next case's fit cache. */
-export async function pickerReadyCase(browser: Browser, kind: RepetitionKind, mode: "hover" | "cold-ready") {
+export async function pickerReadyCase(browser: Browser, kind: RepetitionKind, mode: "hover" | "cold-ready", repeat = 0) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "dark" });
   try {
     const page = await context.newPage(); await install(page);
@@ -151,6 +166,7 @@ export async function pickerReadyCase(browser: Browser, kind: RepetitionKind, mo
     const location = await point(button);
     const name = `picker-open-${mode}`;
     const observation = await measure(page, () => page.mouse.click(location.x, location.y), "click", "#picker.open");
+    recordWindow(name, kind, repeat, observation);
     if (kind === "timed") add(timed, { action: name, unit: "ms", value: observation.elapsed });
     await expect(page.locator("#picker .fit-skel, #picker .pk-cost.skel")).toHaveCount(0);
     const first = checks;
@@ -179,6 +195,7 @@ test("priority journeys with costs", async ({ browser }) => {
         if (kind === "counters" && selected.has("typing")) await context.addInitScript(browserRegionHook);
         if (selected.has("typing")) await context.addInitScript(browserLongTasks);
         const page = await context.newPage(); await install(page);
+        await registerBrowser(browser);
         const cdp = await context.newCDPSession(page);
         await cdp.send("Network.enable"); await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
         await cdp.send("Performance.enable", { timeDomain: "threadTicks" });
@@ -207,7 +224,8 @@ test("priority journeys with costs", async ({ browser }) => {
           // Before the first load nothing has rendered, and the page has no hook yet.
           return { metrics: await metrics(cdp), react: kind === "counters" && loaded ? await reactCounts() : { commits: 0, renders: 0 } };
         };
-        const finish = async (name: string, before: Awaited<ReturnType<typeof begin>>, elapsed: number) => {
+        const finish = async (name: string, before: Awaited<ReturnType<typeof begin>>, elapsed: number, observation?: Observation) => {
+          if (observation) recordWindow(name, kind, repeat, observation);
           if (kind === "profile") {
             const { profile } = await cdp.send("Profiler.stop");
             mkdirSync(path.join(out, "profiles"), { recursive: true });
@@ -232,10 +250,10 @@ test("priority journeys with costs", async ({ browser }) => {
           await quiet(page);
           const before = await begin();
           const observation = await measure(page, trigger, event, selector, text, mode, later);
-          await finish(name, before, observation.elapsed);
+          await finish(name, before, observation.elapsed, observation);
           if (later) {
             const closed = await page.evaluate(() => window.perfJourney.later);
-            if (kind !== "profile") await finish(later.name, before, closed.elapsed);
+            if (kind !== "profile") await finish(later.name, before, closed.elapsed, closed);
           }
           return observation;
         };
@@ -247,7 +265,7 @@ test("priority journeys with costs", async ({ browser }) => {
         await ready(page);
         loaded = true;
         if (kind === "counters" && (await reactCounts()).commits < 1) throw new Error("React committed nothing during the first load, so the counting hook was installed too late");
-        if (selected.has("startup")) await finish("cold-composer", beforeLoad, cold.elapsed);
+        if (selected.has("startup")) await finish("cold-composer", beforeLoad, cold.elapsed, cold);
         else if (kind === "profile") await cdp.send("Profiler.stop");
 
         if (selected.has("picker")) {
@@ -325,7 +343,7 @@ test("priority journeys with costs", async ({ browser }) => {
 
         if (selected.has("send")) {
           await newThread(page); await scenario(); await page.locator("#ta").fill("Measure first words");
-          await timing("send-first-visible-token", () => page.keyboard.press("Enter"), "keydown", ".turn.a:not(.done) .md", "Here is");
+          await timing("send-first-visible-token", () => page.keyboard.press("Enter"), "keydown", REPLY_TEXT_SELECTOR, "Here is");
           await expect(page.locator(".turn.a.done")).toHaveCount(1);
         }
 
@@ -334,7 +352,7 @@ test("priority journeys with costs", async ({ browser }) => {
           const alphaPrompt = parallelPrompt("parallel alpha"), betaPrompt = parallelPrompt("parallel beta");
           await newThread(page); await send(page, alphaPrompt); const alpha = threadId(page);
           await newThread(page); await page.locator("#ta").fill(betaPrompt);
-          await timing("two-streams-start", () => page.keyboard.press("Enter"), "keydown", ".turn.a:not(.done) .md", "parallel beta"); const beta = threadId(page);
+          await timing("two-streams-start", () => page.keyboard.press("Enter"), "keydown", REPLY_TEXT_SELECTOR, "parallel beta"); const beta = threadId(page);
           for (const [id, prompt] of [[alpha, alphaPrompt], [beta, betaPrompt], [alpha, alphaPrompt], [beta, betaPrompt]] as const) {
             await expect(page.locator('.sb [aria-label="Reply in progress"]')).toHaveCount(2);
             const emitted = tokensFor(await (await fetch(`${FAKE_URL}/__fake/state`)).json(), prompt);
@@ -411,7 +429,7 @@ test("priority journeys with costs", async ({ browser }) => {
                 const placed = kind === "counters" ? await regions() : undefined;
                 const observation = await measure(page, () => page.keyboard.press(ch), "keydown", "#ta", value, "usable-value");
                 if (placed) regionRows(name, placed, await regions());
-                await finish(name, before, observation.elapsed);
+                await finish(name, before, observation.elapsed, observation);
                 if (kind === "timed") add(timed, { action: `${name}.long-tasks`, unit: "count", value: observation.longTasks.length });
               }
             }
@@ -424,10 +442,12 @@ test("priority journeys with costs", async ({ browser }) => {
             const before = await begin();
             const placed = kind === "counters" ? await regions() : undefined;
             const from = await flushes();
+            const epochStart = process.env["GL_PERF_ACCOUNTING"] ? await page.evaluate(() => performance.timeOrigin + performance.now()) : undefined;
             await page.waitForTimeout(CHUNK_WINDOW_MS);
+            const epochEnd = process.env["GL_PERF_ACCOUNTING"] ? await page.evaluate(() => performance.timeOrigin + performance.now()) : undefined;
             const flushed = await flushes() - from;
             if (placed) regionRows(name, placed, await regions());
-            await finish(name, before, CHUNK_WINDOW_MS);
+            await finish(name, before, CHUNK_WINDOW_MS, epochStart !== undefined && epochEnd !== undefined ? { elapsed: epochEnd - epochStart, epochStart, epochEnd, frames: [], longTasks: [], inputDelays: [] } : undefined);
             add(kind === "timed" ? timed : counted, { action: `${name}.flushes`, unit: "count", value: flushed });
           };
           const emitted = async (prompt: string) => { try { return tokensFor(await (await fetch(`${FAKE_URL}/__fake/state`)).json(), prompt); } catch { return 0; } };
@@ -495,9 +515,9 @@ test("priority journeys with costs", async ({ browser }) => {
       } finally { await context.close(); }
       // The fresh picker sessions record no profile; hover-away records only a count.
       if (selected.has("picker") && kind !== "profile") {
-        for (const mode of ["hover", "cold-ready"] as const) await pickerReadyCase(browser, kind, mode);
+        for (const mode of ["hover", "cold-ready"] as const) await pickerReadyCase(browser, kind, mode, repeat);
         for (const mode of ["hand", "keyboard", "hover-away"] as const) {
-          if (mode !== "hover-away" || kind === "counters") await pickerReplyCase(browser, kind, mode);
+          if (mode !== "hover-away" || kind === "counters") await pickerReplyCase(browser, kind, mode, repeat);
         }
       }
     }

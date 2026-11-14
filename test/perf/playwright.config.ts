@@ -24,7 +24,7 @@ export default defineConfig({
   outputDir: path.resolve(process.env["GL_PERF_OUT"] ?? "perf-results", "browser-artifacts"),
   use: {
     browserName: "chromium",
-    launchOptions: { executablePath, args: ["--disable-background-timer-throttling", "--disable-renderer-backgrounding", ...(microphone ? ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", `--use-file-for-fake-audio-capture=${microphone}`] : [])] },
+    launchOptions: { executablePath: process.env["GL_PERF_APP_GROUP"] ? path.join(ROOT, "test/perf/browser-box.sh") : executablePath, args: ["--disable-background-timer-throttling", "--disable-renderer-backgrounding", ...(microphone ? ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", `--use-file-for-fake-audio-capture=${microphone}`] : [])] },
     viewport: { width: 1440, height: 900 },
     colorScheme: "dark",
     trace: "off",

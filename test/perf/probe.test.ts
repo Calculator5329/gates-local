@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { browserProbe } from "./probe.ts";
+import { browserProbe, REPLY_TEXT_SELECTOR } from "./probe.ts";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const noop = () => {};
@@ -12,7 +12,7 @@ function fixture() {
   const element ={ value: "", textContent: "", disabled: false, getClientRects: () => [{}], getBoundingClientRect: () => ({ top: 10, bottom: 100 }) };
   const document = Object.assign(new EventTarget(), {
     activeElement: element,
-    querySelector: (selector: string) => selector === "#done" ? (done ? element : null) : selector === ".composer.blocked" ? null : element,
+    querySelector: (selector: string) => selector === "#done" ? (done ? element : null) : selector === ".composer.blocked" || (done && selector.includes(":not(.done)")) ? null : element,
     querySelectorAll: () => [element],
     getElementsByClassName: (name: string) => name === "turn" ? turns : { length: 0 },
   });
@@ -57,6 +57,16 @@ test("a cached reply from another thread cannot finish the current-text marker",
   let finished = false; void window.perfJourney.result.then(() => { finished = true; });
   await Promise.resolve(); expect(finished).toBe(false);
   f.element.textContent = "Reply 1\nfresh"; f.tick(); await window.perfJourney.result;
+  expect(finished).toBe(true);
+});
+
+test("the reply marker closes even when the reply completes before its first paint", async () => {
+  const f = fixture();
+  window.perfJourney.arm("keydown", REPLY_TEXT_SELECTOR, "Here is", "text");
+  let finished = false; void window.perfJourney.result.then(() => { finished = true; });
+  f.input("keydown", 1);
+  f.element.textContent = "Here is the completed reply"; f.complete();
+  f.tick(); await Promise.resolve();
   expect(finished).toBe(true);
 });
 

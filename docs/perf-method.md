@@ -50,10 +50,13 @@ itself. `--throttle N` slows the page's CPU N times; no job has measured whether
 that helps. The job stops starting rounds when the next would pass
 `--budget-seconds` (780 by default), so it ends inside a 15-minute runner limit.
 
-`--limit 2c-2g` runs each arm's journeys in a smaller machine: the browser, the
-server, the fake model service and the test driver are pinned to the first two
-cores and share 2 GB with no swap (`test/perf/limits.ts`; Linux with a user
-systemd). `1c-512m` and the like work the same way, and `2c` pins cores and
+`--limit 2c-2g` puts the app server and browser on the first two cores in one
+2 GB cgroup with no swap (`test/perf/box.ts` and `limits.ts`; Linux with a user
+systemd and Python 3). The Playwright driver, fake model, static file server
+and synthetic GPU tool run in a separate owned scope on the remaining cores.
+The GPU launcher leaves the app cgroup before starting Node. A small keeper
+and the box's reporting shell stay inside; their work remains unassigned.
+`1c-512m` and the like work the same way, and `2c` pins cores and
 only measures memory. `--limit-base` and `--limit-candidate` set one arm, so
 `--self --limit-candidate 2c-2g` shows what the limit alone costs one build.
 A number after the `c` slows the cores: `1c50-2g` gives the box half of one
@@ -61,6 +64,23 @@ core's time, handed out every 5 ms, so everything in it runs at about half
 speed. On more than one core that share is of all the cores together: `2c50`
 is two cores with one core's worth of time, and one busy thread alone in it
 is not slowed.
+
+No new flag is needed in a night script: existing `--limit`, `--limit-base`
+and `--limit-candidate` calls use this app-only placement. Add
+`--box-everything` to reproduce the old placement, with all test helpers
+sharing the app's cores and memory. The processor sampler stays outside in
+both modes. `scored.json` records `boxContents` so those modes remain distinct.
+Limited-box readings from the performance nights of 2026-11-11 and 2026-11-12
+include the synthetic GPU tool's Node-startup cost and are not comparable
+with later app-only readings. Whole-machine readings do not change placement.
+
+The per-role processor accounting and the server stage timestamps run only in
+limited arms. Measured once on the whole machine, same build, four rounds of
+two samples with them off and on: send to first words 348.68 against
+381.17 ms (within noise), two replies at once 641.27 against 657.93 ms
+(slower by 16.65 ms, just over a 16.48 ms noise limit). So a limited arm's
+wall time carries a few tens of milliseconds of measuring; compare limited
+readings only with limited readings taken the same way.
 
 Each run prints its peak memory, how many processes were killed for memory,
 the processor time everything in the box used and how long a speed limit
@@ -73,6 +93,55 @@ outside the limit. Fewer or slower cores are still this machine's cores, so
 the numbers compare with other limited runs here, not with a real two-core
 laptop. Give a limited job a larger `--budget-seconds` and runner timeout; it
 stops early otherwise.
+
+### Processor work inside the page's marks
+
+Limited arms also write `cpu.jsonl`, `roles.jsonl`, `windows.jsonl` and
+`server-stages.jsonl` per round. Only limited arms enable this instrumentation;
+unlimited arms keep their existing measurement path. `scored.json` retains
+each marked window under `accounting.base` or `accounting.candidate`, beside
+the existing wall-time verdicts. The extra table in `scored.md` contains only
+limited arms and averages timed windows with the same action name. Counter
+and profile windows remain separate in JSON and never enter those means.
+
+The processor columns are milliseconds of work, shown as **inside / outside**:
+
+| Column | What it measures |
+| --- | --- |
+| Wall | The page's event-to-paint window, or its explicit observation interval |
+| Server | The app server and its Node threads |
+| Page | The renderer's main thread, read through Linux schedstat |
+| Browser rest | Browser main process, renderer workers, GPU, network and other Chromium threads |
+| Fake | The synthetic model service and its threads |
+| Driver | Playwright, its worker and the test stack controller |
+| GPU stand-in | The synthetic nvidia-smi executable and its Node threads |
+| Unassigned inside | Cgroup CPU minus the six named in-box roles, including short-lived helpers and sampling discrepancy |
+| Cgroup CPU | Independent cpu.stat usage within the same page marks |
+| Cgroup minus sampled | Cgroup CPU minus all sampled in-box threads, including threads without a named role |
+| Coverage % | Fraction of the marked interval covered by cgroup samples |
+| Max gap / scan | Largest sample interval / scan duration touching the window, in ms |
+
+The sampler reads this comparison's descendants roughly every 10 ms on helper
+cores. Cumulative thread and cgroup counters are interpolated at the page's
+epoch marks. PID, process birth and thread ID keep recycled processes apart;
+new, exited or migrating threads without two readings cannot be attributed.
+Their cost remains in the signed cgroup difference. Neither residual is
+clamped to zero: a negative number exposes sampling overcount. Missing cgroup
+data prints `n/a`, and partial coverage is not a complete-window reading.
+Intervals and scan durations limit precision. CPU outside the box can overlap
+the app and use several cores, so these columns do not partition wall time.
+Even in a one-core box, unassigned work must not be relabelled as waiting.
+The existing DevTools `.cpu-*` rows retain their wider before/after windows.
+
+Server transport instrumentation records request/thread IDs and epoch times
+only: receive of `chat.send`, admission through the fit checks to the streaming
+model fetch, first nonempty model-stream bytes, and first socket delta just
+before WebSocket.send. It appends the record at that first delta, so teardown
+cannot discard an exit-only buffer. These are elapsed stages, including waits,
+and cannot be added as CPU slices. First bytes need not contain visible words;
+the socket mark is not a kernel transmission acknowledgement. A send that
+never reaches a delta produces no stage record. No message content, endpoint
+or credential is saved.
 
 It writes `scored.json` and `scored.md`. `node test/perf/replay-next.ts RESULTS`
 rescores recorded results without a browser and, for a same-build job, prints
@@ -131,8 +200,9 @@ had `picker-open-idle` and held idle callbacks to separate an idle warm-up
 that no longer exists; both are gone.)
 
 Every dwell is setup, excluded from elapsed time, and applies equally to both
-arms. None of the fresh-session rows adds CPU or React count windows, and none
-runs in the profile repetition.
+arms. The fresh-session rows add no DevTools CPU or React count windows; limited
+arms still account for processor work between their page marks. None runs in
+the profile repetition.
 
 - **Wall time** starts at the input that triggers the action, using the event's
   own timestamp (click, keydown, paste). Three rows start differently.

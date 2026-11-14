@@ -7,6 +7,8 @@ and shows its lower quartile to one decimal. A word beside a number means the
 release measured differently from the build it was compared with. These numbers
 are information, not a gate.
 
+Limited-box readings from the performance nights of 2026-11-11 and 2026-11-12 include the synthetic GPU tool's cost and are not comparable with later readings that box only the app and browser.
+
 Refresh with `node test/perf/history.ts --label RELEASE --scored RESULTS/scored.json`.
 
 ## Time

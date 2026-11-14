@@ -1,7 +1,10 @@
 /// <reference lib="dom" />
 import type { Page } from "@playwright/test";
 
-export interface Observation { elapsed: number; frames: number[]; longTasks: number[]; inputDelays: number[] }
+// A fresh thread can finish its reply before the first frame observes it.
+export const REPLY_TEXT_SELECTOR = ".turn.a .md";
+
+export interface Observation { elapsed: number; frames: number[]; longTasks: number[]; inputDelays: number[]; epochStart?: number; epochEnd?: number }
 /**
  * A second end state for the same input. Its window opens with the first and
  * closes later, so one input gives two rows. "class-count" reads a live
@@ -75,7 +78,8 @@ export function browserProbe(setup: boolean) {
               collecting = false;
               document.removeEventListener("keydown", onKey, true);
             }
-            settle({ elapsed: performance.now() - begin, frames: [...frames], longTasks: [...tasks], inputDelays: [...inputs] });
+            const end = performance.now();
+            settle({ elapsed: end - begin, frames: [...frames], longTasks: [...tasks], inputDelays: [...inputs], epochStart: performance.timeOrigin + begin, epochEnd: performance.timeOrigin + end });
           }));
           let firstClosed = false;
           const check = () => {

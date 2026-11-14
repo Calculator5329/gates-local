@@ -1,6 +1,6 @@
 // The existing fake and real Node server, with a larger test-only data set.
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync } from "node:fs";
 import { createServer } from "node:http";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -22,8 +22,12 @@ const libraryFixture = prepareLibraryFixture(run);
 
 const children: ChildProcess[] = [];
 async function start(args: string[], env: NodeJS.ProcessEnv, ready: RegExp): Promise<ChildProcess> {
-  const child = spawn(process.execPath, args, { cwd: target, env, stdio: ["pipe", "pipe", "pipe"] });
+  const server = args[0] === "test/e2e/library-server.ts";
+  const instrumented = server && env["GL_PERF_ACCOUNTING"] ? ["--import", path.join(ROOT, "test/perf/server-stages-entry.ts"), ...args] : args;
+  const boxed = server && Boolean(env["GL_PERF_APP_GROUP"]);
+  const child = spawn(boxed ? "python3" : process.execPath, boxed ? [path.join(ROOT, "test/perf/placement.py"), "app", process.execPath, ...instrumented] : instrumented, { cwd: target, env, stdio: ["pipe", "pipe", "pipe"] });
   children.push(child);
+  if (env["GL_PERF_ACCOUNTING"]) appendFileSync(path.join(env["GL_PERF_OUT"]!, "roles.jsonl"), JSON.stringify({ pid: child.pid, role: server ? "server" : "fake" }) + "\n");
   child.stderr?.on("data", (chunk: Buffer) => process.stderr.write(chunk));
   await new Promise<void>((resolve, reject) => {
     let output = "";
@@ -37,7 +41,7 @@ await start(["test/e2e/library-server.ts", "--port", String(SERVER_PORT), "--dat
   ...process.env,
   GATES_LOCAL_OLLAMA_URL: FAKE_URL,
   GATES_LOCAL_COMFY_URL: "http://127.0.0.1:1",
-  GATES_LOCAL_NVIDIA_SMI: path.join(target, "test/fake-ollama/nvidia-smi.ts"),
+  GATES_LOCAL_NVIDIA_SMI: process.env["GL_PERF_APP_GROUP"] ? path.join(ROOT, "test/perf/gpu-helper.sh") : path.join(target, "test/fake-ollama/nvidia-smi.ts"),
   GATES_LOCAL_FAKE_GPU_STATE: gpu,
   GATES_LOCAL_MEMINFO: path.join(target, "test/fake-ollama/meminfo.txt"),
   GATES_LOCAL_SERVER_TOKEN: TOKEN,

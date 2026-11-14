@@ -8,7 +8,9 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { ROOT } from "../e2e/env.ts";
 import { prepareFixture } from "./fixture.ts";
-import { limitEnv, limited, parseLimit, readLimit, type LimitReading } from "./limits.ts";
+import { parseLimit, readLimit, type LimitReading } from "./limits.ts";
+import { performanceBox } from "./box.ts";
+import { accountingMarkdown, readAccounting, type JourneyCpu } from "./accounting.ts";
 import { ownProcesses } from "./processes.ts";
 import { parseRun, scoreNext, scoredMarkdown, type Verdict } from "./score-next.ts";
 import { NEXT_DEFAULT, nextJourneys } from "./next-journeys.ts";
@@ -19,6 +21,7 @@ const { values } = parseArgs({ options: {
   rounds: { type: "string", default: "4" }, samples: { type: "string", default: "2" }, self: { type: "boolean" },
   throttle: { type: "string", default: "1" }, paste: { type: "boolean" }, "budget-seconds": { type: "string", default: "780" },
   limit: { type: "string" }, "limit-base": { type: "string" }, "limit-candidate": { type: "string" },
+  "box-everything": { type: "boolean", default: false },
 } });
 const selected = nextJourneys(values.only);
 if (!values.prepared) throw new Error("Use --prepared DIR from perf:compare --prepare");
@@ -41,7 +44,7 @@ process.on("SIGTERM", () => { shutdown.abort(); process.exitCode = 143; });
 process.on("SIGINT", () => { shutdown.abort(); process.exitCode = 130; });
 const processes = ownProcesses(shutdown.signal);
 async function command(args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env) {
-  const child = processes.spawn(args[0]!, args.slice(1), { cwd, env, stdio: "inherit" });
+  const child = processes.spawn(args[0]!, args.slice(1), { cwd, env, detached: true, stdio: "inherit" });
   try {
     const code = await new Promise<number>((resolve, reject) => { child.once("error", reject); child.once("exit", (exitCode, signal) => resolve(exitCode ?? (signal ? 128 : 1))); });
     shutdown.signal.throwIfAborted();
@@ -55,52 +58,60 @@ const scratch = mkdtempSync(path.join(cache, "next-"));
 type Arm = "base" | "candidate";
 const arms: Arm[] = ["base", "candidate"];
 const subjects = { base: path.join(scratch, "base"), candidate: path.join(scratch, "candidate") };
-for (const arm of arms) {
-  mkdirSync(subjects[arm]);
-  execFileSync("tar", ["-xf", path.join(source, values.self ? "base.tar" : `${arm}.tar`), "-C", subjects[arm]]);
-  await command(["pnpm", "install", "--frozen-lockfile"], subjects[arm]);
-  await command(["pnpm", "--filter", "@gates-local/web", "build"], subjects[arm]);
-}
-const fixtures = { base: await prepareFixture(subjects.base), candidate: await prepareFixture(subjects.candidate) };
-console.log(`NEXT setup finished at ${elapsed().toFixed(0)}s`);
-
-const runs: Record<Arm, Run[]> = { base: [], candidate: [] }, counters: Record<Arm, Run[]> = { base: [], candidate: [] };
-const boxes: Record<Arm, LimitReading[]> = { base: [], candidate: [] };
-const journeys = ["pnpm", "exec", "playwright", "test", "-c", "test/perf/next.config.ts"];
-let longestRound = 0;
-for (let round = 0; round < rounds; round++) {
-  if (round > 0 && elapsed() + longestRound > budget) { console.log(`NEXT stopping after ${round} rounds: the next would pass the ${budget}s budget`); break; }
-  const roundStart = elapsed();
-  const order: Arm[] = round % 2 === 0 ? ["base", "candidate"] : ["candidate", "base"];
-  for (const arm of order) {
-    console.log(`NEXT round ${round + 1}/${rounds} ${arm} at ${elapsed().toFixed(0)}s`);
-    const runOut = path.join(out, `round-${round + 1}-${arm}`);
-    const limit = limits[arm], report = path.join(out, `round-${round + 1}-${arm}.limit`);
-    try { await command(limit ? limited(limit, journeys, report) : journeys, ROOT, {
-      ...(limit ? limitEnv(process.env) : process.env), GL_PERF_LIMIT: limit?.spec ?? "", GL_PERF_TARGET: subjects[arm], GL_PERF_FIXTURE: fixtures[arm], GL_PERF_COMMIT: commits[arm], GL_PERF_ARM: arm,
-      GL_PERF_ROUND: String(round + 1), GL_PERF_SAMPLES: String(samples), GL_PERF_OUT: runOut, GL_PERF_ONLY: selected.join(","),
-      GL_PERF_THROTTLE: values.throttle, GL_PERF_PASTE: values.paste ? "1" : "0",
-    }); } finally {
-      // Read even when the run failed: a run killed for memory says so here.
-      if (limit && existsSync(report)) {
-        const reading = readLimit(report);
-        boxes[arm].push(reading);
-        console.log(`NEXT round ${round + 1} ${arm} in ${limit.spec}: peak memory ${reading.peakMb} MB, ${reading.oomKills} killed for memory, ${reading.cpuSeconds} s of processor time, held back ${reading.heldBackSeconds} s`);
-      }
-    }
-    // A slowed run that was never held back was not slowed, so it is not recorded as one.
-    if (limit?.speed && boxes[arm].at(-1)?.heldBackSeconds === 0) throw new Error(`${limit.spec} never held this run back; this machine's scheduler may not enforce a speed limit`);
-    runs[arm].push(parseRun(readFileSync(path.join(runOut, "run.json"), "utf8")));
-    counters[arm].push(parseRun(readFileSync(path.join(runOut, "counters.json"), "utf8")));
+try {
+  for (const arm of arms) {
+    mkdirSync(subjects[arm]);
+    execFileSync("tar", ["-xf", path.join(source, values.self ? "base.tar" : `${arm}.tar`), "-C", subjects[arm]]);
+    await command(["pnpm", "install", "--frozen-lockfile"], subjects[arm]);
+    await command(["pnpm", "--filter", "@gates-local/web", "build"], subjects[arm]);
   }
-  longestRound = Math.max(longestRound, elapsed() - roundStart);
-}
-shutdown.signal.throwIfAborted();
-await processes.close();
+  const fixtures = { base: await prepareFixture(subjects.base), candidate: await prepareFixture(subjects.candidate) };
+  console.log(`NEXT setup finished at ${elapsed().toFixed(0)}s`);
 
-const verdicts: Verdict[] = [...scoreNext(runs.base, runs.candidate), ...scoreNext(counters.base, counters.candidate)];
-writeFileSync(path.join(out, "scored.json"), JSON.stringify({ schema: 1, informational: true, commits, limits: { base: limits.base?.spec ?? null, candidate: limits.candidate?.spec ?? null }, boxes, rounds: runs.base.length, samples, throttle: Number(values.throttle), seconds: elapsed(), verdicts }, null, 2) + "\n", { flag: "wx" });
-const markdown = scoredMarkdown(verdicts);
-writeFileSync(path.join(out, "scored.md"), markdown, { flag: "wx" });
-console.log(markdown);
-console.log(`NEXT finished in ${elapsed().toFixed(0)}s with ${runs.base.length} rounds`);
+  const runs: Record<Arm, Run[]> = { base: [], candidate: [] }, counters: Record<Arm, Run[]> = { base: [], candidate: [] };
+  const boxes: Record<Arm, LimitReading[]> = { base: [], candidate: [] };
+  const accounting: Record<Arm, (JourneyCpu & { round: number })[]> = { base: [], candidate: [] };
+  const journeys = ["pnpm", "exec", "playwright", "test", "-c", "test/perf/next.config.ts"];
+  let longestRound = 0;
+  for (let round = 0; round < rounds; round++) {
+    if (round > 0 && elapsed() + longestRound > budget) { console.log(`NEXT stopping after ${round} rounds: the next would pass the ${budget}s budget`); break; }
+    const roundStart = elapsed();
+    const order: Arm[] = round % 2 === 0 ? ["base", "candidate"] : ["candidate", "base"];
+    for (const arm of order) {
+      console.log(`NEXT round ${round + 1}/${rounds} ${arm} at ${elapsed().toFixed(0)}s`);
+      const runOut = path.join(out, `round-${round + 1}-${arm}`);
+      const limit = limits[arm], report = path.join(out, `round-${round + 1}-${arm}.limit`);
+      // Fresh markers identify the scopes we own; never reuse an earlier run.
+      mkdirSync(runOut);
+      const box = limit ? await performanceBox(processes, limit, values["box-everything"], runOut, report, shutdown.signal) : undefined;
+      try { await command(box ? box.command(journeys) : journeys, ROOT, {
+        ...(box?.env ?? process.env), GL_PERF_LIMIT: limit?.spec ?? "", GL_PERF_TARGET: subjects[arm], GL_PERF_FIXTURE: fixtures[arm], GL_PERF_COMMIT: commits[arm], GL_PERF_ARM: arm,
+        GL_PERF_ROUND: String(round + 1), GL_PERF_SAMPLES: String(samples), GL_PERF_OUT: runOut, GL_PERF_ONLY: selected.join(","),
+        GL_PERF_THROTTLE: values.throttle, GL_PERF_PASTE: values.paste ? "1" : "0",
+      }); } finally {
+        try { await box?.close(); } finally {
+          // Read even when the run failed: a run killed for memory says so here.
+          if (limit && existsSync(report)) {
+            const reading = readLimit(report);
+            boxes[arm].push(reading);
+            console.log(`NEXT round ${round + 1} ${arm} in ${limit.spec}: peak memory ${reading.peakMb} MB, ${reading.oomKills} killed for memory, ${reading.cpuSeconds} s of processor time, held back ${reading.heldBackSeconds} s`);
+          }
+        }
+      }
+      // A slowed run that was never held back was not slowed, so it is not recorded as one.
+      if (limit?.speed && boxes[arm].at(-1)?.heldBackSeconds === 0) throw new Error(`${limit.spec} never held this run back; this machine's scheduler may not enforce a speed limit`);
+      runs[arm].push(parseRun(readFileSync(path.join(runOut, "run.json"), "utf8")));
+      counters[arm].push(parseRun(readFileSync(path.join(runOut, "counters.json"), "utf8")));
+      if (limit) accounting[arm].push(...(await readAccounting(runOut)).map(window => ({ ...window, round: round + 1 })));
+    }
+    longestRound = Math.max(longestRound, elapsed() - roundStart);
+  }
+  shutdown.signal.throwIfAborted();
+
+  const verdicts: Verdict[] = [...scoreNext(runs.base, runs.candidate), ...scoreNext(counters.base, counters.candidate)];
+  writeFileSync(path.join(out, "scored.json"), JSON.stringify({ schema: 1, informational: true, commits, limits: { base: limits.base?.spec ?? null, candidate: limits.candidate?.spec ?? null }, boxContents: values["box-everything"] ? "everything" : "app-and-browser", boxes, accounting, rounds: runs.base.length, samples, throttle: Number(values.throttle), seconds: elapsed(), verdicts }, null, 2) + "\n", { flag: "wx" });
+  const markdown = scoredMarkdown(verdicts) + accountingMarkdown(accounting);
+  writeFileSync(path.join(out, "scored.md"), markdown, { flag: "wx" });
+  console.log(markdown);
+  console.log(`NEXT finished in ${elapsed().toFixed(0)}s with ${runs.base.length} rounds`);
+} finally { await processes.close(); }

@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-13: Small-machine speed readings separate the app from test work
+
+- Limited comparisons now reserve the small box for the app server and browser.
+  The fake model, synthetic GPU checks and Playwright driver use other cores;
+  `--box-everything` keeps the previous placement available for reproduction.
+- Each limited journey reports processor work by role within its page marks,
+  with the signed difference from the box's own usage visible. Server stage
+  timestamps are saved at the first socket delta, before teardown.
+- Earlier limited performance nights included the test tools' cost, so their
+  readings cannot be compared directly with the new app-only boxes.
+
+## 2026-11-13: Speed journeys recognize replies that already finished
+
+- A speed journey now stops at the first visible reply words even if the
+  reply completed before its first paint. Previously, waiting for a reply
+  that was still streaming could hang until the test timeout.
+
 ## 2026-11-13: Talk mode, a try-out
 
 - Settings › General › Voice to text has a Talk mode switch, off until
