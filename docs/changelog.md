@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-13: The model button and its list, tidied
+
+- The model button's mark and name start at its left edge and the context
+  number sits at its right edge, with the same padding on both sides. The
+  button keeps its one width, so a short name no longer leaves a blank
+  area on its left and neither end moves when the model changes.
+- A model from a maker the app has no mark for shows no "?" box: the
+  button and its row show the name alone, the name and size stay on one
+  line, and the list's side rail says "Other".
+- Down arrow on the model button opens the list. Inside the list the
+  arrow keys start from the model in use and wrap at both ends.
+- Why: a contributed change, taken whole except that it sized the button
+  to its words; the button keeps one width so the row beside Send does
+  not shift.
+
 ## 2026-11-13: The suggested chat models update with the hourly check
 
 - An installed copy picks up a new list of suggested chat models (the

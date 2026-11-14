@@ -224,6 +224,27 @@ it("typing in the search clears the keyboard's highlight and closes the tip the 
   expect(closeTip).toHaveBeenCalled();
 });
 
+it.each(["ArrowDown", "ArrowUp"])("%s starts from the selected model and wraps through the list", key => {
+  vi.stubGlobal("requestAnimationFrame", (f: () => void) => { f(); return 0; });
+  probe.state.models = ["alpha:1b", "bravo:1b", "charlie:1b"].map(name => ({ name, capabilities: ["completion"] }));
+  probe.state.model = "alpha:1b";
+  const press = () => call(find(render(), p => p.id === "pkSearch"), "onKeyDown", { key, preventDefault: vi.fn() });
+  press();
+  expect(find(render(), p => p.id === "pkSearch").props["aria-activedescendant"]).toBe(key === "ArrowDown" ? "pk-opt-1" : "pk-opt-2");
+  press(); press();
+  expect(find(render(), p => p.id === "pkSearch").props["aria-activedescendant"]).toBe("pk-opt-0");
+});
+
+it("ArrowUp starts at the last row when no selected model is visible, and an empty search result is safe", () => {
+  vi.stubGlobal("requestAnimationFrame", (f: () => void) => { f(); return 0; });
+  probe.state.models = ["alpha:1b", "bravo:1b", "charlie:1b"].map(name => ({ name, capabilities: ["completion"] }));
+  call(find(render(), p => p.id === "pkSearch"), "onKeyDown", { key: "ArrowUp", preventDefault: vi.fn() });
+  expect(find(render(), p => p.id === "pkSearch").props["aria-activedescendant"]).toBe("pk-opt-2");
+  call(find(render(), p => p.id === "pkSearch"), "onChange", { target: { value: "missing-model" } });
+  call(find(render(), p => p.id === "pkSearch"), "onKeyDown", { key: "ArrowDown", preventDefault: vi.fn() });
+  expect(find(render(), p => p.id === "pkSearch").props["aria-activedescendant"]).toBeUndefined();
+});
+
 it.each([false, true])("Use at on a sub-8k cap picks from the table's row at the cap on phone %s", phone => {
   probe.phone = phone;
   vi.stubGlobal("requestAnimationFrame", (cb: () => void) => cb());

@@ -480,10 +480,13 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .cf-l{display:flex;align-items:center;gap:2px;min-width:0;flex:none}
 .cf-l>*{flex:none}
 /* The model trigger keeps one width while the app starts, while a model downloads or loads, and when Image
-   turns on (chat rows 28, 29): at least the room a usual chat name or image name and size take, with the words
-   at its right end; a longer name widens it up to 240 px, past which it is cut (the tag is its tooltip). */
-.cf-r>#modelBtn{flex:0 1 auto;min-width:13em;max-width:240px;justify-content:flex-end}
-#modelBtn>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+   turns on: at least the room a usual chat name or image name and size take. The mark and name start at its
+   left edge and the context or size sits at its right edge, so neither end moves when the name changes and
+   the padding is the same on both sides. A longer name widens it up to 240 px, past which the name is cut
+   (the tag is its tooltip); the mark and the number are never cut. */
+.cf-r>#modelBtn{flex:0 1 auto;min-width:13em;max-width:240px;justify-content:flex-start}
+#modelBtn>.picker-trigger-name,#modelBtn>.t{min-width:0;overflow:hidden;text-overflow:ellipsis}
+#modelBtn>.picker-trigger-ctx{margin-left:auto}
 /* a download (LoadBar.tsx): 2 px on the model button's bottom edge, filled to its percent */
 #modelBtn{position:relative;overflow:hidden}
 .ldbar{position:absolute;left:0;bottom:0;width:100%;height:2px;background:var(--accent);transform-origin:left;transition:transform .25s linear;pointer-events:none}

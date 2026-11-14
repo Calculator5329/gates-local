@@ -151,7 +151,9 @@ export function Picker() {
     if ((e.ctrlKey || e.metaKey) && /^[1-9]$/.test(e.key)) { e.preventDefault(); const row = visible[Number(e.key) - 1]; if (row) choose(row); return; }
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
-      const i = visible.findIndex(r => r.tag === highlight), next = visible[(i + (e.key === "ArrowDown" ? 1 : -1) + visible.length) % visible.length];
+      const i = visible.findIndex(r => r.tag === (highlight ?? selected));
+      const index = i < 0 ? (e.key === "ArrowDown" ? 0 : visible.length - 1) : (i + (e.key === "ArrowDown" ? 1 : -1) + visible.length) % visible.length;
+      const next = visible[index];
       if (next) {
         setHighlight(next.tag);
         requestAnimationFrame(() => {
@@ -199,7 +201,7 @@ export function Picker() {
         <button className="pk-fam" data-testid="models.picker.favorites" aria-label="Favorites" aria-pressed={group === "favorites"} data-tip="Favorites" onClick={() => { setGroup("favorites"); setQuery(""); setHighlight(null); setExpanded(false); }}><Icon id="star" /></button>
         <span className="pk-rail-line" />
         <button className="pk-fam" data-testid="models.picker.all" aria-label="All models" aria-pressed={group === "all"} data-tip="All models" onClick={() => { setGroup("all"); setQuery(""); setHighlight(null); setExpanded(false); }}><svg className="mark"><use href="#i-mark" /></svg></button>
-        {makerGroups(makers).filter(m => present.has(m)).map(m => <button key={m} className="pk-fam" data-testid="models.picker.maker" aria-label={m} aria-pressed={group === m} data-tip={esc(m)} onClick={() => { setGroup(m); setQuery(""); setHighlight(null); setExpanded(false); input.current?.focus({ preventScroll: true }); }}><MakerMark tag={m === "Phi" ? "phi4" : m} /></button>)}
+        {makerGroups(makers).filter(m => present.has(m)).map(m => <button key={m} className="pk-fam" data-testid="models.picker.maker" aria-label={m} aria-pressed={group === m} data-tip={esc(m)} onClick={() => { setGroup(m); setQuery(""); setHighlight(null); setExpanded(false); input.current?.focus({ preventScroll: true }); }}><MakerMark tag={m === "Phi" ? "phi4" : m} fallbackLabel /></button>)}
       </nav>
       <div className="pk-main">
         <div className="pk-search"><Icon id="search" /><input ref={input} id="pkSearch" role="combobox" placeholder="Search models…" aria-label="Search models" data-testid="models.picker.search" aria-controls="pkList" aria-expanded={!!pop} aria-autocomplete="list" aria-activedescendant={highlight && visible.some(r => r.tag === highlight) ? `pk-opt-${visible.findIndex(r => r.tag === highlight)}` : undefined} value={query} onChange={e => { setQuery(e.target.value); setHighlight(null); closeTip(); }} onKeyDown={modelKeys} /><button className="pk-close" data-testid="models.picker.close" aria-label="Close" onClick={() => closePop(true)}><Icon id="x" /></button></div>

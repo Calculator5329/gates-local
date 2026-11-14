@@ -116,6 +116,15 @@ it("a model that fits once another chat's reply stops can be sent to, and Send s
 const modelButton = () => renderToStaticMarkup(createElement(Composer)).match(/<button\b[^>]*id="modelBtn"[\s\S]*?<\/button>/)?.[0] ?? "";
 const slot = (html: string) => html.match(/<small class="picker-trigger-ctx">([^<]*)<\/small>/)?.[1];
 const mark = (html: string) => html.match(/<span class="maker-mark"[\s\S]*?<\/span>/)?.[0];
+it("an unrecognized model has a plain name and context, with no placeholder symbol or icon slot", () => {
+  const tag = "wizard-vicuna:7b";
+  setFixture({ ...ready, model: tag, models: [{ ...ready.models![0]!, name: tag }] });
+  const button = modelButton();
+  expect(button).toContain('class="picker-trigger-name"');
+  expect(slot(button)).toMatch(/^\d+k$/);
+  expect(mark(button)).toBeUndefined();
+  expect(button).not.toContain("?");
+});
 /** A button's contents, without its own tag: the tip on the tag may say more while the face stays the same. */
 const body = (html: string) => html.replace(/^<button\b[^>]*>/, "");
 const sendWhole = () => renderToStaticMarkup(createElement(Composer)).match(/<button\b[^>]*class="send(?: [^"]*)?"[\s\S]*?<\/button>/)?.[0] ?? "";

@@ -1,6 +1,6 @@
 // Owner ruling 2026-11-09, "we need icons for the makers": every maker the
-// curated catalog names gets its own mark, never the "?" fallback or another
-// maker's mark.
+// curated catalog names gets its own mark. Unknown models have no symbol;
+// maker filters retain a text label so the button is still identifiable.
 import { CHAT_MODELS, suggestedList } from "@gates-local/contracts";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -20,7 +20,13 @@ const makers = [...new Set(curated.map(m => makerOf(m.name, rules)))];
 
 it("the catalog names known makers only", () => {
   expect(makers).not.toContain("Other");
-  expect(FALLBACK).toContain(">?</span>");
+  expect(FALLBACK).toBe("");
+});
+
+it("an unknown maker filter has a readable text label", () => {
+  const html = renderToStaticMarkup(createElement(MakerMark, { tag: "some-unknown-model:1b", fallbackLabel: true }));
+  expect(html).toContain(">Other</span>");
+  expect(html).not.toContain("?");
 });
 
 it.each(curated.map(m => [m.name, makerOf(m.name, rules)] as const))("%s shows the %s mark", (name) => {

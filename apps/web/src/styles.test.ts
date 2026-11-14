@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const css = ["styles.css", "picker.css"].map(file => readFileSync(new URL(file, import.meta.url), "utf8")).join("\n");
+const css = ["styles.css", "picker.css"].map(file => readFileSync(new URL(file, import.meta.url), "utf8").replaceAll("\r\n", "\n")).join("\n");
 
 /** Every value a declaration gives `prop`, across the sheet. */
 const values = (prop: string, sheet = css) => [...sheet.matchAll(new RegExp(`(?:^|[;{\\s])${prop}:([^;}]+)`, "g"))].map((m) => (m[1] ?? "").trim());

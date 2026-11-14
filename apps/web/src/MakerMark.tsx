@@ -28,8 +28,9 @@ const paths: Partial<Record<Maker, readonly string[]>> = {
 };
 
 /** Shared monochrome treatment for the rail, model rows and composer. */
-export function MakerMark({ tag, busy = false }: { tag: string; busy?: boolean }) {
+export function MakerMark({ tag, busy = false, fallbackLabel = false }: { tag: string; busy?: boolean; fallbackLabel?: boolean }) {
  const makers = useStore(s => suggestedOf(s)?.makers);
  const maker = makerOf(tag, makers), marks = paths[maker];
- return <span className="maker-mark" aria-hidden="true">{busy ? <Icon id="spin" cls="spin" /> : marks ? <svg viewBox="0 0 24 24" fill="currentColor" fillRule="evenodd">{marks.map((d, i) => <path key={i} d={d} />)}</svg> : maker === "Milo" ? "Mi" : "?"}</span>;
+ if (!busy && !marks && maker !== "Milo") return fallbackLabel ? <span className="pk-maker-name" aria-hidden="true">{maker}</span> : null;
+ return <span className="maker-mark" aria-hidden="true">{busy ? <Icon id="spin" cls="spin" /> : marks ? <svg viewBox="0 0 24 24" fill="currentColor" fillRule="evenodd">{marks.map((d, i) => <path key={i} d={d} />)}</svg> : "Mi"}</span>;
 }
