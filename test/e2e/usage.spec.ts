@@ -128,7 +128,8 @@ test.describe("a week of three models", () => {
     for (const d of paths) expect(d, "no point sits on the zero line").not.toMatch(/ 160\.0/);
     const speeds = await rows.locator("td:nth-child(4)").allInnerTexts();
     for (const s of speeds) expect(s).toMatch(/^\d+$/);
-    await expect(rows.first().locator("td:nth-child(4)")).toHaveAttribute("data-tip", /^Reads prompts at [\d,]+ tok\/s$/);
+    // a figure carries no tooltip: the speed is its number alone
+    await expect(rows.first().locator("td:nth-child(4)")).not.toHaveAttribute("data-tip");
     await metric(page, "tokens").click();
 
     await page.keyboard.press("Escape");

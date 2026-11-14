@@ -14,6 +14,8 @@ type NativeMenu = InstanceType<DesktopApi["Menu"]>;
 type MenuProbe = typeof globalThis & { pasteMenus?: NativeMenu[] };
 const VISION = "qwen3-vl:8b";
 test.use({ installed: [VISION] });
+// The window and clipboard are X11 on Linux; with no display this spec says so as a skip, not as a failure.
+test.skip(process.platform === "linux" && !process.env["DISPLAY"], "no display: the desktop app needs an X server on Linux");
 
 test.beforeAll(async () => {
   await promisify(execFile)("pnpm", ["--filter", "@gates-local/desktop", "build"], { cwd: ROOT });
@@ -191,7 +193,8 @@ test("desktop paste: native menus, X11 clipboard, undo, toolbar and sidebar coex
     await ta.selectText();
     await openMenu(app, page, "#ta");
     await choose(app, "copy");
-    expect(await app.evaluate(async ({ clipboard }: DesktopApi) => clipboard.readText())).toBe("before after");
+    // the Copy role asks the page to copy and returns before the X11 clipboard holds the text
+    await expect.poll(() => app.evaluate(async ({ clipboard }: DesktopApi) => clipboard.readText())).toBe("before after");
     await openMenu(app, page, "#ta");
     await choose(app, "cut");
     await expect(ta).toHaveValue("");
@@ -288,7 +291,7 @@ test("desktop paste: native menus, X11 clipboard, undo, toolbar and sidebar coex
     const selected = await openMenu(app, page, ".turn.a .md");
     expect(selected.find(item => item.role === "copy")?.enabled).toBe(true);
     await choose(app, "copy");
-    expect(await app.evaluate(async ({ clipboard }: DesktopApi) => clipboard.readText())).not.toBe("");
+    await expect.poll(() => app.evaluate(async ({ clipboard }: DesktopApi) => clipboard.readText())).not.toBe("");
     expect(errors).toEqual([]);
   } finally { await app.close(); }
 });

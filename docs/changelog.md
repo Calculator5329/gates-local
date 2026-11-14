@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-14: Browser tests that were red for the wrong reason
+
+- Nothing changes in the app. The Usage test still looked for the speed
+  tooltip that the "no explaining tooltips" decision removed; it now checks
+  that the speed figure has none.
+- The desktop paste test waits for the clipboard after Copy instead of
+  reading it at once, which failed now and then on a test machine.
+- The three desktop tests say "no display" as a skip, not a failure, when a
+  Linux test machine has no screen to open the app on.
+- The test stand-in for the graphics card answers a question for used memory
+  alone, so card memory reads as a number on test runs instead of "?".
+- The speed method describes the long-chat rows as they are now: a long chat
+  opens on its newest 200 messages, and those rows name the window.
+
 ## 2026-11-14: The picture engine keeps its compiled kernels in the app's folder
 
 - The image engine the app starts now writes its CUDA and Triton kernel

@@ -11,6 +11,7 @@ const queries = [
   ["--query-gpu=name,memory.total,memory.used,memory.free", "--format=csv,noheader,nounits"],
   ["--query-compute-apps=pid,process_name,used_memory", "--format=csv,noheader,nounits"],
   ["--query-gpu=name"],
+  ["--query-gpu=memory.used", "--format=csv,noheader,nounits"],
   ["--query-gpu=unknown"],
   [],
   ["--format=csv", "--query-gpu=name", "--query-gpu=unknown"],

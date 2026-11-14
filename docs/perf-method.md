@@ -230,32 +230,46 @@ the profile repetition.
 - cold-composer's CPU counters restart with the new document, so its CPU rows
   cover the new page from its start, the same span as its wall time.
 - **`thread-<n>-<warmth>-<path>` closes at the first screen; its
-  `-mounted` twin closes at the whole thread.** The plain row ends when the
-  last turn's text is on screen. A timeline that mounts the newest turns
-  first and fills in the rest later reaches that point with most of the
-  thread still to mount, so the plain row times and counts the first screen
-  only. `thread-<n>-<warmth>-<path>-mounted` comes from the same click and
-  the same opening reading, and closes two frames after all `<n>` turns are
-  in the DOM: its wall time, CPU and count rows (rendered components,
-  commits, layouts, DOM elements at the end) cover the whole mount. Where
-  everything mounts at once the two rows end in the same frame. The probe
-  checks the turn count each frame from a live collection by class name,
-  which is cheap on a long thread. Those per-frame checks continue after the
-  plain row's end, so the plain row's CPU window, which runs on through its
-  protocol reads, can hold a few of them; its wall window and end state are
-  unchanged.
+  `-mounted` twin closes when the turns the build mounts are in.** The plain
+  row ends when the last turn's text is on screen. A timeline that mounts
+  the newest turns first and fills in the rest later reaches that point with
+  turns still to mount, so the plain row times and counts the first screen
+  only. The twin comes from the same click and the same opening reading, and
+  closes two frames after the build's mounted turns are in the DOM. A build
+  that windows long threads opens one on its newest turns and holds the rest
+  behind a Show earlier button, whose tip counts the turns held back; the
+  twin then closes at `<n>` less that count and is named for the window it
+  held, `thread-<n>-<warmth>-<path>-mounted-<k>` (on a 2000-turn thread
+  today, `thread-2000-cold-click-mounted-200`). A build without the button
+  mounts all `<n>` turns and its twin keeps the bare `-mounted` name. On the
+  200-turn thread the window holds every turn, so its twins are
+  `thread-200-<warmth>-<path>-mounted`. Either way the twin's wall time, CPU
+  and count rows (rendered components, commits, layouts, DOM elements at the
+  end) cover the whole mount of what that build shows, and rows over
+  different windows never share a name, so a column across the change shows
+  two rows, not a speed-up. Where everything mounts at once the two rows end
+  in the same frame. The probe checks the turn count each frame from a live
+  collection by class name, which is cheap on a long thread. Those per-frame
+  checks continue after the plain row's end, so the plain row's CPU window,
+  which runs on through its protocol reads, can hold a few of them; its wall
+  window and end state are unchanged.
+- **`thread-2000-show-earlier`** clicks Show earlier on the 2000-turn
+  thread's window and closes two frames after the turns it adds are in the
+  DOM. A build without the button has no such row.
 - **`type-in-thread-2000`** types one character into the focused composer
-  while the last 2000-turn visit is open and every turn is mounted. It runs
-  from the keydown to two frames after the character is in the box, with the
-  box enabled and focused, and has the same CPU and count rows as the others.
-  A render counter cannot see everything a keystroke costs. It counts
-  components React rendered and committed. A store selector that runs on
-  every change, finds its value unchanged and so renders nothing is invisible
-  to it: two thousand saved replies can each run their selectors on every
-  keystroke and add nothing to `react-renders`. The cheapest honest reading
-  of that work the page already offers is
-  `type-in-thread-2000.cpu-script`, the main thread's scripting time over the
-  keystroke's window.
+  while the last 2000-turn visit is open with every turn it mounts in the
+  DOM. On a windowing build that is the window, and the row is named for it,
+  `type-in-thread-2000-mounted-<k>` (`-mounted-200` today); the bare name is
+  a build that mounts all 2000. It runs from the keydown to two frames after
+  the character is in the box, with the box enabled and focused, and has the
+  same CPU and count rows as the others. A render counter cannot see
+  everything a keystroke costs. It counts components React rendered and
+  committed. A store selector that runs on every change, finds its value
+  unchanged and so renders nothing is invisible to it: every mounted reply
+  can run its selectors on every keystroke and add nothing to
+  `react-renders`. The cheapest honest reading of that work the page already
+  offers is the row's `.cpu-script`, the main thread's scripting time over
+  the keystroke's window.
 
 ## How a change is scored
 

@@ -97,6 +97,7 @@ BEGIN {
     if (query == "--query-gpu=memory.total,memory.used,memory.free") printf "%.15g, %.15g, %.15g\n", total, used, free
     else if (query == "--query-gpu=name,memory.total,memory.used,memory.free") printf "%s, %.15g, %.15g, %.15g\n", name, total, used, free
     else if (query == "--query-gpu=name") print name
+    else if (query == "--query-gpu=memory.used") printf "%.15g\n", used
     else if (query == "--query-compute-apps=pid,process_name,used_memory") {
         print "2101, /usr/local/bin/whisper-server, 2150"
         print "3388, /opt/media-vault/bin/media-vault-vision, 1822"

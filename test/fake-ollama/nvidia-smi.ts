@@ -7,7 +7,8 @@
 // The fixture GPU is 16303 MiB with whisper-server (2150 MiB) and a media-vault
 // vision runtime (1822 MiB) resident. When GATES_LOCAL_FAKE_GPU_STATE names the
 // fake Ollama's state file, loaded models show up as an ollama runner.
-// `--query-gpu=name` answers the card name. Other arguments exit 2.
+// `--query-gpu=name` answers the card name and `--query-gpu=memory.used` the used MiB
+// alone (what a memory sampler asks). Other arguments exit 2.
 import { readFileSync } from "node:fs";
 
 const MIB = 1024 * 1024;
@@ -73,6 +74,8 @@ if (query === "--query-gpu=memory.total,memory.used,memory.free") {
   process.stdout.write(apps.map((a) => `${a.pid}, ${a.name}, ${a.mib}`).join("\n") + "\n");
 } else if (query === "--query-gpu=name") {
   process.stdout.write(`${NAME}\n`);
+} else if (query === "--query-gpu=memory.used") {
+  process.stdout.write(`${used}\n`);
 } else {
   process.stderr.write(`fake nvidia-smi: unsupported arguments ${process.argv.slice(2).join(" ")}\n`);
   process.exit(2);

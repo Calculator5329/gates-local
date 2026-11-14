@@ -16,6 +16,9 @@ import { FAKE_URL, ROOT } from "./env.ts";
 import { type Delay, type WholeFinding, type WholeOptions, delayEverything, settled, watchWhole, wholeFindings } from "./flicker-probe.ts";
 import { expect, navButton, test, waitReady } from "./fixtures.ts";
 
+// The window is X11 on Linux; with no display this spec says so as a skip, not as a failure.
+test.skip(process.platform === "linux" && !process.env["DISPLAY"], "no display: the desktop app needs an X server on Linux");
+
 test.beforeAll(async () => {
   await promisify(execFile)("pnpm", ["--filter", "@gates-local/desktop", "build"], { cwd: ROOT });
 });
