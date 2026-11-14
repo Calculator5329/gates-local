@@ -1,7 +1,7 @@
 [
   {
     "file": "apps/web/src/Thread.tsx",
-    "find": "      <span className=\"run-dot\" />\n      <span className=\"lv-w\">",
-    "replace": "      {stage === \"thinking\" && tools.length > 0 ? null : <span className=\"run-dot\" /> /* finder case: chat row 24 undone (nothing lit while the model reads a result) */}\n      <span className=\"lv-w\">"
+    "find": "      <span className=\"run-dot\" />\n      {clocked ?",
+    "replace": "      {stage === \"thinking\" && tools.length > 0 ? null : <span className=\"run-dot\" /> /* finder case: chat row 24 undone (nothing lit while the model reads a result) */}\n      {clocked ?"
   }
 ]

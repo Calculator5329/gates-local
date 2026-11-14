@@ -146,25 +146,24 @@ interface ChipStep {
 /** A finished reply's work seconds, whole and at least 1; undefined when not known. */
 const workSecs = (ms: number | undefined) => (ms === undefined ? undefined : Math.max(1, Math.round(ms / 1000)));
 
-/** The widest words the live line says, so its box holds still (decision 6). */
-const WIDEST = "Loading into GPU memory…";
-
 /**
- * The one live line of a running reply (decisions 1, 2, 6, 33): the breathing dot the sidebar
- * shows, what the server's record says the reply is doing, its work seconds and the chevron. The
- * same nodes from the send to the end; only words and digits change. The words sit in a box as
- * wide as the widest stage, so the seconds and the chevron hold still; a longer tool summary ends
- * in "…". No number while it waits or loads: the work clock has not started.
+ * The one live line of a running reply (decisions 1, 2, 33; layout B, owner 2026-11-14): the
+ * breathing dot the sidebar shows, the work seconds, then what the server's record says the reply
+ * is doing. Nothing follows the words, so a long tool summary ends in "…" at the line's edge.
+ * The seconds sit in a slot of fixed width that appears, at "0 s", once the work clock has
+ * started (the model is ready) and stays for the rest of the reply, so the words' left edge moves
+ * only when the clock starts. Waiting and loading have no clock: the words follow the dot.
  */
-function LiveLine({ turn, tools, chevron }: { turn: LiveTurn; tools: readonly ToolStep[]; chevron: boolean }) {
+function LiveLine({ turn, tools }: { turn: LiveTurn; tools: readonly ToolStep[] }) {
   const stage = turn.reply?.stage ?? "waiting";
   const now = useTicker(250, stage === "waiting" || stage === "thinking" || stage === "tool");
   const cpu = useStore((s) => noGpu(s.gpu));
   // the send is answered at once, so the turn has its id while it waits behind a picture
   const imageBusy = useStore((s) => turn.pendingUser != null && s.imageStatus !== NA && s.imageStatus?.state === "busy");
   const t = Math.max(now, Date.now());
-  const secs = stage === "waiting" || stage === "loading" ? 0 : Math.floor((workMsAt(turn, t) ?? 0) / 1000);
-  const words = stage === "loading" ? (cpu ? "Loading into memory…" : WIDEST)
+  const clocked = turn.reply?.readyAt !== undefined || !(stage === "waiting" || stage === "loading");
+  const secs = clocked ? Math.floor((workMsAt(turn, t) ?? 0) / 1000) : 0;
+  const words = stage === "loading" ? (cpu ? "Loading into memory…" : "Loading into GPU memory…")
     : stage === "thinking" ? "Thinking"
     : stage === "tool" ? (tools.findLast((s) => s.state === "running") ?? tools.at(-1))?.summary ?? "Thinking"
     : stage === "writing" || stage === "ended" ? "Writing"
@@ -173,12 +172,8 @@ function LiveLine({ turn, tools, chevron }: { turn: LiveTurn; tools: readonly To
   return (
     <>
       <span className="run-dot" />
-      <span className="lv-w">
-        <span>{words}</span>
-        <span className="lv-wide" aria-hidden="true">{WIDEST}</span>
-      </span>
-      <span className="lv-t">{secs >= 1 ? ` · ${secs} s` : ""}</span>
-      <span className={chevron ? "th-x" : "th-x off"} aria-hidden="true"><Icon id="down" /></span>
+      {clocked ? <span className="lv-t">{`${secs} s`}</span> : null}
+      <span className="lv-w"><span>{words}</span></span>
     </>
   );
 }
@@ -298,7 +293,7 @@ function ToggleLine({ open, onToggle, body, step, live, tools }: { open: boolean
     <div className={open ? "fold-line open" : "fold-line"}>
       <button type="button" className={live !== null ? "think fold run" : "think fold"} data-testid="chat.fold.toggle" aria-expanded={open} aria-controls={body}
         aria-label={name} data-think={live === null ? step.secs : undefined} onClick={onToggle}>
-        {live !== null ? <LiveLine turn={live} tools={tools} chevron /> : <DoneLine step={step} />}
+        {live !== null ? <LiveLine turn={live} tools={tools} /> : <DoneLine step={step} />}
       </button>
     </div>
   );
@@ -700,7 +695,7 @@ function Reply({ msg, live, text, paced, thinking, tools, rounds, secs, allowedL
       {folded ? (
         <Fold thinking={thinking} tools={calls} secs={secs} live={streaming ? live : null} stopped={end !== undefined || interrupted} rounds={rounds} />
       ) : streaming ? (
-        <div className="fold-line"><div className="think fold run"><LiveLine turn={live} tools={calls} chevron={false} /></div></div>
+        <div className="fold-line"><div className="think fold run"><LiveLine turn={live} tools={calls} /></div></div>
       ) : slot ? <div className="fold-line slot" aria-hidden="true" /> : null}
       {notes.map((t) => <ToolRow key={t.callId} step={t} stopped={end !== undefined || interrupted} />)}
       {msg?.imageJob ? <ImageCard msg={msg} thread={thread} origin={origin} token={token} /> : shown !== "" ? <Markdown text={shown} live={streaming || pending} allowedLinks={allowedLinks} /> : null}

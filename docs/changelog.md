@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-14: The running line puts its seconds first
+
+- A running reply's line reads dot, seconds, words: "● 2 s Thinking".
+  Nothing follows the words, so short words leave no gap before the
+  number, and a long tool summary uses the whole line.
+- The seconds appear at "0 s" the moment the model starts working and
+  stay until the reply ends; their space does not change while they
+  tick, so the words hold still. While a reply waits or loads there is
+  no clock, and the words follow the dot.
+- No chevron while the reply runs; the line still opens its steps. The
+  finished line keeps its icon and chevron.
+
 ## 2026-11-14: Measure checks a model the way a chat uses it
 
 - Measure runs 20 checks through the chat's own tool loop and tools, on a

@@ -33,7 +33,9 @@ async function shot(page: Page, info: TestInfo, name: string, parts: Record<stri
   writeFileSync(info.outputPath(`${name}.json`), JSON.stringify(boxes));
 }
 
-const thought = (page: Page) => page.locator(".turn.a").first().locator("button.think").getByText(/^Thought for \d+ s$/);
+// the finished line rests as its icon, its words hidden until hover, so its name carries "Thought for"
+const thought = (page: Page) => page.locator(".turn.a").first().locator("button.think");
+const thoughtName = async (page: Page) => (await thought(page).getAttribute("aria-label")) ?? "";
 const stopSecs = (page: Page) => page.locator(".turn.a").last().locator(".stop-mark .s");
 
 // Guards chat row 32 (the server's times): Thought for and Stop's seconds are one number in every window and after a reload.
@@ -45,14 +47,15 @@ test("Thought for and a stopped reply's seconds are the same in a second window 
   await stack.scenario("models", { tokenDelayMs: 105 });
   await sendMessage(page, "Why is the sky blue");
   await expect(page.locator(".turn.a").first()).toHaveClass(/\bdone\b/, { timeout: 30_000 });
-  const here = (await thought(page).innerText()).trim();
+  await expect(thought(page)).toHaveAttribute("aria-label", /^Thought for \d+ s$/);
+  const here = await thoughtName(page);
   const threadId = threadOf(page);
 
   const other = await context.newPage();
   await other.goto(appUrl(`#thread=${encodeURIComponent(threadId)}`));
   await waitReady(other);
   await shot(other, info, "thought-second-window", { thought: thought(other) });
-  await expect(thought(other)).toHaveText(here);
+  await expect(thought(other)).toHaveAttribute("aria-label", here);
 
   // slow words so there is time to press Stop mid-reply; the second window watches it live
   await stack.scenario("models", { tokenDelayMs: 150 });
@@ -60,14 +63,15 @@ test("Thought for and a stopped reply's seconds are the same in a second window 
   // until the second reply is drawn, .last() is the first one, and the waits below would pass on it
   await expect(page.locator(".turn.a")).toHaveCount(2);
   const live = page.locator(".turn.a").last();
-  // Stop's own seconds show only once the thought has ended (a stop mid-thought is timed by the pill)
-  await expect(live.locator("button.think").getByText(/^Thought for \d+ s$/)).toBeVisible({ timeout: 20_000 });
+  // Stop's own seconds show only once the thought has ended (a stop mid-thought is timed by the pill);
+  // the running line says "Writing" from then on, and "Thought for" only once the reply has ended
+  await expect(live.locator(".think.run .lv-w > span").first()).toHaveText("Writing", { timeout: 20_000 });
   await expect(live.locator(".md")).not.toBeEmpty();
   await page.waitForTimeout(1000);
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   await expect(stopSecs(page)).toHaveText(/^\d+ s$/);
-  await expect(page.locator(".writing")).toHaveCount(0);
-  await expect(other.locator(".writing")).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.locator(".think.run")).toHaveCount(0);
+  await expect(other.locator(".think.run")).toHaveCount(0, { timeout: 10_000 });
   // once the saved row takes over, both windows show the server's seconds
   await expect.poll(async () => [await stopSecs(page).innerText(), await stopSecs(other).innerText()].map((s) => s.trim()), { timeout: 10_000 })
     .toEqual([expect.stringMatching(/^\d+ s$/), expect.stringMatching(/^\d+ s$/)]);
@@ -80,7 +84,7 @@ test("Thought for and a stopped reply's seconds are the same in a second window 
   await page.reload(); await waitReady(page);
   await page.locator(".turn.a").last().hover();
   await shot(page, info, "after-reload", { thought: thought(page), stop: stopSecs(page) });
-  await expect(thought(page)).toHaveText(here);
+  await expect(thought(page)).toHaveAttribute("aria-label", here);
   await expect(stopSecs(page)).toHaveText(stopped);
   await other.close();
 });

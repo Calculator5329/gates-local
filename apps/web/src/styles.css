@@ -315,19 +315,16 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .fold-line .think{flex:none}
 /* a live reply with nothing to fold keeps its line's height once it ends, so the words under it stay put */
 .fold-line.slot{height:24px}
-/* one line per reply from the send to the saved row (decisions 1, 3, 6, chat row 37). Running: the breathing dot,
-   what the server says it does, the work seconds, the chevron; the words' box is as wide as the widest stage, so
-   the seconds and the chevron hold still. Ended: the icon and the chevron, the words back on hover and focus.
+/* one line per reply from the send to the saved row (decisions 1, 3, chat row 37). Running (layout B): the breathing
+   dot, the work seconds in a slot of fixed width, then what the server says it does, and nothing after the words.
+   Ended: the icon and the chevron, the words back on hover and focus.
    One line of fixed height: only words and digits change, so nothing under it moves */
 .think.fold{gap:0;height:24px;line-height:24px;min-width:0;max-width:100%;font-variant-numeric:tabular-nums}
 div.think.fold:hover{color:var(--muted-foreground);background:none}
-.think.fold .lv-w{display:grid;min-width:0;text-align:left}
-.think.fold .lv-w>span{grid-area:1/1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* the shown words add no width of their own: the box is the hidden widest stage's */
-.think.fold .lv-w>span:first-child{contain:inline-size;color:var(--foreground)}
-.think.fold .lv-wide{visibility:hidden}
-.think.fold .lv-t{flex:none;white-space:pre;min-width:7ch}
-.think.fold .th-x.off{visibility:hidden}
+.think.fold .lv-w{display:block;min-width:0;text-align:left}
+.think.fold .lv-w>span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--foreground)}
+/* wide enough for "59 s", so the words hold still while the number ticks; it may grow once at 100 s */
+.think.fold .lv-t{flex:none;white-space:pre;min-width:4ch;text-align:right;margin-right:8px}
 .lv-h{display:none;white-space:pre;margin-right:2px}
 .think.fold:hover .lv-h,.think.fold:focus-visible .lv-h{display:inline}
 .lv-i.bad{color:var(--red)}

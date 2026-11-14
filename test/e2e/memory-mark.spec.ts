@@ -60,17 +60,17 @@ test("one memory mark in Models and Download, against the card, with other progr
   await expectMarks(list.locator(".dlrow[data-cat]"), 16);
   await saidOnceUnder(page, list.locator(".dl-others"), list.locator(".grp:not(.dl-bigs) .dlrow[data-cat]").last());
   await page.screenshot({ path: info.outputPath("mark-download.png"), animations: "disabled" });
-  // the estimate is said once, in the name's tooltip; the mark's tooltip only names the mark (row 32)
+  // a value has no tooltip (decision 19, 2026-11-14): the name and the mark show none on hover,
+  // and the mark's verdict lives in its accessible name
   const row = list.locator(".dlrow[data-cat]").first();
   const tip = page.locator("#tip");
   await row.locator(".sl").hover();
-  await expect(tip).toContainText("of memory with 16k of context");
-  await page.mouse.move(0, 0);
-  await expect(tip).toBeHidden();
   await row.locator(".mm").hover();
-  await expect(tip).toBeVisible();
-  await page.screenshot({ path: info.outputPath("mark-download-tip.png"), animations: "disabled" });
-  await expect(tip).toHaveText("Runs on the GPU");
+  // longer than the tooltip's delay, so a tip that would show has shown
+  await page.waitForTimeout(1000);
+  await page.screenshot({ path: info.outputPath("mark-download-hover.png"), animations: "disabled" });
+  await expect(tip).toBeHidden();
+  await expect(row.locator(".mm")).toHaveAttribute("aria-label", /^Runs on the GPU: (\d\.\d|\d{2,}) of 16 GB$/);
 });
 
 // The computer keeps some of its memory for itself, so a model can be too big while needing less than the whole.

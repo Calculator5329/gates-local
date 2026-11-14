@@ -74,7 +74,7 @@ test("sending on a model that needs the memory warns, then stops the other chat,
   await page.locator(`.sb-row[data-thread="${victim}"]`).click();
   await expect(page.locator(".stop-note")).toHaveText("Stopped so Qwen 3.5 9B could load.");
   await expect(page.locator(".turn.a.interrupted .md ul li")).toHaveCount(3);
-  await expect(page.locator(".turn.a .writing")).toHaveCount(0);
+  await expect(page.locator(".turn.a .think.run")).toHaveCount(0);
   await shot(page, "03-stopped-chat");
 });
 
@@ -94,7 +94,8 @@ test("'Don't show this again' survives a reload and later sends stop the other c
   await shot(page, "04-dont-show-again");
   await warning(page).getByTestId("chat.stop-warning.confirm").click();
   await expect(page.locator(".turn.u").last()).toContainText("A question for the other model");
-  await expect(page.locator(".turn.a .writing")).toBeVisible();
+  // "Writing" is the running reply's one line since the one-live-line change; no separate label
+  await expect(page.locator(".turn.a .think.run .lv-w > span").first()).toHaveText("Writing", { timeout: 15_000 });
   // Stop hides immediately, even before chat.send returns its turn id.
   // Regenerate appears only after the server has ended that turn and saved its words.
   await page.getByRole("button", { name: "Stop" }).click();
@@ -122,7 +123,7 @@ test("'Don't show this again' survives a reload and later sends stop the other c
   await page.locator(`.sb-row[data-thread="${victim}"]`).click();
   await expect(page.locator(".stop-note")).toHaveText("Stopped so Qwen 3.5 9B could load.");
   await expect(page.locator(".turn.a.interrupted .md ul li")).toHaveCount(3);
-  await expect(page.locator(".writing")).toHaveCount(0);
+  await expect(page.locator(".think.run")).toHaveCount(0);
   await expect.poll(() => sends.findLast((send) => send.threadId === target)?.stopOthers).toBe(true);
   await expect.poll(async () => (await runtimeState()).turns.find((turn) => turn.id === running?.id)?.outcome).toBe("cancelled");
   await shot(page, "05-optout-stopped-chat");

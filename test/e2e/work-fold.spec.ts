@@ -80,7 +80,9 @@ test.describe("live", () => {
     // chat row 37: one live line, the dot where it was, what it does now and the time in the line itself
     expect(at(await placeIn(chip.locator(".run-dot"))), "the dot holds its place").toEqual(at(dot));
     await expect(chip.locator(".lv-w")).toBeVisible();
-    await expect(chip.locator(".lv-t")).toHaveText(/^ · \d+ s$/);
+    // layout B: the seconds sit between the dot and the words, and no chevron runs after them
+    await expect(chip.locator(".lv-t")).toHaveText(/^\d+ s$/);
+    await expect(chip.locator(".th-x")).toHaveCount(0);
     await shoot(page, "row37-live-line", chip);
     const start = at(await placeIn(chip));
     const height = await heightOf(reply);

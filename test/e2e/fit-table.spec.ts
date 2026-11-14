@@ -5,6 +5,7 @@
 // less), the list row agreeing with the chosen context row, and every frame
 // showing one reading, the footer included: never an older reading's value
 // after a newer one, and no "previous check" in between.
+import { decodeServerMessage } from "@gates-local/contracts";
 import { FAKE_URL } from "./env.ts";
 import { expect, stack, test, waitReady } from "./fixtures.ts";
 
@@ -25,6 +26,12 @@ test("one reading and one basis across the picker while the GPU reading changes"
   const loaded = await fetch(`${FAKE_URL}/api/generate`, { method: "POST", body: JSON.stringify({ model: MODEL, prompt: "", options: { num_ctx: 16384 } }) });
   expect(loaded.ok).toBe(true);
 
+  // The footer names the card (decision 12), so a new reading is seen on the socket, not on screen.
+  let pushed = 0;
+  page.on("websocket", (ws) => ws.on("framereceived", (frame) => {
+    const decoded = decodeServerMessage(frame.payload);
+    if (decoded.ok && decoded.value.type === "push" && decoded.value.channel === "fit.changed") pushed++;
+  }));
   await open(); await waitReady(page);
   await page.locator("#modelBtn").click();
   const row = page.locator(`#picker [data-m="${MODEL}"]`);
@@ -80,16 +87,20 @@ test("one reading and one basis across the picker while the GPU reading changes"
 
   // Another program takes 1.5 GB of GPU memory: a new reading with the picker open.
   const from = (await frames()).length - 1;
+  const tables = pushed;
   await stack.gpu(1536);
-  await expect.poll(async () => (await frames()).at(-1)?.footer, { timeout: 15_000 }).not.toBe(before.footer);
+  await expect.poll(() => pushed, { message: "the new reading's table is pushed", timeout: 15_000 }).toBeGreaterThan(tables);
   const after = await settled();
+  expect(after.footer, "the footer names the card, whatever the reading").toBe(before.footer);
   await page.evaluate(() => { (window as unknown as { fitStop: boolean }).fitStop = true; });
 
   const seen = (await frames()).slice(from).map(key);
   const a = key(before), b = key(after);
   const mixed = seen.filter((f) => f !== a && f !== b);
+  // the values are judged against the card, so a new reading may change nothing on screen: then
+  // A and B are one frame and "mixed" alone says whether anything else was drawn
   const firstB = seen.indexOf(b);
-  const olderAfterNewer = firstB < 0 ? [] : seen.slice(firstB).filter((f) => f === a);
+  const olderAfterNewer = firstB < 0 || a === b ? [] : seen.slice(firstB).filter((f) => f === a);
   expect.soft(mixed, `frames between reading A (${a}) and reading B (${b})`).toEqual([]);
   expect.soft(olderAfterNewer.length, "frames showing the older reading after the newer one").toBe(0);
 });

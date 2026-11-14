@@ -45,8 +45,8 @@ const live = (now: number, turn: LiveTurn) => render(now, { messages: { [T]: [us
 const saved = (reply: Message) => render(99_000, { messages: { [T]: [user, reply] } });
 /** The live line, as markup; "" when there is none. */
 const lineOf = (html: string) => /<(?:button|div)[^>]*class="think fold run"[^>]*>([\s\S]*?)<\/(?:button|div)><\/div>/.exec(html)?.[1] ?? "";
-/** What the live line says on screen: its visible words and seconds, not the hidden twin that holds its width. */
-const says = (html: string) => lineOf(html).replace(/<span class="lv-wide"[^>]*>[^<]*<\/span>/, "").replace(/<[^>]+>/g, "");
+/** What the live line says on screen, its parts in order with one space between: the seconds, then the words. */
+const says = (html: string) => lineOf(html).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 /** The finished reply's work seconds on its line; undefined when it has none. */
 const bulb = (html: string) => /data-think="(\d+)"/.exec(html)?.[1];
 /** The stop square's seconds; undefined when it shows none. */
@@ -87,18 +87,20 @@ describe("the live line says the server's record (decisions 1, 2, 33)", () => {
   it("counts thinking and tool time, grows between pushes, and holds still while it writes", async () => {
     // loads 0-4 s, thinks 4-6 s, a call 6-9 s, thinks 9-10 s, writes from 10 s
     const thinking = play(sent(), [push(4000, { stage: "thinking", readyAt: 4000 }), [4100, { type: "thinking", text: "Look." }]]);
-    expect(says(await live(5000, thinking))).toBe("Thinking · 1 s");
+    // layout B: the seconds' slot comes with the clock, at 0 s, and the words follow it
+    expect(says(await live(4200, thinking))).toBe("0 s Thinking");
+    expect(says(await live(5000, thinking))).toBe("1 s Thinking");
     const calling = play(thinking, [push(6000, { stage: "tool", readyAt: 4000, workMs: 2000 }), [6000, { type: "tool", step: step("a", "running") }]]);
-    expect(says(await live(8000, calling))).toBe("Searching your library · 4 s");
+    expect(says(await live(8000, calling))).toBe("4 s Searching your library");
     const writing = play(calling, [[9000, { type: "tool", step: step("a", "done", 3000) }], push(9000, { stage: "thinking", readyAt: 4000, workMs: 5000 }), push(10_000, { stage: "writing", readyAt: 4000, workMs: 6000, firstTokenAt: 10_000 }), [10_000, { type: "delta", text: "The" }]]);
-    expect(says(await live(10_000, writing))).toBe("Writing · 6 s");
-    expect(says(await live(40_000, writing)), "the writing is not work").toBe("Writing · 6 s");
+    expect(says(await live(10_000, writing))).toBe("6 s Writing");
+    expect(says(await live(40_000, writing)), "the writing is not work").toBe("6 s Writing");
   });
 
   it("a window that opened mid-reply has the same number as the one that sent it", async () => {
     const listed: LiveTurn = { ...sent(), startedAt: 20_000, listed: true };
     const opened = play(listed, [push(20_000, { stage: "tool", readyAt: 2000, workMs: 18_000 }), [20_010, { type: "start", model: "m", userMessage: user, replayed: true }], [20_010, { type: "thinking", text: "eighteen seconds of thought" }], [20_010, { type: "tool", step: step("a", "running") }]]);
-    expect(says(await live(25_000, opened))).toBe("Searching your library · 23 s");
+    expect(says(await live(25_000, opened))).toBe("23 s Searching your library");
   });
 
   it("the same nodes from one stage to the next: words and digits change, nothing else", async () => {

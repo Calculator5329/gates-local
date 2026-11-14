@@ -3,7 +3,8 @@
 // skeletons, the table fills them in place, and two later tables (each pushed
 // by the server after a new GPU reading) change values in place. Every frame
 // is sampled: no box moves or resizes from the first frame to the last, and
-// after the first table no value is a skeleton or empty.
+// after the first table no value is a skeleton or empty. The footer names the
+// card (decision 12, 2026-11-14), so it holds one value through the readings.
 import { expect, stack, test, waitReady } from "./fixtures.ts";
 
 test.use({ viewport: { width: 1137, height: 749 } });
@@ -17,7 +18,7 @@ const shape = (key: string, b: number[] | undefined) => JSON.stringify(/^(value|
 
 // Guards the owner's ruling (N08): the picker's fit values fill and change in place.
 test("the picker's fit values fill and change in place: first table, then two pushes", async ({ page, open }) => {
-  let holding = true;
+  let holding = true, pushed = 0;
   const held: (() => void)[] = [];
   await page.routeWebSocket(/.*/, ws => {
     const server = ws.connectToServer(), asked = new Set<unknown>();
@@ -28,7 +29,9 @@ test("the picker's fit values fill and change in place: first table, then two pu
     });
     server.onMessage(message => {
       const frame = JSON.parse(String(message)) as { id?: unknown; type?: string; channel?: string };
-      const table = (frame.type === "response" && asked.delete(frame.id)) || (frame.type === "push" && frame.channel === "fit.changed");
+      const push = frame.type === "push" && frame.channel === "fit.changed";
+      const table = (frame.type === "response" && asked.delete(frame.id)) || push;
+      if (push && !holding) pushed++;
       if (table && holding) held.push(() => ws.send(message));
       else ws.send(message);
     });
@@ -76,22 +79,23 @@ test("the picker's fit values fill and change in place: first table, then two pu
     sample();
   });
   const frames = () => page.evaluate(() => (window as StillWindow).stillFrames ?? []);
-  const footer = async () => (await frames()).at(-1)?.footer ?? "";
 
   // The first table.
   holding = false;
   for (const release of held.splice(0)) release();
   await expect(picker.locator(".fit-skel, .pk-cost.skel")).toHaveCount(0);
-  // The samples run on animation frames, so the last one can still hold the skeleton's empty footer:
-  // read the first table's footer from a sample that has it, or the first poll passes on the table itself.
+  // The samples run on animation frames, so the last one can still hold the skeletons: wait for a
+  // sampled frame with the first table before the readings change.
   await expect.poll(async () => (await frames()).at(-1)?.skeletons, "a sampled frame with the first table").toBe(0);
-  const first = await footer();
+  // The footer names the card the sizes are judged against (decision 12), so a new reading leaves it
+  // as it is; the pushed tables are counted on the socket instead.
+  const first = pushed;
   // Two new GPU readings; the server pushes a table after each.
   await stack.gpu(1024);
-  await expect.poll(footer, { message: "the first push changes the footer", timeout: 15_000 }).not.toBe(first);
-  const second = await footer();
+  await expect.poll(() => pushed, { message: "the first reading's table is pushed", timeout: 15_000 }).toBeGreaterThan(first);
+  const second = pushed;
   await stack.gpu(2560);
-  await expect.poll(footer, { message: "the second push changes the footer", timeout: 15_000 }).not.toBe(second);
+  await expect.poll(() => pushed, { message: "the second reading's table is pushed", timeout: 15_000 }).toBeGreaterThan(second);
   // A few more frames after the last change.
   await page.evaluate(() => new Promise<void>(resolve => { let n = 10; const f = () => --n ? requestAnimationFrame(f) : resolve(); requestAnimationFrame(f); }));
   await page.evaluate(() => (window as StillWindow).stillStop?.());
@@ -101,7 +105,7 @@ test("the picker's fit values fill and change in place: first table, then two pu
   expect(tabled, "a frame with the first table").toBeGreaterThan(0);
   expect(all[0]?.skeletons, "the sampling starts on the skeletons").toBeGreaterThan(0);
   const footers = [...new Set(all.slice(tabled).map(f => f.footer))];
-  expect(footers.length, `footer values after the first table: ${footers.join(" | ")}`).toBeGreaterThanOrEqual(3);
+  expect(footers, "the footer names the card once, whatever the reading").toEqual([expect.stringMatching(/^\d+\sGB GPU$/u)]);
   const after = all.slice(tabled);
   expect(after.filter(f => f.skeletons > 0).length, "frames with a skeleton after the first table").toBe(0);
   expect([...new Set(after.flatMap(f => f.empty))], "values empty in some frame after the first table").toEqual([]);
