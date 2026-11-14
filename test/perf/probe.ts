@@ -12,6 +12,13 @@ export interface Observation { elapsed: number; frames: number[]; longTasks: num
  * over a long thread's DOM.
  */
 export interface LaterEnd { selector: string; text: string; mode: string }
+/**
+ * The button above a windowed thread that mounts the turns before the window.
+ * Its tip counts every turn held back; builds before long-thread windowing have
+ * no such button and mount every turn. "window-count" ends when the turns of
+ * class `selector` mounted equal `text` (the thread's turns) less that count.
+ */
+export const EARLIER_BUTTON = '[data-testid="chat.thread.earlier"]';
 interface Probe {
   arm(event: string, selector: string, text: string, mode: string, later?: LaterEnd): void;
   result: Promise<Observation>;
@@ -56,6 +63,12 @@ export function browserProbe(setup: boolean) {
           const initialSocket = sockets.at(-1);
           const matches = (end: LaterEnd) => {
             if (end.mode === "class-count") return document.getElementsByClassName(end.selector).length === Number(end.text);
+            if (end.mode === "window-count") {
+              // A build that windows long threads names the turns it holds back on its "show earlier" button; one without the button mounts them all.
+              // EARLIER_BUTTON written out: this function runs in the page, without the module around it.
+              const tip = document.querySelector('[data-testid="chat.thread.earlier"]')?.getAttribute("data-tip") ?? "0";
+              return document.getElementsByClassName(end.selector).length === Number(end.text) - Number(tip.replace(/\D/g, ""));
+            }
             const el = document.querySelector<HTMLElement>(end.selector);
             const visible = el !== null && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
             const rect = el?.getBoundingClientRect();

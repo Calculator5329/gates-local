@@ -13,7 +13,7 @@ import { decodeRequest } from "@gates-local/contracts";
 import { CONTROL_URL, FAKE_URL, appUrl } from "../e2e/env.ts";
 import { browserReactHook, costRows, counterRows, emptyNetwork, frameBytes, hotSpots, snapshot, type HotSpot, type MetricSnapshot, type NetworkCounts, type ReactCounts, type Row } from "./counters.ts";
 import type { FixtureIds } from "./fixture.ts";
-import { install, measure, REPLY_TEXT_SELECTOR, type LaterEnd, type Observation } from "./probe.ts";
+import { EARLIER_BUTTON, install, measure, REPLY_TEXT_SELECTOR, type LaterEnd, type Observation } from "./probe.ts";
 import { COUNTER_REPETITIONS, NEXT_DEFAULT, nextJourneys, repetitionPlan, type RepetitionKind } from "./next-journeys.ts";
 import type { Journey } from "./selection.ts";
 import { metric, type Run } from "./stats.ts";
@@ -88,6 +88,8 @@ async function newThread(page: Page) { await page.keyboard.press("Control+n"); a
 async function send(page: Page, text: string) { await page.locator("#ta").fill(text); await page.locator("#ta").press("Enter"); await expect(page.locator(".turn.a:not(.done) .md")).toBeVisible(); }
 async function stop(page: Page) { await page.getByRole("button", { name: "Stop", exact: true }).click(); await expect(page.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0); }
 function threadId(page: Page) { const id = new URLSearchParams(new URL(page.url()).hash.slice(1)).get("thread"); if (!id) throw new Error("Missing selected thread"); return id; }
+/** Nothing when every turn of a thread mounted, else `-<turns mounted>`: the window a row over a long thread held. */
+function held(mounted: number, count: number) { return mounted === count ? "" : `-${mounted}`; }
 async function point(locator: Locator) { const box = await locator.boundingBox(); if (!box) throw new Error("Target has no box"); return { x: box.x + box.width / 2, y: box.y + box.height / 2 }; }
 
 /** How long a hand rests on the model button between arriving and clicking, or a keyboard user between focus and Enter. */
@@ -246,14 +248,15 @@ test("priority journeys with costs", async ({ browser }) => {
         // A later end gives a second row from the same input and the same opening reading.
         // The profile covers the first window only, but its later window must still close
         // before the next action arms the probe.
-        const timing = async (name: string, trigger: () => Promise<unknown>, event: string, selector: string, text = "", mode = "text", later?: { name: string } & LaterEnd): Promise<Observation> => {
+        // A later end's name can wait for its window to close, when the build decides what the row measured.
+        const timing = async (name: string, trigger: () => Promise<unknown>, event: string, selector: string, text = "", mode = "text", later?: { name: string | (() => Promise<string>) } & LaterEnd): Promise<Observation> => {
           await quiet(page);
           const before = await begin();
-          const observation = await measure(page, trigger, event, selector, text, mode, later);
+          const observation = await measure(page, trigger, event, selector, text, mode, later && { selector: later.selector, text: later.text, mode: later.mode });
           await finish(name, before, observation.elapsed, observation);
           if (later) {
             const closed = await page.evaluate(() => window.perfJourney.later);
-            if (kind !== "profile") await finish(later.name, before, closed.elapsed, closed);
+            if (kind !== "profile") await finish(typeof later.name === "string" ? later.name : await later.name(), before, closed.elapsed, closed);
           }
           return observation;
         };
@@ -283,6 +286,11 @@ test("priority journeys with costs", async ({ browser }) => {
         }
 
         if (selected.has("threads")) {
+          // Builds since long-thread windowing mount a thread's latest turns and hold the rest behind a
+          // button; older builds mount every turn. A row over a window says how many turns it held
+          // (`thread-2000-cold-click-mounted-200`), so a pair across the change is never read as a speed-up.
+          const mountedTurns = () => page.locator(".tl .turn").count();
+          let mountedLast = 0;
           for (const [count, clickId, hoverId, clickTitle, hoverTitle] of [
             [200, seed.long, seed.hoverLong, "Perf long 200", "Perf hover 200"],
             [2000, seed.thousands, seed.hoverThousands, "Perf thousands 2000", "Perf hover 2000"],
@@ -293,17 +301,27 @@ test("priority journeys with costs", async ({ browser }) => {
                 const button = await row(page, id);
                 if (pathName === "hover") { await button.hover(); await page.waitForTimeout(hoverDwellMs); }
                 const name = `thread-${count}-${warmth}-${pathName}`;
-                await timing(name, await clicking(button), "click", ".tl .turn:last-child .md", title, "text", { name: `${name}-mounted`, selector: "turn", text: String(count), mode: "class-count" });
-                await expect(page.locator(".tl .turn")).toHaveCount(count);
+                const mountedRow = async () => `${name}-mounted${held(mountedLast = await mountedTurns(), count)}`;
+                await timing(name, await clicking(button), "click", ".tl .turn:last-child .md", title, "text", { name: mountedRow, selector: "turn", text: String(count), mode: "window-count" });
+                if (kind === "profile") mountedLast = await mountedTurns();
+                await expect(page.locator(".tl .turn")).toHaveCount(mountedLast);
                 await expect(page.locator(`.sb-row.on[data-thread="${id}"]`)).toBeVisible();
               }
             }
           }
-          // One keystroke with the last 2000-turn visit open and every turn mounted.
-          await expect(page.locator(".tl .turn")).toHaveCount(2000); await ready(page);
+          // One keystroke with the last 2000-turn visit open and its window mounted.
+          await expect(page.locator(".tl .turn")).toHaveCount(mountedLast); await ready(page);
           const composer = page.locator("#ta"); await composer.focus();
-          await timing("type-in-thread-2000", () => page.keyboard.press("x"), "keydown", "#ta", "x", "usable-value");
+          await timing(mountedLast === 2000 ? "type-in-thread-2000" : `type-in-thread-2000-mounted-${mountedLast}`, () => page.keyboard.press("x"), "keydown", "#ta", "x", "usable-value");
           await expect(composer).toHaveValue("x"); await composer.fill("");
+          // The button above the window mounts the turns before it, all in one go. Builds without it skip the row.
+          const earlier = page.locator(`.tl ${EARLIER_BUTTON}`);
+          if (await earlier.count() > 0) {
+            await earlier.scrollIntoViewIfNeeded();
+            const adds = Number((await earlier.innerText()).replace(/\D/g, ""));
+            await timing("thread-2000-show-earlier", await clicking(earlier), "click", "turn", String(mountedLast + adds), "class-count");
+            await expect(page.locator(".tl .turn")).toHaveCount(mountedLast + adds);
+          }
           await openShort(page, seed.short);
           await timing("open-huge-reply", await clicking(await row(page, seed.huge)), "click", ".turn.a.done .md", "Huge reply end");
           await expect(page.locator(".md tbody tr")).toHaveCount(300);
@@ -366,7 +384,8 @@ test("priority journeys with costs", async ({ browser }) => {
           await scenario("slow-drip", { prompts: { "queue baseline reply": { holdAfterTokens: 46 } } }); await newThread(page); await send(page, "queue baseline reply");
           for (let i = 1; i <= 5; i++) {
             await page.locator("#ta").fill(`queued item ${i}`);
-            await timing(`queue-send-${i}`, () => page.keyboard.press("Enter"), "keydown", ".qt-r", String(i), "count");
+            // The list's own count: since v0.2.4 a long queue shows two rows and a "+N" chip, so the rows stop at two.
+            await timing(`queue-send-${i}`, () => page.keyboard.press("Enter"), "keydown", `ul.qt[aria-label="${i} queued message${i === 1 ? "" : "s"}"]`, "1", "count");
           }
           await timing("queue-finish-to-next-token", async () => { const result = await fetch(`${FAKE_URL}/__fake/release`, { method: "POST" }); if (!result.ok) throw new Error("Could not release fake reply"); }, "mutation:.turn.a.done", ".turn.a:not(.done) .md", "Here is");
           await expect(page.locator(".qt-r")).toHaveCount(0, { timeout: 15_000 });

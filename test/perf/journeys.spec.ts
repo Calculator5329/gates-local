@@ -80,12 +80,15 @@ test("production browser journeys", async ({ browser }) => {
     latency("switch-thread", await measure(page, () => row.click(), "click", ".bubble", "Short marker"));
     for (const [count, title] of [[200, "Perf long 200"], [2000, "Perf thousands 2000"]] as const) {
       const target = await select(page, title);
-      latency(`open-thread-${count}`, await measure(page, () => target.click(), "click", ".tl .turn:last-child .md", title, "text", { selector: "turn", text: String(count), mode: "class-count" }));
+      // A build that windows long threads mounts their latest turns only; the row names the window it held.
+      latency(`open-thread-${count}`, await measure(page, () => target.click(), "click", ".tl .turn:last-child .md", title, "text", { selector: "turn", text: String(count), mode: "window-count" }));
       const mounted = await page.evaluate(() => window.perfJourney.later);
-      latency(`open-thread-${count}-mounted`, mounted);
+      const turns = await page.locator(".tl .turn").count();
+      const held = turns === count ? "" : `-${turns}`;
+      latency(`open-thread-${count}-mounted${held}`, mounted);
       // The longest stretch the page could not answer input while the thread filled in.
-      add(`open-thread-${count}.long-task-max`, Math.max(0, ...mounted.longTasks));
-      await expect(page.locator(".tl .turn")).toHaveCount(count);
+      add(`open-thread-${count}${held && `-mounted${held}`}.long-task-max`, Math.max(0, ...mounted.longTasks));
+      await expect(page.locator(".tl .turn")).toHaveCount(turns);
     }
     const huge = await select(page, "Perf huge reply");
     latency("open-huge-reply", await measure(page, () => huge.click(), "click", ".turn.a.done .md", "Huge reply end"));

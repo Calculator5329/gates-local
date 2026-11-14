@@ -17,6 +17,15 @@ change, not an app speedup. Earlier columns retain their original readings.
 The v0.1.0 to v0.2.3 columns were all measured with one fixed harness from
 before both of these changes, so they compare with each other directly.
 
+A build that opens a long thread with its latest 200 messages mounts only
+those, so its rows over the 2000-message thread that wait for the mounted
+turns name the window: `thread-2000-cold-click-mounted-200`,
+`type-in-thread-2000-mounted-200`. A row without the number mounted every
+turn. They are different work and never share a row, so a column across
+the change shows two rows, not a speed-up. `thread-2000-show-earlier`
+times the button above the window adding the messages before it; a build
+without the button has no such row.
+
 Refresh with `node test/perf/history.ts --label RELEASE --scored RESULTS/scored.json`.
 
 ## Time

@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-14: The speed check measures long threads the way each release opens them
+
+- Nothing changes in the app. The speed check no longer stalls on a
+  release that opens a long thread with its latest 200 messages: it
+  times the messages that release puts on the page, and the row's name
+  says when that is a window (`thread-2000-cold-click-mounted-200`), so
+  an old release and a new one are never read as one getting faster.
+- A new row times the button above a long thread that shows the 200
+  messages before it.
+- Adding a release to the speed history keeps the notes written by hand
+  in `docs/perf-history.md`; before, each new column rewrote them.
+
 ## 2026-11-14: The chat engine's download reads the same everywhere, says when it stopped, and image setup stays in view
 
 - While the app's own Ollama downloads, the banner's numbers are in the

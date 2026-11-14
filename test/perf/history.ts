@@ -51,12 +51,30 @@ function readTable(lines: readonly string[]): Table {
   return { labels, rows };
 }
 
-function section(text: string, heading: string): string[] {
-  const lines = text.split("\n");
-  const start = lines.indexOf(heading);
-  if (start < 0) return [];
-  const end = lines.findIndex((line, index) => index > start && line.startsWith("## "));
-  return lines.slice(start + 1, end < 0 ? undefined : end);
+/** Where a section's table sits: the run of `|` lines from its `| Action` header, or where one goes. */
+interface Span { heading: number; start: number; end: number }
+function tableSpan(lines: readonly string[], heading: string): Span | undefined {
+  const at = lines.indexOf(heading);
+  if (at < 0) return undefined;
+  const next = lines.findIndex((line, index) => index > at && line.startsWith("## "));
+  const sectionEnd = next < 0 ? lines.length : next;
+  const start = lines.findIndex((line, index) => index > at && index < sectionEnd && line.startsWith("| Action"));
+  if (start < 0) return { heading: at, start: at + 1, end: at + 1 };
+  let end = start;
+  while (end < sectionEnd && lines[end]!.startsWith("|")) end++;
+  return { heading: at, start, end };
+}
+
+/** The lines with the section's table replaced, or the section added at the end. Every other line stays as it was. */
+function putTable(lines: readonly string[], heading: string, table: readonly string[]): string[] {
+  const span = tableSpan(lines, heading);
+  if (!span) {
+    let end = lines.length;
+    while (end > 0 && lines[end - 1] === "") end--;
+    return [...lines.slice(0, end), "", heading, "", ...table, ""];
+  }
+  const fresh = span.start === span.end;
+  return [...lines.slice(0, span.start), ...fresh ? ["", ...table] : table, ...lines.slice(span.end)];
 }
 
 function addColumn(table: Table, label: string, rows: readonly HistoryRow[]): Table {
@@ -76,14 +94,22 @@ function writeTable(table: Table): string[] {
   ];
 }
 
-/** The history text with one more release in it. */
+/**
+ * The history text with one more release in it. Only the two tables are
+ * rewritten: the text above the first table and any note a person wrote
+ * between, under or after them stay as they were. An empty file starts with
+ * the standard introduction.
+ */
 export function addRelease(text: string, label: string, rows: readonly HistoryRow[]): string {
-  const time = readTable(section(text, TIME_HEADING)), work = readTable(section(text, WORK_HEADING));
+  const lines = text.trim() === "" ? PREAMBLE.split("\n") : text.split("\n");
+  const read = (heading: string) => {
+    const span = tableSpan(lines, heading);
+    return readTable(span ? lines.slice(span.start, span.end) : []);
+  };
+  const time = read(TIME_HEADING), work = read(WORK_HEADING);
   if (time.labels.includes(label) || work.labels.includes(label)) throw new Error(`The history already has ${label}`);
-  return [
-    PREAMBLE, TIME_HEADING, "", ...writeTable(addColumn(time, label, rows.filter(row => TIME_ROW.test(row.action)))),
-    "", WORK_HEADING, "", ...writeTable(addColumn(work, label, rows.filter(row => WORK_ROW.test(row.action)))), "",
-  ].join("\n");
+  const withTime = putTable(lines, TIME_HEADING, writeTable(addColumn(time, label, rows.filter(row => TIME_ROW.test(row.action)))));
+  return putTable(withTime, WORK_HEADING, writeTable(addColumn(work, label, rows.filter(row => WORK_ROW.test(row.action))))).join("\n");
 }
 
 function isHistoryRow(value: unknown): value is HistoryRow {

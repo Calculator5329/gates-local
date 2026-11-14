@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { browserProbe, REPLY_TEXT_SELECTOR } from "./probe.ts";
+import { browserProbe, EARLIER_BUTTON, REPLY_TEXT_SELECTOR } from "./probe.ts";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const noop = () => {};
@@ -9,10 +9,11 @@ function fixture() {
   let mutation = noop;
   let done = false;
   const turns = { length: 0 };
+  let earlier: { getAttribute(name: string): string | null } | null = null;
   const element ={ value: "", textContent: "", disabled: false, getClientRects: () => [{}], getBoundingClientRect: () => ({ top: 10, bottom: 100 }) };
   const document = Object.assign(new EventTarget(), {
     activeElement: element,
-    querySelector: (selector: string) => selector === "#done" ? (done ? element : null) : selector === ".composer.blocked" || (done && selector.includes(":not(.done)")) ? null : element,
+    querySelector: (selector: string) => selector === EARLIER_BUTTON ? earlier : selector === "#done" ? (done ? element : null) : selector === ".composer.blocked" || (done && selector.includes(":not(.done)")) ? null : element,
     querySelectorAll: () => [element],
     getElementsByClassName: (name: string) => name === "turn" ? turns : { length: 0 },
   });
@@ -28,7 +29,7 @@ function fixture() {
   const tick = (count = 3) => { for (let i = 0; i < count; i++) { const callback = frames.shift(); if (!callback) throw new Error("No pending paint"); clock += 16; callback(clock); } };
   const input = (type: string, delay: number) => { const event = new Event(type); Object.defineProperty(event, "timeStamp", { value: clock - delay }); document.dispatchEvent(event); };
   browserProbe(false); tick();
-  return { element, document, frames, turns, tick, input, complete: () => { done = true; mutation(); } };
+  return { element, document, frames, turns, tick, input, earlier: (button: typeof earlier) => { earlier = button; }, complete: () => { done = true; mutation(); } };
 }
 
 test("completion-to-next timing waits for the begin marker and usable rendered value", async () => {
@@ -82,6 +83,20 @@ test("a second window from the same input closes when every turn is mounted, aft
   expect(first.elapsed).toBe(64);
   expect(later.elapsed).toBe(128);
   expect(later.frames.length).toBeGreaterThan(first.frames.length);
+});
+
+test("the mounted window ends at the turns a windowing build keeps, and at every turn on a build without the button", async () => {
+  for (const [tip, kept] of [["1,800 earlier", 200], [undefined, 2000]] as const) {
+    const f = fixture(); f.element.textContent = "Last turn";
+    if (tip !== undefined) f.earlier({ getAttribute: (name: string) => name === "data-tip" ? tip : null });
+    window.perfJourney.arm("click", ".md", "Last turn", "text", { selector: "turn", text: "2000", mode: "window-count" });
+    f.turns.length = 40; f.input("click", 0); f.tick(4); await window.perfJourney.result;
+    let mounted = false; void window.perfJourney.later.then(() => { mounted = true; });
+    f.turns.length = tip === undefined ? 200 : 199; f.tick(3); await Promise.resolve(); expect(mounted).toBe(false);
+    f.turns.length = kept; f.tick(3);
+    expect((await window.perfJourney.later).elapsed).toBeGreaterThan(64);
+    expect(mounted).toBe(true);
+  }
 });
 
 test("a window with no second end gives the first result as the later one", async () => {

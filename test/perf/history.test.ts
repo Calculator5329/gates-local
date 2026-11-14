@@ -53,6 +53,23 @@ describe("addRelease", () => {
     expect(next).toContain("| cold-composer.react-renders (count) | 214 | 190 |");
   });
 
+  it("keeps the text above the first table and note lines it did not write, as they were", () => {
+    const lines = first.split("\n");
+    const time = lines.indexOf("## Time"), work = lines.indexOf("## Work");
+    const workEnd = lines.findIndex((line, index) => index > work + 1 && line === "");
+    const edited = [
+      ...lines.slice(0, time), "A note on how older columns were measured.", "", "## Time", "",
+      "Rows ending -mounted-200 held a window of 200 turns.", "", ...lines.slice(time + 2, work),
+      "Below the time table: one hand-written line.", "", ...lines.slice(work, workEnd), "", "## Notes", "", "A closing note.", "",
+    ].join("\n").replace("These numbers are", "These hand-edited numbers are");
+    const next = addRelease(edited, "v2", [row("cold-composer", "ms", 260.2), row("cold-composer.react-renders", "count", 190)]);
+    expect(next.slice(0, next.indexOf("| Action"))).toBe(edited.slice(0, edited.indexOf("| Action")));
+    for (const note of ["Below the time table: one hand-written line.", "## Notes", "A closing note."]) expect(next).toContain(note);
+    expect(next).toContain("| cold-composer (ms) | 287 | 260 |");
+    expect(next.split("## Work")[1]).toContain("| cold-composer.react-renders (count) | 214 | 190 |");
+    expect(next.split("## Time")[1]!.split("## Work")[0]).toContain("Below the time table: one hand-written line.");
+  });
+
   it("refuses a release it already has", () => {
     expect(() => addRelease(first, "v1", [])).toThrow("already has v1");
   });

@@ -136,14 +136,17 @@ test("focused priority production journeys", async ({ browser }) => {
                 const action = `thread-${count}-${warmth}-${pathName}`;
                 const requestsBeforeClick = historyRequests;
                 const beforeClick = await page.evaluate(() => ({ motion: window.threadMotionQueries, height: window.threadHeightReads }));
-                const observation = await timing(page, action, () => button.click(), "click", ".tl .turn:last-child .md", title, "text", { selector: "turn", text: String(count), mode: "class-count" });
+                // A build that windows long threads mounts their latest turns only; the -mounted row names the window it held.
+                const observation = await timing(page, action, () => button.click(), "click", ".tl .turn:last-child .md", title, "text", { selector: "turn", text: String(count), mode: "window-count" });
                 add(`${action}.history-requests`, historyRequests - requestsBeforeClick, "count");
                 const afterClick = await page.evaluate(() => ({ motion: window.threadMotionQueries, height: window.threadHeightReads }));
                 add(`${action}.motion-queries`, afterClick.motion - beforeClick.motion, "count");
                 add(`${action}.height-reads`, afterClick.height - beforeClick.height, "count");
                 smooth(action, observation);
-                add(`${action}-mounted`, (await page.evaluate(() => window.perfJourney.later)).elapsed);
-                await expect(page.locator(".tl .turn")).toHaveCount(count);
+                const mountedElapsed = (await page.evaluate(() => window.perfJourney.later)).elapsed;
+                const turns = await page.locator(".tl .turn").count();
+                add(`${action}-mounted${turns === count ? "" : `-${turns}`}`, mountedElapsed);
+                await expect(page.locator(".tl .turn")).toHaveCount(turns);
                 await expect(page.locator(`.sb-row.on[data-thread="${id}"]`)).toBeVisible();
                 await expect(page.locator(".tl .turn:last-child .md")).toContainText(title);
               }
@@ -237,8 +240,10 @@ test("focused priority production journeys", async ({ browser }) => {
           await scenario("slow-drip", { prompts: { "queue baseline reply": { holdAfterTokens: 46 } } }); await newThread(page); await send(page, "queue baseline reply");
           for (let i = 1; i <= 5; i++) {
             await page.locator("#ta").fill(`queued item ${i}`);
-            const o = await timing(page, `queue-send-${i}`, () => page.locator("#ta").press("Enter"), "keydown", ".qt-r", String(i), "count");
-            add("queue-send", o.elapsed); await expect(page.locator(".qt-r").nth(i - 1)).toContainText(`queued item ${i}`);
+            // The list's own count: since v0.2.4 a long queue shows two rows and a "+N" chip, so the rows stop at two.
+            const o = await timing(page, `queue-send-${i}`, () => page.locator("#ta").press("Enter"), "keydown", `ul.qt[aria-label="${i} queued message${i === 1 ? "" : "s"}"]`, "1", "count");
+            add("queue-send", o.elapsed);
+            if (await page.locator(".qt-r").count() >= i) await expect(page.locator(".qt-r").nth(i - 1)).toContainText(`queued item ${i}`);
           }
           await timing(page, "queue-finish-to-next-token", async () => { const result = await fetch(`${FAKE_URL}/__fake/release`, { method: "POST" }); if (!result.ok) throw new Error("Could not release fake reply"); }, "mutation:.turn.a.done", ".turn.a:not(.done) .md", "Here is");
           await expect(page.locator(".qt-r")).toHaveCount(0, { timeout: 15_000 });
