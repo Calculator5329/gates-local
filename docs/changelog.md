@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-14: Models' tabs sit beside its title
+
+- In the Models pop-up, Installed and Download follow the title at the
+  left, on its line. They were at the right against the Close button and
+  sat a little under the title's line.
+
 ## 2026-11-14: Images are judged by your card, and set up from Settings
 
 - FLUX.2 Klein 4B is one row. The app runs the full setup on a card of
