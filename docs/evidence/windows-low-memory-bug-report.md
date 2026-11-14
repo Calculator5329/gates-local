@@ -47,6 +47,7 @@ not be combined into one memory snapshot. GB is decimal; GiB/MiB are binary.
 | WIN-MEM-04 | High | Image setup and chat/image handoff require manual engine lifecycle management |
 | WIN-MEM-05 | Medium | Memory-holder diagnostics contain unknown sizes and broken application names |
 | WIN-MEM-06 | Medium | Long first render looks stuck; default suitability and phase progress are unclear |
+| WIN-MEM-07 | High | Download/selection availability and context-fit presentation do not explain execution refusal |
 | WIN-SETUP-01 | Medium | Low-disk/existing-install setup and shared download progress are confusing |
 
 Priorities describe user impact, not confirmed root causes. Some entries overlap
@@ -250,6 +251,42 @@ slow first run from an actual stall, keep cancellation clear, and describe the
 recommended preset's tested hardware/performance limitations. A four-step model
 should not imply a fast end-to-end cold start. Warm-run timing was not measured.
 
+## WIN-MEM-07: a downloadable, selectable model cannot run
+
+**User report:** After returning to LLMs, the user could download and select a
+model but could not run it. Their expectation was that it should execute more
+slowly using system RAM rather than remain blocked by the GPU fit check.
+
+**Latest screenshot:** The composer shows Gemma 4 e4b selected at 16k, and a red
+Gemma memory-refusal message is partially obscured by the open picker. The model
+list shows Gemma at 7.6 GB and Qwen 3.5 4B at 3.3 GB, with the Qwen row
+highlighted. The context panel labels 8k, 16k, 32k, and 64k as `Fits`, with
+estimates of 3.2, 3.3, 3.8, and 4.8 GB respectively. The picker footer says
+`0.2 GB free - 0.0 GB usable`.
+
+The highlighted Qwen row and selected Gemma composer differ. This screenshot
+therefore does not prove that the `Fits` estimates apply to Gemma or that the
+same model/context passed and failed the same calculation. It does demonstrate
+that the relationship between the previewed model, selected model, fit labels,
+and execution error is unclear during recovery. The obscured error cannot be
+reconstructed from this screenshot; the earlier complete Gemma refusal is
+recorded in WIN-MEM-01/02.
+
+**Expected:** Make the model/context associated with every estimate explicit.
+Explain the difference between a downloadable model, a model that can fit after
+eligible reclaim, and one that can run now. Use consistent assumptions for the
+picker and actual admission, and remeasure after a handoff. For a model that
+fits with supported GPU/system-RAM offloading, offer that slower execution path
+with a clear speed warning instead of a VRAM-only dead end. If usable combined
+memory is genuinely insufficient, explain the deficit and provide a concrete
+smaller-model/context alternative. Download availability alone is not evidence
+that a model fits; this session did not establish a successful Gemma offload run.
+
+**Investigation leads:** Model-picker selection versus hover/preview state,
+context-fit estimates, available-memory footer, runtime fit policy, and fallback
+actions after admission errors. Test these together while an image engine or a
+different text model is still resident.
+
 ## WIN-SETUP-01: disk planning and download presentation add setup confusion
 
 **Observed:** The three required default files total 8,255,049,810 bytes
@@ -298,6 +335,7 @@ active jobs, selected context/preset, admission estimates, reserves, and results
 | Scenario | Expected validation |
 | --- | --- |
 | Idle text A -> text B | Eligible A is released before the final measurement; B loads or gives a specific actionable refusal |
+| Download/select -> choose context -> run | Preview and selection are unambiguous; fit labels and admission use consistent assumptions; supported slower offload is offered when it fits |
 | Text -> image -> text | Coordinated handoff without user-issued unload commands; no interference with active or foreign work |
 | Cold image -> warm image -> batch of two | Correct resident accounting/reclaim; no false refusal solely because the preceding job left reusable memory |
 | Near-threshold 640x640 image | Explain exact estimated deficit and offer a supported smaller option if it fits |
