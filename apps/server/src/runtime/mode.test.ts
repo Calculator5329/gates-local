@@ -10,7 +10,7 @@ import { json, startFakeServer } from "../fit/fake-http.ts";
 import { httpGet } from "./http.ts";
 import { clearRecord, readLinuxListenerPid, readProc, readRecord, readWindowsProc, stopOwned, windowsProcQuery, writeRecord, type SyncRunner } from "./ownership.ts";
 import { appModelsDir, defaultAppDataDir, findOnPath, findSystemOllama, installDir, installedBinary, ownedStateFile, serveLogFile } from "./paths.ts";
-import { ADOPTED_WINDOWS_DETAIL, WINDOWS_APP_MODE_DETAIL, createOllamaRuntime, windowsAutomaticDetail, type OllamaRuntime, type RuntimeOptions } from "./runtime.ts";
+import { ADOPTED_WINDOWS_DETAIL, WINDOWS_APP_MODE_DETAIL, childHome, createOllamaRuntime, windowsAutomaticDetail, type OllamaRuntime, type RuntimeOptions } from "./runtime.ts";
 import { PINNED_OLLAMA_WINDOWS, pinnedOllamaFor } from "./manifest.ts";
 import { createRuntimeSwitch } from "./switch.ts";
 import { createServerShutdown } from "../shutdown.ts";
@@ -119,9 +119,22 @@ describe("runtimeMode app", () => {
     expect(s.baseUrl).not.toBe(system.baseUrl);
     expect(system.requests).toEqual([]);
     const env = await httpGet(`${s.baseUrl}/fake/env`, 1000);
-    expect(env.kind === "response" && JSON.parse(env.body)).toMatchObject({ OLLAMA_MODELS: appModelsDir(appDataDir) });
+    // its own fetched copy on its own folder: its key pair stays in the app's data, never the person's home
+    expect(env.kind === "response" && JSON.parse(env.body)).toMatchObject({ OLLAMA_MODELS: appModelsDir(appDataDir), HOME: childHome(appDataDir), OLLAMA_MAX_LOADED_MODELS: "1" });
+    expect(existsSync(childHome(appDataDir))).toBe(true);
     expect(s.modelsDir).toBe(appModelsDir(appDataDir));
+    expect(s.holdsOne).toBe(true);
     expect(rt.startedByThisProcess()).toBe(true);
+  });
+
+  it("the person's installed Ollama run on the app's folder keeps the person's home", async () => {
+    const binDir = path.join(work, "bin");
+    writeFakeBinary(path.join(binDir, "ollama"));
+    const rt = await runtime({ mode: "app", externalBaseUrl: await nothingAt(), env: { PATH: binDir, HOME: home } });
+    const s = await rt.ensure();
+    expect(s).toMatchObject({ state: "ready", owner: "app", holdsOne: true });
+    const env = await httpGet(`${s.baseUrl}/fake/env`, 1000);
+    expect(env.kind === "response" && JSON.parse(env.body)).toMatchObject({ OLLAMA_MODELS: appModelsDir(appDataDir), HOME: home });
   });
 
   it("R-11: never reuses an Ollama it did not start on the app port: starts on the next free one, and a restart adopts it", async () => {

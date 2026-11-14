@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-11-14: The app's own Ollama holds one model, and gemma4's small files fit in what they really take
+
+- When the app runs its own Ollama, that Ollama holds one model at a
+  time, and the app now plans for it. Moving to another model no longer
+  waits for the old one to leave first: the step before loading took
+  0.2 to 0.3 s and now takes none. The runtime status says the Ollama
+  holds one model. An Ollama you run yourself works as before.
+- With the app's own Ollama, the model list never says a model runs
+  beside one that is answering. Each fitting size of the other model
+  reads "Stops chat", and sending to it asks before stopping the reply
+  ("This stops Qwen 3.5 4B in 'A long answer'. Its reply so far is
+  kept."). Before, the list read "System memory" and the send started
+  loading with no word.
+- gemma4's E2B and E4B files keep a large table in system memory that
+  never goes on the graphics card, and the estimate now leaves it out
+  on a computer with a card. gemma4:e2b at 16k: 3.6 GB, was 5.5 GB.
+  gemma4:e4b at 16k: 5.3 GB, was 7.6 GB. Layers that reuse another
+  layer's memory are no longer counted twice. gemma4:12b and the 26B
+  are unchanged. With no card, the whole file still counts.
+- An Ollama you installed yourself keeps your home folder when the app
+  starts it, so your Ollama sign-in stays. Only the copy the app
+  downloaded, running on the app's models folder, gets a home of its
+  own. A CUDA cache folder you set is kept. If you signed in to Ollama
+  through the copy the app downloaded, sign in once more: that copy now
+  keeps its sign-in in the app's folder.
+- A model that fits on a computer whose graphics card the app cannot
+  read now says "Runs in system memory", never "on GPU".
+
 ## 2026-11-14: First run keeps its offer, says a full disk, and shows a stalled download
 
 - Leaving the first window while the chat engine downloads no longer ends

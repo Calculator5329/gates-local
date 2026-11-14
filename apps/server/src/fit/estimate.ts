@@ -8,7 +8,8 @@
 // head_count_kv with full_attention_interval N counts one layer in N.
 // Sliding-window layers keep min(num_ctx, window + one batch) tokens with
 // their *_swa key/value lengths. Recurrent state of hybrid models (a few
-// MiB) sits inside the overhead.
+// MiB) sits inside the overhead. Layers that share an earlier layer's cache
+// (gemma4's shared_kv_layers, the last ones) carry none.
 import { KV_BYTES_PER_ELEMENT, RUNTIME_OVERHEAD_BYTES, SWA_BATCH_TOKENS, UNREPORTED_MAX_CONTEXT } from "./constants.ts";
 import { FitError, type NeedEstimate } from "./types.ts";
 
@@ -69,6 +70,9 @@ export function parseArchInfo(model: string, modelInfo: Readonly<Record<string, 
       interval !== undefined && interval > 1 && (i + 1) % interval !== 0 ? 0 : scalar,
     );
   }
+  // gemma4's last shared_kv_layers layers read the cache of an earlier layer and keep none of their own.
+  const shared = num(get("attention.shared_kv_layers")) ?? 0;
+  if (shared > 0) headCountKv = headCountKv.map((heads, i) => (i >= blockCount - shared ? 0 : heads));
 
   const derivedHeadDim = embedding !== undefined && headCount ? embedding / headCount : undefined;
   const keyLength = num(get("attention.key_length")) ?? derivedHeadDim;

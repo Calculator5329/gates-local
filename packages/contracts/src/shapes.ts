@@ -426,6 +426,12 @@ export const RuntimeStatus = S.Struct({
   /** The folder the app's own running Ollama was started with. Absent whenever that isn't known for certain, as for an Ollama the app did not start. */
   modelsDir: S.optional(S.String),
   /**
+   * True while the app's own Ollama runs, started to hold one model at a time
+   * (OLLAMA_MAX_LOADED_MODELS=1): loading another model replaces the one in memory, so no model
+   * runs beside another. Absent for an Ollama the app did not start, or one started before this setting.
+   */
+  holdsOne: S.optional(S.Boolean),
+  /**
    * "error": what failed. "download": the app's own Ollama did not finish downloading (cut off,
    * stalled or not the pinned file); "install": it came down but did not unpack or may not be
    * installed; "start": it is there and did not start. Absent for an error from elsewhere.

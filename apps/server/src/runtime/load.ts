@@ -318,6 +318,10 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
   const prune = (resident: readonly string[]) => {
     for (const [tag, numCtx] of record.observe(resident.map((name) => ({ name })))) send({ model: tag, numCtx, state: "unloaded" });
   };
+  /** The record takes the load; in an Ollama that holds one model, the app's other models left with it. */
+  const recordLoaded = (model: string, numCtx: number) => {
+    for (const [tag, at] of record.loaded(model, numCtx)) send({ model: tag, numCtx: at, state: "unloaded" });
+  };
 
   /** The GPU poll's last logged /api/ps failure; cleared when a read succeeds. */
   let pollFailure: string | undefined;
@@ -406,7 +410,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       }
       const afterLoad = stopped();
       if (afterLoad) return finish(afterLoad);
-      record.loaded(tag, numCtx);
+      recordLoaded(tag, numCtx);
       const ready = finish({ model, numCtx, state: "ready" });
       deps.onLoaded?.();
       return ready;
@@ -432,7 +436,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
   };
 
   const loaded = (model: string, numCtx: number, notice: Notice | undefined) => {
-    record.loaded(model, numCtx);
+    recordLoaded(model, numCtx);
     const ready: ModelLoad = { model, numCtx, state: "ready" };
     if (notice) closeNotice(notice, ready);
     else send(ready);

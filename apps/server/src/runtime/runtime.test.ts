@@ -6,7 +6,7 @@ import { httpGet } from "./http.ts";
 import { probe } from "./probe.ts";
 import { readProc, readRecord } from "./ownership.ts";
 import { installedBinary, ownedStateFile } from "./paths.ts";
-import { type OllamaRuntime, type RuntimeOptions, createOllamaRuntime } from "./runtime.ts";
+import { type OllamaRuntime, type RuntimeOptions, childHome, createOllamaRuntime, ownedChildEnv } from "./runtime.ts";
 import type { InstallManifest } from "./schemas.ts";
 import {
   FAKE_RELEASE_FORMAT,
@@ -126,23 +126,26 @@ describe("stopped (installed, nothing answering)", () => {
     expect(seen.map((x) => x.state)).toEqual(["stopped", "starting", "ready"]);
 
     const env = await httpGet(`${s.baseUrl}/fake/env`, 1000);
-    // its key pair and the CUDA kernels it compiles go in the app's runtime folder, never the person's
-    // home; the models stay the person's store; one model is held at a time
+    // on the person's store it keeps the person's home, so the key `ollama signin` registered still
+    // signs; the CUDA kernels it compiles go in the app's runtime folder; one model is held at a time
     expect(env.kind === "response" && JSON.parse(env.body)).toEqual({
       OLLAMA_MODELS: modelsDir, OLLAMA_HOST: new URL(s.baseUrl).host,
-      HOME: path.join(appDataDir, "runtime", "home"), CUDA_CACHE_PATH: path.join(appDataDir, "runtime", "cuda-cache"), OLLAMA_MAX_LOADED_MODELS: "1",
+      HOME: home, CUDA_CACHE_PATH: path.join(appDataDir, "runtime", "cuda-cache"), OLLAMA_MAX_LOADED_MODELS: "1",
     });
-    expect(existsSync(path.join(appDataDir, "runtime", "home"))).toBe(true);
+    expect(existsSync(childHome(appDataDir))).toBe(false);
     // the folder the status reports is the one the Ollama was really given
     expect(s.modelsDir).toBe(modelsDir);
+    // started with OLLAMA_MAX_LOADED_MODELS=1, and the status says so
+    expect(s.holdsOne).toBe(true);
 
     const rec = readRecord(ownedStateFile(appDataDir));
     expect(rec?.baseUrl).toBe(s.baseUrl);
+    expect(rec?.holdsOne).toBe(true);
     expect(readProc(rec!.pid)?.startTime).toBe(rec!.startTime);
 
-    // A second runtime instance (server restart) recognises it as ours.
+    // A second runtime instance (server restart) recognises it as ours, still holding one model.
     const again = createOllamaRuntime({ appDataDir, home, appPort: Number(new URL(s.baseUrl).port), externalBaseUrl: d.baseUrl.replace(/:\d+$/, ":1"), env: { PATH: emptyPathDir }, allowInstall: false });
-    expect((await again.discover()).owner).toBe("app");
+    expect(await again.discover()).toMatchObject({ owner: "app", holdsOne: true });
 
     const stop = await rt.stop();
     expect(stop).toEqual({ stopped: true, pid: rec!.pid });
@@ -154,14 +157,24 @@ describe("stopped (installed, nothing answering)", () => {
   it("falls back to an ollama on PATH and runs it as app-owned", async () => {
     const binDir = path.join(work, "bin");
     writeFakeBinary(path.join(binDir, "ollama"));
-    const { rt } = await makeRuntime({ externalBaseUrl: await nothingAt(), env: { PATH: binDir } });
+    const { rt } = await makeRuntime({ externalBaseUrl: await nothingAt(), env: { PATH: binDir, HOME: home } });
     const s = await rt.ensure();
     expect(s.state).toBe("ready");
     expect(s.owner).toBe("app");
     expect(s.detail).toContain("from PATH");
-    // no models folder yet: the child is told the person's default store outright, since its own home is the app's
+    // the person's own install keeps the person's home; no models folder yet: told the default store outright
     const env = await httpGet(`${s.baseUrl}/fake/env`, 1000);
-    expect(env.kind === "response" && JSON.parse(env.body)).toMatchObject({ OLLAMA_MODELS: path.join(home, ".ollama", "models"), HOME: path.join(appDataDir, "runtime", "home") });
+    expect(env.kind === "response" && JSON.parse(env.body)).toMatchObject({ OLLAMA_MODELS: path.join(home, ".ollama", "models"), HOME: home });
+  });
+
+  it("the person's install keeps a CUDA cache folder the person set", async () => {
+    const binDir = path.join(work, "bin");
+    writeFakeBinary(path.join(binDir, "ollama"));
+    const cache = path.join(work, "my-cuda-cache");
+    const { rt } = await makeRuntime({ externalBaseUrl: await nothingAt(), env: { PATH: binDir, HOME: home, CUDA_CACHE_PATH: cache } });
+    const s = await rt.ensure();
+    const env = await httpGet(`${s.baseUrl}/fake/env`, 1000);
+    expect(env.kind === "response" && JSON.parse(env.body)).toMatchObject({ CUDA_CACHE_PATH: cache, OLLAMA_MAX_LOADED_MODELS: "1", HOME: home });
   });
 
   it("a look while the app's copy is starting waits for that start and answers its result (BD-02)", async () => {
@@ -196,6 +209,26 @@ describe("stopped (installed, nothing answering)", () => {
     expect(s.detail).toContain("boom: cannot bind");
     expect(s.failure).toBe("start");
     expect(existsSync(ownedStateFile(appDataDir))).toBe(false);
+  });
+});
+
+describe("the environment of an Ollama the app starts", () => {
+  const data = path.join("/data", "gates-local");
+  it("the app's own fetched copy on its own models folder gets its own home, on Linux and on Windows", () => {
+    expect(ownedChildEnv({ HOME: "/home/ada" }, data, 11500, "linux", true)).toMatchObject({ HOME: childHome(data), OLLAMA_MAX_LOADED_MODELS: "1", OLLAMA_HOST: "127.0.0.1:11500" });
+    expect(ownedChildEnv({ USERPROFILE: "C:\\Users\\Ada" }, data, 11500, "win32", true)).toMatchObject({ USERPROFILE: childHome(data) });
+  });
+
+  it("the person's install, or any copy on the person's store, keeps the person's home and sign-in", () => {
+    expect(ownedChildEnv({ HOME: "/home/ada" }, data, 11500, "linux", false)).toMatchObject({ HOME: "/home/ada", OLLAMA_MAX_LOADED_MODELS: "1" });
+    expect(ownedChildEnv({ USERPROFILE: "C:\\Users\\Ada" }, data, 11500, "win32", false)).toMatchObject({ USERPROFILE: "C:\\Users\\Ada" });
+  });
+
+  it("a CUDA cache folder the person set is kept; one model at a time is forced over the person's setting", () => {
+    for (const own of [true, false]) {
+      expect(ownedChildEnv({ CUDA_CACHE_PATH: "/mine", OLLAMA_MAX_LOADED_MODELS: "3" }, data, 1, "linux", own)).toMatchObject({ CUDA_CACHE_PATH: "/mine", OLLAMA_MAX_LOADED_MODELS: "1" });
+      expect(ownedChildEnv({}, data, 1, "linux", own).CUDA_CACHE_PATH).toBe(path.join(data, "runtime", "cuda-cache"));
+    }
   });
 });
 

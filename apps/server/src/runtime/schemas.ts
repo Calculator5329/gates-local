@@ -51,6 +51,8 @@ export const OwnedRecord = Schema.Struct({
   startedAt: Schema.Number,
   /** OLLAMA_MODELS as given to this process, so a restart that adopts it still knows. Absent in older records. */
   modelsDir: Schema.optional(Schema.String),
+  /** Started with OLLAMA_MAX_LOADED_MODELS=1, so an adopted copy is known to hold one model. Absent in older records. */
+  holdsOne: Schema.optional(Schema.Boolean),
 });
 export type OwnedRecord = typeof OwnedRecord.Type;
 

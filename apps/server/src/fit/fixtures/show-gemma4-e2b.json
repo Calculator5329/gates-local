@@ -1,0 +1,40 @@
+{
+  "capabilities": ["completion", "vision", "audio", "tools", "thinking"],
+  "model_info": {
+    "gemma4.attention.head_count": 8,
+    "gemma4.attention.head_count_kv": 1,
+    "gemma4.attention.key_length": 512,
+    "gemma4.attention.key_length_swa": 256,
+    "gemma4.attention.layer_norm_rms_epsilon": 1e-6,
+    "gemma4.attention.shared_kv_layers": 20,
+    "gemma4.attention.sliding_window": 512,
+    "gemma4.attention.sliding_window_pattern": [true, true, true, true, false, true, true, true, true, false, true, true, true, true, false, true, true, true, true, false, true, true, true, true, false, true, true, true, true, false, true, true, true, true, false],
+    "gemma4.attention.value_length": 512,
+    "gemma4.attention.value_length_swa": 256,
+    "gemma4.block_count": 35,
+    "gemma4.context_length": 131072,
+    "gemma4.embedding_length": 1536,
+    "gemma4.embedding_length_per_layer_input": 256,
+    "gemma4.feed_forward_length": [6144, 6144, 6144, 6144, 6144, 6144, 6144, 6144, 6144, 6144, 6144, 6144, 6144, 6144, 6144, 12288, 12288, 12288, 12288, 12288, 12288, 12288, 12288, 12288, 12288, 12288, 12288, 12288, 12288, 12288, 12288, 12288, 12288, 12288, 12288],
+    "gemma4.final_logit_softcapping": 30,
+    "gemma4.rope.dimension_count": 512,
+    "gemma4.rope.dimension_count_swa": 256,
+    "gemma4.rope.freq_base": 1000000,
+    "gemma4.rope.freq_base_swa": 10000,
+    "general.architecture": "gemma4",
+    "general.file_type": 15,
+    "general.parameter_count": 4647450147,
+    "general.quantization_version": 2,
+    "general.size_label": "4.6B",
+    "general.type": "model",
+    "tokenizer.ggml.tokens": []
+  },
+  "tensors": [
+    { "name": "output_norm.weight", "type": "F32", "shape": [1536] },
+    { "name": "per_layer_model_proj.weight", "type": "BF16", "shape": [1536, 8960] },
+    { "name": "per_layer_proj_norm.weight", "type": "F32", "shape": [256] },
+    { "name": "per_layer_token_embd.weight", "type": "Q6_K", "shape": [8960, 262144] },
+    { "name": "rope_freqs.weight", "type": "F32", "shape": [256] },
+    { "name": "token_embd.weight", "type": "Q6_K", "shape": [1536, 262144] }
+  ]
+}

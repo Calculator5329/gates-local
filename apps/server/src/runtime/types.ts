@@ -24,6 +24,8 @@ export type RuntimeStatus = {
   noAppCopy?: boolean;
   /** The folder the app's own running Ollama was started with (contracts RuntimeStatus.modelsDir). */
   modelsDir?: string;
+  /** The app's own Ollama holds one model at a time (contracts RuntimeStatus.holdsOne). */
+  holdsOne?: boolean;
   /** "error": what failed (contracts RuntimeStatus.failure). */
   failure?: "download" | "install" | "start";
   /** "installing": the download of the app's own Ollama (contracts RuntimeStatus.install). */

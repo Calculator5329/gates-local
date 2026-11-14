@@ -20,6 +20,11 @@
 // What it never touches: whisper and every other program on the GPU (they are only measured),
 // and a running reply's model. An Ollama or ComfyUI the app did not start is asked, never
 // stopped, restarted or reconfigured (owner ruling 2026-11-13: an unload request is not a stop).
+//
+// An Ollama that holds one model (the app's own, started with OLLAMA_MAX_LOADED_MODELS=1,
+// `holdsOne`) replaces the old model itself when the next one loads: a chat handoff then asks
+// nothing and waits for nothing, and the load clears the other models from the record at once.
+// An image still asks every chat model to leave, since Ollama frees nothing for ComfyUI.
 import type { MemoryState, MemoryThing } from "@gates-local/contracts";
 import { setTimeout as delay } from "node:timers/promises";
 import { forgetGpuReadings } from "../fit/gpu.ts";
@@ -54,6 +59,8 @@ export interface Handoff {
 export interface MemoryOwnerDeps {
   /** The Ollama the app talks to now; undefined when none is ready. */
   readonly ollamaUrl: () => string | undefined;
+  /** That Ollama holds one model at a time and replaces it itself (RuntimeStatus.holdsOne); absent: false. */
+  readonly holdsOne?: () => boolean;
   readonly listLoaded: (baseUrl: string, signal: AbortSignal) => Promise<readonly LoadedModel[]>;
   /** Models a running reply of this app is using: never asked to leave. */
   readonly replying: () => readonly string[];
@@ -84,8 +91,11 @@ export interface LoadedRecord {
   ours(): readonly string[];
   /** The num_ctx this app loaded `model` at; undefined when the app did not load it. */
   oursAt(model: string): number | undefined;
-  /** This app loaded `model` at `numCtx`: it is listed and the app's. */
-  loaded(model: string, numCtx: number): void;
+  /**
+   * This app loaded `model` at `numCtx`: it is listed and the app's. In an Ollama that holds one
+   * model, nothing else is listed any more; returns the app's models that left so, with their num_ctx.
+   */
+  loaded(model: string, numCtx: number): readonly (readonly [string, number])[];
   /** `model` left (an unload): it is no longer listed; returns the num_ctx when it was the app's. */
   left(model: string): number | undefined;
   /** A new /api/ps of the current runtime; returns the app's models it no longer lists, with their num_ctx. */
@@ -94,7 +104,8 @@ export interface LoadedRecord {
   clear(): void;
 }
 
-export function createLoadedRecord(): LoadedRecord {
+/** `holdsOne`: the Ollama it records holds one model at a time, so a load replaces whatever was listed. */
+export function createLoadedRecord(holdsOne: () => boolean = () => false): LoadedRecord {
   let listed = new Set<string>();
   /** Tag -> the num_ctx the app loaded it at. */
   const ours = new Map<string, number>();
@@ -104,8 +115,15 @@ export function createLoadedRecord(): LoadedRecord {
     oursAt: (model) => ours.get(canonicalTag(model)),
     loaded(model, numCtx) {
       const tag = canonicalTag(model);
+      const one = holdsOne();
+      const gone = one ? [...ours].filter(([t]) => t !== tag) : [];
+      if (one) {
+        listed = new Set();
+        ours.clear();
+      }
       listed.add(tag);
       ours.set(tag, numCtx);
+      return gone;
     },
     left(model) {
       const tag = canonicalTag(model);
@@ -178,6 +196,8 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
   /** The setup the engine holds; "unknown" until it was asked to free once, or ran a job. */
   let engineHolds: string | "unknown" | "empty" = "unknown";
   let said = "";
+  /** A chat model wanted from an Ollama that replaces the one it holds itself: nothing is asked to leave. */
+  const oneChat = (want: Want) => want.kind === "chat" && deps.holdsOne?.() === true;
 
   const state = (): MemoryState => ({ ...resident === undefined ? {} : { resident }, ...handoff === undefined ? {} : { handoff } });
   const changed = () => {
@@ -228,7 +248,9 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
     const kept = (m: LoadedModel) => want.kind === "chat" && canonicalTag(m.name) === canonicalTag(want.model);
     const busy = listed.filter((m) => !kept(m) && replying.has(canonicalTag(m.name))).map((m) => m.name);
     const asked = listed.filter((m) => !kept(m) && !replying.has(canonicalTag(m.name))).map((m) => m.name);
-    if (asked.length === 0) return { left: [], stayed: busy };
+    // An Ollama that holds one model unloads the old one itself before it loads the next (and waits
+    // for a running reply first); the fit counts what the old one holds as leaving (fit.ts planWith).
+    if (asked.length === 0 || oneChat(want)) return { left: [], stayed: busy };
     onLeave?.(true);
     for (const model of asked) await unload(baseUrl, model, signal);
     // Ollama answers the unload before its runner has gone: read until /api/ps no longer lists them.
@@ -294,7 +316,7 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
 
   return {
     gate,
-    loaded: createLoadedRecord(),
+    loaded: createLoadedRecord(() => deps.holdsOne?.() === true),
     async handoff(want, signal, options = {}) {
       handoff = { to: thing(want), stage: "leaving" };
       changed();

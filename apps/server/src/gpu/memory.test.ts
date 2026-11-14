@@ -115,3 +115,42 @@ describe("one thing in memory: the handoff", () => {
     expect(m.status().handoff).toBeUndefined();
   });
 });
+
+describe("an Ollama that holds one model (the app's own)", () => {
+  it("a chat handoff asks nothing to leave and waits for nothing: Ollama replaces the model itself", async () => {
+    const o = ollama(["a:1b"], ["a:1b"]);
+    let reads = 0;
+    const m = owner(o, { holdsOne: () => true, waitMs: 5_000, readFree: async () => { reads += 1; return 1e9; } });
+    const started = Date.now();
+    const h = await m.gate(() => m.handoff(chat("b:2b"), signal));
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(o.asked).toEqual([]);
+    expect(reads).toBe(0);
+    expect(h).toMatchObject({ left: [], stayed: [] });
+  });
+
+  it("an image still asks every chat model to leave: Ollama frees nothing for ComfyUI", async () => {
+    const o = ollama(["a:1b"]);
+    const m = owner(o, { holdsOne: () => true });
+    const h = await m.handoff({ kind: "image", setup: "p 512x512" }, signal);
+    expect(o.asked).toEqual(["a:1b"]);
+    expect(h.left).toEqual(["a:1b"]);
+  });
+
+  it("a load clears the other models from the record at once and names the app's that left", () => {
+    const m = owner(ollama([]), { holdsOne: () => true });
+    m.loaded.observe([{ name: "other:1b" }]);
+    expect(m.loaded.loaded("a:1b", 8192)).toEqual([]);
+    expect(m.loaded.listed()).toEqual(["a:1b"]);
+    expect(m.loaded.loaded("b:2b", 16384)).toEqual([["a:1b", 8192]]);
+    expect(m.loaded.listed()).toEqual(["b:2b"]);
+    expect(m.loaded.ours()).toEqual(["b:2b"]);
+  });
+
+  it("an Ollama the person runs keeps both in the record, as before", () => {
+    const m = owner(ollama([]));
+    m.loaded.loaded("a:1b", 8192);
+    expect(m.loaded.loaded("b:2b", 16384)).toEqual([]);
+    expect(m.loaded.listed().toSorted()).toEqual(["a:1b", "b:2b"]);
+  });
+});

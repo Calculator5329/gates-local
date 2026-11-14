@@ -702,6 +702,38 @@ describe("blockingModels: which busy resident models a load would push out", () 
     expect(check.report).toMatchObject({ verdict: "fits", freeVramBytes: 500 * MIB + 12e9 });
     expect(check.report.message).toContain(`held by ${QWEN27}, which leaves to make room`);
   });
+
+  it("an Ollama that holds one model never runs it beside a busy reply: the busy one is in the way however much is free", async () => {
+    const s = await fakeOllama(resident([{ name: QWEN27, vram: 2e9 }]));
+    const base = { baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, busy: [QWEN27], runNvidiaSmi: gpuWith(15000), readMeminfo: plenty };
+    expect(await planLoad(base)).toMatchObject({ report: { verdict: "fits" }, stop: [] });
+    expect(await planLoad({ ...base, holdsOne: true })).toMatchObject({ report: { verdict: "fits" }, stop: [QWEN27] });
+    // the busy model itself, already resident: nothing to replace
+    expect((await planLoad({ ...base, model: QWEN27, holdsOne: true })).stop).toEqual([]);
+    // nothing busy: nothing in the way
+    expect((await planLoad({ ...base, busy: [], holdsOne: true })).stop).toEqual([]);
+  });
+
+  it("an Ollama that holds one model, on a computer with no card: the busy reply is still in the way", async () => {
+    const s = await fakeOllama({ models: [{ name: QWEN27, size: 2e9, size_vram: 0, context_length: 16384 }] });
+    const base = { baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, busy: [QWEN27], readMeminfo: plenty, now: () => 1,
+      runNvidiaSmi: async () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); } };
+    expect((await planLoad(base)).stop).toEqual([]);
+    expect((await planLoad({ ...base, holdsOne: true })).stop).toEqual([QWEN27]);
+  });
+
+  it("an Ollama that holds one model, and a model that refuses even with the busy one gone: nothing is stopped", async () => {
+    const s = await fakeOllama(resident([{ name: QWEN27, vram: 3e9 }]));
+    const check = await planLoad({ baseUrl: s.baseUrl, model: GEMMA, numCtx: 16384, busy: [QWEN27], holdsOne: true, runNvidiaSmi: gpuWith(1000), readMeminfo: async () => "MemAvailable: 1000000 kB\n" });
+    expect(check).toMatchObject({ report: { verdict: "refuse" }, stop: [] });
+  });
+
+  it("after a handoff that asked nothing (an Ollama that holds one model), the old model still counts as leaving", async () => {
+    const s = await fakeOllama(resident([{ name: QWEN27, vram: 12e9 }]));
+    const base = { baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, busy: [], measured: true, runNvidiaSmi: gpuWith(500), readMeminfo: plenty };
+    expect((await planLoad(base)).report.verdict).not.toBe("fits");
+    expect((await planLoad({ ...base, holdsOne: true })).report).toMatchObject({ verdict: "fits", freeVramBytes: 500 * MIB + 12e9 });
+  });
 });
 
 describe("fitEach: the chat pick's fit", () => {

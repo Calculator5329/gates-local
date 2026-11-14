@@ -25,6 +25,12 @@ const ShowResponse = S.Struct({
 });
 export type ShowResponse = typeof ShowResponse.Type;
 
+/** /api/show with verbose: true, read only for its tensor list (the answer also carries the whole vocabulary). */
+const TensorsResponse = S.Struct({
+  tensors: S.optional(S.Array(S.Struct({ name: S.String, type: S.String, shape: S.Array(S.Number) }))),
+});
+export type TensorsResponse = typeof TensorsResponse.Type;
+
 const PsEntry = S.Struct({
   name: S.String,
   model: S.optional(S.String),
@@ -85,6 +91,17 @@ export async function fetchShow(baseUrl: string, model: string, signal?: AbortSi
     ...(signal === undefined ? {} : { signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) }),
   });
   return decode(ShowResponse, "/api/show", body);
+}
+
+/** The model's tensors (name, type, shape), from a verbose /api/show; about 12 MB for a gemma4 file, so ask it rarely. */
+export async function fetchTensors(baseUrl: string, model: string, signal?: AbortSignal): Promise<TensorsResponse> {
+  const body = await request(baseUrl, "/api/show", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model, verbose: true }),
+    ...(signal === undefined ? {} : { signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) }),
+  });
+  return decode(TensorsResponse, "/api/show", body);
 }
 
 /** `signal` ends the request early; it is combined with the usual 15 s timeout. */

@@ -45,4 +45,15 @@ describe("fit words", () => {
     expect(label("spills", false, true)).toBe("Should run in system memory");
     expect(label("spills", true, true)).toBe("Runs in system memory");
   });
+
+  it("a fit on a computer whose card the app cannot read never says GPU: every word says system memory", () => {
+    // Ollama can report VRAM on a card nvidia-smi does not list (an integrated one), so the verdict fits
+    for (const measured of [false, true]) {
+      const w = fitWords(report("fits", measured), "card", true);
+      expect([w.label, w.word, w.chip, w.mark, w.short].join(" | ")).not.toMatch(/GPU/);
+      expect(w).toMatchObject({ word: "Runs in system memory", chip: "system memory", mark: "Runs in system memory", short: "System memory" });
+    }
+    // with a card read, a fit still says the GPU
+    expect(fitWords(report("fits"), "card", false)).toMatchObject({ word: "Runs on GPU", chip: "on GPU", mark: "Runs on the GPU" });
+  });
 });

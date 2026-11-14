@@ -217,29 +217,31 @@ function tail(file: string, chars = 2000): string {
 }
 
 const inFolder = (modelsDir: string | undefined) => (modelsDir === undefined ? {} : { modelsDir });
+/** An adopted copy holds one model only when its record says it was started so (older records do not). */
+const oneIn = (record: OwnedRecord) => (record.holdsOne === true ? { holdsOne: true } : {});
 
 /** The home folder an Ollama the app starts is given, inside the app's runtime folder. */
 export const childHome = (appDataDir: string): string => path.join(runtimeDir(appDataDir), "home");
 
 /**
- * The environment of an Ollama the app starts, so what it writes stays in the app's data and
- * leaves with it. Ollama keeps its key pair at <home>/.ollama with no setting of its own (it asks
- * Go for the home folder), so the child's home is the one way: HOME, or USERPROFILE on Windows,
- * points at childHome. That also moves anything else it would write under a home, such as a
- * graphics driver's shader cache; the models folder never moves with it, since the caller always
- * names OLLAMA_MODELS. The CUDA kernel cache has its own setting. One model is held at a time
- * (the owner's ruling): a second model's turn waits for the first to finish rather than loading beside it.
- * An Ollama already running when the app looks is used as it is: it never gets this.
+ * The environment of an Ollama the app starts. Ollama keeps its key pair at <home>/.ollama with no
+ * setting of its own (it asks Go for the home folder), and that key is what `ollama signin`
+ * registered for cloud models and private pulls. So the home moves only when `ownHome`: the app
+ * runs the Ollama it fetched on its own models folder, and what it writes stays in the app's data
+ * and leaves with it (HOME, or USERPROFILE on Windows, points at childHome; anything else it would
+ * write under a home, such as a graphics driver's shader cache, moves with it). The person's own
+ * install, or any copy on the person's store, keeps the person's home and so their sign-in. The
+ * models folder never moves with the home, since the caller always names OLLAMA_MODELS. The CUDA
+ * kernel cache goes in the app's data unless the person named one. One model is held at a time
+ * (the owner's ruling, RuntimeStatus.holdsOne): a second model's turn waits for the first to
+ * finish rather than loading beside it. An Ollama already running when the app looks is used as
+ * it is: it never gets this.
  */
-export function ownedChildEnv(env: Env, appDataDir: string, appPort: number, platform: NodeJS.Platform): Record<string, string | undefined> {
-  const home = childHome(appDataDir);
-  return {
-    ...env,
-    OLLAMA_HOST: `127.0.0.1:${appPort}`,
-    [platform === "win32" ? "USERPROFILE" : "HOME"]: home,
-    CUDA_CACHE_PATH: path.join(runtimeDir(appDataDir), "cuda-cache"),
-    OLLAMA_MAX_LOADED_MODELS: "1",
-  };
+export function ownedChildEnv(env: Env, appDataDir: string, appPort: number, platform: NodeJS.Platform, ownHome: boolean): Record<string, string | undefined> {
+  const child: Record<string, string | undefined> = { ...env, OLLAMA_HOST: `127.0.0.1:${appPort}`, OLLAMA_MAX_LOADED_MODELS: "1" };
+  if (ownHome) child[platform === "win32" ? "USERPROFILE" : "HOME"] = childHome(appDataDir);
+  child.CUDA_CACHE_PATH ??= path.join(runtimeDir(appDataDir), "cuda-cache");
+  return child;
 }
 
 export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime {
@@ -351,7 +353,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       const version = await adoptable(own.record);
       if (version !== undefined) {
         useAppPort(own.record.baseUrl);
-        return { kind: "ready", status: { state: "ready", owner: "app", baseUrl: appBaseUrl, version, ...inFolder(own.record.modelsDir) } };
+        return { kind: "ready", status: { state: "ready", owner: "app", baseUrl: appBaseUrl, version, ...inFolder(own.record.modelsDir), ...oneIn(own.record) } };
       }
       // Otherwise its port counts as another program's; the scan below moves past it.
     }
@@ -430,7 +432,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
         // A non-Ollama on the system port is still busy, as on a fresh start.
         const busy = withBusy(note?.busy ?? []);
         if (version !== undefined) {
-          return { kind: "ready", status: { state: "ready", owner: "app", baseUrl: appBaseUrl, version, ...busy, ...(own.kind === "ours" ? inFolder(own.record.modelsDir) : {}) } };
+          return { kind: "ready", status: { state: "ready", owner: "app", baseUrl: appBaseUrl, version, ...busy, ...(own.kind === "ours" ? { ...inFolder(own.record.modelsDir), ...oneIn(own.record) } : {}) } };
         }
         return {
           kind: "ready",
@@ -478,8 +480,9 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     mkdirSync(runtimeDir(stateDir), { recursive: true });
     const logFile = serveLogFile(stateDir);
     const log = openSync(logFile, "a");
-    const childEnv = ownedChildEnv(env, appDataDir, appPort, platform);
-    mkdirSync(childHome(appDataDir), { recursive: true });
+    const ownHome = mode === "app" && binary.origin === "app-install";
+    const childEnv = ownedChildEnv(env, appDataDir, appPort, platform, ownHome);
+    if (ownHome) mkdirSync(childHome(appDataDir), { recursive: true });
     let models: { path: string; hasModels?: boolean } | undefined;
     if (mode === "app") {
       // Its own models folder, so it never writes into a system install's store.
@@ -491,8 +494,8 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       models = detectModelsDir(env, options.home, options.systemModelsDirs);
     }
     if (models) childEnv.OLLAMA_MODELS = models.path;
-    // Ollama's own default store, named outright: left to itself it would look under the home
-    // this child is given (ownedChildEnv), not the person's.
+    // Ollama's own default store, named outright: the home this child is given (ownedChildEnv)
+    // need not be the person's.
     else childEnv.OLLAMA_MODELS ??= path.join(options.home ?? os.homedir(), ".ollama", "models");
     const readOnly =
       mode === "app" ? undefined : findModelsDirs(env, options.home, options.systemModelsDirs).find((d) => d.hasModels && !d.writable && !models?.hasModels);
@@ -566,6 +569,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       binary: binary.path,
       startedAt: Date.now(),
       ...inFolder(models?.path),
+      holdsOne: true,
     });
     startedPid = proc.pid;
     const modelsNote =
@@ -580,6 +584,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
           version,
           detail: `App-owned Ollama (pid ${proc.pid}, ${binary.origin === "path" ? "from PATH" : "app install"}).${modelsNote}`,
           ...inFolder(models?.path),
+          holdsOne: true,
         },
         note,
       ),

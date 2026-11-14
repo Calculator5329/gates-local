@@ -7,6 +7,7 @@ import { json, startFakeServer, type FakeServer, type Route } from "../fit/fake-
 import { checkFit } from "../fit/fit.ts";
 import { readGpuStatus } from "../fit/gpu-status.ts";
 import { createGpuLease } from "../gpu/lease.ts";
+import { createMemoryOwner } from "../gpu/memory.ts";
 import { defaultSettings } from "../settings/store.ts";
 import { createRuntimeHandlers } from "./handlers.ts";
 import { ModelActionError, createModelLoader, type ModelLoader, type ModelLoaderDeps } from "./load.ts";
@@ -438,6 +439,18 @@ describe("what the next thing may ask to leave: every resident model no running 
     await loader.load("cold:7b", 16384);
     loader.prune([]);
     expect(loader.appLoadedModels()).toEqual([]);
+  });
+
+  it("in an Ollama that holds one model, a load pushes the app's old model unloaded at once and asks it nothing", async () => {
+    const s = await fakeOllama([]);
+    const pushes: ModelLoad[] = [];
+    const memory = createMemoryOwner({ ollamaUrl: () => s.baseUrl, listLoaded: () => listLoaded(s.baseUrl), replying: () => [], holdsOne: () => true, waitMs: 100, pollMs: 1 });
+    const loader = loaderFor(s, pushes, "fits", { memory });
+    await loader.load("a:1b", 8192);
+    await loader.load("b:2b", 16384);
+    expect(pushes.map((p) => `${p.model} ${p.state}`)).toEqual(["a:1b loading", "a:1b ready", "b:2b loading", "a:1b unloaded", "b:2b ready"]);
+    expect(loader.appLoadedModels()).toEqual(["b:2b"]);
+    expect(s.requests.filter((r) => r.path === "/api/generate").map((r) => (r.body as { keep_alive: unknown }).keep_alive)).toEqual(["5m", "5m"]);
   });
 });
 

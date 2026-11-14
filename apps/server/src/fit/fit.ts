@@ -21,6 +21,8 @@ import { effectiveNumCtx, estimateNeed, parseArchInfo, reportedContextLength, ty
 import { formatBytes, formatGb } from "./format.ts";
 import { defaultMeminfo, defaultNvidiaSmi, gpuReadingConflict, readGpu, readMemory, untilAborted } from "./gpu.ts";
 import { fetchPs, fetchShow, fetchTags, findLoaded, isCopyOf, sameModel, type PsEntry, type PsResponse, type ShowResponse, type TagsResponse } from "./ollama.ts";
+import { hasPerLayerTable, offCardBytes } from "./off-card.ts";
+import { holdsOneAt } from "./one-model.ts";
 import {
   FitError,
   type FitReport,
@@ -235,6 +237,11 @@ export interface FitDeps {
    */
   reclaim?: readonly string[];
   /**
+   * The Ollama at `baseUrl` holds one model at a time and replaces it itself when another loads
+   * (RuntimeStatus.holdsOne). Absent: as one-model.ts holdsOneAt answers for `baseUrl`.
+   */
+  holdsOne?: boolean;
+  /**
    * The card's own memory, and who uses it right now (baseline.ts): every list judges against
    * it. A send never reads it; absent, the lists judge right now too.
    */
@@ -299,9 +306,9 @@ export async function fitWithReadings(deps: FitDeps, model: string, requested: n
   // context_length out may hold it at a smaller one, so that copy is estimated like a cold one),
   // and only when the measurement is on the estimate's basis (measuredNeed). A copy /api/tags does
   // not list has no known weights; /api/ps saying nothing spilled is then the only proof.
-  const measured = (numCtx: number): FitCheck | undefined => {
+  const measured = (numCtx: number, weights = tag?.size ?? 0): FitCheck | undefined => {
     if (!loaded || loaded.context_length !== numCtx) return undefined;
-    const need = measuredNeed(loaded, runnerBytesOf(r.gpu, r.ps.models.length), tag?.size ?? 0);
+    const need = measuredNeed(loaded, runnerBytesOf(r.gpu, r.ps.models.length), weights);
     if (need === undefined) return undefined;
     return { report: { ...measuredReport(model, loaded, numCtx, r.gpu, r.ps.models.length), needVramBytes: need }, resident: true, gpu: r.gpu, memAvailableBytes: r.memAvailableBytes };
   };
@@ -312,15 +319,19 @@ export async function fitWithReadings(deps: FitDeps, model: string, requested: n
   const show = await showOf(deps, r, model);
   // The one place the size a model runs at is decided; the report carries it to every caller.
   const numCtx = effectiveNumCtx(requested, reportedContextLength(show.model_info));
-  const atMax = numCtx === requested ? undefined : measured(numCtx);
+  // On a card, the weights are the file less what the runtime keeps in system memory (off-card.ts).
+  // With no card everything is in system memory, so the whole file counts.
+  const offCard = r.gpu.gpuCount > 0 && hasPerLayerTable(show.model_info) ? await untilAborted(offCardBytes(deps.baseUrl, model, tag.digest ?? tag.name, deps.signal), deps.signal) : undefined;
+  const weights = Math.max(0, tag.size - (offCard ?? 0));
+  const atMax = numCtx === requested && offCard === undefined ? undefined : measured(numCtx, weights);
   if (atMax) return atMax;
-  const estimate = needAt(model, numCtx, tag.size, show.model_info, deps.estimate);
+  const estimate = needAt(model, numCtx, weights, show.model_info, deps.estimate);
   // One basis per model: a copy wholly on the GPU moves every context by its measurement's offset.
   const runnerBytes = runnerBytesOf(r.gpu, r.ps.models.length);
   const loadedCtx = loaded?.context_length;
   const held = loaded ? Math.max(loaded.size_vram, runnerBytes ?? 0) : 0;
-  const atLoaded = loaded && loadedCtx !== undefined ? needAt(model, loadedCtx, tag.size, show.model_info, deps.estimate).need : undefined;
-  const measuredLoaded = loaded && atLoaded ? measuredNeed(loaded, runnerBytes, tag.size) : undefined;
+  const atLoaded = loaded && loadedCtx !== undefined ? needAt(model, loadedCtx, weights, show.model_info, deps.estimate).need : undefined;
+  const measuredLoaded = loaded && atLoaded ? measuredNeed(loaded, runnerBytes, weights) : undefined;
   const offset = measuredLoaded === undefined || atLoaded === undefined ? 0 : measuredLoaded - atLoaded.totalBytes;
   const need = offsetNeed(estimate.need, offset);
 
@@ -358,6 +369,7 @@ export async function fitWithReadings(deps: FitDeps, model: string, requested: n
     ...(freedFrom.length > 0 ? [`free VRAM counts ${formatGb(freed)} held by ${freedFrom.map((m) => m.name).join(", ")}, which leave${freedFrom.length === 1 ? "s" : ""} to make room`] : []),
   ];
   if (estimate.rough !== undefined) notes.push(estimate.rough);
+  if (offCard !== undefined) notes.push(`its per-layer table (${formatGb(offCard)}) stays in system memory and is not counted on the GPU`);
   if (cardRamBytes(r.memTotalBytes) > ramNow) notes.push(`system RAM counts what this computer has; ${formatGb(ramNow)} is free now`);
   const report = judge("now", {
     model,
@@ -421,7 +433,9 @@ export interface LoadPlan {
  *
  * `stop` is empty when the model is resident at this num_ctx, fits without any busy model, or
  * refuses even with every busy one gone (stopping them would not help); otherwise the busy ones
- * whose VRAM makes it fit. The same model in `busy` never counts. Reads only; never loads or stops anything.
+ * whose VRAM makes it fit. In an Ollama that holds one model no model fits beside a busy one: `stop`
+ * is every busy model unless this one is resident or refuses even with them gone. The same model in
+ * `busy` never counts. Reads only; never loads or stops anything.
  */
 export async function planLoad(deps: FitDeps & { model: string; numCtx: number; busy: readonly string[]; measured?: boolean }): Promise<LoadPlan> {
   return planWith(deps, await takeReadings(deps));
@@ -429,20 +443,32 @@ export async function planLoad(deps: FitDeps & { model: string; numCtx: number; 
 
 /** planLoad from a reading already taken: the fit table plans every row from one. */
 export async function planWith(deps: FitDeps & { model: string; numCtx: number; busy: readonly string[]; measured?: boolean }, r: Readings): Promise<LoadPlan> {
-  // With no GPU there is no VRAM to reclaim from another reply.
-  if (r.gpu.gpuCount === 0) return { report: (await fitWithReadings(deps, deps.model, deps.numCtx, r)).report, stop: [] };
   const others = r.ps.models.filter((m) => !isCopyOf(m, deps.model));
   const busy = deps.busy.filter((b) => !sameModel(b, deps.model));
   const isBusy = (name: string) => busy.some((b) => sameModel(b, name));
-  const leaving = deps.measured === true ? [] : others.filter((m) => !isBusy(m.name)).map((m) => m.name);
-  const plan = async (stop: readonly string[]) => (await fitWithReadings({ ...deps, reclaim: [...leaving, ...stop] }, deps.model, deps.numCtx, r)).report;
-  const first = await fitWithReadings({ ...deps, reclaim: leaving }, deps.model, deps.numCtx, r);
-  const report = first.report;
-  if (first.resident === true || report.verdict === "fits") return { report, stop: [] };
   const candidates = others
     .filter((m) => isBusy(m.name))
     .toSorted((a, b) => b.size_vram - a.size_vram)
     .map((m) => m.name);
+  // An Ollama that holds one model (RuntimeStatus.holdsOne) never runs this model beside another:
+  // it unloads the idle ones itself at this load, and waits for a busy one's reply to end, so every
+  // busy one is in the way whatever is free, on a card or not.
+  const one = deps.holdsOne ?? holdsOneAt(deps.baseUrl);
+  if (r.gpu.gpuCount === 0) {
+    // With no GPU there is no VRAM to reclaim from another reply.
+    const check = await fitWithReadings(deps, deps.model, deps.numCtx, r);
+    const inTheWay = one && check.resident !== true && check.report.verdict !== "refuse";
+    return { report: check.report, stop: inTheWay ? candidates : [] };
+  }
+  // The handoff asked nothing to leave from an Ollama that holds one model, so even after it
+  // (`measured`) what the idle ones hold counts as leaving.
+  const leaving = deps.measured === true && !one ? [] : others.filter((m) => !isBusy(m.name)).map((m) => m.name);
+  const plan = async (stop: readonly string[]) => (await fitWithReadings({ ...deps, reclaim: [...leaving, ...stop] }, deps.model, deps.numCtx, r)).report;
+  const first = await fitWithReadings({ ...deps, reclaim: leaving }, deps.model, deps.numCtx, r);
+  const report = first.report;
+  if (first.resident === true || candidates.length === 0) return { report, stop: [] };
+  if (one) return { report, stop: (await plan(candidates)).verdict === "refuse" ? [] : candidates };
+  if (report.verdict === "fits") return { report, stop: [] };
   for (let n = 1; n <= candidates.length; n++) {
     if ((await plan(candidates.slice(0, n))).verdict === "fits") return { report, stop: candidates.slice(0, n) };
   }

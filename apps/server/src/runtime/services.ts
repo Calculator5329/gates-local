@@ -11,6 +11,7 @@ import { catalogModels } from "./catalog.ts";
 import type { FitReport } from "../fit/types.ts";
 import { cached, procListeningPids, readGpuStatus, systemdMainPid } from "../fit/gpu-status.ts";
 import { createGpuWatcher, type GpuWatcher } from "../fit/gpu-watch.ts";
+import { answerHoldsOne } from "../fit/one-model.ts";
 import { defaultNvidiaSmi, forgetGpuReadings, readGpu } from "../fit/gpu.ts";
 import { createMemoryOwner, type MemoryEngine, type MemoryOwner } from "../gpu/memory.ts";
 import { createGpuHandlers } from "../fit/handlers.ts";
@@ -169,9 +170,14 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     log,
   });
 
+  // The app's own Ollama holds one model (OLLAMA_MAX_LOADED_MODELS=1): every plan against its
+  // address counts the model in memory as leaving, and a chat handoff asks nothing (it replaces it).
+  const holdsOne = () => runtime.baseUrl() !== undefined && runtime.status().holdsOne === true;
+  const forgetHoldsOne = answerHoldsOne((baseUrl) => holdsOne() && runtime.baseUrl() === baseUrl);
   // The one owner of memory (gpu/memory.ts): every load, send and image job hands off through it.
   const owner = createMemoryOwner({
     ollamaUrl: () => runtime.baseUrl(),
+    holdsOne,
     listLoaded: (url, signal) => listLoaded(url, undefined, signal),
     replying: () => loader?.replying() ?? [],
     engine: () => engine,
@@ -287,6 +293,7 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     handlers,
     killRuntimeNow: () => runtime.killNow(),
     async close({ stopRuntime }) {
+      forgetHoldsOne();
       pulls?.stop();
       gpu.stop();
       catalog.stop();

@@ -28,7 +28,9 @@ export function fitWords(r: Pick<FitReport, "verdict" | "numCtx" | "needVramByte
   const measured = r.source === "measured";
   const label = labelOf(r.verdict, measured, cpu);
   if (r.verdict === "fits") {
-    return { basis, k: "gpu", label, word: "Runs on GPU", chip: "on GPU", detail: "", mark: "Runs on the GPU", short: cpu ? "System memory" : "Fits", amt: 0 };
+    // A card the app cannot read (Ollama may still report VRAM on one nvidia-smi does not list) is no GPU to these words.
+    if (cpu) return { basis, k: "gpu", label, word: "Runs in system memory", chip: "system memory", detail: "", mark: "Runs in system memory", short: "System memory", amt: 0 };
+    return { basis, k: "gpu", label, word: "Runs on GPU", chip: "on GPU", detail: "", mark: "Runs on the GPU", short: "Fits", amt: 0 };
   }
   if (r.verdict === "spills") {
     return {
