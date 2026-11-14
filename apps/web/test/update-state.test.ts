@@ -65,19 +65,19 @@ describe("downloading", () => {
 
 describe("ready", () => {
   it("22 only when the copy can really restart into it: the green up-arrow alone, no dot", () => {
-    const ready = withCheck(installed, newer({ download: "ready", lines: ["Version 1.3.0 is downloaded and checked."] }));
+    const ready = withCheck(installed, newer({ download: "ready", lines: ["Update 1.3.0 is downloaded and checked."] }));
     expect(icon(ready, { canRestart: true })).toMatchObject({ state: "ready", click: "restart", dot: null, label: "Restart to update" });
   });
-  it("24 a copy that cannot install it: its folder in the desktop app, else the release page", () => {
+  it("24 a copy that cannot install it says the update waits and opens Settings, where the words and Open folder are", () => {
     const ready = withCheck(installed, newer({ download: "ready", lines: ["Update 1.3.0 is downloaded and checked. Run this installer to update."] }));
-    expect(icon(ready, { canShow: true })).toMatchObject({ state: "external", click: "folder", target: "1.3.0", dot: "amber", label: "Can't update itself" });
-    expect(icon(ready)).toMatchObject({ state: "external", click: "page", page: PAGE, dot: "amber" });
+    // A computer with no file manager opens nothing for a folder: the click never depends on one.
+    expect(icon(ready)).toEqual({ state: "waiting", label: "Update 1.3.0 waiting", click: "settings", busy: false, dot: "amber" });
   });
   it("a clone never shows it", () => {
     expect(icon(withCheck(clone, available), { canRestart: true })?.state).toBe("available");
   });
   it("UW-01 an installed copy can restart only when the server says it can and approves this version, in the desktop app", () => {
-    const ready = { ...withCheck(installed, newer({ download: "ready", restart: true, lines: ["Version 1.3.0 is downloaded and checked."] })), approval: "a1" };
+    const ready = { ...withCheck(installed, newer({ download: "ready", restart: true, lines: ["Update 1.3.0 is downloaded and checked."] })), approval: "a1" };
     expect(restartable(ready, true)).toBe(true);
     expect(icon(ready, { canRestart: restartable(ready, true) })).toMatchObject({ state: "ready", click: "restart" });
     expect(restartable(ready, false)).toBe(false);
@@ -154,7 +154,7 @@ describe("failed", () => {
 
 describe("can't update itself", () => {
   it("an installed copy with no installer for it: the release page, dot because something newer is known", () => {
-    const i = icon(withCheck(installed, newer({ forThisCopy: false, lines: ["Version 1.3.0 is available, but this copy cannot install it by itself. Download it from the release page."] })), { canShow: true });
+    const i = icon(withCheck(installed, newer({ forThisCopy: false, lines: ["Version 1.3.0 is available, but this copy cannot install it by itself. Download it from the release page."] })));
     expect(i).toMatchObject({ state: "external", click: "page", page: PAGE, dot: "amber", label: "Can't update itself" });
   });
   it("an installed copy with no release key: the release page, no dot", () => {
@@ -204,7 +204,7 @@ it("the tooltip rule: every name is one to three words plus a version, and no se
   const all: (UpdateIcon | null)[] = [
     icon(null), icon(fresh), icon(withCheck(installed, newer())), icon(clone, { checking: true }), icon(clone, { installing: true }),
     icon(withCheck(installed, newer({ download: "downloading" }))), icon(withCheck(installed, newer({ download: "ready" })), { canRestart: true }),
-    icon(withCheck(installed, newer({ download: "ready", lines: ["<img src=x> a long server sentence"] })), { canShow: true }),
+    icon(withCheck(installed, newer({ download: "ready", lines: ["<img src=x> a long server sentence"] }))),
     icon(fresh, { error: "a long reason from the updater" }), icon(neither),
     icon(withCheck(clone, { state: "cannot-check", checkedAt: 3, reason: "remote", lines: ["Could not reach the git remote."] })),
   ];

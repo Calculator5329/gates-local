@@ -33,7 +33,7 @@ it("a start that throws returns and shows Couldn't start the update, and release
 const READY: UpdateStatus = {
   version: { kind: "installed", version: "1.2.3" },
   result: null,
-  lastCheck: { state: "newer", checkedAt: 1, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Version 1.3.0 is downloaded and checked."], page: "https://example.invalid/latest", download: "ready", restart: true },
+  lastCheck: { state: "newer", checkedAt: 1, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Update 1.3.0 is downloaded and checked."], page: "https://example.invalid/latest", download: "ready", restart: true },
   approval: "approval-i",
   activity: [],
 };

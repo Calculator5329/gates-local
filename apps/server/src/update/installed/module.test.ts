@@ -267,6 +267,7 @@ describe("composition", () => {
 });
 
 describe("the download's words", () => {
+  const PROGRAM = "/apps/Gates-Local-1.2.3-x86_64.AppImage";
   it("says each state in Settings' words", () => {
     expect(downloadLines("1.3.0", { state: "downloading", received: 12_345_678, total: 98_765_432 })).toEqual(["Downloading version 1.3.0 (12 of 99 MB). You can keep chatting."]);
     expect(downloadLines("1.3.0", { state: "downloading", received: 1_250_000, total: 4_000_000 })).toEqual(["Downloading version 1.3.0 (1.2 of 4.0 MB). You can keep chatting."]);
@@ -274,8 +275,10 @@ describe("the download's words", () => {
     expect(downloadLines("1.3.0", { state: "failed" })).toEqual(["Could not download version 1.3.0. Check your connection."]);
     expect(downloadLines("1.3.0", { state: "disk", volume: "/home", needed: 98_100_000, free: 97_900_000 })).toEqual(["Not enough free space on /home for version 1.3.0 (needs 99 MB, 97 MB free). Free some space, then use Check for updates."]);
     // A copy that cannot install it keeps the file and says what to do with it, in one line.
-    expect(downloadLines("1.3.0", { state: "ready" }, "none", undefined, "linux")).toEqual(["Update 1.3.0 is downloaded and checked. Put it in place of this file."]);
-    expect(downloadLines("1.3.0", { state: "ready" }, "read-only", undefined, "linux")).toEqual(["Update 1.3.0 is downloaded and checked. Put it in place of this file."]);
+    // On Linux the sentence names the running file, the one to put the download in place of.
+    expect(downloadLines("1.3.0", { state: "ready" }, "no-permission", undefined, "linux", PROGRAM)).toEqual([`Update 1.3.0 is downloaded and checked. Put it in place of ${PROGRAM}.`]);
+    expect(downloadLines("1.3.0", { state: "ready" }, "read-only", undefined, "linux", PROGRAM)).toEqual([`Update 1.3.0 is downloaded and checked. Put it in place of ${PROGRAM}.`]);
+    expect(downloadLines("1.3.0", { state: "ready" }, "not-appimage", undefined, "linux")).toEqual(["Update 1.3.0 is downloaded and checked. Put it in place of the file you started Gates Local from."]);
     expect(downloadLines("1.3.0", { state: "ready" }, "none", undefined, "win32")).toEqual(["Update 1.3.0 is downloaded and checked. Run this installer to update."]);
     expect(downloadLines("1.3.0", { state: "ready" }, "pinned", undefined, "win32")).toEqual(["Update 1.3.0 is downloaded and checked. Run this installer to update."]);
   });
@@ -306,7 +309,6 @@ describe("downloading a newer version", () => {
   let page: ReleasePage;
   beforeEach(async () => { dataDir = tempDataDir(); page = await releasePage(); });
   afterEach(async () => { await page.close(); fs.rmSync(dataDir, { recursive: true, force: true }); });
-
   const folder = (version = VERSION) => path.join(dataDir, "updates", version);
   const artifactRequests = () => page.requests.filter((p) => p === ARTIFACT).length;
   const serveGood = () => {
@@ -318,7 +320,7 @@ describe("downloading a newer version", () => {
     const sw = toggle(on);
     const pushes: UpdateStatus[] = [];
     const module = createInstalledUpdateModule({
-      version: "1.2.3", platform: "linux", arch: "x64",
+      version: "1.2.3", platform: "linux", arch: "x64", program: "/apps/Gates-Local-1.2.3-x86_64.AppImage",
       feed: { base: page.base, page: `${page.base.href}/latest`, keys: [key.publicKey], allowLoopbackHttp: true },
       dataDir, automatic: sw.automatic, keep: () => [],
       freeSpace: () => Promise.resolve({ volume: "/data", free: 10 ** 12 }),
@@ -342,7 +344,7 @@ describe("downloading a newer version", () => {
     const { module } = installed(true);
     expect(await module.check()).toMatchObject({ state: "newer", download: "downloading" });
     await settled(module);
-    expect(shown(module)).toMatchObject({ download: "ready", lines: ["Update 1.3.0 is downloaded and checked. Put it in place of this file."], page: `${page.base.href}/latest` });
+    expect(shown(module)).toMatchObject({ download: "ready", lines: ["Update 1.3.0 is downloaded and checked. Put it in place of /apps/Gates-Local-1.2.3-x86_64.AppImage."], page: `${page.base.href}/latest` });
     expect(fs.readdirSync(folder()).toSorted()).toEqual([FILE, LIST_FILE, SIGNATURE_FILE]);
     expect(sha512(fs.readFileSync(path.join(folder(), FILE)))).toBe(sha512(BYTES));
     expect(artifactRequests()).toBe(1);
@@ -705,7 +707,7 @@ describe("downloading a newer version", () => {
       expect(module.status()).not.toHaveProperty("approval");
       await settled(module);
       const check = shown(module);
-      expect(check).toMatchObject({ download: "ready", restart: true, lines: ["Version 1.3.0 is downloaded and checked."] });
+      expect(check).toMatchObject({ download: "ready", restart: true, lines: ["Update 1.3.0 is downloaded and checked."] });
       const approval = module.status().approval;
       expect(typeof approval).toBe("string");
       expect(await module.prepare("an older approval")).toMatchObject({ state: "changed" });
@@ -739,7 +741,7 @@ describe("downloading a newer version", () => {
         await module.check();
         await settled(module);
         const check = shown(module);
-        expect(check).toMatchObject({ download: "ready", lines: ["Update 1.3.0 is downloaded and checked. Put it in place of this file."], page: `${page.base.href}/latest` });
+        expect(check).toMatchObject({ download: "ready", lines: ["Update 1.3.0 is downloaded and checked. Put it in place of /apps/Gates-Local-1.2.3-x86_64.AppImage."], page: `${page.base.href}/latest` });
         expect(check).not.toHaveProperty("restart");
         expect(module.status()).not.toHaveProperty("approval");
         expect(await module.prepare("anything")).toEqual({ state: "blocked", message: sentence });
@@ -776,7 +778,7 @@ describe("downloading a newer version", () => {
         await eventually(() => { if (shown(module).restart !== true) throw new Error("no Restart yet"); });
         expect(shown(module)).toMatchObject({
           download: "ready", restart: true,
-          lines: ["Version 1.3.0 is downloaded and checked.", `If version 1.3.0 does not start, Gates Local will not go back by itself. To go back, run ${kept}.`],
+          lines: ["Update 1.3.0 is downloaded and checked.", `If version 1.3.0 does not start, Gates Local will not go back by itself. To go back, run ${kept}.`],
         });
         expect(typeof module.status().approval).toBe("string");
         expect(fs.readdirSync(path.join(dataDir, "updates")).toSorted()).toEqual([RUNNING, VERSION]);
@@ -793,7 +795,7 @@ describe("downloading a newer version", () => {
           await settled(module);
           await eventually(() => { if (shown(module).restart !== true) throw new Error("no Restart yet"); });
           expect(shown(module).lines).toEqual([
-            "Version 1.3.0 is downloaded and checked.",
+            "Update 1.3.0 is downloaded and checked.",
             `If version 1.3.0 does not start, Gates Local will not go back by itself. To go back, download version 1.2.3 from ${page.base.href}/tag/v1.2.3.`,
           ]);
           await module.close();

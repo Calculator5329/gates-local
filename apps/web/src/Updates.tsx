@@ -2,7 +2,7 @@
 import type { UpdateCheck, UpdateStatus } from "@gates-local/contracts";
 import { useEffect, useRef, useState } from "react";
 import { Icon, type IconId } from "./icons.tsx";
-import { canShowUpdate, canUpdateHere, checkForUpdates, dismissUpdateResult, downloadUpdate, openSettings, readUpdateStatus, showUpdate, updateAndRestart } from "./session.ts";
+import { canUpdateHere, checkForUpdates, dismissUpdateResult, downloadUpdate, openSettings, readUpdateStatus, updateAndRestart } from "./session.ts";
 import { NA, getState, useStore } from "./store.ts";
 import { closeTip, esc } from "./ui.tsx";
 import { RESTART, restartable, type UpdateClick, type UpdateIcon, type UpdateInput, outdated, updateIcon, ver } from "./update-state.ts";
@@ -66,6 +66,8 @@ const LOOK: Record<UpdateIcon["state"], { icon: IconId; tone?: FootProps["tone"]
   downloading: { icon: "fetch", tone: "fg" },
   // Ready to restart: the green up-arrow alone, no dot (audit of 0.2.4, decision 22).
   ready: { icon: "up", tone: "green" },
+  // Downloaded for a copy that cannot install it: the same up-arrow, plain, with the amber dot; the click opens Settings.
+  waiting: { icon: "up", tone: "fg" },
   updating: { icon: "spin", spin: true },
   failed: { icon: "alert", tone: "red" },
   external: { icon: "external", tone: "fg" },
@@ -180,7 +182,7 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
   const button = useRef<HTMLSpanElement>(null);
   const known = status === NA || status === undefined ? null : status;
   const desktop = canUpdateHere();
-  const u = updateIcon({ status: known, desktop, checking, installing, error, clickError, downloading, canRestart: restartable(known, desktop), canShow: canShowUpdate() });
+  const u = updateIcon({ status: known, desktop, checking, installing, error, clickError, downloading, canRestart: restartable(known, desktop) });
   const click = u?.click ?? null;
   // The ask belongs to an Update or Restart click: it closes when the click stops being one, and with the drawer.
   useEffect(() => {
@@ -242,15 +244,6 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
     },
     update: () => void restart(),
     restart: () => void restart(),
-    // A copy that cannot install its download: the checked file in its folder, to run it from there (decision 24).
-    folder: () => {
-      if (u.target === undefined) return;
-      const page = check?.state === "newer" ? check.page : undefined;
-      // the file is gone or failed its check again: the release page has the installer
-      void showUpdate(u.target).then((message) => {
-        if (message !== null && page !== undefined) window.open(page, "_blank", "noopener,noreferrer");
-      });
-    },
     download: () => {
       setClickError(null);
       setDownloading(true);

@@ -410,7 +410,8 @@ async function fetchInto(folder: string, final: string, artifact: ReleaseArtifac
   await writeFlushed(path.join(folder, LIST_FILE), o.list);
   await writeFlushed(path.join(folder, SIGNATURE_FILE), o.signature);
   const part = `${final}${PART}`;
-  const handle = await fs.promises.open(part, "wx");
+  // An AppImage is a program: a copy that cannot replace itself leaves it for the person to put in place and start.
+  const handle = await fs.promises.open(part, "wx", artifact.kind === "appimage" ? 0o755 : 0o644);
   let read: Streamed<Read> | undefined;
   let taken = 0;
   try {

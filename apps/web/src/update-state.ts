@@ -3,12 +3,13 @@ import type { UpdateBlocked, UpdateCheck, UpdateStatus } from "@gates-local/cont
 /**
  * The sidebar's update icon, one state per row of the footer table:
  * idle (up to date or nothing known), checking, available, downloading,
- * ready, updating, failed and external (this copy cannot update itself).
+ * ready, waiting (downloaded for a copy that cannot install it), updating,
+ * failed and external (this copy cannot update itself).
  */
-export type UpdateIconState = "idle" | "checking" | "available" | "downloading" | "ready" | "updating" | "failed" | "external";
+export type UpdateIconState = "idle" | "checking" | "available" | "downloading" | "ready" | "waiting" | "updating" | "failed" | "external";
 
-/** What a click does: check now, update (after a confirm), download, restart into a downloaded version, open the release page, the download's folder, or the version row. */
-export type UpdateClick = "check" | "update" | "download" | "restart" | "page" | "folder" | "settings";
+/** What a click does: check now, update (after a confirm), download, restart into a downloaded version, open the release page, or the version row. */
+export type UpdateClick = "check" | "update" | "download" | "restart" | "page" | "settings";
 
 /**
  * The icon says the state; its name (aria-label and tooltip) is a few words
@@ -26,8 +27,6 @@ export interface UpdateIcon {
   /** downloading: 0 to 1, or null when the status carries no numbers (a turning arc). */
   readonly progress?: number | null;
   readonly page?: string;
-  /** folder: the downloaded version whose folder the click opens. */
-  readonly target?: string;
   /** The click also dismisses the shown result (a stopped or refused update) as it acts on it. */
   readonly dismiss?: boolean;
 }
@@ -63,8 +62,6 @@ export interface UpdateInput {
    * server's lines say why not, and a downloaded version shows as external.
    */
   readonly canRestart?: boolean;
-  /** The desktop app can open a downloaded version's folder (canShowUpdate); without it the click opens the release page. */
-  readonly canShow?: boolean;
 }
 
 /** The one clock time every update surface shows ("9:05 AM"). */
@@ -125,7 +122,7 @@ function blockedIcon(check: Extract<UpdateCheck, { state: "cannot-check" }>): Up
   return icon("external", ITSELF, "settings");
 }
 
-function installedIcon(check: Extract<UpdateCheck, { state: "newer" }>, canRestart: boolean, canShow: boolean, downloading: boolean): UpdateIcon {
+function installedIcon(check: Extract<UpdateCheck, { state: "newer" }>, canRestart: boolean, downloading: boolean): UpdateIcon {
   const target = ver(check.target);
   if (!check.forThisCopy) return icon("external", ITSELF, "page", { dot: "amber", page: check.page });
   switch (check.download) {
@@ -135,11 +132,10 @@ function installedIcon(check: Extract<UpdateCheck, { state: "newer" }>, canResta
     case "downloading":
       return icon("downloading", `Downloading ${target}`, null, { progress: null });
     case "ready":
-      // Ready is the green up-arrow alone, no dot (audit of 0.2.4, decision 22). A copy that cannot install it opens the checked file's folder.
+      // Ready is the green up-arrow alone, no dot (audit of 0.2.4, decision 22). A copy that cannot install it says the
+      // update waits and opens Settings › Updates, whose line says what to do and whose Open folder opens the file's folder.
       if (canRestart) return icon("ready", RESTART, "restart");
-      return canShow
-        ? icon("external", ITSELF, "folder", { dot: "amber", target: check.target })
-        : icon("external", ITSELF, "page", { dot: "amber", page: check.page });
+      return icon("waiting", `Update ${target} waiting`, "settings", { dot: "amber" });
     case "bad":
     case "failed":
     case "disk":
@@ -148,7 +144,7 @@ function installedIcon(check: Extract<UpdateCheck, { state: "newer" }>, canResta
 }
 
 /** The icon for a status, or null where the icon is not shown (a browser tab, a phone). */
-export function updateIcon({ status, desktop, checking = false, installing = false, error = null, clickError = null, downloading = false, canRestart = false, canShow = false }: UpdateInput): UpdateIcon | null {
+export function updateIcon({ status, desktop, checking = false, installing = false, error = null, clickError = null, downloading = false, canRestart = false }: UpdateInput): UpdateIcon | null {
   if (!desktop) return null;
   if (installing || status?.installing === true) return icon("updating", "Closing to update…", null);
   if (checking) return icon("checking", "Checking for updates…", null);
@@ -176,7 +172,7 @@ export function updateIcon({ status, desktop, checking = false, installing = fal
     case "available":
       return icon("available", `Update to ${ver(check.target)}`, retry, { dot: "amber" });
     case "newer":
-      return installedIcon(check, canRestart, canShow, downloading);
+      return installedIcon(check, canRestart, downloading);
     case "cannot-check":
       return blockedIcon(check);
   }

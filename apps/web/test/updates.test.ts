@@ -322,15 +322,30 @@ describe("the Updates group of an installed copy", () => {
     // The line is said whole: it may wrap instead of being cut off.
     expect(html).toMatch(/<span class="src-help" role="status" style="white-space:normal">Update 1\.3\.0 is downloaded and checked\. Run this installer to update\.<\/span>/);
     // A folder that could not be shown says why in the line's place.
-    expect(stateLine(view({ canUpdate: true, canShow: true, onFolder, folderErr: "The download did not pass its check.", ...ready }))?.[2]).toBe("The download did not pass its check.");
+    const folderFailed = view({ canUpdate: true, canShow: true, onFolder, folderErr: "The download did not pass its check.", ...ready });
+    expect(folderFailed).toMatch(/<span class="src-help act-err" role="alert" style="display:grid"><span style="grid-area:1 \/ 1">The download did not pass its check\.<\/span>/);
     // A phone sees the line and no control.
     expect(view({ status: { ...ready.status, canControl: false }, canShow: true })).not.toContain("settings.updates.folder");
   });
 
+  it("checking a download this copy cannot install says Checking… in the line's own space, so the row keeps its height", () => {
+    const line = "Update 1.3.0 is downloaded and checked. Put it in place of /apps/Gates-Local-1.2.3-x86_64.AppImage.";
+    const ready = installedWith({ state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: [line], page: PAGE, download: "ready" });
+    // A browser tab: no folder to open, so the control is Check for updates.
+    for (const over of [{ checking: true }, { checkErr: "Gates Local is not answering. Try again in a moment.", checkErrSince: AT }]) {
+      const html = view({ ...over, ...ready });
+      expect(text(html), JSON.stringify(over)).toContain(over.checking === true ? "Checking…" : "Gates Local is not answering.");
+      // The kept line stays under it, hidden, holding its two lines.
+      expect(html, JSON.stringify(over)).toMatch(new RegExp(`<span aria-hidden="true" style="[^"]*visibility:hidden[^"]*">${line.replace(/[.]/g, "\\.")}</span>`));
+    }
+    // A one-line state shows Checking… alone, as before.
+    expect(view({ checking: true, ...withCheck({ state: "up-to-date", checkedAt: AT, channel: "release", current: "abc1234" }) })).not.toContain("visibility:hidden");
+  });
+
   it("UW-06 downloaded on a copy that can replace its file: Restart to update in the desktop app, no release page", () => {
-    const ready = installedWith({ state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Version 1.3.0 is downloaded and checked.", "If version 1.3.0 does not start, run Setup-1.2.3.exe."], page: PAGE, download: "ready", restart: true });
+    const ready = installedWith({ state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Update 1.3.0 is downloaded and checked.","If version 1.3.0 does not start, run Setup-1.2.3.exe."], page: PAGE, download: "ready", restart: true });
     const html = view({ canUpdate: true, canShow: true, ...ready });
-    expect(stateLine(html)?.[2]).toBe("Update 1.3.0 downloaded and checked.");
+    expect(stateLine(html)?.[2]).toBe("Update 1.3.0 is downloaded and checked.");
     expect(html).toMatch(/<button[^>]*>Restart to update<\/button>/);
     expect(html).not.toContain("settings.updates.folder");
     expect(html.includes(link)).toBe(false);
@@ -368,11 +383,10 @@ describe("the Updates group of an installed copy", () => {
 
   it("puts no install control in the sidebar for a newer version", async () => {
     const { updateIcon } = await import("../src/update-state.ts");
-    // Not ready, not update: the icon downloads it, and a downloaded version opens its folder, or the release page without one.
+    // Not ready, not update: the icon downloads it, and a downloaded version opens Settings, where its folder is.
     expect(updateIcon({ status: { ...INSTALLED, lastCheck: { state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: [], page: PAGE } }, desktop: true })?.click).toBe("download");
     const ready = { ...INSTALLED, lastCheck: { state: "newer" as const, checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: [], page: PAGE, download: "ready" as const } };
-    expect(updateIcon({ status: ready, desktop: true })?.click).toBe("page");
-    expect(updateIcon({ status: ready, desktop: true, canShow: true })?.click).toBe("folder");
+    expect(updateIcon({ status: ready, desktop: true })?.click).toBe("settings");
   });
 });
 

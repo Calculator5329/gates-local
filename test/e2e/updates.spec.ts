@@ -129,7 +129,7 @@ const upToDate = (current: string, channel: "main" | "release", checkedAt: numbe
 test.describe("Version with the update state, then the automatic switch", () => {
   test.use({ colorScheme: "dark" });
   const CHECKED = Date.UTC(2026, 10, 13, 6, 57);
-  interface Copy { readonly name: string; readonly idle: UpdateStatus; readonly said: string; readonly found: UpdateCheck; readonly failed: UpdateCheck & { state: "cannot-check" } }
+  interface Copy { readonly name: string; readonly idle: UpdateStatus; readonly said: string; readonly found: UpdateCheck; readonly failed: UpdateCheck & { state: "cannot-check" }; readonly itself: UpdateCheck & { state: "cannot-check" } }
   const copies: readonly Copy[] = [
     {
       name: "clone",
@@ -137,6 +137,7 @@ test.describe("Version with the update state, then the automatic switch", () => 
       said: "7093c45",
       found: { state: "available", checkedAt: CHECKED, channel: "release", current: "7093c45", target: "def5678", total: 25, changes: ["Faster chat", "A new setting", "Fewer words in Settings", "Two", "One"] },
       failed: { state: "cannot-check", checkedAt: CHECKED, reason: "error", lines: ["The check stopped on an error: git fetch exited with code 128", "Try again, or run pnpm run app-update --check in the Gates Local folder to see more."] },
+      itself: { state: "cannot-check", checkedAt: CHECKED, reason: "local-changes", lines: ["1 file has changes that are not saved in git."] },
     },
     {
       name: "installed",
@@ -144,10 +145,11 @@ test.describe("Version with the update state, then the automatic switch", () => 
       said: "0.2.1",
       found: { state: "newer", checkedAt: CHECKED, current: "0.2.1", target: "0.2.2", forThisCopy: true, lines: ["Downloading version 0.2.2 (12 of 98 MB). You can keep chatting."], page: "https://example.invalid/releases/latest", download: "downloading" },
       failed: { state: "cannot-check", checkedAt: CHECKED, reason: "unreachable", lines: ["Could not reach the update server. Check your connection."] },
+      itself: { state: "cannot-check", checkedAt: CHECKED, reason: "no-key", lines: ["This build has no release key, so it cannot check for updates. Download the latest version from the release page."], page: "https://example.invalid/releases/latest" },
     },
   ];
   // Guards the owner's ruling on the Updates card (decision 25): one row for the version and its state, and the card never changes size.
-  for (const copy of copies) test(`${copy.name}: one row for the version and its state; the card keeps its size through checking, up to date, found and failed`, async ({ page, open }) => {
+  for (const copy of copies) test(`${copy.name}: one row for the version and its state; the card keeps its size through checking, up to date, found, failed and cannot update itself`, async ({ page, open }) => {
     let lastCheck: UpdateCheck | null = null;
     let answer: ((next: UpdateCheck) => void) | undefined;
     await page.routeWebSocket(/\/\?token=/, (socket) => {
@@ -200,6 +202,7 @@ test.describe("Version with the update state, then the automatic switch", () => 
       ["up to date", upToDate(copy.said, "release", CHECKED), "Up to date"],
       ["found", copy.found, copy.found.state === "available" || copy.found.state === "newer" ? copy.found.target : ""],
       ["failed", copy.failed, copy.failed.lines[0] ?? ""],
+      ["cannot update itself", copy.itself, copy.itself.lines[0] ?? ""],
       ["up to date again", upToDate(copy.said, "release", CHECKED + 60_000), "Up to date"],
     ];
     for (const [step, next, words] of steps) {
@@ -296,6 +299,73 @@ test.describe("Version with the update state, then the automatic switch", () => 
     expect(heights, "the card's height changed at 390px").toEqual([]);
   });
 
+  // Guards the owner's ruling on the Updates card: a check moves nothing, also where a download waits for the person
+  // (a copy that cannot replace itself); its footer icon says it waits and opens Settings.
+  for (const width of [1280, 390]) test(`a download this copy cannot install at ${width}px: the footer says it waits and opens Settings, a check keeps the card's size`, async ({ page, open }, info) => {
+    await page.setViewportSize({ width, height: 844 });
+    const PAGE = "https://example.invalid/releases/latest";
+    const kept: UpdateCheck = { state: "newer", checkedAt: CHECKED, current: "0.2.1", target: "0.2.2", forThisCopy: true, lines: ["Update 0.2.2 is downloaded and checked. Put it in place of /apps/Gates-Local-0.2.1-x86_64.AppImage."], page: PAGE, download: "ready" };
+    let lastCheck: UpdateCheck = kept;
+    let answer: ((next: UpdateCheck) => void) | undefined;
+    // The desktop app, with no folder to open (the Linux copy that cannot replace its own file).
+    await page.addInitScript(() => {
+      Object.assign(window, { gatesLocal: { updateApprovalVersion: 2, getServerUrl: async () => new URLSearchParams(location.search).get("server"), onState: () => () => undefined, updateAndRestart: async () => ({ ok: true }) } });
+    });
+    await page.routeWebSocket(/\/\?token=/, (socket) => {
+      const server = socket.connectToServer();
+      socket.onMessage((raw) => {
+        const message = JSON.parse(String(raw)) as { method?: string; id: string };
+        const reply = (result: unknown) => socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result }));
+        if (message.method === "update.status") reply({ version: { kind: "installed", version: "0.2.1" }, result: null, lastCheck, activity: [], canControl: true });
+        else if (message.method === "update.check") answer = (next) => { lastCheck = next; reply(next); };
+        else server.send(raw);
+      });
+    });
+    await open(); await waitReady(page);
+    const chip = page.locator(".sb-foot .upd");
+    if (width === 1280) {
+      await expect(chip).toHaveAccessibleName("Update 0.2.2 waiting");
+      await expect(chip).toHaveAttribute("data-tip", "Update 0.2.2 waiting");
+      await chip.hover();
+      await expect(page.locator("#tip")).toHaveText("Update 0.2.2 waiting");
+      await page.screenshot({ path: info.outputPath("footer-waiting-tip.png"), animations: "disabled" });
+      await chip.click();
+    } else {
+      await page.keyboard.press("Control+Comma");
+      const general = page.getByTestId("settings.sections.open-general");
+      if (await general.isVisible()) await general.click();
+    }
+    await expect(page.locator(".set .set-h h1")).toHaveText("General");
+    const group = page.locator(".grp").filter({ has: page.locator(".grp-t", { hasText: /^Updates$/ }) });
+    const card = group.locator(".box");
+    const line = group.locator(".srow").first().locator(".src-help");
+    await expect(line).toHaveText(kept.lines[0] ?? "");
+    await group.scrollIntoViewIfNeeded();
+    await group.screenshot({ path: info.outputPath("settings-kept-download.png"), animations: "disabled" });
+    const box = () => card.evaluate((el) => { const r = el.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; });
+    const start = await box();
+    const moves: string[] = [];
+    const control = group.getByTestId("settings.updates.check");
+    const steps: readonly (readonly [string, UpdateCheck & { readonly lines: readonly string[] }])[] = [
+      ["the same download again", { ...kept, checkedAt: CHECKED + 60_000 }],
+      ["failed, the download kept", { state: "cannot-check", checkedAt: CHECKED + 120_000, reason: "unreachable", lines: ["Could not reach the update server. Check your connection."] }],
+    ];
+    for (const [step, next] of steps) {
+      const before = await box();
+      await control.click();
+      await expect(control).toBeDisabled();
+      await expect(line).toContainText("Checking…");
+      const during = await box();
+      if (JSON.stringify(during) !== JSON.stringify(before)) moves.push(`checking before ${step}: ${JSON.stringify(before)} -> ${JSON.stringify(during)}`);
+      if (step === "the same download again") await group.screenshot({ path: info.outputPath("settings-kept-download-checking.png"), animations: "disabled" });
+      answer?.(next);
+      await expect(control).toBeEnabled();
+      await expect(line).toContainText(next.lines[0] ?? "");
+      if (step === "the same download again" && JSON.stringify(await box()) !== JSON.stringify(start)) moves.push(`${step}: ${JSON.stringify(start)} -> ${JSON.stringify(await box())}`);
+    }
+    expect(moves, "a check moved or resized the Updates card").toEqual([]);
+  });
+
   // Guards the owner's ruling (updates row 9): a clone with no release tags is still offered its update.
   test("row 9 a clone with no release tags and the switch off is offered the update its check found", async ({ page, open }) => {
     await page.addInitScript(() => {
@@ -339,7 +409,7 @@ test.describe("Version with the update state, then the automatic switch", () => 
     const ready = { state: "newer", checkedAt: Date.UTC(2026, 10, 13, 7, 0), current: "0.2.1", target: "0.2.2", forThisCopy: true, page: PAGE, download: "ready" } as const;
     // What a copy that cannot install it says, and what a copy that can says for the same download.
     const before: UpdateCheck = { ...ready, lines: ["Update 0.2.2 is downloaded and checked. Run this installer to update."] };
-    const after: UpdateCheck = { ...ready, restart: true, lines: ["Version 0.2.2 is downloaded and checked.", "If version 0.2.2 does not start, Gates Local will not go back by itself. To go back, download version 0.2.1 from https://example.invalid/releases/tag/v0.2.1."] };
+    const after: UpdateCheck = { ...ready, restart: true, lines: ["Update 0.2.2 is downloaded and checked.","If version 0.2.2 does not start, Gates Local will not go back by itself. To go back, download version 0.2.1 from https://example.invalid/releases/tag/v0.2.1."] };
     const idle: UpdateStatus = { version: { kind: "installed", version: "0.2.1" }, result: null, lastCheck: before, activity: [] };
     let route: WebSocketRoute | undefined;
     await page.routeWebSocket(/\/\?token=/, (socket) => {
@@ -366,7 +436,8 @@ test.describe("Version with the update state, then the automatic switch", () => 
     route?.send(JSON.stringify({ type: "push", channel: "update.changed", payload: { ...idle, lastCheck: after, approval: "approval-1", canControl: true } }));
     const restart = group.getByRole("button", { name: "Restart to update", exact: true });
     await expect(restart).toBeVisible();
-    await expect(line).toHaveText("Update 0.2.2 downloaded and checked.");
+    // One wording for a checked download, the server's, on either copy.
+    await expect(line).toHaveText("Update 0.2.2 is downloaded and checked.");
     await expect(row).not.toContainText("download it from the release page");
     await expect(group.locator(".tipped")).toHaveCount(0);
     await group.screenshot({ path: test.info().outputPath("update-windows-row2-after.png") });

@@ -29,6 +29,7 @@
 // retry. Settings reads the switch itself for the bracketed sentences.
 import type { UpdateCheck, UpdateCommitRequest, UpdateDownload, UpdatePreparation, UpdateResult, UpdateStatus } from "@gates-local/contracts";
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
 import { cannotReplace, type CannotReplace, earlierFailure, pinnedDataFolder, readyWindows } from "../../../../desktop/src/installed-update/words.ts";
 import { createUpdateAdmission, FINISHING, UPDATE_PAUSED, type UpdateAdmission } from "../admission.ts";
 import { REPO_URL } from "../cli.ts";
@@ -162,10 +163,13 @@ function mb(bytes: number, round: (n: number) => number = Math.round): string {
   return value < 10 ? (round(value * 10) / 10).toFixed(1) : String(round(value));
 }
 
+/** The one sentence for a finished, checked download, on every copy; Settings shows it as the server sends it. */
+export const downloadedLine = (target: string) => `Update ${target} is downloaded and checked.`;
+
 /** The download's words, in place of "Version <new> is available.".
  *  Ready: a copy that can restart into it says so beside its Restart button (a Windows copy also says how to go back). Any other
  *  keeps the checked file and says, in one line that fits the card, what to do with it; Settings opens its folder. */
-export function downloadLines(target: string, fetch: Fetch, restart: Restart = "none", goBack?: GoBack, platform: string = process.platform): string[] {
+export function downloadLines(target: string, fetch: Fetch, restart: Restart = "none", goBack?: GoBack, platform: string = process.platform, program: string | null = null): string[] {
   switch (fetch.state) {
     case "downloading":
       return [`Downloading version ${target} (${mb(fetch.received, Math.floor)} of ${mb(fetch.total)} MB). You can keep chatting.`];
@@ -177,13 +181,25 @@ export function downloadLines(target: string, fetch: Fetch, restart: Restart = "
       // Needed rounds up and free rounds down, so the two never read equal when the space is short.
       return [`Not enough free space on ${fetch.volume} for version ${target} (needs ${mb(fetch.needed, Math.ceil)} MB, ${mb(fetch.free, Math.floor)} MB free). Free some space, then use Check for updates.`];
     case "ready":
-      if (restart === "yes") return [`Version ${target} is downloaded and checked.`];
+      if (restart === "yes") return [downloadedLine(target)];
       if (restart === "windows") {
         const detail = goBack === undefined ? undefined : readyWindows(target, goBack).detail;
-        return [`Version ${target} is downloaded and checked.`, ...(detail === undefined ? [] : [detail])];
+        return [downloadedLine(target), ...(detail === undefined ? [] : [detail])];
       }
-      // Nothing is downloaded twice: the person uses the file already here (Windows: the installer; Linux: the AppImage).
-      return [platform === "win32" ? `Update ${target} is downloaded and checked. Run this installer to update.` : `Update ${target} is downloaded and checked. Put it in place of this file.`];
+      // Nothing is downloaded twice: the person uses the file already here (Windows: the installer; Linux: the AppImage, put where the running one is).
+      return [`${downloadedLine(target)} ${platform === "win32" ? "Run this installer to update." : `Put it in place of ${program ?? "the file you started Gates Local from"}.`}`];
+  }
+}
+
+/** The real path of the file the AppImage runtime says it started (APPIMAGE), when it is a file; else null. */
+export function runningAppImage(env: NodeJS.ProcessEnv): string | null {
+  const value = env["APPIMAGE"];
+  if (value === undefined || value === "") return null;
+  try {
+    const real = fs.realpathSync(value);
+    return fs.statSync(real).isFile() ? real : null;
+  } catch {
+    return null;
   }
 }
 
@@ -214,6 +230,8 @@ export interface InstalledModuleDeps {
   readonly keep: () => readonly string[];
   /** Whether this copy can replace its own file; default none. */
   readonly restart?: Restart;
+  /** Linux: the running AppImage, which a copy that cannot replace itself names for the person to replace. Default: APPIMAGE, set by the AppImage runtime. */
+  readonly program?: string | null;
   /** Shared with every producer of work, as for the clone updater. */
   readonly admission?: UpdateAdmission;
   readonly activity?: () => readonly string[];
@@ -283,6 +301,7 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
   catch (error) { log(`chat model list: ${error instanceof Error ? error.message : String(error)}`); }
 
   const restart = deps.restart ?? "none";
+  const program = deps.program === undefined ? (deps.platform === "linux" ? runningAppImage(process.env) : null) : deps.program;
   // Windows: set once the running version's kept installer has been looked for.
   let goBack: GoBack | undefined;
   const admission =deps.admission ?? createUpdateAdmission({ finishing: deps.startupToken !== undefined });
@@ -335,7 +354,7 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     // An undismissed rollback-failed note refuses the update: no button, and the row says why.
     // Windows: the button turns on once the kept installer has been looked for (section 3, W-A step 2).
     const ready = checked && failed === undefined && (restart !== "windows" || goBack !== undefined);
-    const lines = checked && failed !== undefined ? [earlierFailure().text] : downloadLines(c.target, fetch.fetch, restart, goBack, deps.platform);
+    const lines = checked && failed !== undefined ? [earlierFailure().text] : downloadLines(c.target, fetch.fetch, restart, goBack, deps.platform, program);
     return { ...c, lines, download: fetch.fetch.state, ...(ready ? { restart: true } : {}) };
   };
   let offer: { readonly token: string; readonly fingerprint: string } | undefined;

@@ -85,16 +85,29 @@ function stateLine(check: UpdateCheck | null, checking: boolean, control: boolea
       const target = ver(check.target);
       if (!check.forThisCopy) return `Update ${target} is not built for this copy.`;
       if (check.download === undefined) return `Update ${target} available.`;
-      if (check.download === "ready" && check.restart === true) return `Update ${target} downloaded and checked.`;
+      // The download's own line, as the server words it (one sentence for every copy); a restartable copy's go-back line is the button's ask.
       return check.lines[0] ?? `Update ${target} available.`;
     }
   }
 }
 
-/** The grey line, or the last action's failure in its place. */
-function StateLine({ text, err, calm, wrap }: { text: string; err: string | null; calm: boolean; wrap: boolean }) {
-  if (err !== null) return <span className="src-help act-err" role="alert">{err}</span>;
-  return <span className="src-help" role={calm ? "status" : "alert"} style={wrap ? { whiteSpace: "normal" } : undefined}>{text}</span>;
+/**
+ * The grey line, or the last action's failure in its place. kept: a checked
+ * download's line, said whole; Checking… or a failure shows in its space, the
+ * kept line hidden under it, so a check never shrinks the row and grows it back.
+ */
+function StateLine({ text, err, calm, kept }: { text: string; err: string | null; calm: boolean; kept: string | null }) {
+  const shown = err ?? text;
+  const className = err === null ? "src-help" : "src-help act-err";
+  const role = err === null && calm ? "status" : "alert";
+  if (kept === null) return <span className={className} role={role}>{shown}</span>;
+  if (shown === kept) return <span className={className} role={role} style={{ whiteSpace: "normal" }}>{shown}</span>;
+  return (
+    <span className={className} role={role} style={{ display: "grid" }}>
+      <span style={{ gridArea: "1 / 1" }}>{shown}</span>
+      <span aria-hidden="true" style={{ gridArea: "1 / 1", whiteSpace: "normal", visibility: "hidden" }}>{kept}</span>
+    </span>
+  );
 }
 
 /** A check that failed, or a download that did: said as an alert. */
@@ -236,7 +249,7 @@ export function UpdatesView(p: UpdatesViewProps) {
     p.status === undefined ? <Skel w="14em" />
     : kind === "not-a-clone" ? "Can't update: not a git clone."
     : kind === "unreadable" && p.status.version.kind === "unreadable" ? `Could not read the version: ${p.status.version.detail}.`
-    : <StateLine text={stateLine(check, p.checking, canControl, canUpdate)} err={err} calm={!troubled(check)} wrap={keptDownload(check)} />;
+    : <StateLine text={stateLine(check, p.checking, canControl, canUpdate)} err={err} calm={!troubled(check)} kept={keptDownload(check) ? stateLine(check, false, canControl, canUpdate) : null} />;
   const more = fold ? (
     <button type="button" className="ibtn" data-testid="settings.updates.more" aria-expanded={open} aria-label="More" data-tip="More" onClick={() => setOpen(!open)}>
       <Icon id={open ? "down" : "right"} />

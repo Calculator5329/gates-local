@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-11-14: A waiting update says so, and a check keeps the card still
+
+- On Linux, an AppImage that cannot replace its own file now downloads
+  the update ready to start (it was saved without permission to run),
+  and Settings names the file to replace: "Put it in place of
+  /path/to/Gates-Local.AppImage." instead of "this file".
+- When a copy cannot install a downloaded update itself, the update icon
+  at the bottom of the sidebar now says "Update 0.2.6 waiting", and a
+  click opens Settings, where the sentence and the Open folder button
+  are. It used to say "Can't update itself" and open a folder, which did
+  nothing on a computer with no file manager.
+- A finished download reads the same everywhere in Settings: "Update
+  0.2.6 is downloaded and checked." It said "Update 0.2.6 downloaded and
+  checked." on a copy that can restart into it.
+- Check for updates no longer moves the Updates card when a download is
+  waiting. That sentence takes two or three lines; "Checking…" used to
+  take one, so the card shrank and grew back. "Checking…" now shows in
+  the sentence's own space.
+
 ## 2026-11-14: Measure keeps Pages after a reload, and a long chat lists all its pages
 
 - A window reloaded while Measure runs now runs the model's pages, so the

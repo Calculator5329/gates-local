@@ -88,6 +88,14 @@ describe("downloading a version", () => {
     expect(page.requests).toEqual([ARTIFACT_PATH]);
   });
 
+  it("writes an AppImage executable, so a person who puts it in place can start it", async () => {
+    page.serve(good(), { file: FILE, bytes: BYTES });
+    expect(await downloadRelease(options())).toMatchObject({ kind: "ready" });
+    expect(fs.statSync(path.join(folder(), FILE)).mode & 0o100).toBe(0o100);
+    // The list and signature are data, never programs.
+    expect(fs.statSync(path.join(folder(), LIST_FILE)).mode & 0o111).toBe(0);
+  });
+
   it("reads the artifact from B/download/v<version>/<file>, with no query and the copy's own name", async () => {
     const seen: string[] = [];
     page.serve(good(), { file: FILE, bytes: BYTES });
