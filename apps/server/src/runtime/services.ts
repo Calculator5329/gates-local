@@ -5,7 +5,9 @@
 // did not start.
 import type { RuntimeMode } from "@gates-local/contracts";
 import type { Push } from "../app.ts";
+import { offerAfterRefusal } from "../fit/alternatives.ts";
 import { fitEach, planLoad, type FitDeps } from "../fit/fit.ts";
+import { catalogModels } from "./catalog.ts";
 import type { FitReport } from "../fit/types.ts";
 import { cached, procListeningPids, readGpuStatus, systemdMainPid } from "../fit/gpu-status.ts";
 import { createGpuWatcher, type GpuWatcher } from "../fit/gpu-watch.ts";
@@ -166,6 +168,14 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     // preload holds are busy, and it never reclaims ComfyUI (it runs inside a shared chat claim).
     fit: async (model, numCtx, baseUrl, signal) =>
       (await planLoad({ ...options.fit, baseUrl, model, numCtx, signal, busy: loader?.busyModels() ?? [] })).report,
+    // A refusal's offer: what runs instead, planned the same way on the reading that refused.
+    offer: (refused, baseUrl) => offerAfterRefusal({
+      ...options.fit,
+      baseUrl,
+      models: catalogModels(catalog.current() ?? []).filter((m) => m.installed).map((m) => m.name),
+      defaultNumCtx: settings.get().defaultNumCtx,
+      busy: loader?.busyModels() ?? [],
+    }, refused),
     // a load changed the GPU: no fit after it reuses a reading from before it
     onLoaded: () => { forgetGpuReadings(); gpu.poke(); },
     // An Ollama this app started (now or on an earlier run, per the ownership record) holds only the app's models.

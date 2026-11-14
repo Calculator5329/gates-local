@@ -582,11 +582,14 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     if (where === "box") replaceDraft(threadId, { text: content, images, ...attached, sendId: messageId ?? null });
     const title = st.threads.find(t => t.id === threadId)?.title;
     const restoredElsewhere = where === "box" && !here ? `Your message didn't send. Your words are in the draft in ${title ? `“${title}”` : "another chat"}.` : undefined;
+    const notice = restoredElsewhere ?? (code === "gpu-unreadable" && e instanceof Error ? `${e.message}${where === null ? "" : ` Your message is back in the ${where}.`}` : code === "image-input" && e instanceof Error ? e.message : where === "queue" && !here ? elsewhereNotice(st, threadId) : refusal(code, model, where));
+    // A memory refusal in view says what runs instead; the note's buttons take it (WIN-MEM-02).
+    const offer = code === "wont-fit" && here && e instanceof WireError ? e.offer : undefined;
     applyServerEvent({
       ...(owner === null ? {} : { turns: withTurn(st.turns, threadId, halted ? reduceTurn(owner, { type: "refused" }, Date.now()) : null) }),
       ...(where === "queue" ? { queued: from === undefined ? [...st.queued, typed] : putBack(st.queued, from) } : {}),
       ...(ask === null || consented ? {} : { stopAsk: ask, notice: null }),
-      ...(ask === null && !halted ? { notice: restoredElsewhere ?? (code === "gpu-unreadable" && e instanceof Error ? `${e.message}${where === null ? "" : ` Your message is back in the ${where}.`}` : code === "image-input" && e instanceof Error ? e.message : where === "queue" && !here ? elsewhereNotice(st, threadId) : refusal(code, model, where)) } : {}),
+      ...(ask === null && !halted ? { notice, noticeOffer: offer === undefined ? null : { notice, model, numCtx: ctxFor(st.numCtx, st.models, model), offer } } : {}),
     });
     if (consented) void launch(ask, true);
     // what waited behind it does not overtake it
@@ -765,7 +768,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
       admitting.delete(key);
       if (event.type === "error") {
         oldTurns.delete(turnId);
-        return own.refused(new WireError(event.code, event.message, event.blocking));
+        return own.refused(new WireError(event.code, event.message, event.blocking, event.offer));
       }
       if (own.turnId === undefined) {
         own.turnId = turnId;

@@ -12,6 +12,7 @@ import { ctxFor, describeModel, gb, k, modelFacts, noGpu, verdictOf } from "./fo
 import { DownloadBar, LoadRing } from "./LoadBar.tsx";
 import { loadGuess } from "./load-times.ts";
 import { MakerMark } from "./MakerMark.tsx";
+import { RefusalNote } from "./RefusalNote.tsx";
 import { pickerLabels, suggestedOf } from "./picker-models.ts";
 import { imagePickerScreen, pickerScreen, threadScreen } from "./screen-loaders.ts";
 import { chosenImage, imageCount, imageMode, imagesUnset, sizeLabel } from "./image-choice.ts";
@@ -111,7 +112,8 @@ export function Composer() {
   const replacement = useDraft(d => d.version);
   const pasting = useStore((s) => s.pasting);
   const notice = useStore((s) => s.notice);
-  const fit = useStore((s) => fitFor(s.fitTable, s.model, ctxFor(s.numCtx, s.models, s.model)));
+  const noticeOffer = useStore((s) => s.noticeOffer);
+  const fit =useStore((s) => fitFor(s.fitTable, s.model, ctxFor(s.numCtx, s.models, s.model)));
   const models = useStore((s) => s.models);
   const exampleLabel = useStore((s) => suggestedOf(s)?.exampleLabel);
   const catalog = useStore(catalogOf);
@@ -441,7 +443,7 @@ export function Composer() {
           </div>
         </div>
       </form>
-      {notice !== null ? (
+      {notice !== null && noticeOffer?.notice === notice ? <RefusalNote o={noticeOffer} /> : notice !== null ? (
         <p className={`na c-note${memNo ? " no" : ""}`} data-testid="chat.composer.notice" role="status" tabIndex={0} data-tip={esc(notice)}>
           {notice}
         </p>

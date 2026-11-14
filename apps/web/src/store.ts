@@ -9,6 +9,7 @@ import type {
   BlockingTurn,
   CatalogEntry,
   ContextSize,
+  FitOffer,
   FitTable,
   GpuStatus,
   ImageChoice,
@@ -136,6 +137,14 @@ export interface StopAsk {
 /** Why a reply stopped: the person pressed Stop this many seconds in (a mark, no words), or a reason they did not cause, in its own words. */
 export type StopNote = { readonly kind: "stopped"; readonly secs: number } | { readonly kind: "said"; readonly words: string };
 
+/** A refusal for memory and what runs instead: `notice` the note's words it belongs to, `model` and `numCtx` what was refused. */
+export interface NoticeOffer {
+  readonly notice: string;
+  readonly model: string;
+  readonly numCtx: number;
+  readonly offer: FitOffer;
+}
+
 export interface State {
   readonly conn: Conn;
   /** The initial read attempt ended, including failure, for this connection. */
@@ -238,6 +247,8 @@ export interface State {
   readonly unavailable: Readonly<Record<string, true>>;
   /** A one-line note the client shows under the composer after a refused send. */
   readonly notice: string | null;
+  /** A memory refusal's offer (WIN-MEM-02): shown in the note while `notice` is still its words. */
+  readonly noticeOffer: NoticeOffer | null;
   /** Per thread, why its newest load failed; the timeline shows it with Retry while that thread is open (WF-03). */
   readonly loadErrors: Readonly<Record<string, string>>;
 }
@@ -302,6 +313,7 @@ const initial: State = {
   updateError: null,
   unavailable: {},
   notice: null,
+  noticeOffer: null,
   loadErrors: {},
 };
 

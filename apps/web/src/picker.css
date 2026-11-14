@@ -11,7 +11,8 @@
 .pk-list-scroll{flex:1;min-height:0;overflow-y:auto;scrollbar-gutter:stable;padding:8px 12px}
 .model-picker .pk-r{height:34px;min-height:34px;width:100%;position:relative;padding:0;display:block;border-radius:var(--r-picker)}
 .model-picker .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
-.model-picker .pk-r.sel{background:var(--hover)}
+/* the selected model is a bar at the row's edge (and its check); the highlighted row is the filled one: both at once read apart (WIN-MEM-07) */
+.model-picker .pk-r.sel{box-shadow:inset 2px 0 0 var(--foreground)}
 /* before the first table: not pickable yet, with the look it keeps once the table lands (nothing pops) */
 .model-picker .pk-r[aria-busy=true] .pk-select,.pk-ctx-row[aria-busy=true]{cursor:progress}
 .model-picker .pk-r.hl,.model-picker .pk-r:hover{background:var(--selected)}
@@ -30,6 +31,10 @@
 .model-picker .pk-v{overflow:hidden;white-space:nowrap;text-align:right;font-size:12px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
 .model-picker .pk-v.spill{color:var(--amber-fg)}
 .model-picker .pk-v.no{color:var(--red-fg)}
+/* cannot run here now (fit-table refusedNow): the mark before the number */
+.model-picker .pk-v.now{display:inline-flex;align-items:center;justify-content:flex-end;gap:4px}
+.pk-cost-caption small{display:inline-flex;align-items:center;gap:3px}
+.pk-cost-caption .ic{width:10px;height:10px}
 .pk-favorite{position:absolute;left:8px;top:8px;height:18px;width:16px;opacity:0;display:flex;align-items:center;justify-content:center;color:var(--foreground)}
 .pk-favorite[aria-pressed=true] .ic{fill:currentColor}
 .pk-r:hover .pk-favorite,.pk-favorite:focus-visible{opacity:1}
@@ -40,8 +45,9 @@
 .model-picker .pk-empty{padding:24px 8px;text-align:center;font-size:12px;line-height:20px;color:var(--muted-foreground)}
 .pk-context{min-width:0;overflow:hidden;padding:0 12px;border-left:1px solid var(--border)}
 .pk-context-head{display:flex;align-items:center;justify-content:space-between;gap:8px;height:42px;border-bottom:1px solid var(--border);font-size:14px;color:var(--muted-foreground)}
-.pk-context-head>span{white-space:nowrap;flex:none}
-.pk-context-head small{min-width:0;max-width:104px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;font-size:12px;font-weight:400}
+/* the model the column's numbers are for: its mark and name, once */
+.pk-for{flex:1;min-width:0;display:flex;align-items:center;gap:8px;color:var(--foreground)}
+.pk-for .pk-nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pk-context-rows{padding-top:8px}
 .pk-ctx-row{height:34px;width:100%;display:grid;grid-template-columns:32px minmax(0,1fr) 12px;align-items:center;gap:8px;text-align:left;font-size:14px;border-radius:var(--r-picker)}
 .pk-ctx-row:hover:enabled,.pk-ctx-row:focus-visible{background:var(--hover)}
@@ -83,7 +89,6 @@
 .pk-back{display:flex;align-items:center;justify-content:center;width:44px;height:44px;flex:none}
 .pk-close{display:flex;width:44px;height:44px;margin-right:-12px}
 .pk-context-head{justify-content:flex-start;gap:4px}
-.pk-context-head small{margin-left:auto;max-width:124px}
 .model-picker .pk-r,.pk-select{height:44px;min-height:44px}
 .pk-more{height:44px}
 .pk-select{width:calc(100% - 44px);grid-template-columns:16px minmax(0,1fr) 64px;gap:4px;padding:0 4px}

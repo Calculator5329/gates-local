@@ -127,6 +127,20 @@ describe("models.load", () => {
     expect(failed.message).toBe("Could not load broken:1b: llama runner process has terminated: exit status 2");
   });
 
+  it("a refusal carries what runs instead (WIN-MEM-02), pushed and returned alike", async () => {
+    const s = await fakeOllama([]);
+    const pushes: ModelLoad[] = [];
+    const offer = { model: { model: "qwen3.5:4b", numCtx: 16384, verdict: "fits" as const }, short: { needBytes: 30 * GB, gpuBytes: 12 * GB, ramBytes: 4 * GB, shortBytes: 14 * GB } };
+    const asked: number[] = [];
+    const refused = await loaderFor(s, pushes, "refuse", { offer: async (r) => { asked.push(r.numCtx); return offer; } }).load("big:70b", 16384);
+    expect(refused).toEqual({ model: "big:70b", numCtx: 16384, state: "error", message: "needs 30 GB, 12 GB free", offer });
+    expect(pushes.at(-1)).toEqual(refused);
+    expect(asked).toEqual([16384]);
+    // an offer that cannot be worked out leaves the refusal as it was
+    const plain = await loaderFor(s, [], "refuse", { offer: async () => { throw new Error("no reading"); } }).load("big:70b", 16384);
+    expect(plain).toEqual({ model: "big:70b", numCtx: 16384, state: "error", message: "needs 30 GB, 12 GB free" });
+  });
+
   it("R-01: a model already resident that the app did not load is external: ready, no preload, never owned", async () => {
     // `ollama run m` in a terminal.
     const s = await fakeOllama(["m:latest"]);

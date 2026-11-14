@@ -13,7 +13,7 @@ import { checkFiles, fileLifecycle, fileLine, fileSources, saveFile } from "./ch
 import type { LibraryEntry } from "../../../packages/harness/src/index.ts";
 import { readThumbnail } from "./pictures/thumbs.ts";
 import { fitToWindow, OMITTED_IMAGE } from "./chat/window.ts";
-import { suggestedList, type AttachedFile, type BlockingTurn, type Channel, type ImageChoice, type Message, type Params, type Payload, type ShellStatus, type SyncChange, type ToolStep, type TurnEnded } from "@gates-local/contracts";
+import { suggestedList, type AttachedFile, type BlockingTurn, type Channel, type FitOffer, type ImageChoice, type Message, type Params, type Payload, type ShellStatus, type SyncChange, type ToolStep, type TurnEnded } from "@gates-local/contracts";
 import { streamTurn, type UsageFigures } from "./chat/stream.ts";
 import { streamToolTurn } from "./chat/tools.ts";
 import { turnClock, type TurnClock } from "./chat/times.ts";
@@ -21,6 +21,7 @@ import type { Sources } from "./sources/index.ts";
 import { createSourcesHandlers } from "./sources/handlers.ts";
 import type { LibraryImports } from "./sources/imports.ts";
 import type { ChatEvent, TurnMessage } from "./chat/types.ts";
+import { offerAfterRefusal } from "./fit/alternatives.ts";
 import { planLoad, type FitDeps } from "./fit/fit.ts";
 import { untilAborted } from "./fit/gpu.ts";
 import { fetchShow, sameModel } from "./fit/ollama.ts";
@@ -85,6 +86,8 @@ export class AppError extends Error {
   readonly neededBy?: string;
   /** For would-stop: the running turns in the way, on the wire as error.blocking. */
   readonly blocking?: readonly BlockingTurn[];
+  /** For wont-fit: what does run from the same reading (WIN-MEM-02), on the wire as error.offer. */
+  offer?: FitOffer;
   constructor(code: AppErrorCode, message: string, report?: FitReport, neededBy?: string, blocking?: readonly BlockingTurn[]) {
     super(message);
     this.code = code;
@@ -635,6 +638,20 @@ export function createApp(deps: AppDeps): App {
     return { report: plan.report, stop: running.filter((t) => plan.stop.some((n) => sameModel(n, t.model))), comfy: plan.comfy };
   };
 
+  /** What a wont-fit offers instead (fit/alternatives.ts), planned as planBeside plans; undefined when it cannot tell. */
+  const offerFor = async (baseUrl: string, report: FitReport) => {
+    const installed = catalogModels(catalog.current() ?? []).filter((m) => m.installed).map((m) => m.name);
+    const comfyPid = reclaimableComfy();
+    return offerAfterRefusal({
+      ...deps.fit,
+      baseUrl,
+      models: installed,
+      defaultNumCtx: deps.settings?.get().defaultNumCtx ?? report.numCtx,
+      busy: [...turns.values()].filter((t) => t.started && !sameModel(t.model, report.model)).map((t) => t.model),
+      ...(comfyPid === undefined ? {} : { comfyPid }),
+    }, report);
+  };
+
   /** Turns as the client names them in its warning. */
   const blockingTurns = (stop: readonly Turn[]): BlockingTurn[] => {
     const titles = new Map(store.listThreads().map((t) => [t.id, t.title]));
@@ -982,8 +999,12 @@ export function createApp(deps: AppDeps): App {
         // Every plan reads with a signal (fit/planLoad ends each read on it); a plan error that lands
         // after the turn's cancel is the cancel.
         const turnSignal = turn.controller.signal;
-        const refusal = (report: FitReport) =>
-          new AppError("wont-fit", report.message ?? `${model} at num_ctx ${numCtx} does not fit (fit check refused).`, report);
+        const refusal = async (report: FitReport) => {
+          const e = new AppError("wont-fit", report.message ?? `${model} at num_ctx ${numCtx} does not fit (fit check refused).`, report);
+          const offer = await offerFor(baseUrl, report);
+          if (offer !== undefined) e.offer = offer;
+          return e;
+        };
         // The plan beside the admitted turns. stopOthers ends the ones whose model holds memory this
         // load needs, the way a switch does (each saves what it sent and ends "preempted"), waits
         // for them and plans again until none is in the way: the plan that returns counts their
@@ -1018,11 +1039,11 @@ export function createApp(deps: AppDeps): App {
         // wait on a claim. The plan inside the gate decides again.
         if (stopOthers === true) {
           const ahead = await planned(reclaimableComfy());
-          if (ahead.report.verdict === "refuse" && !ahead.comfy) throw refusal(ahead.report);
+          if (ahead.report.verdict === "refuse" && !ahead.comfy) throw await refusal(ahead.report);
         } else if (askFirst === true && [...turns.values()].some((t) => t.started)) {
           // Before the claim and the gate, where this send would otherwise wait behind that reply; fit refuses it.
           const ahead = await planned(reclaimableComfy());
-          if (ahead.report.verdict === "refuse" && !ahead.comfy) throw refusal(ahead.report);
+          if (ahead.report.verdict === "refuse" && !ahead.comfy) throw await refusal(ahead.report);
         }
         // Waits while an image job holds the GPU; admit's load gate runs inside this claim.
         const claim = async () => {
@@ -1072,7 +1093,7 @@ export function createApp(deps: AppDeps): App {
           if (e instanceof AdmitCancelled || turn.halted || turnSignal.aborted) throw stoppedEarly();
           throw e;
         }
-        if (report.verdict === "refuse") throw refusal(report);
+        if (report.verdict === "refuse") throw await refusal(report);
         if (turnSignal.aborted) throw stoppedEarly();
         const history = [...prior.map((m): TurnMessage => {
           const priorContent = m.imageJob ? `Image job ${m.imageJob.state}${m.imageJob.message ? `: ${m.imageJob.message}` : ""}` : withFiles(m.content, m.files);
@@ -1133,13 +1154,14 @@ export function createApp(deps: AppDeps): App {
    * saved, so the sender's words go back to its composer.
    */
   function refused(turn: Turn, e: unknown): void {
-    const { code, message, blocking, neededBy } = typeof e === "object" && e !== null ? (e as { code?: unknown; message?: unknown; blocking?: readonly BlockingTurn[]; neededBy?: string }) : {};
+    const { code, message, blocking, neededBy, offer } = typeof e === "object" && e !== null ? (e as { code?: unknown; message?: unknown; blocking?: readonly BlockingTurn[]; neededBy?: string; offer?: FitOffer }) : {};
     const failure: TurnFailure = {
       type: "error",
       code: typeof code === "string" && code !== "" ? code : "internal",
       message: typeof message === "string" ? message : String(e),
       ...(blocking === undefined ? {} : { blocking }),
       ...(neededBy === undefined ? {} : { neededBy }),
+      ...(offer === undefined ? {} : { offer }),
     };
     if (failure.code === "internal") log(`turn ${turn.turnId} refused: ${failure.message}`);
     turn.terminal = true;

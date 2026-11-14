@@ -367,6 +367,23 @@ export const FitTable = S.Struct({
 });
 export type FitTable = typeof FitTable.Type;
 
+/** A way a refused model runs: "spills" runs with part of it in system memory, slower. */
+const OfferVerdict = S.Literals(["fits", "spills"]);
+
+/**
+ * What a memory refusal ("wont-fit") offers, worked out from the reading that refused it
+ * (apps/server/src/fit/alternatives.ts). context: the largest smaller context of the refused model
+ * that runs. model: only when no context of it runs, the largest installed chat model that does, at
+ * the default context. short: what the refused load lacks, the usable GPU memory and the usable
+ * system memory apart (margins already taken off), for the one line said when nothing else runs.
+ */
+export const FitOffer = S.Struct({
+  context: S.optional(S.Struct({ numCtx: PositiveInt, verdict: OfferVerdict })),
+  model: S.optional(S.Struct({ model: S.String, numCtx: PositiveInt, verdict: OfferVerdict })),
+  short: S.Struct({ needBytes: Count, gpuBytes: Count, ramBytes: Count, shortBytes: Count }),
+});
+export type FitOffer = typeof FitOffer.Type;
+
 /** A running turn a load would have to stop (turns.blocking). */
 export const BlockingTurn = S.Struct({
   threadId: S.String,
@@ -404,6 +421,8 @@ export const ChatEvent = S.Union([
     neededBy: S.optional(S.String),
     /** Refused before its start, code "would-stop" (chat.send askFirst or stopTurns): the running turns in the way. */
     blocking: S.optional(S.Array(BlockingTurn)),
+    /** code "wont-fit": what does run, from the same reading. Absent when that could not be worked out. */
+    offer: S.optional(FitOffer),
   }),
   // A tool call started, finished or failed; the same callId updates one step row.
   S.Struct({ type: S.Literal("tool"), step: ToolStep }),
@@ -579,6 +598,8 @@ export const ModelLoad = S.Struct({
   numCtx: NumCtx,
   state: S.Literals(["loading", "ready", "error", "unloaded"]),
   message: S.optional(S.String),
+  /** An "error" refused for memory: what does run, from the same reading (as on chat.event's wont-fit). */
+  offer: S.optional(FitOffer),
 });
 export type ModelLoad = typeof ModelLoad.Type;
 

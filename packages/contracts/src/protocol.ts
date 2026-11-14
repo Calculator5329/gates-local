@@ -11,6 +11,7 @@ import {
   CatalogEntry,
   ModelEstimate,
   ChatEvent,
+  type FitOffer,
   FitTable,
   GpuStatus,
   ImageChoice,
@@ -73,10 +74,13 @@ export class WireError extends Error {
   readonly code: WireErrorCode | (string & {});
   /** For chat.send's "would-stop": the running turns in the way. */
   readonly blocking?: readonly BlockingTurn[];
-  constructor(code: WireErrorCode | (string & {}), message: string, blocking?: readonly BlockingTurn[]) {
+  /** For a turn's "wont-fit": what runs instead, from the reading that refused it. */
+  readonly offer?: FitOffer;
+  constructor(code: WireErrorCode | (string & {}), message: string, blocking?: readonly BlockingTurn[], offer?: FitOffer) {
     super(message);
     this.code = code;
     if (blocking !== undefined) this.blocking = blocking;
+    if (offer !== undefined) this.offer = offer;
   }
 }
 

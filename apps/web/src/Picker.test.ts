@@ -8,9 +8,9 @@ vi.mock("./session.ts", () => Object.fromEntries(["pickModel", "pull", "openSett
 const { Picker, ContextMemory } = await import("./Picker.tsx");
 
 /** The picker for one installed model; `tabled`: the first fit table has arrived. */
-function markup(tabled = true) {
+function markup(tabled = true, over: Record<string, unknown> = {}) {
   const tag = "milo-e4b-v4:latest", gib = 1024 ** 3;
-  const row = { model: tag, numCtx: 16384, freeVramBytes: 12.06 * gib, needVramBytes: 6.87 * gib, spillRamBytes: 0, verdict: "fits", source: "estimate", stops: [] };
+  const row = { model: tag, numCtx: 16384, freeVramBytes: 12.06 * gib, needVramBytes: 6.87 * gib, spillRamBytes: 0, verdict: "fits", source: "estimate", stops: [], ...over };
   mock.state = {
     pop: { id: "picker", kb: true, ready: true }, unavailable: {}, numCtx: 16384, model: tag,
     models: [{ name: tag, digest: "test", sizeBytes: 5.37 * gib, modifiedAt: "", capabilities: ["completion", "thinking"], maxContext: 131072 }],
@@ -74,6 +74,33 @@ describe("approved model picker", () => {
     // model that spills or does not fit loses its amber or red.
     expect(classes?.[0]).toBe("pk-v");
     expect(classes?.length).toBe(2);
+  });
+  // WIN-MEM-07 (docs/evidence/windows-low-memory-bug-report.md): the context column said "Fits" for a
+  // row nobody could tell apart, and the selected model's refusal showed nowhere in the list.
+  it("names the model the context column's numbers are for, its mark and name, once", () => {
+    const html = markup();
+    const head = /<header class="pk-context-head">.*?<\/header>/.exec(html)?.[0] ?? "";
+    expect(head).toContain('data-testid="models.picker.context-for"');
+    // this maker has no mark, so the name stands alone, as in its row; the browser journey checks a marked one
+    expect(head).not.toContain("?");
+    expect(head).toContain(">Milo E4B v4</span>");
+    expect(head.match(/Milo E4B v4/g)?.length).toBe(2); // the name, and its tip when cut (data-tipt)
+  });
+  it("an installed model that cannot run now says so in its row and its sizes, with the send's verdict, though the card would hold it", () => {
+    const gib = 1024 ** 3;
+    const refusedNow = { verdict: "refuse", freeVramBytes: 4 * gib, spillRamBytes: 0, shortfallBytes: 1.5 * gib, card: { verdict: "spills", freeVramBytes: 9.9 * gib, spillRamBytes: 1.2 * gib } };
+    const html = markup(true, refusedNow);
+    const row = html.slice(html.indexOf('data-m="milo-e4b-v4:latest"'));
+    const need = /<span data-testid="models.picker.need" class="([^"]*)">(.*?)<\/span>/.exec(row);
+    expect(need?.[1]).toBe("pk-v no now");
+    expect(need?.[2]).toContain("#i-xc");
+    expect(need?.[2]).toMatch(/~6\.9\sGB$/u);
+    expect(row).toContain("not enough memory now");
+    const size = html.match(/<button[^>]*data-ctx="16384"[\s\S]*?<\/button>/)?.[0] ?? "";
+    expect(size).toContain("Not now");
+    expect(size).toContain('class="pk-cost no"');
+    // the card's own verdict stays the pick's: the model can still be chosen, and its refusal then offers what runs
+    expect(row).not.toMatch(/^[^>]*class="pk-r[^"]*\bdis\b/);
   });
   it("shows a clean name and estimated memory need instead of disk size as its row metric", () => {
     const html = markup();

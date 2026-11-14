@@ -1,6 +1,7 @@
 // Runtime/model reads, local model choice, catalog and download actions.
 import type { BlockingTurn, MethodName, Params, Payload, ResultOf } from "@gates-local/contracts";
 import { type ModelDecision, modelChoice as pickChoice, modelNameKey, newestOnly } from "../pick.ts";
+import { describeModel, k } from "../format.ts";
 import { imageMode } from "../image-choice.ts";
 import { saveLoadTimes } from "../load-times.ts";
 import { NA, type State, chatReady, getState, setState } from "../store.ts";
@@ -17,6 +18,12 @@ interface ModelEffects {
   readonly restoreSaved: () => void;
   readonly flushQueued: () => void;
   readonly blockingFor: (model: string, numCtx: number) => Promise<readonly BlockingTurn[]>;
+}
+
+/** A memory refusal's words, as a send's ("Gemma 4 12B doesn't fit in memory at 16k."). */
+export function memoryRefusal(model: string, numCtx: number): string {
+  const s = getState();
+  return `${describeModel(model, s.catalog === NA ? undefined : s.catalog).name} doesn't fit in memory at ${k(numCtx)}.`;
 }
 
 /** How often typing may ask for a load of the same model. */
@@ -104,8 +111,10 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
     // The pick passed on this client's table; the server refused it on its own, newer reading.
     // Say why once, in the status line under the box the pick was made from, while it is still the pick.
     if (r.ok && r.value.state === "error" && r.value.message !== undefined && getState().model === model) {
-      refusal = r.value.message;
-      setState({ notice: refusal });
+      const { offer } = r.value;
+      // A memory refusal with its offer: the note says it in numbers and buttons, its words are the short ones a send gets (WIN-MEM-02).
+      refusal = offer === undefined ? r.value.message : memoryRefusal(model, r.value.numCtx);
+      setState({ notice: refusal, noticeOffer: offer === undefined ? null : { notice: refusal, model, numCtx: r.value.numCtx, offer } });
     }
   }
 

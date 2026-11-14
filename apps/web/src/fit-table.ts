@@ -68,5 +68,12 @@ export const phaseOf = (table: FitTable | undefined, fit: TableFit | undefined):
 /** Using it stops another chat's reply first. */
 export const stopsChat = (fit: TableFit | undefined): boolean => (fit?.stops.length ?? 0) > 0;
 
+/**
+ * The row as a send reads it says no: not enough memory right now, with nothing a stop would free.
+ * The same row and rule chat.send's admission plans with (fit/planWith on the table's reading), so a
+ * model marked this way is the one the send refuses, whatever the card's own verdict.
+ */
+export const refusedNow = (fit: TableFit | undefined): boolean => fit !== undefined && fit.verdict === "refuse" && !stopsChat(fit);
+
 /** A pick needs the table's row for it, one that fits, spills, or runs once another chat stops. */
 export const canPick = (fit: TableFit | undefined): boolean => fit !== undefined && (fit.verdict !== "refuse" || stopsChat(fit));

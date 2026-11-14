@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-11-13: A model that does not fit offers what does
+
+- When a send or a load is refused for memory, the note under the
+  composer names the model and context, then offers one way on: a
+  smaller context of the same model that runs, or else the largest
+  installed chat model that runs at the default context. One click makes
+  the change and sends the waiting message. An offer that runs partly in
+  system memory carries a gauge marked "Slower", once.
+- When nothing runs, the note gives one line of numbers instead: what the
+  model needs, the GPU and system memory it could use, and how much is
+  missing. A button beside it opens the memory details.
+- The offer comes from the same reading and the same rule that refused,
+  so it never offers something the next send would refuse.
+- The model picker names the model its context column is for, with its
+  mark. The selected model is a bar at the row's edge and the
+  highlighted row is filled, so the two read apart. A model that cannot
+  run right now has a red mark before its size, and its sizes say "Not
+  now". The open picker sits above the refusal note instead of over it.
+- Why: on a small machine a refused model left a red sentence of numbers
+  and no way on, and the picker covered that sentence while showing
+  another model's numbers (WIN-MEM-02, WIN-MEM-07 in
+  `docs/evidence/windows-low-memory-bug-report.md`).
+
 ## 2026-11-13: GPU memory holders are named by their program
 
 - An image refusal's detail listed every process on the GPU by the first

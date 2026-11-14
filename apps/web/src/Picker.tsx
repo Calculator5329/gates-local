@@ -5,7 +5,7 @@ import { type KeyboardEvent, useLayoutEffect, useRef, useState } from "react";
 import type { ContextSize, FitTable, ModelInfo } from "@gates-local/contracts";
 import { CONTEXT_SIZES, type Verdict, ctxFor, gb, k, noGpu, verdictOf } from "./format.ts";
 import { openFit } from "./fit-actions.ts";
-import { answers, canPick, cardFit, fitFor, stopsChat } from "./fit-table.ts";
+import { answers, canPick, cardFit, fitFor, refusedNow, stopsChat } from "./fit-table.ts";
 import { MakerMark } from "./MakerMark.tsx";
 import { ModelSpeed, speedWords } from "./model-speed.tsx";
 import { Icon } from "./icons.tsx";
@@ -18,7 +18,7 @@ import { FitSkel, PHONE, closePop, closeTip, esc, isTouch, openTip, tabStops, us
 const FAVORITES = "gates-local.model-favorites";
 /** Below this height the picker's rail, list and context column stop being usable. */
 const CRAMPED = 280;
-interface Row { tag: string; label: string; name: string; variant: string; info?: ModelInfo; v?: Verdict; downloading?: number; frees: boolean }
+interface Row { tag: string; label: string; name: string; variant: string; info?: ModelInfo; v?: Verdict; downloading?: number; frees: boolean; notNow: boolean }
 
 function savedFavorites(): string[] {
   try {
@@ -31,12 +31,13 @@ function savedFavorites(): string[] {
 const shownNeed = (v: Verdict) => `${v.measured ? "" : "~"}${gb(v.need)}`;
 
 /** Swappable presentation only. The verdict and all byte counts come from the fit table; before the first one, a same-size skeleton. */
-export function ContextMemory({ v, cpu, frees = false, ready = true }: { v: Verdict | undefined; cpu: boolean; frees?: boolean; ready?: boolean }) {
+export function ContextMemory({ v, cpu, frees = false, ready = true, notNow = false }: { v: Verdict | undefined; cpu: boolean; frees?: boolean; ready?: boolean; notNow?: boolean }) {
   if (!v) return ready ? <span className="pk-cost none">–</span> : <span className="pk-cost"><FitSkel w="104px" /></span>;
   const ruler = contextRuler(v);
-  const word = frees ? "Stops chat" : v.k === "no" ? "Too big" : cpu ? "System memory" : v.k === "gpu" ? "Fits" : "Slower";
-  return <span className={`pk-cost ${v.k}`} role="img" aria-label={`${gb(v.need)} ${v.measured ? "measured" : "estimated"}; ${word}`}>
-    <span className="pk-cost-caption"><span>{shownNeed(v)}</span><small>{word}</small></span>
+  // notNow: the card would hold it, but a send now is refused (fit-table refusedNow); the icon says it, as on the row
+  const word = frees ? "Stops chat" : v.k === "no" ? "Too big" : notNow ? "Not now" : cpu ? "System memory" : v.k === "gpu" ? "Fits" : "Slower";
+  return <span className={`pk-cost ${notNow && !frees ? "no" : v.k}`} role="img" aria-label={`${gb(v.need)} ${v.measured ? "measured" : "estimated"}; ${word}`}>
+    <span className="pk-cost-caption"><span>{shownNeed(v)}</span><small>{notNow && !frees && v.k !== "no" ? <Icon id="xc" /> : null}{word}</small></span>
     {cpu ? null : <span className="pk-cost-track"><i className="pk-cost-room" /><i className="pk-cost-fill" style={{ width: `${ruler.fill}%` }} />{ruler.overflow > 0 ? <i className="pk-cost-over" style={{ width: `${ruler.overflow}%` }} /> : null}<i className="pk-cost-edge" />{ruler.continues ? <b>→</b> : null}</span>}
   </span>;
 }
@@ -79,9 +80,11 @@ export function Picker() {
     return r ? verdictOf(r) : undefined;
   };
   const pickable = (tag: string, c = numCtx) => canPick(fitOf(tag, c));
+  // The send's own verdict, right now (the row as it is, not the card's): it cannot run here now.
+  const notNow = (tag: string, c = numCtx) => refusedNow(fitFor(table, tag, ctxFor(c, models, tag)));
   // In list order already: filtering keeps it.
   const rows: Row[] = pickerEntries(models, pulls, catalog, selected).map(({ pull, ...entry }) => ({ ...entry, v: report(entry.tag),
-    ...pull ? { downloading: pull.totalBytes ? Math.round(pull.completedBytes / pull.totalBytes * 100) : 0, frees: false } : { frees: stopsChat(fitOf(entry.tag)) } }));
+    ...pull ? { downloading: pull.totalBytes ? Math.round(pull.completedBytes / pull.totalBytes * 100) : 0, frees: false, notNow: false } : { frees: stopsChat(fitOf(entry.tag)), notNow: notNow(entry.tag) } }));
   const q = query.toLowerCase().trim();
   const filtered = rows.filter(r => q ? `${r.label} ${r.tag}`.toLowerCase().includes(q) : group === "all" || (group === "favorites" ? favorites.includes(r.tag) : makerOf(r.tag, makers) === group));
   const limit = phone ? 5 : 6; // Leave room for Show more alongside the phone's 44 px rows.
@@ -112,12 +115,16 @@ export function Picker() {
     // gives up a little height (its list scrolls) rather than cover the button,
     // and opens below only when even that leaves it cramped.
     const r = anchor.getBoundingClientRect(), pw = root.offsetWidth, ph = root.offsetHeight;
-    const above = r.top - 6 - 8, below = window.innerHeight - r.bottom - 6 - 8;
+    // The note over the box (a refusal and what runs instead) stays in view: opening up, the picker
+    // starts above it (WIN-MEM-07).
+    const note = document.querySelector('[data-testid="chat.composer.notice"]');
+    const top = Math.min(r.top, note?.getBoundingClientRect().top ?? r.top);
+    const above = top - 6 - 8, below = window.innerHeight - r.bottom - 6 - 8;
     const up = ph <= above || above >= CRAMPED || above >= below;
     const h = Math.min(ph, up ? above : below);
     if (h < ph) root.style.maxHeight = `${h}px`;
     root.style.left = `${Math.max(8, Math.min(r.right - pw, window.innerWidth - pw - 8))}px`;
-    root.style.top = `${up ? r.top - 6 - h : r.bottom + 6}px`;
+    root.style.top = `${up ? top - 6 - h : r.bottom + 6}px`;
   });
   function finish(row: Row, c?: ContextSize) {
     const chosenCtx = c ?? CONTEXT_SIZES.find(n => n === ctxFor(numCtx, models, row.tag)) ?? numCtx;
@@ -189,7 +196,7 @@ export function Picker() {
   // by colour, the fit. Screen readers get the size and the fit in words, from the table. Only a cut name has a tip.
   const facts = (row: Row) => {
     const fit = !row.v ? answered ? "No memory reading" : "Checking memory"
-      : `${gb(row.v.need)} ${row.v.measured ? "measured" : "estimated"}; ${row.frees ? "sending stops another chat first" : row.v.k === "no" ? "not enough memory" : cpu ? "runs in system memory" : row.v.k === "gpu" ? "fits on GPU" : `${gb(row.v.amt)} in system memory, slower`}`;
+      : `${gb(row.v.need)} ${row.v.measured ? "measured" : "estimated"}; ${row.frees ? "sending stops another chat first" : row.notNow ? "not enough memory now" : row.v.k === "no" ? "not enough memory" : cpu ? "runs in system memory" : row.v.k === "gpu" ? "fits on GPU" : `${gb(row.v.amt)} in system memory, slower`}`;
     const speed = speedWords(speeds, row.tag);
     const said = speed === undefined ? fit : `${fit}; ${speed}`;
     return row.downloading === undefined ? said : `Downloading, ${row.downloading}%. ${said}`;
@@ -210,7 +217,7 @@ export function Picker() {
             {/* before the first table every row is busy and cannot be picked yet, with the look it keeps after; once the table is in, a row it cannot pick (no reading, or too big) is disabled, except on the phone, whose context step offers other sizes */}
             {visible.map((r, i) => <div key={r.tag} className={`pk-r${r.tag === selected ? " sel" : ""}${r.tag === highlight ? " hl" : ""}${r.downloading !== undefined || !pickable(r.tag) ? " dis" : ""}`} id={`pk-opt-${i}`} role="option" data-testid="models.picker.option" aria-selected={highlight ? r.tag === highlight : r.tag === selected} aria-busy={r.downloading === undefined && !answered || undefined} aria-disabled={r.downloading !== undefined || !answered || (!phone && !pickable(r.tag))} data-m={r.tag} data-i={i} onMouseMove={() => setHighlight(r.tag)}>
               {/* a name cut by its row reads in full in a tip, and only then (data-tipt) */}
-              <button type="button" className="pk-select" data-testid="models.picker.select" tabIndex={-1} aria-label={r.label} aria-describedby={`pk-facts-${i}`} data-tipt={r.name} onClick={() => choose(r)}><MakerMark tag={r.tag} busy={r.downloading !== undefined} /><span className="pk-name pk-n"><span className="pk-nm">{r.name}</span>{r.variant ? <small className="pk-variant">{r.variant}</small> : null}{r.tag === selected ? <Icon id="check" cls="s12" /> : null}<ModelSpeed tag={r.tag} /></span><span className={`pk-v ${r.v?.k ?? ""}`}>{r.downloading !== undefined ? `${r.downloading}%` : r.v ? shownNeed(r.v) : answered ? "–" : <FitSkel />}</span></button>
+              <button type="button" className="pk-select" data-testid="models.picker.select" tabIndex={-1} aria-label={r.label} aria-describedby={`pk-facts-${i}`} data-tipt={r.name} onClick={() => choose(r)}><MakerMark tag={r.tag} busy={r.downloading !== undefined} /><span className="pk-name pk-n"><span className="pk-nm">{r.name}</span>{r.variant ? <small className="pk-variant">{r.variant}</small> : null}{r.tag === selected ? <Icon id="check" cls="s12" /> : null}<ModelSpeed tag={r.tag} /></span><span data-testid="models.picker.need" className={`pk-v ${r.notNow ? "no now" : r.v?.k ?? ""}`}>{r.downloading !== undefined ? `${r.downloading}%` : r.v ? <>{r.notNow ? <Icon id="xc" cls="s12" /> : null}{shownNeed(r.v)}</> : answered ? "–" : <FitSkel />}</span></button>
               {/* after the row's name, so the option is announced name first */}
               <span className="vh" id={`pk-facts-${i}`}>{facts(r)}</span>
               <button className="pk-favorite" data-testid="models.picker.favorite" aria-label={`${favorites.includes(r.tag) ? "Unfavorite" : "Favorite"} ${r.label}`} aria-pressed={favorites.includes(r.tag)} onClick={() => toggleFavorite(r.tag)}><Icon id="star" /></button>
@@ -221,7 +228,7 @@ export function Picker() {
         </div>
       </div>
       <section className="pk-context" aria-label="Context length">
-        <header className="pk-context-head"><button className="pk-back" data-testid="models.picker.back" aria-label="Back to models" onClick={e => backToModels(!isTouch() || pop?.kb === true || e.detail === 0)}><Icon id="left" /></button><span>Context length</span>{/* the wide picker shows the model list beside it; the phone's context screen does not */}{phone ? <small data-tip={active ? esc(active.label) : undefined}>{active?.label}</small> : null}</header>
+        <header className="pk-context-head"><button className="pk-back" data-testid="models.picker.back" aria-label="Back to models" onClick={e => backToModels(!isTouch() || pop?.kb === true || e.detail === 0)}><Icon id="left" /></button>{/* whose numbers these are, once (WIN-MEM-07): the row the column follows, highlighted or selected; a cut name reads in full in a tip */}<span className="pk-for" data-testid="models.picker.context-for" data-tipt={active?.label}>{active ? <><MakerMark tag={active.tag} /><span className="pk-nm">{active.label}</span></> : null}</span></header>
         <div className="pk-context-rows" role="radiogroup" aria-label={active ? `Context length for ${active.label}` : "Context length"} data-testid="models.picker.context-sizes" onKeyDown={e => {
           if (e.key === "ArrowLeft") { e.preventDefault(); backToModels(true); return; }
           if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -229,12 +236,12 @@ export function Picker() {
           buttons[(i + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
         }}>
           {CONTEXT_SIZES.map(c => {
-            const v = active ? report(active.tag, c) : undefined, frees = active ? stopsChat(fitOf(active.tag, c)) : false;
+            const v = active ? report(active.tag, c) : undefined, frees = active ? stopsChat(fitOf(active.tag, c)) : false, now = active ? notNow(active.tag, c) : false;
             const capped = activeMax !== undefined && c > activeMax;
             // a size the table has no reading for cannot be picked (finish refuses it), so it says so to assistive tech too;
             // before the table a size is not picked yet either, but stays focusable with its look (native disabled greys it)
             const disabled = !active || active.downloading !== undefined || capped || (answered && !pickable(active.tag, c));
-            return <button key={c} className="pk-ctx-row" role="radio" data-testid={`models.picker.context-${c}`} aria-checked={c === actual} aria-disabled={disabled || !answered} aria-busy={(!capped && !answered) || undefined} tabIndex={c === actual ? 0 : -1} data-ctx={c} disabled={disabled} onClick={() => { if (active) chooseContext(active, c); }}><span>{k(c)}</span>{capped ? <small className="pk-cap">Max {k(activeMax)}</small> : <ContextMemory v={v} cpu={cpu} frees={frees} ready={answered} />}<span className="pk-context-check">{c === actual ? <Icon id="check" cls="s12" /> : null}</span></button>;
+            return <button key={c} className="pk-ctx-row" role="radio" data-testid={`models.picker.context-${c}`} aria-checked={c === actual} aria-disabled={disabled || !answered} aria-busy={(!capped && !answered) || undefined} tabIndex={c === actual ? 0 : -1} data-ctx={c} disabled={disabled} onClick={() => { if (active) chooseContext(active, c); }}><span>{k(c)}</span>{capped ? <small className="pk-cap">Max {k(activeMax)}</small> : <ContextMemory v={v} cpu={cpu} frees={frees} ready={answered} notNow={now} />}<span className="pk-context-check">{c === actual ? <Icon id="check" cls="s12" /> : null}</span></button>;
           })}
         </div>
         {activeMax !== undefined && activeMax < numCtx ? <p className="pk-help">Runs at {k(activeMax)}, the most this model takes.</p> : null}

@@ -43,7 +43,7 @@
 // waiting admissions, and ends every open "loading" notice with an error.
 // close() refuses new work and aborts and drains every preload, so a
 // shutdown never waits on a cold load holding its GPU claim.
-import type { FitReport, ModelLoad } from "@gates-local/contracts";
+import type { FitOffer, FitReport, ModelLoad } from "@gates-local/contracts";
 import type { GpuLease } from "../gpu/lease.ts";
 import { canonicalTag } from "./recommended.ts";
 import { GenerateResponse, decode, parseJson } from "./schemas.ts";
@@ -205,6 +205,8 @@ export interface ModelLoaderDeps {
    * child process it runs.
    */
   readonly fit: (model: string, numCtx: number, baseUrl: string, signal: AbortSignal) => Promise<FitReport>;
+  /** For a refusal: what runs instead (fit/alternatives.ts), carried on the error as `offer`. */
+  readonly offer?: (refused: FitReport, baseUrl: string) => Promise<FitOffer | undefined>;
   /** The load gate; default an in-process FIFO mutex (see LoadGate). */
   readonly gate?: LoadGate;
   /** models.load holds a shared chat claim, so it never loads beside an image job. */
@@ -378,7 +380,10 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       const afterFit = stopped();
       if (afterFit) return finish(afterFit);
       numCtx = report.numCtx;
-      if (report.verdict === "refuse") return finish({ model, numCtx, state: "error", message: report.message ?? `${model} at num_ctx ${numCtx} does not fit.` });
+      if (report.verdict === "refuse") {
+        const offer = await deps.offer?.(report, baseUrl).catch(() => undefined);
+        return finish({ model, numCtx, state: "error", message: report.message ?? `${model} at num_ctx ${numCtx} does not fit.`, ...(offer === undefined ? {} : { offer }) });
+      }
       // Empty generate uses a runner slot too. A redundant preload could wait
       // behind its reply while holding the load gate needed by another chat.
       if (here.models.get(tag)?.contextLength === numCtx) return finish({ model, numCtx, state: "ready" });
