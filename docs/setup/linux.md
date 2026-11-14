@@ -16,9 +16,16 @@ has. Versions 0.2.4 and earlier need FUSE 2 instead
 elsewhere). Where FUSE is unavailable, use the documented fallback:
 `./Gates-Local.AppImage --appimage-extract-and-run` (substitute your filename).
 See [AppImage's FUSE instructions](https://docs.appimage.org/user-guide/troubleshooting/fuse.html).
-Do not disable Chromium's sandbox to launch the app. On Ubuntu 23.10 and
-later the AppImage's own launcher turns it off by itself, because those
-systems restrict the user namespaces it needs.
+
+On Ubuntu 23.10 and later the AppImage's window runs with Chromium's
+sandbox off: its launcher turns it off by itself, because those systems
+restrict the user namespaces the sandbox needs. The sandbox keeps a bug in
+the window's web engine away from the rest of your account; with it off,
+such a bug would run with your rights. So on those systems the app does not
+run a page a model writes by itself; it shows the code and runs it when you
+press Run. The clone
+route below keeps the sandbox on with an AppArmor profile
+([Electron stops with "No usable sandbox!"](#electron-stops-with-no-usable-sandbox)).
 
 ## 1. Install Node.js 24 and pnpm 11
 
@@ -394,8 +401,16 @@ That removes a protection the distribution turned on on purpose: it makes
 kernel bugs that need user namespaces harder to exploit. Prefer the
 profile.
 
-Do not start the app with `--no-sandbox`. It turns off the protection
-around the app's window.
+Do not start the clone with `--no-sandbox`: the profile keeps the sandbox
+on, and the flag turns it off.
+
+A profile can cover the AppImage too, but it takes two, and it has not been
+tested: one like the above for the window program inside the mounted
+AppImage, whose folder name changes on every launch (a pattern such as
+`/tmp/.mount_Gates-*/gates-local`), and one for `/usr/bin/unshare`, which
+the AppImage's launcher tries first and turns the sandbox off when it
+fails. The second lets every program that runs `unshare` make user
+namespaces, which weakens the protection for the whole machine.
 
 The profile covers Electron only. The shell tool's bubblewrap needs user
 namespaces too; on these systems it may stay off, and the rest of the app

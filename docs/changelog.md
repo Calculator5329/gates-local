@@ -228,6 +228,11 @@
   longer installs, and said so only in a terminal. The AppImage now
   carries its own FUSE support and opens with a double-click, no extra
   package and no admin password.
+- On Ubuntu 23.10 and later its window runs with Chromium's sandbox off:
+  the AppImage's launcher turns it off because those systems restrict the
+  user namespaces it needs. A bug in the window's web engine would then run
+  with your rights, so there the app does not run a page a model writes by
+  itself. The clone route with its AppArmor profile keeps the sandbox on.
 - The fallback launch (`--appimage-extract-and-run`) no longer prints
   every file it unpacks, and the app no longer repeats "the model runtime
   is not running" every second while it installs Ollama.

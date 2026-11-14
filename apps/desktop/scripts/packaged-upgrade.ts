@@ -38,6 +38,7 @@ import { rowOf, STOP_POINTS, type Row, type StopPoint } from "../src/installed-u
 import { approve, INSTALLED_APPROVAL_MS, transactionFile, UPDATES_FOLDER, writeIntent } from "../src/installed-update/transaction.ts";
 import { writeResult } from "../src/installed-update/results.ts";
 import { cannotReplace, earlierFailure, otherCopy, rolledBack, secondLaunch, startedTooLate, stuck, updated, watcherDied, type CannotReplace } from "../src/installed-update/words.ts";
+import { fuseProblem, thisMachine } from "./appimage-fuse.ts";
 import { Checks, freePort, message, openUpdates, pause, personClick, publicKeyBase64, restartButton, rpc, seedData, sha512Of, shoot, shootNote, startFeed, until, waitDownloaded, type IuFeed, type PageDocument } from "./installed-update-probe.ts";
 
 function digest(file: string): string {
@@ -958,15 +959,6 @@ async function refusalSeen(rig: Rig, c: Checks, details: Record<string, unknown>
   details["words"] = words;
 }
 
-function fuseProblem(): string | null {
-  if (!existsSync("/dev/fuse")) return "this machine has no /dev/fuse";
-  const helper = ["fusermount3", "fusermount"].some(name => spawnSync("sh", ["-c", `command -v ${name}`]).status === 0);
-  if (!helper) return "this machine has no fusermount";
-  // The AppImage runtime loads libfuse.so.2 with dlopen: from the system's folders, or LD_LIBRARY_PATH.
-  const folders = [...(process.env["LD_LIBRARY_PATH"] ?? "").split(":"), "/lib/x86_64-linux-gnu", "/usr/lib/x86_64-linux-gnu", "/lib64", "/usr/lib64", "/lib", "/usr/lib"];
-  return folders.some(f => f !== "" && existsSync(path.join(f, "libfuse.so.2"))) ? null : "this machine has no libfuse.so.2 (Ubuntu: libfuse2t64)";
-}
-
 const versionOf = (file: string) => /Gates-Local-(\d+\.\d+\.\d+)-x86_64\.AppImage$/.exec(path.basename(file))?.[1];
 
 /** Runs the jobs at most `limit` at a time, in order of start. */
@@ -1021,7 +1013,8 @@ async function installedUpdate(argv: readonly string[]): Promise<void> {
   const started = Date.now();
   try {
     const jobs: { readonly test: IuName; readonly name: string; readonly run: () => Promise<Outcome> }[] = [];
-    const fuse = fuseProblem();
+    // Mounted mode runs N, then N+1: either one's runtime decides whether libfuse.so.2 is needed.
+    const fuse = fuseProblem([readFileSync(run.older), newerBytes], thisMachine());
     if (only.includes("IU-03")) {
       jobs.push({ test: "IU-03", name: "extract", run: () => forwardUpdate(run, "extract") });
       jobs.push({ test: "IU-03", name: "mounted", run: () => fuse === null ? forwardUpdate(run, "mounted") : Promise.resolve({ passed: false, problems: [`mounted mode: ${fuse}`], details: {} }) });
