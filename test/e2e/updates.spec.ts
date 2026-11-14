@@ -358,7 +358,7 @@ test.describe("Version and the update state in two rows", () => {
     route?.send(JSON.stringify({ type: "push", channel: "update.changed", payload: { ...idle, lastCheck: after, approval: "approval-1", canControl: true } }));
     const restart = group.getByRole("button", { name: "Restart to update", exact: true });
     await expect(restart).toBeVisible();
-    await expect(row.locator(".src-help")).toHaveText("Version 0.2.2 is downloaded and checked.");
+    await expect(row.locator(".src-help")).toHaveText(/^Checked at /);
     await expect(row).not.toContainText("download it from the release page");
     await expect(row.locator(".tipped")).toHaveAttribute("aria-description", /To go back, download version 0\.2\.1 from .*Gates Local will close, update and reopen\./);
     expect(await box(), "the Updates card moved or changed size").toEqual(start);

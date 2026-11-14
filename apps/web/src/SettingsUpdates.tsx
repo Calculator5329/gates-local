@@ -23,7 +23,7 @@ import { canUpdateHere, checkForUpdates, downloadUpdate, updateAndRestart, updat
 import { Grp, Na, Row, Skel, useAct } from "./settings-ui.tsx";
 import { type Maybe, NA, useStore } from "./store.ts";
 import { esc } from "./ui.tsx";
-import { ITSELF, RESTART, clock, goBackLine, outdated, retryable, ver } from "./update-state.ts";
+import { ITSELF, RESTART, clock, outdated, retryable, ver } from "./update-state.ts";
 
 /** Subjects shown before the rest fold away under "Show all". */
 export const SHOWN_CHANGES = 3;
@@ -102,8 +102,9 @@ function stateLine(check: UpdateCheck | null, control: boolean, canUpdate: boole
     case "cannot-check":
       return check.lines[0] === undefined ? checked(check) : whole(check.lines[0]);
     case "newer": {
-      // Ready on Windows: the one fact that differs there (it does not go back by itself) is the line; the button says it is downloaded.
-      if (check.download === "ready" && check.lines.length > 1) return goBackLine(check);
+      // Ready and installable: the button says so, so the line is when it checked, as in every other state.
+      // A ready download this copy cannot install keeps the server's first line, which says why.
+      if (check.download === "ready" && check.restart === true) return checked(check);
       // The server's plain "Version X is available." is the label already.
       const first = check.lines[0];
       return first === undefined || first === `Version ${check.target} is available.` ? checked(check) : first;

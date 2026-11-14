@@ -233,6 +233,9 @@ async function fixture(options: Partial<ImageDeps> & OwnerOptions = {}, realOlla
   };
 }
 
+/** A folder's free space is the real disk's, which other work moves between two reads: it and the read time are left out of a comparison. */
+const steady = (p: unknown): unknown => JSON.parse(JSON.stringify(p, (k, v: unknown) => (k === "freeBytes" || k === "readAt" ? 0 : v)));
+
 describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () => {
   it.each(["owned", "foreign", "changed", "unreadable"])("SN-CO-06 shutdown's deadline stops only the current app-started unit (%s)", async kind => {
     let up = kind === "foreign";
@@ -1347,7 +1350,7 @@ describe("image presets (fake ComfyUI file lists)", () => {
       expect(first.others?.find((p) => p.id === "file:loras/ink.safetensors")).toMatchObject({ name: "ink style", group: "Your models", family: "sdxl", why: "A SDXL LoRA; it needs a SDXL model, and none is installed." });
       expect(first.others?.at(-1)).toMatchObject({ id: "file:loras/zi.safetensors", family: "zimage", why: expect.stringContaining("no Z-Image Turbo setup that takes a LoRA") });
       f.workflows({});
-      expect(await f.module.presets()).toEqual({ ...first, readAt: expect.any(Number) });
+      expect(steady(await f.module.presets())).toEqual(steady(first));
       f.configure({ answering: false });
       const restarted = await fixture({ dataDir: f.dataDir });
       restarted.configure({ answering: false });

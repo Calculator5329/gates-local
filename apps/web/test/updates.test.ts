@@ -310,10 +310,11 @@ describe("the Updates group of an installed copy", () => {
     expect(plain).not.toMatch(/git|pnpm/i);
   });
 
-  it("downloaded on Windows: the card's line is that it does not go back by itself, and the tip says how to go back", () => {
+  it("downloaded on Windows: the card's line is when it checked, and the tip says how to go back", () => {
     const back = "If version 1.3.0 does not start, Gates Local will not go back by itself. To go back, run Setup-1.2.3.exe.";
     const html = view({ canUpdate: true, ...installedWith({ state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Version 1.3.0 is downloaded and checked.", back], page: PAGE, download: "ready", restart: true }) });
-    expect(stateLine(html)?.[2]).toBe("Does not go back by itself if 1.3.0 does not start.");
+    expect(stateLine(html)?.[2]).toMatch(/^Checked at /);
+    expect(said(html).match(/go back by itself/g)?.length ?? 0).toBeLessThanOrEqual(1);
     expect(said(html)).toContain("To go back, run Setup-1.2.3.exe.");
     expect(html).toMatch(/<button[^>]*>Restart to update<\/button>/);
   });
@@ -322,7 +323,8 @@ describe("the Updates group of an installed copy", () => {
     const ready = installedWith({ state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Version 1.3.0 is downloaded and checked."], page: PAGE, download: "ready", restart: true });
     const html = view({ canUpdate: true, ...ready });
     const plain = text(html);
-    expect(plain).toContain("Version 1.3.0 is downloaded and checked.");
+    expect(plain).toContain("Checked at ");
+    expect(plain).not.toContain("is downloaded and checked");
     expect(html).toMatch(/<button[^>]*>Restart to update<\/button>/);
     expect(said(html)).toContain("Gates Local will close, update and reopen.");
     expect(html.includes(link)).toBe(false);

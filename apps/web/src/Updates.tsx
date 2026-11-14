@@ -5,7 +5,7 @@ import { Icon, type IconId } from "./icons.tsx";
 import { canUpdateHere, checkForUpdates, dismissUpdateResult, downloadUpdate, openSettings, readUpdateStatus, updateAndRestart } from "./session.ts";
 import { NA, getState, useStore } from "./store.ts";
 import { closeTip } from "./ui.tsx";
-import { RESTART, goBackLine, restartable, type UpdateClick, type UpdateIcon, type UpdateInput, outdated, updateIcon, ver } from "./update-state.ts";
+import { RESTART, restartable, type UpdateClick, type UpdateIcon, type UpdateInput, outdated, updateIcon, ver } from "./update-state.ts";
 import { updateWork, workLines } from "./update-work.ts";
 
 /** A progress ring around a footer icon: a share from 0 to 1, or null for a turning arc. It sits inside the box and never changes it. */
@@ -85,9 +85,10 @@ const BRIGHT = { color: "var(--foreground)" } as const;
  * window's queue or drafts, read again at Go) the new ones show brighter, a
  * screen reader hears "Changed", and Go waits a moment; nothing installs on
  * that press. before: the lines shown when it last closed for that reason.
- * An installed copy's Restart asks the same way. What happens if the new
- * version does not start is goBackLine: on Linux it goes back by itself, on
- * Windows it does not (installed-updates.md, 2, 8); Settings' tip says how.
+ * An installed copy's Restart asks the same way, with only the lines for
+ * what would stop; with nothing running it is the question and two buttons.
+ * What happens if the new version does not start is not said here: on
+ * Windows the tip in Settings says how to go back.
  */
 function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStatus; check: Extract<UpdateCheck, { state: "available" | "newer" }>; before: readonly string[] | null; onCancel: () => void; onGo: (shown: readonly string[]) => void }) {
   const installed = check.state === "newer";
@@ -137,14 +138,16 @@ function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStat
   return (
     <div className="cfm" role="group" aria-label="Confirm update">
       <b>Update to {ver(check.target)} and restart?</b>
-      <ul>
-        {work.map((w) => (
-          <li key={w} style={fresh.includes(w) ? BRIGHT : undefined}>
-            {w}
-          </li>
-        ))}
-        <li>{installed ? goBackLine(check) : `Falls back to ${ver(check.current)} if a step fails.`}</li>
-      </ul>
+      {installed && work.length === 0 ? null : (
+        <ul>
+          {work.map((w) => (
+            <li key={w} style={fresh.includes(w) ? BRIGHT : undefined}>
+              {w}
+            </li>
+          ))}
+          {installed ? null : <li>{`Falls back to ${ver(check.current)} if a step fails.`}</li>}
+        </ul>
+      )}
       <span role="status" style={UNSEEN}>
         {wait && prev !== null ? ["Changed:", ...fresh].join(" ") : ""}
       </span>

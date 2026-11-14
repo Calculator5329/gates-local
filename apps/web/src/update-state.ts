@@ -69,16 +69,6 @@ export const ver = (v: string) => v.replace(/^v(?=\d)/, "");
 /** The one button name for closing into a newer version, on a clone and on an installed copy. */
 export const RESTART = "Restart to update";
 
-/**
- * What happens if the new version does not start, said once for the confirm and Settings. Linux: it
- * goes back by itself. Windows: it does not; only a Windows copy sends a second line on a ready
- * download (the server's sentence with the installer to run), which Settings' tip carries whole.
- */
-export function goBackLine(check: Extract<UpdateCheck, { state: "newer" }>): string {
-  const windows = check.download === "ready" && check.lines.length > 1;
-  return windows ? `Does not go back by itself if ${ver(check.target)} does not start.` : `Goes back to ${ver(check.current)} if ${ver(check.target)} does not start.`;
-}
-
 const lines = (...l: (string | false | undefined)[]) => l.filter((x): x is string => typeof x === "string" && x !== "").join("<br>");
 const changes = (n: number) => (n === 1 ? "1 change" : `${n} changes`);
 const CHECK = "Check for updates";
