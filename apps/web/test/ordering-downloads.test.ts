@@ -121,7 +121,7 @@ function ended(outcome: "done" | "error" | "cancelled", firstModel: boolean, ava
         const firstDownload = w.wire.a.session.firstPull(state);
         const stopped = available && order.includes("hydration.release") && outcome !== "done";
         if (stopped) expect(firstDownload, "the entry cannot promise an absent download").toBeUndefined();
-        expect(w.words(q, false, firstDownload, state.model), "queue words must describe the current download, including during a drop").toBe(stopped ? STOPPED : WAITING);
+        expect(w.words(q, false, firstDownload, state.model, false), "queue words must describe the current download, including during a drop").toBe(stopped ? STOPPED : WAITING);
       }
     },
   };

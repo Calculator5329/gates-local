@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-14: The composer says the missing model once
+
+- With the first model offered above the composer, the message box keeps
+  "Ask anything…" and no longer repeats "Download a model to start
+  chatting" under the offer. Send, off until a model exists, still says
+  why in its tip.
+- A message typed during setup said "Sends when setup finishes" after
+  setup had ended. Its row now follows what is true: a running download
+  is named, and with none the row is quiet, since the offer above already
+  says the message waits for a model.
+
 ## 2026-11-14: The app's own Ollama holds one model, and gemma4's small files fit in what they really take
 
 - When the app runs its own Ollama, that Ollama holds one model at a

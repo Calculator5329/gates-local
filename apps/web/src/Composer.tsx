@@ -5,7 +5,7 @@
 import { type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type RefObject, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { type AttachedFile, IMAGE_COUNT_MAX, type ModelInfo } from "@gates-local/contracts";
 import { useActionPress } from "./composer-press.ts";
-import { CONNECTING, PLACEHOLDER, booting, rtOf, unread } from "./Banner.tsx";
+import { CONNECTING, PLACEHOLDER, booting, firstModelOffer, rtOf, unread } from "./Banner.tsx";
 import { openFit } from "./fit-actions.ts";
 import { cardFit, fitFor, stopsChat } from "./fit-table.ts";
 import { ctxFor, describeModel, k, noGpu, slowReason, timeLeft, verdictOf } from "./format.ts";
@@ -188,6 +188,8 @@ export function Composer() {
   const slowWhy = v?.k !== "spill" ? undefined : slowReason(cardFit(fit)?.slowNow)?.short ?? (v.mark || undefined);
   const text = hasText || images.length > 0 || files.length > 0;
   const imageNo = imageReason(models, model, images, tag => describeModel(tag, catalog).name);
+  // the first model is offered right above the composer: the placeholder does not say it a second time
+  const offered = useStore((s) => firstModelOffer(s) !== undefined);
   const why = chatBlockedReason(models, model); // a download would not help: old Ollama, or the model is still being checked
   const noModel = (model === undefined || why !== undefined) && !queueable;
   // During setup the gate style already greys every control; otherwise the pill says why it is off.
@@ -214,8 +216,9 @@ export function Composer() {
   // past the boot bound with still nothing read, one neutral word until the runtime answers
   // a message typed during the first download says when it goes once, in its queue row (chat row 29)
   // Image on: Send goes to the picture model, whatever the chat engine is doing; only a dropped server stops it
+  const needsModel = why ?? "Download a model to start chatting";
   const placeholder = drawing && !boot && !none && rt !== "offline" ? IMAGE_PLACEHOLDER
-    : noModel && ready ? (why ?? "Download a model to start chatting") : boot ? PLACEHOLDER.ready : none ? CONNECTING : PLACEHOLDER[rt];
+    : noModel && ready ? (offered ? PLACEHOLDER.ready : needsModel) : boot ? PLACEHOLDER.ready : none ? CONNECTING : PLACEHOLDER[rt];
 
   // A message queued behind a reply is checked when it goes, and memory a reply holds may be freed by stopping it.
   const memNo = v?.k === "no" && !isStreaming && !freed && !editing;
@@ -233,7 +236,7 @@ export function Composer() {
   }
   // Not ready and nothing queues: once typed words hide the placeholder, the tip is what it said is awaited
   // (owner, 2026-11-14: "enter to send message is sometimes not working"); with the box empty the placeholder says it
-  if (!drawing && text && ((blocked && !queueable) || noModel)) sendTip = boot ? CONNECTING : placeholder;
+  if (!drawing && text && ((blocked && !queueable) || noModel)) sendTip = boot ? CONNECTING : noModel && ready ? needsModel : placeholder;
   // the model list not read yet, or the model not in it: send() would hold the message with nothing said
   const unlisted = !drawing && ready && !queueable && !noModel && model !== undefined && sendableModel(models, model) === undefined;
   if (unlisted) sendTip = models === undefined ? "Reading the models…" : models.some((m) => m.name === model) ? `${name} can't chat` : `${name} isn't installed`;
@@ -521,12 +524,13 @@ export function enterAnswer(s: { readonly sendDisabled: boolean; readonly memRef
 }
 
 /** A queued message's state in a word or two, only where being in the queue does not already say it: null while it waits for the reply, and while it is edited here (the pressed pencil says that). */
-export function queueWords(q: Queued, editing: boolean, first: string | undefined, model: string | undefined): string | null {
+export function queueWords(q: Queued, editing: boolean, first: string | undefined, model: string | undefined, installing: boolean): string | null {
   if (editing) return null;
   // open in another window's composer, it does not go until that edit ends or that window closes
   if (q.editing === true) return EDITED_ELSEWHERE;
   if (q.waitFor === "download") return first === undefined && (q.model ?? model) === undefined ? "Download stopped" : AFTER_DOWNLOAD;
-  if (q.waitFor === "setup") return AFTER_SETUP;
+  // setup has ended: a download that runs is what it waits for now; with none, the offer above the composer says a model is needed
+  if (q.waitFor === "setup") return installing ? AFTER_SETUP : first !== undefined ? AFTER_DOWNLOAD : null;
   if (q.retry === "running") return RETRYING;
   if (q.retry === "failed") return RETRY_FAILED;
   return q.held ? "On hold" : null;
@@ -610,6 +614,7 @@ function QueueTray() {
   const kind = useStore(runningKind);
   const downloadAt = useStore(downloadNumbers);
   const setupAt = useStore(setupNumbers);
+  const installing = useStore((s) => s.runtime?.state === "installing" || s.runtime?.state === "starting");
   const mine = queued.filter((q) => q.threadId === threadId);
   if (mine.length === 0) return null;
   const n = mine.length;
@@ -622,7 +627,7 @@ function QueueTray() {
       {mine.map((q, i) => {
         if (!shown(i, q.id)) return null;
         const editing = q.id === editingId;
-        const words = queueWords(q, editing, first, model);
+        const words = queueWords(q, editing, first, model, installing);
         return (
           <li key={q.id} className="qt-r" aria-label={`Queued ${q.draw === undefined ? "message" : "image"} ${i + 1} of ${n}`}>
             {/* a chat is the default, so only a picture marks its kind (chat row 19) */}
