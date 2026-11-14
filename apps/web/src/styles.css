@@ -324,7 +324,7 @@ div.think.fold:hover{color:var(--muted-foreground);background:none}
 .think.fold .lv-w{display:block;min-width:0;text-align:left}
 .think.fold .lv-w>span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--foreground)}
 /* wide enough for "59 s", so the words hold still while the number ticks; it may grow once at 100 s */
-.think.fold .lv-t{flex:none;white-space:pre;min-width:4ch;text-align:right;margin-right:8px}
+.think.fold .lv-t{flex:none;white-space:pre;min-width:4ch;text-align:left;margin-right:8px}
 .lv-h{display:none;white-space:pre;margin-right:2px}
 .think.fold:hover .lv-h,.think.fold:focus-visible .lv-h{display:inline}
 .lv-i.bad{color:var(--red)}
