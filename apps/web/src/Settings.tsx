@@ -4,8 +4,8 @@
 // for what is rare or destructive. A control the server cannot back is left
 // out instead of being shown switched off.
 import { type CSSProperties, useEffect, useRef, useState } from "react";
-import type { Accent, ImageSetupProgress, ImageStatus, ShellStatus, Source, Theme } from "@gates-local/contracts";
-import { portOf, rtInfo, rtOf } from "./Banner.tsx";
+import { type Accent, type ImageSetupProgress, type ImageStatus, type ShellStatus, type Source, type Theme, cardBytes } from "@gates-local/contracts";
+import { failWords, installStep, installWords, portOf, rtInfo, rtOf, underTitle } from "./Banner.tsx";
 import { GpuMemory } from "./FitPanel.tsx";
 import { count, folderWords, gb, noGpu, sourceDetail } from "./format.ts";
 import { noImageEngine } from "./image-choice.ts";
@@ -14,7 +14,7 @@ import { Icon, type IconId } from "./icons.tsx";
 import LibraryImports from "./LibraryImports.tsx";
 import { ModelsPage } from "./Models.tsx";
 import { sizeText } from "./models-rules.ts";
-import { addSource, canOpenFolder, checkImageStatus, checkShell, dataFolder, folderDialog, loadImageSetup, openDataFolder, openSettings, refreshSource, removeSource, resetSettings, saveImageFolder, settingsReads, startImageSetup, updateSettings } from "./session.ts";
+import { addSource, canOpenFolder, checkImageStatus, checkShell, dataFolder, folderDialog, loadImageSetup, openDataFolder, openSettings, recheckRuntime, refreshSource, removeSource, resetSettings, saveImageFolder, settingsReads, startImageSetup, updateSettings } from "./session.ts";
 import { NA, setState, useStore } from "./store.ts";
 import { CopyButton, PathText, Status } from "./settings-controls.tsx";
 import { type LibraryTool, libraryToolCanUse } from "./settings-rules.ts";
@@ -92,15 +92,17 @@ function Runtime() {
   const info = rtInfo({ conn, runtime, settings });
   const port = portOf(runtime?.baseUrl);
   const app = runtime?.owner === "app";
+  // while the app's own Ollama installs, the step and its numbers in the first window's and the banner's words
+  const words = rt === "installing" ? installWords(runtime?.install) : undefined;
   const stat =
-    rt === "ready" ? "Running" : rt === "installing" ? "Installing" : rt === "starting" ? "Starting" : rt === "missing" ? "Not installed" : rt === "wrong" ? `Port ${port} busy` : rt === "offline" ? "Reconnecting" : rt === "stopped" ? "Stopped" : "Didn't start";
+    rt === "ready" ? "Running" : rt === "installing" ? installStep(runtime?.install) : rt === "starting" ? "Starting" : rt === "missing" ? "Not installed" : rt === "wrong" ? `Port ${port} busy` : rt === "offline" ? "Reconnecting" : rt === "stopped" ? "Stopped" : failWords(runtime?.failure).stat;
   const statD =
     rt === "ready"
       ? app
         ? "Gates Local's own Ollama. It starts and stops with the app."
         : "The Ollama your computer runs. It keeps running when you quit Gates Local."
       : rt === "installing"
-        ? "Installing Gates Local's own Ollama."
+        ? words === undefined ? "Gates Local's own Ollama." : <span className="fig">{words}</span>
         : rt === "starting"
           ? "Waiting for Ollama to answer."
           : rt === "missing"
@@ -109,7 +111,7 @@ function Runtime() {
               : "No Ollama is installed. Gates Local can install its own."
             : rt === "wrong"
               ? `Something other than Ollama answers on port ${port}.`
-              : (runtime?.detail ?? info.tip);
+              : (underTitle(runtime?.detail, runtime?.failure) ?? info.tip);
   const canSwitch = settings !== NA && settings !== undefined;
   // A runtime that cannot be used has no owner, so the mode chosen says which way a switch goes.
   const ownCopy = rt === "ready" || !canSwitch ? app : settings.runtimeMode === "app";
@@ -130,12 +132,19 @@ function Runtime() {
   // Desktop uses main's verified ownership record. A browser can only copy the server-reported path.
   const folder = window.gatesLocal === undefined ? runtime?.modelsDir : app && runtime?.state === "ready" ? knownFolder ?? undefined : undefined;
   const locked = useStore((s) => s.unavailable["settings.update"] === true);
-  const switchable = !locked && !nothingToSwitchTo && canSwitch && rt !== "installing" && rt !== "starting" && rt !== "offline";
+  const noRetry = useStore((s) => s.unavailable["runtime.retry"] === true);
+  const switchable =!locked && !nothingToSwitchTo && canSwitch && rt !== "installing" && rt !== "starting" && rt !== "offline";
   return (
     <>
       <Head title="Runtime" />
       <Grp>
         <Row label={<Status dot={info.dot}>{stat}</Status>} desc={statD} err={err}>
+          {/* a failed download, unpack or start is retried here too, as on the banner and the first window */}
+          {rt === "error" && !noRetry ? (
+            <button type="button" className="btn outline" data-testid="settings.runtime.retry" onClick={() => void recheckRuntime()}>
+              Retry
+            </button>
+          ) : null}
           {switchable ? (
             <button type="button" className={`btn outline${confirm ? " pressed" : ""}`} data-testid="settings.runtime.switch" aria-expanded={confirm} onClick={() => setState({ ownerConfirm: !confirm })}>
               {ownCopy ? "Use the system Ollama" : "Use Gates Local's Ollama"}
@@ -387,7 +396,6 @@ function ImageSetUp() {
   const setup = useStore((s) => s.imageSetup);
   const canSetUp = useStore((s) => s.unavailable["image.setup"] !== true);
   const [err, run] = useAct();
-  useEffect(() => { void loadImageSetup(); }, []);
   if (setup?.why !== undefined || !canSetUp) {
     return (
       <Row label="Set up images" desc={setup?.why === undefined ? undefined : addressBelow(setup.why)}>
@@ -471,6 +479,11 @@ function ImageState({ address }: { address: string }) {
   );
 }
 
+/** The smallest card the server renders pictures on (MIN_ROOM in the server's image presets). */
+const MIN_ROOM = 4 * 1024 ** 3;
+
+const UNLOADS = "The chat model unloads while an image renders.";
+
 function Images() {
   const settings = useStore((s) => s.settings);
   const locked = useStore((s) => s.unavailable["settings.update"] === true);
@@ -480,9 +493,21 @@ function Images() {
   const [genErr, runGen] = useAct();
   const [urlErr, runUrl] = useAct();
   const none = useStore(noImageEngine);
+  // The setup's own state decides whether its row shows (setupHeld), so it is read on opening and
+  // again after each reconnect: a "done" or "error" pushed while the socket was down leaves no
+  // "Setting up…" behind, and a page opened mid-setup finds its row.
+  const linked = useStore((s) => s.conn.kind === "open");
+  useEffect(() => { if (linked) void loadImageSetup(); }, [linked]);
   // true only where a picture's fit asks the chat model to leave: this computer's card, never the processor or a ComfyUI elsewhere
   const unloads = useStore((s) => s.imagePresets !== undefined && s.imagePresets !== NA && s.imagePresets.unloadsChat === true);
-  const on = settings !== NA && settings?.imageGen === true;
+  // The list asks ComfyUI first, so it can answer after this section paints. On a card the server
+  // could say it for (one of MIN_ROOM or more, read before Settings opens), the sentence holds its
+  // room unseen (as many lines as it wraps to at this width) from the first frame to the section's
+  // last; anywhere else it is never said, so no room.
+  const could = useStore((s) => s.gpu !== undefined && s.gpu !== NA && s.gpu.vendor === "nvidia" && s.gpu.totalBytes !== undefined && cardBytes(s.gpu.totalBytes) >= MIN_ROOM);
+  const listed = useStore((s) => s.imagePresets !== undefined);
+  const [room] = useState(() => could && !listed);
+  const on =settings !== NA && settings?.imageGen === true;
   const comfy = settings === NA ? undefined : settings?.comfyUrl;
   const address = (status !== undefined && status !== NA ? status.baseUrl : undefined) ?? comfy ?? "http://127.0.0.1:8188";
   // the typed address stays until the server saved it (W-07)
@@ -526,7 +551,7 @@ function Images() {
       <Head title="Image generation" />
       {settings === NA || settings === undefined ? null : (
         <Grp>
-          <Row label="Generate images" desc={locked ? `${on ? "On" : "Off"}. ${COMPUTER_ONLY}` : unloads ? "The chat model unloads while an image renders." : undefined} err={genErr}>
+          <Row label="Generate images" desc={locked ? `${on ? "On" : "Off"}. ${COMPUTER_ONLY}` : unloads ? UNLOADS : room ? <span className="held" aria-hidden="true">{UNLOADS}</span> : undefined} err={genErr}>
             {locked ? null : <button type="button" className="switch" role="switch" data-testid="settings.images.enable" aria-checked={on} aria-label="Generate images" onClick={() => void runGen(updateSettings({ imageGen: !on }))} />}
           </Row>
         </Grp>

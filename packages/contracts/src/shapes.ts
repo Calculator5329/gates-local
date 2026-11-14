@@ -400,6 +400,12 @@ export const RuntimeStatus = S.Struct({
   noAppCopy: S.optional(S.Boolean),
   /** The folder the app's own running Ollama was started with. Absent whenever that isn't known for certain, as for an Ollama the app did not start. */
   modelsDir: S.optional(S.String),
+  /**
+   * "error": what failed. "download": the app's own Ollama did not finish downloading (cut off,
+   * stalled or not the pinned file); "install": it came down but did not unpack or may not be
+   * installed; "start": it is there and did not start. Absent for an error from elsewhere.
+   */
+  failure: S.optional(S.Literals(["download", "install", "start"])),
   /** "installing": how far the download of the app's own Ollama is, as a model download says it. Received equals total while it is checked and unpacked. */
   install: S.optional(S.Struct({
     receivedBytes: Count,

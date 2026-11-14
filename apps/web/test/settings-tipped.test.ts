@@ -54,11 +54,29 @@ it("no label, row or value in any section carries a tooltip, and every tip is a 
 it("F4: Image generation says what an image costs the chat model in its visible line, once, and not in the tooltip", () => {
   const sentence = "The chat model unloads while an image renders.";
   // only where it is true: nothing is said until this computer's card is known to render
+  // (on a card it can be true for, its room is held by an unseen copy, aria-hidden: that copy says nothing)
   store.setState({ imagePresets: undefined });
-  expect(render("images")).not.toContain(sentence);
+  expect(render("images").replace(/<span class="held" aria-hidden="true">[^<]*<\/span>/g, "")).not.toContain(sentence);
   store.setState({ imagePresets: { ...methodSamples["image.presets"].result, unloadsChat: true } });
   const html = render("images");
   expect(html.split(sentence).length - 1).toBe(1);
   expect(html).not.toMatch(/data-tip="[^"]*chat model unloads/);
   expect(html).toMatch(/<span class="d">[^<]*The chat model unloads while an image renders\./);
+});
+
+// Nothing moves: the image list asks ComfyUI first and can answer after Settings › Image generation
+// has painted. On a card the sentence can be said for, its line is there from the first frame.
+it("the unloads line keeps its room while the image list is on its way, only on a card it can be said for", () => {
+  const GIB = 1024 ** 3;
+  const card = { vendor: "nvidia" as const, totalBytes: 16 * GIB, freeBytes: 14 * GIB, occupants: [], systemMemoryAvailableBytes: 24 * GIB, measuredAt: 1 };
+  const line = /<b>Generate images<\/b><span class="d">/;
+  store.setState({ imagePresets: undefined, gpu: card });
+  // held unseen, the sentence itself, so the room is as many lines as it wraps to at any width
+  expect(render("images")).toMatch(/<b>Generate images<\/b><span class="d"><span class="held" aria-hidden="true">The chat model unloads while an image renders\.<\/span>/);
+  // the answer lands: the sentence fills the line it kept
+  store.setState({ imagePresets: { ...methodSamples["image.presets"].result, unloadsChat: true } });
+  expect(render("images")).toMatch(/<b>Generate images<\/b><span class="d">The chat model unloads while an image renders\./);
+  // no GPU: the sentence is never said, so no line is kept for it
+  store.setState({ imagePresets: undefined, gpu: { ...card, vendor: "none", totalBytes: undefined, freeBytes: undefined } });
+  expect(render("images")).not.toMatch(line);
 });

@@ -185,6 +185,7 @@ describe("stopped (installed, nothing answering)", () => {
     expect(s.state).toBe("error");
     expect(s.detail).toContain("code 3");
     expect(s.detail).toContain("boom: cannot bind");
+    expect(s.failure).toBe("start");
     expect(existsSync(ownedStateFile(appDataDir))).toBe(false);
   });
 });
@@ -231,8 +232,29 @@ describe("missing", () => {
     const s = await rt.ensure();
     expect(s.state).toBe("error");
     expect(s.detail).toContain("did not match its pinned checksum");
+    // the status says the download is what failed, so no screen calls it a start that failed
+    expect(s.failure).toBe("download");
     expect(existsSync(installedBinary(appDataDir, VERSION))).toBe(false);
   });
+
+  it("Retry while the download has stalled ends that attempt and starts a new one, with no error between", async () => {
+    const tarball = buildFakeRelease(work);
+    const release = await startReleaseServer(tarball);
+    cleanups.push(() => release.close());
+    release.mode = "hang";
+    const m = manifest({ url: release.url, sha256: createHash("sha256").update(tarball).digest("hex"), sizeBytes: tarball.length });
+    const { rt, seen } = await makeRuntime({ externalBaseUrl: await nothingAt(), manifest: m, allowInstall: true, stallMs: 200 });
+    const first = rt.ensure();
+    const deadline = Date.now() + 5000;
+    while (!seen.some((x) => (x.install?.receivedBytes ?? 0) > 0) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    await new Promise((r) => setTimeout(r, 400));
+    release.mode = "ok";
+    const s = await rt.ensure();
+    expect(s.state).toBe("ready");
+    expect(release.hits).toBe(2);
+    expect((await first).state).toBe("ready");
+    expect(seen.some((x) => x.state === "error")).toBe(false);
+  }, 30_000);
 });
 
 describe("wrong service on the port", () => {

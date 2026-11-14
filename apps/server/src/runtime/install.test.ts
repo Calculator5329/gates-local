@@ -97,6 +97,16 @@ describe("installPinned", () => {
     expectNothingInstalled();
   });
 
+  // Node's fetch waits 300 s (undici's bodyTimeout) for a body that stops sending; the download ends itself sooner.
+  it("a download that stops sending ends after the idle bound, as an interrupted download that says to retry", async () => {
+    server.mode = "hang";
+    const t0 = Date.now();
+    const e = await expectInstallError(installPinned({ appDataDir, manifest: manifest(), idleMs: 300 }), "interrupted");
+    expect(Date.now() - t0).toBeLessThan(3000);
+    expect(e.message).toMatch(/^The Ollama download stopped at .* \(no data for 0\.3 s\)\. Check the network and retry/);
+    expectNothingInstalled();
+  }, 10_000);
+
   it("a download longer than the pinned size is refused before it is hashed to completion", async () => {
     const e = await expectInstallError(installPinned({ appDataDir, manifest: manifest({ sizeBytes: tarball.length - 10 }) }), "hash-mismatch");
     expect(e.message).toContain("larger than the pinned");

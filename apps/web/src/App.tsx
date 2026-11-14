@@ -6,7 +6,7 @@
 // runtime confirm, the download page, then Settings itself.
 import type { Message } from "@gates-local/contracts";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Banner, type Rt, rtOf } from "./Banner.tsx";
+import { Banner, type Rt, failWords, installStep, rtOf } from "./Banner.tsx";
 import { Composer, CountMenu, OptsMenu, PlusMenu } from "./Composer.tsx";
 import { ImageUnset } from "./ImageUnset.tsx";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
@@ -171,8 +171,11 @@ function listValue(s: State, id: Section): string {
       const tag = settings?.defaultModel ?? s.model;
       return tag === undefined ? "" : describeModel(tag, s.catalog === NA ? undefined : s.catalog).name;
     }
-    case "runtime":
-      return RT_WORD[rtOf(s)];
+    case "runtime": {
+      // the step and the cause in the words the banner and Settings › Runtime use
+      const rt = rtOf(s);
+      return rt === "installing" ? installStep(s.runtime?.install) : rt === "error" ? failWords(s.runtime?.failure).stat : RT_WORD[rt];
+    }
     case "tools":
       return settings === undefined ? "" : settings.tools ? "On" : "Off";
     case "images":

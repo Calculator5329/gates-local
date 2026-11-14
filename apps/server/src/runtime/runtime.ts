@@ -114,6 +114,8 @@ export type RuntimeOptions = {
    * Tests inject one so a Windows PATH resolves on Linux.
    */
   isExecutable?: (file: string) => boolean;
+  /** No bytes of the Ollama download for this long: the status drops its speed, and a Retry starts again. Default STALL_MS. */
+  stallMs?: number;
 };
 
 /**
@@ -159,6 +161,16 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** How often the installing status says how far Ollama's download is. */
 const INSTALL_PUSH_MS = 1000;
+
+/**
+ * No bytes of Ollama's download for this long is a stall: the speed (and the time left built on it)
+ * leaves the status, since it is no longer true, and a Retry ends the attempt and starts a new one.
+ * The download ends itself after install.ts's DOWNLOAD_IDLE_MS.
+ */
+const STALL_MS = 5000;
+
+/** Why an attempt was ended for a Retry; its failure is not shown, the new attempt's status is. */
+class Restart extends Error {}
 
 /** The status with the note in front of its detail and the note's busy ports. */
 function noted(status: RuntimeStatus, note: Note | undefined): RuntimeStatus {
@@ -240,6 +252,9 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
   const statusListeners = new Set<Listener<RuntimeStatus>>();
   const progressListeners = new Set<Listener<InstallProgress>>();
   let inFlight: Promise<RuntimeStatus> | undefined;
+  const stallMs = options.stallMs ?? STALL_MS;
+  /** The Ollama install running now: how to end it, when its last bytes came, and whether it is still downloading (a check or unpack is never cut short). */
+  let download: { abort: AbortController; lastBytesAt: number; fetching: boolean } | undefined;
   /** Nothing to install here, and nothing on this computer the app could run as its own. Set by `classify`. */
   let noAppCopy = installable === undefined;
 
@@ -488,6 +503,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
             state: "error",
             owner: "none",
             baseUrl: appBaseUrl,
+            failure: "start",
             detail: `${why}${logTail ? ` Last log lines: ${logTail}` : ""} Log: ${logFile}`,
           },
           note,
@@ -553,12 +569,25 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       setStatus({ ...installing, install: { receivedBytes: 0, totalBytes: manifest.sizeBytes, ...disk } });
       // The status carries the download's size and progress, at most once a second, with the speed since the last one.
       let said = { at: Date.now(), bytes: 0 };
+      const mine = { abort: new AbortController(), lastBytesAt: Date.now(), bytes: 0, fetching: true };
+      download = mine;
+      // no bytes for stallMs: the speed is no longer true, so it leaves the status (and with it the time left)
+      const watch = setInterval(() => {
+        const i = current.state === "installing" ? current.install : undefined;
+        if (i?.bytesPerSecond === undefined || Date.now() - mine.lastBytesAt < stallMs) return;
+        const { bytesPerSecond: _, ...still } = i;
+        setStatus({ ...current, install: still });
+      }, Math.max(50, Math.min(1000, stallMs / 4)));
       try {
         const r = await installPinned({
           appDataDir,
           manifest,
+          signal: mine.abort.signal,
           onProgress: (p) => {
             for (const l of progressListeners) l(p);
+            if (p.receivedBytes > mine.bytes || p.phase !== "download") mine.lastBytesAt = Date.now();
+            mine.bytes = p.receivedBytes;
+            mine.fetching = p.phase === "download";
             const now = Date.now();
             const whole = p.receivedBytes >= p.totalBytes;
             if (!whole && now - said.at < INSTALL_PUSH_MS) return;
@@ -569,8 +598,17 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
         });
         binary = { path: r.binary, origin: "app-install" };
       } catch (e) {
+        // ended for a Retry: the next attempt runs inside this one's promise, so every caller gets its status, and no error shows between
+        if (mine.abort.signal.reason instanceof Restart) {
+          clearInterval(watch);
+          return ensureOnce();
+        }
         const message = e instanceof InstallError ? e.message : `Installing Ollama failed: ${(e as Error).message}`;
-        return setStatus(noted({ state: "error", owner: "none", baseUrl: appBaseUrl, detail: message }, c.note));
+        const failure = e instanceof InstallError && (e.code === "download-failed" || e.code === "interrupted" || e.code === "hash-mismatch") ? "download" : "install";
+        return setStatus(noted({ state: "error", owner: "none", baseUrl: appBaseUrl, failure, detail: message }, c.note));
+      } finally {
+        clearInterval(watch);
+        if (download === mine) download = undefined;
       }
     }
     return start(binary, c.note);
@@ -622,7 +660,11 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     status: () => current,
     baseUrl: () => (current.state === "ready" ? current.baseUrl : undefined),
     discover: () => serial(async () => setStatus(statusFor(await classify()))),
-    ensure: () => serial(ensureOnce),
+    ensure: () => {
+      // Retry while the download has stalled ends that attempt; a moving download is left to finish
+      if (inFlight !== undefined && download?.fetching === true && Date.now() - download.lastBytesAt >= stallMs) download.abort.abort(new Restart("Retry"));
+      return serial(ensureOnce);
+    },
     async stop() {
       if (platform === "win32" || (spawned !== undefined && spawned.pid !== undefined && spawned.exitCode === null && spawned.signalCode === null)) return stopSpawned();
       const r = await stopOwned(stateFile, undefined, on);

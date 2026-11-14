@@ -5,7 +5,7 @@
 import { type ReactNode, useEffect, useState } from "react";
 import type { CatalogEntry } from "@gates-local/contracts";
 import { suggestedOf } from "./picker-models.ts";
-import { CONNECTING, INSTALL_TITLE, booting, installStep, installWords, ownCopyNote, portOf, rtOf, unread } from "./Banner.tsx";
+import { CONNECTING, INSTALL_TITLE, booting, failWords, installStep, installWords, ownCopyNote, portOf, rtOf, underTitle, unread } from "./Banner.tsx";
 import { DlButton, canCancelPull } from "./ModelDownloads.tsx";
 import { cardGb, ctxFor, describeModel, etaText, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
@@ -267,6 +267,7 @@ function NoOllama() {
   const rt = useStore(rtOfState);
   const baseUrl = useStore((s) => s.runtime?.baseUrl);
   const detail = useStore((s) => s.runtime?.detail);
+  const failure = useStore((s) => s.runtime?.failure);
   const note = useStore(ownCopyNote);
   const computerOnly = useStore((s) => s.unavailable["runtime.retry"] === true);
   const own = note !== "";
@@ -280,7 +281,7 @@ function NoOllama() {
       : rt === "stopped"
         ? ["Ollama is stopped", "Ollama", own ? `${around}It starts when Gates Local opens; press Retry to check again.` : "Start Ollama, then press Retry."]
         : rt === "error"
-          ? ["Ollama didn't start", "Ollama", detail]
+          ? [failWords(failure).title, "Ollama", underTitle(detail, failure)]
           : ["Ollama isn't installed", "Ollama", `${around}${computerOnly ? "On the computer, install" : "Install"} Ollama from ollama.com, then press Retry.`];
   return (
     <Shell
@@ -311,6 +312,7 @@ function Waiting({ installing }: { installing: boolean }) {
   // the runtime has not answered once: no Ollama words yet
   const none = useStore(unread);
   const install = useStore((s) => s.runtime?.install);
+  const words = installWords(install);
   if (none) return <Connecting />;
   return (
     <Shell
@@ -321,7 +323,7 @@ function Waiting({ installing }: { installing: boolean }) {
         </>
       }
       title={installing ? INSTALL_TITLE : "Starting up"}
-      sub={installing ? installWords(install) : undefined}
+      sub={installing && words !== undefined ? <span className="fig">{words}</span> : undefined}
     >
       {installing ? (
         <>

@@ -99,6 +99,25 @@ export function installWords(i: InstallSize | undefined): string | undefined {
 /** The engine install's title, the same in the first window and the banner. */
 export const INSTALL_TITLE = "Getting the chat engine ready";
 
+/**
+ * A runtime "error" by what failed (RuntimeStatus.failure): a download that stopped, an unpack
+ * that failed, or a start. `title` heads the banner and the first window, `stat` is the gear's and
+ * Settings › Runtime's word. A status without a cause is a start, as it was before causes.
+ */
+export function failWords(failure: "download" | "install" | "start" | undefined): { title: string; stat: string } {
+  if (failure === "download") return { title: "The Ollama download didn't finish", stat: "Download didn't finish" };
+  if (failure === "install") return { title: "Ollama didn't install", stat: "Didn't install" };
+  return { title: "Ollama didn't start", stat: "Didn't start" };
+}
+
+/**
+ * The server's detail under a title that has already named the download: its sentence without
+ * the subject, so "The Ollama download" is said once. Any other detail is shown as it came.
+ */
+export function underTitle(detail: string | undefined, failure: "download" | "install" | "start" | undefined): string | undefined {
+  return failure === "download" ? detail?.replace(/^The Ollama download stopped at /, "Stopped at ") : detail;
+}
+
 /** The footer row: dot class, the words (with a bold lead) and the tooltip. */
 export function rtInfo(s: RtSource): { dot: string; text: ReactNode; tip: string } {
   const rt = rtOf(s);
@@ -110,7 +129,8 @@ export function rtInfo(s: RtSource): { dot: string; text: ReactNode; tip: string
         ? { dot: "ok", text: <><b>Ollama</b> · Gates Local</>, tip: "<b>Ready.</b> Gates Local's own copy. It starts with the app and stops when the app quits." }
         : { dot: "ok", text: <><b>Ollama</b> · system</>, tip: "<b>Ready.</b> System install, started outside Gates Local. Gates Local uses it and never stops it." };
     case "installing":
-      return { dot: "run", text: <b>{installStep(s.runtime?.install)}</b>, tip: installWords(s.runtime?.install) ?? "" };
+      // the numbers are the banner's and Settings › Runtime's (the gear opens it): the gear's tip names the step only
+      return { dot: "run", text: <b>{installStep(s.runtime?.install)}</b>, tip: "" };
     case "starting":
       return { dot: "run", text: <b>Starting Ollama</b>, tip: `Waiting for the server on port ${port}.` };
     case "missing":
@@ -120,7 +140,8 @@ export function rtInfo(s: RtSource): { dot: string; text: ReactNode; tip: string
     case "stopped":
       return { dot: "warn", text: <b>Ollama stopped</b>, tip: own === "" ? `Nothing answers on port ${port}. Start Ollama, then retry.` : `${own} It starts when Gates Local opens.` };
     case "error":
-      return { dot: "err", text: <b>Ollama didn't start</b>, tip: "Ollama failed to start. Open Settings › Runtime for details." };
+      // the words say what failed; the tip says where to act, not the words again
+      return { dot: "err", text: <b>{failWords(s.runtime?.failure).title}</b>, tip: "Open Settings › Runtime for details and Retry." };
     case "offline":
       return { dot: "run", text: <b>Reconnecting</b>, tip: "The Gates Local server stopped answering. Trying again." };
   }
@@ -151,6 +172,7 @@ export function Banner() {
   const detail = useStore((s) => s.runtime?.detail);
   const own = useStore(ownCopyNote);
   const install = useStore((s) => s.runtime?.install);
+  const failure = useStore((s) => s.runtime?.failure);
   const words = installWords(install);
   // first run tells the runtime story itself; the banner under it stays quiet
   const firstRun = useStore((s) => s.view === "firstrun");
@@ -165,11 +187,10 @@ export function Banner() {
     case "installing":
       return (
         <Shell icon={<Icon id="download" />} role="status" title={INSTALL_TITLE}>
+          {/* the step and its numbers as the first window says them: words in full, figures in the app's font */}
           <div className="bm">
-            <span className="tipd" data-testid="chat.banner.install-place" tabIndex={0} data-tip='Into <span class="mono">~/.local/share/gates-local/ollama</span>. Gates Local starts and stops only this copy.'>
-              {installStep(install)}
-            </span>
-            {words === undefined ? null : <span className="mono"> · {words}</span>}
+            {installStep(install)}
+            {words === undefined ? null : <span className="fig"> · {words}</span>}
           </div>
         </Shell>
       );
@@ -220,8 +241,8 @@ export function Banner() {
       );
     case "error":
       return (
-        <Shell icon={<Icon id="alert" cls="err" />} role="alert" title="Ollama didn't start">
-          <div className="bm">{detail ?? "Gates Local couldn't start Ollama."}</div>
+        <Shell icon={<Icon id="alert" cls="err" />} role="alert" title={failWords(failure).title}>
+          <div className="bm">{underTitle(detail, failure) ?? (failure === "download" ? "Check the network, then retry." : failure === "install" ? "Gates Local couldn't unpack Ollama." : "Gates Local couldn't start Ollama.")}</div>
           <div className="ba">
             <RetryButton primary />
           </div>

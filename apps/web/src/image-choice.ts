@@ -20,15 +20,28 @@ export interface ImageView {
 /** Image is on and image generation is on: Send goes to the image model. */
 export const imageMode = (s: State): boolean => s.image && s.settings !== NA && s.settings?.imageGen === true;
 
-/** No ComfyUI answered and the app has none to start: Image mode is not reachable until one does. */
-export const imagesUnset = (s: State): boolean => s.imageStatus !== undefined && s.imageStatus !== NA && s.imageStatus.state === "missing";
+/**
+ * Set up images is under way, or stopped partway, and no address of one's own was set since. Its
+ * engine step installs the app's own engine, so from the model step on the status reads as that
+ * engine, stopped: the setup's own state, not the engine's, says its view stays until it ends well.
+ */
+export const setupHeld = (s: Pick<State, "imageSetup" | "imageStatus">): boolean => {
+  const step = s.imageSetup?.progress?.step;
+  if (step === undefined || step === "done") return false;
+  const st = s.imageStatus;
+  return st === undefined || st === NA || st.addressSet !== true;
+};
+
+/** No ComfyUI answered and the app has none to start, or a setup has not ended well: Image mode is not reachable until one does. */
+export const imagesUnset = (s: State): boolean => (s.imageStatus !== undefined && s.imageStatus !== NA && s.imageStatus.state === "missing") || setupHeld(s);
 
 /**
  * No image engine anywhere: with generation on, none answered, there is none to start and no
- * address is set; with it off, the server's look found none. Settings then offers Set up images
- * and no Generate images switch.
+ * address is set; with it off, the server's look found none. Or a setup has not ended well
+ * (setupHeld). Settings then offers Set up images and no Generate images switch.
  */
-export const noImageEngine = (s: Pick<State, "imageStatus">): boolean => {
+export const noImageEngine = (s: Pick<State, "imageStatus" | "imageSetup">): boolean => {
+  if (setupHeld(s)) return true;
   const st = s.imageStatus;
   if (st === undefined || st === NA) return false;
   return st.state === "off" ? st.nowhere === true : st.state === "missing" && st.addressSet !== true;

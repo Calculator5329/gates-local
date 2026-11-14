@@ -238,11 +238,11 @@ export function buildFakeRelease(workDir: string): Buffer {
 export type ReleaseServer = {
   url: string;
   hits: number;
-  mode: "ok" | "truncate" | "404";
+  mode: "ok" | "truncate" | "hang" | "404";
   close(): Promise<void>;
 };
 
-/** Serves one asset; "truncate" sends half the bytes and drops the socket. */
+/** Serves one asset; "truncate" sends half the bytes and drops the socket; "hang" sends half and then nothing, keeping the socket open. */
 export async function startReleaseServer(asset: Buffer): Promise<ReleaseServer> {
   const rs: ReleaseServer = { url: "", hits: 0, mode: "ok", close: async () => close(server) };
   const server = http.createServer((req, res) => {
@@ -257,6 +257,10 @@ export async function startReleaseServer(asset: Buffer): Promise<ReleaseServer> 
       res.write(asset.subarray(0, Math.floor(asset.length / 2)), () => {
         setTimeout(() => res.socket?.destroy(), 20);
       });
+      return;
+    }
+    if (rs.mode === "hang") {
+      res.write(asset.subarray(0, Math.floor(asset.length / 2)));
       return;
     }
     res.end(asset);

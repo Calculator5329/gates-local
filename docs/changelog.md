@@ -1,5 +1,40 @@
 # Changelog
 
+## 2026-11-14: The chat engine's download reads the same everywhere, says when it stopped, and image setup stays in view
+
+- While the app's own Ollama downloads, the banner's numbers are in the
+  app's own font with even-width figures, the way the first window
+  shows them, and "Downloading Ollama" is plain text with no dotted
+  underline or tooltip.
+- Settings › Runtime says "Downloading Ollama" (then "Unpacking
+  Ollama") with the same numbers, where it used to say "Installing".
+- The Settings gear's tooltip names the step only; the numbers are in
+  the banner and in Settings › Runtime, where the gear leads.
+- Settings › Image generation no longer shifts when "The chat model
+  unloads while an image renders." arrives a moment late: on a
+  graphics card it can be true for, its line is there from the start.
+- A download of the app's own Ollama that did not finish now says so
+  ("The Ollama download didn't finish") in the banner, the first
+  window, the gear and Settings › Runtime, where it used to say
+  "Ollama didn't start". Each has Retry, Settings › Runtime included.
+  A start that failed still says Ollama didn't start. Under that
+  title the detail starts at "Stopped at …", so the download is named
+  once, and the phone's Settings list says the same words for the
+  step and the cause.
+- A download that stops sending ends after 30 seconds with "The
+  Ollama download stopped at … (no data for 30 s)", where it used to
+  wait 5 minutes. After 5 seconds with no data, the speed and time
+  left leave the screen rather than stay frozen. Retry during a stall
+  starts a new download at once.
+- Settings › Image generation keeps the Set up images row for the
+  whole setup, through the image model's download, and keeps "Setup
+  stopped" with Try again if it fails partway. It used to vanish once
+  the engine was in, showing Ready and the switch while the model was
+  still downloading. The row also reads the setup again after a
+  reconnect, so a lost last word no longer leaves "Setting up…"
+  stuck. While a setup runs, the composer's Image button still opens
+  the setup's progress.
+
 ## 2026-11-14: Picture setup counts its download on Linux, and setup words say only what is true
 
 - On Linux the picture engine's download counts up as its packages

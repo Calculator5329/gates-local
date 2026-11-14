@@ -67,7 +67,15 @@ export type InstallOptions = {
   signal?: AbortSignal;
   /** Progress events during download fire at most this often. */
   progressIntervalMs?: number;
+  /** The download ends as interrupted after this long with no bytes (DOWNLOAD_IDLE_MS when absent). */
+  idleMs?: number;
 };
+
+/**
+ * No bytes for this long ends a download. Node's fetch would wait 300 s (undici's bodyTimeout and
+ * headersTimeout), with the speed and time left frozen on screen and Retry handed the stalled attempt.
+ */
+export const DOWNLOAD_IDLE_MS = 30_000;
 
 export type InstallResult = { version: string; dir: string; binary: string; alreadyInstalled: boolean };
 
@@ -98,13 +106,25 @@ async function download(opts: InstallOptions & { target: InstallTarget }, file: 
   const { label, name } = opts.target;
   const interval = opts.progressIntervalMs ?? 250;
   const retry = "Check the network and retry; nothing was installed.";
+  // An idle bound, re-armed by every chunk: the connection that stops sending ends here, not at fetch's own 300 s.
+  const idleMs = opts.idleMs ?? DOWNLOAD_IDLE_MS;
+  const idle = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const arm = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => idle.abort(new Error(`no data for ${(idleMs / 1000).toFixed(idleMs < 1000 ? 1 : 0)} s`)), idleMs);
+  };
+  const reason = (e: unknown) => (idle.signal.aborted ? (idle.signal.reason as Error).message : (e as Error).message);
+  arm();
   let res: Response;
   try {
-    res = await fetch(manifest.url, signal ? { signal } : {});
+    res = await fetch(manifest.url, { signal: signal ? AbortSignal.any([signal, idle.signal]) : idle.signal });
   } catch (e) {
-    throw new InstallError("download-failed", `Could not reach ${manifest.url} (${(e as Error).message}). ${retry}`);
+    clearTimeout(timer);
+    throw new InstallError("download-failed", `Could not reach ${manifest.url} (${reason(e)}). ${retry}`);
   }
   if (!res.ok || !res.body) {
+    clearTimeout(timer);
     throw new InstallError("download-failed", `Downloading ${name} failed: HTTP ${res.status} from ${manifest.url}. ${retry}`);
   }
   const hash = createHash("sha256");
@@ -116,6 +136,7 @@ async function download(opts: InstallOptions & { target: InstallTarget }, file: 
   try {
     for await (const chunk of Readable.fromWeb(res.body as import("node:stream/web").ReadableStream<Uint8Array>)) {
       const buf = chunk as Buffer;
+      arm();
       received += buf.length;
       if (received > manifest.sizeBytes) {
         throw new InstallError(
@@ -135,9 +156,10 @@ async function download(opts: InstallOptions & { target: InstallTarget }, file: 
     if (e instanceof InstallError) throw e;
     throw new InstallError(
       "interrupted",
-      `The ${label} download stopped at ${mib(received)} of ${mib(manifest.sizeBytes)} (${(e as Error).message}). ${retry}`,
+      `The ${label} download stopped at ${mib(received)} of ${mib(manifest.sizeBytes)} (${reason(e)}). ${retry}`,
     );
   } finally {
+    clearTimeout(timer);
     await fh.close();
   }
   emit();
