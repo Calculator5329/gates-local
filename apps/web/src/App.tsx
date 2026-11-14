@@ -24,6 +24,7 @@ import { NA, type Section, type State, getState, overChat, setState, useStore } 
 import { useDraft } from "./drafts.ts";
 import { syncWindowTitle } from "./titlebar.ts";
 import { keepSheetFocus } from "./sheet-focus.ts";
+import { useReadAloud } from "./talk.ts";
 import { PHONE, POP_EL, SheetHead, Tip, TurnSkel, anchorOf, closePop, isPhone, isTouch, menuKeys, place, tabStops, useMedia } from "./ui.tsx";
 
 /** Which setup icons show under the start screen's bar: library search's and image generation's, each only while it is not set up. */
@@ -484,6 +485,8 @@ export function App() {
   const hydrated = useStore((s) => s.hydrationSettled);
   const drawer = useStore((s) => s.drawer);
   const setList = useStore((s) => s.setList);
+  // talk mode reads replies here, above both message boxes, so a new chat's first reply is read whole
+  useReadAloud();
   const popId = useStore((s) => s.pop?.id ?? null);
   const settings = useScreen(settingsScreen, view === "settings");
   const firstRun = useScreen(firstRunScreen, !noServer && view === "firstrun");

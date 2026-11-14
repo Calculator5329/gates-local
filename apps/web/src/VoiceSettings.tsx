@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { call, updateSettings } from "./session.ts";
 import { getState, NA, setState, useStore } from "./store.ts";
 import { COMPUTER_ONLY, Grp, Row, Skel } from "./settings-ui.tsx";
+import { setTalk, useTalk } from "./talk.ts";
 
 const TIP = "Your local whisper.cpp transcribes audio into a draft you review before sending. Gates Local keeps no recording and never starts or stops this service.";
+const TALK_TIP = "Replies are read aloud by this device's own voice; the speaker beside the microphone turns that off.";
 
 function begin() {
   setState((s) => ({ voiceConnectionVersion: s.voiceConnectionVersion + 1 }));
@@ -19,6 +21,7 @@ export function VoiceSettings() {
   const [err, fail] = useState<string | null>(null);
   const attempt = useRef(0);
   const locked = useStore((s) => s.unavailable["settings.update"] === true);
+  const talk = useTalk().on;
   useEffect(() => () => { attempt.current++; }, []);
   if (settings === NA) return null;
   // Settings arrive before Settings can open on a healthy start; the card keeps its shape when they do not.
@@ -54,5 +57,8 @@ export function VoiceSettings() {
         {settings.whisperUrl ? <button type="button" className="btn ghost" data-testid="settings.voice.disconnect" onClick={() => void disconnect()}>Disconnect</button> : null}
       </>}
     </Row>
+    {settings.whisperUrl ? <Row label="Talk mode" tip={TALK_TIP} desc="Try-out, on this device. Hold the microphone or Space to talk; let go to send.">
+      <button type="button" className="switch" role="switch" data-testid="settings.voice.talk" aria-checked={talk} aria-label="Talk mode" onClick={() => setTalk({ on: !talk })} />
+    </Row> : null}
   </Grp>;
 }

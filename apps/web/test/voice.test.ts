@@ -25,6 +25,7 @@ vi.mock("react", async (original) => ({
     if (!h.refs.has(at)) h.refs.set(at, { current: initial });
     return h.refs.get(at);
   },
+  useSyncExternalStore(_subscribe: unknown, snapshot: () => unknown) { return snapshot(); },
   useEffect(effect: () => void | (() => void), deps?: readonly unknown[]) {
     const at = h.cursor++, previous = h.effects.get(at);
     if (deps && previous?.deps && deps.length === previous.deps.length && deps.every((d, i) => Object.is(d, previous.deps?.[i]))) return;

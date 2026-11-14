@@ -421,10 +421,14 @@ test.describe("finished turns while a reply streams", () => {
 // Guards the owner's ask that a long conversation opens and scrolls fast; the release check names the first title.
 test.describe("a 400-message thread", () => {
   test.use({ seed: 400 });
-  test("renders all 400 messages", async ({ page, open, seededThread }) => {
+  // chat row 40: the page holds a window of the latest 200 and loads the rest when asked
+  test("renders the latest 200 messages, and all 400 after Load earlier", async ({ page, open, seededThread }) => {
     await open(`#thread=${seededThread ?? ""}`);
     await waitReady(page);
+    await expect(page.locator(".tl .turn")).toHaveCount(200);
+    await page.getByTestId("chat.thread.earlier").click();
     await expect(page.locator(".tl .turn")).toHaveCount(400);
+    await expect(page.getByTestId("chat.thread.earlier")).toHaveCount(0);
   });
   // Guards the owner's ask that a long conversation scrolls smoothly.
   test("opens and scrolls: the longest task is measured", { tag: "@timing" }, async ({ page, open, seededThread }) => {

@@ -122,3 +122,22 @@ test("a model still loading follows New thread, and a second pick joins its one 
   await expect(btn).toContainText("Gemma");
   await expect(btn).not.toHaveAttribute("aria-busy", "true");
 });
+
+// Guards the owner's pick (chat row 39, A): opening the app takes nothing from the card; the first key starts the load.
+test("opening the app loads nothing, and the first key typed starts the thread's model loading", async ({ page, open }) => {
+  const loadsAsked: string[] = [];
+  page.on("websocket", (ws) => ws.on("framesent", (frame) => {
+    const r = decodeRequest(frame.payload);
+    if (r.ok && r.value.method === "models.load") loadsAsked.push(r.value.params.model);
+  }));
+  await open();
+  await waitReady(page);
+  await expect(page.locator("#modelBtn")).toContainText("Qwen 3.5 9B");
+  await page.waitForTimeout(500);
+  expect(loadsAsked, "opening the app asks for no load").toEqual([]);
+  await page.locator("#ta").pressSequentially("Wh");
+  await expect.poll(() => loadsAsked, { timeout: 5000 }).toEqual(["qwen3.5:9b"]);
+  await page.locator("#ta").pressSequentially("y is the sky blue");
+  await page.waitForTimeout(300);
+  expect(loadsAsked, "more keys ask nothing more").toEqual(["qwen3.5:9b"]);
+});

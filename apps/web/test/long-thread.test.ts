@@ -27,6 +27,8 @@ const BOUND = {
   reducedMotionQueries: 0,
   selectorsPerKeystroke: 10,
 } as const;
+/** Turns a long thread opens with, at most: Thread.tsx WINDOW_TURNS. */
+const WINDOW = 200;
 
 /** test/perf/fixture.ts seedLong(2000), as client messages. */
 function longThread(threadId: string, messages: number, title = `Perf thousands ${messages}`): Message[] {
@@ -97,7 +99,7 @@ const still = (el: FakeElement) => el.style.animation === "none";
 /** A selector with a sibling combinator, outside brackets and parentheses. */
 const sibling = (s: string) => /[+~]/.test(s.replace(/\[[^\]]*\]/g, "").replace(/\([^)]*\)/g, ""));
 
-it("opens a 2,000-message thread with a bounded first commit and few subscriptions, then mounts the rest", async () => {
+it("opens a 2,000-message thread with a bounded first commit and few subscriptions, then mounts the rest of its window", async () => {
   const { Timeline } = await import("../src/Thread.tsx");
   const thread = longThread("long", 2000);
   store.setState({ messages: { long: thread }, catalog: [] });
@@ -121,15 +123,16 @@ it("opens a 2,000-message thread with a bounded first commit and few subscriptio
   expect(reduced, "reduced-motion matchMedia calls").toBeLessThanOrEqual(BOUND.reducedMotionQueries);
   expect(selectors, "selectors run by one editDraft").toBeLessThanOrEqual(BOUND.selectorsPerKeystroke);
 
-  // idle slices mount the older turns until the whole thread is in the DOM, in order
+  // idle slices mount the older turns until the window of the latest 200 is in the DOM, in order;
+  // the 1,800 before it wait for Load earlier
   for (let slices = 0; idle.length > 0; slices++) {
     expect(slices, "backfill ends").toBeLessThan(200);
     const next = idle.shift();
     act(() => next?.());
   }
   const all = turns();
-  expect(all).toHaveLength(2000);
-  expect(turnLabel(all[0])).toContain("Question 0");
+  expect(all).toHaveLength(WINDOW);
+  expect(turnLabel(all[0])).toContain("Question 1800");
   expect(turnLabel(all.at(-1))).toContain("Perf thousands 2000");
   expect(store.listenerCount() - before, "backfilled rows subscribe to nothing").toBe(subscriptions);
 });
@@ -238,7 +241,8 @@ it("holds back the history that arrives in front of a reply that finished before
   expect(turns(), "turns in front of the mounted reply are held back like at open").toHaveLength(BOUND.firstCommitTurns);
   expect(turnLabel(turns().at(-1))).toContain("Perf thousands 2000");
   while (idle.length > 0) act(() => idle.shift()?.());
-  expect(turns()).toHaveLength(2000);
+  expect(turns()).toHaveLength(WINDOW);
+  expect(turnLabel(turns().at(-1))).toContain("Perf thousands 2000");
 });
 
 it("keeps the reply on screen, the same element in the same place, when the history replaces a partial cache", async () => {
@@ -295,28 +299,32 @@ it("mounts further slices in one idle callback while its deadline has room", asy
   idle.length = 0;
   act(() => root.render(createElement(Timeline, { threadId: "roomy", key: "roomy" })));
   expect(turns()).toHaveLength(40);
-  // the first slice adds 40, as many as the first commit, and the ones after it 120:
-  // room after the first, room after the second, then too little for a fourth
-  idleLeft = [40, 30, 10];
+  // the first slice adds 40, as many as the first commit, and the ones after it 120
+  idleLeft = [10];
   act(() => idle.shift()?.());
-  expect(turns()).toHaveLength(320);
+  expect(turns(), "too little room left for a second slice").toHaveLength(80);
+  idleLeft = [40, 40, 40];
+  act(() => idle.shift()?.());
+  expect(turns(), "room for more, but the window ends at the latest 200").toHaveLength(WINDOW);
   idleLeft = [];
-  idle.length = 0;
+  while (idle.length > 0) act(() => idle.shift()?.());
+  expect(turns(), "the turns before the window wait for Load earlier").toHaveLength(WINDOW);
 });
 
 it("keeps a fully mounted thread mounted, the same elements, when its first turn is deleted", async () => {
   const { Timeline } = await import("../src/Thread.tsx");
-  const thread = longThread("gone-first", 2000);
+  // a thread that fits in the window mounts whole
+  const thread = longThread("gone-first", WINDOW);
   act(() => store.setState({ messages: { "gone-first": thread }, turns: {} }));
   idle.length = 0;
   act(() => root.render(createElement(Timeline, { threadId: "gone-first", key: "gone-first" })));
   while (idle.length > 0) act(() => idle.shift()?.());
   const before = [...turns()];
-  expect(before).toHaveLength(2000);
+  expect(before).toHaveLength(WINDOW);
   // the first question and its answer deleted (an answer left without its question is keyed anew)
   act(() => store.setState({ messages: { "gone-first": thread.slice(2) } }));
   const after = [...turns()];
-  expect(after, "everything but the deleted turns stays mounted").toHaveLength(1998);
+  expect(after, "everything but the deleted turns stays mounted").toHaveLength(WINDOW - 2);
   expect(after[0], "the next question is now first").toBe(before[2]);
   expect(after[18], "the turn being read is the same element").toBe(before[20]);
   idle.length = 0;

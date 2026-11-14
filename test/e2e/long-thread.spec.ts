@@ -1,19 +1,22 @@
 /// <reference lib="dom" />
 // One journey through a 2,000-message thread: it opens at its end with a
 // bounded first commit, scrolling to the top mounts a slice at once, the turn
-// the reader is looking at stays put while idle slices mount everything above
-// it, and the whole thread ends up in the page. A probe in the page samples
-// after each slice and in the frame after it, and asks for no other frames,
-// so the backfill runs at the browser's own pace.
+// the reader is looking at stays put while idle slices mount the rest of the
+// window above it, and the page holds only that window (chat row 40) until the
+// reader presses Load earlier, which adds the window before it and moves
+// nothing in view. A probe in the page samples after each slice and in the
+// frame after it, and asks for no other frames, so the backfill runs at the
+// browser's own pace.
 import { expect, test, waitReady } from "./fixtures.ts";
 
 const TURNS = 2000;
 test.use({ seed: TURNS });
 
-/** Thread.tsx FIRST_TURNS, SLICE_TURNS and FILL_TURNS. */
+/** Thread.tsx FIRST_TURNS, SLICE_TURNS, FILL_TURNS and WINDOW_TURNS. */
 const FIRST = 40;
 const SLICE = 40;
 const FILL = 120;
+const WINDOW = 200;
 
 interface LongProbe {
   /** Turns in the first commit that mounted any. */
@@ -36,8 +39,9 @@ declare global {
   interface Window { longProbe?: LongProbe }
 }
 
-// Guards the owner's ask that long conversations open fast, at their end, and hold still.
-test("a 2,000-message thread opens at its end, keeps the turn in view still, and mounts in full", async ({ page, open, seededThread }) => {
+// Guards the owner's ask that long conversations open fast, at their end, and hold still, and his pick
+// (chat row 40, A): the page holds a window of the latest turns, and a button loads the ones before it.
+test("a 2,000-message thread opens at its end as a window, keeps the turn in view still, and loads earlier turns on a press", async ({ page, open, seededThread }) => {
   // Seeding 2,000 messages alone takes 3 to 17 s on the test machine, depending on its load; the
   // journey checks counts and positions, never speed.
   test.setTimeout(90_000);
@@ -117,12 +121,12 @@ test("a 2,000-message thread opens at its end, keeps the turn in view still, and
       }
     });
     watch.observe(document, { childList: true, subtree: true });
-  }, { total: TURNS, timeline: ".tl" });
+  }, { total: WINDOW, timeline: ".tl" });
 
   await open(`#thread=${seededThread ?? ""}`);
   await waitReady(page);
   const turns = page.locator(".tl .turn");
-  await expect(turns).toHaveCount(TURNS, { timeout: 45_000 });
+  await expect(turns).toHaveCount(WINDOW, { timeout: 45_000 });
   await expect.poll(() => page.evaluate(() => window.longProbe?.fullAt ?? 0), { message: "the probe saw every turn mount" }).toBeGreaterThan(0);
   const probe = await page.evaluate(() => window.longProbe);
   if (probe === undefined || probe.scroll === null) throw new Error(`the probe did not see the scroll: ${JSON.stringify(probe)}`);
@@ -136,7 +140,26 @@ test("a 2,000-message thread opens at its end, keeps the turn in view still, and
   expect(probe.samples, "slices watched during the backfill").toBeGreaterThan(0);
   expect(probe.drift, "the turn in view moved while older turns mounted").toBeLessThanOrEqual(1);
   // each slice renders every mounted row and lays out the column again, so the rest goes in few large slices
-  expect(probe.steps, "idle slices that mounted the rest").toBeLessThanOrEqual(Math.ceil((TURNS - FIRST - SLICE) / FILL));
-  await expect(turns.first()).toContainText("Question 1:");
+  expect(probe.steps, "idle slices that mounted the rest of the window").toBeLessThanOrEqual(Math.ceil((WINDOW - FIRST - SLICE) / FILL));
   await expect(turns.last()).toHaveAttribute("aria-label", /reply/i);
+
+  // the page holds only the window: nothing more mounts by itself, idle or scrolled to the top
+  const tl = page.locator(".tl");
+  await tl.evaluate((n) => { n.scrollTop = 0; });
+  await page.waitForTimeout(1000);
+  await expect(turns).toHaveCount(WINDOW);
+  await expect(turns.first()).toContainText(`Question ${(TURNS - WINDOW) / 2 + 1}:`);
+
+  // Load earlier: the window before it goes in at once, and the turn that was first stays where it is
+  const earlier = page.getByTestId("chat.thread.earlier");
+  await expect(earlier).toHaveText(`200 earlier of ${(TURNS - WINDOW).toLocaleString("en-US")}`);
+  const was = turns.filter({ hasText: `Question ${(TURNS - WINDOW) / 2 + 1}:` }).first();
+  const before = await was.evaluate((n) => n.getBoundingClientRect().top);
+  await earlier.click();
+  await expect(turns).toHaveCount(2 * WINDOW);
+  expect(Math.abs((await was.evaluate((n) => n.getBoundingClientRect().top)) - before), "the turn in view stayed where it was").toBeLessThanOrEqual(1);
+  await expect(earlier).toHaveText(`200 earlier of ${(TURNS - 2 * WINDOW).toLocaleString("en-US")}`);
+  await page.screenshot({ path: test.info().outputPath("row40-after-load-earlier.png") });
+  await tl.evaluate((n) => { n.scrollTop = 0; });
+  await page.screenshot({ path: test.info().outputPath("row40-button.png") });
 });

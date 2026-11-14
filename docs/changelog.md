@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-11-13: Talk mode, a try-out
+
+- Settings › General › Voice to text has a Talk mode switch, off until
+  you turn it on, kept on this device. With it on, hold the microphone
+  (or Space in an empty message box) while you talk; letting go sends
+  what you said. A tap sends nothing.
+- The reply is read aloud a sentence at a time as it is written: no
+  thinking, code or link addresses. A speaker beside the microphone turns
+  the reading off and stops it at once; talking again stops it too.
+- The voice is the one your device already has. A voice that would speak
+  through an online service is never used, and no voice ships with the
+  app yet.
+
+## 2026-11-13: Long threads open as a window, with Load earlier
+
+- A long thread opens with its latest 200 messages, and the page holds
+  only those. A button at the top, "↑ 200 earlier of 1,800", adds the 200
+  before them; the message you were reading stays where it was.
+- Before this the rest of the thread filled in by itself behind the
+  first screen, so a 2,000-message thread ended up all on the page.
+
+## 2026-11-13: The model loads while you type
+
+- The first key typed in a thread starts its model loading, so the load
+  runs while you write instead of after Send. Opening the app still loads
+  nothing and takes nothing from the graphics card.
+- Typing a picture's prompt in Image mode leaves the chat model alone.
+
+## 2026-11-13: One live line per reply
+
+- While a reply works it shows one line: a lit dot, what it is doing right
+  now, and the running time. Going from thinking to a tool call changes
+  only the words; nothing flickers or moves.
+- When it ends the line reads the time, the step count, and how many
+  failed in red: "71 s · 4 steps · 3 failed". Opening it lists the steps.
+- A failed step shows its command with a red mark, never "Tool could not
+  finish". A thinking round in the list reads "33 s".
+
 ## 2026-11-13: Settings says each thing once
 
 - Tools: the switch that lets the model use tools sits on the Tools card's
@@ -27,6 +65,7 @@
   - "Use custom instructions" is the app's own switch, no longer the
     browser's checkbox.
   - The number fields lost the browser's spin arrows.
+
 ## 2026-11-13: The bug finder keeps score against bugs the owner found
 
 - `node scripts/finder-board.ts` undoes twelve fixed bugs, one at a time,

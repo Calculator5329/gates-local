@@ -1,6 +1,7 @@
 // Runtime/model reads, local model choice, catalog and download actions.
 import type { BlockingTurn, MethodName, Params, Payload, ResultOf } from "@gates-local/contracts";
 import { type ModelDecision, modelChoice as pickChoice, modelNameKey, newestOnly } from "../pick.ts";
+import { imageMode } from "../image-choice.ts";
 import { saveLoadTimes } from "../load-times.ts";
 import { NA, type State, chatReady, getState, setState } from "../store.ts";
 
@@ -17,6 +18,9 @@ interface ModelEffects {
   readonly flushQueued: () => void;
   readonly blockingFor: (model: string, numCtx: number) => Promise<readonly BlockingTurn[]>;
 }
+
+/** How often typing may ask for a load of the same model. */
+const TYPED_LOAD_EVERY_MS = 60_000;
 
 /** First-batch hydration holds all pushes until this snapshot lands. */
 export function reconcilePulls(pulls: State["pulls"], pending: ResultOf<"models.pulls"> | typeof NA | undefined): State["pulls"] {
@@ -103,6 +107,25 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
       refusal = r.value.message;
       setState({ notice: refusal });
     }
+  }
+
+  /** When each model was last asked to load by typing, so a run of keys asks once. */
+  const typedAt = new Map<string, number>();
+
+  /**
+   * A key typed in the message box starts the thread's model loading (chat row 39, owner pick A):
+   * the load runs while the person writes, and opening the app takes nothing from the card. At most
+   * one ask a minute per model; the server answers at once when the model is already in memory.
+   */
+  function typedInComposer(): void {
+    const s = getState();
+    const model = s.model;
+    // in Image mode the words are a picture's prompt: the card is the image model's
+    if (model === undefined || imageMode(s) || s.unavailable["models.load"] || !chatReady(s) || s.loads[model]?.state === "loading") return;
+    const now = Date.now();
+    if (now - (typedAt.get(model) ?? Number.NEGATIVE_INFINITY) < TYPED_LOAD_EVERY_MS) return;
+    typedAt.set(model, now);
+    void preload(model, s.numCtx);
   }
 
   async function pull(name: string): Promise<string | null> {
@@ -197,5 +220,5 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
   }
 
   return { modelsOrder, runtimeOrder, catalogOrder, catalogLands, refreshModels,
-    pickModel, pull, cancelPull, removeModel, recheckRuntime, runtimeChanged, modelsChanged, pullChanged, loadChanged };
+    pickModel, typedInComposer, pull, cancelPull, removeModel, recheckRuntime, runtimeChanged, modelsChanged, pullChanged, loadChanged };
 }

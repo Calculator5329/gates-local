@@ -2,7 +2,7 @@
 // The composer (shell.md F01, F02, F15, F28-F31, F34, F37b, F43b): the text
 // box, model and context chips, Thinking and Image pills, the context meter,
 // Send or Stop, and the popovers it opens (model picker, + menu).
-import { type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type RefObject, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type RefObject, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { type AttachedFile, IMAGE_COUNT_MAX, type ModelInfo } from "@gates-local/contracts";
 import { useActionPress } from "./composer-press.ts";
 import { CONNECTING, PLACEHOLDER, booting, rtOf, unread } from "./Banner.tsx";
@@ -37,11 +37,13 @@ import {
   send,
   sendQueuedNow,
   stop,
+  typedInComposer,
 } from "./session.ts";
 import { NA, type Queued, type State, getState, runningTurn, setState, streamingHere, useStore } from "./store.ts";
 import { editDraft, getDraft, useDraft } from "./drafts.ts";
 import { SheetHead, Skel, closePop, closeTip, esc, isTouch, place, togglePop, useMedia } from "./ui.tsx";
-import { Voice } from "./Voice.tsx";
+import { Speaker, Voice } from "./Voice.tsx";
+import { useTalk } from "./talk.ts";
 
 const catalogOf = (s: Pick<State, "catalog">) => (s.catalog === NA ? undefined : s.catalog);
 const imageGenOf = (s: State) => s.settings !== NA && s.settings?.imageGen === true;
@@ -244,6 +246,11 @@ export function Composer() {
     if (sendDisabled) return;
     void send(getDraft().text);
   };
+  // talk mode sends after the transcript is drawn, with Send's latest judgement of the draft
+  const latestSubmit = useRef(submit);
+  useLayoutEffect(() => { latestSubmit.current = submit; });
+  const talkSend = useCallback(() => latestSubmit.current(), []);
+  const talk = useTalk().on;
   const stopThisReply = () => {
     const s = getState();
     if (runningTurn(s, s.threadId)?.gen === running) stop();
@@ -369,7 +376,8 @@ export function Composer() {
           <div className="cf-r">
             {/* Stop takes Dictate's square while a queued message is edited; Dictate stays mounted under it, so its shortcut still answers */}
             {stopForVoice ? stopSquare : null}
-            <Suspense fallback={stopForVoice ? null : <span className="ctl sq voice" />}><Voice key={`${view}:${voiceThread}:${replacement}`} textarea={ta} held={stopForVoice ? VOICE_HELD : null} /></Suspense>
+            <Suspense fallback={stopForVoice ? null : <span className="ctl sq voice" />}><Voice key={`${view}:${voiceThread}:${replacement}`} textarea={ta} held={stopForVoice ? VOICE_HELD : null} send={talkSend} /></Suspense>
+            {talk ? <Speaker /> : null}
             <button
               type="button"
               className="ctl gate"
@@ -457,7 +465,11 @@ function DraftTextarea({ textarea, placeholder, submit }: { textarea: RefObject<
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
   }, [draft, placeholder, textarea]);
   return <textarea ref={textarea} id="ta" data-testid="chat.composer.message" data-draft-version={version} className="ta" rows={1} placeholder={placeholder} aria-label="Message" value={draft} onPaste={paste}
-    onChange={e => editDraft(e.target.value)} onKeyDown={e => {
+    onChange={e => {
+      editDraft(e.target.value);
+      // the first key starts the thread's model loading while the person writes (chat row 39)
+      if (e.target.value !== "") typedInComposer();
+    }} onKeyDown={e => {
       if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !isTouch()) { e.preventDefault(); submit(); }
     }} />;
 }

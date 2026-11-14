@@ -3,6 +3,10 @@
 .ctl.voice.asking { color: var(--amber-fg); }
 .ctl.voice.listening { color: var(--green-fg); }
 .ctl.voice.transcribing { color: var(--foreground); }
+/* talk mode: the microphone is held, so a long press must not select, scroll or open a menu */
+.ctl.voice.talk { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.ctl.speak { flex-shrink: 0; }
+.ctl.speak.on { color: var(--green-fg); }
 .voice .vh, .attachment.file .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* reduced motion: the transcribing arc holds still and pulses, still unlike the idle microphone */
 @media (prefers-reduced-motion: reduce) { .ctl.voice .spin { animation: pulse 1.6s ease-in-out infinite; } }
@@ -243,6 +247,11 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .tl{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable both-edges;padding:0 24px;
   -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 20px);mask-image:linear-gradient(to bottom,transparent 0,#000 20px)}
 .col{max-width:var(--col);margin:0 auto;padding:32px 0 24px}
+/* Load earlier (chat row 40): one quiet button centred over the window's first turn */
+.earlier{display:flex;align-items:center;gap:6px;margin:0 auto 24px;height:32px;padding:0 12px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;color:var(--foreground);font-variant-numeric:tabular-nums;transition:background-color .12s,border-color .12s}
+.earlier:hover,.earlier:focus-visible{background:var(--hover);border-color:var(--border-strong)}
+.earlier .ic{width:14px;height:14px}
+.earlier-of{color:var(--muted-foreground);white-space:pre}
 
 /* ---------- timeline (F04 F05 F10 F11 F12) ---------- */
 .turn{animation:fadein .18s ease-out}
@@ -315,17 +324,19 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .fold-line{display:flex;align-items:center;gap:10px;min-width:0;align-self:stretch}
 .fold-line .think{flex:none}
 .fold-now{min-width:0;font-size:13px;line-height:24px;color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* the chip: the box changes only by digits, each number keeping room for two */
-.think.fold{gap:7px;height:24px;line-height:22px;margin-left:-4px;padding:0 6px 0 8px;border:1px solid var(--border);font-variant-numeric:tabular-nums}
-.ch-p{display:inline-flex;align-items:center;gap:5px}
-.ch-p .ic{width:14px;height:14px}
-.ch-n{min-width:2ch;text-align:right}
-.ch-u{margin-left:-2px}
-.ch-sep{width:1px;height:12px;background:var(--border)}
-.ch-p.on{color:var(--foreground)}
-.ch-p.on .ic{animation:pulse 2s ease-in-out infinite}
-.ch-p.bad .ic{color:var(--red)}
-@media (prefers-reduced-motion:reduce){.ch-p.on .ic{animation:none}}
+/* one live line per reply (chat row 37): a lit dot, what it does now and the time; after, a check, the time, the steps and the failed in red.
+   One line of fixed height: only words and digits change, so nothing under it moves */
+.think.fold{gap:0;height:24px;line-height:24px;min-width:0;max-width:100%;font-variant-numeric:tabular-nums}
+/* the mark takes the bulb's 20 px box, so going from thinking to working moves no word */
+.lv-dot,.lv-i{width:20px;height:14px;display:flex;align-items:center;justify-content:center;flex:none;margin-right:8px}
+.lv-dot::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--green)}
+.lv-w{min-width:0;color:var(--foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lv-t{flex:none;white-space:pre}
+.lv-i .ic{width:14px;height:14px}
+.lv-i+.lv-t{color:var(--foreground)}
+.lv-n{flex:none}
+.lv-bad{flex:none;white-space:pre;color:var(--red)}
+.think.fold .th-x{margin-left:6px}
 /* open: one list in the order things happened, a thinking round's line beside each call's */
 .fold-body{interpolate-size:allow-keywords;height:0;min-height:0;opacity:0;visibility:hidden;overflow:clip;transition:height .18s ease,opacity .18s ease,visibility 0s linear .18s}
 .fold-line.open+.fold-body{height:auto;opacity:1;visibility:visible;margin-top:2px;transition:height .18s ease,opacity .18s ease,visibility 0s}
@@ -346,6 +357,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .wr:hover{background:var(--hover)}
 .wr-line{display:flex;align-items:center;gap:8px;font-size:14px;line-height:24px;user-select:none;min-width:0;flex-wrap:wrap;row-gap:0}
 .wr-st{width:20px;height:24px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);flex:none}
+.wr-st[data-st="rej"]{color:var(--red)}
 .wr-h{color:var(--foreground);font-weight:500}
 .wr-m{color:var(--muted-foreground);font-size:13px}
 .wr-x{display:flex;align-items:center;color:var(--muted-foreground)}

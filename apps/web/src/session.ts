@@ -88,7 +88,7 @@ const modelsSession = createModels({ applyServerEvent,
   call, probe, act, isNA, restoreSaved, flushQueued,
   blockingFor,
 });
-export const { refreshModels, pickModel, pull, cancelPull, removeModel, recheckRuntime } = modelsSession;
+export const { refreshModels, pickModel, typedInComposer, pull, cancelPull, removeModel, recheckRuntime } = modelsSession;
 const { modelsOrder, runtimeOrder, catalogOrder, catalogLands } = modelsSession;
 /** A typed name's size and fit before its download (row 22); undefined when the server cannot say. */
 export const estimateModel = (name: string, numCtx: number) => call("models.estimate", { name, numCtx }).catch(() => undefined);

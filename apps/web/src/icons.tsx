@@ -5,7 +5,7 @@
 // then draws <svg class="ic"><use href="#i-pen"/></svg> like the design does.
 
 export type IconId =
-  | "star" | "mark" | "pen" | "search" | "gear" | "down" | "left" | "arrow" | "check" | "checkc"
+  | "star" | "mark" | "pen" | "search" | "gear" | "down" | "up" | "vol" | "vol-off" | "left" | "arrow" | "check" | "checkc"
   | "x" | "xc" | "clock" | "plus" | "clip" | "alert" | "lock" | "file" | "image" | "bulb" | "copy" | "redo"
   | "spin" | "download" | "more" | "chat" | "book" | "cpu" | "server" | "db" | "folder" | "sliders"
   | "pencil" | "trash" | "box" | "wrench" | "keyboard" | "menu" | "gauge" | "right" | "speed"
@@ -44,6 +44,9 @@ export function Sprite() {
         <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
         <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></symbol>
         <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></symbol>
+        <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5" /><path d="m5 12 7-7 7 7" /></symbol>
+        <symbol id="i-vol" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4Z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.4 5.6a9 9 0 0 1 0 12.8" /></symbol>
+        <symbol id="i-vol-off" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4Z" /><path d="m16 9 6 6" /><path d="m22 9-6 6" /></symbol>
         <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol>
         <symbol id="i-checkc" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="m8.5 12 2.5 2.5 4.5-5" /></symbol>
         <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></symbol>

@@ -44,8 +44,8 @@ async function render(now: number, state: Partial<State>): Promise<string> {
   return renderToStaticMarkup(createElement(Timeline, { threadId: T }));
 }
 const live = (now: number, turn: LiveTurn) => render(now, { messages: { [T]: [user] }, turns: { [T]: turn } });
-/** The bulb's number on the chip; undefined when it has none. */
-const bulb = (html: string) => /class="ch-n">(\d+)<\/span><span class="ch-u">/.exec(html)?.[1];
+/** The thinking seconds the line carries (the turn's clock); undefined when it has none. */
+const bulb = (html: string) => /data-think="(\d+)"/.exec(html)?.[1];
 /** The stop square's seconds; undefined when it shows none. */
 const square = (html: string) => /class="stop-mark">.*?<span class="s">(\d+) s<\/span>/s.exec(html)?.[1];
 const chipName = (html: string) => /class="think fold"[^>]*aria-label="([^"]*)"/.exec(html)?.[1];
@@ -89,13 +89,13 @@ describe("the bulb's seconds are the turn's clock", () => {
     const t1 = play(watched(), [[0, { type: "thinking", text: "Hm." }], [3000, { type: "delta", text: "Let me check." }], [3500, { type: "tool", step: step("a", "running") }]]);
     const during = await live(5000, t1);
     expect(bulb(during)).toBe("3");
-    expect(during).toContain('class="fold-now">Searching your library<');
+    expect(during).toContain('class="lv-w">Searching your library<');
     expect(chipName(during)).toBe("Working, 1 tool call");
     const t2 = play(t1, [[8500, { type: "tool", step: step("a", "error", 5000) }], [8500, { type: "thinking", text: " Retry." }]]);
     const after = await live(9000, t2);
     expect(bulb(after)).toBe("4");
-    expect(after).not.toContain("ch-p bad");
-    expect(after).toContain('class="fold-now">Thinking<');
+    expect(after).not.toContain('class="lv-bad"');
+    expect(after).toContain('class="lv-w">Thinking<');
     const t3 = play(t2, [[10000, { type: "delta", text: " Done." }]]);
     expect(bulb(await live(10000, t3))).toBe("5");
     const saved: Message = { id: "b", threadId: T, role: "assistant", createdAt: 2, content: t3.text, thinking: t3.thinking, tools: [step("a", "error", 5000), step("c", "done", 10)], times: stamped(t3.clock, "done", 11) };
@@ -253,26 +253,72 @@ describe("the red mark", () => {
     const calls = play(watched(), [[0, { type: "thinking", text: "Hm." }], [1000, { type: "tool", step: step("a", "running") }], [2000, { type: "tool", step: step("a", "done", 1000) }]]);
     const failed = play(calls, [[3000, { type: "error", code: "model-error", message: "The model failed." }]]);
     const html = await live(4000, failed);
-    expect(html).not.toContain("ch-p bad");
+    expect(html).not.toContain('class="lv-bad"');
     expect(chipName(html)).toBe("Thinking 1 second, 1 tool call");
     const stopped = play(watched(), [[0, { type: "thinking", text: "Hm." }], [1000, { type: "tool", step: step("a", "running") }], [1500, { type: "stop" }]]);
-    expect(await live(2000, stopped)).not.toContain("ch-p bad");
+    expect(await live(2000, stopped)).not.toContain('class="lv-bad"');
     const lastFailed = play(calls, [[2500, { type: "tool", step: step("b", "error", 10) }], [3000, { type: "delta", text: "Sorry." }], [3100, { type: "error", code: "model-error", message: "x" }]]);
     const marked = await live(4000, lastFailed);
-    expect(marked).toContain("ch-p bad");
-    expect(chipName(marked)).toBe("Thinking 1 second, 2 tool calls, last call failed");
+    expect(marked).toContain('class="lv-bad"');
+    expect(chipName(marked)).toBe("Thinking 1 second, 2 tool calls, 1 failed");
   });
 
   it("is not on a call the person stopped: the saved step says stopped after a reload, and a step that failed still says failed", async () => {
     const saved = (tools: ToolStep[]): Message => ({ id: "s", threadId: T, role: "assistant", createdAt: 2, content: "", thinking: "Hm.", tools, interrupted: true });
     const stopped = await render(9000, { messages: { [T]: [user, { ...saved([step("a", "done", 10), { ...step("b", "error", 900), stopped: true }]), times: stamped(undefined, "stopped", 3) }] } });
-    expect(stopped).not.toContain("ch-p bad");
+    expect(stopped).not.toContain('class="lv-bad"');
     expect(chipName(stopped)).toBe("Thinking, 2 tool calls");
     // the tool's label stays, as on a failed step
     expect(stopped).toContain('<span class="wr-m">Shell · stopped</span>');
     expect(stopped).not.toContain("failed");
     const failed = await render(9000, { messages: { [T]: [user, saved([step("a", "done", 10), step("b", "error", 900)])] } });
-    expect(failed).toContain("ch-p bad");
+    expect(failed).toContain('class="lv-bad"');
     expect(failed).toMatch(/failed/);
+  });
+});
+
+// Chat row 37, owner pick A (2026-11-13): one live line per reply.
+const shell = (callId: string, state: ToolStep["state"], command: string): ToolStep => ({ callId, name: "shell", state, durationMs: 900,
+  summary: state === "error" ? "Tool could not finish" : "Searched your library", detail: `${JSON.stringify({ name: "shell", input: { command } })}\nno such column` });
+
+describe("one live line per reply", () => {
+  it("while it runs: one lit mark, what it is doing now and the running time, in the line itself", async () => {
+    const t1 = play(watched(), [[0, { type: "thinking", text: "Look." }], [5000, { type: "tool", step: step("a", "running") }]]);
+    const during = await live(71_400, t1);
+    const line = /<button[^>]*class="think fold"[^>]*>([\s\S]*?)<\/button>/.exec(during)?.[1] ?? "";
+    expect(line).toContain('class="lv-dot"');
+    expect(line.replace(/<[^>]+>/g, "")).toBe("Searching your library · 71 s");
+    expect(during, "no second node beside it").not.toContain("fold-now");
+    // the same nodes when the call ends and it thinks again: words and digits change, nothing else
+    const t2 = play(t1, [[72_000, { type: "tool", step: step("a", "done", 67_000) }], [72_000, { type: "thinking", text: " More." }]]);
+    const next = /<button[^>]*class="think fold"[^>]*>([\s\S]*?)<\/button>/.exec(await live(73_000, t2))?.[1] ?? "";
+    expect(next.replace(/>[^<]*</g, "><")).toBe(line.replace(/>[^<]*</g, "><"));
+    expect(next.replace(/<[^>]+>/g, "")).toBe("Thinking · 73 s");
+  });
+
+  it("after: the time, the step count and how many failed, with no sentence for a failed step", async () => {
+    const reply: Message = { id: "a", threadId: T, role: "assistant", createdAt: 2, content: "Tennessine.", thinking: "Which table?",
+      tools: [shell("a", "error", "sqlite3 elements.db 'SELECT name, discovery_date'"), shell("b", "error", "sqlite3 elements.db .schema"), shell("c", "done", "sqlite3 elements.db 'ORDER BY year DESC'")],
+      times: { startedAt: 0, spans: [{ from: 0, ms: 33_000 }], callsAt: { a: 12, b: 12, c: 12 }, ended: { reason: "done", at: 71_000 } } };
+    const html = await render(99_000, { messages: { [T]: [user, reply] } });
+    const line = /<button[^>]*class="think fold"[^>]*>([\s\S]*?)<\/button>/.exec(html)?.[1] ?? "";
+    expect(line).not.toContain("lv-dot");
+    expect(line.replace(/<[^>]+>/g, "")).toBe("71 s · 3 steps · 2 failed");
+    expect(line).toMatch(/class="lv-bad">[^<]*2 failed/);
+    expect(html).not.toContain("Tool could not finish");
+    // a failed step is its command with a red mark
+    expect(html).toMatch(/data-st="rej"[\s\S]*?class="wr-h">sqlite3 elements.db &#x27;SELECT name, discovery_date&#x27;</);
+    // the opened list says a round's seconds once: no "Thought ·" before them
+    expect(html).toMatch(/class="th-line"[^>]*aria-label="Thought for 33 s"[^>]*>[\s\S]*?class="wr-h">33 s</);
+  });
+
+  it("a step Stop cut short is not counted or marked as failed", async () => {
+    const cut: ToolStep = { ...shell("a", "error", "sqlite3 elements.db .schema"), stopped: true };
+    const reply: Message = { id: "a", threadId: T, role: "assistant", createdAt: 2, content: "", thinking: "Which table?", tools: [cut],
+      times: { startedAt: 0, spans: [{ from: 0, ms: 3000 }], callsAt: { a: 3 }, ended: { reason: "stopped", at: 9000 } } };
+    const html = await render(99_000, { messages: { [T]: [user, reply] } });
+    expect(html).toContain('data-st="cut"');
+    expect(html).not.toContain('data-st="rej"');
+    expect(html).not.toContain("lv-bad");
   });
 });

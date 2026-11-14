@@ -292,6 +292,57 @@ describe("a pick the server refuses on its own, newer reading", () => {
   });
 });
 
+// Chat row 39, owner pick A (2026-11-13): the model starts loading on the first key, never at app open.
+/** A client that records every models.load it is asked. */
+const loadsAsked = () => {
+  const asked: unknown[] = [];
+  return { asked, answers: { "models.load": (p?: unknown) => { asked.push(p); return Promise.resolve(defaults["models.load"]); } } };
+};
+
+describe("the model starts loading on the first key typed", () => {
+  it("opening the app loads nothing", async () => {
+    const { asked, answers } = loadsAsked();
+    const { hydrated } = await boot(answers);
+    await hydrated();
+    await settle();
+    expect(asked).toEqual([]);
+  });
+
+  it("the first key asks for the thread's model once; more keys ask nothing more", async () => {
+    const { asked, answers } = loadsAsked();
+    const { session, store, hydrated } = await boot(answers);
+    await hydrated();
+    const model = store.getState().model;
+    expect(model).toBeDefined();
+    session.typedInComposer();
+    session.typedInComposer();
+    await vi.waitFor(() => expect(asked).toEqual([{ model, numCtx: store.getState().numCtx }]));
+    session.typedInComposer();
+    await settle();
+    expect(asked).toHaveLength(1);
+  });
+
+  it("typing a picture's prompt in Image mode leaves the chat model where it is", async () => {
+    const { asked, answers } = loadsAsked();
+    const { session, store, hydrated } = await boot(answers);
+    await hydrated();
+    store.setState((s) => ({ image: true, settings: s.settings === undefined || s.settings === "na" ? s.settings : { ...s.settings, imageGen: true } }));
+    session.typedInComposer();
+    await settle();
+    expect(asked).toEqual([]);
+  });
+
+  it("a model already loading is not asked again", async () => {
+    const { asked, answers } = loadsAsked();
+    const { session, store, push, hydrated } = await boot(answers);
+    await hydrated();
+    push("models.load", { model: store.getState().model, numCtx: 16384, state: "loading" });
+    session.typedInComposer();
+    await settle();
+    expect(asked).toEqual([]);
+  });
+});
+
 const savedReply = (model: string) => ({ messages: [{ id: "m1", role: "assistant", model, content: "Saved answer", createdAt: 1 }] });
 const qwenPicked = [info(QWEN, true), info(GEMMA), info(LLAMA)];
 

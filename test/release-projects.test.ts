@@ -27,7 +27,7 @@ test("RG-05: functional companions of timing measurements stay in the blocking p
   const timing = list("timing");
   // A list without its last line is not a list of every test.
   for (const listing of [blocking, timing]) expect(listing).toMatch(/\nTotal: \d+ tests? in \d+ files?\n$/);
-  for (const title of ["renders all 400 messages", "cold load reaches a ready composer without console errors", "typing preserves every character while idle, streaming and busy"]) {
+  for (const title of ["renders the latest 200 messages, and all 400 after Load earlier", "cold load reaches a ready composer without console errors", "typing preserves every character while idle, streaming and busy"]) {
     expect(blocking).toContain(title);
     expect(timing).not.toContain(title);
   }

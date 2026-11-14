@@ -42,6 +42,14 @@ const placeIn = (el: Locator) => el.evaluate((n) => {
   const t = n.closest(".turn")!.getBoundingClientRect();
   return { x: Math.round(b.left - t.left), y: Math.round(b.top - t.top), width: Math.round(b.width), height: Math.round(b.height) };
 });
+/** A shot for the report and the box of the thing it is about, so the report can outline it. */
+async function shoot(page: Page, name: string, about: Locator): Promise<void> {
+  await page.screenshot({ path: test.info().outputPath(`${name}.png`), animations: "disabled" });
+  await writeFile(test.info().outputPath(`${name}.json`), JSON.stringify({ about: await about.boundingBox() }));
+}
+
+/** Only where a box starts: a line whose words change keeps its place, not its width. */
+const at = (n: { x: number; y: number }) => ({ x: n.x, y: n.y });
 const heightOf = (el: Locator) => el.evaluate((n) => Math.round(n.getBoundingClientRect().height));
 const topOf = (el: Locator) => el.evaluate((n) => Math.round(n.getBoundingClientRect().top));
 /** Resolves once a fold has finished opening: its height the same on two frames running. */
@@ -64,31 +72,41 @@ test.describe("live", () => {
     await sendMessage(page, "Use a tool to check my notes");
     const reply = page.locator(".turn.a").last();
     const chip = reply.locator("button.think");
-    // the first round is held inside its thinking: the thought line, its bulb where the chip's will be
+    // the first round is held inside its thinking: the thought line, its bulb in the box the lit mark takes
     await expect(chip).toHaveClass(/\blive\b/);
-    const bulb = await placeIn(chip.locator(".ic").first());
+    const bulb = await placeIn(chip.locator(".th-i"));
     await untilCalls(chip, 1);
     await expect(chip).toHaveClass(/\bfold\b/);
-    expect(await placeIn(chip.locator(".ic").first()), "the bulb keeps its place and size as the line becomes the chip").toEqual(bulb);
-    const box = await placeIn(chip);
+    // chat row 37: one live line, the lit mark where the bulb was, what it does now and the time in the line itself
+    expect(at(await placeIn(chip.locator(".lv-dot"))), "the lit mark sits where the bulb was").toEqual(at(bulb));
+    await expect(chip.locator(".lv-w")).toBeVisible();
+    await expect(chip.locator(".lv-t")).toHaveText(/^ · \d+ s$/);
+    await shoot(page, "row37-live-line", chip);
+    const start = at(await placeIn(chip));
     const height = await heightOf(reply);
-    // the current step is said beside the chip, and the part at work is lit
-    await expect(reply.locator(".fold-now")).toBeVisible();
     for (let n = 2; n <= 10; n++) {
       await untilCalls(chip, n);
-      expect(await placeIn(chip), `the chip's box at ${n} calls`).toEqual(box);
+      expect(at(await placeIn(chip)), `the line's place at ${n} calls`).toEqual(start);
       expect(await heightOf(reply), `the reply's height at ${n} calls`).toBe(height);
       await expect(chip).toHaveAttribute("aria-expanded", "false");
       await expect(reply.locator("[data-tool-row]").first()).toBeHidden();
     }
-    await expect(chip.locator(".ch-n").last()).toHaveText("10");
     await expect.poll(async () => { await release(); return reply.evaluate((n) => n.classList.contains("done")); }, { timeout: 20_000, intervals: [50] }).toBe(true);
-    // done: the same box, the words gone, still closed; the last call failed, so the chip says so
-    expect(await placeIn(chip), "the chip's box once done").toEqual(box);
-    await expect(reply.locator(".fold-now")).toHaveCount(0);
+    // done: the same place, the time and the step count, still closed; failed calls counted in red, no sentence
+    expect(at(await placeIn(chip)), "the line's place once done").toEqual(start);
+    await expect(chip.locator(".lv-dot")).toHaveCount(0);
+    await expect(chip.locator(".lv-n")).toHaveText("10 steps");
     await expect(chip).toHaveAttribute("aria-expanded", "false");
-    await expect(chip).toHaveAccessibleName(/^Thinking \d+ seconds?, 10 tool calls, last call failed$/);
-    await expect(chip.locator(".ch-p.bad")).toHaveCount(1);
+    await expect(chip).toHaveAccessibleName(/^Thinking \d+ seconds?, 10 tool calls, \d+ failed$/);
+    await expect(chip.locator(".lv-bad")).toHaveCount(1);
+    await expect(reply).not.toContainText("Tool could not finish");
+    await shoot(page, "row37-done-line", chip);
+    await chip.click();
+    await expect(reply.locator("[data-tool-row]").first()).toBeVisible();
+    // a failed step's mark is red: the same colour as the count of failed on the line
+    const red = await chip.locator(".lv-bad").evaluate((n) => getComputedStyle(n).color);
+    await expect(reply.locator('[data-tool-row] .wr-st[data-st="rej"]').first()).toHaveCSS("color", red);
+    await shoot(page, "row37-done-open", reply.getByRole("list", { name: "Steps" }));
   });
 
   test.describe("opened while calls run", () => {
@@ -116,7 +134,7 @@ test.describe("live", () => {
       // round 2 is held inside its thinking: round 1 is one closed line, the call one line, round 2 open and growing
       await expect(items).toHaveCount(3);
       await expect(items.nth(0).locator(".th-line")).toHaveAttribute("aria-expanded", "false");
-      await expect(items.nth(0).locator(".th-line")).toHaveText(/^Thought · \d+ s$/);
+      await expect(items.nth(0).locator(".th-line")).toHaveText(/^\d+ s$/);
       await expect(items.nth(1).locator("[data-tool-row]")).toBeVisible();
       await expect(items.nth(2).locator(".th-line")).toHaveText("Thinking");
       await expect(items.nth(2).locator(".think-body")).toBeVisible();
@@ -126,7 +144,7 @@ test.describe("live", () => {
       await untilCalls(chip, 2);
       await expect(items).toHaveCount(5);
       await expect(items.nth(2).locator(".th-line")).toHaveAttribute("aria-expanded", "false");
-      await expect(items.nth(2).locator(".th-line")).toHaveText(/^Thought · \d+ s$/);
+      await expect(items.nth(2).locator(".th-line")).toHaveText(/^\d+ s$/);
 
       // at the end, the page follows: the newest line is on screen
       await tl.evaluate((n) => { n.scrollTop = n.scrollHeight; });

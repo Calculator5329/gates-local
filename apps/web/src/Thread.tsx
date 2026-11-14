@@ -139,46 +139,38 @@ interface ChipStep {
   readonly calls: number | null;
   /** The part at work while the reply runs. */
   readonly lit: "think" | "calls" | null;
-  /** The last call failed. */
-  readonly failed: boolean;
+  /** Calls that failed (not ones a Stop cut short), counted once the turn has ended; 0 while it runs. */
+  readonly failed: number;
   /** The current step in words, said beside the chip until the answer starts. */
   readonly words: string;
 }
 
 /**
- * The chip's face (owner's option 3 of four, 2026-11-11): the finished shape
- * from the first moment, bulb and seconds, a divider, wrench and calls, a
- * chevron; the part at work is lit and its number climbs. The box changes only
- * by digits. Another option is a change to this part and ChipWords.
+ * One live line per reply (chat row 37, owner pick A, 2026-11-13). While the reply runs: one lit
+ * mark, what it is doing right now, and the running time; the same nodes throughout, only words
+ * and digits change. After: the time, the step count, and how many failed in red. `secs` is the
+ * reply's time so far, or its whole time once ended; undefined when not known.
  */
-function ChipFace({ step }: { step: ChipStep }) {
-  return (
+function WorkLine({ step, busy, writing, secs }: { step: ChipStep; busy: boolean; writing: boolean; secs: number | undefined }) {
+  const n = step.calls ?? 0;
+  const chevron = <span className="th-x"><Icon id="down" /></span>;
+  return busy ? (
     <>
-      {step.think !== null ? (
-        <span className={step.lit === "think" ? "ch-p on" : "ch-p"}>
-          <Icon id="bulb" />
-          {step.think === undefined ? null : <span className="ch-n">{step.think}</span>}
-          {step.think === undefined ? null : <span className="ch-u">s</span>}
-        </span>
-      ) : null}
-      {step.think !== null && step.calls !== null ? <span className="ch-sep" /> : null}
-      {step.calls !== null ? (
-        <span className={step.lit === "calls" ? "ch-p on" : step.failed ? "ch-p bad" : "ch-p"}>
-          <Icon id={step.failed ? "xc" : "wrench"} />
-          <span className="ch-n">{step.calls}</span>
-        </span>
-      ) : null}
-      <span className="th-x">
-        <Icon id="down" />
-      </span>
+      <span className="lv-dot" />
+      {/* once the answer streams the same node says "Writing" (chat row 30) */}
+      <span className="lv-w">{step.words !== "" ? step.words : writing ? "Writing" : "Working"}</span>
+      {secs === undefined ? null : <span className="lv-t">{` · ${secs} s`}</span>}
+      {chevron}
+    </>
+  ) : (
+    <>
+      <span className="lv-i"><Icon id="check" /></span>
+      {secs === undefined ? null : <span className="lv-t">{`${secs} s · `}</span>}
+      <span className="lv-n">{`${n} step${n === 1 ? "" : "s"}`}</span>
+      {step.failed > 0 ? <span className="lv-bad">{` · ${step.failed} failed`}</span> : null}
+      {chevron}
     </>
   );
-}
-
-function ChipWords({ step, writing }: { step: ChipStep; writing: boolean }) {
-  // once the answer streams the same node says "Writing", above the words (chat row 30)
-  const w = writing && step.words === "";
-  return <span className={w ? "fold-now writing" : "fold-now"}>{w ? "Writing" : step.words}</span>;
 }
 
 /** The answer is streaming: one blinking word above it, the same while the paced text catches up. */
@@ -191,10 +183,14 @@ function chipName(step: ChipStep, busy: boolean): string {
   const calls = step.calls === null ? "" : `${step.calls} tool ${step.calls === 1 ? "call" : "calls"}`;
   if (busy) return `Working, ${calls}`;
   const think = step.think === null ? "" : step.think === undefined ? "Thinking" : `Thinking ${step.think} ${step.think === 1 ? "second" : "seconds"}`;
-  return [think, calls].filter(Boolean).join(", ") + (step.failed ? ", last call failed" : "");
+  return [think, calls].filter(Boolean).join(", ") + (step.failed > 0 ? `, ${step.failed} failed` : "");
 }
 
 interface FoldProps {
+  /** When the turn started, for the live line's running time; undefined for a saved reply. */
+  readonly startedAt?: number | undefined;
+  /** The whole reply's seconds once it has ended; undefined when not known. */
+  readonly total?: number | undefined;
   readonly thinking: string;
   /** The reply's calls; the server's notes are not calls and are not here. */
   readonly tools: readonly ToolStep[];
@@ -225,7 +221,7 @@ interface FoldProps {
  * in the thinking is the turn's clock's; a reply it did not watch (a reload)
  * lists its thought first, then its calls.
  */
-function Fold({ thinking, tools, secs, since, thinkingNow, busy, answering, stopped, clock, writing }: FoldProps) {
+function Fold({ thinking, tools, secs, since, thinkingNow, busy, answering, stopped, clock, writing, startedAt, total }: FoldProps) {
   const [open, setOpen] = useState(false);
   const [rounds, setRounds] = useState<Readonly<Record<number, boolean>>>({});
   const body = useId();
@@ -249,7 +245,8 @@ function Fold({ thinking, tools, secs, since, thinkingNow, busy, answering, stop
   };
   const line = (
     <ToggleLine open={open} onToggle={() => setOpen(!open)} body={body} chip={tools.length > 0} live={thinkingNow}
-      step={tools.length === 0 ? null : chipStep(thinking, tools, clock, t, running, answering, busy)} busy={busy} writing={writing}>
+      step={tools.length === 0 ? null : chipStep(thinking, tools, clock, t, running, answering, busy)} busy={busy} writing={writing}
+      secs={busy ? (startedAt === undefined ? undefined : Math.max(0, Math.floor((t - startedAt) / 1000))) : total}>
       {thinkingNow && since !== undefined ? <ThinkingLabel since={since} /> : <ThoughtLabel secs={secs} />}
     </ToggleLine>
   );
@@ -287,12 +284,6 @@ function cutByStop(step: ToolStep): boolean {
   return step.state === "error" && step.stopped === true;
 }
 
-/** The last call failed: it ended as "error" and no Stop cut it. */
-function lastFailed(tools: readonly ToolStep[]): boolean {
-  const last = tools.at(-1);
-  return last !== undefined && last.state === "error" && !cutByStop(last);
-}
-
 /**
  * The chip's state. Thinking seconds are the turn's clock, never rebuilt here:
  * a reply the clock did not watch shows the bulb with no number. The red mark
@@ -312,17 +303,18 @@ export function chipStep(thinking: string, tools: readonly ToolStep[], clock: Wo
     think: thinking === "" ? null : clock === undefined ? undefined : thoughtSecs(clock, now),
     calls: tools.length,
     lit: !busy ? null : running !== undefined ? "calls" : thinkingNow ? "think" : reading ? (thinking === "" ? "calls" : "think") : null,
-    failed: !busy && lastFailed(tools),
+    failed: busy ? 0 : tools.filter((s) => s.state === "error" && !cutByStop(s)).length,
     words: !busy ? "" : running !== undefined ? running.summary : thinkingNow ? "Thinking" : reading ? "Reading the result" : "",
   };
 }
 
 /** The control that opens a reply's fold: the thought line as it was, or the chip with the current step beside it. */
-function ToggleLine({ open, onToggle, body, chip, live, step, busy, writing, children }: { open: boolean; onToggle: () => void; body: string; chip: boolean; live: boolean; step: ChipStep | null; busy: boolean; writing: boolean; children: ReactNode }) {
+function ToggleLine({ open, onToggle, body, chip, live, step, busy, writing, secs, children }: { open: boolean; onToggle: () => void; body: string; chip: boolean; live: boolean; step: ChipStep | null; busy: boolean; writing: boolean; secs: number | undefined; children: ReactNode }) {
   return (
     <div className={open ? "fold-line open" : "fold-line"}>
+      {/* data-think: the turn's clock's thinking seconds, which the opened list splits by round */}
       <button type="button" className={chip ? "think fold" : live ? "think live" : "think"} data-testid="chat.fold.toggle" aria-expanded={open} aria-controls={body}
-        aria-label={step === null ? undefined : chipName(step, busy)} onClick={onToggle}>
+        aria-label={step === null ? undefined : chipName(step, busy)} data-think={step?.think ?? undefined} onClick={onToggle}>
         {step === null ? (
           <>
             <span className="th-i">
@@ -333,24 +325,25 @@ function ToggleLine({ open, onToggle, body, chip, live, step, busy, writing, chi
               <Icon id="down" />
             </span>
           </>
-        ) : <ChipFace step={step} />}
+        ) : <WorkLine step={step} busy={busy} writing={writing} secs={secs} />}
       </button>
-      {/* kept mounted while busy, so a step change swaps words in place and never adds or drops a node */}
-      {step !== null && (busy || step.words !== "" || writing) ? <ChipWords step={step} writing={writing} /> : writing ? <WritingLabel /> : null}
+      {step === null && writing ? <WritingLabel /> : null}
     </div>
   );
 }
 
-/** One thinking round in the open fold: its text, growing live; once the next step starts it closes to "Thought · 6 s" and reopens on a click. */
+/** One thinking round in the open fold: its text, growing live; once the next step starts it closes to the bulb and "6 s" and reopens on a click. */
 function ThoughtRound({ text, live, secs, open, onToggle }: { text: string; live: boolean; secs: number | undefined; open: boolean; onToggle: (open: boolean) => void }) {
   const id = useId();
   return (
     <>
-      <button type="button" className="th-line" data-testid="chat.fold.thinking" aria-expanded={open} aria-controls={id} onClick={() => onToggle(!open)}>
+      <button type="button" className="th-line" data-testid="chat.fold.thinking" aria-expanded={open} aria-controls={id}
+        aria-label={live ? "Thinking" : secs === undefined ? "Thought" : `Thought for ${secs} s`} onClick={() => onToggle(!open)}>
         <span className="wr-st">
           <Icon id="bulb" />
         </span>
-        <span className="wr-h">{live ? "Thinking" : secs === undefined ? "Thought" : `Thought · ${secs} s`}</span>
+        {/* the bulb says thought: the round says its seconds once */}
+        <span className="wr-h">{live ? "Thinking" : secs === undefined ? "Thought" : `${secs} s`}</span>
         <span className="wr-x">
           <Icon id="down" />
         </span>
@@ -415,7 +408,8 @@ function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
   const [open, setOpen] = useState(false);
   // cut short by Stop: live (a running step in a stopped turn) or saved (an "error" marked stopped)
   const cut = cutByStop(step) || (stopped === true && step.state === "running");
-  const st = cut ? "rej" : step.state === "running" ? "run" : step.state === "error" ? "rej" : "done";
+  // "rej" is a failed step, drawn red; a step Stop cut short keeps the grey mark
+  const st = cut ? "cut" : step.state === "running" ? "run" : step.state === "error" ? "rej" : "done";
   const label = toolLabel(step.name);
   // the contract has no read-only flag yet; a `-readonly` flag in the call is the evidence the design's word rests on
   const ro = /(^|\s)-readonly(\s|$)/.test(step.detail ?? "") ? "read-only" : "";
@@ -423,9 +417,12 @@ function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
   const dur = duration(step.durationMs);
   // the summary is said once: "Read notes.md" needs no "Read ·" after it
   const named = step.summary.toLowerCase().startsWith(label.toLowerCase());
-  const meta = st === "run" ? (named ? "running" : `${label} · running`) : cut ? (named ? "stopped" : `${label} · stopped`) : step.state === "error" ? (named ? "failed" : `${label} · failed`) : dur === "" ? lead : null;
   const [line = "", ...rest] = (step.detail ?? "").split("\n");
   const { cmd, shell } = callLine(line);
+  // a failed step is its call with the red mark, never "Tool could not finish" (chat row 37)
+  const failed = step.state === "error" && !cut;
+  const heading = !failed ? step.summary : cmd !== "" ? cmd : label;
+  const meta = st === "run" ? (named ? "running" : `${label} · running`) : cut ? (named ? "stopped" : `${label} · stopped`) : failed ? (cmd !== "" ? lead : dur) : dur === "" ? lead : null;
   const out = rest.join("\n").trim();
   const toggle = () => setOpen(!open);
   return (
@@ -447,10 +444,10 @@ function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
       }}
     >
       <div className="wr-line">
-        <span className="wr-st" data-st>
-          {st === "run" ? <Icon id="spin" cls="spin" /> : <Icon id={st === "rej" ? "xc" : "checkc"} />}
+        <span className="wr-st" data-st={st}>
+          {st === "run" ? <Icon id="spin" cls="spin" /> : <Icon id={st === "done" ? "checkc" : "xc"} />}
         </span>
-        <span className="wr-h">{step.summary}</span>
+        <span className="wr-h">{heading}</span>
         {/* a phone's collapsed line keeps the time; the tool's name moves into the details */}
         <span className="wr-m">
           {meta ?? (
@@ -465,7 +462,7 @@ function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
         </span>
       </div>
       {/* one box up to 360 px: longer output scrolls inside it, by wheel or keys; the wheel goes on to the page at its ends */}
-      <div className="wr-body" data-testid="chat.tool-call.body" tabIndex={open ? 0 : -1} aria-label={`${step.summary}: details`}>
+      <div className="wr-body" data-testid="chat.tool-call.body" tabIndex={open ? 0 : -1} aria-label={`${heading}: details`}>
         {meta === null ? <p className="wr-who">{lead}</p> : null}
         {cmd !== "" ? (
           <p className="cmd">
@@ -732,7 +729,8 @@ function Reply({ msg, live, text, paced, thinking, tools, clock, secs, allowedLi
     <div className={`turn a${interrupted ? " interrupted" : streaming || pending ? "" : " done"}${knownStop ? " noted" : ""}`} data-testid="chat.reply.turn" tabIndex={0} aria-label={interrupted ? "Interrupted reply" : "Reply"} data-received={text.length} data-revealed={paced.length}>
       {folded ? (
         <Fold thinking={thinking} tools={calls} secs={secs} since={thinkingNow ? thoughtOrigin(live) : undefined} thinkingNow={thinkingNow}
-          busy={streaming} answering={text !== ""} stopped={end !== undefined || interrupted} clock={clock} writing={writing} />
+          busy={streaming} answering={text !== ""} stopped={end !== undefined || interrupted} clock={clock} writing={writing}
+          startedAt={live?.startedAt} total={msg?.times ? Math.max(1, Math.round((msg.times.ended.at - msg.times.startedAt) / 1000)) : stopSecs} />
       ) : writing ? <WritingLabel over /> : null}
       {notes.map((t) => <ToolRow key={t.callId} step={t} stopped={end !== undefined || interrupted} />)}
       {msg?.imageJob ? <ImageCard msg={msg} thread={thread} origin={origin} token={token} /> : shown !== "" ? <Markdown text={shown} live={streaming || pending} allowedLinks={allowedLinks} /> : null}
@@ -839,6 +837,12 @@ const SLICE_TURNS = 40;
  * opened thread, so it adds SLICE_TURNS, no more than the first commit.
  */
 const FILL_TURNS = 120;
+/**
+ * The page holds only what the reader asked for (chat row 40, owner pick A, 2026-11-13): a
+ * thread opens with a window of its latest turns, and a button at the top adds the turns
+ * before them, this many a press. Turns that come in at the end widen the window there.
+ */
+const WINDOW_TURNS = 200;
 
 /** The longest a slice waits for an idle moment before it mounts anyway. */
 const IDLE_WAIT_MS = 100;
@@ -922,8 +926,17 @@ export function Timeline({ threadId }: { threadId: string }) {
   const skip = at < 0 ? opening : Math.min(at, opening);
   const firstKey = turns[skip]?.key ?? null;
   if (firstKey !== null && firstKey !== first) setFirst(firstKey);
+  // The earliest turn the reader asked for, by key: nothing in front of it mounts until they ask.
+  // When it leaves the thread (deleted) the window starts at what is mounted, so nothing unmounts.
+  const [floor, setFloor] = useState<string | null>(null);
+  const floorNow = useRef(0);
+  let floorAt = floor === null ? -1 : turns.findIndex((t) => t.key === floor);
+  if (floorAt < 0) floorAt = Math.min(skip, Math.max(0, turns.length - WINDOW_TURNS));
+  const floorKey = turns[floorAt]?.key ?? null;
+  if (floorKey !== null && floorKey !== floor) setFloor(floorKey);
   turnsNow.current = turns;
   skipNow.current = skip;
+  floorNow.current = floorAt;
   // The first mounted turn and its distance from the top of the view, noted after
   // each commit and scroll and just before a slice goes in. A distance in the
   // view, not in the content: when the browser's own scroll anchoring has
@@ -935,8 +948,8 @@ export function Timeline({ threadId }: { threadId: string }) {
     anchor.current = top === null || view === null ? null : { el: top, off: top.getBoundingClientRect().top - view.getBoundingClientRect().top };
   }, []);
   const grow = useCallback((count: number) => {
-    if (skipNow.current === 0) return;
-    const key = turnsNow.current[Math.max(0, skipNow.current - count)]?.key;
+    if (skipNow.current <= floorNow.current) return;
+    const key = turnsNow.current[Math.max(floorNow.current, skipNow.current - count)]?.key;
     if (key === undefined) return;
     note();
     flushSync(() => setFirst(key));
@@ -963,10 +976,19 @@ export function Timeline({ threadId }: { threadId: string }) {
     note();
   });
 
-  // the rest of the thread mounts in idle time, so find-in-page and select-all see all of it
-  useEffect(() => (first === null || skip === 0 ? undefined : whenIdle((timeLeft) => {
-    do grow(turnsNow.current.length - skipNow.current <= FIRST_TURNS ? SLICE_TURNS : FILL_TURNS); while (skipNow.current > 0 && timeLeft() > SLICE_MS);
-  })), [first, skip, grow]);
+  // the rest of the window mounts in idle time, so find-in-page and select-all see all of it
+  useEffect(() => (first === null || skip <= floorAt ? undefined : whenIdle((timeLeft) => {
+    do grow(turnsNow.current.length - skipNow.current <= FIRST_TURNS ? SLICE_TURNS : FILL_TURNS); while (skipNow.current > floorNow.current && timeLeft() > SLICE_MS);
+  })), [first, skip, floorAt, grow]);
+
+  // Load earlier: the window takes the turns before it, mounted at once; the turn in view stays where it is
+  const earlier = () => {
+    const key = turnsNow.current[Math.max(0, floorNow.current - WINDOW_TURNS)]?.key;
+    if (key === undefined) return;
+    floorNow.current = Math.max(0, floorNow.current - WINDOW_TURNS);
+    flushSync(() => setFloor(key));
+    grow(Number.MAX_SAFE_INTEGER);
+  };
 
   // a newly opened thread starts at its end
   useLayoutEffect(() => {
@@ -1040,6 +1062,13 @@ export function Timeline({ threadId }: { threadId: string }) {
     <div className="tl" ref={tl} aria-busy={loading && loadError === undefined}>
       <div className={messages.length >= LONG_THREAD ? "col long" : "col"} ref={col}>
         {loading && loadError === undefined ? <TurnSkel /> : null}
+        {floorAt > 0 ? (
+          <button type="button" className="earlier" data-testid="chat.thread.earlier" onClick={earlier}>
+            <Icon id="up" />
+            {`${Math.min(WINDOW_TURNS, floorAt).toLocaleString("en-US")} earlier`}
+            <span className="earlier-of">{` of ${floorAt.toLocaleString("en-US")}`}</span>
+          </button>
+        ) : null}
         {turns.slice(skip).map(({ msg: m, key }, j) => {
           if (m !== undefined && retries.has(m.id)) return null;
           const last = skip + j === messages.length - 1;

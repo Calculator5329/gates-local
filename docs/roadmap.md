@@ -810,6 +810,17 @@ documents Milo's measured 404/850 ms first-audio references and the latency
 targets to validate here, and explains the request identities and PCM capture
 that stage 1 leaves reusable. Manual Dictate stays available separately.
 
+2026-11-13 (chat row 38, owner pick A, a try-out): talk mode is built
+behind the microphone, off by default: hold to talk (the microphone, or
+Space in an empty box), let go to send, the reply read a sentence at a
+time by the device's own `speechSynthesis` voice (local voices only), a
+speaker icon to turn it off. No voice is bundled.
+
+- [ ] Choose the bundled CPU voice; the owner picks before anything ships. Measured on disk: Pocket TTS English weights 219 MB (`model.safetensors` 219,029,196 bytes plus a 59 KB tokenizer; Milo's measured path; the CC0-catalogued voices are marius, javert, bill_boerst, stuart_bell, with alba as Milo's reference); Kokoro 82M 354 MB (ONNX 325.5 MB plus 28.2 MB of voices); Piper `en_US-lessac-high` 114 MB.
+      *Accept:* the chosen voice runs on the processor behind the same sentence reader (`apps/web/src/talk.ts` `Speaker`), with its first-audio time measured against `docs/design/voice.md` targets and its licence written down.
+- [ ] Talk mode's reading follows the device voice's own pace; a sentence already handed to it cannot be pulled back except by cancelling everything, so Stop on a reply does not stop the reading of what was already written.
+      *Accept:* decide whether Stop also stops the reading; then one browser step proves it.
+
 - [ ] <!-- workspace:id=work:467cf6a2-d944-5751-89dd-5115d78c96a6 --> Dictation cancellation is keyed twice: Composer remounts `Voice` by draft identity, while `Voice` also tears capture down on identity changes.
       *Accept:* consolidate the lifecycle in `Composer.tsx`/`Voice.tsx` while replacement, navigation and disconnect still release the microphone and reject late transcripts.
 
@@ -868,6 +879,8 @@ RS-03 remains dropped.
       *Accept:* another window clears the listed running marker without waiting for reconnect when admission fails there.
 - [ ] <!-- workspace:id=work:c587a493-aab1-56bb-9bf4-37a11af524c5 --> Sending into a chat with a listed-only turn replaces its marker; a turn-active refusal drops it until the other client's start arrives (`session/chat.ts`).
       *Accept:* a held other-client start and refused local send retain the sidebar's truthful running state.
+- [ ] Another window starts a reply in a chat while this window's send is still unanswered: this send is refused as turn-active, and this window's Stop then stops the other window's reply, which is the one on screen (chat row 32 edge case, 2026-11-13).
+      *Accept:* the refused send keeps its words with a true line, and a browser test with two windows shows which reply Stop stops (the owner decides: only this window's own, or the reply on screen whoever sent it).
 - [ ] <!-- workspace:id=work:0d656ff2-effc-5c4c-9ffb-9e3d65679a19 --> `oldTurns` in `session/chat.ts` only retires ids on terminal events, so missed terminals can grow the set for the session's lifetime.
       *Accept:* repeated missed endings stay bounded without allowing late events into a replacement turn.
 - [ ] <!-- workspace:id=work:3226a596-aaa1-5051-914e-fe2f6a70a940 --> Exercise listed-turn send refusal and a listed turn's later start in the browser; `listed-turn.test.ts` currently proves those ordering paths in memory.

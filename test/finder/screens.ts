@@ -81,8 +81,9 @@ export const NAMES: Readonly<Record<string, string>> = {
   ".composer button.send": "Send",
   ".qt-r": "queued row",
   ".qt": "queue tray",
-  ".fold-now": "work chip words",
-  ".fold-line:has(.ch-p.on)": "lit work chip",
+  ".fold-now": "Writing word",
+  ".lv-w": "work line words",
+  ".fold-line:has(.lv-dot)": "live work line",
   ".sb-foot > *": "footer icon",
   ".hdr": "thread header",
   ".hdr h2": "thread title",
@@ -224,8 +225,8 @@ export const SCREENS: readonly Screen[] = [
       name: "send a message that calls two tools",
       root: ".tl",
       // the reply streams in and the view follows it: only blinks, words and cuts count here
-      free: [".turn", "details", ".fold-now", ".cf-r > *", ".composer button.send"],
-      track: [".fold-now", ".fold-line:has(.ch-p.on)"],
+      free: [".turn", "details", ".fold-now", ".lv-w", ".cf-r > *", ".composer button.send"],
+      track: [".lv-w", ".fold-line:has(.lv-dot)"],
       max: 15_000,
       before: (c) => c.scenario("slow-drip", { toolCalls: 2, quietToolRounds: 1, tokenDelayMs: 15, firstTokenDelayMs: 900 }),
       // the watch runs until the reply ends: the page is quiet while the model reads a result, so a quiet page is not the end
