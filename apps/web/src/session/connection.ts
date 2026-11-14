@@ -1,6 +1,7 @@
 // One connection's reconnect loop, RPCs and draft-persistence lifetime.
 import { type CallOptions, type Client, type MethodName, type Params, type ResultOf, WireError, createClient } from "@gates-local/contracts";
 import { NA, setState } from "../store.ts";
+import { pinFramePolicy } from "../pages/frame-policy.ts";
 
 interface ConnectionEffects {
   readonly applyServerEvent: typeof setState;
@@ -94,7 +95,10 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
       }
       const parsed = new URL(url);
       // Image URLs follow the socket's scheme: wss gives https.
-      applyServerEvent({ serverOrigin: `${parsed.protocol === "wss:" ? "https:" : "http:"}//${parsed.host}`, fileToken: parsed.searchParams.get("token") });
+      const serverOrigin = `${parsed.protocol === "wss:" ? "https:" : "http:"}//${parsed.host}`;
+      // a browser tab has no main process guarding its frames: the page route's one address is all a frame may load
+      if (!desktopBridge() && typeof document !== "undefined") pinFramePolicy(serverOrigin);
+      applyServerEvent({ serverOrigin, fileToken: parsed.searchParams.get("token") });
       if (!stopDrafts && typeof indexedDB !== "undefined") {
         try { stopDrafts = await (await import("../draft-persistence.ts")).watchDraft(desktopBridge() ? "desktop" : parsed.host); }
         catch { setState({ notice: "Image drafts cannot be saved on this device. Keep this window open until you send them." }); }

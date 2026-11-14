@@ -9,6 +9,8 @@ export interface LinkDeps {
   isClientUrl(url: string): boolean;
   openExternal(url: string): Promise<void>;
   log(line: string): void;
+  /** The port this app's server listens on right now; undefined while none is ready. */
+  pagePort(): number | undefined;
 }
 
 /** A navigation in any frame of the window, as Electron's will-frame-navigate gives it. */
@@ -40,8 +42,15 @@ export interface GuardedContents {
   setWebRTCIPHandlingPolicy(policy: "disable_non_proxied_udp"): void;
 }
 
-/** The one kind of address a frame in the window may load: a page a reply wrote, at the server's one-time page address (apps/server/src/pages/route.ts). */
-export const isPageFrame = (url: string): boolean => /^http:\/\/127\.0\.0\.1:\d{1,5}\/pages\/[0-9a-f]{32}$/.test(url);
+/**
+ * The one kind of address a frame in the window may load: a page a reply wrote, at the server's
+ * one-time page address (apps/server/src/pages/route.ts). Given `port`, on that port only: another
+ * program on this computer serving under /pages/ is not this app's server.
+ */
+export function isPageFrame(url: string, port?: number): boolean {
+  const at = /^http:\/\/127\.0\.0\.1:(\d{1,5})\/pages\/[0-9a-f]{32}$/.exec(url);
+  return at !== null && (port === undefined || Number(at[1]) === port);
+}
 
 /**
  * Hand an http(s) link to the system browser; any other URL is dropped.
@@ -97,7 +106,8 @@ export function guardNavigation(contents: GuardedContents, deps: LinkDeps): void
     // frame is in the document, so no frame of the client's ever navigates to about:blank or
     // about:srcdoc: those are refused like any other address.
     const fromWindow = details.initiator === undefined || details.initiator === null || details.initiator.parent === null;
-    if (isPageFrame(details.url) && fromWindow) return;
+    const port = deps.pagePort();
+    if (port !== undefined && isPageFrame(details.url, port) && fromWindow) return;
     details.preventDefault();
     deps.log(`refused a navigation inside a frame (${schemeOf(details.url)})`);
   });

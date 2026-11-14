@@ -55,8 +55,12 @@ function inside(root: string, file: string): boolean {
   return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
 }
 
-/** The client's own frame policy in index.html, which as built names this computer's loopback page route. */
-const FRAME_POLICY = /(<meta\s+http-equiv="Content-Security-Policy"\s+content=")frame-src [^"]*(")/i;
+/**
+ * The client's own policy tag in index.html, which as built names this computer's loopback page
+ * route. Matched whole and whatever a build did to its attribute order, quotes or closing.
+ */
+const POLICY_TAG = /<meta\b[^>]*http-equiv\s*=\s*["']?Content-Security-Policy["']?[^>]*>/gi;
+const policyTag = (origin: string) => `<meta http-equiv="Content-Security-Policy" content="frame-src ${origin}/pages/" />`;
 
 /**
  * index.html with the meta (and a root base) as the first thing in its head. Given `pagesOrigin`,
@@ -64,9 +68,12 @@ const FRAME_POLICY = /(<meta\s+http-equiv="Content-Security-Policy"\s+content=")
  * can move its own frame only where this policy lets a frame go, so it never names a wildcard host.
  */
 export function withMeta(html: string, pagesOrigin?: string): string {
-  const own = pagesOrigin === undefined ? html : html.replace(FRAME_POLICY, (_, open: string, close: string) => `${open}frame-src ${pagesOrigin}/pages/${close}`);
+  // the client's tag goes and this listener's own is written in its place: a tag this could not
+  // find would stay beside the listener's header, and then no page would load at all
+  const own = pagesOrigin === undefined ? "" : policyTag(pagesOrigin);
+  const rest = pagesOrigin === undefined ? html : html.replace(POLICY_TAG, "");
   const head = /<head(\s[^>]*)?>/i;
-  return head.test(own) ? own.replace(head, (tag) => `${tag}${SAME_ORIGIN_META}${BASE}`) : `${SAME_ORIGIN_META}${BASE}${own}`;
+  return head.test(rest) ? rest.replace(head, (tag) => `${tag}${SAME_ORIGIN_META}${BASE}${own}`) : `${SAME_ORIGIN_META}${BASE}${own}${rest}`;
 }
 
 function send(req: IncomingMessage, res: ServerResponse, status: number, headers: Record<string, string | number>, body: Buffer | string): void {

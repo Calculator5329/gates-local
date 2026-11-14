@@ -42,7 +42,9 @@ export function sandboxOff(): Promise<boolean> {
     };
     let stop: (() => void) | undefined;
     stop = b.onState?.((s) => { if (settle(s)) stop?.(); });
-    void b.getState().then((s) => { if (settle(s)) stop?.(); }, () => undefined);
+    // A bridge that cannot answer: nothing more will come, and waiting would hold every page and
+    // Measure with it. Off is the safe side: a page then waits for Run.
+    void b.getState().then((s) => { if (settle(s)) stop?.(); }, () => { stop?.(); learn(true); resolve(true); });
   });
   return asked;
 }

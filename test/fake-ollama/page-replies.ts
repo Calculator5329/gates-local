@@ -170,6 +170,10 @@ export const MOVING = {
     prompt: "make the page that goes to the server",
     code: `<!doctype html><html><head><meta charset="utf-8"><title>Going page</title></head><body><p id="out">here</p><script>setTimeout(() => { location.href = "${FAKE_ORIGIN}${LEFT_PATH}/navigation"; }, 100);</script></body></html>`,
   },
+  "another port's page route": {
+    prompt: "make the page that goes to another port",
+    code: `<!doctype html><html><head><meta charset="utf-8"><title>Port page</title></head><body><p id="out">here</p><script>setTimeout(() => { location.href = "${FAKE_ORIGIN}/pages${LEFT_PATH}/other-port?typed=" + encodeURIComponent("what the person typed"); }, 100);</script></body></html>`,
+  },
   "a refresh tag": {
     prompt: "make the page that refreshes away",
     code: `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${FAKE_ORIGIN}${LEFT_PATH}/refresh"><title>Refreshing page</title></head><body><p id="out">here</p></body></html>`,

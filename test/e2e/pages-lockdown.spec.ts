@@ -28,7 +28,7 @@ async function pageOf(page: Page, prompt: string, timeout = 20_000, frame = true
 const PAGE_ADDRESS = new RegExp(`^http://127\\.0\\.0\\.1:${SERVER_PORT}/pages/[0-9a-f]{32}$`);
 
 /** What the fake server was asked by anything that left a page's limits. */
-const leftRequests = async () => ((await (await fetch(`${FAKE_URL}/__fake/state`)).json()) as { requests: { path: string }[] }).requests.map((r) => r.path).filter((p) => p.startsWith(LEFT_PATH));
+const leftRequests = async () => ((await (await fetch(`${FAKE_URL}/__fake/state`)).json()) as { requests: { path: string }[] }).requests.map((r) => r.path).filter((p) => p.includes(LEFT_PATH));
 
 test("the frame is the server's one-time page address, sandboxed to scripts only, with no referrer and no token", async ({ page, open }) => {
   await open(); await waitReady(page);

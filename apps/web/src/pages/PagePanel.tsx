@@ -82,7 +82,7 @@ export function PagePanel({ threadId }: { threadId: string }) {
         </span>
         <span className="pg-sep" />
         <HeadButton icon="code" tip="Code" testid="pages.panel.code" pressed={source} disabled={big || held || failed !== undefined} onClick={() => setCode(!code)} />
-        <HeadButton cls="pg-wide" icon="external" tip="Open in window" testid="pages.panel.open-window" disabled={big || held} onClick={() => openPageWindow(shown.code, shown.title, { origin, token })} />
+        <HeadButton cls="pg-wide" icon="external" tip="Open in window" testid="pages.panel.open-window" disabled={big || held || sandboxOff === undefined} onClick={() => openPageWindow(shown.code, shown.title, { origin, token })} />
         <HeadButton icon="download" tip="Save file" testid="pages.panel.save" onClick={() => savePage(shown.code, shown.title)} />
         <HeadButton icon="x" tip="Close" testid="pages.panel.close" onClick={() => closePanel(threadId)} />
       </div>

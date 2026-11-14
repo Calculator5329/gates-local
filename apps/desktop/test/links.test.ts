@@ -34,7 +34,7 @@ function fakeContents() {
   return { contents, state, navigate, frameNavigate, created, open: (url: string) => state.windowOpen!({ url }) };
 }
 
-function rig(opts: { openFails?: boolean } = {}) {
+function rig(opts: { openFails?: boolean; port?: number | null } = {}) {
   const opened: string[] = [];
   const logged: string[] = [];
   const deps: LinkDeps = {
@@ -44,6 +44,7 @@ function rig(opts: { openFails?: boolean } = {}) {
       return opts.openFails ? Promise.reject(new Error(`xdg-open failed for ${url}`)) : Promise.resolve();
     },
     log: (line) => logged.push(line),
+    pagePort: () => (opts.port === null ? undefined : opts.port ?? 5186),
   };
   const w = fakeContents();
   guardNavigation(w.contents, deps);
@@ -59,6 +60,16 @@ describe("pages a reply wrote", () => {
     const r = rig();
     expect(r.frameNavigate({ url: PAGE, isMainFrame: false, initiator: TOP })).toBe(false);
     expect(isPageFrame(PAGE)).toBe(true);
+  });
+
+  it("only the server's own port: a page address on another port is refused, and every one while no server is ready", () => {
+    const OTHER = "http://127.0.0.1:8188/pages/0123456789abcdef0123456789abcdef";
+    expect(rig().frameNavigate({ url: OTHER, isMainFrame: false, initiator: TOP })).toBe(true);
+    expect(rig().frameNavigate({ url: OTHER, isMainFrame: false, initiator: null })).toBe(true);
+    expect(rig({ port: 8188 }).frameNavigate({ url: OTHER, isMainFrame: false, initiator: TOP })).toBe(false);
+    expect(rig({ port: null }).frameNavigate({ url: PAGE, isMainFrame: false, initiator: TOP })).toBe(true);
+    expect(isPageFrame(OTHER, 5186)).toBe(false);
+    expect(isPageFrame(PAGE, 5186)).toBe(true);
   });
 
   it("a page cannot move its own frame, to the web or to another page", () => {

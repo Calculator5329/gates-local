@@ -9,6 +9,7 @@ import { PAGE_MAX, pageAddress, pageFileName } from "./page-doc.ts";
 import { closePanel, follow, showVersion, shownOf, versionsOf } from "./pages.ts";
 import { PagePanel } from "./PagePanel.tsx";
 import { sandboxOff } from "./sandbox.ts";
+import { pinFramePolicy, pinnedFramePolicy } from "./frame-policy.ts";
 
 const page = (title: string, body = "<p>x</p>") => `<!doctype html>\n<html><head><title>${title}</title></head><body>${body}</body></html>`;
 const block = (code: string) => `\`\`\`html\n${code}\n\`\`\``;
@@ -192,6 +193,28 @@ describe("the frame's address", () => {
     await Promise.resolve();
     push?.({ status: "ready", sandboxOff: true });
     expect(await asked).toBe(true);
+  });
+
+  it("a bridge that cannot answer counts as sandbox off: a page waits for Run, and Measure is not left waiting", async () => {
+    vi.resetModules();
+    vi.stubGlobal("window", { gatesLocal: { getState: () => Promise.reject(new Error("no reply")), onState: () => () => undefined } });
+    const fresh = await import("./sandbox.ts");
+    expect(await Promise.race([fresh.sandboxOff(), new Promise((r) => setTimeout(() => r("never settled"), 50))])).toBe(true);
+  });
+
+  it("in a browser tab the app's frame policy is narrowed to the one server it talks to, once", () => {
+    expect(pinnedFramePolicy("http://127.0.0.1:5286")).toBe("frame-src http://127.0.0.1:5286/pages/");
+    expect(pinnedFramePolicy("https://hub.example.ts.net:8456")).toBe("frame-src https://hub.example.ts.net:8456/pages/");
+    // nothing that is not a bare origin is ever written into a policy
+    for (const odd of ["", "http://127.0.0.1:5286/x", "http://a b", "http://x; script-src *", "javascript:alert(1)"]) expect(pinnedFramePolicy(odd), odd).toBeUndefined();
+    const added: { httpEquiv: string; content: string }[] = [];
+    const doc = { createElement: () => ({ httpEquiv: "", content: "" }), head: { append: (m: { httpEquiv: string; content: string }) => added.push(m) } };
+    // a document that cannot take the tag: the connection that called this goes on, and the next one tries again
+    expect(() => pinFramePolicy("http://127.0.0.1:5286", {} as unknown as Document)).not.toThrow();
+    pinFramePolicy("http://127.0.0.1:5286", doc as unknown as Document);
+    pinFramePolicy("http://127.0.0.1:5286", doc as unknown as Document);
+    pinFramePolicy("http://127.0.0.1:9999", doc as unknown as Document);
+    expect(added).toEqual([{ httpEquiv: "Content-Security-Policy", content: "frame-src http://127.0.0.1:5286/pages/" }]);
   });
 
   it("a save is named after the page", () => {

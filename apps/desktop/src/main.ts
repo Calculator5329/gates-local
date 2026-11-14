@@ -477,6 +477,7 @@ function run(start: StartApp = {}): void {
       isClientUrl,
       openExternal: (url) => shell.openExternal(url),
       log: (line) => console.error(`[desktop] ${line}`),
+      pagePort: () => (supervisor.state.status === "ready" ? supervisor.state.port : undefined),
     });
     contents.on("did-fail-load", (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
       // -3 is ERR_ABORTED: a newer navigation replaced this one.

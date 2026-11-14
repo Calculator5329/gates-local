@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-14: A page's frame may load one address
+
+- In a browser tab, the app's frame policy is narrowed to the server it
+  talks to as soon as that address is known. A page that moved its own
+  frame could before send one request to another port on the same
+  computer.
+- The desktop app's frame guard accepts a page address only on its own
+  server's port, and none while no server is ready.
+- Open in window waits until the desktop app has said whether Chromium's
+  sandbox is on.
+- A desktop bridge that cannot answer counts as sandbox off, so a page
+  waits for Run and nothing waits for ever.
+- The phone address writes its own frame policy whatever a build did to
+  the client's tag.
+
 ## 2026-11-14: A reply appears word by word again on a model with no tool calling
 
 - With tools on and nothing in the Library, a model that has no tool
