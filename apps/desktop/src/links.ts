@@ -93,8 +93,9 @@ export function guardNavigation(contents: GuardedContents, deps: LinkDeps): void
   contents.on("will-frame-navigate", (details) => {
     // the window's own document is will-navigate's
     if (details.isMainFrame) return;
-    // A frame in the window (Measure's page checks) keeps the page it was given: it loads no address.
-    if (details.url === "about:srcdoc" || details.url === "about:blank") return;
+    // A blank frame stays blank. Pages and Measure's page checks load as data: pages (below); no
+    // frame is a srcdoc one any more, so about:srcdoc is refused like any other address.
+    if (details.url === "about:blank") return;
     const fromWindow = details.initiator === undefined || details.initiator === null || details.initiator.parent === null;
     if (isPageFrame(details.url) && fromWindow) return;
     details.preventDefault();

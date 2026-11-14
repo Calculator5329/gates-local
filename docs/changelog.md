@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-14: Pages on a phone, and Measure's pages locked the same way
+
+- On a phone or a narrow window the page panel covers the chat, so a
+  chat's first page now arrives as a chip and opens when tapped. A wide
+  window still opens it by itself, and a window made narrow with the
+  panel open keeps it open.
+- In a narrow window the panel's header drops "open in its own window",
+  so the page's name has more room. The keyboard stays in the panel: the
+  chat under it can no longer be reached with Tab.
+- While a page is written its chip shows the page's name (once the reply
+  has given it) and the working dot where the version goes, instead of a
+  second "Writing".
+- A page too big to run (past 2 MB) shows its code, with a line saying
+  so and its size, instead of a blank panel.
+- Measure's page checks run in the same locked frame as a chat's pages.
+  In the browser, a page a model wrote for a check could read the
+  server's token from the window's address; it no longer can.
+
 ## 2026-11-14: The Linux app opens on a stock Ubuntu 24.04
 
 - From the fresh-install test on Linux. Opening the AppImage on a fresh

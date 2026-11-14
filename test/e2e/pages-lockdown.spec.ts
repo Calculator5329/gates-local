@@ -3,8 +3,9 @@
 // way out and writes what happened into itself; the tests read that, and check
 // the app's side: the frame's attributes, no message listener, the app's own
 // frame policy, and the page's own window.
+import { appendFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
-import { LOAN_PROMPTS, NAVIGATE_PROMPT, PROBE_PROMPT } from "../fake-ollama/page-replies.ts";
+import { BIG_PROMPT, LOAN_PROMPTS, NAVIGATE_PROMPT, PROBE_PROMPT } from "../fake-ollama/page-replies.ts";
 import { TOKEN, WEB_ORIGIN } from "./env.ts";
 import { expect, test, waitReady } from "./fixtures.ts";
 import { INSTALLED, configure, start } from "./threads-support.ts";
@@ -16,11 +17,11 @@ test.use({ installed: INSTALLED, allowedErrors: [REFUSALS] });
 
 const frameEl = (page: Page) => page.getByTestId("pages.frame");
 
-async function pageOf(page: Page, prompt: string): Promise<void> {
+async function pageOf(page: Page, prompt: string, timeout = 20_000, frame = true): Promise<void> {
   await configure();
   await start(page, prompt);
-  await expect(page.locator(".turn.a.done")).toHaveCount(1, { timeout: 20_000 });
-  await expect(frameEl(page)).toBeVisible();
+  await expect(page.locator(".turn.a.done")).toHaveCount(1, { timeout });
+  if (frame) await expect(frameEl(page)).toBeVisible();
 }
 
 test("the frame is a data: page sandboxed to scripts only, and sends no referrer", async ({ page, open }) => {
@@ -61,6 +62,40 @@ test("a page learns nothing of the app and reaches nothing outside its frame", a
   // WebRTC and popups
   expect.soft(r["rtc"]).toBe("undefined,undefined,undefined");
   expect.soft(r["popup"]).toBe("null");
+  // what the page is told of the windows around it, recorded with the results
+  await appendFile(test.info().outputPath("notes.txt"), `probe: ${JSON.stringify(r)}\n`);
+});
+
+test("a page too big for a frame's address shows its code and says so", async ({ page, open }) => {
+  test.info().annotations.push({ type: "budget", description: "a 2 MiB reply goes through the server and the socket, and a blank frame is waited out once" });
+  await open(); await waitReady(page);
+  // a frame loads a data: address up to 2 MiB and is blank past it (PAGE_URL_MAX in page-doc.ts)
+  const loads = await page.evaluate(async (sizes) => {
+    const out: string[] = [];
+    for (const mb of sizes) {
+      const head = "data:text/html,<script>parent.postMessage('up','*')</script><p>";
+      const url = head + "a".repeat(Math.round(mb * 1024 * 1024) - head.length);
+      const f = document.createElement("iframe");
+      const up = new Promise<string>((done) => {
+        const on = (e: MessageEvent) => { if (e.source === f.contentWindow) { removeEventListener("message", on); done("loads"); } };
+        addEventListener("message", on);
+        setTimeout(() => { removeEventListener("message", on); done("blank"); }, 3000);
+      });
+      f.src = url;
+      document.body.append(f);
+      out.push(`${mb} MiB ${await up}`);
+      f.remove();
+    }
+    return out;
+  }, [1.99, 2.01]);
+  expect(loads).toEqual(["1.99 MiB loads", "2.01 MiB blank"]);
+
+  // the big page cannot run (it ran blank before): the panel says so with its size, and shows the code
+  await pageOf(page, BIG_PROMPT, 60_000, false);
+  await expect(page.getByTestId("pages.panel")).toBeVisible();
+  await expect(page.getByTestId("pages.too-big")).toHaveText(/^Too big to run here · 2\.\d MB$/);
+  await expect(page.getByTestId("pages.panel.source")).toContainText("<title>Big page</title>");
+  await expect(page.getByTestId("pages.frame")).toHaveCount(0);
 });
 
 test("the app does not listen for a page's messages", async ({ page, open }) => {

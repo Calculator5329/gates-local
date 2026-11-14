@@ -101,6 +101,8 @@ export interface FakeOptions {
    * real runtime did for a model whose CPU-side weights are mapped from disk.
    */
   vramCapBytes: number;
+  /** measure: when nonzero, the counter check's page shows the address it was loaded at instead of counting (measure-reply.ts). */
+  measureProbe: number;
 }
 
 const LOAD_STEPS = 6;
@@ -126,6 +128,7 @@ const DEFAULTS: FakeOptions = {
   parallelLimit: 1,
   capacityBytes: 12 * 1024 ** 3,
   vramCapBytes: 0,
+  measureProbe: 0,
 };
 
 /** The slow-drip reply: one of each block kind the reply renderer draws. */
@@ -455,7 +458,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
         const all = Array.isArray(messages) ? messages : [];
         const system = all.filter(x => field(x, "role") === "system").map(x => String(field(x, "content"))).join("\n");
         const named = Array.isArray(tools) ? tools.map(t => str(field(t, "function"), "name")).filter((n): n is string => n !== undefined) : [...system.matchAll(/"name":\s*"(\w+)"/g)].map(x => x[1]!);
-        const play = measureReply(messages, named) ?? { content: "Ready." };
+        const play = measureReply(messages, named, options.measureProbe > 0) ?? { content: "Ready." };
         const message = "call" in play
           ? (Array.isArray(tools) ? { role: "assistant", content: "", tool_calls: [{ function: play.call }] } : { role: "assistant", content: `<tool_call>${JSON.stringify(play.call)}</tool_call>` })
           : { role: "assistant", content: play.content };

@@ -5,7 +5,8 @@
 .pg-chip .pg-v{font-size:12.5px;font-weight:400;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
 .pg-chip.on{background:var(--selected);box-shadow:none}
 .pg-chip.on .ic{color:var(--foreground)}
-.pg-chip.writing{font-weight:400;color:var(--muted-foreground)}
+/* a page still being written: its name and the app's one working mark where the version goes */
+.pg-chip .run-dot{width:14px;margin-right:0}
 @media (hover:hover){button.pg-chip:not(.on):hover{background:var(--hover)}}
 
 .pg-panel{width:clamp(400px,42vw,760px);flex:none;display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--border);background:var(--background)}
@@ -17,13 +18,21 @@
 .pg-sep{width:1px;height:18px;background:var(--border-strong);margin:0 6px;flex:none}
 .pg-head .ibtn[aria-pressed="true"]{background:var(--selected);color:var(--foreground)}
 .pg-frame{flex:1;min-height:0;width:100%;border:0;display:block;background:#0f0f0f}
+.pg-big{flex:none;padding:10px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
 .pg-code{flex:1;min-height:0;margin:0;padding:14px 16px;overflow:auto;background:var(--code-bg);font-size:12.5px;line-height:1.55;white-space:pre;tab-size:2}
 
-/* narrow window and phone: the panel covers the chat; close gives it back */
+/* narrow window and phone (cover.ts COVER): the panel covers the chat; close gives it back.
+   The panel is the window already, so its own-window button gives the title its room */
 @media (max-width:1099px){
 .pg-panel{position:fixed;inset:0;z-index:44;width:auto;border-left:0;padding-top:env(safe-area-inset-top)}
+.pg-head .pg-wide{display:none}
 }
 @media (max-width:1023px){
 .pg-head{padding-left:12px}
 .pg-head>.ibtn{width:44px;height:44px}
+}
+/* a phone: the header gives the page's name the room of its own icon and divider */
+@media (max-width:480px){
+.pg-head>.ic,.pg-sep{display:none}
+.pg-step{margin-right:0}
 }

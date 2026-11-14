@@ -27,12 +27,18 @@ export function PageChip({ code }: { code: string }) {
   );
 }
 
-/** A page still arriving: no code and no counter; the panel keeps the version before it. */
-export function WritingChip() {
+/**
+ * A page still arriving: its name once the stream has given its whole
+ * `<title>` (else "Page") and the app's working mark where the version will
+ * be; no code, no word (the running line says "Writing") and no counter. The
+ * panel keeps the version before it.
+ */
+export function WritingChip({ code }: { code: string }) {
   return (
-    <div className="pg-chip writing" data-testid="pages.writing">
+    <div className="pg-chip writing" data-testid="pages.writing" aria-busy="true">
       <Icon id="page" />
-      Writing page…
+      <span className="pg-t">{pageTitle(code)}</span>
+      <span className="run-dot" aria-hidden="true" />
     </div>
   );
 }

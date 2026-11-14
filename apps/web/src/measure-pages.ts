@@ -2,19 +2,18 @@
 // is loaded with its scripts on, used the way the check says (click, type, read), and what it
 // showed goes back to the server, which grades it (apps/server/src/measure/score.ts).
 //
-// The page runs in an invisible frame, sandboxed with scripts only: no same origin (it can't
-// reach this app, its storage or its cookies), no forms, popups, dialogs or top navigation. A
-// content policy put first in the page refuses every network load. The frame is laid out but
+// The page runs in an invisible frame built the way a chat's pages are (pages/page-doc.ts): a
+// data: address, so the page has no origin and never sees this window's address (which in the
+// browser carries the server's token), sandboxed with scripts only, no referrer, a content policy
+// put first in the page that refuses every network load, and no WebRTC. The frame is laid out but
 // never seen or clicked, and takes no focus from the app. A page that does not finish in time,
-// or leaves for another address, fails.
+// leaves for another address, or is too big for a frame's address, fails.
 import type { PageAction, PageSeen } from "@gates-local/contracts";
+import { PAGE_URL_MAX, lockFrame, pageMb, pageUrl } from "./pages/page-doc.ts";
 
 /** How long one page may take from load to its last action. */
 export const PAGE_MS = 5000;
 const STEP_MS = 40;
-
-const POLICY = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:";
-const HEAD = `<meta http-equiv="Content-Security-Policy" content="${POLICY}"><meta http-equiv="x-dns-prefetch-control" content="off">`;
 
 /** Runs in the frame after the page's own scripts: does each action, then posts what it saw. */
 function harness(token: string, script: readonly PageAction[], stepMs: number) {
@@ -56,20 +55,22 @@ function harness(token: string, script: readonly PageAction[], stepMs: number) {
   });
 }
 
-/** The page as the frame loads it: the policy first (after a doctype, so the page keeps its mode), the harness last. */
+/** The page with the harness last; the frame builder puts its policy first. */
 export function framed(page: string, token: string, script: readonly PageAction[], stepMs = STEP_MS): string {
-  const doctype = /^\s*<!doctype[^>]*>/i.exec(page)?.[0] ?? "";
-  const tail = `<script>(${harness.toString()})(${JSON.stringify(token)}, ${JSON.stringify(script)}, ${stepMs});</script>`;
-  return `${doctype}${HEAD}${page.slice(doctype.length)}${tail}`;
+  return `${page}<script>(${harness.toString()})(${JSON.stringify(token)}, ${JSON.stringify(script)}, ${stepMs});</script>`;
 }
 
 /** One page, used in a sandboxed frame; resolves with what it showed, or why it could not be used. */
 export function runPage(id: string, page: string, script: readonly PageAction[], timeoutMs = PAGE_MS): Promise<PageSeen> {
   return new Promise((resolve) => {
     const token = crypto.randomUUID();
+    const doc = framed(page, token, script);
+    if (pageUrl(doc).length > PAGE_URL_MAX) {
+      resolve({ id, seen: [], error: `The page is too big to run here (${pageMb(page)} MB).` });
+      return;
+    }
     const frame = document.createElement("iframe");
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
-    frame.setAttribute("sandbox", "allow-scripts");
     frame.setAttribute("aria-hidden", "true");
     frame.setAttribute("data-measure-page", id);
     frame.tabIndex = -1;
@@ -97,7 +98,7 @@ export function runPage(id: string, page: string, script: readonly PageAction[],
     // The page may not take the app's focus.
     frame.addEventListener("focus", () => before?.focus({ preventScroll: true }));
     timer = window.setTimeout(() => finish({ id, seen: [], error: `The page did not finish within ${Math.round(timeoutMs / 1000)} seconds.` }), timeoutMs);
-    frame.srcdoc = framed(page, token, script);
+    lockFrame(frame, doc, "Measure page");
     document.body.append(frame);
   });
 }

@@ -5,7 +5,7 @@
 // The fake's "measure" scenario passes every check but two (test/fake-ollama/measure-reply.ts):
 // Instructions 3 of 4 and Pages 2 of 3, so the score is 90.
 import { expect, openModels, stack, test, waitReady } from "./fixtures.ts";
-import { FAKE_URL } from "./env.ts";
+import { FAKE_URL, TOKEN } from "./env.ts";
 
 const chatRequests = async (model: string) => {
   const state = (await (await fetch(`${FAKE_URL}/__fake/state`)).json()) as { requests: { path: string; body: { model?: string } }[] };
@@ -89,4 +89,23 @@ test("Measure runs only on a click, grades pages in this window, and the score o
   await expect(detail).toBeVisible();
   await expect(detail.getByTestId("models.measure.part-pages")).toContainText("2/3");
   await page.screenshot({ path: info.outputPath("measure-phone.png"), animations: "disabled" });
+});
+
+// A page a model wrote runs in this window; in the browser build the window's address carries the
+// server's token (?server=…token=…). The fake's counter page shows the address it resolves
+// against and its referrer where the check reads, so what the window sends back is what it learnt.
+test("a Measure page learns nothing of the window's address", async ({ page, open }) => {
+  await stack.scenario("measure", { installed: ["qwen3.5:9b", "gemma4:12b"], measureProbe: 1 });
+  const sent: string[] = [];
+  page.on("websocket", (ws) => ws.on("framesent", (f) => { if (typeof f.payload === "string" && f.payload.includes("models.measurePages")) sent.push(f.payload); }));
+  await open();
+  await waitReady(page);
+  expect(page.url()).toContain(`token%3D${TOKEN}`);
+  await openModels(page);
+  await page.getByTestId("settings.models.measure-qwen3-5-9b").click();
+  await expect.poll(() => sent.length, { timeout: 60_000 }).toBeGreaterThan(0);
+  const told = sent.join("\n");
+  // the page did read where it runs: its own data: address, not the window's
+  expect.soft(told).toContain("at data:text/html");
+  expect(told).not.toContain(TOKEN);
 });

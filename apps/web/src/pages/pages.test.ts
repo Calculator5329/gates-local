@@ -27,11 +27,16 @@ describe("a page in a reply", () => {
     expect(out).not.toContain("<pre");
   });
 
-  it("while it is written the chip says so, with no code and no counter", () => {
-    const out = html("Here it is.\n\n```html\n<!doctype html>\n<html><head><title>Loan", true);
-    expect(out).toContain("Writing page…");
-    expect(out).not.toContain("Loan");
-    expect(out).not.toMatch(/\d/);
+  it("while it is written the chip names it once its title is whole, with the working mark and no code, word or counter", () => {
+    const part = "Here it is.\n\n```html\n<!doctype html>\n<html><head><title>Loan";
+    const early = html(part, true);
+    expect(early).toContain('<span class="pg-t">Page</span><span class="run-dot"');
+    expect(early).not.toContain("Loan");
+    expect(early).not.toContain("Writing");
+    expect(early).not.toMatch(/\d/);
+    const named = html(`${part} calculator</title></head><body><p>12`, true);
+    expect(named).toContain('<span class="pg-t">Loan calculator</span><span class="run-dot"');
+    expect(named).not.toMatch(/\d/);
   });
 
   it("a reply that ended before the block closed shows the code as before", () => {
@@ -88,6 +93,17 @@ describe("the panel's state", () => {
     expect(panel("two")).toBe("");
     showVersion("two", 1, vs(2));
     expect(step(panel("two"))).toBe("1 of 2");
+  });
+
+  it("where the panel would cover the chat, the first page waits for its chip", () => {
+    setState({ messages: { four: [msg("a", block(page("P", "<p>0</p>")))] } });
+    follow("four", vs(1), false);
+    expect(panel("four")).toBe("");
+    // a wide window later does not open it by itself either: the chat has met its page
+    follow("four", vs(1));
+    expect(panel("four")).toBe("");
+    showVersion("four", 1, vs(1));
+    expect(step(panel("four"))).toBe("1 of 1");
   });
 
   it("a version that is gone falls back to the newest there is", () => {

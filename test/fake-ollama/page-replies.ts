@@ -6,6 +6,7 @@
 export const LOAN_PROMPTS = ["make me a loan calculator", "make the rate a slider", "show the total interest too"] as const;
 export const PROBE_PROMPT = "make the escape probe page";
 export const NAVIGATE_PROMPT = "make the leaving page";
+export const BIG_PROMPT = "make the big page";
 /** The address the probe and the leaving page try to reach: the app's own web server. */
 export const PROBE_TARGET = "http://127.0.0.1:5287/";
 
@@ -117,6 +118,8 @@ result.rtc = typeof RTCPeerConnection + "," + typeof webkitRTCPeerConnection + "
 // recorded, not refused: a blank frame of its own is a fresh window with the constructors back
 result.nestedRtc = tryIt(() => { const f = document.createElement("iframe"); document.body.append(f); return typeof f.contentWindow.RTCPeerConnection; });
 result.popup = tryIt(() => window.open("${PROBE_TARGET}") === null ? "null" : "opened");
+// the origins of the windows around it, which no referrer policy hides in every browser
+result.ancestors = tryIt(() => location.ancestorOrigins ? [...location.ancestorOrigins].join(",") : "none");
 result.eval = tryIt(() => eval("1 + 1"));
 try { parent.postMessage({ from: "page" }, "*"); result.posted = "sent"; } catch (e) { result.posted = "threw " + e.name; }
 const img = (src) => new Promise((done) => { const i = new Image(); i.onload = () => done("loaded"); i.onerror = () => done("failed"); i.src = src; });
@@ -148,6 +151,12 @@ setTimeout(() => { location.href = "${PROBE_TARGET}"; }, 100);
 </html>`;
 }
 
+/** A page past what a frame's address can hold (2 MiB in Chromium): one long line, so the stream sends it whole. */
+export function bigPage(): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Big page</title></head><body><p id="out">big</p><script>const pad = "${"a".repeat(BIG_PAD)}";</script></body></html>`;
+}
+export const BIG_PAD = 2_200_000;
+
 const fenced = (before: string, code: string, after: string) => `${before}\n\n\`\`\`html\n${code}\n\`\`\`\n\n${after}`;
 
 /** The reply to a page prompt, or undefined for any other prompt. */
@@ -158,6 +167,7 @@ export function pageReply(prompt: string): string | undefined {
     case LOAN_PROMPTS[2]: return fenced("Added the total interest and the total paid under the payment.", loanPage({ slider: true, total: true }), "Everything else is the same.");
     case PROBE_PROMPT: return fenced("Here is the probe.", probePage(), "It reports what it reached.");
     case NAVIGATE_PROMPT: return fenced("Here is a page that leaves.", leavingPage(), "It tries to go elsewhere.");
+    case BIG_PROMPT: return fenced("Here is a big page.", bigPage(), "It is mostly padding.");
     default: return undefined;
   }
 }

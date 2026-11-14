@@ -99,14 +99,16 @@ export function useView(threadId: string | null): View | undefined {
 
 /**
  * Bring a chat's panel up to date with its pages: the first page opens it,
- * and a new version comes on show (the panel stays as the person left it).
+ * unless `opens` is false (a narrow window, where the panel would cover the
+ * chat: the chip opens it), and a new version comes on show (the panel stays
+ * as the person left it).
  */
-export function follow(threadId: string, versions: readonly PageVersion[]): void {
+export function follow(threadId: string, versions: readonly PageVersion[], opens = true): void {
   const newest = versions.at(-1);
   if (newest === undefined) return;
   const was = views[threadId];
   const key = mark(newest.code);
-  if (was === undefined) save(threadId, { open: true, shown: newest.n, newest: key });
+  if (was === undefined) save(threadId, { open: opens, shown: newest.n, newest: key });
   else if (was.newest !== key) save(threadId, { ...was, shown: newest.n, newest: key });
 }
 

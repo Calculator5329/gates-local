@@ -272,11 +272,11 @@ const MarkdownBlock = memo(function MarkdownBlock({ b, partial, allowedLinks }: 
       );
     }
     case "code":
-      // a whole html document is a page (pages/): a chip once it is whole, "Writing page…" while it arrives;
-      // a reply that ended before its block closed shows the code
+      // a whole html document is a page (pages/): a chip once it is whole, its name and the working mark while it
+      // arrives; a reply that ended before its block closed shows the code
       if (b.lang.toLowerCase() === "html") {
         if (b.closed && isPageDoc(b.text)) return <PageChip code={b.text} />;
-        if (!b.closed && partial && mayBePage(b.text)) return <WritingChip />;
+        if (!b.closed && partial && mayBePage(b.text)) return <WritingChip code={b.text} />;
       }
       return <CodeBlock lang={b.lang} code={b.text} />;
     case "quote":

@@ -25,6 +25,7 @@ import { useDraft } from "./drafts.ts";
 import { syncWindowTitle } from "./titlebar.ts";
 import { keepSheetFocus } from "./sheet-focus.ts";
 import { useReadAloud } from "./talk.ts";
+import { useCovering } from "./pages/cover.ts";
 import { PHONE, POP_EL, SheetHead, Tip, TurnSkel, anchorOf, closePop, isPhone, isTouch, menuKeys, place, tabStops, useMedia } from "./ui.tsx";
 
 /** Which setup icons show under the start screen's bar: library search's and image generation's, each only while it is not set up. */
@@ -485,6 +486,8 @@ export function App() {
   // threads.get); the browser tests wait for it
   const hydrated = useStore((s) => s.hydrationSettled);
   const drawer = useStore((s) => s.drawer);
+  // a page's panel lies over the chat in a narrow window: what is under it takes no keys (pages/cover.ts)
+  const pageCover = useCovering();
   const setList = useStore((s) => s.setList);
   // talk mode reads replies here, above both message boxes, so a new chat's first reply is read whole
   useReadAloud();
@@ -546,11 +549,11 @@ export function App() {
       <Sprite />
       {/* under a pop-up (Settings, Models, Usage) the whole window stays mounted and takes no focus, keys or clicks, and is out of the accessibility tree */}
       <div className={`app${drawer ? " drawer" : ""}`} id="app" data-ready={hydrated ? "" : undefined} inert={(popOpen && phone) || dialog || panel !== null}>
-        <div style={{ display: "contents" }} inert={covered}>
+        <div style={{ display: "contents" }} inert={covered || pageCover}>
           <Sidebar />
         </div>
         {drawer ? <div className="scrim" data-testid="sidebar.drawer.scrim" aria-hidden="true" onClick={() => { cancelPendingSettings(); closeDrawer(); }} /> : null}
-        <main className="main" inert={covered || drawer}>
+        <main className="main" inert={covered || drawer || pageCover}>
           {/* Pictures draws its own bar, in its own chunk */}
           {isSet ? <SettingsBar /> : isPics ? null : <Header isNew={isNew} />}
           <div className="work">

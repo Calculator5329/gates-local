@@ -70,16 +70,13 @@ describe("pages a reply wrote", () => {
 
   it("a frame loads nothing but a page, whoever asks", () => {
     const r = rig();
-    for (const url of ["https://example.com/", `${CLIENT}/index.html`, "blob:gates-local://app/1", "data:image/svg+xml,<svg/>"]) {
+    for (const url of ["https://example.com/", `${CLIENT}/index.html`, "blob:gates-local://app/1", "data:image/svg+xml,<svg/>", "about:srcdoc"]) {
       expect(r.frameNavigate({ url, isMainFrame: false, initiator: TOP })).toBe(true);
     }
   });
 
-  it("a frame holding a document the window gave it (Measure's page checks) loads", () => {
-    const r = rig();
-    for (const url of ["about:srcdoc", "about:blank"]) {
-      expect(r.frameNavigate({ url, isMainFrame: false, initiator: TOP })).toBe(false);
-    }
+  it("a blank frame stays blank", () => {
+    expect(rig().frameNavigate({ url: "about:blank", isMainFrame: false, initiator: TOP })).toBe(false);
   });
 
   it("the window's own navigation is left to will-navigate", () => {

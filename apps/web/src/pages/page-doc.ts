@@ -3,8 +3,9 @@
 // window's address, and with it the server token), sandboxed to scripts only,
 // with a policy at the top of its document that lets nothing load from or go
 // out to anywhere, and the WebRTC constructors gone before its own code runs.
+// Measure's page checks (measure-pages.ts) run in the same frame.
 
-export const PAGE_POLICY = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:";
+export const PAGE_POLICY = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:";
 /** The frame's whole permission: its scripts run, and nothing else (no same origin, popups, forms, downloads or top navigation). */
 export const PAGE_SANDBOX = "allow-scripts";
 
@@ -12,6 +13,7 @@ const RTC = ["RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel", "
 const HEAD =
   `<meta http-equiv="Content-Security-Policy" content="${PAGE_POLICY}">` +
   `<meta name="referrer" content="no-referrer">` +
+  `<meta http-equiv="x-dns-prefetch-control" content="off">` +
   `<script>for(const k of ${JSON.stringify(RTC)}){try{Object.defineProperty(window,k,{value:undefined,writable:false,configurable:false})}catch{}}</script>`;
 
 /** The page's code with the policy first in its document, after its doctype so it keeps standards mode. */
@@ -23,7 +25,13 @@ export function framedDoc(code: string): string {
 /** The address the frame loads: the whole document in the URL, so it has no origin and no address of the app's. */
 export const pageUrl = (code: string): string => `data:text/html;charset=utf-8,${encodeURIComponent(framedDoc(code))}`;
 
-/** Attributes every page frame carries, in the panel and in its own window. */
+/** The longest address a frame loads (Chromium's URL limit, 2 MiB); a page whose address is longer cannot run. */
+export const PAGE_URL_MAX = 2 * 1024 * 1024;
+
+/** The page's size as a person reads it: megabytes with one decimal. */
+export const pageMb = (code: string): string => (new TextEncoder().encode(code).length / (1024 * 1024)).toFixed(1);
+
+/** Attributes every page frame carries, in the panel, in its own window and in Measure's checks. */
 export function lockFrame(frame: HTMLIFrameElement, code: string, title: string): void {
   frame.setAttribute("sandbox", PAGE_SANDBOX);
   frame.referrerPolicy = "no-referrer";
