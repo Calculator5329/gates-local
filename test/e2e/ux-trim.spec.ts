@@ -81,7 +81,8 @@ test.describe("the reply-running line", () => {
   test("is gone; the composer does not move as a reply starts and ends, and Stop stays one click away while editing", async ({ page, open, seededThread }) => {
     await open(`#thread=${seededThread ?? ""}`); await waitReady(page);
     const top = () => page.locator(".composer").evaluate(el => el.getBoundingClientRect().top);
-    const before = await top();
+    const bottom = () => page.locator(".composer").evaluate(el => el.getBoundingClientRect().bottom);
+    const before = await top(), under = await bottom();
     await stack.scenario("slow-drip", { holdAfterTokens: 46 });
     await page.locator("#ta").fill("Keep this reply running");
     const primary = page.locator(".composer button.send");
@@ -89,6 +90,7 @@ test.describe("the reply-running line", () => {
     await expect(primary).toHaveAccessibleName("Stop");
     await expect(page.locator(".turn.a").last().locator(".md ul li")).toHaveCount(3);
     expect(await top(), "a reply starting leaves the composer where it was").toBe(before);
+    const inBox = await page.locator("#ta").evaluate(el => el.getBoundingClientRect().bottom - el.closest(".composer")!.getBoundingClientRect().bottom);
     await expect(page.getByText("Reply running", { exact: true })).toHaveCount(0);
     await expect(page.locator("[data-running-status]")).toHaveCount(0);
     await expect(page.locator(".composer .stop-sq"), "the main button is Stop").toHaveCount(0);
@@ -107,7 +109,9 @@ test.describe("the reply-running line", () => {
     await expect(primary).toHaveAccessibleName("Update queued message");
     await expect(page.locator("#ta")).toHaveValue("Keep this queued draft");
     await expect(stop).toHaveCount(0);
-    expect(await top(), "the reply ending leaves the composer where it was").toBe(before);
+    // the queued message is still on its shelf, which the composer grew upward to hold (chat row 36): its foot is what holds still
+    expect(await bottom(), "the reply ending leaves the composer's foot where it was").toBe(under);
+    expect(await page.locator("#ta").evaluate(el => el.getBoundingClientRect().bottom - el.closest(".composer")!.getBoundingClientRect().bottom), "and the box in it").toBe(inBox);
   });
 });
 
@@ -148,12 +152,12 @@ test.describe("a reply the person stopped", () => {
     expect(stopped.top, "Stop leaves the last block where it was").toBeCloseTo(before.top, 1);
     expect(saved, "saving leaves it where it was").toEqual(stopped);
 
-    // after a reload this client no longer knows who stopped it or when: the square alone, the same text in the same place
+    // after a reload the server's record of how the reply ended still says when: the same square and seconds, the same text in the same place
     await page.reload(); await waitReady(page);
     const kept = page.locator(".turn.a.interrupted");
     await expect(kept).toHaveCount(1);
     await expect(kept.getByRole("img", { name: UNSEEN, exact: true })).toBeVisible();
-    await expect(kept.locator(".stop-mark .s")).toHaveCount(0);
+    await expect(kept.locator(".stop-mark .s")).toHaveText(/^\d+ s$/);
     await expect(page.locator(".stop-note")).toHaveCount(0);
     await expect(page.getByText(OLD_WORDS)).toHaveCount(0);
     expect(await box(), "a reload leaves it where it was").toEqual(saved);

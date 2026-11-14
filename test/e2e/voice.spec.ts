@@ -135,6 +135,8 @@ test("talk mode: hold to talk sends, the reply is read aloud, the speaker turns 
   await expect.poll(async () => (await speech(page)).said[0], { timeout: 15_000 }).toBe("You asked: spoken words.");
   await expect(page.locator(".turn.a")).toHaveCount(1);
   await expect(page.getByTestId("chat.composer.send")).not.toHaveAttribute("aria-label", "Stop", { timeout: 30_000 });
+  // the words come out at a steady pace and can still be arriving on screen when Stop goes: wait for the whole reply
+  await expect(page.locator(".turn.a").first()).toHaveClass(/\bdone\b/);
   const read = (await speech(page)).said;
   expect(read.length, "the rest of the reply is read after its first sentence").toBeGreaterThan(1);
   const reply = (await page.locator(".turn.a .md").first().innerText()).replace(/\s+/g, " ").trim();

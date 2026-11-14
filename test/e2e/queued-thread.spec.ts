@@ -27,19 +27,27 @@ async function libraryOn(page: Page, info: TestInfo): Promise<void> {
 const B = "Use a tool for beta";
 const MODEL = "gemma4:12b";
 const rows = (page: Page) => page.locator(".sb-row").allInnerTexts();
+const loaded = async () => (await state()).loaded.map((m) => m.name);
 
 // Guards a shipped bug fix (chat row 23): a send that waited past 30 s behind another reply was dropped.
 test("a new thread's send that waits over 30 s behind another reply stays sent, sits under it, and shows its tool call live", async ({ page, open }, info) => {
   test.setTimeout(150_000);
   await open(); await waitReady(page);
   await libraryOn(page, info);
-  // picking warms the model; configure then empties the fake GPU, so A's send is a cold load,
-  // which holds the load gate until A's first token, 45 s away. B takes the same model, one
+  // A's send has to be a cold load: that is what holds the load gate until A's first token,
+  // 45 s away. Picking warms the model, and so does the first key typed (chat row 39), at most
+  // once a minute for a model. So A's words go in first, and the fake GPU is emptied once that
+  // load has landed: nothing loads the model again before the send. B takes the same model, one
   // the fake offers native tool calls.
+  const scenario = { prompts: { alpha: { firstTokenDelayMs: 45_000 }, [B]: { toolCalls: 1, quietToolRounds: 1, holdAfterTokens: 5 } } };
   await pick(page, MODEL);
-  await expect.poll(async () => (await state()).loaded.map((m) => m.name)).toContain(MODEL);
-  await configure({ prompts: { alpha: { firstTokenDelayMs: 45_000 }, [B]: { toolCalls: 1, quietToolRounds: 1, holdAfterTokens: 5 } } });
-  await sendMessage(page, "alpha");
+  await expect.poll(loaded).toContain(MODEL);
+  await configure(scenario);
+  await page.locator("#ta").fill("alpha");
+  await expect.poll(loaded, "the first key typed loads the model").toContain(MODEL);
+  await configure(scenario);
+  expect(await loaded(), "the send finds the fake GPU empty").not.toContain(MODEL);
+  await page.locator("#ta").press("Enter");
   await expect.poll(async () => (await state()).turns.some((t) => t.prompt === "alpha")).toBe(true);
   await page.getByTestId("sidebar.top.new-thread").click();
   await sendMessage(page, B);
