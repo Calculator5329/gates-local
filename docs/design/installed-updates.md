@@ -239,7 +239,7 @@ A release that breaks the rule on one platform publishes a list without that pla
 | Retry | With automatic checks on, a network error or a hash or size mismatch is retried at the next hourly check. With them off, the person uses "Check for updates". |
 | Chats | The download streams in the server and holds no admission. Admission closes only at the click. |
 | Without asking | yes, when the automatic switch is on (owner decision D1) |
-| Switch off | cancels the retry timer and any download in flight, and deletes prepared folders that neither an unfinished transaction nor an undismissed `rollback-failed` result names. "Check for updates" then offers "Download". |
+| Switch off | cancels the retry timer and any download in flight, and deletes that download's folder and any other prepared folder that is not the finished, checked download of the current target and that neither an unfinished transaction nor an undismissed `rollback-failed` result names (decision 29: a finished download is kept, a half-finished one starts over). With nothing ready, "Check for updates" then offers "Download". |
 | Cleanup | When a newer list verifies, delete other versions' folders, except one named by an unfinished transaction or by an undismissed `rollback-failed` result, and, on Windows, the kept go-back installer |
 
 ## 7. Admission and the handoff deadline (roadmap `a34578dc`)

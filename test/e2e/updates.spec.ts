@@ -83,13 +83,14 @@ test("an update turns the footer's update icon to Update without moving or resiz
   update.show();
   const button = page.getByRole("button", { name: "Update to def5678", exact: true });
   await expect(button).toBeVisible();
-  await expect(button).toHaveAttribute("data-tip", /Faster chat/);
+  await expect(button).toHaveAttribute("data-tip", "Update to def5678");
   const after = await Promise.all(selectors.map((s) => page.locator(s).boundingBox()));
   expect(before.every((box) => box !== null)).toBe(true);
   expect(after).toEqual(before);
+  // Nothing running: one click restarts, no ask (decision 23).
   await button.click();
-  await page.getByRole("group", { name: "Confirm update" }).getByTestId("sidebar.update.go").click();
   await expect(page.locator("html")).toHaveAttribute("data-update-started", "yes");
+  await expect(page.getByRole("group", { name: "Confirm update" })).toHaveCount(0);
   await expect(page.locator(".sb-foot .upd")).toBeDisabled();
 });
 
@@ -111,7 +112,7 @@ test("a reply running: one ask, in the footer's panel, that names the reply; can
   const button = page.getByRole("button", { name: "Update to def5678", exact: true });
   const ask = page.getByRole("group", { name: "Confirm update" });
   await button.click();
-  await expect(ask.locator("li")).toHaveText(["1 reply stops. Its text is kept.", "Falls back to abc1234 if a step fails."]);
+  await expect(ask.locator("li")).toHaveText(["1 reply stops. Its text is kept."]);
   await expect(ask).toContainText("Update to def5678 and restart?");
   await ask.getByRole("button", { name: "Cancel" }).click();
   await expect(ask).toHaveCount(0);
@@ -125,7 +126,7 @@ test("a reply running: one ask, in the footer's panel, that names the reply; can
 
 const upToDate = (current: string, channel: "main" | "release", checkedAt: number): UpdateCheck => ({ state: "up-to-date", checkedAt, channel, current });
 
-test.describe("Version and the update state in two rows", () => {
+test.describe("Version with the update state, then the automatic switch", () => {
   test.use({ colorScheme: "dark" });
   const CHECKED = Date.UTC(2026, 10, 13, 6, 57);
   interface Copy { readonly name: string; readonly idle: UpdateStatus; readonly said: string; readonly found: UpdateCheck; readonly failed: UpdateCheck & { state: "cannot-check" } }
@@ -145,8 +146,8 @@ test.describe("Version and the update state in two rows", () => {
       failed: { state: "cannot-check", checkedAt: CHECKED, reason: "unreachable", lines: ["Could not reach the update server. Check your connection."] },
     },
   ];
-  // Guards the owner's ruling on the Updates card: Version said once, one row for the state, and the card never changes size.
-  for (const copy of copies) test(`${copy.name}: Version once, then one row for the state; the card keeps its size through checking, up to date, found and failed`, async ({ page, open }) => {
+  // Guards the owner's ruling on the Updates card (decision 25): one row for the version and its state, and the card never changes size.
+  for (const copy of copies) test(`${copy.name}: one row for the version and its state; the card keeps its size through checking, up to date, found and failed`, async ({ page, open }) => {
     let lastCheck: UpdateCheck | null = null;
     let answer: ((next: UpdateCheck) => void) | undefined;
     await page.routeWebSocket(/\/\?token=/, (socket) => {
@@ -211,24 +212,29 @@ test.describe("Version and the update state in two rows", () => {
       same(step, await measure());
       if (step === "up to date") {
         const text = (await measure()).text.join("\n");
-        expect(start.rows.length, `rows above the switches: ${start.text.join(" | ")}`).toBe(2);
+        expect(start.rows.length, `rows above the switches: ${start.text.join(" | ")}`).toBe(1);
         expect(text.split(copy.said).length - 1, `"${copy.said}" said ${text.split(copy.said).length - 1} times: ${text}`).toBe(1);
         expect(text).not.toContain("Asks this copy's git remote");
         if (copy.name === "clone") {
-          // UR-01, row 9: the switch now follows every change, so the server drops the release check; row 2 waits for a check, in the same space.
+          // UR-01, row 9: the switch now follows every change, so the server drops the release check; row 1 waits for a check, in the same space.
+          // The switch is in the clone's fold, which closes again before the card is measured.
+          const more = group.getByTestId("settings.updates.more");
+          await expect(more).toHaveAttribute("aria-expanded", "false");
+          await more.click();
           const every = group.getByTestId("settings.updates.every-change");
-          const label = group.locator(".srow").nth(1).locator(".sl b");
+          const line = group.locator(".srow").first().locator(".src-help");
           await every.click();
           await expect(every).toHaveAttribute("aria-checked", "true");
-          await expect(label).toHaveText("Not checked yet");
+          await expect(line).toHaveText("Not checked yet.");
           await expect(control).toHaveText("Check for updates");
           await expect(control).toBeEnabled();
-          same("every change switched on after a release check", await measure());
           await every.click();
           await expect(every).toHaveAttribute("aria-checked", "false");
           // Dropped, not kept for a flip back: the next check answers.
-          await expect(label).toHaveText("Not checked yet");
-          same("every change switched off again", await measure());
+          await expect(line).toHaveText("Not checked yet.");
+          await more.click();
+          await expect(every).toHaveCount(0);
+          same("every change switched on and off again", await measure());
         }
       }
     }
@@ -263,7 +269,7 @@ test.describe("Version and the update state in two rows", () => {
     await expect(card).toContainText("0.2.1");
     await group.scrollIntoViewIfNeeded();
     const height = () => card.evaluate((box) => box.getBoundingClientRect().height);
-    const control = group.locator(".srow").nth(1).locator("button.btn");
+    const control = group.locator(".srow").first().locator("button.btn");
     const link = group.getByTestId("settings.updates.release-page");
     const start = await height();
     const heights: string[] = [];
@@ -313,15 +319,17 @@ test.describe("Version and the update state in two rows", () => {
     await page.keyboard.press("Control+Comma");
     await expect(page.locator(".set .set-h h1")).toHaveText("General");
     const group = page.locator(".grp").filter({ has: page.locator(".grp-t", { hasText: /^Updates$/ }) });
+    await group.getByTestId("settings.updates.more").click();
     await expect(group.getByTestId("settings.updates.every-change")).toHaveAttribute("aria-checked", "false");
     await group.getByTestId("settings.updates.check").click();
-    await expect(group.locator(".srow").nth(1).locator(".sl b")).toHaveText("Update available: def5678");
+    await expect(group.locator(".srow").first().locator(".src-help")).toHaveText("Update def5678: 2 changes.");
     await expect(group.getByTestId("settings.updates.update")).toBeVisible();
     await group.evaluate((el) => { el.style.outline = "3px solid #e5484d"; el.style.outlineOffset = "-3px"; });
     await group.screenshot({ path: test.info().outputPath("update-row9-no-tags-switch-off.png") });
   });
 
   // Updates row 2 (Windows W-A): the downloaded, checked installer is offered as Restart to update, not a second download.
+  // Before that, a copy that cannot install it says so whole, never cut off (decision 24).
   // The platform is faked: the server's Windows lines are replayed into the web client; the click itself is unit-tested (windows.test.ts).
   test("row 2 a Windows install with the checked installer on disk offers Restart to update in the same row", async ({ page, open }) => {
     await page.addInitScript(() => {
@@ -329,8 +337,8 @@ test.describe("Version and the update state in two rows", () => {
     });
     const PAGE = "https://example.invalid/releases/tag/v0.2.2";
     const ready = { state: "newer", checkedAt: Date.UTC(2026, 10, 13, 7, 0), current: "0.2.1", target: "0.2.2", forThisCopy: true, page: PAGE, download: "ready" } as const;
-    // What 0.2.1 says on Windows today, and what this branch's server says for the same download.
-    const before: UpdateCheck = { ...ready, lines: ["Version 0.2.2 is downloaded and checked. This copy cannot install it by itself yet. To update now, download it from the release page."] };
+    // What a copy that cannot install it says, and what a copy that can says for the same download.
+    const before: UpdateCheck = { ...ready, lines: ["Update 0.2.2 is downloaded and checked. Run this installer to update."] };
     const after: UpdateCheck = { ...ready, restart: true, lines: ["Version 0.2.2 is downloaded and checked.", "If version 0.2.2 does not start, Gates Local will not go back by itself. To go back, download version 0.2.1 from https://example.invalid/releases/tag/v0.2.1."] };
     const idle: UpdateStatus = { version: { kind: "installed", version: "0.2.1" }, result: null, lastCheck: before, activity: [] };
     let route: WebSocketRoute | undefined;
@@ -347,26 +355,25 @@ test.describe("Version and the update state in two rows", () => {
     await page.keyboard.press("Control+Comma");
     await expect(page.locator(".set .set-h h1")).toHaveText("General");
     const group = page.locator(".grp").filter({ has: page.locator(".grp-t", { hasText: /^Updates$/ }) });
-    const row = group.locator(".srow").nth(1);
-    await expect(row.locator(".sl b")).toHaveText("Update available: 0.2.2");
-    await expect(row).toContainText("This copy cannot install it by itself yet.");
+    const row = group.locator(".srow").first();
+    const line = row.locator(".src-help");
+    await expect(line).toHaveText("Update 0.2.2 is downloaded and checked. Run this installer to update.");
+    // Said whole: nothing of the line is cut off.
+    expect(await line.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
     await expect(group.getByRole("button", { name: "Restart to update", exact: true })).toHaveCount(0);
     await group.scrollIntoViewIfNeeded();
-    const box = () => group.evaluate((el) => { const r = el.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; });
-    const start = await box();
     await group.screenshot({ path: test.info().outputPath("update-windows-row2-before.png") });
     route?.send(JSON.stringify({ type: "push", channel: "update.changed", payload: { ...idle, lastCheck: after, approval: "approval-1", canControl: true } }));
     const restart = group.getByRole("button", { name: "Restart to update", exact: true });
     await expect(restart).toBeVisible();
-    await expect(row.locator(".src-help")).toHaveText(/^Checked at /);
+    await expect(line).toHaveText("Update 0.2.2 downloaded and checked.");
     await expect(row).not.toContainText("download it from the release page");
-    await expect(row.locator(".tipped")).toHaveAttribute("aria-description", /To go back, download version 0\.2\.1 from .*Gates Local will close, update and reopen\./);
-    expect(await box(), "the Updates card moved or changed size").toEqual(start);
+    await expect(group.locator(".tipped")).toHaveCount(0);
     await group.screenshot({ path: test.info().outputPath("update-windows-row2-after.png") });
   });
 
-  // Guards the owner's ruling (updates row 10): the release page goes in the tip, so the row keeps its height.
-  test("row 10 at 390px a listener's release page goes in the tip, so the row keeps its height", async ({ page, open }) => {
+  // Guards the owner's ruling (updates row 10): a listener's row keeps its height. The release page is not offered there (decision 19: no tips).
+  test("row 10 at 390px a listener's row keeps its height and offers no control", async ({ page, open }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     const idle: UpdateStatus = { version: { kind: "installed", version: "0.2.1" }, result: null, lastCheck: upToDate("0.2.1", "release", Date.UTC(2026, 10, 13, 6, 57)), activity: [] };
     const newer: UpdateCheck = { state: "newer", checkedAt: Date.UTC(2026, 10, 13, 7, 0), current: "0.2.1", target: "0.2.2", forThisCopy: false, lines: ["Version 0.2.2 is available, but this copy cannot install it by itself. Download it from the release page."], page: "https://example.invalid/releases/latest" };
@@ -387,16 +394,16 @@ test.describe("Version and the update state in two rows", () => {
     const general = page.getByTestId("settings.sections.open-general");
     if (await general.isVisible()) await general.click();
     const group = page.locator(".grp").filter({ has: page.locator(".grp-t", { hasText: /^Updates$/ }) });
-    const row = group.locator(".srow").nth(1);
-    await expect(row.locator(".sl b")).toHaveText("Up to date");
+    const row = group.locator(".srow").first();
+    await expect(row.locator(".src-help")).toHaveText(/^Up to date\./);
     await group.scrollIntoViewIfNeeded();
     await group.evaluate((el) => { el.style.outline = "3px solid #e5484d"; el.style.outlineOffset = "-3px"; });
     const height = () => row.evaluate((el) => el.getBoundingClientRect().height);
     const before = await height();
     route?.send(JSON.stringify({ type: "push", channel: "update.changed", payload: { ...idle, lastCheck: newer, canControl: false } }));
-    await expect(row.locator(".sl b")).toHaveText("Update available: 0.2.2");
+    await expect(row.locator(".src-help")).toHaveText("Update 0.2.2 is not built for this copy.");
     await expect(group.getByTestId("settings.updates.release-page")).toHaveCount(0);
-    await expect(row.locator(".tipped")).toHaveAttribute("aria-description", /Release page: https:\/\/example\.invalid\/releases\/latest/);
+    await expect(group.locator(".tipped")).toHaveCount(0);
     expect(await height(), "the listener's state row changed height at 390px").toBe(before);
     await group.screenshot({ path: test.info().outputPath("update-row10-listener-390.png") });
   });

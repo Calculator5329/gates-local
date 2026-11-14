@@ -1,165 +1,126 @@
 // Settings-only update controls, deferred with the Settings screen.
 //
-// Two rows: Version (the commit or version, said once, and what this copy
-// follows, from the switch), then the state of the last check, labelled with
-// that state, one grey line (when it checked, or what went wrong) and the one
-// control that moves it on at the right. Neither row changes height between
-// states: the grey line never wraps, a failure takes its place, and whatever
-// else a state says (the changes, the server's further lines) is the label's
-// tip. The release page link sits beside the control.
+// Two rows (audit of 0.2.4, decision 25): the version, said once in the label,
+// with the state of the last check as its one grey line and the one control
+// that moves it on at the right; then the automatic switch. A clone's further
+// rows (every change or only releases, what the update brings) fold away
+// under the group's chevron. No label, row or value carries a tooltip: what a
+// row needs said is on the row.
 //
 // The desktop server checks the clone's remote after 15 seconds and hourly
-// when enabled. Browsers only check on request. Restart to
-// update shows only in the desktop app, which quits and lets
-// `pnpm run app-update` do the work. The phone listener exposes status only;
-// a computer browser may check but installs from the desktop app. An
-// installed copy (AppImage or installer) reads the signed release list and
-// downloads a newer version for itself (Download while automatic checks are
-// off). A Linux AppImage that can replace its own file then shows Restart to
-// update; any other copy says why not and links the release page.
-import type { Settings, UpdateChannel, UpdateCheck, UpdateStatus, UpdateVersion } from "@gates-local/contracts";
-import { useState } from "react";
-import { canUpdateHere, checkForUpdates, downloadUpdate, updateAndRestart, updateSettings } from "./session.ts";
+// when enabled. Browsers only check on request. Restart to update shows only
+// in the desktop app, which quits and lets `pnpm run app-update` do the work.
+// The phone listener exposes status only; a computer browser may check but
+// installs from the desktop app. An installed copy (AppImage or installer)
+// reads the signed release list and downloads a newer version for itself
+// (Download while automatic checks are off). A Linux AppImage that can
+// replace its own file then shows Restart to update; any other copy keeps
+// the checked download and opens its folder, to run it from there
+// (decision 24).
+import type { Settings, UpdateCheck, UpdateStatus, UpdateVersion } from "@gates-local/contracts";
+import { type ReactNode, useState } from "react";
+import { Icon } from "./icons.tsx";
+import { canShowUpdate, canUpdateHere, checkForUpdates, downloadUpdate, showUpdate, updateAndRestart, updateSettings } from "./session.ts";
 import { Grp, Na, Row, Skel, useAct } from "./settings-ui.tsx";
 import { type Maybe, NA, useStore } from "./store.ts";
-import { esc } from "./ui.tsx";
 import { ITSELF, RESTART, clock, outdated, retryable, ver } from "./update-state.ts";
 
-/** Subjects shown before the rest fold away under "Show all". */
+/** Subjects shown in the clone's fold before the rest are counted. */
 export const SHOWN_CHANGES = 3;
 
 const day = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 const changes = (n: number) => (n === 1 ? "1 change" : `${n} changes`);
 
-/** Row 1: the commit or version once as the value; the description says what kind of copy it is and what it follows. */
-function versionText(v: UpdateVersion, channel: UpdateChannel): { value: string; desc: string } {
+/** Row 1's label: the commit or version, said once. */
+function versionLabel(v: UpdateVersion): ReactNode {
   switch (v.kind) {
     case "release":
-      return { value: ver(v.tag), desc: `Commit ${v.commit}${v.date === undefined ? "" : `, ${day(v.date)}`}, following ${channel === "main" ? "every change on the main branch" : "releases"}.` };
-    case "commit": {
-      const when = v.date === undefined ? "A commit" : `A commit from ${day(v.date)}`;
-      return { value: v.commit, desc: channel === "main" ? `${when} on the main branch.` : `${when}, between releases.` };
-    }
-    case "not-a-clone":
-      // One line, not a sentence and a chip saying it twice (audit W09); there is no version to show.
-      return { value: "", desc: "Can't update: not a git clone." };
-    case "unreadable":
-      return { value: "Unknown", desc: `Could not read the version: ${v.detail}.` };
+      return <>Version <span className="mono">{ver(v.tag)}</span></>;
+    case "commit":
+      return <>Version <span className="mono">{v.commit}</span></>;
     case "installed":
-      return { value: v.version, desc: "An installed copy, following releases." };
+      return <>Version <span className="mono">{ver(v.version)}</span></>;
+    case "not-a-clone":
+      return "Version";
+    case "unreadable":
+      return "Version unknown";
   }
 }
 
-const AGAIN = "Gates Local will try again in an hour.";
-// A file that did not match is not fetched again by a background check of the same list.
-const DOWNLOAD_AGAIN = "Use Check for updates to try again.";
-
-/** The sentence Settings adds while automatic checks are on now, so it follows the switch, not the check. */
-function retryLine(check: UpdateCheck): string | undefined {
-  if (check.state === "cannot-check") return check.reason === "unreachable" || check.reason === "no-list" ? AGAIN : undefined;
-  if (check.state !== "newer") return undefined;
-  if (check.download === "bad") return DOWNLOAD_AGAIN;
-  return check.download === "failed" ? AGAIN : undefined;
+/** The clone's fold: which commit this is and when, for the switch that decides what it follows. */
+function cloneDetail(v: UpdateVersion): string | undefined {
+  if (v.kind === "release") return `Commit ${v.commit}${v.date === undefined ? "" : `, ${day(v.date)}`}.`;
+  if (v.kind === "commit") return v.date === undefined ? undefined : `A commit from ${day(v.date)}.`;
+  return undefined;
 }
 
-/** The words send the person to the release page: a version this copy cannot use, or one it downloaded but cannot install. */
-function linksPage(check: UpdateCheck): string | undefined {
+/** The release page, when the line sends the person there: a version this copy cannot use, or a check that names one. */
+function linksPage(check: UpdateCheck, folder: boolean): string | undefined {
   if (check.state === "cannot-check") return check.page;
   if (check.state !== "newer") return undefined;
-  return !check.forThisCopy || (check.download === "ready" && check.restart !== true) ? check.page : undefined;
+  if (!check.forThisCopy) return check.page;
+  // A checked download this copy cannot install: its folder, or the page where the desktop app cannot open one.
+  return check.download === "ready" && check.restart !== true && !folder ? check.page : undefined;
 }
 
-/** Row 2's label: the state in a few words, short enough for one line. */
-function stateLabel(check: UpdateCheck | null, checking: boolean): string {
-  if (checking) return "Checking…";
-  if (check === null) return "Not checked yet";
-  switch (check.state) {
-    case "up-to-date":
-      return "Up to date";
-    case "available":
-    case "newer":
-      return `Update available: ${ver(check.target)}`;
-    case "cannot-check":
-      // the footer's words: a reason no new check changes means the check ran and this copy cannot update
-      return retryable(check.reason) ? "Couldn’t check" : ITSELF;
-  }
-}
-
-/** A server line as the grey line: one that leads into a list in the tip ends as a sentence, not on a colon. */
+/** A server line as the grey line: one that led into a list ends as a sentence, not on a colon. */
 const whole = (line: string) => line.replace(/:$/, ".");
 
-const checked = (check: UpdateCheck) => `Checked at ${clock(check.checkedAt)}.`;
-
-/** Row 2's one grey line: when it checked, or what the state needs said first. It never wraps, so no state changes the row's height. */
-function stateLine(check: UpdateCheck | null, control: boolean, canUpdate: boolean): string {
-  // A space keeps the line's height before the first check.
-  if (check === null) return control ? " " : "Check and install updates on the computer running Gates Local.";
+/**
+ * Row 1's one grey line: the state of the last check. It never wraps, so no
+ * state changes the row's height, except a checked download this copy cannot
+ * install, whose line says what to do with it and is never cut off.
+ */
+function stateLine(check: UpdateCheck | null, checking: boolean, control: boolean, canUpdate: boolean): string {
+  if (checking) return "Checking…";
+  if (check === null) return control ? "Not checked yet." : "Check and install updates on the computer running Gates Local.";
   switch (check.state) {
     case "up-to-date":
-      return checked(check);
+      return `Up to date. Checked at ${clock(check.checkedAt)}.`;
     case "available":
-      return canUpdate ? `${changes(check.total)}. ${checked(check)}` : "To install it, close Gates Local on the computer it runs on and run pnpm run app-update in its folder.";
+      return canUpdate ? `Update ${ver(check.target)}: ${changes(check.total)}.` : `Update ${ver(check.target)}: run pnpm run app-update on the computer.`;
     case "cannot-check":
-      return check.lines[0] === undefined ? checked(check) : whole(check.lines[0]);
+      return check.lines[0] === undefined ? (retryable(check.reason) ? "Couldn’t check." : `${ITSELF}.`) : whole(check.lines[0]);
     case "newer": {
-      // Ready and installable: the button says so, so the line is when it checked, as in every other state.
-      // A ready download this copy cannot install keeps the server's first line, which says why.
-      if (check.download === "ready" && check.restart === true) return checked(check);
-      // The server's plain "Version X is available." is the label already.
-      const first = check.lines[0];
-      return first === undefined || first === `Version ${check.target} is available.` ? checked(check) : first;
+      const target = ver(check.target);
+      if (!check.forThisCopy) return `Update ${target} is not built for this copy.`;
+      if (check.download === undefined) return `Update ${target} available.`;
+      if (check.download === "ready" && check.restart === true) return `Update ${target} downloaded and checked.`;
+      return check.lines[0] ?? `Update ${target} available.`;
     }
   }
 }
 
-/**
- * Row 2's tip: everything else the state says (the changes, the server's
- * further lines, when it tried), so nothing is added under the row.
- */
-function stateTip(check: UpdateCheck | null, automatic: boolean, installed: boolean, canUpdate: boolean): string | undefined {
-  if (check === null || check.state === "up-to-date") return undefined;
-  if (check.state === "available") {
-    const notes = check.notes?.split("\n").map((l) => l.trim()).filter((l) => l !== "");
-    const items = notes ?? check.changes;
-    const more = (notes === undefined ? check.total : items.length) - Math.min(items.length, SHOWN_CHANGES);
-    const list = `${notes === undefined ? changes(check.total) : "Release notes"}: ${items.slice(0, SHOWN_CHANGES).join("; ")}${more > 0 ? `; and ${more} more` : ""}.`;
-    const how = canUpdate
-      ? `${RESTART} closes Gates Local, updates it and opens it again. If a step fails it goes back to ${ver(check.current)}.`
-      : "To install it, close Gates Local on the computer it runs on and run pnpm run app-update in its folder.";
-    return `${list} ${how}`;
-  }
-  const again = installed && automatic ? retryLine(check) : undefined;
-  const parts = [...check.lines];
-  if (again !== undefined) parts.push(again);
-  if (check.state === "newer" && check.restart === true && canUpdate) parts.push("Gates Local will close, update and reopen.");
-  if (check.state === "cannot-check") parts.push(`Tried at ${clock(check.checkedAt)}.`);
-  return parts.join(" ");
-}
-
-/** The grey line cut to one line (the label's tip has the whole of it), or the last action's failure in its place with its own tip. */
-function StateLine({ text, err, calm }: { text: string; err: string | null; calm: boolean }) {
-  if (err !== null) return <span className="src-help act-err" role="alert" data-tip={esc(err)}>{err}</span>;
-  return <span className="src-help" role={calm ? "status" : "alert"}>{text}</span>;
+/** The grey line, or the last action's failure in its place. */
+function StateLine({ text, err, calm, wrap }: { text: string; err: string | null; calm: boolean; wrap: boolean }) {
+  if (err !== null) return <span className="src-help act-err" role="alert">{err}</span>;
+  return <span className="src-help" role={calm ? "status" : "alert"} style={wrap ? { whiteSpace: "normal" } : undefined}>{text}</span>;
 }
 
 /** A check that failed, or a download that did: said as an alert. */
 const troubled = (check: UpdateCheck | null) => check?.state === "cannot-check" || (check?.state === "newer" && (check.download === "bad" || check.download === "failed" || check.download === "disk"));
+
+/** A checked download this copy cannot install by itself (decision 24). */
+const keptDownload = (check: UpdateCheck | null): check is Extract<UpdateCheck, { state: "newer" }> => check?.state === "newer" && check.forThisCopy && check.download === "ready" && check.restart !== true;
 
 interface StateProps {
   readonly check: UpdateCheck | null;
   readonly automatic: boolean;
   /** Restart to update: the desktop app, with control. */
   readonly canUpdate: boolean;
+  /** The desktop app can open a checked download's folder. */
+  readonly canShow: boolean;
   readonly checking: boolean;
   readonly updating: boolean;
   readonly onCheck: () => void;
   readonly onUpdate: () => void;
   /** The Download control; absent where this window cannot control updates. */
   readonly onDownload?: (() => void) | undefined;
+  readonly onFolder?: (() => void) | undefined;
 }
 
-/** Row 2's one control: what moves this state on, else Check for updates, whose label never changes while it runs. */
-function StateAction({ check, automatic, canUpdate, checking, updating, onCheck, onUpdate, onDownload }: StateProps) {
+/** Row 1's one control: what moves this state on, else Check for updates, whose label never changes while it runs. */
+function StateAction({ check, automatic, canUpdate, canShow, checking, updating, onCheck, onUpdate, onDownload, onFolder }: StateProps) {
   if (check?.state === "available" && canUpdate) {
     return (
       <button type="button" className="btn primary" data-testid="settings.updates.update" disabled={updating} onClick={onUpdate}>
@@ -174,6 +135,9 @@ function StateAction({ check, automatic, canUpdate, checking, updating, onCheck,
       </button>
     );
   }
+  if (keptDownload(check) && canShow && onFolder !== undefined) {
+    return <button type="button" className="btn primary" data-testid="settings.updates.folder" onClick={onFolder}>Open folder</button>;
+  }
   if (check?.state === "newer" && check.forThisCopy && check.download === undefined && !automatic && onDownload !== undefined) {
     return <button type="button" className="btn outline" data-testid="settings.updates.download" onClick={onDownload}>Download</button>;
   }
@@ -184,10 +148,23 @@ function StateAction({ check, automatic, canUpdate, checking, updating, onCheck,
   );
 }
 
-/** Beside the control, on the row's own line: the release page, when the words send the person there. */
-function PageLink({ check }: { check: UpdateCheck | null }) {
-  const page = check === null ? undefined : linksPage(check);
-  return page === undefined ? null : <a className="link" href={page} data-testid="settings.updates.release-page" target="_blank" rel="noreferrer noopener">Open the release page</a>;
+/** Beside the control, on the row's own line: the release page, when the line sends the person there. */
+function PageLink({ check, folder }: { check: UpdateCheck | null; folder: boolean }) {
+  const page = check === null ? undefined : linksPage(check, folder);
+  return page === undefined ? null : <a className="link" href={page} data-testid="settings.updates.release-page" target="_blank" rel="noreferrer noopener">Release page</a>;
+}
+
+/** The clone's fold, under the Every change switch: what the update brings, its release notes or its commits. */
+function ChangeList({ check }: { check: Extract<UpdateCheck, { state: "available" }> }) {
+  const notes = check.notes?.split("\n").map((l) => l.trim()).filter((l) => l !== "");
+  const items = notes ?? check.changes;
+  const more = (notes === undefined ? check.total : items.length) - Math.min(items.length, SHOWN_CHANGES);
+  return (
+    <ul className="d" data-testid="settings.updates.changes">
+      {items.slice(0, SHOWN_CHANGES).map((c) => <li key={c}>{c}</li>)}
+      {more > 0 ? <li>{`and ${more} more`}</li> : null}
+    </ul>
+  );
 }
 
 export interface UpdatesViewProps {
@@ -196,6 +173,8 @@ export interface UpdatesViewProps {
   readonly settingsLocked: boolean;
   readonly checking: boolean;
   readonly canUpdate: boolean;
+  /** The desktop app can open a checked download's folder (canShowUpdate). */
+  readonly canShow?: boolean;
   readonly updating?: boolean;
   readonly checkErr?: string | null;
   /** The last check's time when the failed Check for updates was clicked: a newer check clears that failure, as in the footer. */
@@ -205,9 +184,13 @@ export interface UpdatesViewProps {
   readonly downloadErr?: string | null;
   /** The same for a failed Download: a newer check, or the server saying it downloads, clears it. */
   readonly downloadErrSince?: number | null;
+  readonly folderErr?: string | null;
+  /** The clone's fold starts open (a test renders it). */
+  readonly open?: boolean;
   readonly onCheck: () => void;
   /** An installed copy's Download click. */
   readonly onDownload?: () => void;
+  readonly onFolder?: () => void;
   readonly onUpdate: () => void;
   readonly onEveryChange: (on: boolean) => void;
   readonly onAutomatic?: (on: boolean) => void;
@@ -215,6 +198,7 @@ export interface UpdatesViewProps {
 
 /** The group itself, from props, so each state renders in a test without a server. */
 export function UpdatesView(p: UpdatesViewProps) {
+  const [open, setOpen] = useState(p.open === true);
   if (p.status === NA) {
     return (
       <Grp title="Updates">
@@ -226,69 +210,73 @@ export function UpdatesView(p: UpdatesViewProps) {
       </Grp>
     );
   }
-  const last = p.status?.lastCheck ?? null;
+  const check = p.status?.lastCheck ?? null;
   const settings = p.settings === NA ? undefined : p.settings;
   const every = settings?.updateEveryChange === true;
-  // The switch says what this copy follows, so flipping it changes row 1 now, not after the next check.
-  const channel: UpdateChannel = every ? "main" : "release";
-  // Settings waits for the version before it shows (whenSettingsReady); a placeholder covers a slow server.
-  const version = p.status === undefined ? { value: <Skel w="6em" />, desc: <Skel w="14em" /> } : versionText(p.status.version, channel);
-  const clone = p.status !== undefined && (p.status.version.kind === "release" || p.status.version.kind === "commit");
-  // The server drops the last check when the switch flips (update/module.ts), so the one it sends is about the choice now.
-  const check = last;
-  const installed = p.status?.version.kind === "installed";
+  const kind = p.status?.version.kind;
+  const clone = kind === "release" || kind === "commit";
+  const installed = kind === "installed";
   const canControl = p.status?.canControl !== false;
   const automatic = settings !== undefined && settings.updateAutomatic !== false;
   const canUpdate = p.canUpdate && canControl;
+  const canShow = p.canShow === true && canControl;
   const restartHere = canUpdate && (check?.state === "available" || (check?.state === "newer" && check.restart === true));
   // A failure takes the grey line's place, so it never adds a line. The newest action's failure wins; a check that answered after a failed click clears it.
   const updateErr = restartHere ? p.updateErr : undefined;
-  const checkErr = p.checkErr != null && !outdated({ click: "check", message: p.checkErr, since: p.checkErrSince ?? null }, last) ? p.checkErr : null;
-  const downloadErr = p.downloadErr != null && !outdated({ click: "download", message: p.downloadErr, since: p.downloadErrSince ?? null }, last) ? p.downloadErr : null;
-  const err = canControl ? (updateErr ?? downloadErr ?? checkErr) : null;
-  // A listener (the phone) has no control line to share, so the release page goes in the tip instead of growing the row.
-  const tipPage = !canControl && check !== null ? linksPage(check) : undefined;
-  const tip = [stateTip(check, automatic, installed, canUpdate), tipPage === undefined ? undefined : `Release page: ${tipPage}`].filter((t) => t !== undefined).join(" ") || undefined;
+  const checkErr = p.checkErr != null && !outdated({ click: "check", message: p.checkErr, since: p.checkErrSince ?? null }, check) ? p.checkErr : null;
+  const downloadErr = p.downloadErr != null && !outdated({ click: "download", message: p.downloadErr, since: p.downloadErrSince ?? null }, check) ? p.downloadErr : null;
+  const folderErr = keptDownload(check) ? (p.folderErr ?? null) : null;
+  const err = canControl ? (updateErr ?? folderErr ?? downloadErr ?? checkErr) : null;
+  const switches = settings !== undefined && !p.settingsLocked && canControl;
+  const detail = p.status === undefined ? undefined : cloneDetail(p.status.version);
+  const fold = clone && switches;
+  // Settings waits for the version before it shows (whenSettingsReady); a placeholder covers a slow server.
+  const label = p.status === undefined ? <>Version <Skel w="4em" /></> : versionLabel(p.status.version);
+  const desc =
+    p.status === undefined ? <Skel w="14em" />
+    : kind === "not-a-clone" ? "Can't update: not a git clone."
+    : kind === "unreadable" && p.status.version.kind === "unreadable" ? `Could not read the version: ${p.status.version.detail}.`
+    : <StateLine text={stateLine(check, p.checking, canControl, canUpdate)} err={err} calm={!troubled(check)} wrap={keptDownload(check)} />;
+  const more = fold ? (
+    <button type="button" className="ibtn" data-testid="settings.updates.more" aria-expanded={open} aria-label="More" data-tip="More" onClick={() => setOpen(!open)}>
+      <Icon id={open ? "down" : "right"} />
+    </button>
+  ) : undefined;
   return (
-    <Grp title="Updates" busy={p.status === undefined}>
-      <Row label="Version" desc={version.desc}>
-        <span className="mono">{version.value}</span>
+    <Grp title="Updates" busy={p.status === undefined} {...(more === undefined ? {} : { action: more })}>
+      <Row label={label} desc={desc}>
+        {(clone || installed) && canControl ? (
+          // One line for the link and the control, reserved on a phone, so the link showing never grows the row.
+          <span className="upd-acts">
+            <PageLink check={check} folder={canShow} />
+            <StateAction
+              check={check}
+              automatic={automatic}
+              canUpdate={canUpdate}
+              canShow={canShow}
+              checking={p.checking}
+              updating={p.updating === true}
+              onCheck={p.onCheck}
+              onUpdate={p.onUpdate}
+              onDownload={p.onDownload}
+              onFolder={p.onFolder}
+            />
+          </span>
+        ) : null}
       </Row>
-      {clone || installed ? (
+      {(clone || installed) && switches ? (
+        <Row label="Check for updates automatically" desc={installed ? "Checks hourly and downloads newer versions." : "Asks this clone's git remote hourly."} err={p.switchErr ?? null}>
+          <button type="button" className="switch" role="switch" data-testid="settings.updates.automatic" aria-checked={automatic} aria-label="Check for updates automatically" onClick={() => p.onAutomatic?.(!automatic)} />
+        </Row>
+      ) : null}
+      {fold && open ? (
         <>
-          <Row label={stateLabel(check, p.checking)} desc={<StateLine text={stateLine(check, canControl, canUpdate)} err={err} calm={!troubled(check)} />} tip={tip}>
-            {canControl ? (
-              // One line for the link and the control, reserved on a phone, so the link showing never grows the row.
-              <span className="upd-acts">
-                <PageLink check={check} />
-                <StateAction
-                  check={check}
-                  automatic={automatic}
-                  canUpdate={canUpdate}
-                  checking={p.checking}
-                  updating={p.updating === true}
-                  onCheck={p.onCheck}
-                  onUpdate={p.onUpdate}
-                  onDownload={p.onDownload}
-                />
-              </span>
-            ) : null}
+          <Row label="Get every change, not only releases" {...(detail === undefined ? {} : { desc: detail })} err={p.switchErr ?? null}>
+            <button type="button" className="switch" role="switch" data-testid="settings.updates.every-change" aria-checked={every} aria-label="Get every change, not only releases" onClick={() => p.onEveryChange(!every)} />
           </Row>
-          {settings === undefined || p.settingsLocked || !canControl ? null : (
-            <>
-            <Row label="Check for updates automatically"
-              desc={installed ? "Checks hourly and downloads newer versions; off deletes them." : "Asks this clone's git remote hourly."}
-              tip={installed
-                ? "Desktop app only: reads the release page's list 15 seconds after startup, then hourly, and downloads a newer version for this copy. Default on. Off stops automatic requests, stops a download in progress and deletes downloaded versions; a check in progress finishes. Manual checks still work."
-                : "Desktop app only: asks this clone's git remote 15 seconds after startup, then hourly. Default on. Off prevents future automatic git processes and network requests; a check in progress finishes. Manual checks still work."}
-              err={p.switchErr ?? null}>
-              <button type="button" className="switch" role="switch" data-testid="settings.updates.automatic" aria-checked={settings.updateAutomatic !== false} aria-label="Check for updates automatically" onClick={() => p.onAutomatic?.(settings.updateAutomatic === false)} />
-            </Row>
-            {installed ? null : <Row label="Get every change, not only releases" tip="Off: only releases, once there are any. On: every change on the main branch as soon as it lands." err={p.switchErr ?? null}>
-              <button type="button" className="switch" role="switch" data-testid="settings.updates.every-change" aria-checked={every} aria-label="Get every change, not only releases" onClick={() => p.onEveryChange(!every)} />
-            </Row>}
-            </>
-          )}
+          {check?.state === "available" ? (
+            <Row label={check.notes === undefined ? `What ${ver(check.target)} brings: ${changes(check.total)}` : `What ${ver(check.target)} brings`} desc={<ChangeList check={check} />} />
+          ) : null}
         </>
       ) : null}
     </Grp>
@@ -305,8 +293,10 @@ export function Updates() {
   const [switchErr, runSwitch] = useAct();
   const [downloadErr, runDownload] = useAct();
   const [downloadErrSince, setDownloadErrSince] = useState<number | null>(null);
+  const [folderErr, runFolder] = useAct();
   const updateErr = useStore((s) => s.updateError);
   const updating = useStore((s) => s.updateInstalling || (s.update !== NA && s.update?.installing === true));
+  const target = status === NA || status?.lastCheck?.state !== "newer" ? undefined : status.lastCheck.target;
   return (
     <UpdatesView
       status={status}
@@ -314,6 +304,7 @@ export function Updates() {
       settingsLocked={settingsLocked}
       checking={checking}
       canUpdate={canUpdateHere()}
+      canShow={canShowUpdate()}
       updating={updating}
       checkErr={checkErr}
       checkErrSince={checkErrSince}
@@ -321,6 +312,7 @@ export function Updates() {
       updateErr={updateErr}
       downloadErr={downloadErr}
       downloadErrSince={downloadErrSince}
+      folderErr={folderErr}
       onCheck={() => {
         setCheckErrSince(status === NA ? null : (status?.lastCheck?.checkedAt ?? null));
         void runCheck(checkForUpdates());
@@ -328,6 +320,9 @@ export function Updates() {
       onDownload={() => {
         setDownloadErrSince(status === NA ? null : (status?.lastCheck?.checkedAt ?? null));
         void runDownload(downloadUpdate());
+      }}
+      onFolder={() => {
+        if (target !== undefined) void runFolder(showUpdate(target));
       }}
       onEveryChange={(on) => void runSwitch(updateSettings({ updateEveryChange: on }))}
       onAutomatic={(on) => void runSwitch(updateSettings({ updateAutomatic: on }))}

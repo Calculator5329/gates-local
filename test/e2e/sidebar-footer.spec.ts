@@ -37,7 +37,7 @@ test("one row of five icon buttons whose boxes never move, in any state or in Se
   s.pull({ ...QWEN4, state: "error", completedBytes: 0, message: "no space left on device" });
   await expect(models(page).locator(".fdot.red")).toHaveCount(1);
   await same("a failed download");
-  const labels = { available: "Update to def5678", updating: "Closing to update…", failed: "Update failed", "can't update itself": "Can't update itself", downloading: "Downloading version 1.3.0" };
+  const labels = { available: "Update to def5678", updating: "Closing to update…", failed: "Update failed", "can't update itself": "Can't update itself", downloading: "Downloading 1.3.0" };
   for (const [name, label] of Object.entries(labels)) {
     s.update(name);
     await expect(page.locator(".sb-foot .upd")).toHaveAccessibleName(label);
@@ -69,7 +69,8 @@ test("the tooltips carry the words, and the Models tooltip names the model", asy
   await expect(models(page)).toHaveAttribute("data-tip", "Models");
   const update = page.locator(".sb-foot .upd");
   await expect(update).toHaveAccessibleName("Check for updates");
-  await expect(update).toHaveAttribute("data-tip", /Not checked since Gates Local started/);
+  // The update mark's tooltip is its name, nothing more (decision 19).
+  await expect(update).toHaveAttribute("data-tip", "Check for updates");
 
   s.pull(QWEN14);
   await expect(models(page)).toHaveAttribute("data-tip", /^<b>Downloading Qwen 3 14B<\/b> · 61% · 5\.3 of 8\.6 GB$/);
@@ -83,11 +84,11 @@ test("the tooltips carry the words, and the Models tooltip names the model", asy
 
   s.update("available");
   await expect(update).toHaveAccessibleName("Update to def5678");
-  await expect(update).toHaveAttribute("data-tip", /3 changes from abc1234 to def5678/);
+  await expect(update).toHaveAttribute("data-tip", "Update to def5678");
   await expect(update.locator(".fdot.amber")).toHaveCount(1);
   s.update("failed");
   await expect(update).toHaveAccessibleName("Update failed");
-  await expect(update).toHaveAttribute("data-tip", /Full log: \/srv\/updates\/failure\.log/);
+  await expect(update).toHaveAttribute("data-tip", "Update failed");
 
   s.runtime("wrong-service");
   await expect(settings(page)).toHaveAccessibleName(/^Settings · Port \d+ · busy$/);
@@ -96,8 +97,8 @@ test("the tooltips carry the words, and the Models tooltip names the model", asy
   await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
 });
 
-// Guards the owner's ask for auto update: an update asks once, in the footer (unsure: the clone case may not matter to him).
-test("a clone's update asks once in the footer, and Cancel puts focus back", async ({ page, open }) => {
+// Guards the owner's ruling (decision 23): with nothing running, one click restarts; the ask shows only when something would stop.
+test("a clone's update with nothing running starts on one click, with no ask", async ({ page, open }) => {
   await desktopBridge(page);
   const s = await footerSocket(page);
   const dialogs: string[] = [];
@@ -110,17 +111,9 @@ test("a clone's update asks once in the footer, and Cancel puts focus back", asy
   s.update("available");
   const update = page.getByRole("button", { name: "Update to def5678", exact: true });
   await update.click();
-  const ask = page.getByRole("group", { name: "Confirm update" });
-  await expect(ask).toContainText("Update to def5678 and restart?");
-  await expect(ask.locator("li")).toHaveText(["Falls back to abc1234 if a step fails."]);
-  await expect(ask.getByRole("button", { name: "Cancel" })).toBeFocused();
-  await page.keyboard.press("Escape");
-  await expect(ask).toHaveCount(0);
-  await expect(update).toBeFocused();
-  await update.click();
-  await ask.getByTestId("sidebar.update.go").click();
   await expect(page.locator("html")).toHaveAttribute("data-update-started", "yes");
-  // after the one ask, focus is on the update button, now closing to update
+  await expect(page.getByRole("group", { name: "Confirm update" })).toHaveCount(0);
+  // focus stays on the update button, now closing to update
   await expect(page.locator(".sb-foot .upd")).toBeFocused();
   expect(dialogs, "no second, native prompt").toEqual([]);
 });

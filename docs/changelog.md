@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-11-14: Updates take one click and say each thing once
+
+- When an update is downloaded and ready, the mark at the right of the
+  sidebar footer is a green up arrow, with no dot.
+- With nothing running, one click on Restart to update restarts. The ask
+  shows only when a reply, a download or an image would stop, and it
+  names what stops.
+- A Windows copy that cannot install its own update keeps the checked
+  download and offers its folder: "Run this installer to update." The line
+  is shown whole, and the file is not downloaded twice.
+- Settings › General › Updates is two rows: the version with the update
+  and its button, then the automatic switch. A clone's extra rows (every
+  change, what the update brings) fold away behind a More button.
+- Turning automatic updates off still stops and deletes a download that is
+  half way; a finished, checked download is now kept.
+- Uninstalling on Windows removes the updater's own copy of the installer
+  (about 129 MB) from the local app data folder.
+- The update mark and the Updates card have no tooltips beyond a button's
+  name.
+
 ## 2026-11-14: Measure reads a call the way a chat does, and keeps what it saw
 
 - Measure (Settings, Models) failed a check when the model wrote its

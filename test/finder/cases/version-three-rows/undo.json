@@ -1,7 +1,7 @@
 [
   {
     "file": "apps/web/src/SettingsUpdates.tsx",
-    "find": "          <Row label={stateLabel(check, p.checking)} desc={<StateLine text={stateLine(check, canControl, canUpdate)} err={err} calm={!troubled(check)} />} tip={tip}>",
-    "replace": "          {/* finder case: updates row 8 undone (the state on a third row that comes and goes) */}\n          {p.checking ? null : <Row label={stateLabel(check, false)} desc={<StateLine text={stateLine(check, canControl, canUpdate)} err={err} calm={!troubled(check)} />} tip={tip}>{null}</Row>}\n          <Row label=\"Check for updates\">"
+    "find": "      <Row label={label} desc={desc}>",
+    "replace": "      {/* finder case: updates row 8 undone (the state on a third row that comes and goes) */}\n      <Row label={label} />\n      {p.checking ? null : <Row label=\"State\" desc={desc} />}\n      <Row label=\"Check for updates\">"
   }
 ]

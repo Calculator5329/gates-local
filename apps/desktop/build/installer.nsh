@@ -41,3 +41,16 @@
     ${EndIf}
   ${Loop}
 !macroend
+
+; Uninstall removes the copy of the installer electron-builder keeps under the
+; local app data folder, in gates-local-updater (about 130 MB). The update's
+; own run of the old uninstaller (isUpdated) leaves it: the new installer keeps
+; its own copy there. Gates Local's data folder is never touched here.
+!macro customUnInstall
+  ${ifNot} ${isUpdated}
+    !ifdef APP_INSTALLER_STORE_FILE
+      Delete "$LOCALAPPDATA\${APP_INSTALLER_STORE_FILE}"
+    !endif
+    RMDir /r "$LOCALAPPDATA\gates-local-updater"
+  ${endif}
+!macroend

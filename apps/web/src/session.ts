@@ -32,7 +32,7 @@ import { type ActionResult, codeOf, createConnection, failure, isNA } from "./se
 export { threadMarkdown } from "./session/threads.ts";
 export { queueReason, firstPull, cancelStopAsk, canRetry, removeQueued, editQueued } from "./session/chat.ts";
 export { type ActionCall, type ActionResult, failure, isNA } from "./session/connection.ts";
-export { fileUrl, dataFolder, openDataFolder, canOpenFolder, canUpdateHere, folderDialog } from "./session/platform.ts";
+export { fileUrl, dataFolder, openDataFolder, canOpenFolder, canUpdateHere, canShowUpdate, showUpdate, folderDialog } from "./session/platform.ts";
 export { threadFromHash } from "./session/navigation.ts";
 
 export const applyServerEvent = createServerState(getState, setState);

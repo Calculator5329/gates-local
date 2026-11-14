@@ -2,9 +2,9 @@
 import type { UpdateCheck, UpdateStatus } from "@gates-local/contracts";
 import { useEffect, useRef, useState } from "react";
 import { Icon, type IconId } from "./icons.tsx";
-import { canUpdateHere, checkForUpdates, dismissUpdateResult, downloadUpdate, openSettings, readUpdateStatus, updateAndRestart } from "./session.ts";
+import { canShowUpdate, canUpdateHere, checkForUpdates, dismissUpdateResult, downloadUpdate, openSettings, readUpdateStatus, showUpdate, updateAndRestart } from "./session.ts";
 import { NA, getState, useStore } from "./store.ts";
-import { closeTip } from "./ui.tsx";
+import { closeTip, esc } from "./ui.tsx";
 import { RESTART, restartable, type UpdateClick, type UpdateIcon, type UpdateInput, outdated, updateIcon, ver } from "./update-state.ts";
 import { updateWork, workLines } from "./update-work.ts";
 
@@ -64,7 +64,8 @@ const LOOK: Record<UpdateIcon["state"], { icon: IconId; tone?: FootProps["tone"]
   checking: { icon: "refresh", spin: true },
   available: { icon: "fetch", tone: "fg" },
   downloading: { icon: "fetch", tone: "fg" },
-  ready: { icon: "refresh", tone: "green" },
+  // Ready to restart: the green up-arrow alone, no dot (audit of 0.2.4, decision 22).
+  ready: { icon: "up", tone: "green" },
   updating: { icon: "spin", spin: true },
   failed: { icon: "alert", tone: "red" },
   external: { icon: "external", tone: "fg" },
@@ -78,20 +79,17 @@ const UNSEEN = { position: "absolute", width: 1, height: 1, overflow: "hidden", 
 const BRIGHT = { color: "var(--foreground)" } as const;
 
 /**
- * The one ask before the app closes: the target, one line for each piece of
+ * The ask before the app closes, shown only when something would stop
+ * (audit of 0.2.4, decision 23): the target and one line for each piece of
  * work the update stops (update-work.ts, the same lines as the installer's
- * native prompt), read fresh from the server when it opens, and what it falls
- * back to. When those lines change while it is open (a new approval, or this
- * window's queue or drafts, read again at Go) the new ones show brighter, a
- * screen reader hears "Changed", and Go waits a moment; nothing installs on
- * that press. before: the lines shown when it last closed for that reason.
- * An installed copy's Restart asks the same way, with only the lines for
- * what would stop; with nothing running it is the question and two buttons.
- * What happens if the new version does not start is not said here: on
- * Windows the tip in Settings says how to go back.
+ * native prompt), read fresh from the server when it opens. With nothing
+ * running the click restarts at once. When those lines change while it is
+ * open (a new approval, or this window's queue or drafts, read again at Go)
+ * the new ones show brighter, a screen reader hears "Changed", and Go waits a
+ * moment; nothing installs on that press. before: the lines shown when it
+ * last closed for that reason.
  */
 function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStatus; check: Extract<UpdateCheck, { state: "available" | "newer" }>; before: readonly string[] | null; onCancel: () => void; onGo: (shown: readonly string[]) => void }) {
-  const installed = check.state === "newer";
   const cancel = useRef<HTMLButtonElement>(null);
   const goButton = useRef<HTMLButtonElement>(null);
   const lines = () => workLines(updateWork(status.activity));
@@ -138,14 +136,13 @@ function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStat
   return (
     <div className="cfm" role="group" aria-label="Confirm update">
       <b>Update to {ver(check.target)} and restart?</b>
-      {installed && work.length === 0 ? null : (
+      {work.length === 0 ? null : (
         <ul>
           {work.map((w) => (
             <li key={w} style={fresh.includes(w) ? BRIGHT : undefined}>
               {w}
             </li>
           ))}
-          {installed ? null : <li>{`Falls back to ${ver(check.current)} if a step fails.`}</li>}
         </ul>
       )}
       <span role="status" style={UNSEEN}>
@@ -183,7 +180,7 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
   const button = useRef<HTMLSpanElement>(null);
   const known = status === NA || status === undefined ? null : status;
   const desktop = canUpdateHere();
-  const u = updateIcon({ status: known, desktop, checking, installing, error, clickError, downloading, canRestart: restartable(known, desktop) });
+  const u = updateIcon({ status: known, desktop, checking, installing, error, clickError, downloading, canRestart: restartable(known, desktop), canShow: canShowUpdate() });
   const click = u?.click ?? null;
   // The ask belongs to an Update or Restart click: it closes when the click stops being one, and with the drawer.
   useEffect(() => {
@@ -224,21 +221,35 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
   const focusButton = () => button.current?.querySelector("button")?.focus();
   // the check this footer saw when it clicked: a newer one that answers anywhere clears the click's error (update-state.ts)
   const since = check?.checkedAt ?? null;
+  // Update (a clone) and Restart (an installed copy): with nothing running one click restarts; the ask shows
+  // only when a reply, a download, an image job or an import would stop (audit of 0.2.4, decision 23).
+  const restart = async () => {
+    closeTip();
+    setBefore(null);
+    if (asking) return setAsking(false);
+    // the running work, read fresh: an unreadable list asks, and the ask says why
+    const read = await readUpdateStatus();
+    const s = getState();
+    const now = s.update === NA ? undefined : s.update;
+    const idle = read === null && now?.activity !== undefined && now.activity.length === 0;
+    if (idle && now?.approval !== undefined) return void go(now.approval, workLines(updateWork(now.activity)), u.dismiss === true);
+    setAsking(true);
+  };
   const run: Record<UpdateClick, () => void> = {
     check: () => {
       setClickError(null);
       void checkForUpdates().then((message) => setClickError(message === null ? null : { click: "check", message, since }));
     },
-    update: () => {
-      closeTip();
-      setBefore(null);
-      setAsking(!asking);
-    },
-    // An installed copy that can replace its file: the same one ask, then it closes, updates and reopens.
-    restart: () => {
-      closeTip();
-      setBefore(null);
-      setAsking(!asking);
+    update: () => void restart(),
+    restart: () => void restart(),
+    // A copy that cannot install its download: the checked file in its folder, to run it from there (decision 24).
+    folder: () => {
+      if (u.target === undefined) return;
+      const page = check?.state === "newer" ? check.page : undefined;
+      // the file is gone or failed its check again: the release page has the installer
+      void showUpdate(u.target).then((message) => {
+        if (message !== null && page !== undefined) window.open(page, "_blank", "noopener,noreferrer");
+      });
     },
     download: () => {
       setClickError(null);
@@ -288,7 +299,7 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
           testId="sidebar.foot.update"
           icon={look.icon}
           label={u.label}
-          tip={u.tip}
+          tip={esc(u.label)}
           {...(look.tone === undefined ? {} : { tone: look.tone })}
           dot={u.dot}
           {...(u.state === "downloading" ? { ring: u.progress ?? null } : {})}

@@ -24,6 +24,8 @@ interface DesktopBridge {
   openModelsFolder?(): Promise<string | null>;
   /** The system's folder dialog, opened at `start`; null when the person closed it. Missing on older desktop builds. */
   pickFolder?(start?: string): Promise<string | null>;
+  /** Shows a downloaded, checked update in the file manager; a sentence if it could not. Missing on older desktop builds. */
+  showUpdate?(version: string): Promise<string | null>;
 }
 
 declare global {
@@ -100,6 +102,15 @@ export const folderDialog = (): ((start?: string) => Promise<string | null>) | u
 
 /** Only the desktop window can open a folder. */
 export const canOpenFolder = (): boolean => window.gatesLocal?.modelsFolder !== undefined && window.gatesLocal.openModelsFolder !== undefined;
+
+/** The desktop window can show a downloaded update's file in its folder (a copy that cannot install it by itself). */
+export const canShowUpdate = (): boolean => typeof window.gatesLocal?.showUpdate === "function";
+
+/** Shows a downloaded update's file in the file manager; a sentence if it could not. */
+export async function showUpdate(version: string): Promise<string | null> {
+  const show = window.gatesLocal?.showUpdate;
+  return show === undefined ? "Only the desktop app can open this folder." : show(version);
+}
 
 /** True in the desktop app, which can quit, update and open again; phones and browsers only check. */
 export function canUpdateHere(): boolean {

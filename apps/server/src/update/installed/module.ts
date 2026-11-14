@@ -18,7 +18,7 @@
 // Windows install offers the same button (section 3, W-A): the desktop runs
 // the checked installer silently, and the row says how to go back, naming
 // the running version's kept installer, which no cleanup deletes. Any other
-// copy says why it cannot and sends the person to the release page.
+// copy keeps its checked download, and the desktop app opens its folder.
 //
 // Results: the watcher leaves one in update-result.json. A token launch
 // (GATES_LOCAL_UPDATE_STARTUP_TOKEN) keeps admission closed until it reads a
@@ -162,9 +162,10 @@ function mb(bytes: number, round: (n: number) => number = Math.round): string {
   return value < 10 ? (round(value * 10) / 10).toFixed(1) : String(round(value));
 }
 
-/** The download's words, in place of "Version <new> is available.". Settings adds the bracketed sentence while the switch is on.
- *  Ready: a copy that can restart into it says so beside its Restart button (a Windows copy also says how to go back); any other says why not. */
-export function downloadLines(target: string, fetch: Fetch, restart: Restart = "none", goBack?: GoBack): string[] {
+/** The download's words, in place of "Version <new> is available.".
+ *  Ready: a copy that can restart into it says so beside its Restart button (a Windows copy also says how to go back). Any other
+ *  keeps the checked file and says, in one line that fits the card, what to do with it; Settings opens its folder. */
+export function downloadLines(target: string, fetch: Fetch, restart: Restart = "none", goBack?: GoBack, platform: string = process.platform): string[] {
   switch (fetch.state) {
     case "downloading":
       return [`Downloading version ${target} (${mb(fetch.received, Math.floor)} of ${mb(fetch.total)} MB). You can keep chatting.`];
@@ -181,8 +182,8 @@ export function downloadLines(target: string, fetch: Fetch, restart: Restart = "
         const detail = goBack === undefined ? undefined : readyWindows(target, goBack).detail;
         return [`Version ${target} is downloaded and checked.`, ...(detail === undefined ? [] : [detail])];
       }
-      if (restart !== "none") return [refusal(restart, target)];
-      return [`Version ${target} is downloaded and checked. This copy cannot install it by itself yet. To update now, download it from the release page.`];
+      // Nothing is downloaded twice: the person uses the file already here (Windows: the installer; Linux: the AppImage).
+      return [platform === "win32" ? `Update ${target} is downloaded and checked. Run this installer to update.` : `Update ${target} is downloaded and checked. Put it in place of this file.`];
   }
 }
 
@@ -203,7 +204,7 @@ export interface InstalledModuleDeps {
   readonly feed: InstalledFeed;
   /** The server's --data-dir; downloads go in its updates/ folder. */
   readonly dataDir: string;
-  /** Settings' "Check for updates automatically": on, a newer version downloads by itself; turned off, downloads stop and are deleted. */
+  /** Settings' "Check for updates automatically": on, a newer version downloads by itself; turned off, a download in flight stops and is deleted, a finished one stays. */
   readonly automatic: { readonly enabled: () => boolean; readonly onChange: (listener: () => void) => () => void };
   /**
    * Versions whose folders cleanup and the switch never delete: main.ts
@@ -334,7 +335,7 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     // An undismissed rollback-failed note refuses the update: no button, and the row says why.
     // Windows: the button turns on once the kept installer has been looked for (section 3, W-A step 2).
     const ready = checked && failed === undefined && (restart !== "windows" || goBack !== undefined);
-    const lines = checked && failed !== undefined ? [earlierFailure().text] : downloadLines(c.target, fetch.fetch, restart, goBack);
+    const lines = checked && failed !== undefined ? [earlierFailure().text] : downloadLines(c.target, fetch.fetch, restart, goBack, deps.platform);
     return { ...c, lines, download: fetch.fetch.state, ...(ready ? { restart: true } : {}) };
   };
   let offer: { readonly token: string; readonly fingerprint: string } | undefined;
@@ -458,10 +459,12 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     start(found);
   });
 
+  // Off stops a download in flight, whose part file goes. A finished, checked download stays, so it is never fetched twice.
   const switchedOff = () => serial(async () => {
     await cancelActive("automatic checks were turned off");
-    await removeVersions(deps.dataDir, kept()).catch((error: unknown) => log(`update cleanup: ${error instanceof Error ? error.message : String(error)}`));
-    fetch = undefined;
+    const ready = fetch?.fetch.state === "ready" ? [fetch.target] : [];
+    await removeVersions(deps.dataDir, [...kept(), ...ready]).catch((error: unknown) => log(`update cleanup: ${error instanceof Error ? error.message : String(error)}`));
+    if (ready.length === 0) fetch = undefined;
     push();
   });
   const offSwitch = deps.automatic.onChange(() => { if (!deps.automatic.enabled()) void switchedOff(); });

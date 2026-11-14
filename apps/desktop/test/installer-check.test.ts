@@ -34,4 +34,10 @@ describe("the Windows installer's running-app check", () => {
     // A wait that ran out asks again; a check that could not run takes the person's Retry.
     expect(loop).toMatch(/\$\{If\} \$R0 != 11\s+\$\{Break\}/);
   });
+
+  it("IC-05 uninstall removes the installer copy in gates-local-updater, but not when an update runs the old uninstaller", () => {
+    const un = /^!macro customUnInstall$([\s\S]*?)^!macroend$/m.exec(code)?.[1] ?? "";
+    expect(un).toMatch(/\$\{ifNot\} \$\{isUpdated\}[\s\S]*RMDir \/r "\$LOCALAPPDATA\\gates-local-updater"[\s\S]*\$\{endif\}/);
+    expect(un).not.toMatch(/APPDATA\\Gates Local|\$INSTDIR/);
+  });
 });

@@ -273,7 +273,11 @@ describe("the download's words", () => {
     expect(downloadLines("1.3.0", { state: "bad" })).toEqual(["The download of version 1.3.0 did not match the signed release list, so it was deleted."]);
     expect(downloadLines("1.3.0", { state: "failed" })).toEqual(["Could not download version 1.3.0. Check your connection."]);
     expect(downloadLines("1.3.0", { state: "disk", volume: "/home", needed: 98_100_000, free: 97_900_000 })).toEqual(["Not enough free space on /home for version 1.3.0 (needs 99 MB, 97 MB free). Free some space, then use Check for updates."]);
-    expect(downloadLines("1.3.0", { state: "ready" })).toEqual(["Version 1.3.0 is downloaded and checked. This copy cannot install it by itself yet. To update now, download it from the release page."]);
+    // A copy that cannot install it keeps the file and says what to do with it, in one line.
+    expect(downloadLines("1.3.0", { state: "ready" }, "none", undefined, "linux")).toEqual(["Update 1.3.0 is downloaded and checked. Put it in place of this file."]);
+    expect(downloadLines("1.3.0", { state: "ready" }, "read-only", undefined, "linux")).toEqual(["Update 1.3.0 is downloaded and checked. Put it in place of this file."]);
+    expect(downloadLines("1.3.0", { state: "ready" }, "none", undefined, "win32")).toEqual(["Update 1.3.0 is downloaded and checked. Run this installer to update."]);
+    expect(downloadLines("1.3.0", { state: "ready" }, "pinned", undefined, "win32")).toEqual(["Update 1.3.0 is downloaded and checked. Run this installer to update."]);
   });
 });
 
@@ -338,7 +342,7 @@ describe("downloading a newer version", () => {
     const { module } = installed(true);
     expect(await module.check()).toMatchObject({ state: "newer", download: "downloading" });
     await settled(module);
-    expect(shown(module)).toMatchObject({ download: "ready", lines: ["Version 1.3.0 is downloaded and checked. This copy cannot install it by itself yet. To update now, download it from the release page."], page: `${page.base.href}/latest` });
+    expect(shown(module)).toMatchObject({ download: "ready", lines: ["Update 1.3.0 is downloaded and checked. Put it in place of this file."], page: `${page.base.href}/latest` });
     expect(fs.readdirSync(folder()).toSorted()).toEqual([FILE, LIST_FILE, SIGNATURE_FILE]);
     expect(sha512(fs.readFileSync(path.join(folder(), FILE)))).toBe(sha512(BYTES));
     expect(artifactRequests()).toBe(1);
@@ -636,7 +640,7 @@ describe("downloading a newer version", () => {
     expect(fs.existsSync(folder())).toBe(false);
   });
 
-  it("a kept version survives the cleanup a newer list starts, and the switch turned off", async () => {
+  it("a kept version survives the cleanup a newer list starts, and the switch turned off keeps the finished download", async () => {
     for (const version of ["1.0.0", "1.1.0"]) {
       fs.mkdirSync(folder(version), { recursive: true });
       fs.writeFileSync(path.join(folder(version), "note"), version);
@@ -648,8 +652,12 @@ describe("downloading a newer version", () => {
     expect(shown(module).download).toBe("ready");
     expect(fs.readdirSync(path.join(dataDir, "updates")).toSorted()).toEqual(["1.1.0", "1.3.0"]);
     sw.set(false);
-    await eventually(() => expect(fs.readdirSync(path.join(dataDir, "updates"))).toEqual(["1.1.0"]));
+    await eventually(() => expect(fs.existsSync(folder("1.0.0"))).toBe(false));
+    expect(fs.readdirSync(path.join(dataDir, "updates")).toSorted()).toEqual(["1.1.0", "1.3.0"]);
     expect(fs.readFileSync(path.join(folder("1.1.0"), "note"), "utf8")).toBe("1.1.0");
+    // Still offered as downloaded: nothing is fetched twice.
+    expect(shown(module).download).toBe("ready");
+    expect(artifactRequests()).toBe(1);
     await module.close();
   });
 
@@ -718,7 +726,7 @@ describe("downloading a newer version", () => {
       await module.close();
     });
 
-    it("IM-02 a copy that cannot replace its file names why, links the release page, and offers no approval", async () => {
+    it("IM-02 a copy that cannot replace its file keeps the download, says what to do with it, refuses the click with why, and offers no approval", async () => {
       const cases = [
         ["read-only", "Gates Local cannot replace its own file because its folder is read-only. Download version 1.3.0 from the release page and replace the file yourself."],
         ["no-permission", "Gates Local cannot replace its own file because you do not have permission to change its folder. Download version 1.3.0 from the release page and replace the file yourself."],
@@ -731,7 +739,7 @@ describe("downloading a newer version", () => {
         await module.check();
         await settled(module);
         const check = shown(module);
-        expect(check).toMatchObject({ download: "ready", lines: [sentence], page: `${page.base.href}/latest` });
+        expect(check).toMatchObject({ download: "ready", lines: ["Update 1.3.0 is downloaded and checked. Put it in place of this file."], page: `${page.base.href}/latest` });
         expect(check).not.toHaveProperty("restart");
         expect(module.status()).not.toHaveProperty("approval");
         expect(await module.prepare("anything")).toEqual({ state: "blocked", message: sentence });
@@ -804,14 +812,17 @@ describe("downloading a newer version", () => {
         await module.close();
       });
 
-      it("IM-W4 switching automatic checks off keeps the running version's installer", async () => {
+      it("IM-W4 switching automatic checks off keeps the running version's installer and the finished download", async () => {
         const kept = keepInstaller();
         serveWin();
         const { module, sw } = windows();
         await module.check();
         await settled(module);
+        // Another version's folder, which the switch's cleanup deletes: once it is gone, the cleanup has run.
+        fs.mkdirSync(folder("1.0.0"), { recursive: true });
         sw.set(false);
-        await eventually(() => { if (fs.existsSync(folder())) throw new Error("download still there"); });
+        await eventually(() => { if (fs.existsSync(folder("1.0.0"))) throw new Error("cleanup has not run"); });
+        expect(fs.existsSync(folder())).toBe(true);
         expect(fs.existsSync(kept)).toBe(true);
         await module.close();
       });

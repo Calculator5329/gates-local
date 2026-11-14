@@ -18,6 +18,7 @@ export const IPC = {
   modelsFolder: "gates-local:models-folder",
   openModelsFolder: "gates-local:open-models-folder",
   pickFolder: "gates-local:pick-folder",
+  showUpdate: "gates-local:show-update",
   state: "gates-local:state",
   titleBar: "gates-local:title-bar",
 } as const;
@@ -89,6 +90,8 @@ export interface GatesLocalBridge {
   openModelsFolder(): Promise<string | null>;
   /** The system's folder dialog, opened at `start`: the folder picked, or null when it was closed. Nothing is read or written. */
   pickFolder(start?: string): Promise<string | null>;
+  /** Show a downloaded update's checked file in the file manager, for a copy that cannot install it by itself; a sentence if it could not. */
+  showUpdate(version: string): Promise<string | null>;
 }
 
 /** The one place the server URL shape is defined. */

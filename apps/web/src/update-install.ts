@@ -73,9 +73,10 @@ export async function installUpdate(act: ActionCall, start: StartUpdate, prior: 
       // The footer asked once, for this approval: if the server's moved on, nothing installs and its ask shows the new words.
       if (approved !== undefined && snapshot.approval !== approved) return null;
       const work = updateWork(snapshot.activity);
-      const back = snapshot.lastCheck?.state === "available" ? `Falls back to ${snapshot.lastCheck.current} if a step fails.` : undefined;
-      // the footer's ask's lines (update-work.ts), so both say the same once
-      if (approved === undefined && (changed || (work?.length ?? 1) > 0) && !window.confirm(`${offer.ask}\n\n${[...workLines(work), ...(back === undefined ? [] : [back])].join("\n")}`)) return null;
+      // the footer's ask's lines (update-work.ts), so both say the same once; it asks only when something
+      // running would stop, or the target changed since the person saw it (decision 23)
+      const stops = (snapshot.activity?.length ?? 1) > 0;
+      if (approved === undefined && (changed || stops) && !window.confirm([offer.ask, ...(work?.length === 0 ? [] : ["", ...workLines(work)])].join("\n"))) return null;
       const prepared = await act("update.prepare", { approval: snapshot.approval }, "reserve the approved update");
       if (!prepared.ok) { error = prepared.message; return error; }
       if (prepared.value.state === "blocked") { error = prepared.value.message; return error; }

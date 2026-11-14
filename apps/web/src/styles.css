@@ -220,7 +220,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .sb-foot .ibtn{width:32px;height:32px;position:relative}
 .sb-foot .ibtn:active,.sb-foot .on{background:var(--selected);color:var(--foreground)}
 .sb-foot .ibtn[aria-disabled]{background:none;cursor:default}
-.sb-foot .fg{color:var(--foreground)}.sb-foot .red{color:var(--red)}.sb-foot .green{color:var(--green)}
+.sb-foot .fg{color:var(--foreground)}.sb-foot .red,.sb-foot .ibtn.red{color:var(--red)}.sb-foot .green,.sb-foot .ibtn.green{color:var(--green)}
 .fdot{position:absolute;top:calc(50% - 14px);left:calc(50% + 8px);width:6px;height:6px;border-radius:50%;color:var(--amber);background:currentColor}
 .ring{position:absolute;inset:0;margin:auto;width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:2}
 .sb-foot .end{margin-left:auto;display:flex}

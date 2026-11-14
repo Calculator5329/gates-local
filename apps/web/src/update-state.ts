@@ -1,5 +1,4 @@
 import type { UpdateBlocked, UpdateCheck, UpdateStatus } from "@gates-local/contracts";
-import { esc } from "./ui.tsx";
 
 /**
  * The sidebar's update icon, one state per row of the footer table:
@@ -8,15 +7,18 @@ import { esc } from "./ui.tsx";
  */
 export type UpdateIconState = "idle" | "checking" | "available" | "downloading" | "ready" | "updating" | "failed" | "external";
 
-/** What a click does: check now, update (after a confirm), download, restart into a downloaded version, open the release page or the version row. */
-export type UpdateClick = "check" | "update" | "download" | "restart" | "page" | "settings";
+/** What a click does: check now, update (after a confirm), download, restart into a downloaded version, open the release page, the download's folder, or the version row. */
+export type UpdateClick = "check" | "update" | "download" | "restart" | "page" | "folder" | "settings";
 
+/**
+ * The icon says the state; its name (aria-label and tooltip) is a few words
+ * and nothing more (audit of 0.2.4, the tooltip rule). Settings › Updates
+ * says the rest.
+ */
 export interface UpdateIcon {
   readonly state: UpdateIconState;
-  /** aria-label: plain words. */
+  /** aria-label and the tooltip: plain words, one to three. */
   readonly label: string;
-  /** data-tip: HTML, every server value escaped. */
-  readonly tip: string;
   /** null while busy: the button stays focusable and keeps its tooltip, and a click does nothing. */
   readonly click: UpdateClick | null;
   readonly busy: boolean;
@@ -24,6 +26,8 @@ export interface UpdateIcon {
   /** downloading: 0 to 1, or null when the status carries no numbers (a turning arc). */
   readonly progress?: number | null;
   readonly page?: string;
+  /** folder: the downloaded version whose folder the click opens. */
+  readonly target?: string;
   /** The click also dismisses the shown result (a stopped or refused update) as it acts on it. */
   readonly dismiss?: boolean;
 }
@@ -59,7 +63,8 @@ export interface UpdateInput {
    * server's lines say why not, and a downloaded version shows as external.
    */
   readonly canRestart?: boolean;
-  readonly clock?: (ms: number) => string;
+  /** The desktop app can open a downloaded version's folder (canShowUpdate); without it the click opens the release page. */
+  readonly canShow?: boolean;
 }
 
 /** The one clock time every update surface shows ("9:05 AM"). */
@@ -69,30 +74,13 @@ export const ver = (v: string) => v.replace(/^v(?=\d)/, "");
 /** The one button name for closing into a newer version, on a clone and on an installed copy. */
 export const RESTART = "Restart to update";
 
-const lines = (...l: (string | false | undefined)[]) => l.filter((x): x is string => typeof x === "string" && x !== "").join("<br>");
-const changes = (n: number) => (n === 1 ? "1 change" : `${n} changes`);
 const CHECK = "Check for updates";
 export const ITSELF = "Can't update itself";
 const FAILED = "Update failed";
-const NOT_CHECKED = "Could not check for updates";
-const AGAIN = "Click to check again.";
-const PAGE = "Click to open the release page.";
-const SETTINGS = "Click to open Settings › General.";
+const NOT_CHECKED = "Couldn't check";
 
-/** What an update brings: its release notes, or else its change titles, five at most. */
-function notes(text: string | undefined, titles: readonly string[]): string[] {
-  const all = text === undefined ? titles : text.split("\n").filter((l) => l.trim() !== "");
-  return [...all.slice(0, 5).map(esc), ...(all.length > 5 ? [`and ${all.length - 5} more`] : [])];
-}
-
-/** The first server line in bold, the rest plain, all escaped. */
-function said(ls: readonly string[]): string {
-  const [first, ...rest] = ls;
-  return lines(first !== undefined && `<b>${esc(first)}</b>`, ...rest.map(esc));
-}
-
-function icon(state: UpdateIconState, label: string, tip: string, click: UpdateClick | null, more: Partial<UpdateIcon> = {}): UpdateIcon {
-  return { state, label, tip, click, busy: click === null, dot: null, ...more };
+function icon(state: UpdateIconState, label: string, click: UpdateClick | null, more: Partial<UpdateIcon> = {}): UpdateIcon {
+  return { state, label, click, busy: click === null, dot: null, ...more };
 }
 
 /** A clone's target this window can install now: a checked commit and the server's approval for it. Without one, a click checks first. */
@@ -105,7 +93,7 @@ export function restartable(status: UpdateStatus | null, desktop: boolean): bool
 }
 
 /**
- * Whether a new check can change why a check could not say ("Could not check"); otherwise the check
+ * Whether a new check can change why a check could not say ("Couldn't check"); otherwise the check
  * ran and this copy cannot update itself until the person acts ("Can't update itself"). Exhaustive,
  * so a new reason fails the build until it is placed.
  */
@@ -131,74 +119,65 @@ export function retryable(reason: UpdateBlocked): boolean {
   }
 }
 
-function blockedIcon(check: Extract<UpdateCheck, { state: "cannot-check" }>, when: string): UpdateIcon {
-  if (retryable(check.reason)) return icon("failed", NOT_CHECKED, lines(said(check.lines), `Tried at ${when}.`, AGAIN), "check");
-  if (check.reason === "no-key" && check.page !== undefined) return icon("external", ITSELF, lines(said(check.lines), PAGE), "page", { page: check.page });
-  return icon("external", ITSELF, lines(said(check.lines), SETTINGS), "settings");
+function blockedIcon(check: Extract<UpdateCheck, { state: "cannot-check" }>): UpdateIcon {
+  if (retryable(check.reason)) return icon("failed", NOT_CHECKED, "check");
+  if (check.reason === "no-key" && check.page !== undefined) return icon("external", ITSELF, "page", { page: check.page });
+  return icon("external", ITSELF, "settings");
 }
 
-function installedIcon(check: Extract<UpdateCheck, { state: "newer" }>, canRestart: boolean, downloading: boolean, when: string): UpdateIcon {
-  const tried = `Checked at ${when}.`;
-  if (!check.forThisCopy) return icon("external", ITSELF, lines(said(check.lines), tried, PAGE), "page", { dot: "amber", page: check.page });
+function installedIcon(check: Extract<UpdateCheck, { state: "newer" }>, canRestart: boolean, canShow: boolean, downloading: boolean): UpdateIcon {
+  const target = ver(check.target);
+  if (!check.forThisCopy) return icon("external", ITSELF, "page", { dot: "amber", page: check.page });
   switch (check.download) {
     case undefined:
-      if (downloading) return icon("downloading", `Downloading version ${check.target}`, `<b>Starting the download of version ${esc(check.target)}…</b>`, null, { progress: null });
-      return icon("available", `Download version ${check.target}`, lines(said(check.lines), tried, "Click to download it. You can keep chatting."), "download", { dot: "amber" });
+      if (downloading) return icon("downloading", `Downloading ${target}`, null, { progress: null });
+      return icon("available", `Download ${target}`, "download", { dot: "amber" });
     case "downloading":
-      return icon("downloading", `Downloading version ${check.target}`, said(check.lines), null, { progress: null });
+      return icon("downloading", `Downloading ${target}`, null, { progress: null });
     case "ready":
-      return canRestart
-        ? icon("ready", RESTART, lines(`<b>${RESTART}.</b> Version ${esc(check.target)} is downloaded.`, "Gates Local will close, update and reopen."), "restart", { dot: "green" })
-        : icon("external", ITSELF, lines(said(check.lines), PAGE), "page", { dot: "amber", page: check.page });
+      // Ready is the green up-arrow alone, no dot (audit of 0.2.4, decision 22). A copy that cannot install it opens the checked file's folder.
+      if (canRestart) return icon("ready", RESTART, "restart");
+      return canShow
+        ? icon("external", ITSELF, "folder", { dot: "amber", target: check.target })
+        : icon("external", ITSELF, "page", { dot: "amber", page: check.page });
     case "bad":
     case "failed":
     case "disk":
-      return icon("failed", FAILED, lines(said(check.lines), AGAIN), "check");
+      return icon("failed", FAILED, "check");
   }
 }
 
 /** The icon for a status, or null where the icon is not shown (a browser tab, a phone). */
-export function updateIcon({ status, desktop, checking = false, installing = false, error = null, clickError = null, downloading = false, canRestart = false, clock: at = clock }: UpdateInput): UpdateIcon | null {
+export function updateIcon({ status, desktop, checking = false, installing = false, error = null, clickError = null, downloading = false, canRestart = false, canShow = false }: UpdateInput): UpdateIcon | null {
   if (!desktop) return null;
-  if (installing || status?.installing === true) {
-    const how = status?.version.kind === "installed" ? "Gates Local will close, update and reopen." : "Gates Local closes while dependencies install and the app builds, then opens again.";
-    return icon("updating", "Closing to update…", lines("<b>Closing to update…</b>", how), null);
-  }
-  if (checking) return icon("checking", "Checking for updates…", "<b>Checking for updates…</b>", null);
-  if (clickError !== null && !outdated(clickError, status?.lastCheck)) return icon("failed", clickError.click === "check" ? NOT_CHECKED : "Download failed", lines(`<b>${esc(clickError.message)}</b>`, AGAIN), "check");
+  if (installing || status?.installing === true) return icon("updating", "Closing to update…", null);
+  if (checking) return icon("checking", "Checking for updates…", null);
+  if (clickError !== null && !outdated(clickError, status?.lastCheck)) return icon("failed", clickError.click === "check" ? NOT_CHECKED : "Download failed", "check");
   // A retry installs only a fresh target; without one the click checks first.
-  const retry = fresh(status)
-    ? { click: "update" as const, words: "Click to try again." }
+  const retry: UpdateClick = fresh(status)
+    ? "update"
     : canRestart && status?.lastCheck?.state === "newer" && status.lastCheck.restart === true
-      ? { click: "restart" as const, words: "Click to try again." }
-      : { click: "check" as const, words: AGAIN };
-  if (error !== null) return icon("failed", FAILED, lines(`<b>${esc(error)}</b>`, retry.words), retry.click);
+      ? "restart"
+      : "check";
+  if (error !== null) return icon("failed", FAILED, retry);
   const result = status?.result;
   if (result && result.outcome !== "updated") {
-    const told = [`<b>${esc(result.line)}</b>`, result.logPath && `Full log: ${esc(result.logPath)}`, ...(result.commands ?? []).map(esc)];
     // A failed rollback leaves commands to run: Settings › General shows them and keeps the note.
-    if (result.outcome === "rollback-failed") return icon("failed", FAILED, lines(...told, SETTINGS), "settings");
-    return icon("failed", FAILED, lines(...told, retry.words), retry.click, { dismiss: true });
+    if (result.outcome === "rollback-failed") return icon("failed", FAILED, "settings");
+    return icon("failed", FAILED, retry, { dismiss: true });
   }
   const version = status?.version;
-  if (version?.kind === "not-a-clone") return icon("external", ITSELF, lines("<b>This copy cannot update itself.</b>", "It was not downloaded with git clone, so it cannot check for updates.", "Click to see the version in Settings."), "settings");
-  if (version?.kind === "unreadable") return icon("external", ITSELF, lines("<b>This copy cannot update itself.</b>", `Could not read the version: ${esc(version.detail)}.`, "Click to see the version in Settings."), "settings");
+  if (version?.kind === "not-a-clone" || version?.kind === "unreadable") return icon("external", ITSELF, "settings");
   const check = status?.lastCheck ?? null;
-  if (check === null) return icon("idle", CHECK, lines(`<b>${CHECK}</b>`, "Not checked since Gates Local started."), "check");
-  const when = at(check.checkedAt);
+  if (check === null) return icon("idle", CHECK, "check");
   switch (check.state) {
     case "up-to-date":
-      return icon("idle", CHECK, lines(`<b>${CHECK}</b>`, version?.kind === "installed" ? `No newer version was found. Checked at ${when}.` : `Up to date (${esc(ver(check.current))}). Checked at ${when}.`), "check");
+      return icon("idle", CHECK, "check");
     case "available":
-      return icon("available", `Update to ${ver(check.target)}`, lines(
-        `<b>Update to ${esc(ver(check.target))}</b>`,
-        `${changes(check.total)} from ${esc(ver(check.current))} to ${esc(ver(check.target))}. Checked at ${when}.`,
-        ...notes(check.notes, check.changes),
-        retry.click === "update" ? "Click to update. Gates Local asks first, then closes while it updates and opens again." : "Click to check it again before updating.",
-      ), retry.click, { dot: "amber" });
+      return icon("available", `Update to ${ver(check.target)}`, retry, { dot: "amber" });
     case "newer":
-      return installedIcon(check, canRestart, downloading, when);
+      return installedIcon(check, canRestart, canShow, downloading);
     case "cannot-check":
-      return blockedIcon(check, when);
+      return blockedIcon(check);
   }
 }

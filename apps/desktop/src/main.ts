@@ -24,7 +24,7 @@ import { approvedHandoffEnv, cannotUpdate, launchApprovedUpdate, onceUntilFailed
 import { withUpdateControl } from "./update-control.ts";
 import type { UpdateInstallRequest } from "@gates-local/contracts";
 import { acknowledgeStartup, reportStartupFailure, STARTUP_TOKEN_ENV } from "../../server/src/update/startup.ts";
-import { verifyPrepared } from "../../server/src/update/installed/download.ts";
+import { verifyKept, verifyPrepared } from "../../server/src/update/installed/download.ts";
 import { installedFeed, RESTART_ENV } from "../../server/src/update/installed/module.ts";
 import { processRecord } from "../../server/src/update/identity.ts";
 import { uptime } from "node:os";
@@ -342,6 +342,16 @@ function run(start: StartApp = {}): void {
     // shell.openPath resolves to an error message, "" when it worked
     const failed = await shell.openPath(dataDir);
     return failed === "" ? null : `Couldn't open the folder: ${failed}`;
+  });
+  // A checked download this copy cannot install by itself: show its file, checked again, to run from there (decision 24).
+  // Only a version name crosses from the renderer; the folder is main's own, and nothing is deleted.
+  ipcMain.handle(IPC.showUpdate, async (event, version: unknown): Promise<string | null> => {
+    if (!fromOurWindow(event)) throw new Error("refused");
+    if (typeof version !== "string") return "No downloaded update was named.";
+    const kept = await verifyKept({ dataDir, running: app.getVersion(), keys: feed.keys, platform: process.platform, arch: process.arch, version });
+    if (!kept.ok) return `The download did not pass its check: ${kept.reason}. Use Check for updates.`;
+    shell.showItemInFolder(kept.prepared.file);
+    return null;
   });
   // Row H for an installed copy: after the server commits the approval, re-verify, write `approved`, start the watcher, quit.
   const startInstalled = (request: UpdateInstallRequest): Promise<UpdateAndRestartResult> => {
