@@ -295,9 +295,12 @@ export function imageRoom(gpu: GpuStatus | undefined, cpuOnly: boolean | undefin
   return cardBytes(gpu.totalBytes);
 }
 
-/** The picker's words: on a GPU too small for any default why, and on the CPU how slow. */
-const roomWords = (room: number | undefined): { noGpu?: string; slow?: string } =>
-  room === 0 ? { slow: SLOW } : room !== undefined && room < MIN_ROOM ? { noGpu: NO_GPU } : {};
+/**
+ * The picker's words: on a GPU too small for any default why, and on the CPU how slow. A card that
+ * renders (a room read only for a ComfyUI on this computer) is where the fit hands memory off.
+ */
+const roomWords = (room: number | undefined): { noGpu?: string; slow?: string; unloadsChat?: boolean } =>
+  room === 0 ? { slow: SLOW } : room === undefined ? {} : room < MIN_ROOM ? { noGpu: NO_GPU } : { unloadsChat: true };
 
 export function createImageModule(deps: ImageDeps): ImageModule {
   const log = deps.log ?? ((line: string) => console.error(`[image] ${line}`));
@@ -338,6 +341,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   /** What starts and stops the ComfyUI at `baseUrl`: the app's own engine at its address, else the unit. */
   const serviceAt = (baseUrl: string): ComfyService =>
     deps.own !== undefined && deps.own.installed() && deps.own.address().replace(/\/$/, "") === baseUrl ? deps.own : systemUnit;
+  /** The app's own engine is at `baseUrl`: Settings says Ready for it stopped, never Found. */
+  const ownMark = (baseUrl: string): { own?: true } => deps.own !== undefined && serviceAt(baseUrl) === deps.own ? { own: true } : {};
   const client = (baseUrl: string) => createComfyClient(baseUrl, deps);
   const filesPath = path.join(deps.dataDir, FILES_NAME);
   let known: KnownFiles | undefined;
@@ -407,7 +412,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     const starting =unit.present && !["inactive", "failed"].includes(unit.activeState);
     if (jobs.size > 0) return status;
     if (owned?.baseUrl === cfg.baseUrl && (!unit.active || unit.pid !== owned.pid)) owned = undefined;
-    return update({ state: starting ? "starting" : unit.present ? "stopped" : "missing", owner: owned?.baseUrl === cfg.baseUrl ? "app" : starting ? "external" : "none", baseUrl: cfg.baseUrl, ...marked(cfg.baseUrl),
+    return update({ state: starting ? "starting" : unit.present ? "stopped" : "missing", owner: owned?.baseUrl === cfg.baseUrl ? "app" : starting ? "external" : "none", baseUrl: cfg.baseUrl, ...marked(cfg.baseUrl), ...ownMark(cfg.baseUrl),
       detail: starting ? "ComfyUI is running or changing state but its HTTP interface is not ready yet." : unit.present ? "ComfyUI will start when you make an image." : missingWords(cfg.baseUrl, true) });
   };
   const measure = deps.readGpu ?? (async () => {
@@ -619,7 +624,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     owned = undefined;
     clearIdle();
     deps.memory?.engineGone();
-    if (jobs.size === 0) update({ state: "stopped", owner: "none", baseUrl, detail: "ComfyUI stopped on its own. It starts again when you make an image; its log says why." });
+    if (jobs.size === 0) update({ state: "stopped", owner: "none", baseUrl, ...ownMark(baseUrl), detail: "ComfyUI stopped on its own. It starts again when you make an image; its log says why." });
   });
   const module: ImageModule = {
     current: () => status,
@@ -914,7 +919,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
         const baseUrl = owned.baseUrl; owned = undefined;
         stuck.delete(baseUrl);
         deps.memory?.engineGone();
-        update({ state: "stopped", owner: "none", baseUrl });
+        update({ state: "stopped", owner: "none", baseUrl, ...ownMark(baseUrl) });
       }).catch((error: unknown) => {
         // A cancelled reclaim leaves ComfyUI to its idle timer.
         if (signal?.aborted) armIdle();

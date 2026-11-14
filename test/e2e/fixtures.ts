@@ -12,7 +12,7 @@ export type RuntimeMode = "system" | "app";
 export type Seed = number | "design" | "design-code" | "readme" | "usage" | "work-fold";
 export type Sandbox = "ready" | "off";
 /** The image engine the server installs in place of the pinned one (GATES_LOCAL_IMAGE_ENGINE): fake-comfy's engine(). */
-export type FakeEngine = { readonly manifest: Record<string, unknown>; readonly layout: "uv-venv"; readonly address: string };
+export type FakeEngine = { readonly manifest: Record<string, unknown>; readonly layout: "uv-venv"; readonly address: string; readonly build?: Record<string, unknown> };
 
 /** What Chromium fails an in-flight request with when the host's addresses change under it. */
 const NETWORK_CHANGED = "net::ERR_NETWORK_CHANGED";

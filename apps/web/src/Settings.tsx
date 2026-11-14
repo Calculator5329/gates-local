@@ -363,6 +363,12 @@ export function setupSize(download: number, need: number | undefined): string {
   return need === undefined || need <= download ? gb(download) : `${gb(download)} download · ${gb(need)} on disk`;
 }
 
+/**
+ * The server's why ends "set its address in Settings." for every place that shows it; here the
+ * address box is the row under it, so the end says so. Elsewhere the sentence stays whole.
+ */
+export const addressBelow = (why: string): string => why.replace(/set its address in Settings\.$/, "set its address below.");
+
 const SETUP_STEP: Record<ImageSetupProgress["step"], string> = {
   engine: "Downloading the image engine",
   starting: "Starting the image engine",
@@ -384,7 +390,7 @@ function ImageSetUp() {
   useEffect(() => { void loadImageSetup(); }, []);
   if (setup?.why !== undefined || !canSetUp) {
     return (
-      <Row label="Set up images" desc={setup?.why}>
+      <Row label="Set up images" desc={setup?.why === undefined ? undefined : addressBelow(setup.why)}>
         <SetupLink />
       </Row>
     );
@@ -401,9 +407,14 @@ function ImageSetUp() {
   const go = async () => {
     if (await run(updateSettings({ imageGen: true }))) await run(startImageSetup());
   };
+  // the sizes take their own line under the sentence, so neither squeezes the other or moves the button
+  const size = (
+    <span className="mono setup-size" data-testid="settings.images.setup-size">
+      {total === undefined ? <Skel w="4em" /> : running ? `${gb(progress.completedBytes)} of ${gb(total)}` : setupSize(total, setup?.needBytes)}
+    </span>
+  );
   return (
-    <Row label={setup?.model?.name ?? <Skel w="9em" />} desc={desc} err={err ?? (progress?.step === "error" ? progress.message ?? null : null)} busy={setup === undefined}>
-      <span className="mono" data-testid="settings.images.setup-size">{total === undefined ? <Skel w="4em" /> : running ? `${gb(progress.completedBytes)} of ${gb(total)}` : setupSize(total, setup?.needBytes)}</span>
+    <Row label={setup?.model?.name ?? <Skel w="9em" />} desc={<>{desc}{size}</>} err={err ?? (progress?.step === "error" ? progress.message ?? null : null)} busy={setup === undefined}>
       <button type="button" className="btn" data-testid="settings.images.set-up" disabled={setup === undefined || running || short} onClick={() => void go()}>
         <span className="steady">
           <span aria-hidden={running}>{progress?.step === "error" ? "Try again" : "Set up images"}</span>
@@ -423,7 +434,9 @@ function imageFace(status: ImageStatus | "na" | undefined) {
   const state = status === undefined || status === NA || status.state === "off" ? "checking" : status.state;
   const set = status !== undefined && status !== NA && status.addressSet === true;
   const mine = status !== undefined && status !== NA && status.owner === "app";
-  const word = { checking: "Checking", missing: set ? "Not running" : "Not connected", stopped: "Found", starting: "Starting", ready: mine ? "Running" : "Connected", busy: "Making an image", error: "Something went wrong" }[state];
+  // "Found" is for discovering a ComfyUI of someone else's; the app's own engine, stopped, is ready to start
+  const own = status !== undefined && status !== NA && status.own === true;
+  const word = { checking: "Checking", missing: set ? "Not running" : "Not connected", stopped: own ? "Ready" : "Found", starting: "Starting", ready: mine ? "Running" : "Connected", busy: "Making an image", error: "Something went wrong" }[state];
   const usable = state === "ready" || state === "busy" || state === "stopped";
   // ComfyUI not being there is a thing to set up; only a real error is red
   return { state, word, usable, dot: usable ? "ok" : state === "error" ? "err" : state === "missing" ? "warn" : "run" };
@@ -467,6 +480,8 @@ function Images() {
   const [genErr, runGen] = useAct();
   const [urlErr, runUrl] = useAct();
   const none = useStore(noImageEngine);
+  // true only where a picture's fit asks the chat model to leave: this computer's card, never the processor or a ComfyUI elsewhere
+  const unloads = useStore((s) => s.imagePresets !== undefined && s.imagePresets !== NA && s.imagePresets.unloadsChat === true);
   const on = settings !== NA && settings?.imageGen === true;
   const comfy = settings === NA ? undefined : settings?.comfyUrl;
   const address = (status !== undefined && status !== NA ? status.baseUrl : undefined) ?? comfy ?? "http://127.0.0.1:8188";
@@ -511,7 +526,7 @@ function Images() {
       <Head title="Image generation" />
       {settings === NA || settings === undefined ? null : (
         <Grp>
-          <Row label="Generate images" desc={locked ? `${on ? "On" : "Off"}. ${COMPUTER_ONLY}` : "The chat model unloads while an image renders."} err={genErr}>
+          <Row label="Generate images" desc={locked ? `${on ? "On" : "Off"}. ${COMPUTER_ONLY}` : unloads ? "The chat model unloads while an image renders." : undefined} err={genErr}>
             {locked ? null : <button type="button" className="switch" role="switch" data-testid="settings.images.enable" aria-checked={on} aria-label="Generate images" onClick={() => void runGen(updateSettings({ imageGen: !on }))} />}
           </Row>
         </Grp>

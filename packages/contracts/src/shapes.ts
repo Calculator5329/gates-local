@@ -830,6 +830,8 @@ export const ImageStatus = S.Struct({
   detail: S.optional(S.String),
   /** The address is the one the person set in Settings (not the app's own engine or the default): nothing answering there means "not running", never "not set up". */
   addressSet: S.optional(S.Boolean),
+  /** The address is the app's own engine (installed by Set up images), running or not: never one found elsewhere. */
+  own: S.optional(S.Boolean),
   /**
    * With image generation off: no image engine anywhere (none of the app's, no address set, no
    * ComfyUI service, nothing answering at the default address). Settings then offers Set up images
@@ -950,6 +952,12 @@ export const ImagePresets = S.Struct({
   noGpu: S.optional(S.String),
   /** Set when ComfyUI runs on the processor: pictures are made, slowly; how slowly, in words. */
   slow: S.optional(S.String),
+  /**
+   * Set when ComfyUI is on this computer and renders on its graphics card: the only case where a
+   * picture's fit asks the chat model to leave memory (image/module.ts fit). Absent on the
+   * processor, for a ComfyUI elsewhere, and before the card is read.
+   */
+  unloadsChat: S.optional(S.Boolean),
   /** The download running now, as its last image.download push said. */
   download: S.optional(ImageDownload),
   /**

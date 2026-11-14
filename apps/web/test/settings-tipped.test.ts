@@ -52,8 +52,12 @@ it("no label, row or value in any section carries a tooltip, and every tip is a 
 });
 
 it("F4: Image generation says what an image costs the chat model in its visible line, once, and not in the tooltip", () => {
-  const html = render("images");
   const sentence = "The chat model unloads while an image renders.";
+  // only where it is true: nothing is said until this computer's card is known to render
+  store.setState({ imagePresets: undefined });
+  expect(render("images")).not.toContain(sentence);
+  store.setState({ imagePresets: { ...methodSamples["image.presets"].result, unloadsChat: true } });
+  const html = render("images");
   expect(html.split(sentence).length - 1).toBe(1);
   expect(html).not.toMatch(/data-tip="[^"]*chat model unloads/);
   expect(html).toMatch(/<span class="d">[^<]*The chat model unloads while an image renders\./);

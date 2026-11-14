@@ -60,6 +60,8 @@ const pctOf = (done: number, total: number | undefined) => (total ? Math.round((
 // Transfer primary-action focus only to that immediate replacement.
 let primaryFocus = false;
 const NO_FILES: readonly AttachedFile[] = [];
+/** The field in Image mode: what to type for a picture. */
+export const IMAGE_PLACEHOLDER = "Describe a picture…";
 
 /** Tokens the open thread holds: the last reply's prompt plus its answer. */
 function usedTokens(s: State): number {
@@ -208,7 +210,9 @@ export function Composer() {
   // before the first read nothing is known: the words of a ready app, never a problem not yet seen;
   // past the boot bound with still nothing read, one neutral word until the runtime answers
   // a message typed during the first download says when it goes once, in its queue row (chat row 29)
-  const placeholder = noModel && ready ? (why ?? "Download a model to start chatting") : boot ? PLACEHOLDER.ready : none ? CONNECTING : PLACEHOLDER[rt];
+  // Image on: Send goes to the picture model, whatever the chat engine is doing; only a dropped server stops it
+  const placeholder = drawing && !boot && !none && rt !== "offline" ? IMAGE_PLACEHOLDER
+    : noModel && ready ? (why ?? "Download a model to start chatting") : boot ? PLACEHOLDER.ready : none ? CONNECTING : PLACEHOLDER[rt];
 
   // A message queued behind a reply is checked when it goes, and memory a reply holds may be freed by stopping it.
   const memNo = v?.k === "no" && !isStreaming && !freed && !editing;

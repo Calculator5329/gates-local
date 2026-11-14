@@ -8,14 +8,15 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type ReleaseServer, removeDir, startReleaseServer, tmpDir } from "../runtime/test-fakes.ts";
 import type { InstallProgress } from "../runtime/types.ts";
 import { engineDir, engineRoot } from "./engine.ts";
-import { LINUX_ENGINE, linuxBuild, linuxPinned, type LinuxPins } from "./linux-build.ts";
+import { LINUX_ENGINE, linuxBuild, linuxPinned, type LinuxPins, uvDownloads } from "./linux-build.ts";
 import { createOwnComfy } from "./own.ts";
 
 const FAKE_UV = `#!/bin/sh
 echo "$*" >> "$FAKE_UV_LOG"
 case "$1" in
   venv) for a; do last=$a; done; mkdir -p "$last/bin"; printf '#!/bin/sh\\n' > "$last/bin/python"; chmod +x "$last/bin/python" ;;
-  pip) if [ -n "$FAKE_UV_FAIL" ]; then echo "error: no matching hash for torch" >&2; exit 1; fi ;;
+  pip) if [ -n "$FAKE_UV_FAIL" ]; then echo "error: no matching hash for torch" >&2; exit 1; fi
+    printf 'Resolved 2 packages in 1ms\\nDownloading torch (0.5KiB)\\n Downloaded torch\\nPrepared 2 packages in 1ms\\n' >&2 ;;
 esac
 `;
 
@@ -88,7 +89,10 @@ describe.skipIf(process.platform === "win32")("linuxBuild", () => {
     expect(calls[1]).toMatch(/^pip sync --require-hashes --index-strategy unsafe-best-match --python \S+\/venv\/bin\/python \S+\/requirements\.lock$/);
     // the lock it synced is the pinned one
     expect(readFileSync(path.join(tree, "requirements.lock"), "utf8")).toBe(pins.lock);
-    // progress counts every part of the one download, up to its whole size
+    // progress counts every part of the one download, up to its whole size; a wheel uv says it
+    // finished counts while the sync still runs (the counter sat at 0.0 GB for the whole engine)
+    const archives = pins.uv.sizeBytes + pins.source.sizeBytes;
+    expect(events.some((e) => e.phase !== "done" && e.receivedBytes === archives + 512)).toBe(true);
     expect(events.at(-1)?.receivedBytes).toBe(plan.bytes);
     expect(events.every((e) => e.totalBytes === plan.bytes)).toBe(true);
   });
@@ -99,6 +103,23 @@ describe.skipIf(process.platform === "win32")("linuxBuild", () => {
     expect(existsSync(engineDir(appDataDir, "0.0.0"))).toBe(false);
     expect(own().installed()).toBe(false);
     expect(leftovers()).toEqual([]);
+  });
+});
+
+describe("uvDownloads, the sync's own lines", () => {
+  it("counts a wheel once uv says it finished, at the size uv gave it, and never past the whole", () => {
+    const read = uvDownloads(3 * 1024 ** 3);
+    expect(read("Resolved 103 packages in 2.10s")).toBe(0);
+    expect(read("Downloading torch (846.4MiB)")).toBe(0);
+    expect(read("Downloading nvidia-cudnn-cu13 (1.1GiB)")).toBe(0);
+    // uv indents the end line; a colour code (FORCE_COLOR) is not part of the name
+    expect(read(" \u001b[1m\u001b[36mDownloaded\u001b[39m\u001b[0m torch")).toBe(Math.round(846.4 * 1024 ** 2));
+    // a download whose size uv did not know adds nothing
+    expect(read("Downloading sympy")).toBe(Math.round(846.4 * 1024 ** 2));
+    expect(read(" Downloaded sympy")).toBe(Math.round(846.4 * 1024 ** 2));
+    expect(read(" Downloaded nvidia-cudnn-cu13")).toBe(Math.round(846.4 * 1024 ** 2) + Math.round(1.1 * 1024 ** 3));
+    expect(read("Downloading triton (2.0GiB)")).toBe(Math.round(846.4 * 1024 ** 2) + Math.round(1.1 * 1024 ** 3));
+    expect(read(" Downloaded triton")).toBe(3 * 1024 ** 3);
   });
 });
 

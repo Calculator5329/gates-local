@@ -8,7 +8,8 @@ import { createClient } from "@gates-local/contracts";
 import { fakeComfy } from "./fake-comfy.ts";
 import { expect, stack, test, waitReady } from "./fixtures.ts";
 
-test.use({ video: "off", allowedErrors: [/WebSocket connection to .* failed/, /Failed to load resource.*503/] });
+// a list of two is passed as [value, options], so the value is wrapped (a bare pair reads as one pattern and its options)
+test.use({ video: "off", allowedErrors: [[/WebSocket connection to .* failed/, /Failed to load resource.*503/], { scope: "test" }] });
 let comfy: Awaited<ReturnType<typeof fakeComfy>>;
 // no engine runs until the app starts its own: the fake answers nothing but 503 until then
 test.beforeEach(async () => { comfy = await fakeComfy(); comfy.down(true); comfy.bare(); comfy.withFolders(); });
@@ -72,6 +73,33 @@ test("one click sets up images: the pop-up shows the one download, Set up images
   // then the engine the app started runs on the graphics card, at its own port
   expect(comfy.engineArgs()).toEqual(expect.arrayContaining(["--port"]));
   expect(comfy.engineArgs()).not.toContain("--cpu");
+  // the composer's model button names the picture model from the start, never "Image model"
+  await expect(page.locator("#modelBtn")).not.toContainText("Image model");
+  await expect(page.locator("#modelBtn")).toHaveAttribute("data-tip", /Klein/);
+});
+
+// Guards F-7 of the fresh-install audit: on Linux the engine is built by a package sync that
+// reports no bytes, and the count sat at 0.0 GB for the whole download. The count follows the
+// sync's own lines now: one wheel in, its size shows; no number is ever a zero held throughout.
+test.describe("at 1024 wide", () => {
+  test.use({ viewport: { width: 1024, height: 768 } });
+  test("setting up on Linux, the count moves as the engine's packages arrive", async ({ page, open }, info) => {
+    await stack.reset("models", 0, undefined, "system", undefined, undefined, false, "ready", comfy.engine({ build: true }));
+    comfy.holdSync(true);
+    await open(); await waitReady(page);
+    await page.keyboard.press("Control+Comma");
+    await page.getByTestId("settings.nav.open-images").click();
+    await page.getByTestId("settings.images.set-up").click();
+    const row = page.locator(".srow", { has: page.getByTestId("settings.images.set-up") });
+    await expect(row).toContainText("Downloading the image engine");
+    const size = page.getByTestId("settings.images.setup-size");
+    // the first wheel (1.0 GB) is in and the sync is held before the second
+    const counted = await expect(size).toHaveText(/^1\.0\sGB of \d+\.\d\sGB$/, { timeout: 10_000 }).then(() => true, () => false);
+    await shot(page, ".srow:has([data-testid='settings.images.set-up'])", "[data-testid='settings.images.setup-size']", info.outputPath("row5.png"));
+    expect(counted, `the count with one wheel in: ${await size.textContent()}`).toBe(true);
+    comfy.holdSync(false);
+    await expect(page.getByTestId("settings.images.enable")).toBeVisible({ timeout: 60_000 });
+  });
 });
 
 // Guards the owner's ask: where images cannot run, the app says so plainly.

@@ -121,7 +121,12 @@ export type EngineInstallOptions = {
   progressIntervalMs?: number;
 };
 
-const EngineKnob = Schema.Struct({ manifest: InstallManifest, layout: Schema.Literals(["windows-portable", "uv-venv"]), address: Schema.String });
+/** linux-build.ts's pins, for a test that builds its fake engine the way Linux does (uv and a lock). */
+const BuildKnob = Schema.Struct({
+  version: Schema.String, python: Schema.String, uv: InstallManifest, uvDir: Schema.String,
+  source: InstallManifest, sourceDir: Schema.String, lock: Schema.String, wheelBytes: Schema.Number,
+});
+const EngineKnob = Schema.Struct({ manifest: InstallManifest, layout: Schema.Literals(["windows-portable", "uv-venv"]), address: Schema.String, build: Schema.optional(BuildKnob) });
 export type EngineKnob = typeof EngineKnob.Type;
 
 /**

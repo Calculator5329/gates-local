@@ -36,6 +36,8 @@ setInterval(() => {}, 60_000);
 `;
 /** Each served file's size: enough for a progress bar to move. */
 const FILE_BYTES = 4 * 1024 * 1024;
+/** One word for sh: single quotes, an inner quote closed, escaped and reopened. */
+const quoted = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
 export async function fakeComfy() {
   let complete = false, missingModel = false, cuda = false, unlisted = false, down = false;
@@ -48,6 +50,9 @@ export async function fakeComfy() {
   let viewPng: Buffer = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
   /** engine(): the fake engine's tar.gz, its folder, and the arguments its last run started with. */
   let engineArchive: Buffer | undefined, engineDir: string | undefined, engineArgs: string[] | undefined;
+  /** engine({ build: true }): uv's and the source's archives by path, and the file whose presence holds the sync. */
+  const buildParts = new Map<string, Buffer>();
+  let syncHold: string | undefined;
   /** Held downloads: each ends its response when released. */
   const held = new Set<() => void>();
   /** A held GET trickles 16 KiB every 100 ms, never the last piece, until released or the app stops it. */
@@ -85,6 +90,8 @@ export async function fakeComfy() {
     const url = new URL(req.url ?? "/", "http://fake");
     if (url.pathname.includes("/resolve/")) { serveFile(req.method ?? "GET", req.headers.range, path.basename(url.pathname), res); return; }
     if (url.pathname === ENGINE_PATH && engineArchive !== undefined) { res.writeHead(200, { "content-length": String(engineArchive.length) }); res.end(engineArchive); return; }
+    const part = buildParts.get(url.pathname);
+    if (part !== undefined) { res.writeHead(200, { "content-length": String(part.length) }); res.end(part); return; }
     if (url.pathname === "/__engine/up") {
       down = false; engineArgs = JSON.parse(Buffer.concat(chunks).toString("utf8") || "[]") as string[];
       // as ComfyUI does: started with --base-directory, its model folders are that folder's models/
@@ -192,7 +199,7 @@ export async function fakeComfy() {
      * (stack.reset's engine). Its "python" answers for this fake while it runs: up when started,
      * down when stopped. Pass the result to stack.reset; nothing is fetched from anywhere else.
      */
-    engine: (): FakeEngine => {
+    engine: (opts: { build?: boolean } = {}): FakeEngine => {
       const root = path.join(homedir(), ".cache", "gates-local-e2e");
       mkdirSync(root, { recursive: true });
       engineDir = mkdtempSync(path.join(root, "comfy-engine-"));
@@ -209,7 +216,50 @@ export async function fakeComfy() {
         version: "0.0.0-test", url: `${url}${ENGINE_PATH}`, sha256: createHash("sha256").update(engineArchive).digest("hex"),
         sizeBytes: engineArchive.length, format: "tar.gz", verified: true, source: "test/e2e/fake-comfy.ts",
       };
-      return { manifest, layout: "uv-venv", address: url };
+      if (opts.build !== true) return { manifest, layout: "uv-venv", address: url };
+      // Built as Linux builds it (image/linux-build.ts): uv is a script that makes the venv's
+      // "python" (the fake engine's), and for the sync prints what uv prints with its output piped,
+      // then waits while holdSync(true) holds it. Its wheels "weigh" 3 GiB; nothing is fetched.
+      syncHold = path.join(engineDir, "sync-hold");
+      const python = `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} "$(dirname "$0")/../../ComfyUI/engine.mjs" ${JSON.stringify(url)} "$@"\n`;
+      const uv = [
+        "#!/bin/sh",
+        'case "$1" in',
+        `  venv) for a; do last=$a; done; mkdir -p "$last/bin"; printf '%s' ${quoted(python)} > "$last/bin/python"; chmod +x "$last/bin/python" ;;`,
+        "  pip) printf 'Resolved 2 packages in 1ms\\nDownloading torch (1.0GiB)\\nDownloading nvidia-cudnn-cu13 (1.5GiB)\\n Downloaded torch\\n' >&2",
+        `    while [ "$(cat ${quoted(syncHold)} 2>/dev/null)" = hold ]; do sleep 0.1; done`,
+        "    printf ' Downloaded nvidia-cudnn-cu13\\nPrepared 2 packages in 1ms\\n' >&2 ;;",
+        "esac",
+        "",
+      ].join("\n");
+      const part = (name: string, files: Record<string, { text: string; mode?: number }>) => {
+        const src = path.join(engineDir!, `${name}-src`);
+        for (const [file, { text, mode }] of Object.entries(files)) {
+          mkdirSync(path.dirname(path.join(src, file)), { recursive: true });
+          writeFileSync(path.join(src, file), text, mode === undefined ? {} : { mode });
+        }
+        const archive = path.join(engineDir!, `${name}.tar.gz`);
+        execFileSync("tar", ["-czf", archive, "-C", src, "."]);
+        const bytes = readFileSync(archive);
+        buildParts.set(`/engine/${name}.tar.gz`, bytes);
+        return {
+          version: "0.0.0-test", url: `${url}/engine/${name}.tar.gz`, sha256: createHash("sha256").update(bytes).digest("hex"),
+          sizeBytes: bytes.length, format: "tar.gz", verified: true, source: "test/e2e/fake-comfy.ts",
+        };
+      };
+      const sourceDir = "ComfyUI-0.0.0-test";
+      const build = {
+        version: "0.0.0-test", python: "3.13",
+        uv: part("uv", { "uv-fake/uv": { text: uv, mode: 0o755 } }), uvDir: "uv-fake",
+        source: part("source", { [`${sourceDir}/main.py`]: { text: "# the fake engine runs engine.mjs, not this\n" }, [`${sourceDir}/engine.mjs`]: { text: FAKE_ENGINE_SCRIPT } }),
+        sourceDir, lock: "torch==0.0.0\n", wheelBytes: 3 * 1024 ** 3,
+      };
+      return { manifest, layout: "uv-venv", address: url, build };
+    },
+    /** engine({ build: true }) only: hold the sync after uv says its first wheel is in (on), or let it finish (off). */
+    holdSync: (on: boolean) => {
+      if (syncHold === undefined) throw new Error("holdSync needs engine({ build: true })");
+      writeFileSync(syncHold, on ? "hold" : "go");
     },
     /** The arguments the fake engine's last run started with (main.py's), or undefined if none has run. */
     engineArgs: () => engineArgs,

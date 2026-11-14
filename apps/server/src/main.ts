@@ -30,8 +30,9 @@
 //   GATES_LOCAL_COMFY_URL        tests: the ComfyUI address when Settings has none, in place of
 //                                http://127.0.0.1:8188, and comfyui.service is never touched
 //                                (systemctl); every test launcher sets it (test/server-env.test.ts)
-//   GATES_LOCAL_IMAGE_ENGINE     tests: JSON {manifest, layout, address}. Set images up installs this
-//                                engine (an http origin on this computer, never the pinned release),
+//   GATES_LOCAL_IMAGE_ENGINE     tests: JSON {manifest, layout, address, build?}. Set images up installs this
+//                                engine (an http origin on this computer, never the pinned release;
+//                                with `build`, through the Linux build from the fake's uv and lock),
 //                                the app's own ComfyUI is read at `address`, and before it is
 //                                installed the app reads `address` in place of GATES_LOCAL_COMFY_URL
 //                                and looks for no systemd unit (image/engine.ts engineKnob)
@@ -318,6 +319,8 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
       // unless the person running the app asked to try it (GATES_LOCAL_OFFER_ENGINE=1). Off says the
       // version is why on the systems the app sets images up on (Windows and Linux, x64), never the computer.
       if (engineTest === undefined && !offered) return process.arch === "x64" && (process.platform === "win32" || process.platform === "linux") ? "later" : undefined;
+      // a test's fake engine built as Linux builds it: uv and a lock, both the fake's
+      if (engineTest?.build !== undefined) return linuxBuild({ appDataDir: dataDir, pins: { ...engineTest.build } });
       const pick = engineTest ?? engineFor(process.platform, process.arch, gpuName);
       // an engine whose size and digest are not confirmed is not offered: the installer would refuse it at the click
       if (pick !== undefined) return pick.manifest.verified ? { kind: "archive", manifest: pick.manifest, layout: pick.layout } : "later";

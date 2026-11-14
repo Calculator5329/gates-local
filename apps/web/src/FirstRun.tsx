@@ -5,7 +5,7 @@
 import { type ReactNode, useEffect, useState } from "react";
 import type { CatalogEntry } from "@gates-local/contracts";
 import { suggestedOf } from "./picker-models.ts";
-import { CONNECTING, booting, ownCopyNote, portOf, rtOf, unread } from "./Banner.tsx";
+import { CONNECTING, INSTALL_TITLE, booting, installStep, installWords, ownCopyNote, portOf, rtOf, unread } from "./Banner.tsx";
 import { DlButton, canCancelPull } from "./ModelDownloads.tsx";
 import { cardGb, ctxFor, describeModel, etaText, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
@@ -304,19 +304,8 @@ function Connecting() {
   return <Shell st={<span className="dot run" />} title={CONNECTING} />;
 }
 
-type InstallSize = { receivedBytes: number; totalBytes: number; bytesPerSecond?: number | undefined; diskBytes?: number | undefined };
-
-/** The status line while the app's own Ollama installs: the one place its name is said, and the step. */
-export const installStep = (i: InstallSize | undefined): string => (i !== undefined && i.receivedBytes >= i.totalBytes ? "Unpacking Ollama" : "Downloading Ollama");
-
-/** The line under the title, numbers only: how far the download is and the time left, then the disk the copy takes. */
-export function installWords(i: InstallSize | undefined): string | undefined {
-  if (i === undefined) return undefined;
-  const disk = i.diskBytes === undefined ? [] : [`${gb(i.diskBytes)} on disk`];
-  if (i.receivedBytes >= i.totalBytes) return [`${gb(i.totalBytes)} downloaded`, ...disk].join(" · ");
-  const p = { name: "ollama", state: "downloading" as const, completedBytes: i.receivedBytes, totalBytes: i.totalBytes, ...(i.bytesPerSecond === undefined ? {} : { bytesPerSecond: i.bytesPerSecond }) };
-  return [etaText(p, { speed: false }), ...disk].join(" · ");
-}
+// the step words live with the banner, which says them too (Banner.tsx)
+export { installStep, installWords };
 
 function Waiting({ installing }: { installing: boolean }) {
   // the runtime has not answered once: no Ollama words yet
@@ -331,7 +320,7 @@ function Waiting({ installing }: { installing: boolean }) {
           {installing ? installStep(install) : "Looking for Ollama"}
         </>
       }
-      title={installing ? "Getting the chat engine ready" : "Starting up"}
+      title={installing ? INSTALL_TITLE : "Starting up"}
       sub={installing ? installWords(install) : undefined}
     >
       {installing ? (

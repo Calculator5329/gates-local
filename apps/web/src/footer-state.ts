@@ -21,7 +21,7 @@ export interface SettingsIcon {
  */
 export function settingsIcon(rt: { readonly text: string; readonly tip: string; readonly dot: string } | null): SettingsIcon {
   if (rt === null) return { dot: null, tip: SETTINGS, label: "Settings", runtime: false };
-  return { dot: rt.dot === "err" ? "red" : "amber", tip: `<b>${esc(rt.text)}</b><br>${rt.tip}<br>${SETTINGS}`, label: `Settings · ${rt.text}`, runtime: true };
+  return { dot: rt.dot === "err" ? "red" : "amber", tip: `<b>${esc(rt.text)}</b><br>${rt.tip === "" ? "" : `${rt.tip}<br>`}${SETTINGS}`, label: `Settings · ${rt.text}`, runtime: true };
 }
 
 export interface ModelsIcon {

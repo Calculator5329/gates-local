@@ -693,6 +693,7 @@ div.think.fold:hover{color:var(--muted-foreground);background:none}
 .sl b{display:block;font-size:14px;font-weight:500}
 .sl .d{display:block;font-size:13px;color:var(--muted-foreground);margin-top:2px;text-wrap:pretty}
 .sl .d .yaml-line{font-size:12px;overflow-wrap:anywhere;user-select:all}
+.sl .d .setup-size{display:block;font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .sv{flex:none;display:flex;align-items:center;gap:8px}
 .sv .mono{font-size:13px}
 .sv .qa{margin:0 0 0 4px}   /* a quiet action after a badge keeps the same 12 px as Memory details after its status */

@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-11-14: Picture setup counts its download on Linux, and setup words say only what is true
+
+- On Linux the picture engine's download counts up as its packages
+  arrive ("1.0 GB of 11.3 GB"), instead of sitting at 0.0 GB until the
+  end. Windows already counted.
+- The picture setup row keeps its sentence on one line and gives the
+  sizes their own line under it; Set up images stays where it was.
+- "The chat model unloads while an image renders." shows only on a
+  computer whose graphics card it is true for.
+- In Image mode the message box says "Describe a picture…", and the
+  model button names the picture model once images are set up.
+- The app's own picture engine, stopped, reads "Ready"; "Found" stays
+  for a ComfyUI found at an address.
+- In Settings › Image generation, a reason that pictures cannot run here
+  ends "set its address below.", where the address box is; elsewhere it
+  still says "in Settings".
+- While the app's own Ollama installs, the banner reads "Getting the
+  chat engine ready" with the step ("Downloading Ollama", then
+  "Unpacking Ollama") and the numbers, and the sidebar's Settings tip
+  says the same step, as the first window does.
+
 ## 2026-11-14: Pages on a phone, and Measure's pages locked the same way
 
 - On a phone or a narrow window the page panel covers the chat, so a

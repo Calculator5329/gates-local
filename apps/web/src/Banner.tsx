@@ -3,6 +3,7 @@
 // composer placeholder and the banner docked above the composer, one entry
 // per RuntimeStatus state plus "offline" for a dropped server connection.
 import type { ReactNode } from "react";
+import { etaText, gb } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { recheckRuntime } from "./session.ts";
 import { NA, type State, useStore } from "./store.ts";
@@ -81,6 +82,23 @@ export const PLACEHOLDER: Record<Rt, string> = {
   offline: "Chat starts when Gates Local reconnects…",
 };
 
+type InstallSize = { receivedBytes: number; totalBytes: number; bytesPerSecond?: number | undefined; diskBytes?: number | undefined };
+
+/** The step while the app's own Ollama installs, as the first window, the banner and the sidebar tip say it. */
+export const installStep = (i: InstallSize | undefined): string => (i !== undefined && i.receivedBytes >= i.totalBytes ? "Unpacking Ollama" : "Downloading Ollama");
+
+/** Numbers only, after the step: how far the download is and the time left, then the disk the copy takes. */
+export function installWords(i: InstallSize | undefined): string | undefined {
+  if (i === undefined) return undefined;
+  const disk = i.diskBytes === undefined ? [] : [`${gb(i.diskBytes)} on disk`];
+  if (i.receivedBytes >= i.totalBytes) return [`${gb(i.totalBytes)} downloaded`, ...disk].join(" · ");
+  const p = { name: "ollama", state: "downloading" as const, completedBytes: i.receivedBytes, totalBytes: i.totalBytes, ...(i.bytesPerSecond === undefined ? {} : { bytesPerSecond: i.bytesPerSecond }) };
+  return [etaText(p, { speed: false }), ...disk].join(" · ");
+}
+
+/** The engine install's title, the same in the first window and the banner. */
+export const INSTALL_TITLE = "Getting the chat engine ready";
+
 /** The footer row: dot class, the words (with a bold lead) and the tooltip. */
 export function rtInfo(s: RtSource): { dot: string; text: ReactNode; tip: string } {
   const rt = rtOf(s);
@@ -92,7 +110,7 @@ export function rtInfo(s: RtSource): { dot: string; text: ReactNode; tip: string
         ? { dot: "ok", text: <><b>Ollama</b> · Gates Local</>, tip: "<b>Ready.</b> Gates Local's own copy. It starts with the app and stops when the app quits." }
         : { dot: "ok", text: <><b>Ollama</b> · system</>, tip: "<b>Ready.</b> System install, started outside Gates Local. Gates Local uses it and never stops it." };
     case "installing":
-      return { dot: "run", text: <b>Installing Ollama</b>, tip: "Downloading Ollama into the Gates Local app folder. Your first model downloads next." };
+      return { dot: "run", text: <b>{installStep(s.runtime?.install)}</b>, tip: installWords(s.runtime?.install) ?? "" };
     case "starting":
       return { dot: "run", text: <b>Starting Ollama</b>, tip: `Waiting for the server on port ${port}.` };
     case "missing":
@@ -132,6 +150,8 @@ export function Banner() {
   const baseUrl = useStore((s) => s.runtime?.baseUrl);
   const detail = useStore((s) => s.runtime?.detail);
   const own = useStore(ownCopyNote);
+  const install = useStore((s) => s.runtime?.install);
+  const words = installWords(install);
   // first run tells the runtime story itself; the banner under it stays quiet
   const firstRun = useStore((s) => s.view === "firstrun");
   const boot = useStore(booting);
@@ -144,13 +164,12 @@ export function Banner() {
       return null;
     case "installing":
       return (
-        <Shell icon={<Icon id="download" />} role="status" title="Setting up Ollama">
+        <Shell icon={<Icon id="download" />} role="status" title={INSTALL_TITLE}>
           <div className="bm">
-            No Ollama was found, so Gates Local is installing{" "}
             <span className="tipd" data-testid="chat.banner.install-place" tabIndex={0} data-tip='Into <span class="mono">~/.local/share/gates-local/ollama</span>. Gates Local starts and stops only this copy.'>
-              its own copy
+              {installStep(install)}
             </span>
-            , then your first model.
+            {words === undefined ? null : <span className="mono"> · {words}</span>}
           </div>
         </Shell>
       );

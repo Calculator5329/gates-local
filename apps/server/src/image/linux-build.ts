@@ -81,14 +81,45 @@ const target = (appDataDir: string, label: string, folder: string, inside: strin
   check: (tree) => access(path.join(tree, inside), constants.R_OK),
 });
 
-/** Run uv to the end; a failure carries the end of what it printed. */
-function runUv(uv: string, args: string[], env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<void> {
+const UNITS: Record<string, number> = { B: 1, KiB: 1024, MiB: 1024 ** 2, GiB: 1024 ** 3, TiB: 1024 ** 4 };
+/** A terminal colour code, should uv print one (FORCE_COLOR in the app's environment). */
+const COLOUR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
+
+/**
+ * The bytes uv's sync has finished downloading, from its own lines. With its output not a terminal
+ * uv prints no bars; for each file over 1 MiB it prints "Downloading torch (846.4MiB)" when the
+ * download starts and " Downloaded torch" when it ends (uv-command-support progress.rs, 0.13.7).
+ * A wheel counts once it has ended, at the size uv gave it; smaller wheels say nothing and are
+ * counted when the sync ends. Never more than `cap`.
+ */
+export function uvDownloads(cap: number): (line: string) => number {
+  const sizes = new Map<string, number>();
+  let done = 0;
+  return (line) => {
+    const text = line.replace(COLOUR, "").trim();
+    const start = /^Downloading (\S+) \((\d+(?:\.\d+)?)(B|KiB|MiB|GiB|TiB)\)$/.exec(text);
+    if (start) sizes.set(start[1]!, Math.round(Number(start[2]) * UNITS[start[3]!]!));
+    const end = /^Downloaded (\S+)$/.exec(text);
+    if (end) { done += sizes.get(end[1]!) ?? 0; sizes.delete(end[1]!); }
+    return Math.min(done, cap);
+  };
+}
+
+/** Run uv to the end; a failure carries the end of what it printed. `onLine` hears each line it prints. */
+function runUv(uv: string, args: string[], env: NodeJS.ProcessEnv, signal: AbortSignal, onLine?: (line: string) => void): Promise<void> {
   return new Promise((resolve, reject) => {
     let run: ChildProcess;
     try { run = spawn(uv, args, { env, stdio: ["ignore", "ignore", "pipe"], signal }); }
     catch (error) { reject(error as Error); return; }
-    let tail = "";
-    run.stderr?.on("data", (c: Buffer) => { tail = (tail + c.toString("utf8")).slice(-2000); });
+    let tail = "", partial = "";
+    run.stderr?.on("data", (c: Buffer) => {
+      const text = c.toString("utf8");
+      tail = (tail + text).slice(-2000);
+      if (onLine === undefined) return;
+      const lines = (partial + text).split(/\r?\n/);
+      partial = lines.pop() ?? "";
+      for (const line of lines) onLine(line);
+    });
     run.once("error", reject);
     run.once("close", (code) => {
       if (code === 0) resolve();
@@ -134,7 +165,15 @@ export function linuxBuild(opts: { appDataDir: string; pins: LinuxPins }): Extra
         await runUv(path.join(uv.dir, uvBin), ["venv", "--relocatable", "--python", pins.python, venv], env, signal);
         // best-match, as the lock was compiled: first-index would take certifi and the like from
         // the torch index, which lacks the pinned versions
-        await runUv(path.join(uv.dir, uvBin), ["pip", "sync", "--require-hashes", "--index-strategy", "unsafe-best-match", "--python", path.join(venv, "bin", "python"), lock], env, signal);
+        // the wheels are most of the download: each one uv says it finished moves the count
+        const wheels = uvDownloads(pins.wheelBytes);
+        let counted = 0;
+        await runUv(path.join(uv.dir, uvBin), ["pip", "sync", "--require-hashes", "--index-strategy", "unsafe-best-match", "--python", path.join(venv, "bin", "python"), lock], env, signal, (line) => {
+          const now = wheels(line);
+          if (now === counted) return;
+          counted = now;
+          onProgress({ phase: "download", version: pins.version, receivedBytes: before + now, totalBytes: bytes });
+        });
         await access(path.join(venv, "bin", "python"), constants.X_OK);
         await rename(staging, engineDir(appDataDir, pins.version));
         onProgress({ phase: "done", version: pins.version, receivedBytes: bytes, totalBytes: bytes });
