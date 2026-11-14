@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-13: A chat sent while a picture renders says what it waits for
+
+- A message sent to a chat while a picture was rendering showed "Waiting
+  for Ollama…" until the picture ended. It says "Waiting for image
+  generation…" again. The line went wrong when Send began answering at
+  once on 2026-11-13; no release had it.
+
 ## 2026-11-13: The model picker's memory figure has its column and colour back
 
 - In the chat model picker, a model's memory figure had lost its fixed

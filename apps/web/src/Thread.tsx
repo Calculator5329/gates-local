@@ -652,7 +652,8 @@ const UserTurn = memo(function UserTurn({ msg, noted }: { msg: Message; noted: b
 function Working({ startedAt, loading, thinking }: { startedAt: number; loading: boolean; thinking: boolean }) {
   const now = useTicker(250, true);
   const cpu = useStore((s) => noGpu(s.gpu));
-  const imageBusy = useStore((s) => s.threadId !== null && s.turns[s.threadId]?.turnId === null && s.imageStatus !== NA && s.imageStatus?.state === "busy");
+  // the send is answered at once, so the turn has its id while it waits: its start (which saves the question) is what ends the wait
+  const imageBusy = useStore((s) => s.threadId !== null && s.turns[s.threadId]?.pendingUser != null && s.imageStatus !== NA && s.imageStatus?.state === "busy");
   const secs = Math.floor((now - startedAt) / 1000);
   return (
     <div className={thinking ? "working thinking" : "working"}>

@@ -21,6 +21,30 @@ it("names image generation while a chat is waiting to be admitted behind it", as
   expect(renderToStaticMarkup(createElement(Timeline, { threadId: "chat" }))).toContain("Waiting for image generation");
 });
 
+// Send answers at once, so a waiting turn has its id long before its start: the start is what ends the wait.
+describe("a chat sent while a picture renders", () => {
+  const waiting = { gen: 1, threadId: "chat", turnId: "turn-1", model: "tiny-chat:2k", startedAt: Date.now(), thinking: "", text: "", tools: [], pendingUser: "hello" };
+  async function line(turn: typeof waiting | (Omit<typeof waiting, "pendingUser"> & { pendingUser: null; userMessageId: string })) {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    const { Timeline } = await import("./Thread.tsx");
+    setState({ threadId: "chat", turns: { chat: turn }, imageStatus: { state: "busy", owner: "external" } });
+    return renderToStaticMarkup(createElement(Timeline, { threadId: "chat" }));
+  }
+
+  it("names image generation once the server has answered the send, until the turn starts", async () => {
+    const html = await line(waiting);
+    expect(html).toContain("Waiting for image generation");
+    expect(html).not.toContain("Waiting for Ollama");
+  });
+
+  it("names Ollama once the turn has started, whatever the image engine is doing", async () => {
+    const html = await line({ ...waiting, pendingUser: null, userMessageId: "saved" });
+    expect(html).toContain("Waiting for Ollama");
+    expect(html).not.toContain("Waiting for image generation");
+  });
+});
+
 /**
  * One request, one box: a retry is a card message of its own, but it shows in the
  * box of the card it retries. The thread as the server saves it is what a reload
