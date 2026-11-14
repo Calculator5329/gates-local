@@ -8,9 +8,10 @@ import "./pages.css";
 
 export function PageChip({ code }: { code: string }) {
   const threadId = useStore((s) => s.threadId);
-  const { versions } = usePages(threadId);
+  const { versions, loaded } = usePages(threadId);
   const view = useView(threadId);
-  const version = versions.find((v) => v.code === code);
+  // a long chat's older pages are on their way: its number waits for them, in its place
+  const version = loaded ? versions.find((v) => v.code === code) : undefined;
   const on = view?.open === true && version !== undefined && shownOf(view, versions) === version;
   return (
     <button
@@ -22,7 +23,7 @@ export function PageChip({ code }: { code: string }) {
     >
       <Icon id="page" />
       <span className="pg-t">{version?.title ?? pageTitle(code)}</span>
-      {version === undefined ? null : <span className="pg-v">v{version.n}</span>}
+      {!loaded ? <span className="pg-v" aria-hidden="true" style={{ visibility: "hidden" }}>v1</span> : version === undefined ? null : <span className="pg-v">v{version.n}</span>}
     </button>
   );
 }

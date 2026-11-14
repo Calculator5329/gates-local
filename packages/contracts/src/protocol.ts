@@ -32,6 +32,7 @@ import {
   MeasureList,
   MeasureRun,
   PageSeen,
+  ThreadPage,
   QueuedMessage,
   NumCtx,
   MemoryState,
@@ -153,6 +154,12 @@ export const methods = {
     result: S.Struct({ thread: Thread, messages: S.Array(Message), earlier: S.optional(S.Int) }),
     phone: "allow",
   },
+  /**
+   * Every page the thread's saved replies wrote, oldest first, each code once; with `before` only
+   * those of replies before that message (a long thread opens on its newest messages, and its page
+   * list is the whole thread's).
+   */
+  "threads.pages": { params: S.Struct({ threadId: S.String, before: S.optional(S.String) }), result: S.Array(ThreadPage), phone: "allow" },
   "threads.rename": { params: S.Struct({ threadId: S.String, title: S.String }), result: Thread, phone: "allow" },
   /** The picker's pick in an open thread: that thread sends with it from now on; other threads keep theirs. */
   "threads.setImageChoice": { params: S.Struct({ threadId: S.String, choice: ImageChoice }), result: Thread, phone: "allow" },
@@ -346,6 +353,13 @@ export const methods = {
    * is not this model's latest, or a page already graded, is left as it is.
    */
   "models.measurePages": { params: S.Struct({ model: S.String, at: S.Finite, pages: S.Array(PageSeen) }), result: ModelMeasure, phone: "deny" },
+  /**
+   * A window that sees a running measure's pages pending asks to run them; one window at a time
+   * holds them. The window that started the run comes first while it is connected; else the first
+   * to ask. A holder that disconnects lets them go, and models.measures is pushed again so another
+   * window can ask. `claimed` false: another window runs them, or the run no longer waits.
+   */
+  "models.measurePagesClaim": { params: S.Struct({ model: S.String, at: S.Finite }), result: S.Struct({ claimed: S.Boolean }), phone: "deny" },
   "sources.list": { params: NoParams, result: S.Array(Source), phone: "allow" },
   "sources.add": { params: S.Struct({ kind: SourceKind, path: S.String, label: S.optional(S.String) }), result: Source, phone: "deny" },
   "sources.remove": { params: SourceRef, result: SourceRef, phone: "deny" },

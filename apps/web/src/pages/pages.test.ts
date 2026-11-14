@@ -109,8 +109,19 @@ describe("the panel's state", () => {
     expect(step(panel("four"))).toBe("1 of 1");
   });
 
+  it("keeps the page on show when older versions come in front of it (Show earlier, or the server's list)", () => {
+    const all = vs(4);
+    const loaded = all.slice(2);
+    setState({ messages: { five: loaded.map((v, i) => msg(String(i), block(v.code))) } });
+    follow("five", versionsOf(loaded.map((v) => block(v.code))));
+    showVersion("five", 1, versionsOf(loaded.map((v) => block(v.code))));
+    // two older pages arrive in front: the same page stays on show, now the third of four
+    setState({ messages: { five: all.map((v, i) => msg(String(i), block(v.code))) } });
+    expect(step(panel("five"))).toBe("3 of 4");
+  });
+
   it("a version that is gone falls back to the newest there is", () => {
-    expect(shownOf({ open: true, shown: 5, newest: "" }, vs(2))?.n).toBe(2);
+    expect(shownOf({ open: true, shown: "gone", newest: "" }, vs(2))?.n).toBe(2);
     expect(shownOf(undefined, vs(2))?.n).toBe(2);
     expect(shownOf(undefined, [])).toBeUndefined();
   });

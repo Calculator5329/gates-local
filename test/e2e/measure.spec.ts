@@ -145,11 +145,12 @@ test("a window opened during a Measure sees the run, and only the window that st
 
 // A reload in the middle of a Measure keeps the row's running state: the server's record of the run
 // comes with the window's first read, so the row says it is measuring, a second window says so too,
-// and the run ends with a score. No window that started it is left to run its pages, so the run
-// waits for them and leaves them out.
-test("a reload during a Measure still shows it measuring, and the row ends with a score", async ({ page, open }, info) => {
+// and the run ends with a score. The window that started the run is gone, so the first window that
+// sees the pending pages claims them from the server and runs them; any other is refused the claim.
+// Before this, no window ran them: the run waited its 30 s and left Pages out.
+test("a reload during a Measure still shows it measuring, and the reloaded window runs the pages", async ({ page, open }, info) => {
   test.setTimeout(120_000);
-  test.info().annotations.push({ type: "budget", description: "after the reload no window runs the pages, so the run waits its 30 s for them before it ends" });
+  test.info().annotations.push({ type: "budget", description: "the fake holds the model's load for 6 s so the reload lands while the run goes" });
   await stack.scenario("measure", { installed: ["qwen3.5:9b", "gemma4:12b"], loadDelayMs: 6000 });
   await open();
   await waitReady(page);
@@ -157,6 +158,7 @@ test("a reload during a Measure still shows it measuring, and the row ends with 
   const button = page.getByTestId("settings.models.measure-qwen3-5-9b");
   await button.click();
   await expect(button).toHaveText(/^(Starting|Measuring \d+ of 22)$/);
+  const sent = pagesSent(page);
   await page.reload();
   await waitReady(page);
   await openModels(page);
@@ -164,6 +166,7 @@ test("a reload during a Measure still shows it measuring, and the row ends with 
   await expect(button).toBeDisabled();
   await page.locator(".mp-card").screenshot({ path: info.outputPath("measure-after-reload.png"), animations: "disabled" });
   const second = await page.context().newPage();
+  const sentSecond = pagesSent(second);
   await second.goto(page.url());
   await waitReady(second);
   await openModels(second);
@@ -172,14 +175,14 @@ test("a reload during a Measure still shows it measuring, and the row ends with 
   const score = page.getByTestId("settings.models.score-qwen3-5-9b");
   await expect(score).toHaveText(/^\d+$/, { timeout: 90_000 });
   await score.click();
-  await expect(page.getByTestId("models.measure.left-out")).toHaveText("The score leaves Pages out.");
   await page.getByTestId("models.measure.detail").screenshot({ path: info.outputPath("measure-reload-detail.png"), animations: "disabled" });
-  // why the pages were skipped is said once, for the part, not under each page
-  const pages = page.locator('.md-checks section[aria-label="Pages"]');
-  await expect(pages.getByTestId("models.measure.skipped-pages")).toHaveText("Pages were not run: no window ran them while Measure waited.");
-  await expect(pages.locator(".md-check .md-why")).toHaveCount(0);
-  await pages.scrollIntoViewIfNeeded();
-  await pages.screenshot({ path: info.outputPath("measure-pages-skipped.png"), animations: "disabled" });
+  // the pages were run and graded, so the score covers all five parts
+  await expect(page.getByTestId("models.measure.left-out")).toHaveCount(0);
+  await expect(page.getByTestId("models.measure.part-pages")).toContainText("2/3");
+  await expect(score).toHaveText("90");
+  // one window ran them, once
+  expect(sent.length + sentSecond.length).toBe(1);
+  await expect(page.locator("iframe[data-measure-page]")).toHaveCount(0);
 });
 
 // On a phone the row's menu is the way in to Measure; the destructive item comes last.
@@ -262,7 +265,7 @@ test.describe("Measure's pages run locked down", () => {
 /** What this window sent back of the measure's pages, once it has sent them. */
 function pagesSent(page: Page): string[] {
   const sent: string[] = [];
-  page.on("websocket", (ws) => ws.on("framesent", (f) => { if (typeof f.payload === "string" && f.payload.includes("models.measurePages")) sent.push(f.payload); }));
+  page.on("websocket", (ws) => ws.on("framesent", (f) => { if (typeof f.payload === "string" && f.payload.includes('"models.measurePages"')) sent.push(f.payload); }));
   return sent;
 }
 /** Measure on the probe pages, from a fresh window. */

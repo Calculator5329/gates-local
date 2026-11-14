@@ -365,6 +365,33 @@ describe("models.measure", () => {
     await expect(t.measure.handlers["models.measure"]({ name: "m" })).resolves.toMatchObject({ state: "waiting" });
   });
 
+  it("one window at a time holds the pages: the starter first while connected, else the first to ask, and a closed holder lets them go", async () => {
+    const t = setup("fits");
+    const starter = new AbortController();
+    const a = new AbortController();
+    const b = new AbortController();
+    const claim = (clientId: number, signal: AbortSignal, at: number) => t.measure.handlers["models.measurePagesClaim"]({ model: "m", at }, { clientId, signal }).claimed;
+    await t.measure.handlers["models.measure"]({ name: "m" }, { clientId: 1, signal: starter.signal });
+    const saved = await t.saved();
+    // the starter is connected: another window is refused, the starter holds them
+    expect(claim(2, a.signal, saved.at)).toBe(false);
+    expect(claim(1, starter.signal, saved.at)).toBe(true);
+    // the starter reloads: its hold goes, the list is pushed again, and the first to ask holds them
+    const pushed = t.pushes.filter(([c]) => c === "models.measures").length;
+    starter.abort();
+    expect(t.pushes.filter(([c]) => c === "models.measures").length).toBe(pushed + 1);
+    expect(claim(2, a.signal, saved.at)).toBe(true);
+    expect(claim(3, b.signal, saved.at)).toBe(false);
+    expect(claim(2, a.signal, saved.at + 1)).toBe(false);
+    // a window that does not hold them cannot send them
+    const pages = [{ id: "page-counter", seen: ["0", "3"] }, { id: "page-filter", seen: [] }, { id: "page-total", seen: [] }];
+    expect(() => t.measure.handlers["models.measurePages"]({ model: "m", at: saved.at, pages }, { clientId: 3 })).toThrow(expect.objectContaining({ code: "not-claimed" }));
+    t.measure.handlers["models.measurePages"]({ model: "m", at: saved.at, pages }, { clientId: 2 });
+    await t.ended();
+    // the run no longer waits: nobody holds them
+    expect(claim(3, b.signal, saved.at)).toBe(false);
+  });
+
   it("skips the pages no window ran while it waited, says why, leaves them out of the score, and refuses them later", async () => {
     const t = setup("fits", 10);
     await t.measure.handlers["models.measure"]({ name: "m" });

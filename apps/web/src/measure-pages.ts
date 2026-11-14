@@ -75,8 +75,14 @@ export function framed(page: string, token: string, script: readonly PageAction[
   return `${page}<script>(${harness.toString()})(${JSON.stringify(token)}, ${JSON.stringify(script)}, ${stepMs});</script>`;
 }
 
-/** One page, used in a sandboxed frame; resolves with what it showed, or why it could not be used. */
-export async function runPage(id: string, page: string, script: readonly PageAction[], timeoutMs = PAGE_MS, at: PageServer = server()): Promise<PageSeen> {
+/** What has the app's focus now, for a page frame to give it back to. */
+const focused = (): HTMLElement | undefined => (typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? document.activeElement : undefined);
+
+/**
+ * One page, used in a sandboxed frame; resolves with what it showed, or why it could not be used.
+ * `before` is what keeps the app's focus (by default what has it now).
+ */
+export async function runPage(id: string, page: string, script: readonly PageAction[], timeoutMs = PAGE_MS, at: PageServer = server(), before = focused()): Promise<PageSeen> {
   const token = crypto.randomUUID();
   const address = await pageAddress(framed(page, token, script), at);
   // Too big is the model's page; a refusal or a dropped connection is not, so it counts for nothing.
@@ -85,7 +91,6 @@ export async function runPage(id: string, page: string, script: readonly PageAct
   }
   return new Promise((resolve) => {
     const frame = document.createElement("iframe");
-    const before = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
     frame.setAttribute("aria-hidden", "true");
     frame.setAttribute("data-measure-page", id);
     frame.tabIndex = -1;
@@ -119,23 +124,23 @@ export async function runPage(id: string, page: string, script: readonly PageAct
 }
 
 /**
- * Each pending page of a measure, one after another; none with the sandbox off, nor when the
- * desktop app has not said within `waitMs` whether it is on.
+ * Each pending page of a measure, all at once, each in its own frame with its own token (the server
+ * keeps 32 page addresses at a time, pages/route.ts); none with the sandbox off, nor when the
+ * desktop app has not said within `waitMs` whether it is on. Focus goes back to what had it before
+ * any of them started.
  */
 export async function runPages(
   checks: readonly { id: string; state?: string; page?: string; script?: readonly PageAction[] }[],
   off: () => Promise<boolean> = sandboxOff,
   waitMs = SANDBOX_WAIT_MS,
 ): Promise<PageSeen[]> {
-  const seen: PageSeen[] = [];
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<string>((resolve) => { timer = setTimeout(() => resolve(SANDBOX_UNKNOWN_SKIP), waitMs); });
   const skip = await Promise.race([off().then((o) => (o ? SANDBOX_OFF_SKIP : undefined), () => SANDBOX_UNKNOWN_SKIP), late]);
   clearTimeout(timer);
-  for (const c of checks) {
-    if (c.state !== "pending") continue;
-    if (skip !== undefined) seen.push({ id: c.id, seen: [], skipped: skip });
-    else seen.push(c.page && c.script ? await runPage(c.id, c.page, c.script) : { id: c.id, seen: [], error: "The page was not kept." });
-  }
-  return seen;
+  const before = focused();
+  return Promise.all(checks.filter((c) => c.state === "pending").map((c): PageSeen | Promise<PageSeen> =>
+    skip !== undefined ? { id: c.id, seen: [], skipped: skip }
+    : c.page && c.script ? runPage(c.id, c.page, c.script, PAGE_MS, server(), before)
+    : { id: c.id, seen: [], error: "The page was not kept." }));
 }

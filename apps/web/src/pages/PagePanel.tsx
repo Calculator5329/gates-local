@@ -33,7 +33,8 @@ function HeadButton({ icon, tip, testid, onClick, pressed, disabled, xs, cls }: 
 }
 
 export function PagePanel({ threadId }: { threadId: string }) {
-  const { versions } = usePages(threadId);
+  // a long chat's older pages are on their way: the panel waits for the whole list
+  const { versions, loaded } = usePages(threadId);
   const view = useView(threadId);
   const [code, setCode] = useState(false);
   const cover = useMedia(COVER);
@@ -42,9 +43,9 @@ export function PagePanel({ threadId }: { threadId: string }) {
   const sandboxOff = useSandboxOff();
   // with the sandbox off, the one version the person asked to run
   const [ran, setRan] = useState<string | null>(null);
-  useEffect(() => follow(threadId, versions, !cover), [threadId, versions, cover]);
+  useEffect(() => { if (loaded) follow(threadId, versions, !cover); }, [threadId, versions, cover, loaded]);
   const shown = shownOf(view, versions);
-  const visible = view?.open === true && shown !== undefined;
+  const visible = loaded && view?.open === true && shown !== undefined;
   // over the chat, the chat under it takes no keys (App reads this)
   useEffect(() => {
     setCovering(cover && visible);

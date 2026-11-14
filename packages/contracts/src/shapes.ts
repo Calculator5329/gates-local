@@ -371,6 +371,10 @@ export type ModelMeasure = typeof ModelMeasure.Type;
 export const PageSeen = S.Struct({ id: S.String, seen: S.Array(S.String), error: S.optional(S.String), skipped: S.optional(S.String) });
 export type PageSeen = typeof PageSeen.Type;
 
+/** One page a saved reply wrote (a closed html block that is a whole document), and that reply's id. */
+export const ThreadPage = S.Struct({ messageId: S.String, code: S.String });
+export type ThreadPage = typeof ThreadPage.Type;
+
 /** A Measure run while it goes: waiting for the GPU, then each step; ends done or error. */
 export const MeasureRun = S.Struct({
   model: S.String,

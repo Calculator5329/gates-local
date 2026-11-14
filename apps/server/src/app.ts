@@ -41,6 +41,7 @@ import type { ImageSetupModule } from "./image/setup.ts";
 import { IMAGES_UNSET, notRunning, type ImageModule } from "./image/module.ts";
 import type { GpuLease } from "./gpu/lease.ts";
 import { createMeasure, type MeasureDeps } from "./measure/handlers.ts";
+import { threadPages } from "./pages/list.ts";
 import { createUpdateHandlers, type UpdateModule } from "./update/module.ts";
 import type { Usage } from "./usage/index.ts";
 import type { SettingsReader } from "./settings/store.ts";
@@ -964,6 +965,7 @@ export function createApp(deps: AppDeps): App {
       while (start > 0 && all[start]?.role !== "user") start--;
       return { ...saved, messages: all.slice(start, end), earlier: start };
     },
+    "threads.pages": ({ threadId, before }) => threadPages(store, threadId, before, byThread.get(threadId)?.draftId),
     "threads.rename": ({ threadId, title }) => {
       const thread = store.renameThread(threadId, title);
       push("threads.changed", { threadId });

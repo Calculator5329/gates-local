@@ -28,6 +28,11 @@ export interface ThreadStoreOptions {
 
 export interface ThreadStore {
   getMessage(messageId: string): Message | undefined;
+  /**
+   * A thread's saved replies that hold a code fence (where a page can be), oldest first: only their
+   * ids and text. With `before`, only the replies before that message; none when it is not saved.
+   */
+  fencedReplies(threadId: string, before?: string): Array<{ id: string; content: string }>;
   deleteMessage(threadId: string, messageId: string): void;
   imageReferences(): Map<string, number>;
   /** How many messages hold each attached file's copy (AttachedFile.path). */
@@ -200,6 +205,15 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
       guard(); checkId("messageId", messageId);
       const row = stmt.getMessage.get(messageId);
       return row ? messageFromRow(row) : undefined;
+    },
+
+    fencedReplies(threadId, before) {
+      guard(); loadThread(threadId);
+      const fenced = "SELECT id, content FROM messages WHERE thread_id = ? AND role = 'assistant' AND instr(content, '```') > 0";
+      const rows = before === undefined
+        ? db.prepare(`${fenced} ORDER BY created_at, seq`).all(threadId)
+        : db.prepare(`${fenced} AND (created_at, seq) < (SELECT created_at, seq FROM messages WHERE id = ? AND thread_id = ?) ORDER BY created_at, seq`).all(threadId, before, threadId);
+      return rows.map((row) => ({ id: str(row, "id"), content: str(row, "content") }));
     },
 
     deleteMessage(threadId, messageId) {

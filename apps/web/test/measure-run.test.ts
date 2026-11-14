@@ -1,6 +1,6 @@
 // A Measure run in the client's store (in-memory server, harness.ts): the server's read says which
 // run goes now, so a window that connects mid-run, or missed the run's last push, shows what is
-// true; and a measure's pages run only in the window that clicked Measure.
+// true; and a measure's pages run only in the window the server lets hold them.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MeasureRun, ModelMeasure } from "@gates-local/contracts";
 import { type Browser, installBrowser, tick, until } from "./harness.ts";
@@ -69,18 +69,32 @@ describe("a Measure run in the store", () => {
     expect(store.getState().measuring).toEqual({});
   });
 
-  it("a measure's pages run only in the window that clicked Measure", async () => {
+  it("a measure's pages run only in the window the server lets hold them, once", async () => {
+    let claimed = false;
+    const asked: number[] = [];
     b.server.answer("models.measures", () => ({ measures: [] }));
-    b.server.answer("models.measure", () => ({ model: "qwen3.5:9b", state: "waiting", done: 0, total: 22 }));
+    b.server.answer("models.measurePagesClaim", ({ at }) => { asked.push(at); return { claimed }; });
+    b.server.answer("models.measurePages", () => pending(1));
     await boot();
-    // another window's measure: this window never runs its page
+    // another window holds them: this window asks, is refused, and runs nothing
     b.server.broadcast("models.measures", [pending(1)]);
+    await until(() => asked.length === 1, 2000, "the claim");
     await tick();
     expect(frames()).toBe(0);
-    // this window's: its page runs here
-    await session.measureModel("qwen3.5:9b");
-    b.server.broadcast("models.measures", [pending(Date.now() + 1)]);
+    // that window went away and the list came again: this window holds them and runs them, once
+    claimed = true;
+    b.server.broadcast("models.measures", [pending(1)]);
+    b.server.broadcast("models.measures", [pending(1)]);
+    await until(() => frames() === 1, 2000, "the pages");
     await tick();
     expect(frames()).toBe(1);
+  });
+
+  it("a window opened mid-run asks for the pending pages its first read shows", async () => {
+    b.server.answer("models.measures", () => ({ measures: [pending(2)], run: running }));
+    b.server.answer("models.measurePagesClaim", () => ({ claimed: true }));
+    b.server.answer("models.measurePages", () => pending(2));
+    await boot();
+    await until(() => frames() === 1, 2000, "the pages");
   });
 });

@@ -10,10 +10,14 @@
 // removed under it. A check whose turn failed (the runtime crashed, the model did not load) ends
 // the run as an error: nothing is saved and the model's earlier measure stays.
 //
-// The page checks end with a page each, saved as pending. Only the window that started the run
-// runs them, in a sandboxed frame, and sends back what it saw (models.measurePages) while the run
-// waits up to PAGE_WAIT_MS for that, with the GPU lease already given back. Pages still pending
-// when the wait ends are skipped, saying why, and the score is over the other parts.
+// The page checks end with a page each, saved as pending. One window runs them, in a sandboxed
+// frame, and sends back what it saw (models.measurePages) while the run waits up to PAGE_WAIT_MS
+// for that, with the GPU lease already given back. Which window: the one that claims them first
+// (models.measurePagesClaim), the window that started the run coming first while it is connected.
+// The claim is the connection's: a window that reloads or closes lets it go, the list is pushed
+// again, and the next window to ask runs them. A second window is refused while one holds them,
+// and its pages are refused too. Pages still pending when the wait ends are skipped, saying why,
+// and the score is over the other parts.
 //
 // The server keeps its own record of the run, its last step: models.measures answers with it, so
 // a window that connects mid-run, or missed the run's last push, shows what is true.
@@ -33,13 +37,13 @@ import { measureStore } from "./store.ts";
 const DEFAULT_CTX = 16384;
 /** How long a run waits for a window to run its pages. */
 export const PAGE_WAIT_MS = 30_000;
-/** Why a page check counts for nothing: the window that started the run did not run it in time. */
+/** Why a page check counts for nothing: no window ran it in time. */
 export const PAGES_UNRUN = "Pages were not run: no window ran them while Measure waited.";
 export const RUNTIME_CHANGED_MEASURE = "The Ollama runtime changed while Measure ran, so it stopped.";
 
 export class MeasureError extends Error {
   override readonly name = "MeasureError";
-  readonly code: "runtime-not-ready" | "wont-fit" | "measure-busy" | "not-installed" | "shutting-down" | "not-measured" | "not-waiting";
+  readonly code: "runtime-not-ready" | "wont-fit" | "measure-busy" | "not-installed" | "shutting-down" | "not-measured" | "not-waiting" | "not-claimed";
   constructor(code: MeasureError["code"], message: string) {
     super(message);
     this.code = code;
@@ -67,6 +71,12 @@ export interface MeasureDeps {
   readonly pageWaitMs?: number;
 }
 
+/** The connection a call came on (ws HandlerContext): its id, and a signal that aborts when it closes. */
+export interface Caller {
+  readonly clientId: number;
+  readonly signal?: AbortSignal;
+}
+
 export function createMeasure(deps: MeasureDeps) {
   const store = measureStore(deps.dataDir);
   const stop = new AbortController();
@@ -75,6 +85,10 @@ export function createMeasure(deps: MeasureDeps) {
   let last: MeasureRun | undefined;
   /** The run waiting for its pages, by model and measure time. */
   let waiting: { model: string; at: number; resolve: () => void } | undefined;
+  /** The connection that started the running measure. */
+  let starter: Caller | undefined;
+  /** The connection running the waiting run's pages now. */
+  let holder: { model: string; at: number; clientId: number } | undefined;
   const total = STEPS + 1;
   const step = (run: MeasureRun) => {
     last = run;
@@ -84,10 +98,12 @@ export function createMeasure(deps: MeasureDeps) {
   const settled = (m: ModelMeasure) => (waiting?.model === m.model && waiting.at === m.at ? m : skipPages(m, PAGES_UNRUN));
 
   /** Refuses at once when it cannot start; otherwise answers with the started run and goes on behind it. */
-  const start = async (model: string): Promise<MeasureRun> => {
+  const start = async (model: string, caller?: Caller): Promise<MeasureRun> => {
     if (stop.signal.aborted) throw new MeasureError("shutting-down", "The app is closing.");
     if (running !== undefined) throw new MeasureError("measure-busy", `${running} is being measured. Measure one model at a time.`);
     running = model;
+    starter = caller;
+    holder = undefined;
     try {
       const info = (await deps.installed()).find((m) => m.name === model);
       if (info === undefined) throw new MeasureError("not-installed", `${model} is not installed.`);
@@ -171,6 +187,7 @@ export function createMeasure(deps: MeasureDeps) {
             clearTimeout(timer);
             stop.signal.removeEventListener("abort", done);
             waiting = undefined;
+            holder = undefined;
             resolve();
           }
           waiting = { model, at, resolve: done };
@@ -191,14 +208,38 @@ export function createMeasure(deps: MeasureDeps) {
     }
   };
 
-  /** What the window that started the run saw on its pages: graded, saved and pushed, while the run waits. */
-  const pagesSeen = ({ model, at, pages }: { model: string; at: number; pages: readonly PageSeen[] }): ModelMeasure => {
+  const waitsFor = (model: string, at: number) => waiting?.model === model && waiting.at === at;
+
+  /**
+   * A window asks to run the waiting run's pages. The one that started the run is first while it is
+   * connected; else the first to ask. The hold ends with its connection, and the list goes out
+   * again so a window still open (or the one just reloaded) can ask.
+   */
+  const claim = ({ model, at }: { model: string; at: number }, caller?: Caller): { claimed: boolean } => {
+    if (!waitsFor(model, at)) return { claimed: false };
+    const id = caller?.clientId ?? -1;
+    if (holder !== undefined) return { claimed: holder.model === model && holder.at === at && holder.clientId === id };
+    const starterHere = starter !== undefined && starter.signal?.aborted !== true;
+    if (starterHere && starter?.clientId !== id) return { claimed: false };
+    const held = { model, at, clientId: id };
+    holder = held;
+    caller?.signal?.addEventListener("abort", () => {
+      if (holder !== held) return;
+      holder = undefined;
+      if (waitsFor(model, at)) deps.push("models.measures", store.list().map(settled));
+    }, { once: true });
+    return { claimed: true };
+  };
+
+  /** What the window holding the run's pages saw on them: graded, saved and pushed, while the run waits. */
+  const pagesSeen = ({ model, at, pages }: { model: string; at: number; pages: readonly PageSeen[] }, caller?: Caller): ModelMeasure => {
     const measure = store.list().find((m) => m.model === model && m.at === at);
     if (measure === undefined) throw new MeasureError("not-measured", `${model} has no measure from that time; it was measured again since.`);
-    if (waiting?.model !== model || waiting.at !== at) throw new MeasureError("not-waiting", "Measure stopped waiting for these pages, so they were left out of the score.");
+    if (!waitsFor(model, at)) throw new MeasureError("not-waiting", "Measure stopped waiting for these pages, so they were left out of the score.");
+    if (holder !== undefined && holder.clientId !== (caller?.clientId ?? -1)) throw new MeasureError("not-claimed", "Another window is running these pages.");
     const graded = gradePages(measure, pages);
     deps.push("models.measures", store.put(graded).map(settled));
-    if (pendingPages(graded) === 0) waiting.resolve();
+    if (pendingPages(graded) === 0) waiting?.resolve();
     return graded;
   };
 
@@ -208,8 +249,9 @@ export function createMeasure(deps: MeasureDeps) {
   return {
     handlers: {
       "models.measures": list,
-      "models.measure": ({ name }: { name: string }) => start(name),
+      "models.measure": ({ name }: { name: string }, caller?: Caller) => start(name, caller),
       "models.measurePages": pagesSeen,
+      "models.measurePagesClaim": claim,
     },
     close: () => stop.abort(),
   };

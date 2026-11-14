@@ -26,6 +26,7 @@ import { createNavigation, enterScreen, exitScreen, onScreenEntry } from "./sess
 import { createUpdates } from "./session/updates.ts";
 import { speedsChanged, speedsRead } from "./session/speed.ts";
 import { measureRefused, measureStarted, measuresChanged, measuresRead, measuringChanged } from "./session/measures.ts";
+import { setPageReads } from "./pages/pages.ts";
 import { createUsage } from "./session/usage.ts";
 import { createPictures } from "./session/pictures.ts";
 import { type ActionResult, codeOf, createConnection, failure, isNA } from "./session/connection.ts";
@@ -171,10 +172,7 @@ async function hydrateWith(
     applyServerEvent(measuresChanged(list));
     runMeasurePages(list);
   });
-  on("models.measuring", (run) => {
-    if (run.state === "done" || run.state === "error") startedHere.delete(run.model);
-    applyServerEvent((s) => measuringChanged(s, run));
-  });
+  on("models.measuring", (run) => applyServerEvent((s) => measuringChanged(s, run)));
   on("sources.changed", (sources) => applyServerEvent({ sources }));
   on("update.changed", updatesSession.receiveUpdate);
   on("usage.changed", () => usageSession.usageChanged());
@@ -494,31 +492,43 @@ export async function addSource(kind: "folder" | "file" | "sqlite", path: string
   return r.ok ? null : r.message;
 }
 
-/**
- * Models whose running Measure this window started: only their pages run here. The server marks
- * pages no run waits for as skipped, so a pending page in a push is the running measure's.
- */
-const startedHere = new Set<string>();
+// A long chat's page list: the pages of the replies before its loaded messages come from the server.
+setPageReads({ pages: (threadId, before) => call("threads.pages", { threadId, before }), earlierOf, onEarlier });
+
+/** Measures (model and time) whose pages this window is asking for or running now. */
+const pagesHere = new Set<string>();
 
 /**
- * A measure's page checks wait for the window that started the run (measure-pages.ts): that window
- * runs them once, while the run waits, and sends back what they showed. The server grades it and
- * pushes the measure again. No other window runs a model's page code, and none runs it later.
+ * A measure's page checks wait for a window to run them (measure-pages.ts). The server marks pages
+ * no run waits for as skipped, so a pending page in a list is the running measure's. Any window
+ * that sees them asks the server to hold them (models.measurePagesClaim): the window that started
+ * the run is answered first while it is connected, else the first to ask; every other window is
+ * refused and runs nothing. The holder runs them once and sends back what they showed. A holder
+ * that reloads or closes lets them go and the list is pushed again, so the next window asks.
  */
 function runMeasurePages(list: readonly ModelMeasure[]): void {
-  if (getState().unavailable["models.measurePages"] === true) return;
+  const s = getState();
+  if (s.unavailable["models.measurePages"] === true || s.unavailable["models.measurePagesClaim"] === true) return;
   for (const m of list) {
-    if (!startedHere.has(m.model) || !m.checks.some((c) => c.state === "pending")) continue;
-    startedHere.delete(m.model);
-    void runPages(m.checks).then((pages) => act("models.measurePages", { model: m.model, at: m.at, pages }, `check the pages ${m.model} wrote`));
+    const key = `${m.model}\n${m.at}`;
+    if (pagesHere.has(key) || !m.checks.some((c) => c.state === "pending")) continue;
+    pagesHere.add(key);
+    void (async () => {
+      try {
+        const r = await act("models.measurePagesClaim", { model: m.model, at: m.at }, `check the pages ${m.model} wrote`);
+        if (!r.ok || !r.value.claimed) return;
+        const pages = await runPages(m.checks);
+        await act("models.measurePages", { model: m.model, at: m.at, pages }, `check the pages ${m.model} wrote`);
+      } finally {
+        pagesHere.delete(key);
+      }
+    })();
   }
 }
 
 /** Settings › Models, Measure: starts the run; its steps and numbers arrive as pushes, a refusal shows on the row. */
 export async function measureModel(name: string): Promise<void> {
-  startedHere.add(name);
   const r = await act("models.measure", { name }, `measure ${name}`);
-  if (!r.ok) startedHere.delete(name);
   applyServerEvent((s) => (r.ok ? measureStarted(s, r.value) : measureRefused(s, name, r.message)));
 }
 

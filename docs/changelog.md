@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-14: Measure keeps Pages after a reload, and a long chat lists all its pages
+
+- A window reloaded while Measure runs now runs the model's pages, so the
+  score still covers Pages instead of waiting 30 seconds and leaving them
+  out. One window runs them: the one that clicked Measure while it is
+  open, else the first open window that sees them.
+- A long chat's page panel lists every page in the chat, also those made in
+  older messages the chat has not loaded yet, and steps back to them and runs
+  them. Loading earlier messages keeps the page you have open on show.
+- Measure runs the model's three pages at the same time instead of one after
+  another, so its last step is shorter.
+
 ## 2026-11-14: The first window holds still and counts in one unit
 
 - The first window's heading stays at one height from the moment it opens
