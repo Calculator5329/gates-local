@@ -1,13 +1,16 @@
 // Measure (Settings › Models, row 29): a short check of one model on this computer, run only
 // when the person clicks Measure. One request measures decode speed; then three tool-use
 // prompts and five questions against a small built-in shop database, each one request,
-// graded on the call the model makes. Nothing here takes the GPU lease or checks the fit:
-// the caller does both before it calls measureModel.
+// graded on the call the model makes. A call is read the way a chat reads it: the runtime's
+// tool_calls, the text call format, or a reply that is only the call as JSON. Each check keeps
+// what the model wrote and what its query returned, so a failed check can be read afterwards.
+// Nothing here takes the GPU lease or checks the fit: the caller does both before it calls
+// measureModel.
 import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import type { MeasureCheck, ModelMeasure } from "@gates-local/contracts";
-import { parseTextCalls, repairCall } from "../../../../packages/harness/src/parser.ts";
+import { looseCall, parseTextCalls, repairCall } from "../../../../packages/harness/src/parser.ts";
 import { toolBlock, type ToolDefinition } from "../../../../packages/harness/src/prompt.ts";
 import { runSnapshotQuery } from "../../../../packages/harness/src/sql.ts";
 import type { ToolCall } from "../../../../packages/harness/src/types.ts";
@@ -18,6 +21,10 @@ const SPEED_PROMPT = "Describe a lighthouse at night in about 150 words.";
 const SPEED_TOKENS = 200;
 const CHECK_TOKENS = 400;
 const QUERY_MS = 5000;
+/** How much of a reply, and of a query's first row or error, a check keeps. */
+const REPLY_KEPT = 600;
+const RESULT_KEPT = 300;
+const clip = (text: string, max: number) => text.length > max ? `${text.slice(0, max)}…` : text;
 
 const fn = (name: string, description: string, properties: Record<string, unknown>, required: string[]): ToolDefinition =>
   ({ type: "function", function: { name, description, parameters: { type: "object", properties, required, additionalProperties: false } } });
@@ -126,13 +133,18 @@ export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasu
       if (Array.isArray(v.message?.tool_calls)) raw.push(...v.message.tool_calls);
       if (v.done) figures = v;
     }
+    // What the model wrote, before any of it is read as a call.
+    const wrote = clip([content.trim(), ...raw.map((c) => JSON.stringify(c))].filter(Boolean).join("\n"), REPLY_KEPT);
     if (tools && !native) {
       const parsed = parseTextCalls(content);
       raw.push(...parsed.calls);
       content = parsed.content;
     }
+    // A chat also runs a reply that is only a call to an offered tool written as JSON.
+    const loose = tools && raw.length === 0 ? looseCall(content, tools) : undefined;
+    if (loose) { raw.push(loose); content = ""; }
     const calls = raw.flatMap((c) => { try { return [repairCall(c)]; } catch { return []; } });
-    return { reply: { content, calls }, figures };
+    return { reply: { content, calls }, figures, wrote };
   };
   const withTools = (system: string, tools: readonly ToolDefinition[]) => native ? system : `${system}\n${toolBlock(tools)}`;
 
@@ -146,22 +158,32 @@ export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasu
   const checks: MeasureCheck[] = [];
   for (const c of CASES) {
     let ok: boolean;
+    let result: string | undefined;
+    let wrote: string;
     if (c.kind === "tools") {
       const system = withTools("Use the provided tools when they help; answer directly when they do not.", CHECK_TOOLS);
-      const { reply } = await ask([{ role: "system", content: system }, { role: "user", content: c.prompt }], CHECK_TOKENS, CHECK_TOOLS);
+      const { reply, ...rest } = await ask([{ role: "system", content: system }, { role: "user", content: c.prompt }], CHECK_TOKENS, CHECK_TOOLS);
       ok = c.pass(reply);
+      wrote = rest.wrote;
     } else {
       const system = withTools(`You answer questions about a shop's SQLite database by calling the sql tool once with one SELECT query. Schema:\n${SCHEMA}`, SQL_TOOLS);
-      const { reply } = await ask([{ role: "system", content: system }, { role: "user", content: c.prompt }], CHECK_TOKENS, SQL_TOOLS);
+      const { reply, ...rest } = await ask([{ role: "system", content: system }, { role: "user", content: c.prompt }], CHECK_TOKENS, SQL_TOOLS);
+      wrote = rest.wrote;
       const query = only(reply, "sql")?.query;
       ok = false;
       if (typeof query === "string") {
-        const rows = await runSnapshotQuery({ file: input.dbFile, query, limit: 20, signal: input.signal, timeoutMs: QUERY_MS }).catch(() => []);
-        const first = rows[0];
-        ok = typeof first === "object" && first !== null && Object.values(first).some((cell) => isAnswer(cell, c.answer));
+        try {
+          const rows = await runSnapshotQuery({ file: input.dbFile, query, limit: 20, signal: input.signal, timeoutMs: QUERY_MS });
+          const first = rows[0];
+          ok = typeof first === "object" && first !== null && Object.values(first).some((cell) => isAnswer(cell, c.answer));
+          result = first === undefined ? "No rows." : JSON.stringify(first);
+        } catch (error) {
+          input.signal.throwIfAborted();
+          result = error instanceof Error ? error.message : String(error);
+        }
       }
     }
-    checks.push({ id: c.id, kind: c.kind, ok });
+    checks.push({ id: c.id, kind: c.kind, ok, ...(wrote ? { reply: wrote } : {}), ...(result === undefined ? {} : { result: clip(result, RESULT_KEPT) }) });
     step();
   }
   const passed = checks.filter((c) => c.ok).length;

@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-14: Measure reads a call the way a chat does, and keeps what it saw
+
+- Measure (Settings, Models) failed a check when the model wrote its
+  call as plain JSON with no tags around it, although a chat runs that
+  reply as a call. Measure now reads calls exactly as a chat does. A call
+  written as JSON may also carry a number (it was refused before, in a
+  chat too).
+- Each check now saves what the model wrote and, for a database
+  question, the first row its query returned or the reason the query did
+  not run. The saved measure can then be read to see why a check failed.
+  Models measured before this keep their score and have no saved replies
+  until they are measured again.
+
 ## 2026-11-14: A pop-up clears the window's buttons
 
 - In the desktop window, Settings, Models and Usage no longer sit under

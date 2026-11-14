@@ -239,7 +239,15 @@ export const ModelSpeed = S.Struct({
 export type ModelSpeed = typeof ModelSpeed.Type;
 
 /** One check of a Measure run: a tool-use prompt or a question against the built-in database. */
-export const MeasureCheck = S.Struct({ id: S.String, kind: S.Literals(["tools", "sql"]), ok: S.Boolean });
+export const MeasureCheck = S.Struct({
+  id: S.String,
+  kind: S.Literals(["tools", "sql"]),
+  ok: S.Boolean,
+  /** What the model wrote, its calls included, cut short. Not in a measure saved before 2026-11-14. */
+  reply: S.optional(S.String),
+  /** A database question: the first row its query returned, or why the query did not run. */
+  result: S.optional(S.String),
+});
 export type MeasureCheck = typeof MeasureCheck.Type;
 
 /**

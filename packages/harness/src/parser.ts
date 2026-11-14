@@ -118,9 +118,10 @@ type LooseCall = { name: string; arguments: Record<string, unknown> };
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
 type Property = { type?: string; minimum?: number; minItems?: number; items?: Property };
-/** Whether one value fits one property: strings not empty, integers at their minimum, arrays of fitting items. */
+/** Whether one value fits one property: strings not empty, numbers finite, integers at their minimum, arrays of fitting items. */
 function fitsProperty(property: Property | undefined, value: unknown): boolean {
   if (property?.type === "string") return typeof value === "string" && value.trim() !== "";
+  if (property?.type === "number") return typeof value === "number" && Number.isFinite(value);
   if (property?.type === "integer") return typeof value === "number" && Number.isInteger(value) && value >= (property.minimum ?? -Infinity);
   if (property?.type === "array") return Array.isArray(value) && value.length >= (property.minItems ?? 0) && value.every(item => fitsProperty(property.items, item));
   return false;

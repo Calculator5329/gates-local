@@ -103,6 +103,46 @@ describe("measureModel", () => {
     expect(String((rt.bodies[1]!.messages as { content: string }[])[0]!.content)).toContain("<tool_call>");
   });
 
+  it("passes a reply that is only the call written as JSON, as a chat runs it", async () => {
+    for (const capabilities of [["completion", "tools"], ["completion"]]) {
+      const rt = fakeRuntime(capabilities, (prompt) => {
+        const a = goodAnswer(prompt);
+        const call = a.calls?.[0] as { function: unknown } | undefined;
+        return call ? { content: `\`\`\`json\n${JSON.stringify(call.function)}\n\`\`\`` } : a;
+      });
+      const m = await measureModel({ baseUrl: "http://runtime", model: "m", fetch: rt.fetcher, signal: new AbortController().signal, dbFile: ensureShopDb(dir()) });
+      expect(m.score, capabilities.join()).toBe(100);
+    }
+  });
+
+  it("keeps what the model wrote and what its query returned, for a failed check too", async () => {
+    const rt = fakeRuntime(["completion", "tools"], (prompt) => {
+      const c = CASES.find((x) => x.prompt === prompt);
+      if (c?.id === "sql-count") return { calls: [{ function: { name: "sql", arguments: { query: "SELECT COUNT(*) AS n FROM orders" } } }] };
+      if (c?.id === "sql-top") return { calls: [{ function: { name: "sql", arguments: { query: "SELECT nothing FROM nowhere" } } }] };
+      if (c?.id === "sql-never") return { content: "```sql\nSELECT 2\n```" };
+      if (c?.id === "sql-city") return { content: "x".repeat(5000) };
+      return goodAnswer(prompt);
+    });
+    const m = await measureModel({ baseUrl: "http://runtime", model: "m", fetch: rt.fetcher, signal: new AbortController().signal, dbFile: ensureShopDb(dir()) });
+    const check = (id: string) => m.checks.find((c) => c.id === id)!;
+    expect(check("sql-count")).toMatchObject({ ok: false, result: '{"n":8}' });
+    expect(check("sql-count").reply).toContain("SELECT COUNT(*) AS n FROM orders");
+    expect(check("sql-top")).toMatchObject({ ok: false });
+    expect(check("sql-top").result).toMatch(/syntax error/);
+    // a query in a code fence is not a call: the reply is kept, and nothing ran
+    expect(check("sql-never")).toMatchObject({ ok: false, reply: "```sql\nSELECT 2\n```" });
+    expect(check("sql-never").result).toBeUndefined();
+    expect(check("sql-city").reply!.length).toBeLessThan(700);
+    expect(check("sql-garden")).toMatchObject({ ok: true, result: '{"revenue":87.5}' });
+    expect(check("tools-none")).toMatchObject({ ok: true, reply: "Paris" });
+    // the saved file reads back with the new fields
+    const store = measureStore(dir());
+    store.put({ model: "m", digest: "d", ...m });
+    expect(measureStore(path.dirname(path.join(dir(), "x"))).list()).toEqual([]);
+    expect(store.list()[0]!.checks).toEqual(m.checks);
+  });
+
   it("stops on a runtime error, saying what the runtime said", async () => {
     const fetcher = (async (url: URL | string) =>
       new URL(String(url)).pathname === "/api/show" ? Response.json({ capabilities: [] }) : new Response(`${JSON.stringify({ error: "model requires more system memory" })}\n`)) as typeof fetch;
