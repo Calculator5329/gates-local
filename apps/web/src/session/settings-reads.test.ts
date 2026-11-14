@@ -44,6 +44,18 @@ it("begin, read, end: Settings opens once both reads are in, and keeps them", as
   expect(reads.ready(), "nothing is on its way after the reads").toBeNull();
 });
 
+it("Settings also waits for what Set up images would fetch, and opens when that read fails", async () => {
+  const setup = deferred<unknown>();
+  const reads = createSettingsReads({ readImports: async () => IMPORTS, readFolder: async () => "/data", readSetup: () => setup.promise });
+  reads.begin();
+  const open = reads.ready();
+  const reading = reads.read();
+  expect(await settled(open), "the setup read is still out").toBe(false);
+  setup.reject(new Error("down"));
+  await reading;
+  expect(await settled(open)).toBe(true);
+});
+
 it("a failed read still lets Settings open", async () => {
   const reads = createSettingsReads({ readImports: () => Promise.reject(new Error("down")), readFolder: async () => null });
   reads.begin();

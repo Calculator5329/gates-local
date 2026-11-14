@@ -1,16 +1,19 @@
 // Settings is whole on its first frame (docs/design.md): what it shows that is
 // cheap to read is read before it can open. Each hydrate reads the sample
 // database list and the data folder once its second batch (GPU, catalog,
-// sources, image and update status) is in; Settings waits for that, up to a
-// bound, so a slow server shows placeholders instead of a dead key.
+// sources, image and update status) is in, and what Set up images would fetch;
+// Settings waits for that, up to a bound, so a slow server shows placeholders
+// instead of a dead key.
 import type { SourceImports } from "@gates-local/contracts";
 
 interface Reads {
   readonly readImports: () => Promise<SourceImports>;
   readonly readFolder: () => Promise<string | null>;
+  /** What Set up images would fetch, put in the store by the read itself: its row draws no guess first. */
+  readonly readSetup?: () => Promise<unknown>;
 }
 
-export function createSettingsReads({ readImports, readFolder }: Reads) {
+export function createSettingsReads({ readImports, readFolder, readSetup }: Reads) {
   let imports: SourceImports | undefined;
   let folder: string | null | undefined;
   let waiting: Promise<void> | null = null;
@@ -40,6 +43,7 @@ export function createSettingsReads({ readImports, readFolder }: Reads) {
         await Promise.allSettled([
           readImports().then((v) => { imports = v; }),
           readFolder().then((f) => { folder = f; }),
+          readSetup?.(),
         ]);
       } finally {
         reading = false;

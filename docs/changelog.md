@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-14: Settings' picture setup row is right on its first frame
+
+- Settings > Image generation used to open with a placeholder row and a
+  "Set up images" button, then swap it about half a second later for
+  what is true on this computer. What the setup would fetch, or why it
+  cannot run here, is now read before Settings opens, with its other
+  reads, so the row is drawn once.
+
 ## 2026-11-14: Browser tests that were red for the wrong reason
 
 - Nothing changes in the app. The Usage test still looked for the speed

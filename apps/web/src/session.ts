@@ -53,7 +53,7 @@ export const { connect, call, libraryRequest } = connection;
 const { probe, act } = connection;
 setFileCalls(call);
 let keeping: ReturnType<typeof setInterval> | undefined;
-export const settingsReads = createSettingsReads({ readImports: () => libraryRequest("sources.imports", {}), readFolder: dataFolder });
+export const settingsReads = createSettingsReads({ readImports: () => libraryRequest("sources.imports", {}), readFolder: dataFolder, readSetup: () => loadImageSetup() });
 const updatesSession = createUpdates({ applyServerEvent, act });
 export const { checkForUpdates, downloadUpdate, dismissUpdateResult, readUpdateStatus, updateAndRestart } = updatesSession;
 const { updateOrder } = updatesSession;
