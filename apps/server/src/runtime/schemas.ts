@@ -59,6 +59,8 @@ export const InstallManifest = Schema.Struct({
   url: Schema.String,
   sha256: Schema.String,
   sizeBytes: Schema.Number,
+  /** What the unpacked tree holds, in bytes: the disk it takes once installed. Absent where nobody measured it. */
+  unpackedBytes: Schema.optional(Schema.Number),
   /** tar.zst and tar.gz: the Linux releases. zip: the Windows release. 7z: the image engine's Windows portable. */
   format: Schema.Literals(["tar.zst", "tar.gz", "zip", "7z"]),
   verified: Schema.Boolean,

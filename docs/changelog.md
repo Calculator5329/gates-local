@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-11-14: A fresh install says what it is doing, in numbers
+
+- The first window while the chat engine downloads says it once: the
+  status line names Ollama and the step, the title reads "Getting the
+  chat engine ready", and the line under it gives the download, the time
+  left and the disk the engine takes once unpacked ("0.6 of 1.5 GB ·
+  about 2 min left · 2.1 GB on disk" on Windows).
+- A question typed while the first model downloads shows the percent
+  and the time left on its own waiting row ("42% · 2 min"), then
+  "Checking" while the model is checked. The numbers sit in a slot of
+  fixed width, so nothing on the row moves as they change.
+- In a version that does not offer picture setup yet, the setup row
+  says so ("Picture setup is not in this version yet") instead of
+  saying this computer cannot. "How to set up" opens the guide for the
+  system the app runs on; the Windows guide has a short picture section.
+- Pictures with images not set up says "No pictures yet." with a "Set
+  up images" button that opens the setup row, instead of pointing at an
+  Image control that is not there.
+- When the app offers picture setup, its row gives the download and the
+  disk it takes: "9.6 GB download · 15.3 GB on disk".
+
 ## 2026-11-14: A page a reply writes runs beside the chat
 
 - A whole HTML document in a reply is one chip: a page icon, its title

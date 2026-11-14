@@ -8,7 +8,7 @@ import { useActionPress } from "./composer-press.ts";
 import { CONNECTING, PLACEHOLDER, booting, rtOf, unread } from "./Banner.tsx";
 import { openFit } from "./fit-actions.ts";
 import { fitFor, stopsChat } from "./fit-table.ts";
-import { ctxFor, describeModel, k, noGpu, verdictOf } from "./format.ts";
+import { ctxFor, describeModel, k, noGpu, timeLeft, verdictOf } from "./format.ts";
 import { DownloadBar, LoadRing } from "./LoadBar.tsx";
 import { loadGuess } from "./load-times.ts";
 import { MakerMark } from "./MakerMark.tsx";
@@ -533,6 +533,40 @@ export const AFTER_SETUP = "Sends when setup finishes";
 /** The clock is the row's only mark for these, so its tip names it; a word on the row has no tip (decision 19). */
 const CLOCKED = new Set<string | null>([AFTER_DOWNLOAD, AFTER_SETUP]);
 
+/**
+ * What a clocked row waits for, as numbers beside its clock (fresh-install round, 2026-11-14): the
+ * percent and, once the download gives a speed, the time left, as "42%|2 min"; one word once every
+ * byte is in; "" before a size is known. A string, so the row re-renders only when the words change.
+ */
+export function waitNumbers(p: { done: number; total?: number | undefined; rate?: number | undefined; checking?: boolean } | undefined, last: string): string {
+  if (p === undefined || !p.total) return "";
+  if (p.checking === true || p.done >= p.total) return last;
+  const left = p.rate ? timeLeft((p.total - p.done) / p.rate) : "";
+  return `${Math.floor((p.done / p.total) * 100)}%|${left}`;
+}
+
+/** The first model download's numbers, for a message waiting on it. */
+const downloadNumbers = (s: State): string => {
+  const p = s.pulls[firstPull(s) ?? ""];
+  return waitNumbers(p === undefined ? undefined : { done: p.completedBytes, total: p.totalBytes, rate: p.bytesPerSecond, checking: p.state === "verifying" || p.state === "done" }, "Checking");
+};
+
+/** The app's own Ollama download's numbers, for a message waiting on setup. */
+const setupNumbers = (s: State): string => {
+  const i = s.runtime?.state === "installing" ? s.runtime.install : undefined;
+  return waitNumbers(i === undefined ? undefined : { done: i.receivedBytes, total: i.totalBytes, rate: i.bytesPerSecond }, "Unpacking");
+};
+
+/** The numbers in a slot of fixed width, the percent right-aligned in its own, so nothing moves as they change. Read aloud as the clock's words, not number by number. */
+function WaitNumbers({ value }: { value: string }) {
+  const [pct, left] = value.split("|");
+  return (
+    <span className="qt-n" aria-hidden="true">
+      {left === undefined ? pct : <><span className="qt-p">{pct}</span>{left === "" ? null : ` · ${left}`}</>}
+    </span>
+  );
+}
+
 /** What is running in the open chat, as a word, so a reader re-renders when that changes and not at every token. */
 const runningKind = (s: State): "image" | "reply" | null => {
   const turn = runningTurn(s, s.threadId);
@@ -564,6 +598,8 @@ function QueueTray() {
   const first = useStore(firstPull);
   const model = useStore((s) => s.model);
   const kind = useStore(runningKind);
+  const downloadAt = useStore(downloadNumbers);
+  const setupAt = useStore(setupNumbers);
   const mine = queued.filter((q) => q.threadId === threadId);
   if (mine.length === 0) return null;
   const n = mine.length;
@@ -584,7 +620,7 @@ function QueueTray() {
             <span className="qt-t">{q.text}{q.images?.length ? ` · ${q.images.length} image${q.images.length === 1 ? "" : "s"}` : ""}{q.files?.length ? ` · ${q.files.length} file${q.files.length === 1 ? "" : "s"}` : ""}</span>
             {/* always there, empty while the message just waits, so a reader announces the word when it appears */}
             <span className="qt-s" role="status" data-tip={CLOCKED.has(words) ? words ?? undefined : undefined}>
-              {CLOCKED.has(words) ? <><Icon id="clock" cls="s14" /><span className="vh">{words}</span></> : words ?? ""}
+              {CLOCKED.has(words) ? <><Icon id="clock" cls="s14" /><span className="vh">{words}</span><WaitNumbers value={words === AFTER_SETUP ? setupAt : downloadAt} /></> : words ?? ""}
             </span>
             {q.waitFor === "reply" && !editing ? (
               <button type="button" className="ibtn xs" data-testid={`chat.queue.send-now-${i + 1}`} aria-label="Send now" data-send-now data-tip={nowTip} onClick={andFocus(() => sendQueuedNow(q.id))}>

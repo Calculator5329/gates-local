@@ -549,7 +549,8 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     if (!binary) {
       if (!allowInstall) return setStatus(statusFor(c));
       const installing = noted({ state: "installing", owner: "app", baseUrl: appBaseUrl, detail: "Installing Ollama." }, c.note);
-      setStatus({ ...installing, install: { receivedBytes: 0, totalBytes: manifest.sizeBytes } });
+      const disk = manifest.unpackedBytes === undefined ? {} : { diskBytes: manifest.unpackedBytes };
+      setStatus({ ...installing, install: { receivedBytes: 0, totalBytes: manifest.sizeBytes, ...disk } });
       // The status carries the download's size and progress, at most once a second, with the speed since the last one.
       let said = { at: Date.now(), bytes: 0 };
       try {
@@ -563,7 +564,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
             if (!whole && now - said.at < INSTALL_PUSH_MS) return;
             const rate = now > said.at ? ((p.receivedBytes - said.bytes) * 1000) / (now - said.at) : 0;
             said = { at: now, bytes: p.receivedBytes };
-            setStatus({ ...installing, install: { receivedBytes: Math.min(p.receivedBytes, p.totalBytes), totalBytes: p.totalBytes, ...(!whole && rate > 0 ? { bytesPerSecond: rate } : {}) } });
+            setStatus({ ...installing, install: { receivedBytes: Math.min(p.receivedBytes, p.totalBytes), totalBytes: p.totalBytes, ...disk, ...(!whole && rate > 0 ? { bytesPerSecond: rate } : {}) } });
           },
         });
         binary = { path: r.binary, origin: "app-install" };

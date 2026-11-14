@@ -172,11 +172,19 @@ the copy. The downloaded copy stays in the data folder until you remove it.
 
 ## 4. Optional: image generation with ComfyUI
 
-Image generation is off by default. The app does not install ComfyUI or
-download image models, and on Windows it never starts or stops ComfyUI. Start
-ComfyUI yourself, then turn image generation on in Settings › Image
-generation. The default address is `http://127.0.0.1:8188`; change it there
-if your ComfyUI listens elsewhere. The models it needs are listed in the
+Image generation is off by default. This version does not set up its own
+ComfyUI yet: Settings › Image generation says "Picture setup is not in this
+version yet." A ComfyUI you run yourself works, and the app never starts or
+stops it:
+
+1. Start ComfyUI.
+2. In Settings › Image generation, type its address under Connection (the
+   default is `http://127.0.0.1:8188`) and press Test connection.
+3. With an address set, the page shows a Generate images switch. Turn it on.
+4. In a chat, the + menu now has Generate image; with it on, Send makes a
+   picture from your words. Pictures (Ctrl Shift P) keeps every picture.
+
+The models it needs are listed in the
 [Linux guide](linux.md#4-optional-image-generation-with-comfyui).
 
 This was not tested on Windows.

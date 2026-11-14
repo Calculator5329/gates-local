@@ -304,14 +304,18 @@ function Connecting() {
   return <Shell st={<span className="dot run" />} title={CONNECTING} />;
 }
 
-/** How far the app's own Ollama is, in a model download's words: its size, then how much of it and the time left, then unpacking. */
-export function installWords(i: { receivedBytes: number; totalBytes: number; bytesPerSecond?: number | undefined } | undefined): string {
-  const where = "Into Gates Local's folder";
-  if (i === undefined) return where;
-  if (i.receivedBytes >= i.totalBytes) return `${where} · Unpacking`;
-  if (i.receivedBytes === 0) return `${where} · ${gb(i.totalBytes)}`;
+type InstallSize = { receivedBytes: number; totalBytes: number; bytesPerSecond?: number | undefined; diskBytes?: number | undefined };
+
+/** The status line while the app's own Ollama installs: the one place its name is said, and the step. */
+export const installStep = (i: InstallSize | undefined): string => (i !== undefined && i.receivedBytes >= i.totalBytes ? "Unpacking Ollama" : "Downloading Ollama");
+
+/** The line under the title, numbers only: how far the download is and the time left, then the disk the copy takes. */
+export function installWords(i: InstallSize | undefined): string | undefined {
+  if (i === undefined) return undefined;
+  const disk = i.diskBytes === undefined ? [] : [`${gb(i.diskBytes)} on disk`];
+  if (i.receivedBytes >= i.totalBytes) return [`${gb(i.totalBytes)} downloaded`, ...disk].join(" · ");
   const p = { name: "ollama", state: "downloading" as const, completedBytes: i.receivedBytes, totalBytes: i.totalBytes, ...(i.bytesPerSecond === undefined ? {} : { bytesPerSecond: i.bytesPerSecond }) };
-  return `${where} · ${etaText(p, { speed: false })}`;
+  return [etaText(p, { speed: false }), ...disk].join(" · ");
 }
 
 function Waiting({ installing }: { installing: boolean }) {
@@ -324,10 +328,10 @@ function Waiting({ installing }: { installing: boolean }) {
       st={
         <>
           <span className="dot run" />
-          {installing ? "Installing Ollama" : "Looking for Ollama"}
+          {installing ? installStep(install) : "Looking for Ollama"}
         </>
       }
-      title={installing ? "Setting up Ollama" : "Starting up"}
+      title={installing ? "Getting the chat engine ready" : "Starting up"}
       sub={installing ? installWords(install) : undefined}
     >
       {installing ? (

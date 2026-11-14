@@ -345,13 +345,23 @@ function Tools() {
 
 // ---------------------------------------------------------------- Image generation
 
-const SETUP_URL = "https://github.com/Calculator5329/gates-local/blob/main/docs/setup/linux.md#4-optional-image-generation-with-comfyui";
+/** The picture section of the setup guide for the system the app runs on (Settings is only changed on that computer). */
+const setupUrl = (userAgent: string) =>
+  `https://github.com/Calculator5329/gates-local/blob/main/docs/setup/${/\bWindows\b/.test(userAgent) ? "windows" : "linux"}.md#4-optional-image-generation-with-comfyui`;
 
 const SetupLink = () => (
-  <a className="btn outline" href={SETUP_URL} data-testid="settings.images.setup-guide" target="_blank" rel="noreferrer noopener">
+  <a className="btn outline" href={setupUrl(navigator.userAgent)} data-testid="settings.images.setup-guide" target="_blank" rel="noreferrer noopener">
     How to set up
   </a>
 );
+
+/**
+ * The setup's download and, when it takes more, the disk it takes on the app's drive (the server's
+ * needBytes: the engine unpacked beside its archive, plus the model): "9.6 GB download · 16.5 GB on disk".
+ */
+export function setupSize(download: number, need: number | undefined): string {
+  return need === undefined || need <= download ? gb(download) : `${gb(download)} download · ${gb(need)} on disk`;
+}
 
 const SETUP_STEP: Record<ImageSetupProgress["step"], string> = {
   engine: "Downloading the image engine",
@@ -393,7 +403,7 @@ function ImageSetUp() {
   };
   return (
     <Row label={setup?.model?.name ?? <Skel w="9em" />} desc={desc} err={err ?? (progress?.step === "error" ? progress.message ?? null : null)} busy={setup === undefined}>
-      <span className="mono" data-testid="settings.images.setup-size">{total === undefined ? <Skel w="4em" /> : running ? `${gb(progress.completedBytes)} of ${gb(total)}` : gb(total)}</span>
+      <span className="mono" data-testid="settings.images.setup-size">{total === undefined ? <Skel w="4em" /> : running ? `${gb(progress.completedBytes)} of ${gb(total)}` : setupSize(total, setup?.needBytes)}</span>
       <button type="button" className="btn" data-testid="settings.images.set-up" disabled={setup === undefined || running || short} onClick={() => void go()}>
         <span className="steady">
           <span aria-hidden={running}>{progress?.step === "error" ? "Try again" : "Set up images"}</span>

@@ -11,11 +11,11 @@ import { clock } from "./format.ts";
 import { Icon, type IconId } from "./icons.tsx";
 import { chosenImage, presetName, sizeLabel } from "./image-choice.ts";
 import { type Row, type Sheet, dayLabel, layoutSheet, rowsIn, yOf } from "./pictures-layout.ts";
-import { openThread, pictures, send } from "./session.ts";
+import { openSettings, openThread, pictures, send } from "./session.ts";
 import type { PicturesView } from "./session/pictures.ts";
 import { fileUrl } from "./session/platform.ts";
 import { focusComposer, openDrawer } from "./Sidebar.tsx";
-import { getState, setState, useStore } from "./store.ts";
+import { NA, getState, setState, useStore } from "./store.ts";
 import { PHONE, useMedia } from "./ui.tsx";
 
 const GAP = 6;
@@ -427,6 +427,8 @@ function Bar({ phone }: { phone: boolean }) {
 }
 
 function Empty({ status, q }: { status: PicturesView["status"]; q: string }) {
+  // images not set up: there is no Image control to turn on, so the line points at the setup row instead
+  const unset = useStore((s) => s.settings !== undefined && s.settings !== NA && s.settings.imageGen !== true);
   if (status === "loading") return <div className="pics-sheet" />;
   return (
     <div className="pics-sheet pics-empty">
@@ -437,6 +439,11 @@ function Empty({ status, q }: { status: PicturesView["status"]; q: string }) {
         </p>
       ) : q.trim() !== "" ? (
         <p>No picture's prompt has those words.</p>
+      ) : unset ? (
+        <p>
+          No pictures yet.{" "}
+          <button type="button" className="pics-lnk" data-testid="pictures.empty.set-up" onClick={() => openSettings("images")}>Set up images</button>
+        </p>
       ) : (
         <p>No pictures yet. Turn on Image in a chat and send what you want to see.</p>
       )}

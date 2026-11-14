@@ -6,7 +6,7 @@
 // message going out is sampled for the button's width and whether its words fit.
 import { writeFileSync } from "node:fs";
 import { CONTROL_URL } from "./env.ts";
-import { expect, sendMessage, test } from "./fixtures.ts";
+import { expect, sendMessage, stack, test } from "./fixtures.ts";
 
 test.use({ scenario: "no-models", skipFirstRun: false, viewport: { width: 1600, height: 900 } });
 
@@ -55,4 +55,58 @@ test("a message queued behind the first download says it once, and the model but
   expect(frames.length, "frames with the message queued").toBeGreaterThan(30);
   expect(frames.filter((f) => f.cut).map((f) => f.text).slice(0, 3), "frames whose button words were cut").toEqual([]);
   expect([...new Set(frames.map((f) => f.w))], "widths the model button took while the message waited").toHaveLength(1);
+});
+
+interface SlotFrame { readonly slot: string; readonly words: string; readonly text: string }
+
+test.describe("at a small window", () => {
+  test.use({ viewport: { width: 1024, height: 768 } });
+  // Guards the owner's ask (2026-11-14, fresh installs: "make sure the whole process [is] seamless"): a
+  // stranger's first question waited with only a clock while the download's progress sat in a sidebar
+  // ring whose words were hover-only. The waiting row says the percent and the time left itself, in a
+  // slot whose width holds while the number grows from one digit to two.
+  test("a question waiting for the first download shows its percent and time left on its own row, and nothing moves as they change", async ({ page, open }, info) => {
+    test.setTimeout(90_000);
+    test.info().annotations.push({ type: "budget", description: "One first-model download slowed to about 40 s so one-digit and two-digit percents are both seen, then the reply." });
+    await open();
+    // about one percent a tick, so the one-digit percents last a few seconds
+    await stack.scenario("no-models", { pullTickMs: 400, pullChunkBytes: 64 * 1024 ** 2 });
+    await page.getByRole("button", { name: "Download and start" }).click();
+    await page.getByRole("button", { name: "Start chatting" }).click();
+    await page.evaluate(() => {
+      const frames: SlotFrame[] = [];
+      (window as unknown as { slotFrames: SlotFrame[] }).slotFrames = frames;
+      const tick = () => {
+        const row = document.querySelector(".qt-r");
+        if (row !== null) {
+          const [slot = "", words = ""] = [".qt-s", ".qt-t"].map((at) => {
+            const r = row.querySelector(at)?.getBoundingClientRect();
+            return r === undefined ? "" : `${Math.round(r.x * 2) / 2}+${Math.round(r.width * 2) / 2}`;
+          });
+          frames.push({ slot, words, text: row.querySelector(".qt-s")?.textContent ?? "" });
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    // short, since the fake model echoes only a question's first eight words
+    await sendMessage(page, "Name a grey cat?");
+    const row = page.locator(".qt-r");
+    await expect(row).toBeVisible();
+    await page.mouse.move(5, 5);
+    const numbers = row.locator(".qt-n");
+    await expect(numbers, "a one-digit percent on the waiting row").toHaveText(/^[1-9]%/);
+    await page.screenshot({ path: info.outputPath("row2-one-digit.png") });
+    await expect(numbers, "a two-digit percent and the time left on the waiting row").toHaveText(/^[1-9]\d% · \d+ (s|min)$/, { timeout: 20_000 });
+    await page.screenshot({ path: info.outputPath("row2-two-digits.png") });
+    // the clock's words are still its tip and what a screen reader says
+    await expect.soft(row.locator(".qt-s"), "the queue row's state").toHaveAttribute("data-tip", "Sends when the download finishes");
+    await expect(row).toHaveCount(0, { timeout: 60_000 });
+    await expect(page.locator(".turn.a .md").last()).toContainText("You asked: Name a grey cat?", { timeout: 20_000 });
+    const frames = await page.evaluate(() => (window as unknown as { slotFrames: SlotFrame[] }).slotFrames);
+    const counted = frames.filter((f) => /\d%/.test(f.text));
+    expect(new Set(counted.map((f) => f.text.match(/\d+%/)?.[0].length)), "percents of one digit and of two were drawn").toEqual(new Set([2, 3]));
+    expect([...new Set(counted.map((f) => f.slot))], "places the state slot took while the numbers changed").toHaveLength(1);
+    expect([...new Set(counted.map((f) => f.words))], "places the question's words took while the numbers changed").toHaveLength(1);
+  });
 });

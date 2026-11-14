@@ -401,7 +401,13 @@ export const RuntimeStatus = S.Struct({
   /** The folder the app's own running Ollama was started with. Absent whenever that isn't known for certain, as for an Ollama the app did not start. */
   modelsDir: S.optional(S.String),
   /** "installing": how far the download of the app's own Ollama is, as a model download says it. Received equals total while it is checked and unpacked. */
-  install: S.optional(S.Struct({ receivedBytes: Count, totalBytes: Count, bytesPerSecond: S.optional(S.Finite) })),
+  install: S.optional(S.Struct({
+    receivedBytes: Count,
+    totalBytes: Count,
+    bytesPerSecond: S.optional(S.Finite),
+    /** The disk the installed copy takes, from the pinned release (larger than the download, which is compressed); absent where not measured. */
+    diskBytes: S.optional(Count),
+  })),
 });
 export type RuntimeStatus = typeof RuntimeStatus.Type;
 

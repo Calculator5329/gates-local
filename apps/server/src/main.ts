@@ -315,13 +315,15 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     appDataDir: dataDir, own, image,
     engine: (gpuName) => {
       // the release switch (engine.ts): off until the pinned engine has been installed once for real,
-      // unless the person running the app asked to try it (GATES_LOCAL_OFFER_ENGINE=1)
-      if (engineTest === undefined && !offered) return undefined;
+      // unless the person running the app asked to try it (GATES_LOCAL_OFFER_ENGINE=1). Off says the
+      // version is why on the systems the app sets images up on (Windows and Linux, x64), never the computer.
+      if (engineTest === undefined && !offered) return process.arch === "x64" && (process.platform === "win32" || process.platform === "linux") ? "later" : undefined;
       const pick = engineTest ?? engineFor(process.platform, process.arch, gpuName);
       // an engine whose size and digest are not confirmed is not offered: the installer would refuse it at the click
-      if (pick !== undefined) return pick.manifest.verified ? { kind: "archive", manifest: pick.manifest, layout: pick.layout } : undefined;
+      if (pick !== undefined) return pick.manifest.verified ? { kind: "archive", manifest: pick.manifest, layout: pick.layout } : "later";
       // Linux x64 builds its engine (linux-build.ts), once its parts are pinned
-      return process.platform === "linux" && process.arch === "x64" && linuxPinned(LINUX_ENGINE) ? linuxBuild({ appDataDir: dataDir, pins: LINUX_ENGINE }) : undefined;
+      if (process.platform !== "linux" || process.arch !== "x64") return undefined;
+      return linuxPinned(LINUX_ENGINE) ? linuxBuild({ appDataDir: dataDir, pins: LINUX_ENGINE }) : "later";
     },
     gpuStatus: () => services.gpu.read(),
     settingsAddress: () => services.settings.get().comfyUrl,

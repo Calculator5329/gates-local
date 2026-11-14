@@ -407,7 +407,10 @@ div.think.fold:hover{color:var(--muted-foreground);background:none}
 .qt-t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--foreground)}
 .qt-s{flex:0 1 auto;min-width:0;max-width:50%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .qt-s:empty{margin-left:-8px}   /* kept in the tree for screen readers, empty, takes no gap */
-.qt-s:has(>.ic){display:inline-flex;flex:none}
+.qt-s:has(>.ic){display:inline-flex;flex:none;align-items:center;gap:6px}
+/* what the clock waits for, as numbers: a fixed slot, the percent right-aligned in its own, so nothing moves as they change */
+.qt-n{width:12ch;white-space:nowrap;overflow:hidden;font-variant-numeric:tabular-nums}
+.qt-p{display:inline-block;width:4ch;text-align:right}
 /* read aloud, not shown: the clock's words are its tip */
 .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .qt-r .ibtn[aria-pressed="true"]{background:var(--selected);color:var(--foreground)}

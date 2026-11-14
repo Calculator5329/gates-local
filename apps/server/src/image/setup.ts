@@ -18,6 +18,8 @@ const gb = (bytes: number) => `${(bytes / GIB).toFixed(1)} GB`;
 const ELSEWHERE = "A ComfyUI on another computer works too: set its address in Settings.";
 
 export const NO_ENGINE = "The app cannot set up images on this computer. A ComfyUI you run yourself works: set its address in Settings.";
+/** A computer the app sets images up on, in a release that does not offer it yet (engine.ts ENGINE_OFFERED): the version, not the computer. */
+export const NOT_YET = "Picture setup is not in this version yet. A ComfyUI you run yourself works: set its address in Settings.";
 export const addressSet = (address: string) => `Settings names a ComfyUI at ${address}, and it did not answer. Start it there, or clear the address in Settings so the app can set images up here.`;
 
 /**
@@ -56,8 +58,8 @@ export interface ImageSetupDeps {
   image: Pick<ImageModule, "status" | "engine" | "start" | "download">;
   /** Records the device the engine runs on (own.ts reads it at start): "cpu" when the card cannot. */
   setDevice(device: "gpu" | "cpu"): void;
-  /** The engine this machine would fetch (engineFor, or the e2e knob's), or undefined where there is none. */
-  engine(gpuName: string | undefined): EnginePlan | undefined;
+  /** The engine this machine would fetch (engineFor, or the e2e knob's); "later" where this release does not offer one on a system the app sets images up on; undefined where there is none. */
+  engine(gpuName: string | undefined): EnginePlan | "later" | undefined;
   gpuStatus(): Promise<GpuStatus>;
   /** Settings' ComfyUI address: while one is set, the app reads it and not its own engine, so there is nothing to set up. */
   settingsAddress(): string | undefined;
@@ -103,10 +105,12 @@ export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
   const read = async (): Promise<{ info: ImageSetup; plan?: EnginePlan; cpu?: boolean }> => {
     // The card's name only, for the build the engine needs (engineFor: older cards take cu126).
     const gpu = await deps.gpuStatus().catch(() => undefined);
-    const plan = deps.engine(gpu?.name);
+    const found = deps.engine(gpu?.name);
     const progress = last === undefined ? {} : { progress: last };
     const set = deps.settingsAddress();
     if (set !== undefined) return { info: { why: addressSet(set), ...progress } };
+    if (found === "later") return { info: { why: NOT_YET, ...progress } };
+    const plan = found;
     if (plan === undefined) return { info: { why: NO_ENGINE, ...progress } };
     // Whether pictures run here, and on what, is the image module's held value; it is not worked out again here.
     await deps.image.status().catch(() => undefined);

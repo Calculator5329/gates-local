@@ -14,15 +14,22 @@ vi.mock("./Sidebar.tsx", () => ({ focusComposer: () => undefined }));
 vi.mock("./Settings.tsx", () => ({ DlDetail: () => null }));
 vi.mock("./ui.tsx", () => ({ VLabel: () => null }));
 
-const { FirstRun, installWords } = await import("./FirstRun.tsx");
+const { FirstRun, installStep, installWords } = await import("./FirstRun.tsx");
 
 describe("the app's own Ollama installing says its size and progress (FIRST-USE-08)", () => {
   const total = 1_543_547_172;
-  it("its size before a byte arrives, then how far and the time left, then unpacking", () => {
-    expect(installWords(undefined)).toBe("Into Gates Local's folder");
-    expect(installWords({ receivedBytes: 0, totalBytes: total })).toMatch(/^Into Gates Local's folder · 1\.4\sGB$/);
-    expect(installWords({ receivedBytes: 2 ** 29, totalBytes: total, bytesPerSecond: 10e6 })).toMatch(/^Into Gates Local's folder · 0\.5 of 1\.4\sGB · about \d+ min left$/);
-    expect(installWords({ receivedBytes: total, totalBytes: total })).toBe("Into Gates Local's folder · Unpacking");
+  const disk = 2_528_731_874;
+  it("how far and the time left, with the disk it takes, then unpacking", () => {
+    expect(installWords(undefined)).toBeUndefined();
+    expect(installWords({ receivedBytes: 0, totalBytes: total, diskBytes: disk })).toMatch(/^0\.0 of 1\.4\sGB · 2\.4\sGB on disk$/);
+    expect(installWords({ receivedBytes: 2 ** 29, totalBytes: total, bytesPerSecond: 10e6, diskBytes: disk })).toMatch(/^0\.5 of 1\.4\sGB · about \d+ min left · 2\.4\sGB on disk$/);
+    expect(installWords({ receivedBytes: total, totalBytes: total, diskBytes: disk })).toMatch(/^1\.4\sGB downloaded · 2\.4\sGB on disk$/);
+    // a release nobody measured says no disk figure rather than a guessed one
+    expect(installWords({ receivedBytes: 0, totalBytes: total })).toMatch(/^0\.0 of 1\.4\sGB$/);
+  });
+  it("names Ollama once, on the status line, with the step", () => {
+    expect(installStep({ receivedBytes: 0, totalBytes: total })).toBe("Downloading Ollama");
+    expect(installStep({ receivedBytes: total, totalBytes: total })).toBe("Unpacking Ollama");
   });
 });
 
