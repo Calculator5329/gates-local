@@ -19,7 +19,7 @@ import type { ThreadStore } from "../threads/store.ts";
 import { createComfyClient, type ComfyClientDeps } from "./client.ts";
 import { downloadFile, haveFile, partBytes, sizeOf, volumeFree, volumeOf, type DownloadOptions } from "./download.ts";
 import { isLocalComfy } from "./installed.ts";
-import { appPreset, cardBytes, DEFAULT_CHOICE, defaultChoice, describeChoice, isDefaultChoice, judgeRow, listPresets, MIN_ROOM, NO_GPU, presetFiles, resolveChoice, sameRow, SLOW, smallerFit, tiersFor, workflowPreset, type ComfyLists, type KnownWorkflow, type Preset } from "./presets.ts";
+import { appPreset, cardBytes, DEFAULT_CHOICE, defaultChoice, describeChoice, isDefaultChoice, judgeRow, listPresets, liveChoice, MIN_ROOM, NO_GPU, presetFiles, resolveChoice, sameRow, SLOW, smallerFit, tiersFor, workflowPreset, type ComfyLists, type KnownWorkflow, type Preset } from "./presets.ts";
 import { createComfyService, type ComfyService } from "./service.ts";
 import { extraModelPathsLine, MODEL_KINDS, type OwnComfy } from "./own.ts";
 
@@ -244,6 +244,19 @@ const detail = (error: unknown) => error instanceof Error ? error.message : Stri
 const imageError = (code: string, message: string) => Object.assign(new Error(message), { code });
 const gib = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
 const same = (a: ImageChoice, b: ImageChoice) => a.preset === b.preset && a.width === b.width && a.height === b.height;
+
+/**
+ * How long a picture may run before it is stopped. On a card a picture takes seconds; on the processor
+ * Settings promises 2 to 4 minutes (presets.ts SLOW), and a busy computer took 9 minutes a step, so its
+ * limit is five times the slowest promised picture and more.
+ */
+export const RUN_LIMIT_MS = { card: 600_000, cpu: 1_800_000 } as const;
+const QUEUE_LIMIT_MS = 1_800_000;
+const minutes = (ms: number) => Math.round(ms / 60_000);
+/** A picture stopped at its limit: the cause, with the engine named as Settings names it. */
+export const ranLong = (min: number) => `The picture took longer than the ${min}-minute limit on this computer, so the image engine stopped it. Try again when you are ready.`;
+/** A picture that never got its turn (chat held the memory): nothing ran, nothing is wrong with the engine. */
+export const waitedLong = (min: number) => `The picture waited ${min} minutes for its turn and did not start. Try again when you are ready.`;
 
 /** One process on the GPU as nvidia-smi lists it (fit/gpu.ts GpuTenant). */
 export interface GpuHolder { pid: number; usedBytes?: number; label?: string; role?: string; system?: true; unnamed?: true }
@@ -698,14 +711,15 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       deps.admit?.();
       let cfg = { enabled: false, baseUrl: "", managed: false, hostname: "", addressSet: false };
       // The thread's own choice (its last pick or send), else Settings' (the last pick anywhere).
-      const kept = params.threadId ? deps.store.imageChoiceOf(params.threadId) : undefined;
+      // A saved one this build no longer has (an older build's pick) counts as none (liveChoice).
+      const kept = liveChoice(params.threadId ? deps.store.imageChoiceOf(params.threadId) : undefined);
       const jobId = randomUUID();
       let prompt = params.prompt;
       // Unset: nothing saved in the thread or Settings, and the choice sent (or a retry's stored one)
       // is absent or one of the defaults. The picker saves every pick, so with nothing saved a default
       // is all a send can carry (the composer and the image tool send the one they show). The job
       // settles it again from ComfyUI's own list, so a default whose files went missing is passed over.
-      const saved = kept ?? deps.settings().imageChoice;
+      const saved = kept ?? liveChoice(deps.settings().imageChoice);
       let choice = params.choice ?? saved ?? chooseDefault();
       let unset = saved === undefined && isDefaultChoice(params.choice);
       if (params.retryOf !== undefined) {
@@ -736,7 +750,16 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       const deadline = new AbortController();
       const signal = AbortSignal.any([controller.signal, deadline.signal]);
       let timeout: ReturnType<typeof setTimeout> | undefined;
-      let timedOut = false;
+      let timedOut: "queue" | "run" | undefined;
+      /** The run's start and the limit its timer is set to: a computer found to have no card gets its own. */
+      let runFrom = 0, runLimit = 0;
+      const runLimitMs = () => deps.jobTimeoutMs ?? (lastRoom === 0 ? RUN_LIMIT_MS.cpu : RUN_LIMIT_MS.card);
+      const armRun = (ms: number) => {
+        clearTimeout(timeout);
+        runLimit = ms;
+        timeout = setTimeout(() => { timedOut = "run"; deadline.abort(new Error("Image run timed out.")); }, Math.max(0, runFrom + ms - Date.now()));
+        timeout.unref();
+      };
       let stage = "image-config";
       /** The setup this job handed memory to, while it loads: settled at done, ended on a failure. */
       let staged: Want | undefined;
@@ -747,15 +770,14 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       };
       event("queued");
       // Waiting has its own limit; it never spends the render's full run budget.
-      timeout = setTimeout(() => { timedOut = true; deadline.abort(new Error("Image queue timed out.")); }, deps.queueTimeoutMs ?? 1_800_000);
+      timeout = setTimeout(() => { timedOut = "queue"; deadline.abort(new Error("Image queue timed out.")); }, deps.queueTimeoutMs ?? QUEUE_LIMIT_MS);
       timeout.unref();
       // Begin after registering the promise; generate returns before any running event.
       const ended = Promise.resolve().then(async () => {
         try {
           await deps.lease.run("image", signal, async () => {
-            clearTimeout(timeout);
-            timeout = setTimeout(() => { timedOut = true; deadline.abort(new Error("Image run timed out.")); }, deps.jobTimeoutMs ?? 600_000);
-            timeout.unref();
+            runFrom = Date.now();
+            armRun(runLimitMs());
             const latest = config();
             if (!latest.enabled) throw imageError("image-off", "Image generation was turned off while this job waited.");
             cfg = latest;
@@ -807,6 +829,9 @@ export function createImageModule(deps: ImageDeps): ImageModule {
               if ((await comfy.running(signal)).includes(earlier.promptId)) throw imageError("image-busy", "ComfyUI is still running an earlier image from this app that did not stop when cancelled. Wait for it to finish, then retry.");
               stuck.delete(cfg.baseUrl);
             }
+            // The limit follows the computer: a first picture sent before any status read learns here that there is no card.
+            if (lastRoom === undefined && deps.jobTimeoutMs === undefined) await readRoom(signal).catch(() => signal.throwIfAborted());
+            if (runLimitMs() !== runLimit) armRun(runLimitMs());
             update({ state: "busy", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
             // The run time is ComfyUI's time making the picture, not the wait before it.
             const started = performance.now();
@@ -837,7 +862,9 @@ export function createImageModule(deps: ImageDeps): ImageModule {
           // a load that did not finish: what the engine holds is unknown, and the next handoff asks it to free
           if (staged !== undefined) deps.memory?.ended();
           staged = undefined;
-          const message = timedOut && !controller.signal.aborted ? "Image exceeded its run timeout. Retry when ComfyUI is ready." : detail(error);
+          const late = controller.signal.aborted ? undefined
+            : timedOut === "run" ? ranLong(minutes(runLimit)) : timedOut === "queue" ? waitedLong(minutes(deps.queueTimeoutMs ?? QUEUE_LIMIT_MS)) : undefined;
+          const message = late ?? detail(error);
           const cancelDetail = error instanceof Error && "cancelDetail" in error && typeof error.cancelDetail === "string" ? error.cancelDetail : undefined;
           const stuckPromptId = error instanceof Error && "stuckPromptId" in error && typeof error.stuckPromptId === "string" ? error.stuckPromptId : undefined;
           if (stuckPromptId) stuck.set(cfg.baseUrl, { promptId: stuckPromptId, ...owned?.baseUrl === cfg.baseUrl ? { pid: owned.pid } : {} });
@@ -860,14 +887,15 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             "image-save": "The image could not be saved; check free disk space and try again.",
           };
           const errorKind = controller.signal.aborted ? "cancelled" : timedOut ? "timeout" : Object.hasOwn(reasons, code) ? code : stage;
-          const reason = controller.signal.aborted ? "The image was cancelled; try again when you are ready." : timedOut ? "The image timed out; wait until ComfyUI is ready and try again."
+          const reason = controller.signal.aborted ? "The image was cancelled; try again when you are ready." : late !== undefined ? late
             : errorKind === "wont-fit" && error instanceof Error && "said" in error && typeof error.said === "string" ? error.said : reasons[errorKind];
           log(`job ${jobId} failed kind=${errorKind}`);
           event(controller.signal.aborted ? "cancelled" : "error", { message: reason, errorKind });
           if (cancelDetail && activeJob === jobId) {
             // Only a prompt that outlived the deadline means ComfyUI is still up; a failed cleanup alone does not.
             update({ state: "error", owner: owned?.baseUrl === cfg.baseUrl ? "app" : stuckPromptId ? "external" : "none", baseUrl: cfg.baseUrl, detail: `${message} ${cancelDetail}` });
-          } else if (controller.signal.aborted && activeJob === jobId) {
+          } else if ((controller.signal.aborted || timedOut === "run") && activeJob === jobId) {
+            // a picture stopped at its limit, like one cancelled: the engine that stopped it is ready for the next
             const healthy = await client(cfg.baseUrl).healthy();
             if (activeJob === jobId) update({ state: healthy ? "ready" : "stopped", owner: owned?.baseUrl === cfg.baseUrl ? "app" : healthy ? "external" : "none", baseUrl: cfg.baseUrl });
           } else if (!controller.signal.aborted && noComfy && (activeJob === jobId || activeJob === undefined)) {

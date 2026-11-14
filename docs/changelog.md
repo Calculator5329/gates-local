@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-11-14: Pictures on a Linux computer with no graphics card download 1.05 GB, not 3.87 GB
+
+- On Linux, a computer with no graphics card for pictures, where they
+  run on the processor, now sets up the picture engine without CUDA: 1.05 GB to
+  download instead of 3.87 GB, and 2.5 GB on disk instead of 7.4 GB.
+  A computer with a card gets the same engine as before.
+- The engine's download counter on Linux counts up as the bytes arrive,
+  not only when each package finishes.
+- A picture model picked in an older version that this version no
+  longer has no longer stops a picture: the first picture runs on the
+  setup that was just installed, with nothing picked.
+- Picture setup on Linux keeps no download cache once the engine is in
+  place, and the disk it says it takes before the click is what the
+  engine really takes: 14.5 GB on a computer with a 16 GB card (it said
+  22.1 GB), 10.0 GB with no card.
+- With the image tool off, a chat model is told that only making images
+  is off and that its other tools still work.
+- A picture that runs too long now says so: "The picture took longer
+  than the 30-minute limit on this computer, so the image engine stopped
+  it." It used to say to wait until ComfyUI was ready. On a computer with
+  no graphics card the limit is 30 minutes; it was 10, the same as with a card.
+- Stopping that picture asks the image engine once, not on every check,
+  and the engine stays ready for the next picture.
+
 ## 2026-11-14: A question gets its answer in the chat
 
 - A plain question is answered in words in the chat. The instruction

@@ -12,7 +12,7 @@
 // The wheels (torch and ComfyUI's requirements) come from `uv pip sync --require-hashes` against
 // the lock below: a wheel whose hash is not in the lock is refused. No root, no system Python.
 import { type ChildProcess, spawn } from "node:child_process";
-import { constants } from "node:fs";
+import { constants, readFileSync } from "node:fs";
 import { access, cp, mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { installPinned, type InstallTarget } from "../runtime/install.ts";
@@ -21,7 +21,8 @@ import type { InstallManifest } from "../runtime/schemas.ts";
 import type { InstallProgress } from "../runtime/types.ts";
 import { ENGINE_VERSION, engineDir, engineRoot } from "./engine.ts";
 import { LINUX_LOCK, LINUX_WHEEL_BYTES } from "./linux-lock.ts";
-import type { EnginePlan } from "./setup.ts";
+import { LINUX_CPU_WHEEL_BYTES, LINUX_LOCK_CPU } from "./linux-lock-cpu.ts";
+import type { BuildPlan, EnginePlan } from "./setup.ts";
 
 export type LinuxPins = {
   /** The engine's version: its folder under runtime/comfyui/. */
@@ -38,6 +39,13 @@ export type LinuxPins = {
   lock: string;
   /** What the wheels download, for the progress and the free-space check. */
   wheelBytes: number;
+  /** What the built engine takes on disk (its tree, uv, uv's Python, the source), measured once; absent, the setup guesses. */
+  diskBytes?: number;
+  /**
+   * The same engine for a computer whose card cannot run pictures: the lock with torch's CPU build
+   * and no CUDA libraries, built into `<version>-cpu`. Absent: that computer builds from `lock`.
+   */
+  cpu?: { lock: string; wheelBytes: number; diskBytes?: number };
 };
 
 /**
@@ -67,6 +75,10 @@ export const LINUX_ENGINE: LinuxPins = {
   sourceDir: `ComfyUI-${ENGINE_VERSION}`,
   lock: LINUX_LOCK,
   wheelBytes: LINUX_WHEEL_BYTES,
+  // du of runtime/comfyui, uv, uv-python and comfyui-src after one real build each, 2026-11-14
+  diskBytes: 7_325_333_460,
+  // compiled 2026-11-14 against the CPU index, the rest held to the cu130 lock's versions
+  cpu: { lock: LINUX_LOCK_CPU, wheelBytes: LINUX_CPU_WHEEL_BYTES, diskBytes: 2_444_080_259 },
 };
 
 /** Every part has its digest and the lock is filled in: the build may be offered. */
@@ -88,22 +100,45 @@ const COLOUR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 /**
  * The bytes uv's sync has finished downloading, from its own lines. With its output not a terminal
  * uv prints no bars; for each file over 1 MiB it prints "Downloading torch (846.4MiB)" when the
- * download starts and " Downloaded torch" when it ends (uv-command-support progress.rs, 0.13.7).
- * A wheel counts once it has ended, at the size uv gave it; smaller wheels say nothing and are
- * counted when the sync ends. Never more than `cap`.
+ * download starts and " Downloaded torch" when it ends (uv-command-support progress.rs, 0.13.7):
+ * the size, but nothing in between. A wheel counts once it has ended, at the size uv gave it;
+ * smaller wheels say nothing and are counted when the sync ends. Never more than `cap`.
+ * `inFlight` is what the files uv has started and not ended will add.
  */
-export function uvDownloads(cap: number): (line: string) => number {
+export function uvDownloads(cap: number): { line(line: string): number; inFlight(): number } {
   const sizes = new Map<string, number>();
   let done = 0;
-  return (line) => {
-    const text = line.replace(COLOUR, "").trim();
-    const start = /^Downloading (\S+) \((\d+(?:\.\d+)?)(B|KiB|MiB|GiB|TiB)\)$/.exec(text);
-    if (start) sizes.set(start[1]!, Math.round(Number(start[2]) * UNITS[start[3]!]!));
-    const end = /^Downloaded (\S+)$/.exec(text);
-    if (end) { done += sizes.get(end[1]!) ?? 0; sizes.delete(end[1]!); }
-    return Math.min(done, cap);
+  return {
+    line(line) {
+      const text = line.replace(COLOUR, "").trim();
+      const start = /^Downloading (\S+) \((\d+(?:\.\d+)?)(B|KiB|MiB|GiB|TiB)\)$/.exec(text);
+      if (start) sizes.set(start[1]!, Math.round(Number(start[2]) * UNITS[start[3]!]!));
+      const end = /^Downloaded (\S+)$/.exec(text);
+      if (end) { done += sizes.get(end[1]!) ?? 0; sizes.delete(end[1]!); }
+      return Math.min(done, cap);
+    },
+    inFlight: () => [...sizes.values()].reduce((sum, size) => sum + size, 0),
   };
 }
+
+/**
+ * The bytes this computer's network interfaces have received (/proc/net/dev, loopback left out);
+ * undefined where it cannot be read.
+ */
+export function netReceived(): number | undefined {
+  try {
+    let sum = 0;
+    for (const row of readFileSync("/proc/net/dev", "utf8").split("\n").slice(2)) {
+      const [name, rest] = row.split(":");
+      if (rest === undefined || name!.trim() === "lo") continue;
+      sum += Number(rest.trim().split(/\s+/)[0]);
+    }
+    return Number.isFinite(sum) ? sum : undefined;
+  } catch { return undefined; }
+}
+
+/** How often the sync's count is read again while no line comes (a large wheel downloading). */
+const COUNT_MS = 500;
 
 /** Run uv to the end; a failure carries the end of what it printed. `onLine` hears each line it prints. */
 function runUv(uv: string, args: string[], env: NodeJS.ProcessEnv, signal: AbortSignal, onLine?: (line: string) => void): Promise<void> {
@@ -128,13 +163,25 @@ function runUv(uv: string, args: string[], env: NodeJS.ProcessEnv, signal: Abort
   });
 }
 
-export function linuxBuild(opts: { appDataDir: string; pins: LinuxPins }): Extract<EnginePlan, { kind: "build" }> {
+/**
+ * The build with a card's lock, and beside it (`cpu`) the processor one when the pins carry it: the
+ * setup takes `cpu` on a computer whose card cannot run pictures (setup.ts), so no CUDA library is
+ * fetched there.
+ */
+export function linuxBuild(opts: { appDataDir: string; pins: LinuxPins; received?: () => number | undefined }): Extract<EnginePlan, { kind: "build" }> {
   const { appDataDir, pins } = opts;
-  const bytes = pins.uv.sizeBytes + pins.source.sizeBytes + pins.wheelBytes;
+  const received = opts.received ?? netReceived;
+  const card = buildWith(appDataDir, pins, received, pins.version, pins.lock, pins.wheelBytes, pins.diskBytes);
+  return pins.cpu === undefined ? card : { ...card, cpu: buildWith(appDataDir, pins, received, `${pins.version}-cpu`, pins.cpu.lock, pins.cpu.wheelBytes, pins.cpu.diskBytes) };
+}
+
+function buildWith(appDataDir: string, pins: LinuxPins, received: () => number | undefined, version: string, lockText: string, wheelBytes: number, diskBytes: number | undefined): BuildPlan {
+  const bytes = pins.uv.sizeBytes + pins.source.sizeBytes + wheelBytes;
   return {
     kind: "build",
-    version: pins.version,
+    version,
     bytes,
+    ...diskBytes === undefined ? {} : { diskBytes },
     async run(onProgress, signal) {
       let before = 0;
       const part = (size: number) => (p: InstallProgress) => onProgress({ ...p, receivedBytes: before + Math.min(p.receivedBytes, size), totalBytes: bytes });
@@ -149,13 +196,17 @@ export function linuxBuild(opts: { appDataDir: string; pins: LinuxPins }): Extra
       // a build a killed app left behind (own.ts skips dot folders, so it was never started)
       for (const entry of await readdir(root)) if (entry.startsWith(BUILD_PREFIX)) await rm(path.join(root, entry), { recursive: true, force: true });
       const staging = await mkdtemp(path.join(root, BUILD_PREFIX));
+      // uv's cache is the build's own folder beside the staging one, never kept: kept, it counts as
+      // a second engine (6.7 GB by du after one card build) and is one wherever uv can neither
+      // clone nor hardlink its files into the venv; a killed build's is swept with its staging above
+      const cache = await mkdtemp(path.join(root, `${BUILD_PREFIX}cache-`));
       try {
         await cp(path.join(source.dir, pins.sourceDir), path.join(staging, "ComfyUI"), { recursive: true });
         const lock = path.join(staging, "requirements.lock");
-        await writeFile(lock, pins.lock);
+        await writeFile(lock, lockText);
         const env: NodeJS.ProcessEnv = {
           ...process.env,
-          UV_CACHE_DIR: path.join(runtimeDir(appDataDir), "uv-cache"),
+          UV_CACHE_DIR: cache,
           UV_PYTHON_INSTALL_DIR: path.join(runtimeDir(appDataDir), "uv-python"),
           UV_PYTHON_PREFERENCE: "only-managed",
           UV_NO_CONFIG: "1",
@@ -165,20 +216,35 @@ export function linuxBuild(opts: { appDataDir: string; pins: LinuxPins }): Extra
         await runUv(path.join(uv.dir, uvBin), ["venv", "--relocatable", "--python", pins.python, venv], env, signal);
         // best-match, as the lock was compiled: first-index would take certifi and the like from
         // the torch index, which lacks the pinned versions
-        // the wheels are most of the download: each one uv says it finished moves the count
-        const wheels = uvDownloads(pins.wheelBytes);
-        let counted = 0;
-        await runUv(path.join(uv.dir, uvBin), ["pip", "sync", "--require-hashes", "--index-strategy", "unsafe-best-match", "--python", path.join(venv, "bin", "python"), lock], env, signal, (line) => {
-          const now = wheels(line);
+        // The wheels are most of the download. Each one uv says it finished counts; while some are
+        // still coming, the bytes the network has received since the sync began count, never past
+        // what the wheels uv has started will add, so other downloads on the computer cannot run
+        // the count ahead (one real processor build: the finished wheels alone trailed the network
+        // by about 0.45 GB of 1.05 for most of the sync, then caught up in its last seconds).
+        const wheels = uvDownloads(wheelBytes);
+        const rx0 = received();
+        let finished = 0, counted = 0;
+        const count = () => {
+          const rx = rx0 === undefined ? undefined : received();
+          const arrived = rx === undefined ? 0 : Math.min(rx - rx0!, finished + wheels.inFlight());
+          const now = Math.min(Math.max(finished, arrived, counted), wheelBytes);
           if (now === counted) return;
           counted = now;
-          onProgress({ phase: "download", version: pins.version, receivedBytes: before + now, totalBytes: bytes });
-        });
+          onProgress({ phase: "download", version, receivedBytes: before + now, totalBytes: bytes });
+        };
+        const timer = setInterval(count, COUNT_MS);
+        try {
+          await runUv(path.join(uv.dir, uvBin), ["pip", "sync", "--require-hashes", "--index-strategy", "unsafe-best-match", "--python", path.join(venv, "bin", "python"), lock], env, signal, (line) => {
+            finished = wheels.line(line);
+            count();
+          });
+        } finally { clearInterval(timer); }
         await access(path.join(venv, "bin", "python"), constants.X_OK);
-        await rename(staging, engineDir(appDataDir, pins.version));
-        onProgress({ phase: "done", version: pins.version, receivedBytes: bytes, totalBytes: bytes });
+        await rename(staging, engineDir(appDataDir, version));
+        onProgress({ phase: "done", version, receivedBytes: bytes, totalBytes: bytes });
       } finally {
         await rm(staging, { recursive: true, force: true });
+        await rm(cache, { recursive: true, force: true });
       }
     },
   };

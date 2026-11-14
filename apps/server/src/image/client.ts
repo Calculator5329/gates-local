@@ -41,6 +41,9 @@ export interface ComfyClientDeps {
   requestTimeoutMs?: number;
 }
 
+/** How long a cancel waits on its interrupt before it asks again. */
+export const INTERRUPT_AGAIN_MS = 10_000;
+
 export class ComfyCancelTimeoutError extends Error {
   constructor() { super("ComfyUI did not release the image job within 30 s"); this.name = "ComfyCancelTimeoutError"; }
 }
@@ -220,6 +223,10 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
       // free VRAM before loading after the lease is released.
       const deadline = new AbortController();
       const timeout = setTimeout(() => deadline.abort(new ComfyCancelTimeoutError()), 30_000);
+      // One interrupt: ComfyUI keeps it until the prompt stops, which on a processor can take seconds
+      // into a long step. Asked again only after INTERRUPT_AGAIN_MS, for the one it drops: an interrupt
+      // that lands as the prompt starts is cleared by the start (execute_async).
+      let interruptedAt: number | undefined;
       try {
         for (;;) {
           deadline.signal.throwIfAborted();
@@ -228,7 +235,10 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
           const running = next.queue_running.some((row) => row[1] === promptId);
           if (!pending && !running) return;
           if (pending) await post("/queue", { delete: [promptId] }, deadline.signal);
-          if (running) await post("/interrupt", { prompt_id: promptId }, deadline.signal);
+          if (running && (interruptedAt === undefined || Date.now() - interruptedAt >= INTERRUPT_AGAIN_MS)) {
+            interruptedAt = Date.now();
+            await post("/interrupt", { prompt_id: promptId }, deadline.signal);
+          }
           await new Promise<void>((resolve, reject) => {
             const finish = () => { deadline.signal.removeEventListener("abort", abort); resolve(); };
             const timer = setTimeout(finish, 100);

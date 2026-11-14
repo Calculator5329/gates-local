@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { APP_FILES, comfyInfo, KLEIN_COMPACT_FILES, KLEIN_FILES, MOSS_FILES, SDXL_FILES, ZIMAGE_FILES, type FakeFiles } from "../../test/comfy/info.ts";
 import { readFileSync } from "node:fs";
 import { imageFitVerdict } from "@gates-local/contracts";
-import { cardBytes, comfyLists, defaultChoice, jobGraph, listPresets, presetFiles, PRESETS, resolveChoice, RETIRED, tiersFor, workflowPreset, type Preset } from "./presets.ts";
+import { cardBytes, comfyLists, defaultChoice, imageOffLine, jobGraph, listPresets, presetFiles, PRESETS, resolveChoice, RETIRED, tiersFor, workflowPreset, type Preset } from "./presets.ts";
 import { keepWorkflow } from "./sources.ts";
 import { cellsFor, STYLE_CELLS } from "./styles.ts";
 import files from "./setups/files.json" with { type: "json" };
@@ -279,5 +279,24 @@ describe("workflows ComfyUI has", () => {
     const graph = jobGraph(preset, comfyInfo({ checkpoints: ["xl/sd_xl_base_1.0.safetensors"] }), { prompt: "a fox", seed: 5, width: 1024, height: 1024 });
     expect(graph["10"]!.inputs["text"]).toBe("a fox");
     expect(graph["15"]!.inputs["ckpt_name"]).toBe("xl/sd_xl_base_1.0.safetensors");
+  });
+});
+
+describe("imageOffLine, the system prompt's line when the image tool is not offered", () => {
+  it("in a turn with tools it is about images only and says the other tools still work", () => {
+    const line = imageOffLine({ imageGen: true, imageTool: false }, true, true)!;
+    expect(line).not.toMatch(/cannot make images in this chat/i);
+    expect(line).toMatch(/^Making images is off in this chat; every other tool you have still works\./);
+    expect(line).toContain('"Turn on Make images in Settings > Tools, or switch the message box to Image."');
+  });
+
+  it("in a turn without tools it names no tools", () => {
+    const line = imageOffLine({ imageGen: false }, false, false)!;
+    expect(line).toMatch(/^Making images is off in this chat\. /);
+    expect(line).not.toMatch(/tool you have/);
+  });
+
+  it("is absent while the tool is offered", () => {
+    expect(imageOffLine({ imageGen: true }, true, true)).toBeUndefined();
   });
 });

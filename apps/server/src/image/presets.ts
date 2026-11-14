@@ -217,6 +217,16 @@ const APP_PRESETS: readonly Preset[] = [...PRESETS, ...STYLE_CELLS, ...RETIRED];
 export const appPreset = (id: string): Preset | undefined => APP_PRESETS.find((p) => p.id === id);
 
 /**
+ * A saved choice (Settings' or a thread's) as a send reads it: undefined when it names one of the
+ * app's own setups this build no longer has (an older build's pick, such as SDXL Lightning), so the
+ * send runs what nothing picked runs, as the composer already shows. A ComfyUI workflow or a
+ * person's own file (an id with a `kind:` prefix) is kept: its list may not be read yet, and its
+ * job says what is missing.
+ */
+export const liveChoice = (choice: ImageChoice | undefined): ImageChoice | undefined =>
+  choice === undefined || choice.preset.includes(":") || appPreset(choice.preset) !== undefined ? choice : undefined;
+
+/**
  * The preset and size a choice names, from the app's own and `extra` (the workflows ComfyUI had,
  * workflowPresets). An unknown preset or a size it does not run at is refused, never swapped.
  */
@@ -433,7 +443,9 @@ export function imageOffLine(settings: Pick<Settings, "imageGen" | "imageTool">,
     : !runnable && settings.imageTool !== false ? "Set up an image model in Settings > Image generation."
     : !toolsOn ? "Turn on Let the model use tools and Make images in Settings > Tools, or switch the message box to Image."
     : "Turn on Make images in Settings > Tools, or switch the message box to Image.";
-  return `You cannot make images in this chat. If asked for one, say: "${say}" Never send the person to another app or website for it.`;
+  // about images only: beside a tool list, "you cannot" read as every tool being off (a model quoted it so)
+  const off = toolsOn ? "Making images is off in this chat; every other tool you have still works." : "Making images is off in this chat.";
+  return `${off} If asked for an image, say: "${say}" Never send the person to another app or website for it.`;
 }
 
 /**
@@ -443,7 +455,7 @@ export function imageOffLine(settings: Pick<Settings, "imageGen" | "imageTool">,
  */
 export function imageToolChoice(settings: Pick<Settings, "imageGen" | "imageTool" | "imageChoice">, runnable: boolean, lists?: ComfyLists, extra: readonly Preset[] = []): ImageChoice | undefined {
   // with no default (no GPU room), DEFAULT_CHOICE: the job's own check then refuses it in words
-  return imageToolOn(settings, runnable) ? (settings.imageChoice ?? defaultChoice(lists, extra) ?? DEFAULT_CHOICE) : undefined;
+  return imageToolOn(settings, runnable) ? (liveChoice(settings.imageChoice) ?? defaultChoice(lists, extra) ?? DEFAULT_CHOICE) : undefined;
 }
 
 /**

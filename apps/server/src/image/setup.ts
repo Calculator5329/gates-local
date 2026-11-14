@@ -47,10 +47,19 @@ export const shortDisk = (need: number, free: number) => `Needs ${gb(need)} free
  */
 const UNPACK_FACTOR = 4;
 
-/** How this machine's engine is fetched: one pinned archive (Windows, and the e2e fake), or the Linux build (linux-build.ts). */
+/** The Linux build (linux-build.ts) of one engine version: what it downloads, and the build. */
+export type BuildPlan = { kind: "build"; version: string; bytes: number; /** the built tree on disk, measured; absent, the guess below */ diskBytes?: number; run(onProgress: (p: InstallProgress) => void, signal: AbortSignal): Promise<void> };
+
+/**
+ * How this machine's engine is fetched: one pinned archive (Windows, and the e2e fake), or the Linux
+ * build, whose `cpu` is the same engine without CUDA for a computer whose card cannot run pictures.
+ */
 export type EnginePlan =
   | { kind: "archive"; manifest: InstallManifest; layout: EngineLayout }
-  | { kind: "build"; version: string; bytes: number; run(onProgress: (p: InstallProgress) => void, signal: AbortSignal): Promise<void> };
+  | BuildPlan & { cpu?: BuildPlan };
+
+/** The plan this computer runs: a build's processor one where pictures run on the processor. */
+export const planFor = (plan: EnginePlan, cpu: boolean): EnginePlan => cpu && plan.kind === "build" && plan.cpu !== undefined ? plan.cpu : plan;
 
 export interface ImageSetupDeps {
   appDataDir: string;
@@ -86,7 +95,9 @@ async function diskFree(dir: string): Promise<number> {
 }
 
 const planBytes = (plan: EnginePlan) => plan.kind === "archive" ? plan.manifest.sizeBytes : plan.bytes;
-const planVersion = (plan: EnginePlan) => plan.kind === "archive" ? plan.manifest.version : plan.version;
+/** The disk the engine takes: a build's measured tree, else the download times the unpacking guess. */
+const planDisk = (plan: EnginePlan) => plan.kind === "build" && plan.diskBytes !== undefined ? plan.diskBytes : planBytes(plan) * UNPACK_FACTOR;
+const planVersion =(plan: EnginePlan) => plan.kind === "archive" ? plan.manifest.version : plan.version;
 
 /** The setup's download: every file its workflow loads, at the sizes the app's records give. */
 function modelBytes(presetId: string): number {
@@ -110,14 +121,15 @@ export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
     const set = deps.settingsAddress();
     if (set !== undefined) return { info: { why: addressSet(set), ...progress } };
     if (found === "later") return { info: { why: NOT_YET, ...progress } };
-    const plan = found;
-    if (plan === undefined) return { info: { why: NO_ENGINE, ...progress } };
+    if (found === undefined) return { info: { why: NO_ENGINE, ...progress } };
     // Whether pictures run here, and on what, is the image module's held value; it is not worked out again here.
     await deps.image.status().catch(() => undefined);
     const { room } = deps.image.engine();
     if (room === undefined) return { info: { why: GPU_UNREAD, ...progress } };
     if (room > 0 && room < MIN_ROOM) return { info: { why: smallCard(room), ...progress } };
     const cpu = room === 0;
+    // no card that runs pictures: the processor build, with no CUDA libraries to fetch
+    const plan = planFor(found, cpu);
     const preset = PRESETS.find((p) => p.id === SETUP_PRESET)!;
     const installed = deps.own.installed();
     const engineBytes = planBytes(plan);
@@ -130,7 +142,7 @@ export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
         model: { preset: preset.id, name: preset.name, bytes },
         ...cpu ? { cpu: CPU_SECONDS } : {},
         ...freeBytes === undefined ? {} : { freeBytes },
-        needBytes: (installed ? 0 : engineBytes * UNPACK_FACTOR) + (deps.pickedFolder?.() === undefined ? bytes : 0),
+        needBytes: (installed ? 0 : planDisk(plan)) +(deps.pickedFolder?.() === undefined ? bytes : 0),
         ...progress,
       },
     };

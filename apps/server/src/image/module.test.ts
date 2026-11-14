@@ -10,13 +10,13 @@ import { imageFitEdges } from "@gates-local/contracts/testing";
 import { startFakeOllama } from "../../../../test/fake-ollama/fake-ollama.ts";
 import { createModelLoader } from "../runtime/load.ts";
 import { listLoaded } from "../runtime/models.ts";
-import { DEFAULT_CHOICE, NO_GPU, PRESETS, resolveChoice, SLOW } from "./presets.ts";
+import { DEFAULT_CHOICE, imageToolChoice, NO_GPU, PRESETS, resolveChoice, SLOW } from "./presets.ts";
 import { cellsFor } from "./styles.ts";
 import { comfyInfo, KLEIN_COMPACT_FILES, KLEIN_FILES, MOSS_FILES, SDXL_FILES, ZIMAGE_FILES } from "../../test/comfy/info.ts";
 import { createGpuLease } from "../gpu/lease.ts";
 import { openThreadStore } from "../threads/store.ts";
 import { startWsServer } from "../ws/server.ts";
-import { createImageModule, IMAGES_UNSET, imageFitError, imageRoom, isLocalHost, type ImageDeps, type ImageModule } from "./module.ts";
+import { createImageModule, IMAGES_UNSET, imageFitError, imageRoom, isLocalHost, ranLong, RUN_LIMIT_MS, waitedLong, type ImageDeps, type ImageModule } from "./module.ts";
 import { createMemoryOwner } from "../gpu/memory.ts";
 import { createImageHandlers } from "./handlers.ts";
 import { createComfyService } from "./service.ts";
@@ -1929,6 +1929,64 @@ describe("the card Image mode is judged by: each tier's row by its memory, no de
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
     expect(f.events.at(-1)).toMatchObject({ state: "done", choice: cpuGeneral });
     expect(f.graphs.at(-1)!["1"]).toMatchObject({ class_type: "UNETLoader", inputs: { weight_dtype: "fp8_e4m3fn" } });
+  });
+
+  it.each([
+    ["on the processor", true, RUN_LIMIT_MS.cpu],
+    ["on a card", false, RUN_LIMIT_MS.card],
+  ])("a picture that runs past the limit %s: stopped at that computer's limit, the words say so, and the image engine stays up for the next picture", async (_, cpu, limit) => {
+    // A first picture on a computer with no card ran one of two steps in 9 minutes and was stopped at
+    // 10, with words that blamed an engine that was running all along.
+    const f = await fixture({ gpuStatus: async () => cpu ? none : nvidia(16 * gib), idleMs: 3_600_000 }); f.files({ flux: true });
+    f.configure({ cpu, hold: true }); vi.useFakeTimers();
+    const { jobId } = await f.module.generate({ prompt: "a tree" });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() => expect(f.events.some((e) => e.progress === 0.5)).toBe(true));
+    // the room is read once the job holds the lease: a computer with no card gets its own limit from the first picture
+    await vi.advanceTimersByTimeAsync(limit - 1_000);
+    expect(f.events.at(-1)?.state).toBe("running");
+    await vi.advanceTimersByTimeAsync(1_200);
+    await f.module.wait(jobId);
+    expect(RUN_LIMIT_MS.cpu).toBeGreaterThanOrEqual(5 * 4 * 60_000); // five times the slowest picture Settings promises
+    expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "timeout", message: ranLong(limit / 60_000) });
+    expect(f.events.at(-1)?.message).toContain("the image engine");
+    expect(f.calls.filter((c) => c === "/interrupt")).toHaveLength(1);
+    expect(f.calls).not.toContain("stop");
+    expect(f.module.current()).toMatchObject({ state: "ready" });
+    // the next picture runs on the same engine
+    f.configure({ hold: false });
+    const next = await f.module.generate({ prompt: "a tree" });
+    await f.module.wait(next.jobId);
+    expect(f.events.at(-1)).toMatchObject({ state: "done" });
+    expect(f.calls.filter((c) => c === "start")).toHaveLength(0);
+  });
+
+  it("a picture that waits past its turn says it never started, not that the engine was not ready", async () => {
+    const f = await fixture({ gpuStatus: async () => none }); f.files({ flux: true });
+    f.configure({ cpu: true }); vi.useFakeTimers();
+    const release = await f.lease.acquire("chat");
+    const { jobId } = await f.module.generate({ prompt: "a tree" });
+    await vi.advanceTimersByTimeAsync(1_800_001);
+    await f.module.wait(jobId); release();
+    expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "timeout", message: waitedLong(30) });
+  });
+
+  it("a pick an older build saved of a setup this build removed (SDXL Lightning) runs what nothing picked runs, from Settings or a thread, and the image tool never names it", async () => {
+    const f = await fixture({ gpuStatus: async () => none }); f.files({ flux: true });
+    f.configure({ cpu: true });
+    const gone = { preset: "sdxl-lightning", width: 1024, height: 1024 };
+    const cpuGeneral = { preset: "general--cpu-klein-fp4-768-2", width: 768, height: 768 };
+    f.choose(gone);
+    expect((await f.module.presets()).current).toMatchObject({ preset: { id: cpuGeneral.preset } });
+    const plain = await f.module.generate({ prompt: "a red fox" }); await f.module.wait(plain.jobId);
+    expect(f.events.at(-1)).toMatchObject({ state: "done", choice: cpuGeneral });
+    const t = f.store.createThread();
+    f.store.setImageChoice(t.id, gone);
+    const kept = await f.module.generate({ prompt: "a red fox", threadId: t.id }); await f.module.wait(kept.jobId);
+    expect(f.events.at(-1)).toMatchObject({ state: "done", choice: cpuGeneral });
+    expect(imageToolChoice({ imageGen: true, imageChoice: gone }, true)?.preset).not.toBe("sdxl-lightning");
+    // a workflow ComfyUI lists is kept although its list is not read yet: only the app's own removed setups pass
+    expect(imageToolChoice({ imageGen: true, imageChoice: { preset: "template:image_flux2_klein", width: 1024, height: 1024 } }, true)?.preset).toBe("template:image_flux2_klein");
   });
 
   it.each([
