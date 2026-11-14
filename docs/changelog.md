@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-13: A model that runs partly in system memory is no longer refused
+
+- A send was refused when the part of a model that does not fit the GPU
+  was larger than the system memory free at that instant, less 2 GiB. On
+  a 16 GB computer with a 6 GB card and a few programs open, that refused
+  every model that needs system memory at all, while the model list said
+  the same model runs (WIN-MEM-01, WIN-MEM-02 in
+  `docs/evidence/windows-low-memory-bug-report.md`). A send now judges
+  system memory the way the list does: by what the computer has, less the
+  same reserves. The model loads and is marked slower, once. A model the
+  whole computer cannot hold is still refused.
+- Not verified: no real load on a 16 GB Windows computer ran this. When
+  other programs hold most of the memory, the load can be slow, or
+  Ollama can decline it with its own message.
+
 ## 2026-11-13: A model that does not fit offers what does
 
 - When a send or a load is refused for memory, the note under the

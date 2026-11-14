@@ -180,7 +180,9 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
     },
     fit: {
       runNvidiaSmi: async (args) => (args[0]?.startsWith("--query-gpu") ? `16303, ${16303 - gpu.freeMib}, ${gpu.freeMib}\n` : (gpu.apps ?? "")),
-      readMeminfo: async () => `MemTotal: 32541464 kB\nMemAvailable: ${gpu.memAvailableKb} kB\n`,
+      // A send judges system memory by what the computer has, so a test that wants a refusal for
+      // memory needs a small computer, not a busy one: under 2 GB free here is a 3 GB machine.
+      readMeminfo: async () => `MemTotal: ${gpu.memAvailableKb < 2_000_000 ? 3_000_000 : 32541464} kB\nMemAvailable: ${gpu.memAvailableKb} kB\n`,
     },
     log: opts.log ?? (() => undefined),
   });

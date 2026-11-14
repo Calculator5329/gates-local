@@ -93,6 +93,35 @@ async function oneModel(show: unknown, ps: unknown = { models: [] }): Promise<Fa
 const fitOf = async (s: FakeServer, model: string, numCtx: number) =>
   (await checkFit({ baseUrl: s.baseUrl, model, numCtx, runNvidiaSmi: smi(MACHINE_GPU, MACHINE_APPS), readMeminfo: async () => MACHINE_MEMINFO })).report;
 
+const meminfo = (totalGib: number, freeGib: number) => async () => `MemTotal: ${Math.floor(totalGib * 1024 * 1024)} kB\nMemAvailable: ${Math.floor(freeGib * 1024 * 1024)} kB\n`;
+
+describe("a send judges system memory by what the computer has (WIN-MEM-01, WIN-MEM-02)", () => {
+  // docs/evidence/windows-low-memory-bug-report.md: a 6 GB card, 15.92 GiB of RAM, 3.7 GiB of it free at
+  // the send. Every model that had to run partly in system memory was refused.
+  const card = smi("6144, 4144, 2000\n", "");
+
+  it("a model that fits this computer with part in system memory runs, though little is free right now", async () => {
+    const s = await fakeOllama();
+    const { report } = await checkFit({ baseUrl: s.baseUrl, model: "qwen3.5:9b", numCtx: 16384, runNvidiaSmi: card, readMeminfo: meminfo(15.92, 3.7) });
+    expect(report.verdict).toBe("spills");
+    expect(report.spillRamBytes).toBeGreaterThan(2 * GIB);
+    expect(report.message).toContain("system RAM counts what this computer has");
+  });
+
+  it("a model this computer cannot hold at all is still refused", async () => {
+    const s = await fakeOllama();
+    const { report } = await checkFit({ baseUrl: s.baseUrl, model: "gemma4-abliterated:26b", numCtx: 16384, runNvidiaSmi: card, readMeminfo: meminfo(15.92, 3.7) });
+    expect(report.verdict).toBe("refuse");
+  });
+
+  it("more free than the computer's own figure is never cut down to it", async () => {
+    const s = await fakeOllama();
+    const { report } = await checkFit({ baseUrl: s.baseUrl, model: "qwen3.5:9b", numCtx: 16384, runNvidiaSmi: card, readMeminfo: async () => "MemAvailable: 60000000 kB\n" });
+    expect(report.verdict).toBe("spills");
+    expect(report.message).not.toContain("system RAM counts");
+  });
+});
+
 describe("a model's own context window", () => {
   it("runs a model that takes at most 2048 at 2048 when more is asked for: memory decides, nothing refuses", async () => {
     const report = await fitOf(await oneModel(tinyShow(2048)), "tiny:2k", 16384);

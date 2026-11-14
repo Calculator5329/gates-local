@@ -293,6 +293,12 @@ export async function fitWithReadings(deps: FitDeps, model: string, requested: n
   // refused while the loaded one runs. Above it, no more: weights mapped from disk are page cache.
   const smaller = loadedCtx !== undefined && numCtx <= loadedCtx && atLoaded !== undefined;
   const ramReclaim = loaded ? Math.max(loaded.size - loaded.size_vram, smaller ? offsetNeed(atLoaded, offset) - held : 0, 0) : 0;
+  // A send judges system memory as every list does, by what this computer has (cardRamBytes), never
+  // by less than is free now. Memory other programs hold at this instant is the system's to page
+  // out: refusing on it kept every model that runs partly in system memory from loading on a
+  // 16 GB computer (docs/evidence/windows-low-memory-bug-report.md, WIN-MEM-01 and 02).
+  const ramNow = r.memAvailableBytes + ramReclaim;
+  const spillRam = Math.max(ramNow, cardRamBytes(r.memTotalBytes));
   const atCtx = loaded?.context_length === undefined ? "an unknown num_ctx (Ollama did not say)" : `num_ctx ${loaded.context_length}`;
   const freedFrom = r.ps.models.filter((m) => !isCopyOf(m, model) && (deps.reclaim ?? []).some((n) => sameModel(n, m.name)));
   const freed = freedFrom.reduce((sum, m) => sum + m.size_vram, 0);
@@ -302,12 +308,13 @@ export async function fitWithReadings(deps: FitDeps, model: string, requested: n
     ...(comfyBytes > 0 ? [`free VRAM counts ${formatGb(comfyBytes)} held by the app's idle ComfyUI, which the app stops to make room`] : []),
   ];
   if (estimate.rough !== undefined) notes.push(estimate.rough);
+  if (spillRam > ramNow) notes.push(`system RAM counts what this computer has; ${formatGb(ramNow)} is free now`);
   const report = decideFit({
     model,
     numCtx,
     needBytes: need,
     freeVramBytes: r.gpu.freeBytes + reclaim + freed + comfyBytes,
-    memAvailableBytes: r.memAvailableBytes + ramReclaim,
+    memAvailableBytes: spillRam,
     ...(deps.margins ? { margins: deps.margins } : {}),
     measuredAt: r.gpu.measuredAt,
     ...(notes.length > 0 ? { note: notes.join("; ") } : {}),
