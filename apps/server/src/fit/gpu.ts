@@ -91,13 +91,59 @@ export function parseGpuTotals(text: string): GpuTotals {
   return { totalBytes: first.total, usedBytes: first.used, freeBytes: first.free, gpuCount: rows.length };
 }
 
-function labelFor(processName: string): { label: string; role: GpuTenant["role"] } {
-  const command = processName.trim().split(/\s+/)[0] ?? processName;
-  const base = command.split("/").pop() || command;
+/** Last path segment of a Linux or Windows command, without its flags or ".exe". A path may hold spaces ("Program Files"). */
+export function processBasename(processName: string): string {
+  const command = processName.trim().split(/\s+--?\w/)[0]?.trim() ?? processName;
+  const base = command.split(/[\\/]/).pop() || command;
+  return base.replace(/\.exe$/i, "");
+}
+
+/** nvidia-smi prints a bracketed note where it has no name to give ("[Insufficient Permissions]", "[N/A]", "[Not Found]"). */
+const NO_NAME = /^\[[^\]]*\]$/;
+
+/** The desktop's own processes: part of the system, never something to close. Matched on the program's name. */
+const SYSTEM_APPS: readonly [RegExp, string][] = [
+  [/^(dwm|explorer|csrss|winlogon|sihost|ctfmon|ShellHost|ShellExperienceHost|StartMenuExperienceHost|SearchHost|SearchApp|TextInputHost|LockApp|ApplicationFrameHost|SystemSettings)$/i, "Windows desktop"],
+  [/^kwin/i, "Desktop (KWin)"],
+  [/^(gnome-shell|mutter)/i, "Desktop (GNOME)"],
+  [/^(Xorg|Xwayland)/i, "Desktop (X server)"],
+];
+
+/**
+ * The one place a GPU process gets its display name and role. The name is the program's own
+ * (no folders, no flags, no ".exe"), so a full path with a person's folder names is never shown.
+ */
+function labelFor(processName: string): Pick<GpuTenant, "label" | "role" | "unnamed" | "system"> {
+  const raw = processName.trim();
+  if (raw === "" || NO_NAME.test(raw)) return { label: "unnamed process", role: "occupant", unnamed: true };
+  const base = processBasename(raw);
   if (/whisper/i.test(base)) return { label: base, role: "whisper" };
-  if (/^ollama/i.test(base) || /\/ollama(\/|$)/.test(command)) return { label: base, role: "ollama" };
-  if (command.includes("media-vault")) return { label: "media-vault vision runtime", role: "occupant" };
+  if (/^ollama/i.test(base) || /[\\/]ollama([\\/]|$)/i.test(raw.split(/\s+--?\w/)[0] ?? raw)) return { label: base, role: "ollama" };
+  if (/media-vault/i.test(raw)) return { label: "Media Vault vision", role: "occupant" };
+  for (const [pattern, label] of SYSTEM_APPS) if (pattern.test(base)) return { label, role: "occupant", system: true };
   return { label: base, role: "occupant" };
+}
+
+/**
+ * One line for a refusal's detail: who holds GPU memory, largest first, at most four names, the
+ * rest counted. A process whose memory nvidia-smi does not report (every process under Windows'
+ * display driver model, and any it may not inspect) is counted and never given a size.
+ */
+export function holdersSummary(tenants: readonly Pick<GpuTenant, "label" | "usedBytes">[], size: (bytes: number) => string): string {
+  if (tenants.length === 0) return "no process listed";
+  const measured = new Map<string, number>();
+  let unreported = 0;
+  for (const t of tenants) {
+    if (t.usedBytes === undefined) unreported++;
+    else measured.set(t.label, (measured.get(t.label) ?? 0) + t.usedBytes);
+  }
+  if (measured.size === 0) return `${unreported} ${unreported === 1 ? "process" : "processes"}, GPU memory not reported per process`;
+  const ranked = [...measured].toSorted((a, b) => b[1] - a[1]);
+  const parts = ranked.slice(0, 4).map(([label, bytes]) => `${label} ${size(bytes)}`);
+  const rest = ranked.slice(4);
+  if (rest.length > 0) parts.push(`${rest.length} more ${size(rest.reduce((sum, [, bytes]) => sum + bytes, 0))}`);
+  if (unreported > 0) parts.push(`${unreported} more not reported`);
+  return parts.join(", ");
 }
 
 /**
@@ -115,14 +161,13 @@ export function parseComputeApps(text: string): GpuTenant[] {
     if (!/^\d+$/.test(pidText)) continue;
     const processName = line.slice(first + 1, last).trim();
     const usedBytes = parseMib(line.slice(last + 1));
-    const { label, role } = labelFor(processName);
+    const named = labelFor(processName);
     tenants.push({
       pid: Number(pidText),
-      label,
       processName,
       ...(usedBytes === undefined ? {} : { usedBytes }),
-      role,
-      permanent: role === "whisper",
+      ...named,
+      permanent: named.role === "whisper",
     });
   }
   return tenants;

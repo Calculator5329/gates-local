@@ -12,7 +12,7 @@ import { readdir, readFile, readlink } from "node:fs/promises";
 import os from "node:os";
 import type { GpuOccupant, GpuStatus } from "@gates-local/contracts";
 import { MIB } from "./constants.ts";
-import { defaultNvidiaSmi, gpuReadingConflict, parseComputeApps, parseMemAvailable, readNvidiaSmi } from "./gpu.ts";
+import { defaultNvidiaSmi, gpuReadingConflict, parseComputeApps, parseMemAvailable, processBasename, readNvidiaSmi } from "./gpu.ts";
 import { FitError, type MeminfoReader, type NvidiaSmiRunner } from "./types.ts";
 
 export const GPU_STATUS_ARGS = ["--query-gpu=name,memory.total,memory.used,memory.free", "--format=csv,noheader,nounits"] as const;
@@ -56,25 +56,6 @@ export interface GpuStatusDeps {
   /** The app started this Ollama: every model in it is the app's to unload. Read with the same /api/ps, no second read. */
   ownsRuntime?: () => boolean;
   now?: () => number;
-}
-
-const KNOWN_APPS: readonly [RegExp, string][] = [
-  [/media-vault/i, "Media Vault vision"],
-  [/kwin/i, "Desktop (KWin)"],
-  [/gnome-shell|mutter/i, "Desktop (GNOME)"],
-  [/Xorg|Xwayland/i, "Desktop (X server)"],
-];
-
-/** Last path segment of a Linux or Windows command, without ".exe". */
-export function processBasename(processName: string): string {
-  const command = processName.trim().split(/\s+--?\w/)[0]?.trim() ?? processName;
-  const base = command.split(/[\\/]/).pop() || command;
-  return base.replace(/\.exe$/i, "");
-}
-
-function otherAppLabel(processName: string): string {
-  for (const [pattern, label] of KNOWN_APPS) if (pattern.test(processName)) return label;
-  return processBasename(processName);
 }
 
 const isPython = (processName: string) => /python|comfy/i.test(processBasename(processName));
@@ -149,12 +130,16 @@ export async function readGpuStatus(deps: GpuStatusDeps = {}): Promise<GpuStatus
     grouped.set(key, prev ? { ...prev, bytes: prev.bytes + o.bytes } : o);
   };
   for (const t of tenants) {
-    const bytes = t.usedBytes ?? 0;
+    // No reading for this process (every process on Windows, and any nvidia-smi may not inspect):
+    // it gets no row and no size. Its memory is in the measured remainder below.
+    if (t.usedBytes === undefined) continue;
+    const bytes = t.usedBytes;
     accounted += bytes;
     if (t.role === "whisper" || t.pid === whisperPid) add({ label: "Whisper", bytes, kind: "whisper", protected: true });
     else if (t.role === "ollama") runnerBytes += bytes;
     else if (t.pid === imagePid || comfy.has(t.pid)) add({ label: "ComfyUI", bytes, kind: "image", protected: false });
-    else add({ label: otherAppLabel(t.processName), bytes, kind: "other-app", protected: true });
+    else if (t.unnamed) accounted -= bytes; // measured, no name: it joins the remainder
+    else add({ label: t.label, bytes, kind: "other-app", protected: true });
   }
   const occupants = [...chatOccupants(runnerBytes, models, label, mine), ...grouped.values()];
   const unknown = totals.usedBytes - accounted;

@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-11-13: GPU memory holders are named by their program
+
+- An image refusal's detail listed every process on the GPU by the first
+  word of its path with "(unknown)" after it: on Windows that read
+  "C:\\Program (unknown)" and "[Insufficient (unknown)". A process is now
+  named by its program alone (no folders, no ".exe", no flags), measured
+  holders are listed largest first, four names at most, and the rest are
+  counted. When the system reports no GPU memory per process (Windows
+  does not for desktop apps), the line says that once and gives no sizes.
+- The memory bar in the model list shows no "0.0 GB" rows for processes
+  with no reading. Their memory is in the one measured "Other" part.
+- The one-sentence refusal no longer suggests closing the desktop itself
+  or a process it cannot name.
+- Ollama is recognised as the chat runtime from a Windows path.
+- Why: `docs/evidence/windows-low-memory-bug-report.md`, entry
+  WIN-MEM-05. Two functions named processes in two ways; there is one
+  now. Not checked on Windows hardware: the Windows process lines in the
+  tests are written from that report and nvidia-smi's documented output.
+
 ## 2026-11-13: The model button and its list, tidied
 
 - The model button's mark and name start at its left edge and the context

@@ -474,7 +474,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
         { pid: 7, label: "whisper-server", role: "whisper", usedBytes: 2 * gib }, { pid: 8, label: "ollama", role: "ollama", usedBytes: 8.3 * gib }] }) });
       expect(said).toBe("The image needs 9.0 GiB and 3.5 GiB is free; this app's chat model app-chat still holds 8.3 GiB, try again in a moment.");
       expect(said).not.toMatch(/close/i);
-      expect(f.module.current().detail, "the long form stays in the status").toContain("Memory holders: ollama; whisper");
+      expect(f.module.current().detail, "the long form stays in the status").toContain("GPU memory by process: ollama; whisper");
     });
     it("another app holding the most: names it and says to close it", async () => {
       const { said } = await refuse({ imageMayUnload: () => [], readGpu: async () => ({ freeBytes: 3.5 * gib, holders: "media-vault", tenants: [

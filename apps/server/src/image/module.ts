@@ -9,7 +9,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { imageFitVerdict, type GpuStatus, type ImageChoice, type ImageDownload, type ImageEvent, type ImagePresets, type ImageStatus, type Params, type PullProgress } from "@gates-local/contracts";
 import * as S from "effect/Schema";
 import type { Push } from "../app.ts";
-import { forgetGpuReadings, readGpu, untilAborted } from "../fit/gpu.ts";
+import { forgetGpuReadings, holdersSummary, readGpu, untilAborted } from "../fit/gpu.ts";
 import type { NvidiaSmiRunner } from "../fit/types.ts";
 import type { GpuLease } from "../gpu/lease.ts";
 import { canonicalTag } from "../runtime/recommended.ts";
@@ -248,7 +248,7 @@ const gib = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
 const same = (a: ImageChoice, b: ImageChoice) => a.preset === b.preset && a.width === b.width && a.height === b.height;
 
 /** One process on the GPU as nvidia-smi lists it (fit/gpu.ts GpuTenant). */
-export interface GpuHolder { pid: number; usedBytes?: number; label?: string; role?: string }
+export interface GpuHolder { pid: number; usedBytes?: number; label?: string; role?: string; system?: true; unnamed?: true }
 
 /**
  * The refusal the card shows, in one sentence: what the image needs, what is free, who holds the
@@ -260,7 +260,7 @@ export interface GpuHolder { pid: number; usedBytes?: number; label?: string; ro
 export function fitSentence(needBytes: number, freeBytes: number, holders: readonly GpuHolder[], ours: readonly string[] | undefined, smaller?: string): string {
   const base = `The image needs ${gib(needBytes)} and ${gib(freeBytes)} is free`;
   const out = smaller === undefined ? "" : `; ${smaller} would fit`;
-  const top = holders.filter((h) => (h.usedBytes ?? 0) > 0).toSorted((a, b) => (b.usedBytes ?? 0) - (a.usedBytes ?? 0))[0];
+  const top = holders.filter((h) => (h.usedBytes ?? 0) > 0 && h.system !== true && h.unnamed !== true).toSorted((a, b) => (b.usedBytes ?? 0) - (a.usedBytes ?? 0))[0];
   if (top === undefined) return `${base}${out}.`;
   const held = gib(top.usedBytes ?? 0);
   if (top.role === "ollama") {
@@ -275,7 +275,7 @@ export function fitSentence(needBytes: number, freeBytes: number, holders: reado
 export function imageFitError(estimatedBytes: number, creditedBytes: number, freeBytes: number, holders: string, said?: string) {
   const needBytes = Math.max(0, estimatedBytes - creditedBytes);
   const shortfallBytes = Math.max(0, needBytes - freeBytes);
-  return Object.assign(imageError("wont-fit", `Image generation needs ${gib(needBytes)}, ${gib(freeBytes)} free, ${gib(shortfallBytes)} short (estimated total ${gib(estimatedBytes)}, credited ComfyUI resident ${gib(creditedBytes)}). Memory holders: ${holders}. Protected occupants are left running.`),
+  return Object.assign(imageError("wont-fit", `Image generation needs ${gib(needBytes)}, ${gib(freeBytes)} free, ${gib(shortfallBytes)} short (estimated total ${gib(estimatedBytes)}, credited ComfyUI resident ${gib(creditedBytes)}). GPU memory by process: ${holders}. Protected occupants are left running.`),
     { estimatedBytes, creditedBytes, needBytes, freeBytes, shortfallBytes, holders, said: said ?? fitSentence(needBytes, freeBytes, [], []) });
 }
 
@@ -390,7 +390,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   };
   const measure = deps.readGpu ?? (async () => {
     const gpu = await readGpu(deps.runNvidiaSmi);
-    return { freeBytes: gpu.freeBytes, tenants: gpu.tenants, holders: gpu.tenants.map((t) => `${t.label} (${t.usedBytes === undefined ? "unknown" : gib(t.usedBytes)})`).join(", ") || "unlisted GPU occupants" };
+    return { freeBytes: gpu.freeBytes, tenants: gpu.tenants, holders: holdersSummary(gpu.tenants, gib) };
   });
   /**
    * `needBytes`: the preset's need at the job's size (presets.ts). `freeing` is told when the

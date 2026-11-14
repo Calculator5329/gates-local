@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { MIB } from "./constants.ts";
-import { cached, listeningInodes, processBasename, readGpuStatus, systemdMainPid, type GpuStatusDeps } from "./gpu-status.ts";
+import { cached, listeningInodes, readGpuStatus, systemdMainPid, type GpuStatusDeps } from "./gpu-status.ts";
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8");
 const MIXED = fixture("nvidia-smi-apps.mixed.txt");
@@ -132,11 +132,6 @@ describe("gpu.status without a readable NVIDIA GPU", () => {
 });
 
 describe("readers", () => {
-  it("processBasename handles Linux paths with flags and Windows paths", () => {
-    expect(processBasename("/app/extra/chrome --type=gpu-process --x")).toBe("chrome");
-    expect(processBasename("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe")).toBe("chrome");
-    expect(processBasename("falkon")).toBe("falkon");
-  });
 
   it("listeningInodes picks LISTEN rows on the port from tcp and tcp6", () => {
     const tcp = [

@@ -296,7 +296,7 @@ describe("nvidia-smi parsing", () => {
       expect.objectContaining({ pid: 5100, label: "whisper-server", role: "whisper", usedBytes: 2202 * MIB }),
     ]);
     expect(tenants.find((t) => t.pid === 5400)).toMatchObject({
-      label: "media-vault vision runtime",
+      label: "Media Vault vision",
       role: "occupant",
       permanent: false,
       usedBytes: 1822 * MIB,

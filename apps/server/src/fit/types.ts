@@ -22,8 +22,12 @@ export type TenantRole = "whisper" | "ollama" | "occupant";
 
 export interface GpuTenant {
   pid: number;
-  /** Short name for display, e.g. "whisper-server", "media-vault vision runtime". */
+  /** The program's own name for display ("whisper-server", "Discord"): no folders, no flags, no ".exe". */
   label: string;
+  /** nvidia-smi gave a bracketed note instead of a name ("[Insufficient Permissions]"). */
+  unnamed?: true;
+  /** A desktop process (the compositor, the Windows shell): never something to tell a person to close. */
+  system?: true;
   /** The raw process_name from nvidia-smi. */
   processName: string;
   /** undefined when nvidia-smi reports [N/A]. */
