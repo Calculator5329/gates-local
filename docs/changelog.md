@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-11-14: First run and updates say each thing once
+
+- First run: the status line above the heading is the dot and "Ollama";
+  it no longer repeats what the heading says (no models, missing,
+  stopped, failed). A computer with no supported GPU hears it once, on
+  the model card. "Not available in this build" is gone.
+- While Gates Local installs its own Ollama (about 1.5 GB), first run
+  says "Installing Ollama" and shows the size, how much is done and the
+  time left, then "Unpacking", the way a model download does. The
+  server now sends that progress to the app.
+- Updates say one thing one way: versions without a "v", the time as
+  "3:05 PM", and "Restart to update" on the button for a clone and an
+  installed copy alike. A clone with local changes says "Can't update
+  itself" and "1 file has changes that are not saved in git."
+- On Windows the update confirm and the Updates card say it "does not
+  go back by itself" if the new version does not start, before you
+  click; the card's tip names the installer to run to go back. Linux
+  still says it goes back.
+- README: Install comes first, with links to the latest release that do
+  not go stale, how the installed copy updates, and every network call
+  the app can make in Privacy. The Windows guide starts with the
+  installer; the source steps follow.
+- Why: the audit of 0.2.4.
+
 ## 2026-11-13: Chat: fewer lines, fewer words
 
 - No grey line under the thread title, none over the sidebar's foot

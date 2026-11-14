@@ -5,18 +5,30 @@ Ollama, for people who want local models without guessing whether they fit.
 
 ![A chat thread in the dark theme, with the thread list on the left and a code answer open](docs/screenshots/chat.png)
 
-## Download
+## Install
 
-Get the [latest release](https://github.com/Calculator5329/gates-local/releases/latest):
+Download from the [latest release](https://github.com/Calculator5329/gates-local/releases/latest):
 
-- [Windows 11 x64 installer (0.2.1)](https://github.com/Calculator5329/gates-local/releases/download/v0.2.1/Gates-Local-0.2.1-Setup-x64.exe): run the installer. It has no Windows code-signing certificate; Windows may show an unknown-publisher warning. Run a newer installer over the old copy to update while keeping chats and settings.
-- [Linux x64 AppImage (0.2.1)](https://github.com/Calculator5329/gates-local/releases/download/v0.2.1/Gates-Local-0.2.1-x86_64.AppImage): mark it executable in file properties and open it. If FUSE is unavailable, launch it with `--appimage-extract-and-run`. Your distribution may need a FUSE 2 compatibility package.
+- **Windows 11 x64:** `Gates-Local-<version>-Setup-x64.exe`. Run it; it installs for your account only. It has no Windows code-signing certificate, so Windows may show an unknown-publisher warning.
+- **Linux x64:** `Gates-Local-<version>-x86_64.AppImage`. Mark it executable in file properties and open it. If FUSE is unavailable, launch it with `--appimage-extract-and-run`. Your distribution may need a FUSE 2 compatibility package.
 
 The installed app includes Node and needs neither pnpm nor Git. Ollama runs
 the models; you can use your existing installation or try the app-owned setup.
 ComfyUI is separate and optional. The release notes describe the measured
 install checks and remaining limits. Source/developer and installed copies
 keep separate data; installation does not automatically import source chats.
+
+**Updates.** An installed copy reads the signed release list 15 seconds after
+it starts, then hourly, and downloads a newer version by itself. When it is
+ready, the update button beside Settings turns green: "Restart to update"
+closes the app and opens the new version, with your chats and settings. On
+Linux, a new version that does not start is replaced by the one you had. On
+Windows it does not go back by itself; Settings › General › Updates says how
+to go back before you click. Turn off "Check for updates automatically" there
+to stop the checks; "Check for updates" and Download still work.
+
+To run from a clone instead, see [Run from source on Linux](#run-from-source-on-linux)
+or [on Windows](#run-from-source-on-windows).
 
 ## What it does
 
@@ -109,7 +121,7 @@ the end it tells you what it set up and what it skipped. The steps it follows
 are in [docs/setup/with-claude-code.md](docs/setup/with-claude-code.md). They
 have not been run from start to finish on a clean machine yet.
 
-## Quick start on Linux
+## Run from source on Linux
 
 Install Ollama and start it first. Then:
 
@@ -130,7 +142,7 @@ goes full screen while it has focus. The full guide, with the other keys,
 adding the app to your app list, updating, uninstalling and fixes for
 common problems, is [docs/setup/linux.md](docs/setup/linux.md).
 
-## Quick start on Windows
+## Run from source on Windows
 
 Install Node.js 24 from <https://nodejs.org>, Git, and Ollama with the
 official installer from <https://ollama.com/download>, and start Ollama.
@@ -205,12 +217,15 @@ these controls under the same rule as adding a folder.
 
 ## Updating
 
+An installed copy updates itself; see [Install](#install). The rest of this
+section is about a clone.
+
 In the app, Settings › General › Updates shows the version and has a
 "Check for updates" button. The desktop app also checks 15 seconds after
 startup, then hourly. Settings › General › Updates › "Check for updates
 automatically" turns that off (default on). A button beside Settings in the
 main window appears when an update is available, with its version and changes
-in the tooltip. Nothing installs without a click. "Update and restart"
+in the tooltip. Nothing installs without a click. "Restart to update"
 closes the window while dependencies install and the app builds, and
 opens the app again. The next start shows how it went. In a computer browser
 you can check, and install from the desktop app.
@@ -278,6 +293,10 @@ These are all the network calls the code makes:
 - **Model downloads.** When you download a model, the app asks Ollama to
   pull it. Ollama fetches it from its registry (ollama.com) or from the
   source the model name points to.
+- **Model sizes.** A model name you type that is not in the app's list is
+  looked up once on `registry.ollama.ai` (or the host the name points to)
+  to show its whole size before and during the download. Set
+  `GATES_LOCAL_OLLAMA_REGISTRY=off` to stop it.
 - **The Ollama download.** Only when no Ollama is found: the app downloads
   a pinned Ollama release from `github.com/ollama/ollama` and checks its
   SHA-256 before installing it.
@@ -286,16 +305,36 @@ These are all the network calls the code makes:
   image prompt goes to that address, and the address can be another
   machine. A host name there costs one DNS lookup, which the app uses to
   tell whether ComfyUI runs on this machine.
+- **Image setup.** Only when you click to set up an image model: its
+  weights download from `huggingface.co`, pinned by SHA-256, after a size
+  read. Where the app offers to install the image engine itself (not in
+  this release), that click also downloads ComfyUI and `uv` from GitHub and
+  Python packages from `pypi.org` and `download.pytorch.org`.
+- **Library.** Only on a click: a sample database downloads from
+  `raw.githubusercontent.com` at a pinned commit, and a public GitHub
+  repository you paste is cloned (shallow) from `github.com`.
+- **Voice input.** Recorded audio goes to the whisper server address in
+  Settings, which must be on this machine (`127.0.0.1`).
 - **Inside the app.** The window talks to the app's own server over a
   WebSocket on `127.0.0.1`, with a token that changes on every launch.
 - **Links.** A link you click opens in your web browser. The app never
   loads it itself.
-- **Updates.** The desktop app checks 15 seconds after startup, then hourly
-  by default. Turn off "Check for updates automatically" in Settings ›
-  General › Updates to prevent future automatic git processes and network
-  requests (a check already running finishes). Browsers and phones never
-  schedule checks. Automatic checks, "Check for updates", "Update and
-  restart", and `pnpm run app-update` use `git fetch` and `git ls-remote`
+- **Updates, installed copy.** The desktop app checks 15 seconds after
+  startup, then hourly by default, and on "Check for updates". Each check
+  reads the signed release list and the signed model list (`release.json`,
+  `models.json` and their signatures, a few KB) from this repository's
+  latest release on GitHub. The request names the app ("Gates-Local") and
+  carries no version or id. When a newer version is for this copy, its
+  installer or AppImage downloads from that release (while automatic checks
+  are on; otherwise on Download). Turn off "Check for
+  updates automatically" in Settings › General › Updates to stop the
+  automatic checks and downloads.
+- **Updates, clone.** The desktop app checks 15 seconds after startup,
+  then hourly by default. Turn off "Check for updates automatically" in
+  Settings › General › Updates to prevent future automatic git processes
+  and network requests (a check already running finishes). Browsers and
+  phones never schedule checks. Automatic checks, "Check for updates",
+  "Restart to update", and `pnpm run app-update` use `git fetch` and `git ls-remote`
   to the remote your copy was cloned from (GitHub for a clone of this
   repository). Updating also runs `pnpm install`, which downloads packages
   from the npm registry. Checks fetch git objects and tags only; packages

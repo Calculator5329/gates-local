@@ -2,7 +2,7 @@
 // kind of copy (a git clone, an installed copy, a copy that is neither).
 import { describe, expect, it } from "vitest";
 import { UpdateBlocked, type UpdateCheck, type UpdateStatus } from "@gates-local/contracts";
-import { restartable, updateIcon, type UpdateInput } from "../src/update-state.ts";
+import { goBackLine, restartable, updateIcon, type UpdateInput, ver } from "../src/update-state.ts";
 
 const clock = (ms: number) => `T${ms}`;
 const clone: UpdateStatus = { version: { kind: "commit", commit: "abc1234" }, result: null, lastCheck: null };
@@ -34,6 +34,20 @@ describe("up to date or nothing known", () => {
   });
   it("treats a finished update as nothing to do", () => {
     expect(icon({ ...clone, result: { at: 1, outcome: "updated", line: "Updated to v0.2.0, 3 changes." } })).toMatchObject({ state: "idle" });
+  });
+});
+
+describe("one form across the clone and the installed copy", () => {
+  it("a version reads without its v; a commit passes through", () => {
+    expect(ver("v0.2.5")).toBe("0.2.5");
+    expect(ver("0.2.5")).toBe("0.2.5");
+    expect(ver("def5678")).toBe("def5678");
+    expect(icon(withCheck(clone, { ...available, current: "v0.2.4", target: "v0.2.5" }))?.label).toBe("Update to 0.2.5");
+  });
+  it("what happens if the new version does not start: Linux goes back, Windows does not", () => {
+    expect(goBackLine(newer({ download: "ready", restart: true, lines: ["Version 1.3.0 is downloaded and checked."] }) as Extract<UpdateCheck, { state: "newer" }>)).toBe("Goes back to 1.2.3 if 1.3.0 does not start.");
+    const windows = "If version 1.3.0 does not start, Gates Local will not go back by itself. To go back, run Setup.exe.";
+    expect(goBackLine(newer({ download: "ready", restart: true, lines: ["Version 1.3.0 is downloaded and checked.", windows] }) as Extract<UpdateCheck, { state: "newer" }>)).toBe("Does not go back by itself if 1.3.0 does not start.");
   });
 });
 

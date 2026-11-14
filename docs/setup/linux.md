@@ -223,7 +223,7 @@ updates automatically" there to stop future automatic git processes and
 network requests; a check in progress finishes. It defaults on. Browsers
 can check when asked; the phone listener exposes status only. Nothing installs without a click.
 The update button beside Settings names the target and changes in its
-tooltip. "Update and restart" confirms running replies, image jobs and model
+tooltip. "Restart to update" confirms running replies, image jobs and model
 downloads first. Active imports must finish before installation. It then closes the window during install and build and opens
 the app again. Partial replies are saved; downloaded model parts are kept
 and downloading the same model again resumes them. Save drafts and queued

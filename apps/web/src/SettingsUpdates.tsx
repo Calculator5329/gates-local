@@ -9,8 +9,8 @@
 // tip. The release page link sits beside the control.
 //
 // The desktop server checks the clone's remote after 15 seconds and hourly
-// when enabled. Browsers only check on request. Update and
-// restart shows only in the desktop app, which quits and lets
+// when enabled. Browsers only check on request. Restart to
+// update shows only in the desktop app, which quits and lets
 // `pnpm run app-update` do the work. The phone listener exposes status only;
 // a computer browser may check but installs from the desktop app. An
 // installed copy (AppImage or installer) reads the signed release list and
@@ -23,20 +23,19 @@ import { canUpdateHere, checkForUpdates, downloadUpdate, updateAndRestart, updat
 import { Grp, Na, Row, Skel, useAct } from "./settings-ui.tsx";
 import { type Maybe, NA, useStore } from "./store.ts";
 import { esc } from "./ui.tsx";
-import { outdated } from "./update-state.ts";
+import { ITSELF, RESTART, clock, goBackLine, outdated, retryable, ver } from "./update-state.ts";
 
 /** Subjects shown before the rest fold away under "Show all". */
 export const SHOWN_CHANGES = 3;
 
 const day = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
-const clock = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 const changes = (n: number) => (n === 1 ? "1 change" : `${n} changes`);
 
 /** Row 1: the commit or version once as the value; the description says what kind of copy it is and what it follows. */
 function versionText(v: UpdateVersion, channel: UpdateChannel): { value: string; desc: string } {
   switch (v.kind) {
     case "release":
-      return { value: v.tag, desc: `Commit ${v.commit}${v.date === undefined ? "" : `, ${day(v.date)}`}, following ${channel === "main" ? "every change on the main branch" : "releases"}.` };
+      return { value: ver(v.tag), desc: `Commit ${v.commit}${v.date === undefined ? "" : `, ${day(v.date)}`}, following ${channel === "main" ? "every change on the main branch" : "releases"}.` };
     case "commit": {
       const when = v.date === undefined ? "A commit" : `A commit from ${day(v.date)}`;
       return { value: v.commit, desc: channel === "main" ? `${when} on the main branch.` : `${when}, between releases.` };
@@ -79,11 +78,15 @@ function stateLabel(check: UpdateCheck | null, checking: boolean): string {
       return "Up to date";
     case "available":
     case "newer":
-      return `Update available: ${check.target}`;
+      return `Update available: ${ver(check.target)}`;
     case "cannot-check":
-      return "Couldn’t check";
+      // the footer's words: a reason no new check changes means the check ran and this copy cannot update
+      return retryable(check.reason) ? "Couldn’t check" : ITSELF;
   }
 }
+
+/** A server line as the grey line: one that leads into a list in the tip ends as a sentence, not on a colon. */
+const whole = (line: string) => line.replace(/:$/, ".");
 
 const checked = (check: UpdateCheck) => `Checked at ${clock(check.checkedAt)}.`;
 
@@ -97,8 +100,10 @@ function stateLine(check: UpdateCheck | null, control: boolean, canUpdate: boole
     case "available":
       return canUpdate ? `${changes(check.total)}. ${checked(check)}` : "To install it, close Gates Local on the computer it runs on and run pnpm run app-update in its folder.";
     case "cannot-check":
-      return check.lines[0] ?? checked(check);
+      return check.lines[0] === undefined ? checked(check) : whole(check.lines[0]);
     case "newer": {
+      // Ready on Windows: the one fact that differs there (it does not go back by itself) is the line; the button says it is downloaded.
+      if (check.download === "ready" && check.lines.length > 1) return goBackLine(check);
       // The server's plain "Version X is available." is the label already.
       const first = check.lines[0];
       return first === undefined || first === `Version ${check.target} is available.` ? checked(check) : first;
@@ -118,7 +123,7 @@ function stateTip(check: UpdateCheck | null, automatic: boolean, installed: bool
     const more = (notes === undefined ? check.total : items.length) - Math.min(items.length, SHOWN_CHANGES);
     const list = `${notes === undefined ? changes(check.total) : "Release notes"}: ${items.slice(0, SHOWN_CHANGES).join("; ")}${more > 0 ? `; and ${more} more` : ""}.`;
     const how = canUpdate
-      ? `Update and restart closes Gates Local, updates it and opens it again. If a step fails it goes back to ${check.current}.`
+      ? `${RESTART} closes Gates Local, updates it and opens it again. If a step fails it goes back to ${ver(check.current)}.`
       : "To install it, close Gates Local on the computer it runs on and run pnpm run app-update in its folder.";
     return `${list} ${how}`;
   }
@@ -157,14 +162,14 @@ function StateAction({ check, automatic, canUpdate, checking, updating, onCheck,
   if (check?.state === "available" && canUpdate) {
     return (
       <button type="button" className="btn primary" data-testid="settings.updates.update" disabled={updating} onClick={onUpdate}>
-        {updating ? "Closing to update…" : "Update and restart"}
+        {updating ? "Closing to update…" : RESTART}
       </button>
     );
   }
   if (check?.state === "newer" && check.restart === true && canUpdate) {
     return (
       <button type="button" className="btn primary" data-testid="settings.updates.restart" disabled={updating} onClick={onUpdate}>
-        {updating ? "Closing to update…" : "Restart to update"}
+        {updating ? "Closing to update…" : RESTART}
       </button>
     );
   }

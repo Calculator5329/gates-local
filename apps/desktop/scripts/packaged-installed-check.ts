@@ -182,7 +182,7 @@ try {
   await expect(download).toBeVisible();
   await expect(releasePage).toHaveCount(0);
   // Nothing installs from here yet: no install button, no sidebar update button.
-  await expect(copy.page.getByRole("button", { name: "Update and restart" })).toHaveCount(0);
+  await expect(copy.page.getByRole("button", { name: "Restart to update" })).toHaveCount(0);
   await expect(copy.page.locator(".sb-update")).toHaveCount(0);
   await shoot(copy, "available");
 

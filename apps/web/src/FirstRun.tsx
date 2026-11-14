@@ -44,6 +44,8 @@ const pendingWord = (phase: RowPhase): string => (phase === "checking" ? "Checki
 
 const CTX_TIP ="How much of the conversation the model keeps in view. Bigger needs more GPU memory.";
 const SPILL_TIP = "Your best fit uses system memory, so it is slower.";
+/** No supported GPU, said only where the card's verdict would claim one (the table plans no-GPU models in system memory, so rarely). */
+const NO_GPU_SUB = "This computer has no supported GPU, so models run in system memory and replies are slower.";
 
 /**
  * The recommended model card: name and verdict, a download's size when it is
@@ -143,24 +145,20 @@ function NoModels() {
   const canCancel = useStore(canCancelPull);
   const active = useStore(firstPull);
   const p = useStore((s) => (active === undefined ? undefined : s.pulls[active]));
-  // Embedding models can be installed and still leave nothing to chat with.
-  const others = useStore((s) => (s.models ?? []).length);
   const cpu = useStore((s) => noGpu(s.gpu));
   const fresh = useStore(s => entry === undefined ? undefined : rowOf(s, entry.name));
   const st = (
     <>
       <span className="dot ok" />
-      Ollama · {others > 0 ? "no chat models yet" : "no models yet"}
+      Ollama
     </>
   );
+  // the title says there is no model yet, so the status line names only the runtime
   // An Ollama that does not report capabilities: a download would not help, so say what would.
   const tooOld = useStore((s) => chatBlockedReason(s.models, undefined));
-  // a sentence only for what the title and the card's verdict do not say: the step, or why it is slower
-  const sub =
-    tooOld ??
-    (fresh === undefined ? undefined : fresh.verdict === "refuse" ? "Not enough memory at this context. Choose a smaller model or context in Settings." : cpu
-      ? "This computer has no supported GPU, so this model runs in system memory and replies are slower."
-      : undefined);
+  // a sentence only for what the title and the card's verdict do not say: the step. No GPU is the card's
+  // verdict ("Uses system memory · slower"), said again only where the card would claim a GPU.
+  const sub = tooOld ?? (fresh?.verdict === "refuse" ? "Not enough memory at this context. Choose a smaller model or context in Settings." : cpu && fresh?.verdict === "fits" ? NO_GPU_SUB : undefined);
   if (active !== undefined && p !== undefined) {
     return (
       <Shell st={st} title="Downloading your first model" sub={sub}>
@@ -239,8 +237,8 @@ function NoModels() {
  */
 export function foundWords(verdict: "fits" | "spills" | "refuse" | undefined, numCtx: number, cpu = false, name = "This model"): { title: string; sub?: string } {
   if (verdict === "refuse") return { title: "Choose another model", sub: `${name} doesn't fit at ${k(numCtx)}. A smaller context may fit.` };
-  // no supported GPU: every model runs in system memory, so no verdict may promise a GPU
-  if (cpu) return { title: "Ready to chat", sub: "This computer has no supported GPU, so models run in system memory and replies are slower." };
+  // no supported GPU: the card's "Uses system memory · slower" says it; a sentence only where the card would promise a GPU
+  if (cpu && verdict === "fits") return { title: "Ready to chat", sub: NO_GPU_SUB };
   return { title: "Ready to chat" };
 }
 
@@ -290,15 +288,16 @@ function NoOllama() {
   const own = note !== "";
   const around = own ? `${note} ` : "";
   const port = portOf(baseUrl);
-  // the sentence carries the cause or the step; a busy port's status line is its cause, so it has none
+  // the heading says what is wrong and the sentence the cause or the step; the status line is the
+  // dot and "Ollama", except a busy port's, which is its cause (so it has no sentence)
   const [title, st, sub]: [string, string, string | undefined] =
     rt === "wrong"
       ? ["Ollama isn't answering", `Something else holds port ${port}`, undefined]
       : rt === "stopped"
-        ? ["Ollama is stopped", "Ollama is installed but not running", own ? `${around}It starts when Gates Local opens; press Retry to check again.` : "Start Ollama, then press Retry."]
+        ? ["Ollama is stopped", "Ollama", own ? `${around}It starts when Gates Local opens; press Retry to check again.` : "Start Ollama, then press Retry."]
         : rt === "error"
-          ? ["Ollama didn't start", "Ollama reported a problem", detail]
-          : ["Ollama isn't installed", "No Ollama found on this computer", `${around}Install Ollama from ollama.com, then press Retry.`];
+          ? ["Ollama didn't start", "Ollama", detail]
+          : ["Ollama isn't installed", "Ollama", `${around}${computerOnly ? "On the computer, install" : "Install"} Ollama from ollama.com, then press Retry.`];
   return (
     <Shell
       st={
@@ -310,7 +309,6 @@ function NoOllama() {
       title={title}
       sub={sub}
     >
-      {rt === "missing" ? <p className="fr-note na">{computerOnly ? "Gates Local can't install Ollama from here. On the computer, install it from ollama.com, then press Retry." : "Installing Gates Local's own copy is not available in this build."}</p> : null}
       {rt === "error" && computerOnly ? <p className="fr-note na">Gates Local can't fix this from here. On the computer, press Retry in Gates Local.</p> : null}
       <Cta label="Retry" onGo={() => void recheckRuntime()} link="Settings" onLink={() => finishFirstRun("runtime")} />
     </Shell>
@@ -322,20 +320,31 @@ function Connecting() {
   return <Shell st={<span className="dot run" />} title={CONNECTING} />;
 }
 
+/** How far the app's own Ollama is, in a model download's words: its size, then how much of it and the time left, then unpacking. */
+export function installWords(i: { receivedBytes: number; totalBytes: number; bytesPerSecond?: number | undefined } | undefined): string {
+  const where = "Into Gates Local's folder";
+  if (i === undefined) return where;
+  if (i.receivedBytes >= i.totalBytes) return `${where} · Unpacking`;
+  if (i.receivedBytes === 0) return `${where} · ${gb(i.totalBytes)}`;
+  const p = { name: "ollama", state: "downloading" as const, completedBytes: i.receivedBytes, totalBytes: i.totalBytes, ...(i.bytesPerSecond === undefined ? {} : { bytesPerSecond: i.bytesPerSecond }) };
+  return `${where} · ${etaText(p, { speed: false })}`;
+}
+
 function Waiting({ installing }: { installing: boolean }) {
   // the runtime has not answered once: no Ollama words yet
   const none = useStore(unread);
+  const install = useStore((s) => s.runtime?.install);
   if (none) return <Connecting />;
   return (
     <Shell
       st={
         <>
           <span className="dot run" />
-          {installing ? "No Ollama found on this computer" : "Looking for Ollama"}
+          {installing ? "Installing Ollama" : "Looking for Ollama"}
         </>
       }
       title={installing ? "Setting up Ollama" : "Starting up"}
-      sub={installing ? "Gates Local is installing its own copy into its app folder. It won't change anything else on your system." : undefined}
+      sub={installing ? installWords(install) : undefined}
     >
       {installing ? (
         <>

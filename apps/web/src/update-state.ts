@@ -62,11 +62,27 @@ export interface UpdateInput {
   readonly clock?: (ms: number) => string;
 }
 
-const time = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+/** The one clock time every update surface shows ("9:05 AM"). */
+export const clock = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+/** The one version form every update surface shows: "0.2.5", never "v0.2.5". A commit hash passes through. */
+export const ver = (v: string) => v.replace(/^v(?=\d)/, "");
+/** The one button name for closing into a newer version, on a clone and on an installed copy. */
+export const RESTART = "Restart to update";
+
+/**
+ * What happens if the new version does not start, said once for the confirm and Settings. Linux: it
+ * goes back by itself. Windows: it does not; only a Windows copy sends a second line on a ready
+ * download (the server's sentence with the installer to run), which Settings' tip carries whole.
+ */
+export function goBackLine(check: Extract<UpdateCheck, { state: "newer" }>): string {
+  const windows = check.download === "ready" && check.lines.length > 1;
+  return windows ? `Does not go back by itself if ${ver(check.target)} does not start.` : `Goes back to ${ver(check.current)} if ${ver(check.target)} does not start.`;
+}
+
 const lines = (...l: (string | false | undefined)[]) => l.filter((x): x is string => typeof x === "string" && x !== "").join("<br>");
 const changes = (n: number) => (n === 1 ? "1 change" : `${n} changes`);
 const CHECK = "Check for updates";
-const ITSELF = "Can't update itself";
+export const ITSELF = "Can't update itself";
 const FAILED = "Update failed";
 const NOT_CHECKED = "Could not check for updates";
 const AGAIN = "Click to check again.";
@@ -98,8 +114,12 @@ export function restartable(status: UpdateStatus | null, desktop: boolean): bool
   return desktop && status?.approval !== undefined && check?.state === "newer" && check.download === "ready" && check.restart === true;
 }
 
-/** Whether a new check can change why a check could not say. Exhaustive, so a new reason fails the build until it is placed. */
-function retryable(reason: UpdateBlocked): boolean {
+/**
+ * Whether a new check can change why a check could not say ("Could not check"); otherwise the check
+ * ran and this copy cannot update itself until the person acts ("Can't update itself"). Exhaustive,
+ * so a new reason fails the build until it is placed.
+ */
+export function retryable(reason: UpdateBlocked): boolean {
   switch (reason) {
     case "remote":
     case "error":
@@ -138,7 +158,7 @@ function installedIcon(check: Extract<UpdateCheck, { state: "newer" }>, canResta
       return icon("downloading", `Downloading version ${check.target}`, said(check.lines), null, { progress: null });
     case "ready":
       return canRestart
-        ? icon("ready", "Restart to update", lines(`<b>Restart to update.</b> Version ${esc(check.target)} is downloaded.`, "Gates Local will close, update and reopen."), "restart", { dot: "green" })
+        ? icon("ready", RESTART, lines(`<b>${RESTART}.</b> Version ${esc(check.target)} is downloaded.`, "Gates Local will close, update and reopen."), "restart", { dot: "green" })
         : icon("external", ITSELF, lines(said(check.lines), PAGE), "page", { dot: "amber", page: check.page });
     case "bad":
     case "failed":
@@ -148,7 +168,7 @@ function installedIcon(check: Extract<UpdateCheck, { state: "newer" }>, canResta
 }
 
 /** The icon for a status, or null where the icon is not shown (a browser tab, a phone). */
-export function updateIcon({ status, desktop, checking = false, installing = false, error = null, clickError = null, downloading = false, canRestart = false, clock = time }: UpdateInput): UpdateIcon | null {
+export function updateIcon({ status, desktop, checking = false, installing = false, error = null, clickError = null, downloading = false, canRestart = false, clock: at = clock }: UpdateInput): UpdateIcon | null {
   if (!desktop) return null;
   if (installing || status?.installing === true) {
     const how = status?.version.kind === "installed" ? "Gates Local will close, update and reopen." : "Gates Local closes while dependencies install and the app builds, then opens again.";
@@ -175,14 +195,14 @@ export function updateIcon({ status, desktop, checking = false, installing = fal
   if (version?.kind === "unreadable") return icon("external", ITSELF, lines("<b>This copy cannot update itself.</b>", `Could not read the version: ${esc(version.detail)}.`, "Click to see the version in Settings."), "settings");
   const check = status?.lastCheck ?? null;
   if (check === null) return icon("idle", CHECK, lines(`<b>${CHECK}</b>`, "Not checked since Gates Local started."), "check");
-  const when = clock(check.checkedAt);
+  const when = at(check.checkedAt);
   switch (check.state) {
     case "up-to-date":
-      return icon("idle", CHECK, lines(`<b>${CHECK}</b>`, version?.kind === "installed" ? `No newer version was found. Checked at ${when}.` : `Up to date (${esc(check.current)}). Checked at ${when}.`), "check");
+      return icon("idle", CHECK, lines(`<b>${CHECK}</b>`, version?.kind === "installed" ? `No newer version was found. Checked at ${when}.` : `Up to date (${esc(ver(check.current))}). Checked at ${when}.`), "check");
     case "available":
-      return icon("available", `Update to ${check.target}`, lines(
-        `<b>Update to ${esc(check.target)}</b>`,
-        `${changes(check.total)} from ${esc(check.current)} to ${esc(check.target)}. Checked at ${when}.`,
+      return icon("available", `Update to ${ver(check.target)}`, lines(
+        `<b>Update to ${esc(ver(check.target))}</b>`,
+        `${changes(check.total)} from ${esc(ver(check.current))} to ${esc(ver(check.target))}. Checked at ${when}.`,
         ...notes(check.notes, check.changes),
         retry.click === "update" ? "Click to update. Gates Local asks first, then closes while it updates and opens again." : "Click to check it again before updating.",
       ), retry.click, { dot: "amber" });

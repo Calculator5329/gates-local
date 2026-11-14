@@ -183,7 +183,7 @@ describe("checking and updating", () => {
     writeFileSync(path.join(r.clone, "app.txt"), "my own edit\n");
     const run = await cli([]);
     expect(run.code).toBe(1);
-    expect(run.text).toContain("These files have changes that are not saved in git:\n  app.txt\nNothing was changed.");
+    expect(run.text).toContain("1 file has changes that are not saved in git:\n  app.txt\nNothing was changed.");
     expect(run.text).toContain("git stash");
     expect(head(r.clone)).toBe(before);
     expect(readFileSync(path.join(r.clone, "app.txt"), "utf8")).toBe("my own edit\n");
@@ -641,7 +641,7 @@ describe("an update that was cut off", () => {
     writeFileSync(path.join(r.clone, "app.txt"), "edited after the crash\n");
     const run = await cli([]);
     expect(run.code).toBe(1);
-    expect(run.text).toContain("These files have changes that are not saved in git:\n  app.txt");
+    expect(run.text).toContain("1 file has changes that are not saved in git:\n  app.txt");
     expect(readFileSync(path.join(r.clone, "app.txt"), "utf8")).toBe("edited after the crash\n");
     expect(head(r.clone)).toBe(target);
     expect(run.fake.calls.map((c) => c.args.join(" "))).toEqual(["--version"]);

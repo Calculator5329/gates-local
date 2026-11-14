@@ -5,7 +5,7 @@ import { Icon, type IconId } from "./icons.tsx";
 import { canUpdateHere, checkForUpdates, dismissUpdateResult, downloadUpdate, openSettings, readUpdateStatus, updateAndRestart } from "./session.ts";
 import { NA, getState, useStore } from "./store.ts";
 import { closeTip } from "./ui.tsx";
-import { restartable, type UpdateClick, type UpdateIcon, type UpdateInput, outdated, updateIcon } from "./update-state.ts";
+import { RESTART, goBackLine, restartable, type UpdateClick, type UpdateIcon, type UpdateInput, outdated, updateIcon, ver } from "./update-state.ts";
 import { updateWork, workLines } from "./update-work.ts";
 
 /** A progress ring around a footer icon: a share from 0 to 1, or null for a turning arc. It sits inside the box and never changes it. */
@@ -85,8 +85,9 @@ const BRIGHT = { color: "var(--foreground)" } as const;
  * window's queue or drafts, read again at Go) the new ones show brighter, a
  * screen reader hears "Changed", and Go waits a moment; nothing installs on
  * that press. before: the lines shown when it last closed for that reason.
- * An installed copy's Restart asks the same way; it goes back by itself when
- * the new version does not start (docs/design/installed-updates.md, 2).
+ * An installed copy's Restart asks the same way. What happens if the new
+ * version does not start is goBackLine: on Linux it goes back by itself, on
+ * Windows it does not (installed-updates.md, 2, 8); Settings' tip says how.
  */
 function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStatus; check: Extract<UpdateCheck, { state: "available" | "newer" }>; before: readonly string[] | null; onCancel: () => void; onGo: (shown: readonly string[]) => void }) {
   const installed = check.state === "newer";
@@ -135,14 +136,14 @@ function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStat
   const fresh = wait && prev !== null ? work.filter((w) => !prev.includes(w)) : [];
   return (
     <div className="cfm" role="group" aria-label="Confirm update">
-      <b>Update to {check.target} and restart?</b>
+      <b>Update to {ver(check.target)} and restart?</b>
       <ul>
         {work.map((w) => (
           <li key={w} style={fresh.includes(w) ? BRIGHT : undefined}>
             {w}
           </li>
         ))}
-        <li>{installed ? `Goes back to ${check.current} if ${check.target} does not start.` : `Falls back to ${check.current} if a step fails.`}</li>
+        <li>{installed ? goBackLine(check) : `Falls back to ${ver(check.current)} if a step fails.`}</li>
       </ul>
       <span role="status" style={UNSEEN}>
         {wait && prev !== null ? ["Changed:", ...fresh].join(" ") : ""}
@@ -157,7 +158,7 @@ function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStat
           Cancel
         </button>
         <button ref={goButton} type="button" className="btn primary" data-testid="sidebar.update.go" disabled={read !== null || wait} onClick={press}>
-          {installed ? "Restart to update" : "Update and restart"}
+          {RESTART}
         </button>
       </div>
     </div>

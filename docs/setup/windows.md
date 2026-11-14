@@ -1,6 +1,31 @@
 # Setting up Gates Local on Windows
 
-This guide covers Windows 11 on x64. Gates Local, pnpm and Ollama install for
+## The installer
+
+Most people want this. Download `Gates-Local-<version>-Setup-x64.exe` from
+the [latest release](https://github.com/Calculator5329/gates-local/releases/latest)
+and run it. It installs for your account only and needs no administrator
+rights, Node.js, pnpm or Git. It has no code-signing certificate, so Windows
+may show an unknown-publisher warning first.
+
+With no Ollama on the computer, the app downloads its own copy (about 1.5
+GB) on first start and shows how far it is. With Ollama already installed
+([section 2](#2-install-ollama)), it uses that one.
+
+The installed app updates itself. It reads the signed release list 15
+seconds after it starts, then hourly, and downloads a newer version. When it
+is ready, the update button beside Settings turns green; "Restart to update"
+closes the app, runs the new installer and opens the app again, with your
+chats and settings. If the new version does not start, it does not go back
+by itself: Settings › General › Updates says how to go back (the installer
+of the version you had, or its release page) before you click. "Check for
+updates automatically" in the same group turns the checks off.
+
+The rest of this guide runs Gates Local from source, for development.
+
+## From source
+
+This part covers Windows 11 on x64. Gates Local, pnpm and Ollama install for
 your user account only. The Node.js and Git installers normally ask for
 administrator rights; [there is a way without them](#no-administrator-rights).
 
@@ -185,8 +210,9 @@ pnpm start
 
 ## 6. Updating
 
-In the app, open Settings › General › Updates, click "Check for updates" and
-then "Update and restart". The window closes, the new version installs and
+An installed copy updates itself; see [the installer](#the-installer). For a
+clone: in the app, open Settings › General › Updates, click "Check for updates" and
+then "Restart to update". The window closes, the new version installs and
 the app opens again. The desktop also checks this clone's git remote with
 `git fetch` and `git ls-remote` 15 seconds after startup, then hourly,
 without installing anything. "Check for updates automatically" in the same

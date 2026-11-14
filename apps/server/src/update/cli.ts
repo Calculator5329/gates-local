@@ -126,7 +126,7 @@ export function refusalLines(r: Refusal): string[] {
       return [r.detail, "Nothing was changed. Switch back to the main branch with `git switch main` and try again."];
     case "local-changes":
       return [
-        "These files have changes that are not saved in git:",
+        `${r.files.length === 1 ? "1 file has" : `${r.files.length} files have`} changes that are not saved in git:`,
         ...listed(r.files),
         "Nothing was changed.",
         "To keep your changes and update: run `git stash`, run the update again, then `git stash pop`.",

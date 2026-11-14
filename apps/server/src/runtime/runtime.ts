@@ -157,6 +157,9 @@ type Note = { text: string; busy: readonly string[] };
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/** How often the installing status says how far Ollama's download is. */
+const INSTALL_PUSH_MS = 1000;
+
 /** The status with the note in front of its detail and the note's busy ports. */
 function noted(status: RuntimeStatus, note: Note | undefined): RuntimeStatus {
   if (!note) return status;
@@ -545,13 +548,22 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     let binary = c.binary;
     if (!binary) {
       if (!allowInstall) return setStatus(statusFor(c));
-      setStatus(noted({ state: "installing", owner: "app", baseUrl: appBaseUrl, detail: "Installing Ollama." }, c.note));
+      const installing = noted({ state: "installing", owner: "app", baseUrl: appBaseUrl, detail: "Installing Ollama." }, c.note);
+      setStatus({ ...installing, install: { receivedBytes: 0, totalBytes: manifest.sizeBytes } });
+      // The status carries the download's size and progress, at most once a second, with the speed since the last one.
+      let said = { at: Date.now(), bytes: 0 };
       try {
         const r = await installPinned({
           appDataDir,
           manifest,
           onProgress: (p) => {
             for (const l of progressListeners) l(p);
+            const now = Date.now();
+            const whole = p.receivedBytes >= p.totalBytes;
+            if (!whole && now - said.at < INSTALL_PUSH_MS) return;
+            const rate = now > said.at ? ((p.receivedBytes - said.bytes) * 1000) / (now - said.at) : 0;
+            said = { at: now, bytes: p.receivedBytes };
+            setStatus({ ...installing, install: { receivedBytes: Math.min(p.receivedBytes, p.totalBytes), totalBytes: p.totalBytes, ...(!whole && rate > 0 ? { bytesPerSecond: rate } : {}) } });
           },
         });
         binary = { path: r.binary, origin: "app-install" };

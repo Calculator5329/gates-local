@@ -210,8 +210,14 @@ describe("missing", () => {
     const s = await rt.ensure();
     expect(s.state).toBe("ready");
     expect(s.owner).toBe("app");
-    expect(seen.map((x) => x.state)).toEqual(["missing", "installing", "starting", "ready"]);
+    // installing repeats as its download moves on
+    expect(seen.map((x) => x.state).filter((x, i, all) => x !== all[i - 1])).toEqual(["missing", "installing", "starting", "ready"]);
     expect(progress.map((p) => p.phase)).toContain("done");
+    // the status carries the download's size from the start and its whole when it is in; it is gone once it runs
+    const installing = seen.filter((x) => x.state === "installing");
+    expect(installing[0]?.install).toEqual({ receivedBytes: 0, totalBytes: tarball.length });
+    expect(installing.at(-1)?.install).toMatchObject({ receivedBytes: tarball.length, totalBytes: tarball.length });
+    expect(s.install).toBeUndefined();
     expect(existsSync(installedBinary(appDataDir, VERSION))).toBe(true);
     // Windows' fake release carries Node itself (about 90 MB) as ollama.exe.
   }, 30_000);

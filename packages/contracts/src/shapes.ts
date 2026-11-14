@@ -299,6 +299,8 @@ export const RuntimeStatus = S.Struct({
   noAppCopy: S.optional(S.Boolean),
   /** The folder the app's own running Ollama was started with. Absent whenever that isn't known for certain, as for an Ollama the app did not start. */
   modelsDir: S.optional(S.String),
+  /** "installing": how far the download of the app's own Ollama is, as a model download says it. Received equals total while it is checked and unpacked. */
+  install: S.optional(S.Struct({ receivedBytes: Count, totalBytes: Count, bytesPerSecond: S.optional(S.Finite) })),
 });
 export type RuntimeStatus = typeof RuntimeStatus.Type;
 

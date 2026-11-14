@@ -121,8 +121,10 @@ describe("the Updates group", () => {
     expect(view({ settings: { ...SETTINGS, updateEveryChange: true } })).toContain('aria-checked="true"');
   });
 
-  it("shows a release tag as the version", () => {
-    expect(view({ status: { ...CLONE, version: { kind: "release", tag: "v0.2.0", commit: "abc1234" } } })).toContain("v0.2.0");
+  it("shows a release tag as the version, in the installed copy's form (no v)", () => {
+    const html = text(view({ status: { ...CLONE, version: { kind: "release", tag: "v0.2.0", commit: "abc1234" } } }));
+    expect(html).toContain("0.2.0");
+    expect(html).not.toContain("v0.2.0");
   });
 
   it("shows only the version for a copy that is not a clone, or when the server has no updates", () => {
@@ -170,7 +172,7 @@ describe("the Updates group", () => {
     expect(text(view(mainCheck))).toContain("Up to date");
     const noTags = view({ canUpdate: true, ...withCheck(mainFound) });
     expect(text(noTags)).toContain("Update available: def5678");
-    expect(text(noTags)).toContain("Update and restart");
+    expect(text(noTags)).toContain("Restart to update");
     expect(text(view({ settings: every, ...mainCheck }))).toContain("Up to date");
     // Before any check: the same two rows.
     expect(rowsAbove(view())).toBe(2);
@@ -186,10 +188,10 @@ describe("the Updates group", () => {
     expect(plain.split("abc1234").length - 1).toBe(1);
     expect(said(html)).toContain("25 changes: Five; Four; Three; and 22 more.");
     expect(said(html)).not.toContain("Two");
-    expect(plain).not.toContain("Update and restart");
+    expect(plain).not.toContain("Restart to update");
     expect(plain).toContain("pnpm run app-update");
     const desktop = view({ canUpdate: true, ...withCheck(check) });
-    expect(text(desktop)).toContain("Update and restart");
+    expect(text(desktop)).toContain("Restart to update");
     expect(text(desktop)).toMatch(/25 changes\. Checked at \S+/);
     expect(said(desktop)).toContain("goes back to abc1234");
     expect(text(view({ canUpdate: true, updating: true, ...withCheck(check) }))).toContain("Closing to update…");
@@ -203,12 +205,16 @@ describe("the Updates group", () => {
   });
 
   it("says every reason it cannot check: the first on the row, all of them and when it tried in the tip", () => {
-    const lines = ["These files have changes that are not saved in git:", "  app.txt", "Nothing was changed."];
+    // the check ran and found changes: the footer's "Can't update itself", and the line ends as a sentence (the files are in the tip)
+    const lines = ["1 file has changes that are not saved in git:", "  app.txt", "Nothing was changed."];
     const html = view(withCheck({ state: "cannot-check", checkedAt: AT, reason: "local-changes", lines }));
-    expect(text(html)).toContain("Couldn’t check");
-    expect(stateLine(html)?.[2]).toBe(lines[0]);
+    expect(text(html)).toContain("Can't update itself");
+    expect(text(html)).not.toContain("Couldn’t check");
+    expect(stateLine(html)?.[2]).toBe("1 file has changes that are not saved in git.");
     for (const l of lines) expect(said(html)).toContain(l.trim());
     expect(said(html)).toMatch(/Tried at \S+/);
+    // a check that did not answer still says so
+    expect(text(view(withCheck({ state: "cannot-check", checkedAt: AT, reason: "unreachable", lines: ["Could not reach the update server."] })))).toContain("Couldn’t check");
   });
 
   it("every state is the same two rows: one grey line that never wraps, a failure in its place, nothing added under them", () => {
@@ -303,6 +309,14 @@ describe("the Updates group of an installed copy", () => {
     expect(plain).not.toContain("Could not check for updates.");
     expect(plain).not.toContain("Update and restart");
     expect(plain).not.toMatch(/git|pnpm/i);
+  });
+
+  it("downloaded on Windows: the card's line is that it does not go back by itself, and the tip says how to go back", () => {
+    const back = "If version 1.3.0 does not start, Gates Local will not go back by itself. To go back, run Setup-1.2.3.exe.";
+    const html = view({ canUpdate: true, ...installedWith({ state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Version 1.3.0 is downloaded and checked.", back], page: PAGE, download: "ready", restart: true }) });
+    expect(stateLine(html)?.[2]).toBe("Does not go back by itself if 1.3.0 does not start.");
+    expect(said(html)).toContain("To go back, run Setup-1.2.3.exe.");
+    expect(html).toMatch(/<button[^>]*>Restart to update<\/button>/);
   });
 
   it("UW-06 downloaded on a copy that can replace its file: Restart to update in the desktop app, no release page", () => {

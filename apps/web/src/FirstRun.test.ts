@@ -14,7 +14,17 @@ vi.mock("./Sidebar.tsx", () => ({ focusComposer: () => undefined }));
 vi.mock("./Settings.tsx", () => ({ DlDetail: () => null }));
 vi.mock("./ui.tsx", () => ({ VLabel: () => null }));
 
-const { FirstRun } = await import("./FirstRun.tsx");
+const { FirstRun, installWords } = await import("./FirstRun.tsx");
+
+describe("the app's own Ollama installing says its size and progress (FIRST-USE-08)", () => {
+  const total = 1_543_547_172;
+  it("its size before a byte arrives, then how far and the time left, then unpacking", () => {
+    expect(installWords(undefined)).toBe("Into Gates Local's folder");
+    expect(installWords({ receivedBytes: 0, totalBytes: total })).toMatch(/^Into Gates Local's folder · 1\.4\sGB$/);
+    expect(installWords({ receivedBytes: 2 ** 29, totalBytes: total, bytesPerSecond: 10e6 })).toMatch(/^Into Gates Local's folder · 0\.5 of 1\.4\sGB · about \d+ min left$/);
+    expect(installWords({ receivedBytes: total, totalBytes: total })).toBe("Into Gates Local's folder · Unpacking");
+  });
+});
 
 const gemma = { name: "gemma4:12b", label: "Gemma", recommended: true, downloadBytes: 100, purpose: "chat", installed: false };
 const text = (state: unknown) => {
@@ -61,7 +71,8 @@ describe("first run on a phone, where downloads and installs belong to the compu
   it("does not call a computer-only install missing from this build", () => {
     const t = text({ ...phone, runtime: { state: "missing", owner: "none" }, unavailable: { "models.pull": true, "runtime.retry": true } });
     expect(t).not.toContain("not available in this build");
-    expect(t).toContain("Gates Local can't install Ollama from here. On the computer, install it from ollama.com, then press Retry.");
+    expect(t).toContain("On the computer, install Ollama from ollama.com, then press Retry.");
+    expect(t.split("ollama.com").length - 1, "the step is said once").toBe(1);
   });
 
   it("says an Ollama error needs the computer, and keeps the reason", () => {
@@ -72,8 +83,12 @@ describe("first run on a phone, where downloads and installs belong to the compu
     expect(text({ ...phone, runtime: failed, unavailable: {} })).not.toContain("can't fix this from here");
   });
 
-  it("keeps the old sentence where the build really has no installer", () => {
-    expect(text({ ...phone, runtime: { state: "missing", owner: "none" }, unavailable: {} })).toContain("not available in this build");
+  it("says no Ollama without a build detail the person cannot act on (FIRST-USE-09)", () => {
+    const t = text({ ...phone, runtime: { state: "missing", owner: "none" }, unavailable: {} });
+    expect(t).not.toContain("not available in this build");
+    expect(t).not.toContain("No Ollama found");
+    expect(t.match(/isn't installed/g)).toHaveLength(1);
+    expect(t).toContain("Install Ollama from ollama.com, then press Retry.");
   });
 });
 
@@ -110,7 +125,10 @@ describe("first run on a computer with no supported GPU", () => {
     it(`never promises a GPU when the pick ${verdict}`, () => {
       const t = text(cpuOnly(verdict));
       expect(t).not.toMatch(/your GPU|GPU fit/);
-      expect(t).toContain(verdict === "refuse" ? "Qwen 3.5 4B doesn't fit at 16k. A smaller context may fit." : "This computer has no supported GPU, so models run in system memory");
+      if (verdict === "refuse") expect(t).toContain("Qwen 3.5 4B doesn't fit at 16k. A smaller context may fit.");
+      // the card's verdict says system memory once; the sentence only where the card would say GPU (FIRST-USE-15)
+      if (verdict === "spills") expect(t).not.toContain("This computer has no supported GPU");
+      if (verdict === "fits") expect(t).toContain("This computer has no supported GPU, so models run in system memory");
       // the tooltip is an attribute, which text() strips (W1-03)
       expect(raw(cpuOnly(verdict))).not.toContain("fits your GPU");
     });
