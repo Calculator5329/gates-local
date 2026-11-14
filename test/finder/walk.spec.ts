@@ -177,7 +177,7 @@ async function run(page: Page, screen: Screen, step: Step, cast: Screencast, err
     const ends = await atEnd(page);
     const shots = await cast.stop();
     const frames: FinderFrame[] = probe.map((f, i) => ({ ...f, t: extra[i]?.t ?? 0, twice: extra[i]?.twice ?? [], hold: extra[i]?.hold ?? [] }));
-    const found = detect({ screen: screen.id, step: step.name, frames, actAt, opens: step.opens !== undefined || screen.load !== undefined, free: step.free ?? [], cut, ends, errors: errors.slice(before), kinds: [...TRACK.split(","), ...FINDER_TRACK, ...step.track ?? []].map((k) => k.trim()) });
+    const found = detect({ screen: screen.id, step: step.name, frames, actAt, opens: step.opens !== undefined || screen.load !== undefined, free: step.free ?? [], grows: step.grows ?? [], cut, ends, errors: errors.slice(before), kinds: [...TRACK.split(","), ...FINDER_TRACK, ...step.track ?? []].map((k) => k.trim()) });
     const ms = Math.round(Date.now() - t);
     if (frames.findIndex((f) => f.arrived) < 0) return { ...broken(step.name, new Error(`the surface never showed: ${step.opens?.selector ?? step.root}`)), frames: frames.length, ms };
     if (found.length === 0 && !KEEP) return { name: step.name, frames: frames.length, ms, findings: [], burst: [] };

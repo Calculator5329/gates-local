@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-13: The bug finder tells a box that made room from one that moved
+
+- On a step that says a box is meant to make room (the message box
+  growing upward for queued messages), a box whose one edge goes while the
+  other three hold, and whose gained strip holds something that was not on
+  screen before, is no longer listed as moved. Growing for nothing new, a
+  second edge going too, or any other step is still a finding: a card
+  that grows by a row stays one.
+- Two findings are recorded as looked at: the open thread's title in the
+  sidebar and over the chat (not a bug), and Download saying a model's
+  memory estimate in two tooltips (a bug, in the settings queue).
+- Nothing in the app changes.
+
 ## 2026-11-13: A chat sent while a picture renders says what it waits for
 
 - A message sent to a chat while a picture was rendering showed "Waiting

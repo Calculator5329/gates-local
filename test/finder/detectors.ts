@@ -55,6 +55,8 @@ export interface StepFrames {
   readonly opens: boolean;
   /** Tracked kinds (selectors) that may move, come and go on this step. */
   readonly free?: readonly string[];
+  /** Tracked kinds that are meant to make room on this step: they may grow for something that arrives inside them (see madeRoom). */
+  readonly grows?: readonly string[];
   readonly cut?: readonly CutEl[];
   readonly ends?: readonly EndEl[];
   readonly errors?: readonly string[];
@@ -119,6 +121,37 @@ function stoodIn(frames: readonly WholeFrame[], key: string, box: readonly numbe
   return frames.every((f) => f.els.some((e) => e.key !== key && kindOf(e.key, kinds) === kind && same(e.box, box)));
 }
 
+const area = (e: readonly number[]) => (e[2]! - e[0]!) * (e[3]! - e[1]!);
+const EDGES = (b: readonly number[]) => [b[0] ?? 0, b[1] ?? 0, (b[0] ?? 0) + (b[2] ?? 0), (b[1] ?? 0) + (b[3] ?? 0)] as const;
+
+/**
+ * A box that made room: one edge went and the other three held on every frame, and the
+ * strip it gained holds a box that was not on screen before (the message box growing
+ * upward for the queue shelf), or the strip it lost held one that has left. That is the
+ * box doing its job, on a step that says it is meant to (`grows`): anywhere else a card
+ * that grows by a row is a finding. A box that grew for nothing new, or whose second edge
+ * went too, has moved.
+ */
+function madeRoom(frames: readonly WholeFrame[], at: readonly { readonly i: number; readonly box: readonly number[] }[], key: string): boolean {
+  const first = at[0]!, last = at.at(-1)!;
+  const a = EDGES(first.box), b = EDGES(last.box);
+  const went = [0, 1, 2, 3].filter((e) => Math.abs(a[e]! - b[e]!) > SLACK);
+  const edge = went[0];
+  if (edge === undefined) return false;
+  if (at.some((f) => EDGES(f.box).some((v, e) => e !== edge && Math.abs(v - a[e]!) > SLACK))) return false;
+  // the strip between the edge's two places, across the box
+  const strip = [...a] as number[];
+  strip[edge] = Math.min(a[edge]!, b[edge]!);
+  strip[edge < 2 ? edge + 2 : edge - 2] = Math.max(a[edge]!, b[edge]!);
+  const grew = area(b) > area(a);
+  const holds = frames[grew ? last.i : first.i]!, other = frames[grew ? first.i : last.i]!;
+  return holds.els.some((e) => {
+    if (e.key === key || other.els.some((o) => o.key === e.key)) return false;
+    const cx = (e.box[0] ?? 0) + (e.box[2] ?? 0) / 2, cy = (e.box[1] ?? 0) + (e.box[3] ?? 0) / 2;
+    return cx >= strip[0]! && cx <= strip[2]! && cy >= strip[1]! && cy <= strip[3]!;
+  });
+}
+
 /** A box that shifts after it first showed: how far, on which side, and when. */
 function moves(s: StepFrames, from: number, base: number, free: readonly string[], keys: readonly string[]): Finding[] {
   const out: Finding[] = [];
@@ -138,6 +171,7 @@ function moves(s: StepFrames, from: number, base: number, free: readonly string[
     if (moved < 0) continue;
     const before = at[moved - 1] ?? first, after = at[moved]!;
     if (tookPlace(s.frames[before.i]!, s.frames[after.i]!, key, after.box, s.kinds ?? [])) continue;
+    if (isFree(key, s.grows ?? []) && madeRoom(s.frames, at, key)) continue;
     const last = at.at(-1)!;
     const delta = (last.box[axis] ?? 0) - (first.box[axis] ?? 0);
     const back = Math.abs(delta) <= SLACK;

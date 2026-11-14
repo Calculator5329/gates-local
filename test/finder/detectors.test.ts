@@ -47,6 +47,43 @@ describe("moves", () => {
     expect(detect(step(pushed, row)).map((f) => [f.kind, f.element])).toEqual([["moves", ".cf-r > * Dictate"]]);
   });
 
+  // The message box grows upward to hold the queue shelf and its bottom edge stays (chat row 36).
+  describe("a box that makes room", () => {
+    const SHUT = [300, 972, 800, 60] as const, OPEN = [300, 935, 800, 97] as const;
+    const SEND: El = [".composer button.send", [1060, 996, 28, 28]];
+    const SHELF: El = [".qt-r hello", [308, 940, 784, 28]];
+    const steps = (box: readonly number[], extra: readonly El[], back = false) => {
+      const open: El[] = [[".composer ", box], SEND, ...extra], shut: El[] = [[".composer ", SHUT], SEND];
+      return step([0, 1, 2, 3].map((i) => frame(i, (i < 2) !== back ? shut : open)), { grows: [".composer"] });
+    };
+
+    it("has not moved when it grows for something that arrived in the strip it gained, or shrinks as that leaves", () => {
+      expect(detect(steps(OPEN, [SHELF]))).toEqual([]);
+      expect(detect(steps(OPEN, [SHELF], true))).toEqual([]);
+    });
+
+    it("only on a step that says the box is meant to: anywhere else a card that grows by a row is a finding", () => {
+      expect(kinds({ ...steps(OPEN, [SHELF]), grows: [] })).toEqual(["moves"]);
+      expect(kinds({ ...steps(OPEN, [SHELF]), grows: [".dlg"] })).toEqual(["moves"]);
+    });
+
+    it("has moved when it grows and nothing arrived, or what arrived is somewhere else", () => {
+      expect(detect(steps(OPEN, [])).map((f) => [f.kind, f.element])).toEqual([["moves", ".composer "]]);
+      expect(detect(steps(OPEN, [[".qt-r hello", [308, 1000, 784, 28]]])).map((f) => [f.kind, f.element])).toEqual([["moves", ".composer "]]);
+      // a box that was already there is not what it grew for
+      const chip: El = [".to-end ", [680, 940, 40, 28]];
+      const stayed = step([0, 1, 2, 3].map((i) => frame(i, [[".composer ", i < 2 ? SHUT : OPEN], SEND, chip])), { grows: [".composer"] });
+      expect(detect(stayed).map((f) => [f.kind, f.element])).toEqual([["moves", ".composer "]]);
+    });
+
+    it("has moved when a second edge went with it", () => {
+      // the whole box lifted: top and bottom both
+      expect(kinds(steps([300, 935, 800, 60], [SHELF]))).toEqual(["moves"]);
+      // it grew up and got wider too
+      expect(kinds(steps([300, 935, 820, 97], [SHELF]))).toEqual(["moves"]);
+    });
+  });
+
   it("counts from the surface's arrival when the step opens one", () => {
     const frames = [0, 1, 2, 3, 4, 5].map((i) => frame(i, i < 2 ? [] : [["Close", i < 4 ? BOX : at(90)]], { arrived: i >= 2 }));
     expect(detect(step(frames, { opens: true }))[0]).toMatchObject({ kind: "moves", ms: 2 * 16, frames: [3, 4, 5] });

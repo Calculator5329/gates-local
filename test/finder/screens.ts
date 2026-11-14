@@ -38,6 +38,8 @@ export interface Step {
   readonly opens?: { readonly selector: string; readonly text?: string };
   /** Tracked kinds that may move, come and go here (a reply streaming in), by selector. */
   readonly free?: readonly string[];
+  /** Tracked kinds meant to make room here: growing for something that arrives inside them is not a move. */
+  readonly grows?: readonly string[];
   /** Extra boxes to follow on this step, by selector (named in NAMES). */
   readonly track?: readonly string[];
   /** Longest watch after the action, ms (default 6000). */
@@ -254,10 +256,11 @@ export const SCREENS: readonly Screen[] = [
     viewport: { width: 1920, height: 1080 },
     setup: heldReply,
     steps: [
-      { name: "queue a message", root: ".cw", act: (c) => c.send("And on a second drive?") },
+      // the message box grows upward for the shelf and gives the room back (chat row 36): its bottom edge and its controls stay
+      { name: "queue a message", root: ".cw", grows: [".composer"], act: (c) => c.send("And on a second drive?") },
       { name: "edit the queued message", root: ".cw", act: click(".qt-r [data-edit-queued]") },
       { name: "cancel the edit", root: ".cw", act: click('.qt-r [aria-label="Cancel editing"]') },
-      { name: "the reply ends and the queued message goes", root: ".cw", max: 12_000, act: (c) => c.release() },
+      { name: "the reply ends and the queued message goes", root: ".cw", grows: [".composer"], max: 12_000, act: (c) => c.release() },
     ],
   },
   {
