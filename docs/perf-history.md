@@ -9,6 +9,11 @@ are information, not a gate.
 
 Limited-box readings from the performance nights of 2026-11-11 and 2026-11-12 include the synthetic GPU tool's cost and are not comparable with later readings that box only the app and browser.
 
+Readings after the Linux shell GPU stand-in was introduced on 2026-11-13 use
+that cheaper harness tool in both arms, even for older releases. Send rows may
+step down because each fit check no longer starts Node; that is a harness
+change, not an app speedup. Earlier columns retain their original readings.
+
 Refresh with `node test/perf/history.ts --label RELEASE --scored RESULTS/scored.json`.
 
 ## Time

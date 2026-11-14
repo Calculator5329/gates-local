@@ -24,6 +24,8 @@ test("the shared perf stack gives both legacy and fixture-requiring Library serv
       writeFileSync(path.join(target, "test/fake-ollama/main.ts"), 'console.log("fake ollama on"); setInterval(() => {}, 1000);');
       writeFileSync(path.join(target, "test/e2e/library-server.ts"), [
         'const root = process.env.GL_E2E_LIBRARY_FIXTURE;',
+        'const smi = process.env.GATES_LOCAL_NVIDIA_SMI;',
+        'const gpuName = require("node:child_process").execFileSync(process.platform === "win32" ? process.execPath : smi, [...(process.platform === "win32" ? [smi] : []), "--query-gpu=name"], { encoding: "utf8" });',
         `if (${requiresFixture} && !root) throw new Error("The offline Library fixture must be prepared by the test stack.");`,
         'if (root) {',
         '  const { DatabaseSync } = require("node:sqlite");',
@@ -31,7 +33,7 @@ test("the shared perf stack gives both legacy and fixture-requiring Library serv
         '  if (db.prepare("SELECT title FROM albums").get().title !== "Fixture album") throw new Error("missing offline sample"); db.close();',
         '  require("node:child_process").execFileSync("git", ["--git-dir", require("node:path").join(root, "fixture.git"), "rev-parse", "HEAD"], { stdio: "ignore" });',
         '}',
-        'console.error("OFFLINE_FIXTURE=" + JSON.stringify({ ready: Boolean(root), root }));',
+        'console.error("OFFLINE_FIXTURE=" + JSON.stringify({ ready: Boolean(root), root, smi, gpuName }));',
         // Hold before the server readiness protocol, so the control port never opens.
         'setInterval(() => {}, 1000);',
       ].join("\n"));
@@ -48,7 +50,7 @@ test("the shared perf stack gives both legacy and fixture-requiring Library serv
           child.once("error", reject);
           child.once("exit", code => reject(new Error(`Perf stack exited ${code}: ${output}`)));
         });
-        expect(JSON.parse(observed)).toMatchObject({ ready: true, root: expect.stringContaining(path.join(homedir(), ".cache")) });
+        expect(JSON.parse(observed)).toMatchObject({ ready: true, root: expect.stringContaining(path.join(homedir(), ".cache")), smi: path.join(ROOT, `test/fake-ollama/nvidia-smi.${process.platform === "linux" ? "sh" : "ts"}`), gpuName: "NVIDIA GeForce RTX 5070 Ti\n" });
       } finally {
         if (child.pid !== undefined) stopGroup(child.pid);
         await exited;

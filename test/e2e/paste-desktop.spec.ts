@@ -38,7 +38,7 @@ async function desktop(info: TestInfo) {
       GATES_LOCAL_OLLAMA_BINARY: "none",
       GATES_LOCAL_OLLAMA_URL: FAKE_URL,
       GATES_LOCAL_COMFY_URL: "http://127.0.0.1:1",
-      GATES_LOCAL_NVIDIA_SMI: path.join(ROOT, "test/fake-ollama/nvidia-smi.ts"),
+      GATES_LOCAL_NVIDIA_SMI: path.join(ROOT, `test/fake-ollama/nvidia-smi.${process.platform === "linux" ? "sh" : "ts"}`),
       GATES_LOCAL_MEMINFO: path.join(ROOT, "test/fake-ollama/meminfo.txt"),
     },
     recordVideo: { dir: info.outputPath("desktop-video"), size: { width: 1200, height: 800 } },

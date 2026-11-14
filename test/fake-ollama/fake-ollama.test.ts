@@ -336,7 +336,7 @@ describe("fake ollama", () => {
 });
 
 // POSIX runs the script through its #! line; Windows has none, so Node runs it there.
-const smi = path.join(HERE, "nvidia-smi.ts");
+const smi = path.join(HERE, `nvidia-smi.${process.platform === "linux" ? "sh" : "ts"}`);
 const [smiFile, smiArgs] = process.platform === "win32" ? [process.execPath, [smi]] : [smi, []];
 const run = (args: string[], env: Record<string, string> = {}) =>
   new Promise<string>((resolve, reject) =>

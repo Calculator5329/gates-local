@@ -209,7 +209,7 @@ function serverEnv(): NodeJS.ProcessEnv {
     // A typed model name is looked up here, never ollama.com: the fake answers 404, "not in the library".
     GATES_LOCAL_OLLAMA_REGISTRY: FAKE_URL,
     GL_E2E_LIBRARY_FIXTURE: libraryFixture,
-    GATES_LOCAL_NVIDIA_SMI: path.join(ROOT, "test/fake-ollama/nvidia-smi.ts"),
+    GATES_LOCAL_NVIDIA_SMI: path.join(ROOT, `test/fake-ollama/nvidia-smi.${process.platform === "linux" ? "sh" : "ts"}`),
     GATES_LOCAL_FAKE_GPU_STATE: gpuState,
     GATES_LOCAL_MEMINFO: meminfo,
     // The shell sandbox's probe sees a stand-in machine, never the runner's own bwrap.

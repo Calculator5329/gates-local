@@ -41,7 +41,7 @@ await start(["test/e2e/library-server.ts", "--port", String(SERVER_PORT), "--dat
   ...process.env,
   GATES_LOCAL_OLLAMA_URL: FAKE_URL,
   GATES_LOCAL_COMFY_URL: "http://127.0.0.1:1",
-  GATES_LOCAL_NVIDIA_SMI: process.env["GL_PERF_APP_GROUP"] ? path.join(ROOT, "test/perf/gpu-helper.sh") : path.join(target, "test/fake-ollama/nvidia-smi.ts"),
+  GATES_LOCAL_NVIDIA_SMI: process.env["GL_PERF_APP_GROUP"] ? path.join(ROOT, "test/perf/gpu-helper.sh") : path.join(ROOT, `test/fake-ollama/nvidia-smi.${process.platform === "linux" ? "sh" : "ts"}`),
   GATES_LOCAL_FAKE_GPU_STATE: gpu,
   GATES_LOCAL_MEMINFO: path.join(target, "test/fake-ollama/meminfo.txt"),
   GATES_LOCAL_SERVER_TOKEN: TOKEN,

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-13: Linux send tests spend less time starting their GPU fixture
+
+- Browser and speed tests read the same fake GPU state through shell and
+  `awk` on Linux, avoiding a Node startup before each model request. Other
+  platforms keep the TypeScript fixture.
+- Speed comparisons use the harness checkout's stand-in in both arms, so an
+  older release and a current build pay the same fixture cost. Earlier send
+  readings keep their original values and are marked as a different harness.
+
 ## 2026-11-13: First-run controls carry stable test names
 
 - The first-run screen's main button and its link (`first-run.cta.go`,

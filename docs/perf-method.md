@@ -50,11 +50,18 @@ itself. `--throttle N` slows the page's CPU N times; no job has measured whether
 that helps. The job stops starting rounds when the next would pass
 `--budget-seconds` (780 by default), so it ends inside a 15-minute runner limit.
 
+Both arms use the GPU stand-in from the harness checkout, including when a
+target is an older release: Linux uses POSIX shell and `awk` to read the fake
+model's current JSON state, while other platforms keep the Node reference.
+No rendered answers are cached, so direct state-file writes take effect on the
+next query. This removes a Node startup from each Linux fit check; the lower
+send timings after this harness change are not an app improvement.
+
 `--limit 2c-2g` puts the app server and browser on the first two cores in one
 2 GB cgroup with no swap (`test/perf/box.ts` and `limits.ts`; Linux with a user
 systemd and Python 3). The Playwright driver, fake model, static file server
 and synthetic GPU tool run in a separate owned scope on the remaining cores.
-The GPU launcher leaves the app cgroup before starting Node. A small keeper
+The GPU launcher leaves the app cgroup before starting the shell stand-in. A small keeper
 and the box's reporting shell stay inside; their work remains unassigned.
 `1c-512m` and the like work the same way, and `2c` pins cores and
 only measures memory. `--limit-base` and `--limit-candidate` set one arm, so

@@ -65,7 +65,7 @@ with output.open('x') as stream:
                     role = 'server'
                 elif 'test/fake-ollama/main.ts' in cmd:
                     role = 'fake'
-                elif 'test/fake-ollama/nvidia-smi.ts' in cmd or 'test/perf/gpu-helper.sh' in cmd:
+                elif 'fake-ollama/nvidia-smi.' in cmd or 'test/perf/gpu-helper.sh' in cmd:
                     role = 'gpu'
                 elif 'chrome-headless-shell' in cmd or '/chromium' in cmd or '/chrome ' in cmd:
                     role = 'renderer' if '--type=renderer' in cmd else 'browser-other'
