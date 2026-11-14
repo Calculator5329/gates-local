@@ -375,9 +375,41 @@ describe("tool chat transport", () => {
       } finally { await app.shutdown(); store.close(); vi.unstubAllGlobals(); }
     });
   }
+  // a model with no tool calling of its own writes calls as text, and text mode shows a reply only once it is
+  // whole; with the shell as the only tool on offer that would be every reply arriving at once
+  it.skipIf(process.platform === "win32")("an empty Library with Run commands ready keeps the plain turn, word by word, for a model with no tool calling of its own", async () => {
+    const root = scratch("gl-shell-only-text-");
+    const sources = createSources({ dataDir: path.join(root, "data") });
+    const store = openThreadStore(path.join(root, "threads.db"));
+    const chatBodies: unknown[] = [];
+    const deltas: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      const pathname = new URL(String(url)).pathname;
+      if (pathname === "/api/show") return Response.json({ capabilities: ["completion"] });
+      if (pathname === "/api/ps") return Response.json({ models: [{ name: "m", model: "m", size: 1000, size_vram: 1000, context_length: 16384, expires_at: "later", digest: "d" }] });
+      if (pathname === "/api/tags") return Response.json({ models: [] });
+      chatBodies.push(JSON.parse(String(init?.body)));
+      return ndjson([{ message: { content: "Twice " } }, { message: { content: "a week." } }, { message: { content: "" }, done: true }]);
+    }));
+    const app = createApp({ store, sources, think: true, toolsEnabled: () => true, shellStatus: async () => ({ state: "ready" }),
+      runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
+      catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
+      push: (method, payload) => { const event = (payload as { event?: { type?: string; text?: string } }).event; if (method === "chat.event" && event?.type === "delta") deltas.push(event.text ?? ""); },
+      fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
+    });
+    try {
+      const thread = store.createThread();
+      await sendStarted(app, { threadId: thread.id, content: "how often do I water basil", model: "m", numCtx: 16384, think: false, tools: true }, { clientId: 1 });
+      await vi.waitFor(() => expect(app.activeTurns()).toBe(0));
+      // this model cannot think either, so the request carries no think flag: the plain turn and nothing else
+      expect(chatBodies).toEqual([{ model: "m", messages: [{ role: "user", content: "how often do I water basil" }], stream: true, options: { num_ctx: 16384 } }]);
+      expect(deltas).toEqual(["Twice ", "a week."]);
+      expect(store.getThread(thread.id).messages.at(-1)).toMatchObject({ role: "assistant", content: "Twice a week." });
+    } finally { await app.shutdown(); store.close(); vi.unstubAllGlobals(); }
+  });
 });
 
-const answering = (bodies: Record<string, unknown>[]) => vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+const answering =(bodies: Record<string, unknown>[]) => vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
   if (String(url).endsWith("/api/show")) return Response.json({ capabilities: ["completion", "tools"] });
   bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
   return ndjson([{ message: { content: "ok" }, done: true, done_reason: "stop" }]);

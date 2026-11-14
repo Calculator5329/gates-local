@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-14: A reply appears word by word again on a model with no tool calling
+
+- With tools on and nothing in the Library, a model that has no tool
+  calling of its own gets the plain turn again, so its reply appears as
+  it is written. Since the shell was offered on its own, such a model's
+  whole reply arrived at once.
+
 ## 2026-11-14: A page's limits come from the server
 
 - A page now runs from the app's own server, at an address good for one

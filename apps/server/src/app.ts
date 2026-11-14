@@ -622,7 +622,7 @@ export function createApp(deps: AppDeps): App {
       // A reply that fails on its own runs once more (decision 7): the person sees the second
       // attempt start over in the same place, and only its failure is said.
       for (let attempt = 1; ; attempt++) {
-        const events = useTools ? streamToolTurn({ ...input, sources, image, ...(shell ? { shell } : {}), ...(imageChoice ? { queueImage: queueImageFor(threadId, controller.signal, imageChoice) } : {}) }) : streamTurn(input);
+        const events = useTools ? streamToolTurn({ ...input, sources, image, ...(sources.length === 0 && !image ? { shellOnly: true } : {}), ...(shell ? { shell } : {}), ...(imageChoice ? { queueImage: queueImageFor(threadId, controller.signal, imageChoice) } : {}) }) : streamTurn(input);
         const iterator = events[Symbol.asyncIterator]();
         let dropped = false;
         let failed: TurnFailure | undefined;
