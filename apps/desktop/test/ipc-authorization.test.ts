@@ -7,7 +7,7 @@ const electron = vi.hoisted(() => {
   const handlers = new Map<string, (event: unknown) => unknown>();
   const window = {
     destroyed: false,
-    webContents: { mainFrame: {}, on() {}, setWindowOpenHandler() {}, send() {} },
+    webContents: { mainFrame: {}, on() {}, setWindowOpenHandler() {}, setWebRTCIPHandlingPolicy() {}, send() {} },
     isDestroyed() { return this.destroyed; },
     on() {},
   };

@@ -20,7 +20,7 @@ const fake = vi.hoisted(() => {
     mainFrame: frame, on: (name: string, fn: (...args: unknown[]) => void) => events.set(name, [...(events.get(name) ?? []), fn]),
     getURL: () => frame.url, send: vi.fn(), paste: vi.fn(),
     executeJavaScriptInIsolatedWorld: vi.fn(async (_id: number, scripts: Array<{ code: string }>) => (await import("node:vm")).runInNewContext(scripts[0]!.code, world)),
-    setWindowOpenHandler: vi.fn(),
+    setWindowOpenHandler: vi.fn(), setWebRTCIPHandlingPolicy: vi.fn(),
   };
   return { handlers, events, frame, contents, document, world, original, Textarea, read: vi.fn(async () => [{ types: ["text/uri-list"], getType: async () => new Blob(["file:///srv/docs/private.pdf"]) }]) };
 });

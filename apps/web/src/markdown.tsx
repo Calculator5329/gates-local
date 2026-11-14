@@ -5,14 +5,15 @@
 // at a steady pace; incomplete inline spans render without their delimiters.
 import { type ReactNode, memo, useEffect, useRef } from "react";
 import { useCopy } from "./copy.ts";
-import { linkKey } from "@gates-local/contracts";
+import { isPageDoc, linkKey, mayBePage } from "@gates-local/contracts";
 import { Icon } from "./icons.tsx";
+import { PageChip, WritingChip } from "./pages/PageChip.tsx";
 
 type Block =
   | { t: "p"; text: string }
   | { t: "h"; level: 1 | 2 | 3 | 4; text: string }
   | { t: "ul" | "ol"; items: string[] }
-  | { t: "code"; lang: string; text: string }
+  | { t: "code"; lang: string; text: string; closed: boolean }
   | { t: "quote"; text: string }
   | { t: "table"; head: string[]; rows: string[][]; num: boolean[] };
 
@@ -53,7 +54,7 @@ function parse(src: string): { block: Block; start: number; stable: boolean }[] 
       }
       const closed = i < lines.length && /^\s*```/.test(lines[i] ?? "");
       i++;
-      push({ t: "code", lang, text: body.join("\n") }, closed);
+      push({ t: "code", lang, text: body.join("\n"), closed }, closed);
       continue;
     }
     const h = /^(#{1,4})\s+(.*)$/.exec(line);
@@ -271,6 +272,12 @@ const MarkdownBlock = memo(function MarkdownBlock({ b, partial, allowedLinks }: 
       );
     }
     case "code":
+      // a whole html document is a page (pages/): a chip once it is whole, "Writing page…" while it arrives;
+      // a reply that ended before its block closed shows the code
+      if (b.lang.toLowerCase() === "html") {
+        if (b.closed && isPageDoc(b.text)) return <PageChip code={b.text} />;
+        if (!b.closed && partial && mayBePage(b.text)) return <WritingChip />;
+      }
       return <CodeBlock lang={b.lang} code={b.text} />;
     case "quote":
       return <blockquote>{inline(b.text, partial, allowedLinks)}</blockquote>;

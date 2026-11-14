@@ -33,6 +33,7 @@
 import { writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { DEFAULT_INSTALLED, EMBED_ONLY_INSTALLED, EMBED_SMALLEST_INSTALLED, FAKE_MODELS, LONG_NAME_INSTALLED, findFakeModel, showBody, type FakeModel } from "./models.ts";
+import { pageReply } from "./page-replies.ts";
 import { measureReply } from "./measure-reply.ts";
 import { createScheduler } from "./scheduler.ts";
 import { STREAM_REPLY } from "./stream-reply.ts";
@@ -270,6 +271,8 @@ export function libraryRead(messages: unknown, prompt: string, offered: readonly
 
 /** Multiple blocks make partial progress visible without waiting for completion. */
 export function threadReply(prompt: string): string {
+  const page = pageReply(prompt);
+  if (page !== undefined) return page;
   return Array.from({ length: 8 }, (_, i) => `Reply ${i + 1} for ${prompt}. These words belong to this request.`).join("\n\n");
 }
 

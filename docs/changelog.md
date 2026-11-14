@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-11-14: A page a reply writes runs beside the chat
+
+- A whole HTML document in a reply is one chip: a page icon, its title
+  and its version, "Loan calculator v2". Clicking a chip shows that
+  version.
+- The page runs in a panel right of the chat. Its header has the title,
+  "2 of 3" with older and newer, then code, its own window, save and
+  close.
+- The panel opens on a chat's first page. Once closed it stays closed
+  until a chip is clicked. Which version is on show, and open or closed,
+  are kept per chat through a reload.
+- While a page is written the chip says "Writing page…" and the panel
+  keeps the version before. A reply that stops before the page is whole
+  shows the code.
+- A narrow window or a phone gets the panel over the chat.
+- The model is told how to write a page (63 tokens a turn), and sees only
+  the newest page of a chat in full; older ones are one line each.
+- The page is locked down: no address, storage, network, WebRTC, popups
+  or reach into the app. In the desktop app its frame cannot be moved
+  elsewhere, and its own window is locked the same way.
+
 ## 2026-11-14: The app's own image engine starts on a fresh install
 
 - From the fresh-install test on Linux. After "Set up images" finished,

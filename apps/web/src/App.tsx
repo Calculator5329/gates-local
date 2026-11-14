@@ -589,6 +589,12 @@ export function App() {
             {isPics ? pics.kind === "ready" ? <pics.value.Pictures /> : <div className="pics"><ScreenError /></div> : null}
           </div>
         </main>
+        {/* a page the chat's replies wrote runs beside it (pages/) */}
+        {!isNew && !under && threadId !== null && thread.kind === "ready" ? (
+          <div style={{ display: "contents" }} inert={covered || drawer}>
+            <thread.value.PagePanel threadId={threadId} />
+          </div>
+        ) : null}
         {covered ? (
           <div className="first">
             {noServer ? <NoServer /> : firstRun.kind === "ready" ? <firstRun.value.FirstRun /> : firstRun.kind === "error" ? <ScreenError /> : <FirstRunLoading />}

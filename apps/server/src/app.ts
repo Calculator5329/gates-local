@@ -13,6 +13,7 @@ import { checkFiles, fileLifecycle, fileLine, fileSources, saveFile } from "./ch
 import type { LibraryEntry } from "../../../packages/harness/src/index.ts";
 import { readThumbnail } from "./pictures/thumbs.ts";
 import { fitToWindow, OMITTED_IMAGE } from "./chat/window.ts";
+import { PAGE_RULE, condensePages } from "./chat/pages.ts";
 import { suggestedList, type AttachedFile, type BlockingTurn, type Channel, type FitOffer, type ImageChoice, type Message, type Params, type Payload, type ShellStatus, type SyncChange, type ToolStep, type TurnEnded } from "@gates-local/contracts";
 import { streamTurn, type UsageFigures } from "./chat/stream.ts";
 import { streamToolTurn } from "./chat/tools.ts";
@@ -588,7 +589,10 @@ export function createApp(deps: AppDeps): App {
       }
       // Without the image tool the model is told what turns it on here, so it never names another app.
       const offLine = image || deps.image === undefined ? undefined : deps.imageOff?.(wantsTools);
-      const system = offLine === undefined ? systemPrompt : systemPrompt ? `${systemPrompt}\n\n${offLine}` : offLine;
+      // The page rule rides on every chat turn (chat/pages.ts): the turn that first asks for one cannot be told apart.
+      // It joins a system message the app already sends; with no prompt read, the model's own still applies.
+      const system = systemPrompt === undefined && offLine === undefined ? undefined
+        : [systemPrompt, offLine, PAGE_RULE].filter(line => line !== undefined && line !== "").join("\n\n");
       const input = {
         baseUrl,
         model,
@@ -1138,7 +1142,8 @@ export function createApp(deps: AppDeps): App {
         }
         if (report.verdict === "refuse") throw await refusal(report);
         if (turnSignal.aborted) throw stoppedEarly();
-        const history = [...prior.map((m): TurnMessage => {
+        // a model is sent only the newest page's code in full (chat/pages.ts); the thread keeps every version
+        const history = [...condensePages(prior).map((m): TurnMessage => {
           const priorContent = m.imageJob ? `Image job ${m.imageJob.state}${m.imageJob.message ? `: ${m.imageJob.message}` : ""}` : withFiles(m.content, m.files);
           if (!m.images?.length) return { role: m.role, content: priorContent };
           if (vision && m.role === "user") return { role: m.role, content: priorContent, images: m.images };

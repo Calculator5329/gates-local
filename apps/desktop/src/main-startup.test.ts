@@ -11,7 +11,7 @@ const fake = vi.hoisted(() => {
   const contents = {
     mainFrame: { url: "gates-local://app/index.html" },
     on: (name: string, fn: (...args: unknown[]) => void) => events.set(name, [...(events.get(name) ?? []), fn]),
-    getURL: () => "gates-local://app/index.html", send: vi.fn(), paste: vi.fn(),
+    getURL: () => "gates-local://app/index.html", send: vi.fn(), paste: vi.fn(), setWebRTCIPHandlingPolicy: vi.fn(),
     setWindowOpenHandler: (handler: (details: { url: string }) => unknown) => { opened.handler = handler; },
   };
   return { events, opened, contents, openExternal: vi.fn(async (_url: string) => undefined), setApplicationMenu: vi.fn() };

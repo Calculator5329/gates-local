@@ -7,4 +7,5 @@ export * from "./links.ts";
 export * from "./sync.ts";
 export * from "./image-fit.ts";
 export * from "./chat-models.ts";
+export * from "./pages.ts";
 export const CONTRACTS_VERSION = 1;

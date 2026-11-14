@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../app.ts";
 import { sendStarted } from "../chat/send-started.ts";
 import { streamTurn } from "../chat/stream.ts";
+import { PAGE_RULE } from "../chat/pages.ts";
 import { fitToWindow } from "../chat/window.ts";
 import { json, startFakeServer } from "../fit/fake-http.ts";
 import { createSources } from "../sources/index.ts";
@@ -233,8 +234,8 @@ describe("chat settings on the actual fake Ollama request", () => {
     r.respond(res => { res.end(JSON.stringify({ message: { content: "ok" }, done: true }) + "\n"); });
     await r.send(); await r.finish();
     expect(r.bodies().map(b => b.options.seed)).toEqual([1, 2]);
-    expect(r.bodies()[0]!.messages[0]!.content).toBe("Before");
-    expect(r.bodies()[1]!.messages[0]!.content).toBe("After");
+    expect(r.bodies()[0]!.messages[0]!.content).toBe(`Before\n\n${PAGE_RULE}`);
+    expect(r.bodies()[1]!.messages[0]!.content).toBe(`After\n\n${PAGE_RULE}`);
   });
   it("omits default controls and never borrows another model's overrides", async () => {
     const r = await rig();
@@ -242,7 +243,7 @@ describe("chat settings on the actual fake Ollama request", () => {
     await r.send(); await r.finish();
     expect(r.bodies()[0]!.options).toEqual({ num_ctx: 16384 });
     expect(r.bodies()[0]).not.toHaveProperty("keep_alive");
-    expect(r.bodies()[0]!.messages[0]!.content).toBe("Shipped prompt");
+    expect(r.bodies()[0]!.messages[0]!.content).toBe(`Shipped prompt\n\n${PAGE_RULE}`);
   });
   it("keeps the same controls and prompt through every tool round, even after a settings edit", async () => {
     const r = await rig();
