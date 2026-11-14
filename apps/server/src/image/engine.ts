@@ -89,6 +89,10 @@ export function engineDir(appDataDir: string, version: string): string {
   return path.join(engineRoot(appDataDir), version);
 }
 
+/** The processor build's version is the card build's with this after it (linux-build.ts): torch without CUDA, so it only ever runs with --cpu. */
+export const PROCESSOR_BUILD = "-cpu";
+export const isProcessorBuild = (version: string) => version.endsWith(PROCESSOR_BUILD);
+
 /** The Python that runs ComfyUI, and ComfyUI's main.py, inside an engine tree. */
 export function engineFiles(dir: string, layout: EngineLayout): { python: string; main: string; cwd: string } {
   if (layout === "windows-portable") {

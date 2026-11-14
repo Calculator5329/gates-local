@@ -86,6 +86,7 @@ describe("a retry takes over its failed card's box", () => {
     // one live line: a lit dot, the stage ComfyUI reported (else Working), the seconds since it was asked for
     [{ state: "queued" }, "Waiting for the GPU", '<span class="lv-w">Waiting for the GPU</span>'],
     [{ state: "running", progress: 0, phase: "freeing" }, "Freeing memory", '<span class="lv-w">Freeing memory</span>'],
+    [{ state: "running", progress: 0.5, phase: "stopping", stage: "sampling", steps: { done: 2, total: 4 } }, "Stopping the picture", '<span class="lv-w">Stopping the picture</span>'],
     [{ state: "running", progress: 0.4 }, "Making image", '<span class="lv-w">Working</span>'],
     [{ state: "running", progress: 0.4, stage: "sampling", steps: { done: 2, total: 4 } }, "Making image", '<span class="lv-w">Sampling 2/4</span>'],
   ] as const)("while the retry is %o the one box says %s, not the old reason", async (retry, words, shown) => {

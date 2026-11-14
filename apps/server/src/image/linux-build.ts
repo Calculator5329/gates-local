@@ -19,7 +19,7 @@ import { installPinned, type InstallTarget } from "../runtime/install.ts";
 import { runtimeDir } from "../runtime/paths.ts";
 import type { InstallManifest } from "../runtime/schemas.ts";
 import type { InstallProgress } from "../runtime/types.ts";
-import { ENGINE_VERSION, engineDir, engineRoot } from "./engine.ts";
+import { ENGINE_VERSION, engineDir, engineRoot, PROCESSOR_BUILD } from "./engine.ts";
 import { LINUX_LOCK, LINUX_WHEEL_BYTES } from "./linux-lock.ts";
 import { LINUX_CPU_WHEEL_BYTES, LINUX_LOCK_CPU } from "./linux-lock-cpu.ts";
 import type { BuildPlan, EnginePlan } from "./setup.ts";
@@ -172,7 +172,7 @@ export function linuxBuild(opts: { appDataDir: string; pins: LinuxPins; received
   const { appDataDir, pins } = opts;
   const received = opts.received ?? netReceived;
   const card = buildWith(appDataDir, pins, received, pins.version, pins.lock, pins.wheelBytes, pins.diskBytes);
-  return pins.cpu === undefined ? card : { ...card, cpu: buildWith(appDataDir, pins, received, `${pins.version}-cpu`, pins.cpu.lock, pins.cpu.wheelBytes, pins.cpu.diskBytes) };
+  return pins.cpu === undefined ? card : { ...card, cpu: buildWith(appDataDir, pins, received, `${pins.version}${PROCESSOR_BUILD}`, pins.cpu.lock, pins.cpu.wheelBytes, pins.cpu.diskBytes) };
 }
 
 function buildWith(appDataDir: string, pins: LinuxPins, received: () => number | undefined, version: string, lockText: string, wheelBytes: number, diskBytes: number | undefined): BuildPlan {

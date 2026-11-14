@@ -522,6 +522,7 @@ function ImageGroup({ first, thread, origin, token }: { first: Message; thread: 
 
 /** What a pending card is doing, as a screen reader hears it: steady words, not the ticking line. */
 function jobWords(job: ImageEvent): string {
+  if (job.phase === "stopping") return "Stopping the picture";
   if (job.phase === "freeing") return "Freeing memory";
   if (job.state === "queued") return "Waiting for the GPU";
   return "Making image";
@@ -533,6 +534,7 @@ function jobWords(job: ImageEvent): string {
  * A load before any sampling is the one place the first run's wait is explained.
  */
 export function stageWords(job: ImageEvent, sampled: boolean): string {
+  if (job.phase === "stopping") return "Stopping the picture";
   if (job.phase === "freeing") return "Freeing memory";
   if (job.state === "queued") return "Waiting for the GPU";
   switch (job.stage) {

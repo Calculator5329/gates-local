@@ -44,8 +44,20 @@ export interface ComfyClientDeps {
 /** How long a cancel waits on its interrupt before it asks again. */
 export const INTERRUPT_AGAIN_MS = 10_000;
 
+/** How long a cancel waits for ComfyUI to let go of the prompt, on a card: it checks the interrupt between steps of a second or so. */
+export const CANCEL_WAIT_MS = 30_000;
+
+const waitWords = (ms: number) => ms < 120_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} minutes`;
+
 export class ComfyCancelTimeoutError extends Error {
-  constructor() { super("ComfyUI did not release the image job within 30 s"); this.name = "ComfyCancelTimeoutError"; }
+  constructor(waitMs: number = CANCEL_WAIT_MS) { super(`ComfyUI did not release the image job within ${waitWords(waitMs)}`); this.name = "ComfyCancelTimeoutError"; }
+}
+
+/** How a render's cancel behaves: how long it waits for ComfyUI to let go, and who is told when it starts waiting. */
+export interface RenderStop {
+  readonly waitMs?: number;
+  /** The render was stopped (a cancel or its limit) and its cancel is waiting for ComfyUI to let go. */
+  readonly stopping?: () => void;
 }
 
 export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
@@ -103,7 +115,7 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
     },
     /** `extra`: the workflows ComfyUI had, as setups (presets.ts workflowPreset), for a choice that names one. `seed` omitted: a random one. */
     /** `progress`: the sampler's fraction, and with it what ComfyUI said it is doing, whenever either changes. */
-    async render(prompt: string, clientId: string, signal: AbortSignal, progress: (value: number, said?: RenderSaid) => void, fetched: () => void = () => {}, choice: ImageChoice = DEFAULT_CHOICE, extra: readonly Preset[] = [], seed: number = Math.floor(Math.random() * 2 ** 32)): Promise<{ bytes: Buffer; seed: number; steps?: number }> {
+    async render(prompt: string, clientId: string, signal: AbortSignal, progress: (value: number, said?: RenderSaid) => void, fetched: () => void = () => {}, choice: ImageChoice = DEFAULT_CHOICE, extra: readonly Preset[] = [], seed: number = Math.floor(Math.random() * 2 ** 32), stop: RenderStop = {}): Promise<{ bytes: Buffer; seed: number; steps?: number }> {
       const { preset, size } = resolveChoice(choice, extra);
       const graph = jobGraph(preset, await this.info(signal), { prompt, seed, width: size.width, height: size.height });
       // The steps the graph asks for, for the Pictures screen; a graph with none or several gives none.
@@ -205,7 +217,8 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
         signal.removeEventListener("abort", aborted);
         ws.removeEventListener("message", message); ws.removeEventListener("close", closed); ws.removeEventListener("error", closed); ws.close();
         if (promptId && !success) {
-          try { await this.cancelPrompt(promptId); }
+          if (signal.aborted) stop.stopping?.();
+          try { await this.cancelPrompt(promptId, stop.waitMs); }
           catch (error) {
             // Cleanup must not replace the render failure (especially a dead ComfyUI).
             if (renderFailure) {
@@ -218,11 +231,16 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
         }
       }
     },
-    async cancelPrompt(promptId: string) {
+    /**
+     * `waitMs`: how long ComfyUI may take to let go (CANCEL_WAIT_MS on a card; a processor step's
+     * length on the processor). `signal`: ends the wait early with its reason (a job waiting on it).
+     */
+    async cancelPrompt(promptId: string, waitMs: number = CANCEL_WAIT_MS, signal?: AbortSignal) {
       // Bound cleanup even if Comfy ignores interruption. Chat remeasures real
       // free VRAM before loading after the lease is released.
-      const deadline = new AbortController();
-      const timeout = setTimeout(() => deadline.abort(new ComfyCancelTimeoutError()), 30_000);
+      const timedOut = new AbortController();
+      const timeout = setTimeout(() => timedOut.abort(new ComfyCancelTimeoutError(waitMs)), waitMs);
+      const deadline = { signal: signal === undefined ? timedOut.signal : AbortSignal.any([timedOut.signal, signal]) };
       // One interrupt: ComfyUI keeps it until the prompt stops, which on a processor can take seconds
       // into a long step. Asked again only after INTERRUPT_AGAIN_MS, for the one it drops: an interrupt
       // that lands as the prompt starts is cleared by the start (execute_async).

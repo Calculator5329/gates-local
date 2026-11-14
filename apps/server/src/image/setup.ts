@@ -47,6 +47,17 @@ export const shortDisk = (need: number, free: number) => `Needs ${gb(need)} free
  */
 const UNPACK_FACTOR = 4;
 
+/**
+ * Room beside a build's measured tree for what the measure leaves out: uv's cache while the build
+ * runs, the two archives while they unpack, and the compiled files Python writes on the engine's
+ * first start. Measured on one processor build (du, 2026-11-14): 107 MB of compiled files after its
+ * first start, and 36 MB of cache beyond the tree where uv hard-links into the venv, 0.17 GB with
+ * the archives. 1 GiB is six times that: room for the card build's larger tree, whose share was
+ * not measured. Where uv cannot hard-link (it copies) the cache is a second tree, which this does
+ * not cover.
+ */
+export const BUILD_MARGIN = 1024 ** 3;
+
 /** The Linux build (linux-build.ts) of one engine version: what it downloads, and the build. */
 export type BuildPlan = { kind: "build"; version: string; bytes: number; /** the built tree on disk, measured; absent, the guess below */ diskBytes?: number; run(onProgress: (p: InstallProgress) => void, signal: AbortSignal): Promise<void> };
 
@@ -81,6 +92,7 @@ export interface ImageSetupDeps {
 
 export interface ImageSetupModule {
   info(): Promise<ImageSetup>;
+  /** Starts the setup, or joins the one in progress. */
   run(): Promise<{ started: boolean }>;
   /** Every push the image module makes passes here first: the model step follows image.download. */
   saw(channel: string, payload: unknown): void;
@@ -95,8 +107,8 @@ async function diskFree(dir: string): Promise<number> {
 }
 
 const planBytes = (plan: EnginePlan) => plan.kind === "archive" ? plan.manifest.sizeBytes : plan.bytes;
-/** The disk the engine takes: a build's measured tree, else the download times the unpacking guess. */
-const planDisk = (plan: EnginePlan) => plan.kind === "build" && plan.diskBytes !== undefined ? plan.diskBytes : planBytes(plan) * UNPACK_FACTOR;
+/** The disk the engine takes: a build's measured tree and its margin, else the download times the unpacking guess. */
+const planDisk = (plan: EnginePlan) => plan.kind === "build" && plan.diskBytes !== undefined ? plan.diskBytes + BUILD_MARGIN : planBytes(plan) * UNPACK_FACTOR;
 const planVersion =(plan: EnginePlan) => plan.kind === "archive" ? plan.manifest.version : plan.version;
 
 /** The setup's download: every file its workflow loads, at the sizes the app's records give. */
@@ -108,7 +120,8 @@ function modelBytes(presetId: string): number {
 export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
   const log = deps.log ?? (() => {});
   let last: ImageSetupProgress | undefined;
-  let running: Promise<void> | undefined;
+  /** The setup in progress, from the click until its build and model end (or its checks refuse). */
+  let running: Promise<{ started: true }> | undefined;
   /** The model step, while it runs: its setup, the bytes before it, and the whole run's. */
   let model: { preset: string; before: number; bytes: number; total: number; end(ended: { ok: boolean; message?: string }): void } | undefined;
   const say = (p: ImageSetupProgress) => { last = p; deps.push("image.setup", p); };
@@ -150,43 +163,14 @@ export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
 
   return {
     info: async () => (await read()).info,
-    async run() {
-      if (running !== undefined) return { started: false };
-      const { info, plan, cpu } = await read();
-      const preset = SETUP_PRESET;
-      if (info.why !== undefined || plan === undefined) throw Object.assign(new Error(info.why ?? NO_ENGINE), { code: "image-setup" });
-      if (info.freeBytes !== undefined && info.needBytes !== undefined && info.freeBytes < info.needBytes) throw Object.assign(new Error(shortDisk(info.needBytes, info.freeBytes)), { code: "image-setup" });
-      const engineBytes = info.engine!.installed ? 0 : info.engine!.bytes;
-      const total = engineBytes + info.model!.bytes;
-      const controller = new AbortController();
-      say({ step: "engine", completedBytes: 0, totalBytes: total });
-      running = (async () => {
-        if (!deps.own.installed()) {
-          const onProgress = (p: InstallProgress) => say({ step: "engine", completedBytes: Math.min(p.receivedBytes, engineBytes), totalBytes: total });
-          if (plan.kind === "archive") await installEngine({ appDataDir: deps.appDataDir, manifest: plan.manifest, layout: plan.layout, onProgress, signal: controller.signal });
-          else await plan.run(onProgress, controller.signal);
-        }
-        deps.setDevice(cpu === true ? "cpu" : "gpu");
-        // The model is fetched with the engine stopped (a download never needs it), then the engine
-        // starts once, to read what it has; its idle stop ends it.
-        let end!: (ended: { ok: boolean; message?: string }) => void;
-        const ended = new Promise<{ ok: boolean; message?: string }>((resolve) => { end = resolve; });
-        model = { preset, before: engineBytes, bytes: info.model!.bytes, total, end };
-        say({ step: "model", completedBytes: engineBytes, totalBytes: total });
-        const { files } = await deps.image.download(preset);
-        const result = files.length === 0 ? { ok: true } : await ended;
-        model = undefined;
-        if (!result.ok) throw new Error(result.message ?? "The model download stopped.");
-        say({ step: "starting", completedBytes: total, totalBytes: total });
-        await deps.image.start();
-        say({ step: "done", completedBytes: total, totalBytes: total });
-      })().catch((error: unknown) => {
-        model = undefined;
-        const message = error instanceof Error ? error.message : String(error);
-        log(`setup failed: ${message}`);
-        say({ step: "error", completedBytes: last?.completedBytes ?? 0, totalBytes: total, message });
-      }).finally(() => { running = undefined; });
-      return { started: true };
+    // One setup at a time, from the click: a second click (another window) joins the run in progress
+    // and gets its answer, and its progress comes on the same push.
+    run() {
+      if (running !== undefined) return running;
+      const run = begin();
+      running = run;
+      run.catch(() => { if (running === run) running = undefined; });
+      return run;
     },
     saw(channel, payload) {
       if (channel !== "image.download" || model === undefined) return;
@@ -205,4 +189,44 @@ export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
       } else say({ step: "model", completedBytes, totalBytes: total });
     },
   };
+
+  /** The run behind run(): its checks, then the build and the model in the background; `running` holds it until that ends. */
+  async function begin(): Promise<{ started: true }> {
+    const { info, plan, cpu } = await read();
+    const preset = SETUP_PRESET;
+    if (info.why !== undefined || plan === undefined) throw Object.assign(new Error(info.why ?? NO_ENGINE), { code: "image-setup" });
+    if (info.freeBytes !== undefined && info.needBytes !== undefined && info.freeBytes < info.needBytes) throw Object.assign(new Error(shortDisk(info.needBytes, info.freeBytes)), { code: "image-setup" });
+    const engineBytes = info.engine!.installed ? 0 : info.engine!.bytes;
+    const total = engineBytes + info.model!.bytes;
+    const controller = new AbortController();
+    say({ step: "engine", completedBytes: 0, totalBytes: total });
+    const mine = running;
+    void (async () => {
+      if (!deps.own.installed()) {
+        const onProgress = (p: InstallProgress) => say({ step: "engine", completedBytes: Math.min(p.receivedBytes, engineBytes), totalBytes: total });
+        if (plan.kind === "archive") await installEngine({ appDataDir: deps.appDataDir, manifest: plan.manifest, layout: plan.layout, onProgress, signal: controller.signal });
+        else await plan.run(onProgress, controller.signal);
+      }
+      deps.setDevice(cpu === true ? "cpu" : "gpu");
+      // The model is fetched with the engine stopped (a download never needs it), then the engine
+      // starts once, to read what it has; its idle stop ends it.
+      let end!: (ended: { ok: boolean; message?: string }) => void;
+      const ended = new Promise<{ ok: boolean; message?: string }>((resolve) => { end = resolve; });
+      model = { preset, before: engineBytes, bytes: info.model!.bytes, total, end };
+      say({ step: "model", completedBytes: engineBytes, totalBytes: total });
+      const { files } = await deps.image.download(preset);
+      const result = files.length === 0 ? { ok: true } : await ended;
+      model = undefined;
+      if (!result.ok) throw new Error(result.message ?? "The model download stopped.");
+      say({ step: "starting", completedBytes: total, totalBytes: total });
+      await deps.image.start();
+      say({ step: "done", completedBytes: total, totalBytes: total });
+    })().catch((error: unknown) => {
+      model = undefined;
+      const message = error instanceof Error ? error.message : String(error);
+      log(`setup failed: ${message}`);
+      say({ step: "error", completedBytes: last?.completedBytes ?? 0, totalBytes: total, message });
+    }).finally(() => { if (running === mine) running = undefined; });
+    return { started: true };
+  }
 }

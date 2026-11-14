@@ -8,7 +8,8 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { removeDir, tmpDir } from "../runtime/test-fakes.ts";
 import { engineDir, engineFiles } from "./engine.ts";
-import { createOwnComfy, engineChildEnv, type OwnComfy } from "./own.ts";
+import { createOwnComfy, engineChildEnv, writeDevice, type OwnComfy } from "./own.ts";
+import { createImageSetup, type BuildPlan } from "./setup.ts";
 
 const FAKE_ENGINE = `
 const http = require("node:http");
@@ -123,5 +124,51 @@ describe.skipIf(process.platform === "win32")("createOwnComfy", () => {
     await own.start();
     await own.stop();
     expect(told).toEqual([first]);
+  });
+
+  it("a processor build starts with --cpu after a later setup saw a card, so a card that answers late cannot break it", async () => {
+    // The card did not answer during the first setup, so the processor build was made; a later
+    // setup run saw the card, skipped the build (one is on disk) and stored the card device. The
+    // processor build has no CUDA: started without --cpu it fails on import, on every picture.
+    own = createOwnComfy({ appDataDir, port: await freePort(), platform: "linux" });
+    let room = 0;
+    const built: string[] = [];
+    const build = (version: string): BuildPlan => ({ kind: "build", version, bytes: 1, run: async () => { built.push(version); installFake(version); } });
+    const setup = () => createImageSetup({
+      appDataDir, own: own!,
+      image: { status: async () => ({ state: "stopped", owner: "none" }), engine: () => ({ owner: "none", state: "stopped", room }), start: async () => ({ presets: [], current: {} }) as never, download: async () => ({ files: [] }) },
+      setDevice: (device) => writeDevice(appDataDir, device),
+      engine: () => ({ ...build("1.0.0"), cpu: build("1.0.0-cpu") }),
+      gpuStatus: async () => ({}) as never,
+      settingsAddress: () => undefined,
+      push: () => {},
+      freeBytes: async () => 1024 ** 4,
+    });
+    const done = async (s: ReturnType<typeof setup>) => {
+      await s.run();
+      await vi.waitFor(async () => expect((await s.info()).progress?.step).toBe("done"));
+    };
+    await done(setup());
+    room = 16 * 1024 ** 3;
+    await done(setup());
+    expect(built).toEqual(["1.0.0-cpu"]);
+    await own.start();
+    await vi.waitFor(async () => expect(await answers(own!.address())).toBe(true), { timeout: 5000 });
+    const args = JSON.parse(readFileSync(path.join(work, "args.json"), "utf8")) as string[];
+    expect(args[0]).toBe(engineFiles(engineDir(appDataDir, "1.0.0-cpu"), "uv-venv").main);
+    expect(args).toContain("--cpu");
+    expect(own.build?.()).toMatchObject({ version: "1.0.0-cpu", cpu: true });
+  });
+
+  it("a card build runs on the card, and with --cpu only where the setup found no card to run it on", async () => {
+    installFake("1.0.0");
+    own = createOwnComfy({ appDataDir, port: await freePort(), platform: "linux" });
+    expect(own.build?.()).toMatchObject({ version: "1.0.0", cpu: false });
+    writeDevice(appDataDir, "cpu");
+    expect(own.build?.()).toMatchObject({ version: "1.0.0", cpu: true });
+    writeDevice(appDataDir, "gpu");
+    await own.start();
+    await vi.waitFor(async () => expect(await answers(own!.address())).toBe(true), { timeout: 5000 });
+    expect(JSON.parse(readFileSync(path.join(work, "args.json"), "utf8"))).not.toContain("--cpu");
   });
 });

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { createComfyClient, INTERRUPT_AGAIN_MS } from "./client.ts";
+import { ComfyCancelTimeoutError, createComfyClient, INTERRUPT_AGAIN_MS } from "./client.ts";
 
 afterEach(() => vi.useRealTimers());
 
@@ -57,6 +57,28 @@ it("asks again only every INTERRUPT_AGAIN_MS, for an interrupt ComfyUI dropped a
   // asked at 0, 10 and 20 s, never on each poll
   expect(INTERRUPT_AGAIN_MS).toBe(10_000);
   expect(interrupts).toBe(3);
+});
+
+it("on the processor the cancel waits as long as a step runs, and its deadline names that wait", async () => {
+  // A processor step runs for minutes and ComfyUI checks the interrupt between steps: a 30 s wait
+  // gave up on a picture that was stopping as asked.
+  vi.useFakeTimers();
+  const start = Date.now();
+  const client = createComfyClient("http://fake", { fetch: async (input) => {
+    const route = new URL(String(input)).pathname;
+    if (route === "/queue") return Response.json({ queue_pending: [], queue_running: Date.now() < start + 4 * 60_000 ? [[1, "ours"]] : [] });
+    if (route === "/interrupt") return Response.json({});
+    throw new Error(`unexpected ${route}`);
+  } });
+  let failure: unknown, done = false;
+  const ended = client.cancelPrompt("ours", 30 * 60_000).then(() => { done = true; }, (error: unknown) => { failure = error; });
+  await vi.advanceTimersByTimeAsync(31_000);
+  expect(failure).toBeUndefined();
+  await vi.advanceTimersByTimeAsync(4 * 60_000); await ended;
+  expect(failure).toBeUndefined();
+  expect(done).toBe(true);
+  expect(new ComfyCancelTimeoutError(30 * 60_000).message).toBe("ComfyUI did not release the image job within 30 minutes");
+  expect(new ComfyCancelTimeoutError(30_000).message).toBe("ComfyUI did not release the image job within 30 s");
 });
 
 it("throws the named cancellation deadline even if the queue HTTP request hangs", async () => {

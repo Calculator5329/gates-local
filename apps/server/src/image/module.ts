@@ -16,7 +16,7 @@ import { ENGINE_BUSY_NOTE, imageSetup, type EngineLeave, type MemoryEngine, type
 import { pngFacts } from "../pictures/png.ts";
 import type { PictureFacts } from "../pictures/table.ts";
 import type { ThreadStore } from "../threads/store.ts";
-import { createComfyClient, type ComfyClientDeps } from "./client.ts";
+import { CANCEL_WAIT_MS, createComfyClient, type ComfyClientDeps } from "./client.ts";
 import { downloadFile, haveFile, partBytes, sizeOf, volumeFree, volumeOf, type DownloadOptions } from "./download.ts";
 import { isLocalComfy } from "./installed.ts";
 import { appPreset, cardBytes, DEFAULT_CHOICE, defaultChoice, describeChoice, isDefaultChoice, judgeRow, listPresets, liveChoice, MIN_ROOM, NO_GPU, presetFiles, resolveChoice, sameRow, SLOW, smallerFit, tiersFor, workflowPreset, type ComfyLists, type KnownWorkflow, type Preset } from "./presets.ts";
@@ -253,8 +253,21 @@ const same = (a: ImageChoice, b: ImageChoice) => a.preset === b.preset && a.widt
 export const RUN_LIMIT_MS = { card: 600_000, cpu: 1_800_000 } as const;
 const QUEUE_LIMIT_MS = 1_800_000;
 const minutes = (ms: number) => Math.round(ms / 60_000);
-/** A picture stopped at its limit: the cause, with the engine named as Settings names it. */
-export const ranLong = (min: number) => `The picture took longer than the ${min}-minute limit on this computer, so the image engine stopped it. Try again when you are ready.`;
+/**
+ * A picture stopped at its limit: the cause, with the engine named as Settings names it. `stopped`:
+ * the engine let go of it; else it is still stopping (a step it has not ended), and a new picture
+ * on the processor waits for it.
+ */
+export const ranLong = (min: number, stopped = true) => stopped
+  ? `The picture took longer than the ${min}-minute limit on this computer, so the image engine stopped it. Try again when you are ready.`
+  : `The picture took longer than the ${min}-minute limit on this computer, and the image engine is still stopping it.`;
+/**
+ * How long a cancel waits for the engine to let go. On a card it checks the interrupt between
+ * steps of a second or so (client.ts CANCEL_WAIT_MS). On the processor a step can run for minutes
+ * (9 on a busy computer): the wait is as long as the processor's picture limit, which no one
+ * step outlasts.
+ */
+export const CANCEL_WAIT = { card: CANCEL_WAIT_MS, cpu: RUN_LIMIT_MS.cpu } as const;
 /** A picture that never got its turn (chat held the memory): nothing ran, nothing is wrong with the engine. */
 export const waitedLong = (min: number) => `The picture waited ${min} minutes for its turn and did not start. Try again when you are ready.`;
 
@@ -356,6 +369,12 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     deps.own !== undefined && deps.own.installed() && deps.own.address().replace(/\/$/, "") === baseUrl ? deps.own : systemUnit;
   /** The app's own engine is at `baseUrl`: Settings says Ready for it stopped, never Found. */
   const ownMark = (baseUrl: string): { own?: true } => deps.own !== undefined && serviceAt(baseUrl) === deps.own ? { own: true } : {};
+  /**
+   * The app's own engine is at `baseUrl` and its build runs on the processor (own.ts build): the
+   * processor build on disk, whatever card shows up later. Known while it is stopped, so the room,
+   * the limits and the settings are the processor's before it answers.
+   */
+  const onProcessor = (baseUrl: string) => ownMark(baseUrl).own === true && deps.own?.build?.()?.cpu === true;
   const client = (baseUrl: string) => createComfyClient(baseUrl, deps);
   const filesPath = path.join(deps.dataDir, FILES_NAME);
   let known: KnownFiles | undefined;
@@ -445,6 +464,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   const fit = async (cfg: ReturnType<typeof config>, needBytes: number, want: Want, signal: AbortSignal, freeing: (on: boolean) => void): Promise<Want | undefined> => {
     if (!await isLocalHost(cfg.hostname, deps.localAddresses?.() ?? localAddresses(), deps.lookupHost ?? lookupHost, signal)) return undefined;
     signal.throwIfAborted();
+    // the processor build holds nothing on the card: nothing to free or measure there
+    if (onProcessor(cfg.baseUrl)) return undefined;
     const stats = await client(cfg.baseUrl).stats(signal).catch(() => undefined);
     signal.throwIfAborted();
     if (stats && stats.devices.length > 0 && stats.devices.every((device) => device.type === "cpu")) return undefined;
@@ -623,8 +644,11 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     signal?.throwIfAborted();
     lastRam = await deps.memTotal?.().catch(() => undefined);
     signal?.throwIfAborted();
-    return lastRoom = imageRoom(gpu, stats === undefined || stats.devices.length === 0 ? undefined : stats.devices.every((d) => d.type === "cpu"));
+    const cpuOnly = onProcessor(cfg.baseUrl) || (stats === undefined || stats.devices.length === 0 ? undefined : stats.devices.every((d) => d.type === "cpu"));
+    return lastRoom = imageRoom(gpu, cpuOnly);
   };
+  /** How long a stop waits for the engine to let go, on the room last read. */
+  const cancelWaitMs = () => lastRoom === 0 ? CANCEL_WAIT.cpu : CANCEL_WAIT.card;
   /** The default for the files and room last read; DEFAULT_CHOICE stands in where there is none, and the job refuses it (settle). */
   const chooseDefault = () => defaultChoice(knownFiles(), extras(), lastRoom, lastRam) ?? DEFAULT_CHOICE;
   /** What a send runs now: the saved choice, or the default for the files last read. */
@@ -754,6 +778,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       /** The run's start and the limit its timer is set to: a computer found to have no card gets its own. */
       let runFrom = 0, runLimit = 0;
       const runLimitMs = () => deps.jobTimeoutMs ?? (lastRoom === 0 ? RUN_LIMIT_MS.cpu : RUN_LIMIT_MS.card);
+      /** The last progress the card was told, so a stop keeps the card's bar where it was. */
+      let shown = 0;
       const armRun = (ms: number) => {
         clearTimeout(timeout);
         runLimit = ms;
@@ -824,22 +850,33 @@ export function createImageModule(deps: ImageDeps): ImageModule {
               }
             }
             stage = "image-render";
-            const earlier = stuck.get(cfg.baseUrl);
-            if (earlier) {
-              if ((await comfy.running(signal)).includes(earlier.promptId)) throw imageError("image-busy", "ComfyUI is still running an earlier image from this app that did not stop when cancelled. Wait for it to finish, then retry.");
-              stuck.delete(cfg.baseUrl);
-            }
             // The limit follows the computer: a first picture sent before any status read learns here that there is no card.
             if (lastRoom === undefined && deps.jobTimeoutMs === undefined) await readRoom(signal).catch(() => signal.throwIfAborted());
+            const earlier = stuck.get(cfg.baseUrl);
+            if (earlier && (await comfy.running(signal)).includes(earlier.promptId)) {
+              const busy = imageError("image-busy", "ComfyUI is still running an earlier image from this app that did not stop when cancelled. Wait for it to finish, then retry.");
+              // On the processor the engine is still ending a step of it: this picture waits its turn
+              // (the wait is not its run time), asking it to stop as a cancel does.
+              if (lastRoom !== 0) throw busy;
+              clearTimeout(timeout);
+              await comfy.cancelPrompt(earlier.promptId, cancelWaitMs(), signal).catch((error: unknown) => { signal.throwIfAborted(); throw Object.assign(busy, { cause: error }); });
+              runFrom = Date.now();
+              armRun(runLimitMs());
+            }
+            if (earlier) stuck.delete(cfg.baseUrl);
             if (runLimitMs() !== runLimit) armRun(runLimitMs());
             update({ state: "busy", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
             // The run time is ComfyUI's time making the picture, not the wait before it.
             const started = performance.now();
-            const { bytes, seed, steps } = await comfy.render(prompt, jobId, signal, (progress, said) => event("running", { progress, ...said }), () => {
+            const { bytes, seed, steps } = await comfy.render(prompt, jobId, signal, (progress, said) => { shown = progress; event("running", { progress, ...said }); }, () => {
               const job = jobs.get(jobId);
               if (job) job.committing = true;
               clearTimeout(timeout);
-            }, choice, extras(), params.seed);
+            }, choice, extras(), params.seed, {
+              waitMs: cancelWaitMs(),
+              // stopped and waiting for the engine to let go: the card says so until it has
+              stopping: () => event("running", { progress: shown, phase: "stopping" }),
+            });
             const runMs = Math.round(performance.now() - started);
             const imagePath = `images/${jobId}.png`;
             stage = "image-save";
@@ -862,11 +899,12 @@ export function createImageModule(deps: ImageDeps): ImageModule {
           // a load that did not finish: what the engine holds is unknown, and the next handoff asks it to free
           if (staged !== undefined) deps.memory?.ended();
           staged = undefined;
-          const late = controller.signal.aborted ? undefined
-            : timedOut === "run" ? ranLong(minutes(runLimit)) : timedOut === "queue" ? waitedLong(minutes(deps.queueTimeoutMs ?? QUEUE_LIMIT_MS)) : undefined;
-          const message = late ?? detail(error);
           const cancelDetail = error instanceof Error && "cancelDetail" in error && typeof error.cancelDetail === "string" ? error.cancelDetail : undefined;
           const stuckPromptId = error instanceof Error && "stuckPromptId" in error && typeof error.stuckPromptId === "string" ? error.stuckPromptId : undefined;
+          // the words follow what the cancel did: the engine let go, or it is still stopping
+          const late = controller.signal.aborted ? undefined
+            : timedOut === "run" ? ranLong(minutes(runLimit), stuckPromptId === undefined) : timedOut === "queue" ? waitedLong(minutes(deps.queueTimeoutMs ?? QUEUE_LIMIT_MS)) : undefined;
+          const message = late ?? detail(error);
           if (stuckPromptId) stuck.set(cfg.baseUrl, { promptId: stuckPromptId, ...owned?.baseUrl === cfg.baseUrl ? { pid: owned.pid } : {} });
           const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : stage;
           const missingFile = error instanceof Error && "file" in error && typeof error.file === "string" ? error.file : undefined;
@@ -916,8 +954,10 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     },
     cancel(jobId) {
       const job = jobs.get(jobId);
-      if (!job || job.committing || job.controller.signal.aborted) return { cancelled: false };
-      job.controller.abort(new Error("Image cancelled.")); return { cancelled: true };
+      if (!job || job.committing) return { cancelled: false };
+      // a second Stop while the engine lets go of it is answered the same: it is stopping
+      if (!job.controller.signal.aborted) job.controller.abort(new Error("Image cancelled."));
+      return { cancelled: true };
     },
     async wait(jobId) { await jobs.get(jobId)?.ended; },
     async stopIdle(signal) {

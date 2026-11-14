@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-11-14: Stop on the processor waits for the picture to end, and the processor build always runs there
+
+- Stop on a computer that makes pictures on the processor waits as long as
+  one step of the picture can take, instead of giving up after 30 s and
+  saying the engine is stuck. The card says "Stopping the picture" until the
+  engine lets go, pressing Stop again is still answered, and the next
+  picture waits its turn and then runs. On a graphics card, Stop still gives
+  up after 30 s.
+- A picture that runs past its time limit says what happened: that it was
+  stopped, or that the image engine is still stopping it.
+- The image engine set up for the processor always starts on the processor,
+  also after a later setup saw a graphics card, and also when the computer
+  later shows a small card. It keeps the processor's time limit and the
+  setups that suit it.
+- Two image setups started at once run one build, and both get its outcome,
+  instead of each removing the other's build.
+- The free space the image setup asks for includes 1 GB for what the build
+  writes beyond its own measured size, and the words that say how much is
+  needed use that figure.
+
 ## 2026-11-14: A waiting update says so, and a check keeps the card still
 
 - On Linux, an AppImage that cannot replace its own file now downloads

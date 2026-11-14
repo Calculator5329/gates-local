@@ -1044,7 +1044,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     expect(f.calls).toContain("start");
     f.configure({ comfyUrl: "http://remote-comfy:8188" });
     const second = await f.module.generate({ prompt: "a tree" });
-    await vi.waitFor(() => expect(f.events.filter((e) => e.progress === 0.5)).toHaveLength(2));
+    await vi.waitFor(() => expect(f.events.some((e) => e.jobId === second.jobId && e.progress === 0.5)).toBe(true));
     f.module.cancel(second.jobId); await vi.advanceTimersByTimeAsync(30_000); await f.module.wait(second.jobId);
     expect(f.module.current().detail).toMatch(/may still be running/);
     await f.module.stopIdle();
@@ -1959,6 +1959,107 @@ describe("the card Image mode is judged by: each tier's row by its memory, no de
     await f.module.wait(next.jobId);
     expect(f.events.at(-1)).toMatchObject({ state: "done" });
     expect(f.calls.filter((c) => c === "start")).toHaveLength(0);
+  });
+
+  it("Stop on the processor: the card says it is stopping while the engine ends its step, Stop stays answered, and the next picture waits its turn", async () => {
+    // A processor step runs for minutes and the engine checks the interrupt between steps: the cancel
+    // gave up after 30 s, the status became an error and the next picture was refused.
+    const f = await fixture({ gpuStatus: async () => none, idleMs: 3_600_000 }); f.files({ flux: true });
+    f.configure({ cpu: true, hold: true, stuck: true }); vi.useFakeTimers();
+    const { jobId } = await f.module.generate({ prompt: "a tree" });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() => expect(f.events.some((e) => e.progress === 0.5)).toBe(true));
+    expect(f.module.cancel(jobId)).toEqual({ cancelled: true });
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect(f.module.current().state).toBe("busy");
+    expect(f.events.at(-1)).toMatchObject({ jobId, state: "running", phase: "stopping", progress: 0.5 });
+    expect(f.module.cancel(jobId)).toEqual({ cancelled: true });
+    const next = await f.module.generate({ prompt: "a tree" });
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    expect(f.events.filter((e) => e.jobId === next.jobId).map((e) => e.state)).toEqual(["queued"]);
+    expect(f.module.current().state).toBe("busy");
+    // the step ends and the engine lets go: the first is cancelled, the second runs
+    f.configure({ stuck: false, hold: false });
+    await vi.advanceTimersByTimeAsync(12_000);
+    await f.module.wait(jobId); await f.module.wait(next.jobId);
+    expect(f.events.filter((e) => e.jobId === jobId).at(-1)).toMatchObject({ state: "cancelled" });
+    expect(f.events.filter((e) => e.jobId === next.jobId).at(-1)).toMatchObject({ state: "done" });
+    expect(f.module.current().state).toBe("ready");
+  });
+
+  it("a Stop on a card still gives up after 30 s, as before", async () => {
+    const f = await fixture({ gpuStatus: async () => nvidia(16 * gib), idleMs: 3_600_000 }); f.files({ flux: true });
+    f.configure({ hold: true, stuck: true }); vi.useFakeTimers();
+    const { jobId } = await f.module.generate({ prompt: "a tree" });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() => expect(f.events.some((e) => e.progress === 0.5)).toBe(true));
+    f.module.cancel(jobId);
+    await vi.advanceTimersByTimeAsync(30_200); await f.module.wait(jobId);
+    expect(f.module.current()).toMatchObject({ state: "error", detail: expect.stringMatching(/within 30 s/) });
+    f.configure({ stuck: false }); await vi.advanceTimersByTimeAsync(200);
+  });
+
+  it.each([
+    ["on a card", false, RUN_LIMIT_MS.card, 30_000],
+    ["on the processor", true, RUN_LIMIT_MS.cpu, RUN_LIMIT_MS.cpu],
+  ])("a picture past its limit %s whose engine has not let go says it is still stopping, never that it stopped", async (_, cpu, limit, wait) => {
+    const f = await fixture({ gpuStatus: async () => cpu ? none : nvidia(16 * gib), idleMs: 3_600_000 }); f.files({ flux: true });
+    f.configure({ cpu, hold: true, stuck: true }); vi.useFakeTimers();
+    const { jobId } = await f.module.generate({ prompt: "a tree" });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() => expect(f.events.some((e) => e.progress === 0.5)).toBe(true));
+    await vi.advanceTimersByTimeAsync(limit + 1_000);
+    expect(f.events.at(-1)).toMatchObject({ jobId, state: "running", phase: "stopping" });
+    await vi.advanceTimersByTimeAsync(wait + 1_000); await f.module.wait(jobId);
+    const said = f.events.at(-1)!;
+    expect(said).toMatchObject({ state: "error", errorKind: "timeout", message: ranLong(limit / 60_000, false) });
+    expect(said.message).toContain("still stopping");
+    expect(said.message).not.toContain("stopped it");
+    if (cpu) {
+      // on the processor a try now waits for the engine instead of being refused
+      f.configure({ hold: false });
+      const next = await f.module.generate({ prompt: "a tree" });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(f.events.filter((e) => e.jobId === next.jobId).at(-1)?.state).not.toBe("error");
+      f.configure({ stuck: false });
+      await vi.advanceTimersByTimeAsync(12_000); await f.module.wait(next.jobId);
+      expect(f.events.filter((e) => e.jobId === next.jobId).at(-1)).toMatchObject({ state: "done" });
+    } else { f.configure({ stuck: false }); await vi.advanceTimersByTimeAsync(12_000); }
+  });
+
+  it("the processor build on disk: pictures run on the processor, with its limit and its settings, whatever card shows up later", async () => {
+    // A computer set up with no card (the processor build) later shows a 3 GB card: with the engine
+    // idle the room fell back to the card, "no GPU" refused every send, and the engine on disk works.
+    const own = { active: false };
+    let f!: Awaited<ReturnType<typeof fixture>>;
+    f = await fixture({ own: {
+      installed: () => true, address: () => "http://127.0.0.1:41234",
+      build: () => ({ version: "1.0.0-cpu", cpu: true }),
+      inspect: async () => ({ present: true, active: own.active, activeState: own.active ? "active" : "inactive", pid: own.active ? 77 : 0 }),
+      start: async () => { own.active = true; f.configure({ answering: true, cpu: true }); },
+      stop: async () => { own.active = false; f.configure({ answering: false }); },
+      onExit: () => {},
+    }, gpuStatus: async () => nvidia(3 * gib), idleMs: 3_600_000 });
+    f.files({ flux: true }); f.configure({ answering: false });
+    await f.module.status();
+    expect(f.module.engine().room).toBe(0);
+    const listed = await f.module.presets();
+    expect(listed.noGpu).toBeUndefined();
+    expect(listed.slow).toBe(SLOW);
+    f.configure({ hold: true }); vi.useFakeTimers();
+    const { jobId } = await f.module.generate({ prompt: "a tree" });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() => expect(f.events.some((e) => e.progress === 0.5)).toBe(true));
+    const cpuGeneral = { preset: "general--cpu-klein-fp4-768-2", width: 768, height: 768 };
+    expect(f.events.at(-1)).toMatchObject({ state: "running", choice: cpuGeneral });
+    // past the card's limit and still running: the processor's limit applies
+    await vi.advanceTimersByTimeAsync(RUN_LIMIT_MS.card + 1_000);
+    expect(f.events.at(-1)?.state).toBe("running");
+    f.configure({ hold: false });
+    await vi.advanceTimersByTimeAsync(2_000); await f.module.wait(jobId);
+    expect(f.events.at(-1)).toMatchObject({ state: "done", choice: cpuGeneral });
+    // nothing to measure on a card the picture does not use
+    expect(f.measurements()).toBe(0);
   });
 
   it("a picture that waits past its turn says it never started, not that the engine was not ready", async () => {

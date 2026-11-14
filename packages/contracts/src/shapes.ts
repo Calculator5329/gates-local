@@ -81,8 +81,12 @@ export const ImageEvent = S.Struct({
   jobId: S.String,
   threadId: S.optional(S.String),
   state: S.Literals(["queued", "running", "done", "error", "cancelled"]),
-  /** Running, and still freeing GPU memory (unloading this app's chat models and waiting for the memory). Absent once that step ends. */
-  phase: S.optional(S.Literals(["freeing"])),
+  /**
+   * Running, and "freeing": still freeing GPU memory (unloading this app's chat models and waiting
+   * for the memory), absent once that step ends. "stopping": stopped (a Stop or its limit), and the
+   * engine has not let go yet; on the processor it ends the step it is in first.
+   */
+  phase: S.optional(S.Literals(["freeing", "stopping"])),
   /**
    * Running: what ComfyUI said it is doing, only as it reported it. "queued": taken, not begun;
    * "loading": a loader node ran (a model read from disk, so a cold first run); "encoding": the

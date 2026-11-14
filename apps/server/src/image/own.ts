@@ -10,7 +10,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, 
 import { type AddressInfo, createServer } from "node:net";
 import path from "node:path";
 import { runtimeDir } from "../runtime/paths.ts";
-import { engineDir, engineFiles, engineRoot, type EngineLayout } from "./engine.ts";
+import { engineDir, engineFiles, engineRoot, isProcessorBuild, type EngineLayout } from "./engine.ts";
 import type { ComfyService } from "./service.ts";
 
 export interface OwnComfy extends ComfyService {
@@ -22,6 +22,12 @@ export interface OwnComfy extends ComfyService {
   onExit(listener: (pid: number) => void): void;
   /** Its models folder (kind folders inside), known without starting it: where image downloads go unless the person picked a folder. */
   modelsDir?(): string;
+  /**
+   * The build start() runs (the newest whole one), and whether it runs on the processor: always for
+   * the processor build, which has no CUDA; for a card build, where the setup found no card to run
+   * it on. Undefined while none is whole.
+   */
+  build?(): { version: string; cpu: boolean } | undefined;
 }
 
 export type OwnComfyOptions = {
@@ -94,7 +100,10 @@ export function engineLogFile(appDataDir: string): string {
 }
 
 const pidFile = (appDataDir: string) => path.join(runtimeDir(appDataDir), "comfyui.pid");
-/** What the setup chose the engine runs on: "cpu" where the card cannot run pictures. Outside the pinned tree, so its checksum stays whole. */
+/**
+ * What the setup chose a card build runs on: "cpu" where the card cannot run pictures. Outside the
+ * pinned tree, so its checksum stays whole. The processor build never reads it (own.build).
+ */
 const deviceFile = (appDataDir: string) => path.join(runtimeDir(appDataDir), "comfyui-device");
 
 export function writeDevice(appDataDir: string, device: "gpu" | "cpu"): void {
@@ -137,8 +146,10 @@ export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
       if (readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").includes(main)) process.kill(-pid, "SIGKILL");
     } catch { /* none, gone, or not ours */ }
   };
+  const buildOf = (dir: string) => ({ version: path.basename(dir), cpu: isProcessorBuild(path.basename(dir)) || onCpu(opts.appDataDir) });
   const own: OwnComfy = {
     installed: () => find() !== undefined,
+    build: () => { const dir = find(); return dir === undefined ? undefined : buildOf(dir); },
     address: () => opts.address ?? `http://127.0.0.1:${opts.port}`,
     modelsDir: () => path.join(engineDataDir(opts.appDataDir), "models"),
     async inspect() {
@@ -165,7 +176,8 @@ export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
         "--disable-auto-launch",
         "--base-directory", engineDataDir(opts.appDataDir),
         ...picked === undefined ? [] : ["--extra-model-paths-config", extra],
-        ...onCpu(opts.appDataDir) ? ["--cpu"] : [],
+        // follows the build being started, so a processor build always has it
+        ...buildOf(dir).cpu ? ["--cpu"] : [],
         ...layout === "windows-portable" ? ["--windows-standalone-build"] : [],
       ];
       const log = openSync(engineLogFile(opts.appDataDir), "a");
