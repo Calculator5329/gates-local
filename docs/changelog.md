@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-13: The bug finder's past bugs survive landings
+
+- Each case on the finder's scoreboard puts its bug back by naming the
+  exact text to change (`undo.json`) instead of carrying a patch. A patch
+  stopped applying whenever a line near it changed: five of the twelve
+  cases could no longer be played after one evening of landings, and the
+  board still said "caught 1 of 3" and exited 0.
+- An undo now breaks only when the line of the fix itself changes. A unit
+  test says so in the landing that changes it, with the case's name.
+- `node scripts/finder-board.ts --check` lists the cases that cannot be
+  played without walking anything. A board run with a broken walk or an
+  unplayable case exits 1.
+- The three cases that reversed a whole fix (Advanced without a GPU, one
+  size for pop-ups, the Version rows) are remade as a few lines each.
+
 ## 2026-11-13: Restart to update on Windows
 
 - On a copy the Windows installer put on the computer, once a new version

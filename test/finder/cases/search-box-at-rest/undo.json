@@ -1,0 +1,27 @@
+[
+  {
+    "file": "apps/web/src/styles.css",
+    "find": "  --field-hover:rgb(0 0 0 / 7%); /* the sidebar Search field's box, under the pointer, focused or holding text */",
+    "replace": "  --field:rgb(0 0 0 / 4%); --field-hover:rgb(0 0 0 / 7%); /* the sidebar Search field at rest, and under the pointer, focused or holding text */"
+  },
+  {
+    "file": "apps/web/src/styles.css",
+    "find": "    --hover:rgb(255 255 255 / 6%); --selected:rgb(255 255 255 / 12%); --field-hover:rgb(255 255 255 / 9%);",
+    "replace": "    --hover:rgb(255 255 255 / 6%); --selected:rgb(255 255 255 / 12%); --field:rgb(255 255 255 / 5%); --field-hover:rgb(255 255 255 / 9%);"
+  },
+  {
+    "file": "apps/web/src/styles.css",
+    "find": "  --hover:rgb(255 255 255 / 6%); --selected:rgb(255 255 255 / 12%); --field-hover:rgb(255 255 255 / 9%);",
+    "replace": "  --hover:rgb(255 255 255 / 6%); --selected:rgb(255 255 255 / 12%); --field:rgb(255 255 255 / 5%); --field-hover:rgb(255 255 255 / 9%);"
+  },
+  {
+    "file": "apps/web/src/styles.css",
+    "find": "/* the always-there Search field, as T3 has it: at rest no box, a magnifier and the word in line with the\n   thread names; under the pointer, focused or holding text it fills in, same height, nothing moves. No\n   outline in any state: fill plus caret is its focus look, like the composer's text box */\n.sb-search{height:32px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:var(--r-ctl);background:transparent;cursor:text;transition:background-color .12s}",
+    "replace": "/* the always-there Search field: no outline in any state; fill plus caret is its focus look (like the\n   composer's text box, which has no ring either), one step brighter under the pointer, focused or holding text */\n.sb-search{height:32px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:var(--r-ctl);background:var(--field);cursor:text;transition:background-color .12s}"
+  },
+  {
+    "file": "apps/web/src/styles.css",
+    "find": "/* the thread list hides its bar the way T3's sidebar does (hideScrollbars scrollFade): no bar, and a 24 px fade\n   at an edge only as far as there are more threads past it (--fade-top/--fade-end, set by fadeEdges in Sidebar.tsx);\n   wheel, trackpad and keys scroll as before, and the rest of the app keeps its 6 px bar */\n.sb-list{flex:1;overflow-y:auto;padding:0 8px 8px;scrollbar-width:none;\n  --fade-mask:linear-gradient(to bottom,transparent,#000 min(24px,var(--fade-top,0px)),#000 calc(100% - min(24px,var(--fade-end,0px))),transparent);\n  -webkit-mask-image:var(--fade-mask);mask-image:var(--fade-mask)}\n.sb-list::-webkit-scrollbar{display:none}",
+    "replace": ".sb-list{flex:1;overflow-y:auto;padding:0 8px 8px}"
+  }
+]

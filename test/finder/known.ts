@@ -1,7 +1,7 @@
 // What the finder has been told: the real findings on clean dev it should keep
 // finding (known.json), and the scoreboard's cases, each a bug the owner
 // reported that the tests missed (cases/<id>/case.json, its fix undone by
-// cases/<id>/undo.patch). Pure functions; scripts/finder-board.ts and
+// cases/<id>/undo.json). Pure functions; scripts/finder-board.ts and
 // scripts/bug-finder.ts read the files.
 import type { Finding, Kind } from "./detectors.ts";
 
@@ -32,7 +32,7 @@ export interface Case {
   readonly source: string;
   /** The commit that fixed it. */
   readonly fix: string;
-  /** What undo.patch does to today's code (the fix's own diff reversed, or the fix's mechanism undone by hand). */
+  /** What undo.json does to today's code: the fix's mechanism undone by hand, in as few lines as show the bug. */
   readonly undo: string;
   /** The screens that show it, and how (the steps, in words). */
   readonly screens: readonly string[];

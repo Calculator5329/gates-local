@@ -6,6 +6,8 @@ import type { Finding } from "./detectors.ts";
 import { type Case, type Known, matches, parseCase, score, triage } from "./known.ts";
 import { AREA, SCREENS } from "./screens.ts";
 import { command } from "../../scripts/finder-board.ts";
+import { ROOT } from "./out.ts";
+import { undo } from "./undo.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const f = (o: Partial<Finding>): Finding => ({ screen: "models", step: "open Models", kind: "twice", element: "qwen 3 5 9b", frames: [0], detail: "", boxes: [], ...o });
@@ -55,7 +57,9 @@ describe("the board's cases", () => {
   const screens = new Set(SCREENS.map((s) => s.id));
   it.each(ids)("%s has its words, an undo and screens that exist", (id) => {
     const c = parseCase(id, JSON.parse(readFileSync(path.join(dir, id, "case.json"), "utf8")));
-    expect(existsSync(path.join(dir, id, "undo.patch"))).toBe(true);
+    // the undo names its lines, so only a change to the fix itself breaks it; and it still fits this tree
+    expect(existsSync(path.join(dir, id, "undo.json"))).toBe(true);
+    expect(undo(ROOT, path.join(dir, id), false)).toBeUndefined();
     expect([...c.screens, ...c.catch.map((e) => e.screen)].filter((s) => !screens.has(s))).toEqual([]);
     // a catch that names no kind is a bug no detector looks for yet: the case says which one would
     if (c.catch.some((e) => e.kind === undefined)) expect(c.detector).toBeTruthy();

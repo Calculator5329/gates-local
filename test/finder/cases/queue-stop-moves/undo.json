@@ -1,0 +1,7 @@
+[
+  {
+    "file": "apps/web/src/Composer.tsx",
+    "find": "  const stopForVoice = isStreaming && editing && !touch;",
+    "replace": "  const stopForVoice = false as boolean; // finder case: the chat row 14 fix undone (Stop beside Send, Dictate back, while a queued message is edited)"
+  }
+]

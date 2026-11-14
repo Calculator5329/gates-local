@@ -1,6 +1,6 @@
 // The finder's scoreboard: each case is a bug the owner reported that the tests
 // missed (test/finder/cases/<id>/). For each one the board makes a scratch
-// worktree of HEAD, undoes the fix with the case's undo.patch, walks the case's
+// worktree of HEAD, undoes the fix with the case's undo (test/finder/undo.ts), walks the case's
 // screens, and asks whether the finder said something new there that clean HEAD
 // does not say. Clean HEAD is walked whole, and its findings are sorted against
 // test/finder/known.json into real, not real and not looked at yet.
@@ -9,6 +9,8 @@
 //   node scripts/finder-board.ts --cases a,b        these cases (clean is still walked whole)
 //   --jobs 4                                        walks at once
 //   --keep                                          keep the scratch worktrees
+//   --check                                         walk nothing: say which cases' undos no longer
+//                                                   apply to this checkout, exit 1 if any
 //   GL_FINDER_RUNNER='bash <pool>/e2e.sh --finder {worktree} --screens {screens}'
 //                                                   walk through another runner; {worktree}
 //                                                   and {screens} are filled in, and the walk
@@ -17,7 +19,9 @@
 //                                                   <checkout>-board/<time>, beside the checkout)
 //
 // Prints a table and two numbers: caught N of M, and clean findings that are not
-// real. Writes finder-board/board.md, board.json and each walk's report.
+// real. Writes finder-board/board.md, board.json and each walk's report. Exits 1
+// when a walk broke or a case could not be played: a board with a hole in it is
+// not a score.
 import { execFileSync, spawn } from "node:child_process";
 import { cpSync, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -25,9 +29,10 @@ import { fileURLToPath } from "node:url";
 import { type Case, type Known, parseCase, score, triage } from "../test/finder/known.ts";
 import { ROOT } from "../test/finder/out.ts";
 import { SCREENS } from "../test/finder/screens.ts";
+import { undo } from "../test/finder/undo.ts";
 import { type Found, headline } from "../test/finder/sheet.ts";
 
-const USAGE = "usage: node scripts/finder-board.ts [--cases id,id] [--jobs N] [--keep]";
+const USAGE = "usage: node scripts/finder-board.ts [--cases id,id] [--jobs N] [--keep] [--check]";
 const CASES = path.join(ROOT, "test/finder/cases");
 const OUT = path.join(ROOT, "finder-board");
 
@@ -50,7 +55,6 @@ function readCases(only: readonly string[] | undefined): Case[] {
   for (const c of cases) {
     const bad = [...c.screens, ...c.catch.map((e) => e.screen)].filter((s) => !screens.has(s));
     if (bad.length > 0) throw new Error(`case ${c.id}: no screen named ${bad.join(", ")}`);
-    if (!existsSync(path.join(CASES, c.id, "undo.patch"))) throw new Error(`case ${c.id}: undo.patch missing`);
   }
   return cases;
 }
@@ -59,7 +63,8 @@ interface Walk {
   readonly id: string;
   readonly worktree: string;
   readonly screens: string;
-  readonly patch?: string;
+  /** The case's folder, for a walk with a fix undone. */
+  readonly undo?: string;
 }
 interface Walked extends Walk {
   readonly findings?: readonly Found[];
@@ -75,11 +80,8 @@ export function command(template: string, w: { worktree: string; screens: string
 function run(w: Walk, template: string, logs: string): Promise<Walked> {
   const started = Date.now();
   const seconds = () => Math.round((Date.now() - started) / 1000);
-  if (w.patch) {
-    try { git(w.worktree, "apply", w.patch); } catch (e) {
-      return Promise.resolve({ ...w, seconds: 0, broken: `undo.patch does not apply: ${e instanceof Error ? e.message.split("\n")[0] : e}` });
-    }
-  }
+  const cannot = w.undo === undefined ? undefined : undo(w.worktree, w.undo, true);
+  if (cannot !== undefined) return Promise.resolve({ ...w, seconds: 0, broken: cannot });
   const [cmd, ...args] = command(template, w);
   const log = createWriteStream(path.join(logs, `${w.id}.log`));
   return new Promise((resolve) => {
@@ -119,6 +121,13 @@ async function main(): Promise<void> {
   if (!Number.isInteger(jobs) || jobs < 1) throw new Error(`--jobs needs a whole number\n${USAGE}`);
   const template = process.env["GL_FINDER_RUNNER"] ?? "node scripts/bug-finder.ts --screens {screens}";
   const cases = readCases(only);
+  if (has("--check")) {
+    const broken = cases.map((c) => ({ id: c.id, why: undo(ROOT, path.join(CASES, c.id), false) })).filter((c) => c.why !== undefined);
+    for (const c of broken) console.log(`${c.id}: ${c.why}`);
+    console.log(`CASES ${cases.length - broken.length} of ${cases.length} can be played`);
+    if (broken.length > 0) process.exitCode = 1;
+    return;
+  }
   const known = JSON.parse(readFileSync(path.join(ROOT, "test/finder/known.json"), "utf8")) as Known[];
 
   const head = git(ROOT, "rev-parse", "--short", "HEAD");
@@ -132,7 +141,7 @@ async function main(): Promise<void> {
 
   const walks: Walk[] = [
     { id: "clean", worktree: path.join(dir, "clean"), screens: SCREENS.map((s) => s.id).join(",") },
-    ...cases.map((c) => ({ id: c.id, worktree: path.join(dir, c.id), screens: c.screens.join(","), patch: path.join(CASES, c.id, "undo.patch") })),
+    ...cases.map((c) => ({ id: c.id, worktree: path.join(dir, c.id), screens: c.screens.join(","), undo: path.join(CASES, c.id) })),
   ];
   for (const w of walks) git(ROOT, "worktree", "add", "--quiet", "--detach", w.worktree, "HEAD");
   console.log(`board: HEAD ${head}, ${cases.length} cases and clean, ${jobs} at a time, runner: ${template}`);
@@ -183,6 +192,7 @@ async function main(): Promise<void> {
     }
   }
   console.log(`\n${table}\n\n${cleanLines.join("\n")}\n\nBOARD DONE in ${seconds} s: ${path.join(out, "board.md")}\n${totals}`);
+  if (walked.some((w) => w.broken !== undefined)) process.exitCode = 1;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

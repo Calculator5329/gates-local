@@ -1,0 +1,7 @@
+[
+  {
+    "file": "apps/web/src/image-picker.css",
+    "find": ".image-picker .pk-list-scroll{min-height:212px}\n/* both menus in one cell, the other hidden: the list is the taller one's height on either */\n.image-picker .pk-menus{display:grid}\n.image-picker .pk-menu{grid-area:1/1;min-width:0}\n.image-picker .pk-menu[inert]{visibility:hidden}\n/* the sizes never set the picker's height: they scroll inside the list's */\n.image-picker .pk-context{contain:size;overflow-y:auto}",
+    "replace": "/* finder case: the image row 7 fix undone (the shown menu alone sets the list's height, the sizes set their own) */\n.image-picker .pk-list-scroll{min-height:136px}\n.image-picker .pk-menu{min-width:0}\n.image-picker .pk-menu[inert]{display:none}\n.image-picker .pk-context{overflow-y:auto}"
+  }
+]

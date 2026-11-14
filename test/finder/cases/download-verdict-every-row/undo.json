@@ -1,0 +1,7 @@
+[
+  {
+    "file": "apps/web/src/ModelDownloads.tsx",
+    "find": "              {mark && v ? <> · <VLabel v={v} /></> : null}",
+    "replace": "              {/* finder case: the settings row 18 fix undone (every row says its verdict) */}\n              {v ? <> · <VLabel v={v} /></> : null}"
+  }
+]

@@ -2,7 +2,7 @@
   "owner": "probably needs to be a consistent sized pop up for each of the 3 and act like settings pop up does on t3 code",
   "source": "settings row 26",
   "fix": "37391441",
-  "undo": "the fix's own diff reversed (Panel.tsx, Sidebar.tsx, panel.css): each pop-up as tall as what is in it",
+  "undo": "by hand: the pop-up box is as tall as what is in it again (top fixed, a largest height, a body that does not stretch)",
   "screens": ["settings"],
   "shows": "Settings: go from section to section; the pop-up's bottom edge jumps with each section's length",
   "catch": [{ "screen": "settings", "kind": "resized", "element": ".dlg" }]

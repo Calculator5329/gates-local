@@ -2,7 +2,7 @@
   "owner": "these still look really bad (Settings, Advanced, System memory on a computer with no supported GPU: the no-GPU fact said in several places)",
   "source": "settings row 20",
   "fix": "cef84b46",
-  "undo": "the fix's own diff reversed for FitPanel.tsx, format.ts and Settings.tsx",
+  "undo": "by hand: the model's memory row says the no-GPU sentence again under the note that already says it",
   "screens": ["settings-cpu"],
   "shows": "A computer with no NVIDIA GPU: open Settings, then Advanced",
   "catch": [{ "screen": "settings-cpu", "step": "Advanced section", "kind": "twice" }],

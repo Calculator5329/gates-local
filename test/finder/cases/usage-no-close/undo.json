@@ -1,0 +1,7 @@
+[
+  {
+    "file": "apps/web/src/panel.css",
+    "find": "@media (hover:none){.dlg .dlg-x{width:44px;height:44px}}",
+    "replace": "@media (hover:none){.dlg .dlg-x{width:44px;height:44px}}\n/* finder case: the settings row 23 fix undone (the X only on a phone, as the pop-ups had it) */\n@media (min-width:641px){.dlg .dlg-x{display:none}}"
+  }
+]

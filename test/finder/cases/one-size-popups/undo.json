@@ -1,0 +1,22 @@
+[
+  {
+    "file": "apps/web/src/panel.css",
+    "find": ".dlg{position:fixed;z-index:56;inset:0;margin:auto;width:min(calc(100vw - 80px),1280px);height:min(calc(100dvh - 80px),960px);",
+    "replace": ".dlg{position:fixed;z-index:56;top:56px;left:0;right:0;margin:0 auto;width:min(calc(100vw - 80px),1280px);max-height:calc(100dvh - 112px);"
+  },
+  {
+    "file": "apps/web/src/panel.css",
+    "find": ".dlg-body{flex:1 1 0;",
+    "replace": ".dlg-body{flex:0 1 auto;"
+  },
+  {
+    "file": "apps/web/src/panel.css",
+    "find": ".dlg-body.set{flex:1 1 0;",
+    "replace": ".dlg-body.set{flex:0 1 auto;"
+  },
+  {
+    "file": "apps/web/src/panel.css",
+    "find": ".dlg-cols{flex:1 1 0;",
+    "replace": ".dlg-cols{flex:0 1 auto;"
+  }
+]

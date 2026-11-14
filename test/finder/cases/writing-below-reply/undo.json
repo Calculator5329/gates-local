@@ -1,0 +1,12 @@
+[
+  {
+    "file": "apps/web/src/Thread.tsx",
+    "find": ") : writing ? <WritingLabel over /> : null}",
+    "replace": ") : null}"
+  },
+  {
+    "file": "apps/web/src/Thread.tsx",
+    "find": "      {(msg?.imageJob ? [] : msg?.images ?? []).map(",
+    "replace": "      {/* finder case: the chat row 30 fix undone (Writing below the growing words) */}\n      {!folded && writing ? <WritingLabel /> : null}\n      {(msg?.imageJob ? [] : msg?.images ?? []).map("
+  }
+]

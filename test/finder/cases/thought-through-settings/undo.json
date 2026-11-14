@@ -1,0 +1,7 @@
+[
+  {
+    "file": "apps/web/src/panel.css",
+    "find": ".stage.under{position:absolute;inset:0;visibility:hidden;opacity:0;pointer-events:none}",
+    "replace": ".stage.under{position:absolute;inset:0;visibility:hidden} /* finder case: the chat row 22 fix undone */"
+  }
+]
