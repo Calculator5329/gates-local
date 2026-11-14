@@ -66,6 +66,15 @@ describe("turnClock (chat row 32, decision 33)", () => {
     expect(c.record(4_000)).toMatchObject({ stage: "thinking", workMs: 1_000 });
   });
 
+  it("a turn that waited behind a load and starts once it finished is waiting, never still loading", () => {
+    const c = turnClock(0);
+    expect(c.loading()).toBe(true);
+    c.ready(2_000);
+    expect(c.record(3_000)).toMatchObject({ stage: "waiting", readyAt: 2_000, workMs: 0 });
+    expect(c.see({ type: "thinking", text: "x" }, 3_000, "")).toBe(true);
+    expect(c.record(4_000)).toMatchObject({ stage: "thinking", readyAt: 2_000 });
+  });
+
   it("goes waiting, loading, thinking, tool, writing; the work clock never counts the load or the writing", () => {
     const c = turnClock(0);
     expect(c.record(0)).toMatchObject({ stage: "waiting", workMs: 0, toolMs: 0, attempt: 1 });

@@ -12,7 +12,7 @@ export type TurnStep =
 export interface TurnClock {
   /** Its model is loading for it (a cold load, or a load it waits behind): the stage until it is ready. True when the record changed. */
   loading(): boolean;
-  /** The model is in memory for this reply: called at the start of a turn whose model was resident. The stage stays waiting until the runtime's first event. */
+  /** The model is in memory for this reply: called at the start of a turn whose model was resident or whose load it waited behind has finished. The stage is waiting (never still loading) until the runtime's first event. */
   ready(now: number): void;
   /** `event` was sent at `now`; `thought` is the thinking sent before it. True when the record changed. Nothing after a Stop counts. */
   see(event: TurnStep, now: number, thought: string): boolean;
@@ -95,6 +95,8 @@ export function turnClock(startedAt: number): TurnClock {
       // the "Thought for" time runs from here; the stage waits for the runtime's first event, since a
       // request it queues behind another reply (one slot) looks the same from here as one it started
       readyAt ??= now;
+      // a load it waited behind has finished: the model is in memory, so the line no longer says loading
+      if (stage === "loading") stage = "waiting";
     },
     stop(now, thought) {
       if (stopped) return;

@@ -345,6 +345,36 @@ describe("tool chat transport", () => {
       } finally { await app.shutdown(); store.close(); vi.unstubAllGlobals(); }
     });
   }
+  // asked to run a command with tools on and nothing in the Library, the model must be offered the shell
+  for (const state of ["ready", "off"] as const) {
+    it.skipIf(process.platform === "win32")(`an empty Library with Run commands ${state} ${state === "ready" ? "offers the shell" : "keeps the plain turn"}`, async () => {
+      const root = scratch("gl-shell-only-");
+      const sources = createSources({ dataDir: path.join(root, "data") });
+      const store = openThreadStore(path.join(root, "threads.db"));
+      const chatBodies: { messages: { role: string; content: string }[]; tools?: { function: { name: string } }[] }[] = [];
+      vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+        const pathname = new URL(String(url)).pathname;
+        if (pathname === "/api/show") return Response.json({ capabilities: ["completion", "tools"] });
+        if (pathname === "/api/ps") return Response.json({ models: [{ name: "m", model: "m", size: 1000, size_vram: 1000, context_length: 16384, expires_at: "later", digest: "d" }] });
+        if (pathname === "/api/tags") return Response.json({ models: [] });
+        chatBodies.push(JSON.parse(String(init?.body)));
+        return ndjson([{ message: { content: "ok" }, done: true }]);
+      }));
+      const app = createApp({ store, sources, think: true, toolsEnabled: () => true, shellStatus: async () => ({ state }),
+        runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
+        catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
+        push: () => {}, fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
+      });
+      try {
+        const thread = store.createThread();
+        await sendStarted(app, { threadId: thread.id, content: "run uname -a", model: "m", numCtx: 16384, think: false, tools: true }, { clientId: 1 });
+        await vi.waitFor(() => expect(app.activeTurns()).toBe(0));
+        expect(chatBodies).toHaveLength(1);
+        if (state === "off") expect(chatBodies[0]!.tools).toBeUndefined();
+        else expect(chatBodies[0]!.tools?.map(t => t.function.name)).toEqual(["read", "shell"]);
+      } finally { await app.shutdown(); store.close(); vi.unstubAllGlobals(); }
+    });
+  }
 });
 
 const answering = (bodies: Record<string, unknown>[]) => vi.fn(async (url: string | URL | Request, init?: RequestInit) => {

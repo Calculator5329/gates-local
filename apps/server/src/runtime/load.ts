@@ -47,6 +47,7 @@ import type { FitOffer, FitReport, ModelLoad } from "@gates-local/contracts";
 import type { GpuLease } from "../gpu/lease.ts";
 import { ENGINE_BUSY_NOTE, type Handoff, type MemoryOwner, type Want } from "../gpu/memory.ts";
 import { canonicalTag } from "./recommended.ts";
+import { sendMark, sendSpan } from "../chat/send-times.ts";
 import { GenerateResponse, decode, parseJson } from "./schemas.ts";
 import type { LoadedModel } from "./types.ts";
 
@@ -545,9 +546,10 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
               try {
                 // One thing in memory: everything else is asked to leave before this turn measures.
                 if (memory !== undefined) handing = true;
+                sendMark("gate");
                 let handoff = await memory?.handoff(wanted(), reads);
                 if (gone) return handed(false);
-                const here = await residency(baseUrl, gen, reads);
+                const here = await sendSpan("residency", () => residency(baseUrl, gen, reads));
                 if (gone) return handed(false);
                 const leave = async () => (memory === undefined ? undefined : (handoff = await memory.handoff(wanted(), reads)));
                 const report = withBusyNote(await fit(reads, { get handoff() { return handoff; }, leave }), handoff);

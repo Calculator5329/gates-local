@@ -180,7 +180,10 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     listLoaded: (url, signal) => listLoaded(url, undefined, signal),
     replying: () => loader?.replying() ?? [],
     engine: () => engine,
-    readFree: async (signal) => (await readGpu(options.fit?.runNvidiaSmi ?? defaultNvidiaSmi, Date.now, signal)).freeBytes,
+    readFree: async (signal) => {
+      const reading = await readGpu(options.fit?.runNvidiaSmi ?? defaultNvidiaSmi, Date.now, signal);
+      return reading.gpuCount === 0 ? undefined : reading.freeBytes;
+    },
     onUnloaded: (model) => {
       loader?.unloaded(model);
       forgetGpuReadings();

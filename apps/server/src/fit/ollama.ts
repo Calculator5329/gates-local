@@ -3,6 +3,7 @@
 // Schema decodes each response at the boundary; unknown keys are ignored.
 import * as S from "effect/Schema";
 import { FitError } from "./types.ts";
+import { sendSpan } from "../chat/send-times.ts";
 
 const TagsResponse = S.Struct({
   models: S.Array(
@@ -37,7 +38,11 @@ export type PsEntry = typeof PsEntry.Type;
 const PsResponse = S.Struct({ models: S.Array(PsEntry) });
 export type PsResponse = typeof PsResponse.Type;
 
-async function request(baseUrl: string, path: string, init: RequestInit | undefined): Promise<unknown> {
+function request(baseUrl: string, path: string, init: RequestInit | undefined): Promise<unknown> {
+  return sendSpan(path.replace("/api/", ""), () => requestNow(baseUrl, path, init));
+}
+
+async function requestNow(baseUrl: string, path: string, init: RequestInit | undefined): Promise<unknown> {
   const url = new URL(path, baseUrl);
   let response: Response;
   try {

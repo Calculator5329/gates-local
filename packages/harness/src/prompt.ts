@@ -17,7 +17,7 @@ export function toolDefinitions(platform: NodeJS.Platform = process.platform, op
     ...(platform === "win32"
       ? [def("sql", "Read rows from a SQLite snapshot. source is the SQLite source id from the Library list. No writes or PRAGMA statements.", { source: string, query: string, limit: number }, ["source", "query"])]
       : options.shell === false ? []
-      : [def("shell", "Run a Linux shell command with no home, network or file locks. SQLite snapshots: sqlite3 /data/<source id>.db; files: /library/<source id>.", { command: string, timeoutMs: number }, ["command"])]),
+      : [def("shell", "Run a Linux shell command with no home, network or file locks. SQLite snapshots: sqlite3 /data/<source id>.db, with a dot command in quotes (sqlite3 /data/<source id>.db \".schema elements\"); files: /library/<source id>.", { command: string, timeoutMs: number }, ["command"])]),
     ...(options.image ? [def("image", `Queue images, one per prompt: write a separate, distinct prompt for each picture asked for. They are made in order after your reply ends and appear in this chat on their own. At most ${MAX_IMAGES_PER_TURN} per message.`, { prompts: { type: "array", items: string, minItems: 1 } }, ["prompts"])] : []),
   ];
 }

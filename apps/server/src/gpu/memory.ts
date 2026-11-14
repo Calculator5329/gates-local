@@ -20,6 +20,7 @@
 import type { MemoryState, MemoryThing } from "@gates-local/contracts";
 import { setTimeout as delay } from "node:timers/promises";
 import { forgetGpuReadings } from "../fit/gpu.ts";
+import { sendSpan } from "../chat/send-times.ts";
 import { createFifoGate, type LoadGate } from "../runtime/load.ts";
 import { canonicalTag } from "../runtime/recommended.ts";
 import type { LoadedModel } from "../runtime/types.ts";
@@ -55,8 +56,8 @@ export interface MemoryOwnerDeps {
   readonly replying: () => readonly string[];
   /** The image engine, when image generation is on; bound late (the image module is made after). */
   readonly engine?: () => MemoryEngine | undefined;
-  /** The GPU's free bytes now, for the settle after something left; absent: no settle. */
-  readonly readFree?: (signal: AbortSignal) => Promise<number>;
+  /** The GPU's free bytes now, for the settle after something left; absent, or undefined (no card to read): no settle. */
+  readonly readFree?: (signal: AbortSignal) => Promise<number | undefined>;
   /** A chat model left (the loader forgets it was the app's). */
   readonly onUnloaded?: (model: string) => void;
   readonly onChanged?: (state: MemoryState) => void;
@@ -217,11 +218,14 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
     const deadline = now() + waitMs;
     forgetGpuReadings();
     let before = await deps.readFree(signal);
+    // a computer with no card has no GPU memory to wait for: the models run from system memory
+    if (before === undefined) return;
     let flat = 0;
     while (now() < deadline) {
       await delay(pollMs, undefined, { signal });
       forgetGpuReadings();
       const after = await deps.readFree(signal);
+      if (after === undefined) return;
       flat = after - before < SETTLED_BYTES ? flat + 1 : 0;
       if (flat >= SETTLED_READS) return;
       before = after;
@@ -240,8 +244,8 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
         options.onLeave?.(on);
       };
       try {
-        const chat = await chatLeaves(want, signal, tell);
-        const engine = await engineLeaves(want, signal);
+        const chat = await sendSpan("chat-leave", () => chatLeaves(want, signal, tell));
+        const engine = await sendSpan("engine-leave", () => engineLeaves(want, signal));
         // Told once the engine took the request: a busy or absent engine was asked nothing.
         if (engine === "freed") tell(true);
         if (chat.left.length > 0 || engine === "freed") {
@@ -249,7 +253,7 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
           if (was?.kind === "image" && engine === "freed") resident = undefined;
           if (was?.kind === "chat" && chat.left.some((m) => canonicalTag(m) === was.model)) resident = undefined;
           try {
-            await settle(signal);
+            await sendSpan("settle", () => settle(signal));
           } catch (e) {
             signal.throwIfAborted();
             log(`reading the GPU after a handoff failed: ${(e as Error).message}`);

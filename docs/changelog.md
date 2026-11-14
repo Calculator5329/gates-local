@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-11-14: Tools on can run a command with an empty Library, and the running line stops saying Loading once the model is in
+
+- With Let the model use tools on and nothing in the Library, a chat
+  turn now offers the shell tool whenever Run commands is ready. Before,
+  such a turn sent the model no tools at all, so every model answered
+  that it could not run commands. On a 4B model on a processor, asked
+  to run a command five times: no call before, a shell call each time
+  after.
+- A message sent while its model loads (the load that starts as you
+  type) no longer shows "Loading into GPU memory…" once the load has
+  finished and the model is reading the message.
+- On a computer with no graphics card, a send that first asks another
+  model or the picture engine to leave no longer waits half a second or
+  more for a card's memory to settle: there is no card to read.
+- The shell tool's description shows a SQLite dot command in quotes
+  (`sqlite3 /data/<source id>.db ".schema elements"`).
+- `GATES_LOCAL_SEND_TIMES=1` prints, for each send, where its time went
+  before the first token (each reading, each call to Ollama, the
+  request to the model) as one line in the server log.
+
 ## 2026-11-14: Measure stops honestly, and its scores survive going back a version
 
 - When Ollama crashes or a turn fails partway through Measure, the run

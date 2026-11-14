@@ -96,6 +96,15 @@ describe("one thing in memory: the handoff", () => {
     expect(i).toBe(5);
   });
 
+  it("a computer with no card to read has nothing to settle: one reading, no waiting", async () => {
+    let i = 0;
+    const m = owner(ollama(["a:1b"]), { readFree: async () => { i++; return undefined; }, pollMs: 250, waitMs: 20_000 });
+    const started = performance.now();
+    await m.handoff(chat("b:2b"), signal);
+    expect(i).toBe(1);
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+
   it("status: the resident thing and the handoff stage", async () => {
     const m = owner(ollama([]));
     await m.handoff(chat("b:2b"), signal);

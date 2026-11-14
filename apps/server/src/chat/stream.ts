@@ -7,6 +7,7 @@
 import * as S from "effect/Schema";
 import type { ChatErrorCode, ChatEvent, Message, TurnMessage } from "./types.ts";
 import { fitToWindow } from "./window.ts";
+import { sendMark } from "./send-times.ts";
 import { ollamaSettings, type TurnSettings } from "../settings/turn.ts";
 
 export interface StreamTurnInput {
@@ -116,6 +117,7 @@ export async function* streamTurn(input: StreamTurnInput): AsyncGenerator<ChatEv
 
   const url = new URL("/api/chat", input.baseUrl);
   let response: Response;
+  sendMark("model-request");
   try {
     response = await (input.fetch ?? fetch)(url, {
       method: "POST",

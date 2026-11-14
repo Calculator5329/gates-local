@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import os from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import { MIB } from "./constants.ts";
+import { sendSpan } from "../chat/send-times.ts";
 import { FitError, type GpuSnapshot, type GpuTenant, type MeminfoReader, type NvidiaSmiRunner } from "./types.ts";
 
 export const GPU_TOTALS_ARGS = [
@@ -319,7 +320,7 @@ export async function readGpu(run: NvidiaSmiRunner = defaultNvidiaSmi, now: () =
 
 /** One reading of its own: `signal` reaches both nvidia-smi runs; an abort rejects with its reason. */
 async function readGpuNow(run: NvidiaSmiRunner, now: () => number, signal: AbortSignal): Promise<GpuSnapshot> {
-  const read = await readNvidiaSmi(run, GPU_TOTALS_ARGS, parseGpuTotals, signal);
+  const read = await sendSpan("nvidia-smi", () => readNvidiaSmi(run, GPU_TOTALS_ARGS, parseGpuTotals, signal));
   if (read.kind === "unreadable") throw new FitError("gpu-unreadable", read.detail);
   if (read.kind === "none") return { totalBytes: 0, usedBytes: 0, freeBytes: 0, gpuCount: 0, ...(read.detail === undefined ? {} : { unavailableDetail: read.detail }), tenants: [], measuredAt: now() };
   return { ...read.totals, tenants: parseComputeApps(read.apps), measuredAt: now() };

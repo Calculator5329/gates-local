@@ -45,6 +45,7 @@ import { createUpdateHandlers, type UpdateModule } from "./update/module.ts";
 import type { Usage } from "./usage/index.ts";
 import type { SettingsReader } from "./settings/store.ts";
 import { turnSettings, type TurnSettings } from "./settings/turn.ts";
+import { sendMark, sendTimesLine, withSendTimes } from "./chat/send-times.ts";
 
 /** The slice-1 methods every build answers. v2 methods join as their lanes land; until then the socket answers "not-implemented". */
 type CoreMethod =
@@ -469,7 +470,11 @@ export function createApp(deps: AppDeps): App {
     const emit = (event: Exclude<WireEvent, TurnEnd | { type: "reply" }>) => {
       if (turn.terminal) return;
       // Only text means the model answered; an error, cancel or end goes through end() below.
-      if (event.type === "delta" || event.type === "thinking") load?.firstToken();
+      if (event.type === "delta" || event.type === "thinking") {
+        load?.firstToken();
+        const line = sendTimesLine(turnId);
+        if (line !== undefined) log(line);
+      }
       const changed = event.type !== "start" && turn.clock.see(event, Date.now(), turn.thinking);
       if (event.type === "delta") turn.text += event.text;
       if (event.type === "thinking") turn.thinking += event.text;
@@ -572,9 +577,10 @@ export function createApp(deps: AppDeps): App {
       const toolChoice = wantsTools && deps.image !== undefined ? deps.imageTool?.() : undefined;
       const imageChoice = toolChoice === undefined ? undefined : store.imageChoiceOf(threadId) ?? toolChoice;
       const image = imageChoice !== undefined;
-      const useTools = (wantsTools && sources.length > 0) || image;
-      const shell = useTools && deps.shellStatus ? await untilHalted(deps.shellStatus()) : undefined;
+      // Run commands needs no Library: on Linux a ready shell is offered on its own (Windows has no shell tool).
+      const shell = wantsTools && deps.shellStatus && process.platform !== "win32" ? await untilHalted(deps.shellStatus()) : undefined;
       if (shell === HALTED || turn.halted) { finish(haltedEnd(turn.halted!)); return; }
+      const useTools = (wantsTools && (sources.length > 0 || shell?.state === "ready")) || image;
       // Ollama refuses think: true for a model that cannot think, so its turns go without the flag.
       const think = await untilHalted(thinkFlag(baseUrl, model, options.think ?? deps.think, controller.signal));
       if (think === HALTED || turn.halted) {
@@ -965,7 +971,8 @@ export function createApp(deps: AppDeps): App {
     },
 
     // `image` is an older client's Image button: accepted and ignored (Tools › Make images decides now).
-    "chat.send": async ({ threadId, content, model, numCtx, messageId, retryOf, images = [], files: attaching = [], tools, think, draw, drawCount, stopOthers, stopTurns, askFirst }) => {
+    "chat.send": (params) => withSendTimes(async () => {
+      const { threadId, content, model, numCtx, messageId, retryOf, images = [], files: attaching = [], tools, think, draw, drawCount, stopOthers, stopTurns, askFirst } = params;
       if (closing) throw new AppError("shutting-down", "the server is stopping; no new turns");
       deps.admit?.();
       // The thread is going: its delete has already listed what it takes back.
@@ -1002,7 +1009,7 @@ export function createApp(deps: AppDeps): App {
       }
       admitting(turn, admitTurn(turn, end, load, { threadId, content, model, numCtx, messageId, images, files: attaching, tools, think, stopOthers, stopTurns, askFirst }, { replaced, prior, settings }), replacedFiles, attaching.map(file => file.path));
       return { turnId: turn.turnId };
-    },
+    }),
 
     "chat.cancel": ({ turnId }) => {
       const turn = turns.get(turnId);
@@ -1047,6 +1054,7 @@ export function createApp(deps: AppDeps): App {
         turn.answered = true;
         waitsOnLoad(turn);
         await imageReady;
+        sendMark("answered");
         const files = deps.dataDir ? await checkFiles(deps.dataDir, attaching, { threadId, owners: store.fileOwners() }).catch(attachError) : [];
         // The thread's files, this message's included, open by label in this turn when tools are on.
         const wantsTools = tools ?? deps.toolsEnabled?.() ?? false;
@@ -1123,6 +1131,7 @@ export function createApp(deps: AppDeps): App {
           if (ahead.report.verdict === "refuse" && !engineMayHold) throw await refusal(ahead.report);
         }
         // Waits while an image job holds the GPU; admit's load gate runs inside this claim.
+        sendMark("lease");
         try {
           releaseGpu = await deps.lease?.acquire("chat", turnSignal);
         } catch {
@@ -1134,6 +1143,7 @@ export function createApp(deps: AppDeps): App {
           if (r.verdict !== "refuse") turn.started = true;
           return r;
         };
+        sendMark("admit");
         let report: FitReport;
         try {
           report = load ? await load.admit(numCtx, { fit: admitted, signal: turnSignal }) : await admitted(turnSignal);
@@ -1142,6 +1152,7 @@ export function createApp(deps: AppDeps): App {
           if (e instanceof AdmitCancelled || turn.halted || turnSignal.aborted) throw stoppedEarly();
           throw e;
         }
+        sendMark("admitted");
         if (report.verdict === "refuse") throw await refusal(report);
         if (turnSignal.aborted) throw stoppedEarly();
         // a model is sent only the newest page's code in full (chat/pages.ts); the thread keeps every version
@@ -1168,6 +1179,7 @@ export function createApp(deps: AppDeps): App {
         const withImages = () => imageFiles ? imageFiles.save(savedImages, append).catch(imageError) : append();
         // A file removed since the check above (its day ran out) is said, not saved as a dead reference.
         const userMessage = attachedFiles && files.length ? await attachedFiles.save(files, withImages, threadId).catch(attachError) : await withImages();
+        sendMark("saved");
         push("threads.changed", { threadId });
         started = userMessage;
         turn.started = true;
