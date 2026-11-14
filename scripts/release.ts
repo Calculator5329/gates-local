@@ -44,8 +44,12 @@ export interface ReleaseReport {
   interrupted?: boolean;
   scratchRemoved?: boolean;
   limits?: string[];
+  /** Absent: the whole check. correctness: unit tests and the blocking browser project only.
+   *  timing: the timing project and the speed comparison only (never tag-eligible: no tests ran). */
+  part?: "correctness" | "timing";
 }
 export interface CheckOptions { cwd: string; remote?: string; commit?: string; reportPath: string; storeDir?: string; browserPath?: string; signal?: AbortSignal; timingTimeoutMs?: number; performanceBase?: string; performanceTimeoutMs?: number;
+  part?: "correctness" | "timing";
   /** Host tools this machine lacks. The command passes missingHostTools; a named tool stops the check before the clone. */
   hostTools?: () => string[] }
 
@@ -92,6 +96,7 @@ export async function checkTag(cwd: string, version: string, input: ReleaseRepor
   const parsed = parseRelease(version);
   if (!parsed || !Object.values(parsed).every(Number.isSafeInteger)) throw new Error("Version must be vX.Y.Z (nonnegative safe integers, no leading zeroes)");
   if (report.status !== "passed" || report.interrupted) throw new Error("Report failed: run release:check and fix its blocking failures before tagging");
+  if (report.part === "timing") throw new Error("A timing-only report ran no tests: tag from the correctness report");
   for (const name of BLOCKING) {
     const found = report.steps.filter((s) => s.name === name);
     if (found.length !== 1 || !found[0]?.blocking || found[0].status !== "passed" || found[0].exitCode !== 0) throw new Error(`Report ${name} step is missing or failed: run release:check again`);
@@ -331,6 +336,7 @@ export async function runReleaseCheck(options: CheckOptions): Promise<ReleaseRep
   const report: ReleaseReport = {
     schemaVersion: 1, commit: options.commit ?? "", remote: options.remote ?? "", startedAt: new Date(began).toISOString(), finishedAt: "", durationMs: 0,
     status: "failed", tools: { node: process.version }, steps: [], tests: { unit: emptyTotals(), e2e: emptyTotals() }, failures: [], limits: [],
+    ...(options.part ? { part: options.part } : {}),
   };
   // Record limits before any fallible setup, so a failed report still carries them.
   if (options.storeDir) report.limits?.push("A shared pnpm store was selected for installation; a download into an empty store was not proven.");
@@ -401,29 +407,38 @@ export async function runReleaseCheck(options: CheckOptions): Promise<ReleaseRep
       requirePass(pw);
       validateBrowserToolchain(clone, env);
     }
-    const verify = await step("verify", ["pnpm", "verify"], clone);
-    report.tests.unit = unitTotals(verify.output);
-    if (verify.code) {
-      const failures = stripVTControlCharacters(verify.output).split(/(?=^[ \t]*FAIL {2,})/m).slice(1).map((s) => s.trim());
-      for (const failure of failures) report.failures.push({ step: "verify", test: failure.split("\n")[0]?.trim() ?? "unit", message: failure.slice(0, 24_000) });
+    if (options.part !== "timing") {
+      const verify = await step("verify", ["pnpm", "verify"], clone);
+      report.tests.unit = unitTotals(verify.output);
+      if (verify.code) {
+        const failures = stripVTControlCharacters(verify.output).split(/(?=^[ \t]*FAIL {2,})/m).slice(1).map((s) => s.trim());
+        for (const failure of failures) report.failures.push({ step: "verify", test: failure.split("\n")[0]?.trim() ?? "unit", message: failure.slice(0, 24_000) });
+      }
+      requirePass(verify);
+      if (report.tests.unit.passed === 0 || report.tests.unit.failed) throw new Error("verify did not report passing unit tests");
     }
-    requirePass(verify);
-    if (report.tests.unit.passed === 0 || report.tests.unit.failed) throw new Error("verify did not report passing unit tests");
     requirePass(await step("build", ["pnpm", "build"], clone));
     requirePass(await step("desktop-build", ["pnpm", "--filter", "@gates-local/desktop", "build"], clone));
     requirePass(pw);
     const playwright = playwrightCommand(clone);
     // A supplied Playwright cache is validated above and never downloaded here.
     if (!options.browserPath) requirePass(await step("browser", ["pnpm", "exec", "playwright", "install", "chromium"], clone));
-    const browserReport = path.join(artifacts, "e2e.json");
-    env["PLAYWRIGHT_JSON_OUTPUT_FILE"] = browserReport;
-    env["GL_E2E_RESULTS"] = path.join(scratch, "e2e-results");
-    env["GL_E2E_DATA_ROOT"] = path.join(scratch, "e2e-data");
-    const browser = await step("e2e", [...playwright, "test", "-c", "test/e2e/playwright.config.ts", "--project=e2e", "--forbid-only", "--reporter=list,json"], clone);
-    try { report.tests.e2e = readBlockingPlaywright(browserReport, report); }
-    finally { if (browser.code || report.failures.length) retainResults("e2e", env["GL_E2E_RESULTS"]); }
-    requirePass(browser);
-    if (report.tests.e2e.passed === 0 || report.tests.e2e.failed || report.failures.length) throw new Error("Blocking browser project failed; inspect its report and artifacts");
+    if (options.part !== "timing") {
+      const browserReport = path.join(artifacts, "e2e.json");
+      env["PLAYWRIGHT_JSON_OUTPUT_FILE"] = browserReport;
+      env["GL_E2E_RESULTS"] = path.join(scratch, "e2e-results");
+      env["GL_E2E_DATA_ROOT"] = path.join(scratch, "e2e-data");
+      const browser = await step("e2e", [...playwright, "test", "-c", "test/e2e/playwright.config.ts", "--project=e2e", "--forbid-only", "--reporter=list,json"], clone);
+      try { report.tests.e2e = readBlockingPlaywright(browserReport, report); }
+      finally { if (browser.code || report.failures.length) retainResults("e2e", env["GL_E2E_RESULTS"]); }
+      requirePass(browser);
+      if (report.tests.e2e.passed === 0 || report.tests.e2e.failed || report.failures.length) throw new Error("Blocking browser project failed; inspect its report and artifacts");
+    }
+    if (options.part === "correctness") {
+      // The timing half runs as its own job on a timing host (pool release.sh).
+      report.status = "passed";
+      return report;
+    }
 
     // Timing is a separate bounded process. Its JSON is never opened here.
     active = "timing";

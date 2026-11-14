@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-13: The release check runs as two halves
+
+- `pnpm release:check --part correctness` runs the unit tests and the
+  blocking browser project; `--part timing` runs the timing project and
+  the speed comparison. Without `--part` the check is whole, as before.
+- A release is tagged from the correctness report. A timing-only report
+  ran no tests and cannot tag.
+- Why: the timed half needs a machine to itself and the tests do not. As
+  one job the whole check held that machine for about twenty minutes; the
+  timed half alone takes about seven.
+
 ## 2026-11-13: The bug finder's past bugs survive landings
 
 - Each case on the finder's scoreboard puts its bug back by naming the

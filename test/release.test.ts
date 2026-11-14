@@ -369,6 +369,21 @@ test.each([
   await expect(checkTag(f.cwd,"v1.0.0",report)).resolves.toMatchObject({commit:f.sha});
 }, 30_000);
 
+// The pool runs the check as two jobs: the tests on any helper, the timing alone on a timing machine.
+test("the check splits in two: the correctness half runs the tests and can tag, the timing half runs none and cannot", async () => {
+  const f = protocolFixture();
+  const correctness = await runReleaseCheck({ cwd: f.cwd, remote: f.remote, commit: f.sha, reportPath: path.join(f.dir, "correctness.json"), part: "correctness" });
+  expect(correctness.status, JSON.stringify(correctness.failures)).toBe("passed");
+  expect(correctness.steps.map(step => step.name)).toEqual(["clone", "checkout", "install", "verify", "build", "desktop-build", "browser", "e2e"]);
+  expect(correctness.timing, "the correctness half starts no timing run").toBeUndefined();
+  await expect(checkTag(f.cwd, "v1.0.0", correctness)).resolves.toMatchObject({ commit: f.sha });
+  const timing = await runReleaseCheck({ cwd: f.cwd, remote: f.remote, commit: f.sha, reportPath: path.join(f.dir, "timing.json"), part: "timing" });
+  expect(timing.steps.map(step => step.name)).toEqual(["clone", "checkout", "install", "build", "desktop-build", "browser"]);
+  expect(timing.timing).toMatchObject({ completed: true, reportPath: expect.stringContaining("timing.json") });
+  expect(timing.tests.unit.passed + timing.tests.e2e.passed).toBe(0);
+  await expect(checkTag(f.cwd, "v1.0.0", timing)).rejects.toThrow(/timing-only report ran no tests/);
+}, 30_000);
+
 test("RJ tagging never reads timing information", async () => {
   const f = fixture();
   Object.defineProperty(f.report,"timing",{get:()=>{throw new Error("tagging read timing");}});

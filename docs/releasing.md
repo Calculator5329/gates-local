@@ -623,6 +623,13 @@ pnpm release:check --remote <public-url> --commit <full-sha> --report <new-repor
 pnpm release:tag v1.2.3 --report <new-report.json>
 ```
 
+With two machines the check can run as two halves at once:
+`--part correctness` runs the unit tests and the blocking browser project
+and nothing timed, so it can run on a machine that is busy with other
+work; `--part timing` runs only the timing project and the speed
+comparison, on a machine left alone for it. Tag from the correctness
+report. A timing report ran no tests and `release:tag` refuses it.
+
 The check defaults to this clone's origin and current origin/main tracking
 ref. Refresh that ref first. It clones into a new cache directory with a
 fresh home and configuration, checks out the exact commit, installs with
