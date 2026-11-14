@@ -6,17 +6,7 @@ import { friendlyName } from "./format.ts";
 
 // ---------------------------------------------------------------- fit words
 
-/**
- * The one sentence for a fit, on Models and on GPU memory. "Should" until the
- * model has really run at that size (`measured`). With no supported GPU,
- * whatever loads runs in system memory.
- */
-export function fitLabel(verdict: FitVerdict, measured = false, cpu = false): string {
-  if (verdict === "refuse") return "Won't run here";
-  return `${measured ? "Runs" : "Should run"} ${cpu ? "in system memory" : verdict === "fits" ? "well" : "slower"}`;
-}
-
-/** The dot beside that sentence. A model too big for this machine is a limit, not a failure, so it is gray. */
+/** The dot beside a verdict's words (the server's, FitReport.words). A model too big for this machine is a limit, not a failure, so it is gray. */
 export const FIT_DOT: Record<FitVerdict, string> = { fits: "ok", spills: "warn", refuse: "off" };
 
 /** The app's GB is GiB (format.ts gb), so these numbers match every other surface. */

@@ -4,6 +4,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { fitWords, type FitReport } from "@gates-local/contracts";
 
 const store = vi.hoisted(() => ({ state: undefined as unknown }));
 vi.mock("./store.ts", () => ({
@@ -27,12 +28,13 @@ const fit = (model: string, verdict: "spills" | "refuse", needGb: number) => ({
   source: "estimate",
   measuredAt: 0,
 });
-/** A fit table of these reports, from one reading. */
-const tableOf = (...reports: readonly object[]) => ({
+/** A fit table of these reports, from one reading, each with the words the server sends (cpu: no supported GPU). */
+const tableOn = (cpu: boolean, ...reports: readonly object[]) => ({
   reading: { boot: "b", seq: 1, measuredAt: 0 },
-  memory: { kind: "cpu" },
-  rows: reports.map((r) => ({ ...r, stops: [] })),
+  memory: { kind: cpu ? "cpu" : "gpu" },
+  rows: reports.map((r) => ({ ...r, stops: [], words: fitWords(r as FitReport, "card", cpu) })),
 });
+const tableOf = (...reports: readonly object[]) => tableOn(true, ...reports);
 const installed = (name: string) => ({ name, digest: name, sizeBytes: 5 * GIB, modifiedAt: "", capabilities: ["completion"] });
 const entry = (name: string, label: string, verdict: "spills" | "refuse", needGb: number) => ({
   name,
@@ -136,7 +138,7 @@ describe("Models on a computer with no supported GPU", () => {
     const at64 = { ...fit(name, "spills", 15), numCtx: 65536, freeVramBytes: 12 * GIB, spillRamBytes: 3 * GIB };
     const html = render(noGpuComputer({ addPage: true, gpu: { vendor: "nvidia", name: "Test GPU" }, numCtx: 65536,
       catalog: [{ ...entry(name, "Qwen 3 14B", "spills", 10), fit: at16 }],
-      fitTable: tableOf(at64) }));
+      fitTable: tableOn(false, at64) }));
     // the only row spills: its mark says so in amber with the 64k need (decision 11), nothing above the list
     expect(html).toContain('aria-label="Partly in system memory, slower: 15 GB"');
     expect(html).not.toContain("These are bigger than your GPU");
@@ -187,7 +189,7 @@ describe("Models with a model whose window is smaller than the default", () => {
         gpu: { vendor: "nvidia", name: "Test GPU" },
         models: [{ ...installed(tag), maxContext: 2048 }],
         catalog: [],
-        fitTable: tableOf(report),
+        fitTable: tableOn(false, report),
         settings: { defaultModel: tag },
       }),
     );

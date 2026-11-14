@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { fitWords, withNow, type FitRow } from "@gates-local/contracts";
 
 const mock = vi.hoisted(() => ({ state: undefined as unknown }));
 vi.mock("./store.ts", () => ({ NA: "na", chatReady: () => true, useStore: (fn: (s: unknown) => unknown) => fn(mock.state), getState: () => mock.state, setState: () => undefined, streamingHere: () => false }));
@@ -10,7 +11,9 @@ const { Picker, ContextMemory } = await import("./Picker.tsx");
 /** The picker for one installed model; `tabled`: the first fit table has arrived. */
 function markup(tabled = true, over: Record<string, unknown> = {}) {
   const tag = "milo-e4b-v4:latest", gib = 1024 ** 3;
-  const row = { model: tag, numCtx: 16384, freeVramBytes: 12.06 * gib, needVramBytes: 6.87 * gib, spillRamBytes: 0, verdict: "fits", source: "estimate", stops: [], ...over };
+  const raw = { model: tag, numCtx: 16384, freeVramBytes: 12.06 * gib, needVramBytes: 6.87 * gib, spillRamBytes: 0, verdict: "fits", source: "estimate", stops: [], ...over } as FitRow;
+  // the words the server sends: the row's right now, the card's with a refusal now folded in
+  const row = { ...raw, words: fitWords(raw, "now", false), ...(raw.card ? { card: { ...raw.card, words: withNow(fitWords({ ...raw, ...raw.card }, "card", false), raw) } } : {}) };
   mock.state = {
     pop: { id: "picker", kb: true, ready: true }, unavailable: {}, numCtx: 16384, model: tag,
     models: [{ name: tag, digest: "test", sizeBytes: 5.37 * gib, modifiedAt: "", capabilities: ["completion", "thinking"], maxContext: 131072 }],
@@ -35,19 +38,19 @@ describe("approved model picker", () => {
     expect(html).not.toMatch(/fits on (?:the )?GPU/);
   });
   it("shows a CPU cost without a fictional GPU scale", () => {
-    const v = { k: "spill" as const, chip: "system memory", word: "Uses system memory", detail: "", amt: 7 * 1024 ** 3, need: 7 * 1024 ** 3, avail: 0, measured: false };
+    const v = { basis: "now" as const, k: "spill" as const, label: "", mark: "", short: "System memory", chip: "system memory", word: "Uses system memory", detail: "", amt: 7 * 1024 ** 3, need: 7 * 1024 ** 3, avail: 0, measured: false };
     const html = renderToStaticMarkup(createElement(ContextMemory, { v, cpu: true }));
     expect(html).toContain("System memory");
     expect(html).not.toContain('class="pk-cost-track"');
   });
   it("keeps a CPU refusal explicit", () => {
-    const v = { k: "no" as const, chip: "not enough memory", word: "Not enough memory", detail: "", amt: 2 * 1024 ** 3, need: 7 * 1024 ** 3, avail: 0, measured: false };
+    const v = { basis: "now" as const, k: "no" as const, label: "", mark: "", short: "Too big", chip: "not enough memory", word: "Not enough memory", detail: "", amt: 2 * 1024 ** 3, need: 7 * 1024 ** 3, avail: 0, measured: false };
     const refused = renderToStaticMarkup(createElement(ContextMemory, { v, cpu: true }));
     expect(refused).toContain("Too big");
   });
   it("does not count a loaded model's own GPU allocation as overflow against the remaining free memory", () => {
     const gib = 1024 ** 3;
-    const v = { k: "gpu" as const, chip: "on GPU", word: "Runs on GPU", detail: "", amt: 0, need: 7 * gib, avail: 2 * gib, measured: true };
+    const v = { basis: "now" as const, k: "gpu" as const, label: "", mark: "", short: "Fits", chip: "on GPU", word: "Runs on GPU", detail: "", amt: 0, need: 7 * gib, avail: 2 * gib, measured: true };
     const html = renderToStaticMarkup(createElement(ContextMemory, { v, cpu: false }));
     expect(html).not.toContain('class="pk-cost-over"');
     expect(html).toContain("measured; Fits");
@@ -55,7 +58,7 @@ describe("approved model picker", () => {
   // Audit T03: a memory guess is marked as one; a reading from a real load is plain.
   it("marks an estimated memory need with ~ and leaves a measured one plain", () => {
     const gib = 1024 ** 3;
-    const v = { k: "gpu" as const, chip: "on GPU", word: "Runs on GPU", detail: "", amt: 0, need: 7 * gib, avail: 9 * gib, measured: false };
+    const v = { basis: "now" as const, k: "gpu" as const, label: "", mark: "", short: "Fits", chip: "on GPU", word: "Runs on GPU", detail: "", amt: 0, need: 7 * gib, avail: 9 * gib, measured: false };
     expect(caption(renderToStaticMarkup(createElement(ContextMemory, { v, cpu: false })))).toMatch(/^~7\.0\sGB$/u);
     expect(caption(renderToStaticMarkup(createElement(ContextMemory, { v: { ...v, measured: true }, cpu: false })))).toMatch(/^7\.0\sGB$/u);
   });

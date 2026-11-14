@@ -7,11 +7,12 @@
 // system memory. One reading: a row has no reading of its own; build() takes one and makes every row
 // from it, so a table that mixes two cannot be built.
 import { randomUUID } from "node:crypto";
-import type { CatalogEntry, ContextSize, FitMemory, FitRow, FitTable, ModelLoad } from "@gates-local/contracts";
+import { withNow, type CatalogEntry, type ContextSize, type FitMemory, type FitRow, type FitTable, type GpuOccupant, type ModelLoad } from "@gates-local/contracts";
 import type { GpuBaseline } from "./baseline.ts";
 import { VRAM_SAFETY_MARGIN_BYTES } from "./constants.ts";
-import { cardRamBytes, decideFit, estimateBeforeDownload, planWith, takeReadings, type FitDeps, type Readings, type TotalNeed, type TotalReport } from "./fit.ts";
+import { estimateBeforeDownload, judge, planWith, takeReadings, type FitDeps, type Readings, type TotalNeed, type TotalReport } from "./fit.ts";
 import { defaultNvidiaSmi, GPU_REUSE_MS, readGpu } from "./gpu.ts";
+import { holdersOf } from "./gpu-status.ts";
 import { FitError, type GpuSnapshot } from "./types.ts";
 
 /** The contexts the picker offers. */
@@ -24,6 +25,23 @@ type TableRow = Omit<FitRow, "needVramBytes"> & { readonly needVramBytes: TotalN
 export type TableModel = Pick<CatalogEntry, "name" | "downloadBytes" | "installed">;
 
 const rowOf = ({ measuredAt: _theTableHoldsTheReading, ...report }: TotalReport, stops: readonly string[]): TableRow => ({ ...report, stops: [...stops] });
+
+/**
+ * Who is in the way of `gapBytes` (what a load spills right now): the holders biggest first, as many
+ * as it takes to cover the gap. All of them when even that does not: the card's verdict is what says
+ * the model fits, and every one of them is part of why it does not right now.
+ */
+export function inTheWay(holders: readonly GpuOccupant[], gapBytes: number): GpuOccupant[] {
+  const named: GpuOccupant[] = [];
+  let freed = 0;
+  for (const h of holders) {
+    if (h.kind === "chat-model" || h.bytes <= 0) continue;
+    if (freed >= gapBytes) break;
+    named.push(h);
+    freed += h.bytes;
+  }
+  return named;
+}
 
 export interface FitTableDeps {
   readonly baseUrl: () => string | undefined;
@@ -68,25 +86,37 @@ function memoryOf(gpu: GpuSnapshot, margin: number, baseline: GpuBaseline | unde
  * against the card (`card`: the GPU's memory and the system memory the computer has), which every
  * list and Settings show; one offered for download is judged against the card.
  */
-async function rowsFrom(deps: FitTableDeps, baseUrl: string, r: Readings, models: readonly TableModel[]): Promise<TableRow[]> {
+async function rowsFrom(deps: FitTableDeps, baseUrl: string, r: Readings, models: readonly TableModel[], own: readonly number[] = []): Promise<TableRow[]> {
   const rows: TableRow[] = [];
   const busy = deps.busy();
   const baseline = deps.fit?.baseline;
-  const cardFree = baseline?.cardFree(r.gpu) ?? r.gpu.freeBytes;
-  // the system memory side of the card: what the computer has, never what is free right now
-  const cardRam = cardRamBytes(r.memTotalBytes);
   const margins = deps.fit?.margins ? { margins: deps.fit.margins } : {};
+  // who holds the card besides the runtime, read once for every row (this app's ComfyUI by its pid)
+  let holders: GpuOccupant[] | undefined;
+  const holdersNow = () => (holders ??= holdersOf(r.gpu.tenants, r.gpu.usedBytes, { image: (t) => own.includes(t.pid) || /comfy/i.test(t.processName) }).holders);
   const cardOf = (row: TableRow): TableRow => {
-    const { verdict, freeVramBytes, spillRamBytes, shortfallBytes } = decideFit({
+    const { verdict, freeVramBytes, spillRamBytes, shortfallBytes, words } = judge("card", {
       model: row.model,
       numCtx: row.numCtx,
       needBytes: row.needVramBytes,
-      freeVramBytes: Math.max(cardFree, row.freeVramBytes),
-      memAvailableBytes: cardRam,
-      measuredAt: r.gpu.measuredAt,
+      gpu: r.gpu,
+      memTotalBytes: r.memTotalBytes,
+      freeVramBytes: row.freeVramBytes,
       ...margins,
     });
-    return { ...row, card: { verdict, freeVramBytes, spillRamBytes, ...(shortfallBytes === undefined ? {} : { shortfallBytes }) } };
+    // The card holds it and right now it spills: name who is in the way.
+    const blocking = verdict === "fits" && row.verdict === "spills" ? inTheWay(holdersNow(), row.spillRamBytes) : [];
+    return {
+      ...row,
+      card: {
+        verdict,
+        freeVramBytes,
+        spillRamBytes,
+        ...(shortfallBytes === undefined ? {} : { shortfallBytes }),
+        ...(blocking.length > 0 ? { inTheWay: blocking } : {}),
+        ...(words === undefined ? {} : { words: withNow(words, row) }),
+      },
+    };
   };
   // With no GPU the card is the computer's own memory, judged the same way.
   const onCard = baseline !== undefined;
@@ -104,9 +134,8 @@ async function rowsFrom(deps: FitTableDeps, baseUrl: string, r: Readings, models
                 model: entry.name,
                 numCtx,
                 downloadBytes: entry.downloadBytes,
-                freeVramBytes: cardFree,
-                memAvailableBytes: cardRam,
-                measuredAt: r.gpu.measuredAt,
+                gpu: r.gpu,
+                memTotalBytes: r.memTotalBytes,
                 ...margins,
               }),
               [],
@@ -152,7 +181,7 @@ export function createFitTable(deps: FitTableDeps): FitTableSource {
       const own = comfyPid === undefined ? [] : [comfyPid];
       deps.fit?.baseline?.observe(r.gpu, own);
       const memory = memoryOf(r.gpu, margin, deps.fit?.baseline, own, r.memTotalBytes);
-      const rows = await rowsFrom(deps, baseUrl, r, await deps.models());
+      const rows = await rowsFrom(deps, baseUrl, r, await deps.models(), own);
       lastFailure = undefined;
       return { reading: { boot, seq: at, measuredAt: r.gpu.measuredAt }, memory, rows };
     } catch (e) {

@@ -5,6 +5,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { fitWords, type FitReport } from "@gates-local/contracts";
 
 const h = vi.hoisted(() => {
   const hooks = {
@@ -57,7 +58,7 @@ const entry = (name: string, label: string, recommended: boolean, verdict: Verdi
 const base = (over: object) => ({ gpu: { vendor: "nvidia", name: "RTX" }, models: [], pulls: {}, unavailable: {}, settings: {}, fitTable: undefined, numCtx: 16384, ...over });
 let seq = 0;
 /** The server's fit table holding these rows, each one newer than the last. */
-const table = (...rows: ReturnType<typeof fit>[]) => ({ reading: { boot: "b", seq: ++seq, measuredAt: 0 }, memory: { kind: "gpu", freeBytes: 16 * GIB, usableBytes: 15 * GIB }, rows: rows.map(r => ({ ...r, stops: [] })) });
+const table = (...rows: ReturnType<typeof fit>[]) => ({ reading: { boot: "b", seq: ++seq, measuredAt: 0 }, memory: { kind: "gpu", freeBytes: 16 * GIB, usableBytes: 15 * GIB }, rows: rows.map(r => ({ ...r, stops: [], words: fitWords(r as FitReport, "card", false) })) });
 
 const render = (state: object) => {
   h.state = state;

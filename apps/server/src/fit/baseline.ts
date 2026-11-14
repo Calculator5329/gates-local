@@ -20,8 +20,6 @@ export type GpuOthers = NonNullable<Extract<FitMemory, { kind: "gpu" }>["others"
 export interface GpuBaseline {
   /** Learns from one reading; `own` names this app's processes (its ComfyUI), never counted as other programs. */
   observe(gpu: GpuSnapshot, own?: readonly number[]): void;
-  /** The memory a model is judged against: the card's own, whatever other programs hold. */
-  cardFree(gpu: GpuSnapshot): number;
   /** The programs holding memory above the baseline right now, and how much; undefined when none do. */
   others(gpu: GpuSnapshot, own?: readonly number[]): GpuOthers | undefined;
 }
@@ -45,9 +43,6 @@ export function createGpuBaseline(): GpuBaseline {
       const by = new Map<string, number>();
       for (const t of gpu.tenants) if (t.role !== "ollama" && !own.includes(t.pid)) by.set(t.processName, (by.get(t.processName) ?? 0) + bytesOf(t));
       least = { bytes: held, by };
-    },
-    cardFree(gpu) {
-      return gpu.gpuCount === 0 ? gpu.freeBytes : Math.max(gpu.freeBytes, gpu.totalBytes);
     },
     others(gpu, own = []) {
       if (gpu.gpuCount === 0 || least === undefined) return undefined;

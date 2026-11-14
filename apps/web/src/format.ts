@@ -1,18 +1,13 @@
 // Words and numbers the design fixes (shell.md F16, F34, F35, F62): one
 // decimal for GB, three verdict labels, the friendly model name first.
-import type { CatalogEntry, ContextSize, FitReport, Message, ModelInfo, PullProgress, Source } from "@gates-local/contracts";
+import { NBSP, gb, k, type CatalogEntry, type ContextSize, type FitReport, type FitWords, type GpuOccupant, type Message, type ModelInfo, type PullProgress, type Source } from "@gates-local/contracts";
+
+// "6.6 GB" (GiB, a no-break space before the unit) and "16k": the units the server's fit words use too.
+export { NBSP, gb, k };
 
 export const CONTEXT_SIZES: readonly ContextSize[] = [8192, 16384, 32768, 65536];
 
 const GIB = 1024 ** 3;
-
-/** The no-break space between a number and its unit. */
-export const NBSP = String.fromCharCode(160);
-
-/** "6.6 GB": one decimal everywhere, and a no-break space so the unit never wraps away. The design's sizes are GiB (16303 MiB reads 15.9 GB). */
-export function gb(bytes: number): string {
-  return `${(bytes / GIB).toFixed(1)}${NBSP}GB`;
-}
 
 /** A whole card's size, the same on every surface: "16 GB" (16303 MiB is a 16 GB card, never "15.9 GB"). */
 export function cardGb(bytes: number): string {
@@ -53,11 +48,6 @@ export function sourceDetail(src: Source): string {
   return parts.join(" · ");
 }
 
-/** 16384 → "16k", 512 → "512". */
-export function k(numCtx: number): string {
-  return numCtx < 1024 ? String(numCtx) : `${Math.round(numCtx / 1024)}k`;
-}
-
 /** The context `tag` runs at: the size asked for, never past the most it takes. */
 export function ctxFor(numCtx: number, models: readonly { readonly name: string; readonly maxContext?: number }[] | undefined, tag: string | undefined): number {
   const max = models?.find((m) => m.name === tag)?.maxContext;
@@ -90,43 +80,58 @@ export const count = (n: number, one: string, many = `${one}s`) => `${n} ${n ===
 /** What the app says when noGpu() holds. */
 export const NO_GPU_TEXT = "No supported GPU was found (Gates Local reads NVIDIA cards). Replies are slower than on a GPU.";
 
-export type VerdictKind = "gpu" | "spill" | "no";
+export type VerdictKind = FitWords["k"];
 
-/** A fit report in the design's words: chip (short), word (full label) and detail. */
-export interface Verdict {
-  readonly k: VerdictKind;
-  readonly chip: string;
-  readonly word: string;
-  readonly detail: string;
-  /** Spill or shortfall in bytes; 0 when it runs on the GPU. */
-  readonly amt: number;
+/**
+ * A fit report as the screen prints it: the server's words for its verdict (FitReport.words, made
+ * where the server judged it, on the basis it judged), and the numbers beside them. The client
+ * makes no verdict and no fit sentence of its own.
+ */
+export interface Verdict extends FitWords {
   readonly need: number;
   readonly avail: number;
   readonly measured: boolean;
 }
 
+/** A report from a server too old to send words: the kind its verdict names, and no words. */
+const UNSAID: Record<FitReport["verdict"], VerdictKind> = { fits: "gpu", spills: "spill", refuse: "no" };
+
 export function verdictOf(r: FitReport): Verdict {
-  const base = { need: r.needVramBytes, avail: r.freeVramBytes, measured: r.source === "measured" };
-  if (r.verdict === "fits") return { ...base, k: "gpu", chip: "on GPU", word: "Runs on GPU", detail: "", amt: 0 };
-  if (r.verdict === "spills") {
-    return { ...base, k: "spill", chip: "system memory", word: "Uses system memory · slower", detail: `${gb(r.spillRamBytes)} in system memory`, amt: r.spillRamBytes };
-  }
-  const short = r.shortfallBytes ?? Math.max(0, r.needVramBytes - r.freeVramBytes);
-  return { ...base, k: "no", chip: "not enough memory", word: `Not enough memory at ${k(r.numCtx)}`, detail: `needs ${gb(short)} more`, amt: short };
+  const words = r.words ?? { basis: "now", k: UNSAID[r.verdict], label: "", word: "", chip: "", detail: "", mark: "", short: "", amt: 0 };
+  return { ...words, need: r.needVramBytes, avail: r.freeVramBytes, measured: r.source === "measured" };
+}
+
+/** A GPU holder in the app's words, as the GPU memory panel's legend names it: "Whisper", "ComfyUI", a program's name, "Other". */
+export function holderName(o: Pick<GpuOccupant, "kind" | "label">): string {
+  return o.kind === "whisper" ? "Whisper" : o.kind === "unknown" ? "Other" : o.label;
+}
+
+/** Why a model the card holds runs slower right now: the row's short form and the sentence behind it. */
+export interface SlowReason {
+  /** "Slower now · Whisper in the way", with the measured speed when there is one: "Slower now, 7.3 tok/s · Whisper in the way". */
+  readonly short: string;
+  /** "Fits this card with Whisper (2.0 GB) and others (1.4 GB) off it. 3.3 GB is in system memory now." */
+  readonly sentence: string;
 }
 
 /**
- * What the context size not chosen would do, for the line under a context
- * control (F36b): "still runs on GPU; uses 2.5 GB more".
+ * The words for a row whose card verdict fits while right now it spills (fit-table slowNow): who is
+ * in the way, the biggest program by name and the rest summed. `tps`: the measured speed as the
+ * row shows it ("7.3 tok/s"), only where the row has no speed of its own beside it. `said`: the
+ * programs a line on the same screen already names (the list's "blender is using 9.7 GB" line);
+ * one of them in the way is not named again in the short form, which then reads "Slower now".
  */
-export function otherCtxWords(cur: FitReport, other: FitReport): string {
-  const ov = verdictOf(other);
-  const cv = verdictOf(cur);
-  let says = ov.k === "gpu" ? "runs on GPU" : ov.k === "spill" ? "uses system memory, slower" : "not enough memory";
-  if (ov.k === cv.k) says = `still ${says}`;
-  const d = other.needVramBytes - cur.needVramBytes;
-  const tail = ov.k === "gpu" ? `uses ${gb(Math.abs(d))} ${d > 0 ? "more" : "less"}` : ov.detail;
-  return `${says}; ${tail}`;
+export function slowReason(slow: { readonly inTheWay: readonly GpuOccupant[]; readonly spillRamBytes: number } | undefined, tps?: string, said: readonly string[] = []): SlowReason | undefined {
+  if (slow === undefined || slow.inTheWay.length === 0) return undefined;
+  const first = slow.inTheWay.find((o) => o.kind !== "unknown");
+  const restBytes = slow.inTheWay.reduce((n, o) => (o === first ? n : n + o.bytes), 0);
+  const who = first === undefined ? "other programs" : holderName(first);
+  const off = first === undefined ? `other programs (${gb(restBytes)})` : restBytes > 0 ? `${who} (${gb(first.bytes)}) and others (${gb(restBytes)})` : `${who} (${gb(first.bytes)})`;
+  const slower = tps === undefined ? "Slower now" : `Slower now, ${tps}`;
+  return {
+    short: first !== undefined && said.includes(first.label) ? slower : `${slower} · ${who} in the way`,
+    sentence: `Fits this card with ${off} off it. ${gb(slow.spillRamBytes)} is in system memory now.`,
+  };
 }
 
 /** Tag words that read after the size ("Gemma 4 26B abliterated"); others read before it ("Qwen 3.5 VL 9B"). */

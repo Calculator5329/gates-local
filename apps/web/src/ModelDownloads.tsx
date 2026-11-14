@@ -5,7 +5,7 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { CatalogEntry, FitReport, ModelEstimate, PullProgress } from "@gates-local/contracts";
 import { suggestedOf } from "./picker-models.ts";
-import { type Verdict, etaText, gb, noGpu, verdictOf } from "./format.ts";
+import { etaText, gb, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { MakerMark } from "./MakerMark.tsx";
 import { MemoryMark } from "./MemoryMark.tsx";
@@ -160,16 +160,10 @@ export function DlButton({ size, label, p, installed = false, disabled = false, 
   );
 }
 
-/** The verdict in words, the memory mark's name: what its colour says. */
-function markWords(v: Verdict, cpu: boolean): string {
-  return v.k === "no" ? "Too big for this computer" : v.k === "gpu" ? "Runs on the GPU" : cpu ? "Runs in system memory, slower" : "Partly in system memory, slower";
-}
-
 function DlRow({ c, report, actions }: { c: CatalogEntry; report: FitReport | undefined; actions: DownloadActions }) {
   const p = useStore(s => Object.values(s.pulls).findLast(progress => downloadKey(progress.name) === downloadKey(c.name) && awaitingInstall(progress)));
   const installed = useStore((s) => c.installed || (s.models ?? []).some((m) => downloadKey(m.name) === downloadKey(c.name)));
   const canCancel = useStore(canCancelPull);
-  const cpu = useStore((s) => noGpu(s.gpu));
   const v = report ? verdictOf(report) : undefined;
   const dling = p !== undefined && awaitingInstall(p) && !installed;
   const err = installed ? null : actions.error(c.name);
@@ -189,7 +183,7 @@ function DlRow({ c, report, actions }: { c: CatalogEntry; report: FitReport | un
           )}
         </span>
       </div>
-      {report && v ? <MemoryMark report={report} words={markWords(v, cpu)} /> :<span className="mm" aria-hidden="true" />}
+      {report && v ? <MemoryMark report={report} words={v.mark} /> :<span className="mm" aria-hidden="true" />}
       <DlButton
         size={gb(c.downloadBytes)}
         label={name}
@@ -204,8 +198,6 @@ function DlRow({ c, report, actions }: { c: CatalogEntry; report: FitReport | un
 
 /** A row that cannot run here: what it needs, and no button (row 18). */
 function BigRow({ c, report }: { c: CatalogEntry; report: FitReport }) {
-  const v = verdictOf(report);
-  const cpu = useStore((s) => noGpu(s.gpu));
   const name = labelOf(c);
   return (
     <div className="dlrow dl-big" data-cat={c.name} data-verdict={report.verdict}>
@@ -214,7 +206,7 @@ function BigRow({ c, report }: { c: CatalogEntry; report: FitReport }) {
         <b>{name}</b>
         <span className="d">{c.purpose}</span>
       </div>
-      <MemoryMark report={report} words={markWords(v, cpu)} />
+      <MemoryMark report={report} words={verdictOf(report).mark} />
     </div>
   );
 }
@@ -267,7 +259,7 @@ export function CustomPull({ actions, numCtx }: { actions: DownloadActions; numC
   const said = tag === "" || answer === undefined ? undefined
     : answer.found === "no" ? "Not in the Ollama library. Check the name."
     : answer.found === "unknown" ? "Couldn't read this model's size, so it is not checked."
-    : big ? `Too big for this computer · needs ${gb(v.need)}`
+    : big ? `${v.mark} · needs ${gb(v.need)}`
     : v?.k === "spill" && !cpu ? v.word
     : undefined;
   return (

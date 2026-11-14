@@ -14,6 +14,9 @@
 //   measuring  the caller takes a new reading and decides the fit from it alone.
 //   loading    the caller loads the thing; `settled` records it as the one in memory.
 //
+// It holds the one record of what is loaded (LoadedRecord): the chat models the app's Ollama lists
+// and which of them this app loaded. The loader writes it; the GPU status reads it.
+//
 // What it never touches: whisper and every other program on the GPU (they are only measured),
 // and a running reply's model. An Ollama or ComfyUI the app did not start is asked, never
 // stopped, restarted or reconfigured (owner ruling 2026-11-13: an unload request is not a stop).
@@ -69,9 +72,66 @@ export interface MemoryOwnerDeps {
   readonly log?: (line: string) => void;
 }
 
+/**
+ * The one record of the chat models in memory: what the app's Ollama last listed, and which of
+ * them this app loaded, at the num_ctx it loaded them at. The memory owner holds it; the loader
+ * writes it from its /api/ps readings and loads, and the GPU status reads it.
+ */
+export interface LoadedRecord {
+  /** The chat models the last /api/ps of the current runtime listed, by tag. */
+  listed(): readonly string[];
+  /** The listed models this app loaded, by tag. */
+  ours(): readonly string[];
+  /** The num_ctx this app loaded `model` at; undefined when the app did not load it. */
+  oursAt(model: string): number | undefined;
+  /** This app loaded `model` at `numCtx`: it is listed and the app's. */
+  loaded(model: string, numCtx: number): void;
+  /** `model` left (an unload): it is no longer listed; returns the num_ctx when it was the app's. */
+  left(model: string): number | undefined;
+  /** A new /api/ps of the current runtime; returns the app's models it no longer lists, with their num_ctx. */
+  observe(listed: readonly Pick<LoadedModel, "name">[]): readonly (readonly [string, number])[];
+  /** A runtime switch: nothing is known about what the new runtime holds. */
+  clear(): void;
+}
+
+export function createLoadedRecord(): LoadedRecord {
+  let listed = new Set<string>();
+  /** Tag -> the num_ctx the app loaded it at. */
+  const ours = new Map<string, number>();
+  return {
+    listed: () => [...listed],
+    ours: () => [...ours.keys()],
+    oursAt: (model) => ours.get(canonicalTag(model)),
+    loaded(model, numCtx) {
+      const tag = canonicalTag(model);
+      listed.add(tag);
+      ours.set(tag, numCtx);
+    },
+    left(model) {
+      const tag = canonicalTag(model);
+      listed.delete(tag);
+      const numCtx = ours.get(tag);
+      ours.delete(tag);
+      return numCtx;
+    },
+    observe(models) {
+      listed = new Set(models.map((m) => canonicalTag(m.name)));
+      const gone = [...ours].filter(([tag]) => !listed.has(tag));
+      for (const [tag] of gone) ours.delete(tag);
+      return gone;
+    },
+    clear() {
+      listed = new Set();
+      ours.clear();
+    },
+  };
+}
+
 export interface MemoryOwner {
   /** The load gate: a handoff, its reading, its fit and its load run inside it. */
   readonly gate: LoadGate;
+  /** The one record of the chat models in memory and which of them are the app's. */
+  readonly loaded: LoadedRecord;
   /**
    * Inside the gate: everything but `want` is asked to leave, and the wait for it ends.
    * `onLeave(true)` is told when something was asked to leave, `onLeave(false)` once the wait ended.
@@ -234,6 +294,7 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
 
   return {
     gate,
+    loaded: createLoadedRecord(),
     async handoff(want, signal, options = {}) {
       handoff = { to: thing(want), stage: "leaving" };
       changed();

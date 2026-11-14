@@ -3,15 +3,18 @@
 // from the server's fit table plus gpu.status when the server has it.
 import type { ReactNode } from "react";
 import type { FitReport, GpuOccupant, GpuStatus } from "@gates-local/contracts";
-import { NO_GPU_TEXT, type Verdict, cardGb, decodeSpeed, describeModel, gb, k, noGpu, verdictOf } from "./format.ts";
+import { NO_GPU_TEXT, type SlowReason, type Verdict, cardGb, decodeSpeed, describeModel, gb, holderName, k, noGpu, slowReason, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { cardFit, fitFor } from "./fit-table.ts";
+import { tpsText } from "./model-speed.tsx";
+import { measureOf } from "./session/measures.ts";
 import { NA, type State, chatReady, setState, useStore } from "./store.ts";
 import { Status } from "./settings-controls.tsx";
 import { Row } from "./settings-ui.tsx";
 import { FitSkel } from "./ui.tsx";
 export { openFit } from "./fit-actions.ts";
-import { FIT_DOT, fitLabel } from "./models-rules.ts";
+import { FIT_DOT } from "./models-rules.ts";
+import { SlowLine } from "./MemoryMark.tsx";
 
 const gpuHead = (gpu: GpuStatus | undefined): string =>
   gpu === undefined ? "" : gpu.vendor === "none" ? gpu.detail ? "NVIDIA GPU unavailable" : "No supported GPU" : gpu.totalBytes ? `${shortGpu(gpu.name)} · ${cardGb(gpu.totalBytes)}` : shortGpu(gpu.name);
@@ -27,15 +30,16 @@ export function shortGpu(name: string | undefined): string {
 
 /** A legend row's name and its small grey kind; the row has no tooltip (docs/design.md). */
 function occName(o: GpuOccupant): { nm: string; small: string } {
+  const nm = holderName(o);
   switch (o.kind) {
     case "whisper":
-      return { nm: "Whisper", small: "speech-to-text" };
+      return { nm, small: "speech-to-text" };
     case "image":
-      return { nm: o.label, small: "image generation" };
+      return { nm, small: "image generation" };
     case "other-app":
-      return { nm: o.label, small: "other app" };
+      return { nm, small: "other app" };
     case "unknown":
-      return { nm: "Other", small: "" };
+      return { nm, small: "" };
     default:
       return { nm: o.label, small: /^other$/i.test(o.label) ? "" : "other" };
   }
@@ -158,7 +162,7 @@ function Speed({ model, name, numCtx, loaded }: { model: string; name: string; n
 
 // The verdict is against the card's own memory (fit-table cardFit); what other programs hold right
 // now is the bar below, never a reason the model won't fit.
-function Numbers({ r, v, name, gpu, loaded }: { r: FitReport; v: Verdict; name: string; gpu: GpuStatus | undefined; loaded: boolean }) {
+function Numbers({ r, v, name, gpu, loaded, slow }: { r: FitReport; v: Verdict; name: string; gpu: GpuStatus | undefined; loaded: boolean; slow?: SlowReason | undefined }) {
   const ctx = k(r.numCtx);
   if (v.k === "no") {
     const sys = gpu ? ` plus ${gb(gpu.systemMemoryAvailableBytes)} of system memory` : "";
@@ -173,7 +177,7 @@ function Numbers({ r, v, name, gpu, loaded }: { r: FitReport; v: Verdict; name: 
       {/* the fit judges a model against the whole card (freeVramBytes is its size), so the card is named as it is everywhere: 16 GB */}
       Estimated {gb(r.needVramBytes)}{noGpu(gpu) ? `; ${gpu?.detail ? gpuHead(gpu) : "no supported GPU"}` : ` of a ${cardGb(r.freeVramBytes)} GPU`}.
       <br />
-      {v.k === "spill" ? `${gb(v.amt)} in system memory; slower replies.` : "Runs entirely on the GPU."}
+      {v.k === "spill" ? `${gb(v.amt)} in system memory; slower replies.` : slow !== undefined ? <span data-testid="models.fit-panel.slow-now">{slow.sentence}</span> : "Runs entirely on the GPU."}
       <br />
       {r.source === "measured" ? (loaded ? `Measured ${gb(r.needVramBytes)} on last load.` : "Measured at this context.") : `Not measured at ${ctx} yet.`}
     </div>
@@ -201,7 +205,7 @@ function Breakdown({ model, name, numCtx, gpuRaw, report, loaded }: { model: str
 }
 
 /** The model's status, in the same words and the same dot as its row in Models, at the size it runs at. */
-function FitLine({ r, size, cpu }: { r: FitReport; size: number; cpu: boolean }) {
+function FitLine({ r, size }: { r: FitReport; size: number }) {
   const v = verdictOf(r);
   const at = `at ${k(size)}`;
   return (
@@ -210,7 +214,7 @@ function FitLine({ r, size, cpu }: { r: FitReport; size: number; cpu: boolean })
         <Status dot={FIT_DOT.refuse}>{`Needs ${gb(v.amt)} more ${at}`}</Status>
       ) : (
         <>
-          <Status dot={FIT_DOT[r.verdict]}>{fitLabel(r.verdict, v.measured, cpu)}</Status>
+          <Status dot={FIT_DOT[r.verdict]}>{v.label}</Status>
           <span style={{ color: "var(--muted-foreground)" }}>{at}</span>
         </>
       )}
@@ -245,20 +249,25 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
   // Details needs the GPU reading too, so the row waits for it rather than growing when it lands.
   // Judged against the card's own memory (cardFit), whatever other programs hold right now.
   const fit = gpuRaw === undefined ? undefined : cardFit(fitFor(table, model, ctx));
+  // after a Measure, the measured speed rides beside the word slower
+  const tps = useStore((s) => tpsText(measureOf(s, model)?.tokensPerSecond));
+  const slow = slowReason(fit?.slowNow, tps);
   return (
     <>
       {gpuNotice === undefined ? null : <div className="fp-n fp-note">{gpuNotice}</div>}
       <Row label={title} {...(gpuNotice === undefined && head !== "" ? { desc: head } : {})}>
-        {fit === undefined ? gpu?.vendor === "unreadable" ? null : table && gpuRaw !== undefined ? <span className="fp-n">{`No ${memory} reading for ${name}.`}</span> : <span className="fp-n" aria-busy="true"><FitSkel w="120px" /></span> : <FitLine r={fit} size={ctx} cpu={cpu} />}
+        {fit === undefined ? gpu?.vendor === "unreadable" ? null : table && gpuRaw !== undefined ? <span className="fp-n">{`No ${memory} reading for ${name}.`}</span> : <span className="fp-n" aria-busy="true"><FitSkel w="120px" /></span> : <FitLine r={fit} size={ctx} />}
         {action}
       </Row>
+      {/* the card holds it, right now it is slower: the short form under the status, the sentence under Details */}
+      {cpu ? null : <SlowLine fit={fit} tps={tps} tip={false} testId="models.fit-panel.slow-line" />}
       {fit === undefined ? null : (
         <details className="upd-more fp-more">
           <summary data-testid="models.fit-panel.details">
             <Icon id="right" cls="s14" />
             Details
           </summary>
-          <Numbers r={fit} v={verdictOf(fit)} name={name} gpu={gpu} loaded={loaded} />
+          <Numbers r={fit} v={verdictOf(fit)} name={name} gpu={gpu} loaded={loaded} slow={slow} />
           <Breakdown model={model} name={name} numCtx={ctx} gpuRaw={gpuRaw} report={fit} loaded={loaded} />
         </details>
       )}

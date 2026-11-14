@@ -2,7 +2,7 @@
 // The text pick is the app's own Recommended rule (the catalog for a machine
 // with nothing installed yet), imported so the two cannot disagree. Reads only.
 import type { CatalogEntry } from "@gates-local/contracts";
-import { cardRamBytes, estimateBeforeDownload } from "../apps/server/src/fit/fit.ts";
+import { estimateBeforeDownload } from "../apps/server/src/fit/fit.ts";
 import { defaultNvidiaSmi, readGpu } from "../apps/server/src/fit/gpu.ts";
 import type { NvidiaSmiRunner } from "../apps/server/src/fit/types.ts";
 import { cardBytes, NO_GPU, presetFiles, PRESETS, tiersFor } from "../apps/server/src/image/presets.ts";
@@ -55,7 +55,13 @@ function catalog(machine: MachineReadings, numCtx: number): CatalogEntry[] {
     downloadBytes: c.downloadBytes,
     installed: false,
     recommended: false,
-    fit: estimateBeforeDownload({ model: c.name, numCtx, downloadBytes: c.downloadBytes, freeVramBytes: gpuTotalBytes, memAvailableBytes: cardRamBytes(machine.ramTotalBytes), measuredAt: machine.measuredAt }),
+    fit: estimateBeforeDownload({
+      model: c.name,
+      numCtx,
+      downloadBytes: c.downloadBytes,
+      gpu: { gpuCount: gpuTotalBytes > 0 ? 1 : 0, freeBytes: gpuTotalBytes, totalBytes: gpuTotalBytes, measuredAt: machine.measuredAt },
+      memTotalBytes: machine.ramTotalBytes,
+    }),
   }));
   const tier = tierFor({ gpuCount: machine.gpu.kind === "nvidia" ? 1 : 0, gpuTotalBytes, systemTotalBytes: machine.ramTotalBytes });
   return markRecommended(entries, numCtx, tier);

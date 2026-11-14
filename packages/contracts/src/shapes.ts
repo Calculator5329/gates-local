@@ -429,6 +429,27 @@ export const RuntimeStatus = S.Struct({
 });
 export type RuntimeStatus = typeof RuntimeStatus.Type;
 
+/**
+ * A verdict in the app's words, made by the server where it judged (fit-words.ts fitWords) and
+ * printed by clients as sent. basis: what it was judged against, the card's own memory ("card",
+ * every list) or what is free right now ("now", a send). label: the status line ("Should run
+ * well"); word, chip and detail: the composer and a card ("Uses system memory · slower", "system
+ * memory", "2.7 GB in system memory"); mark: the memory mark's name; short: the picker's word;
+ * amt: the spill or shortfall in bytes, 0 on the GPU.
+ */
+export const FitWords = S.Struct({
+  basis: S.Literals(["card", "now"]),
+  k: S.Literals(["gpu", "spill", "no"]),
+  label: S.String,
+  word: S.String,
+  chip: S.String,
+  detail: S.String,
+  mark: S.String,
+  short: S.String,
+  amt: S.Number,
+});
+export type FitWords = typeof FitWords.Type;
+
 export const FitReport = S.Struct({
   model: S.String,
   numCtx: PositiveInt,
@@ -447,8 +468,19 @@ export const FitReport = S.Struct({
    */
   memAvailableBytes: S.optional(Count),
   /** Set when the refusal is the model's own context ceiling, not memory: the most it supports. */
+  /** The verdict in words, on the basis it was judged on. Absent from an older server: a client then shows no verdict. */
+  words: S.optional(FitWords),
 });
 export type FitReport = typeof FitReport.Type;
+
+/** What holds GPU memory now. `protected` holders are never stopped by the app (whisper, other apps). */
+export const GpuOccupant = S.Struct({
+  label: S.String,
+  bytes: Count,
+  kind: S.Literals(["chat-model", "image", "whisper", "other-app", "unknown"]),
+  protected: S.Boolean,
+});
+export type GpuOccupant = typeof GpuOccupant.Type;
 
 const { measuredAt: _rowsShareTheTableReading, ...fitRowFields } = FitReport.fields;
 /**
@@ -459,6 +491,10 @@ const { measuredAt: _rowsShareTheTableReading, ...fitRowFields } = FitReport.fie
  * right now (the owner's ruling, 2026-11-13); the row itself is planned right now, as a send loads
  * it. Every list and Settings show the card; only the composer and a send read right now. A row
  * offered for download is judged against the card already and has none.
+ * card.inTheWay: set when the card fits the model and right now it spills: who holds the card's
+ * memory, biggest first, only as many as it takes to cover the spill (all of them when even that
+ * does not). Never the model runtime's own runners: models that leave for the load are already
+ * counted free, and a busy chat is `stops`.
  */
 export const FitRow = S.Struct({
   ...fitRowFields,
@@ -469,6 +505,8 @@ export const FitRow = S.Struct({
       freeVramBytes: fitRowFields.freeVramBytes,
       spillRamBytes: fitRowFields.spillRamBytes,
       shortfallBytes: fitRowFields.shortfallBytes,
+      inTheWay: S.optional(S.Array(GpuOccupant)),
+      words: fitRowFields.words,
     }),
   ),
 });
@@ -518,8 +556,8 @@ const OfferVerdict = S.Literals(["fits", "spills"]);
  * system memory apart (margins already taken off), for the one line said when nothing else runs.
  */
 export const FitOffer = S.Struct({
-  context: S.optional(S.Struct({ numCtx: PositiveInt, verdict: OfferVerdict })),
-  model: S.optional(S.Struct({ model: S.String, numCtx: PositiveInt, verdict: OfferVerdict })),
+  context: S.optional(S.Struct({ numCtx: PositiveInt, verdict: OfferVerdict, words: S.optional(FitWords) })),
+  model: S.optional(S.Struct({ model: S.String, numCtx: PositiveInt, verdict: OfferVerdict, words: S.optional(FitWords) })),
   short: S.Struct({ needBytes: Count, gpuBytes: Count, ramBytes: Count, shortBytes: Count }),
 });
 export type FitOffer = typeof FitOffer.Type;
@@ -701,15 +739,6 @@ export const SettingsPatch = S.Struct({
   modelSettings: S.optional(S.Null),
 });
 export type SettingsPatch = typeof SettingsPatch.Type;
-
-/** What holds GPU memory now. `protected` holders are never stopped by the app (whisper, other apps). */
-export const GpuOccupant = S.Struct({
-  label: S.String,
-  bytes: Count,
-  kind: S.Literals(["chat-model", "image", "whisper", "other-app", "unknown"]),
-  protected: S.Boolean,
-});
-export type GpuOccupant = typeof GpuOccupant.Type;
 
 export const GpuStatus = S.Struct({
   /** "none" is a machine with no NVIDIA GPU (models run on the CPU); "unreadable" is nvidia-smi failing. */

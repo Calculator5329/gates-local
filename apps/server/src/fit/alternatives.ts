@@ -10,6 +10,8 @@ import { TABLE_CONTEXTS } from "./table.ts";
 import type { FitReport } from "./types.ts";
 
 const runs = (r: FitReport): r is FitReport & { verdict: "fits" | "spills" } => r.verdict !== "refuse";
+/** An offer carries the words its plan was judged with (fit.ts judge), for the note to print. */
+const said = (r: FitReport) => (r.words === undefined ? {} : { words: r.words });
 
 /**
  * Pure: the offer from reports already planned on one reading. `contexts`: the refused model at
@@ -30,8 +32,8 @@ export function chooseOffer(input: { refused: FitReport; contexts: readonly FitR
   const shortBytes = refused.shortfallBytes ?? Math.max(0, refused.needVramBytes - gpuBytes);
   const ramBytes = Math.max(0, refused.needVramBytes - gpuBytes - shortBytes);
   return {
-    ...(context && runs(context) ? { context: { numCtx: context.numCtx, verdict: context.verdict } } : {}),
-    ...(model && runs(model) ? { model: { model: model.model, numCtx: model.numCtx, verdict: model.verdict } } : {}),
+    ...(context && runs(context) ? { context: { numCtx: context.numCtx, verdict: context.verdict, ...said(context) } } : {}),
+    ...(model && runs(model) ? { model: { model: model.model, numCtx: model.numCtx, verdict: model.verdict, ...said(model) } } : {}),
     short: { needBytes: refused.needVramBytes, gpuBytes, ramBytes, shortBytes },
   };
 }

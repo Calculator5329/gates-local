@@ -1,6 +1,7 @@
 // Plain shapes for the fit check. FitReport mirrors the shared shape that
 // packages/contracts carries as a Schema; `message` is an addition (the
 // human sentence that names the numbers).
+import type { FitWords } from "@gates-local/contracts";
 
 export type FitVerdict = "fits" | "spills" | "refuse";
 
@@ -17,6 +18,8 @@ export interface FitReport {
   message?: string;
   /** On a refusal: the system memory available in the reading it was decided from. */
   memAvailableBytes?: number;
+  /** The verdict in words, on the basis it was judged on (fit.ts judge). */
+  words?: FitWords;
 }
 
 /** Who holds GPU memory. Whisper is the permanent tenant the fit plans around. */

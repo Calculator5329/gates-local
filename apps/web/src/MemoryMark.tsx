@@ -9,8 +9,11 @@
 // rows' .pk-cost) and the image picker (ImagePicker.tsx, the size rows' bars) are where the same part
 // goes next.
 import type { FitReport } from "@gates-local/contracts";
-import { NBSP, cardGb } from "./format.ts";
+import { NBSP, cardGb, slowReason } from "./format.ts";
+import type { TableFit } from "./fit-table.ts";
+import { Icon } from "./icons.tsx";
 import { type State, useStore } from "./store.ts";
+import { esc } from "./ui.tsx";
 
 const GIB = 1024 ** 3;
 
@@ -58,5 +61,28 @@ export function MemoryMark({ report, words }: { report: FitReport; words: string
       <span className="mm-bar" aria-hidden="true"><i style={{ width: `${(fill * 100).toFixed(1)}%` }} /></span>
       <span className="mm-n" aria-hidden="true">{text}</span>
     </span>
+  );
+}
+
+/**
+ * Why a model the card holds is slower right now, a quiet line of its own under the row's name: the
+ * short form on screen ("Slower · Whisper in the way"), the sentence with the sizes in its tip and,
+ * for a screen reader, after the short form. Nothing when the model runs as the card says.
+ * `tps`: the measured speed, only where the row shows no speed of its own. `tip` false where the
+ * sentence is already one step away (the fit panel's Details), so it is said once. `listed`: the
+ * list's own line under it names the programs above the card's baseline (Models), so a program it
+ * names is not named again in the row: other programs are said once, under the list.
+ */
+export function SlowLine({ fit, tps, tip = true, listed = false, testId = "models.fit.slow-now" }: { fit: TableFit | undefined; tps?: string | undefined; tip?: boolean; listed?: boolean; testId?: string }) {
+  const said = useStore((s) => (listed && s.fitTable?.memory.kind === "gpu" ? s.fitTable.memory.others?.programs : undefined));
+  const why = slowReason(fit?.slowNow, tps, said);
+  if (why === undefined) return null;
+  const saidBelow = !why.short.endsWith(" in the way");
+  return (
+    <div className="mm-why" data-testid={testId} {...(tip ? { "data-tip": esc(why.sentence) } : {})}>
+      <Icon id="gauge" cls="s14" />
+      <span>{why.short}</span>
+      {tip && !saidBelow ?<span className="vh">. {why.sentence}</span> : null}
+    </div>
   );
 }

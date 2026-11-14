@@ -4,7 +4,7 @@
 // "estimate", and the message says so). Recommended is the computer's tier
 // (tiers.ts): picks by the GPU's memory, or by system memory with no GPU.
 import type { CatalogEntry, FitReport, ModelEstimate } from "@gates-local/contracts";
-import { cardRamBytes, decideFit, estimateBeforeDownload, surveyFit, type FitDeps, type FitSurvey } from "../fit/fit.ts";
+import { estimateBeforeDownload, judge, surveyFit, type FitDeps, type FitSurvey } from "../fit/fit.ts";
 import { defaultMeminfo, defaultNvidiaSmi, GPU_REUSE_MS, readGpu, readMemory } from "../fit/gpu.ts";
 import type { RegistryLookup } from "./registry-size.ts";
 import type { SettingsReader } from "../settings/store.ts";
@@ -31,27 +31,11 @@ const withFit = (entry: Omit<CatalogEntry, "fit" | "recommended">, fit: FitRepor
 
 /** A download is judged against the card and the system memory the computer has, as the fit table's rows are. */
 const preDownload = (c: Pick<CatalogEntry, "name" | "downloadBytes">, numCtx: number, survey: FitSurvey, fit: CatalogDeps["fit"]): FitReport =>
-  estimateBeforeDownload({
-    model: c.name,
-    numCtx,
-    downloadBytes: c.downloadBytes,
-    freeVramBytes: fit?.baseline?.cardFree(survey.gpu) ?? survey.gpu.freeBytes,
-    memAvailableBytes: cardRamBytes(survey.memTotalBytes),
-    measuredAt: survey.gpu.measuredAt,
-    ...(fit?.margins ? { margins: fit.margins } : {}),
-  });
+  estimateBeforeDownload({ model: c.name, numCtx, downloadBytes: c.downloadBytes, gpu: survey.gpu, memTotalBytes: survey.memTotalBytes, ...(fit?.margins ? { margins: fit.margins } : {}) });
 
 /** An installed model's right-now report judged against the card instead, as the fit table's `card` verdict is. */
 const onCard = (r: FitReport, survey: FitSurvey, fit: CatalogDeps["fit"]): FitReport =>
-  decideFit({
-    model: r.model,
-    numCtx: r.numCtx,
-    needBytes: r.needVramBytes,
-    freeVramBytes: Math.max(fit?.baseline?.cardFree(survey.gpu) ?? survey.gpu.freeBytes, r.freeVramBytes),
-    memAvailableBytes: cardRamBytes(survey.memTotalBytes),
-    measuredAt: r.measuredAt,
-    ...(fit?.margins ? { margins: fit.margins } : {}),
-  });
+  judge("card", { model: r.model, numCtx: r.numCtx, needBytes: r.needVramBytes, gpu: survey.gpu, memTotalBytes: survey.memTotalBytes, freeVramBytes: r.freeVramBytes, ...(fit?.margins ? { margins: fit.margins } : {}) });
 
 /** A model the catalog lists, before its fit: the installed chat models, then the ones offered for download. */
 export type CatalogModel = Omit<CatalogEntry, "fit" | "recommended">;
@@ -124,15 +108,7 @@ export async function estimateTyped(deps: EstimateDeps, name: string, numCtx: nu
       readGpu(fit?.runNvidiaSmi ?? defaultNvidiaSmi, fit?.now ?? Date.now, signal, GPU_REUSE_MS),
       readMemory(fit?.readMeminfo ?? defaultMeminfo, signal),
     ]);
-    const report = estimateBeforeDownload({
-      model: tag,
-      numCtx,
-      downloadBytes: found.bytes,
-      freeVramBytes: fit?.baseline?.cardFree(gpu) ?? Math.max(gpu.freeBytes, gpu.totalBytes),
-      memAvailableBytes: cardRamBytes(memory.totalBytes),
-      measuredAt: gpu.measuredAt,
-      ...(fit?.margins ? { margins: fit.margins } : {}),
-    });
+    const report = estimateBeforeDownload({ model: tag, numCtx, downloadBytes: found.bytes, gpu, memTotalBytes: memory.totalBytes, ...(fit?.margins ? { margins: fit.margins } : {}) });
     return { name: tag, found: "yes", downloadBytes: found.bytes, fit: report };
   } catch {
     // no reading of the GPU or memory: the size alone

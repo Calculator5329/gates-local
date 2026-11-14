@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
-import type { FitRow, FitTable } from "@gates-local/contracts";
+import { fitWords, type FitRow, type FitTable } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import type { State } from "../src/store.ts";
 import { installBrowser, tick, until } from "./harness.ts";
@@ -15,7 +15,11 @@ import { getState, setState } from "../src/store.ts";
 const sample = methodSamples["fit.table"].result;
 const row = sample.rows[0]!;
 const MODEL = row.model;
-const at = (numCtx: number, over: Partial<FitRow> = {}): FitRow => ({ ...row, numCtx, verdict: "fits", ...over });
+/** A row as the server sends it, with its words. */
+const at = (numCtx: number, over: Partial<FitRow> = {}): FitRow => {
+  const r: FitRow = { ...row, numCtx, verdict: "fits", ...over };
+  return { ...r, words: fitWords(r, "card", false) };
+};
 const tableOf = (rows: FitRow[], seq = 1): FitTable => ({ ...sample, reading: { ...sample.reading, seq }, rows });
 let GpuMemory: typeof import("../src/FitPanel.tsx")["GpuMemory"];
 const html = () => renderToStaticMarkup(createElement(GpuMemory));

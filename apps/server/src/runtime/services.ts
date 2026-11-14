@@ -147,8 +147,6 @@ export async function createModelServices(options: ModelServicesOptions): Promis
   });
 
   const whisperPid = cached(() => systemdMainPid("whisper-server.service"), WHISPER_PID_TTL_MS);
-  /** The models the GPU status last read in the app's Ollama: all but a running reply's leave for the next thing. */
-  let resident: readonly string[] = [];
   const gpu = createGpuWatcher({
     read: () =>
       readGpuStatus({
@@ -158,17 +156,14 @@ export async function createModelServices(options: ModelServicesOptions): Promis
         ...options.imagePid ? { imagePid: options.imagePid } : {},
         modelLabel,
         // Unprotected is what the next thing in memory asks to leave (gpu/memory.ts): every resident
-        // model no running reply uses, whoever loaded it. From the same /api/ps, no second read.
+        // model no running reply uses, whoever loaded it. From the same /api/ps, no second read: the
+        // loader's reading below writes the memory owner's record, and this asks the record.
         mayUnload: () => {
           const replying = new Set(loader?.replying() ?? []);
-          return resident.filter((tag) => !replying.has(tag));
+          return owner.loaded.listed().filter((tag) => !replying.has(tag));
         },
         // The loader reads /api/ps for the runtime it owns now and prunes against it.
-        residentModels: async () => {
-          const models = ((await loader?.residentModels()) ?? []).map((m) => ({ name: canonicalTag(m.name), sizeVramBytes: m.sizeVramBytes }));
-          resident = models.map((m) => m.name);
-          return models;
-        },
+        residentModels: async () => ((await loader?.residentModels()) ?? []).map((m) => ({ name: canonicalTag(m.name), sizeVramBytes: m.sizeVramBytes })),
       }),
     push: (status) => options.push("gpu.changed", status),
     log,

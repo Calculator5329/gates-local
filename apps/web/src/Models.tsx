@@ -8,7 +8,7 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { ModelInfo, PullProgress } from "@gates-local/contracts";
 import { copyText } from "./copy.ts";
-import { noGpu } from "./format.ts";
+import { noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { type TableFit, rowOf } from "./fit-table.ts";
 import { DownloadTab, DownloadingRow, DownloadingRows, othersLine, othersOf, usePendingDownloads } from "./ModelDownloads.tsx";
@@ -20,7 +20,6 @@ import {
   canBeDefault,
   filterShows,
   noteSettled,
-  fitLabel,
   nameOf,
   nextDefault,
   shortTag,
@@ -30,7 +29,7 @@ import {
 } from "./models-rules.ts";
 import { awaitingInstall, canChat, notForChat, pickedModel } from "./pick.ts";
 import { MakerMark } from "./MakerMark.tsx";
-import { MemoryMark } from "./MemoryMark.tsx";
+import { MemoryMark, SlowLine } from "./MemoryMark.tsx";
 import { ModelSpeed } from "./model-speed.tsx";
 import { MeasureCells, MeasureFail, MeasureMeta, canMeasure, useMeasureItem } from "./ModelMeasure.tsx";
 import { measureOf } from "./session/measures.ts";
@@ -48,13 +47,11 @@ const cannotSaveDefault = (s: State) => s.settings === NA || s.unavailable["sett
 
 /** The memory mark against the card (row 28); the verdict's words are its name and its tip, the number says the rest. */
 function Fit({ report }: { report: TableFit | undefined }) {
-  const cpu = useStore((s) => noGpu(s.gpu));
   const tabled = useStore((s) => s.fitTable !== undefined);
   if (report === undefined) return tabled ? <span className="mp-fit none">–</span> : <span className="mp-fit none" aria-busy="true"><FitSkel w="120px" /></span>;
-  const words = fitLabel(report.verdict, report.source === "measured", cpu);
   return (
     <span className="mp-fit">
-      <MemoryMark report={report} words={words} />
+      <MemoryMark report={report} words={verdictOf(report).label} />
     </span>
   );
 }
@@ -285,6 +282,8 @@ function ModelRowView({ r, def, saved, onRemove }: { r: InstalledRow; def: strin
         </div>
         <MeasureMeta name={r.name} label={r.label.text} />
         <MeasureFail name={r.name} />
+        {/* the card holds it and right now it is slower: who is in the way (its speed is the row's own Speed) */}
+        {r.chat ? <SlowLine fit={r.report} listed /> : null}
       </div>
       <span className="mp-sz">{sizeText(r.info.sizeBytes)}</span>
       {/* A fit check is long by nature: its words may change, its box does not (docs/design.md). */}
@@ -510,6 +509,7 @@ function NoModels() {
   // the suggestion's verdict is the table's row for it, never the catalog's own estimate
   const want = cpu ? "spills" : "fits";
   const pick = useStore(s => catalogOf(s)?.find((c) => c.recommended && rowOf(s, c.name)?.verdict === want));
+  const pickRow = useStore(s => (pick === undefined ? undefined : rowOf(s, pick.name)));
   if (downloading) {
     return (
       <div className="mp-first">
@@ -525,10 +525,10 @@ function NoModels() {
       <h2>No models yet</h2>
       <p>
         {pullNA ? `Downloading: ${COMPUTER_ONLY.toLowerCase()}` : "Download one to start chatting."}
-        {pick && !pullNA ? (
+        {pick && pickRow && !pullNA ? (
           <>
             {" "}
-            We suggest <b>{pick.label}</b>: {about(pick.downloadBytes)}, {fitLabel(want, false, cpu).toLowerCase()} on this computer.
+            We suggest <b>{pick.label}</b>: {about(pick.downloadBytes)}, {verdictOf(pickRow).label.toLowerCase()} on this computer.
           </>
         ) : null}
       </p>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { FitReport, Message } from "@gates-local/contracts";
-import { CONTEXT_SIZES, cardGb, ctxFor, decodeSpeed, fileSize, gb, k, otherCtxWords, replyMeta, shortAge, sourceDetail, verdictOf } from "./format.ts";
+import { fitWords, type FitReport, type Message } from "@gates-local/contracts";
+import { CONTEXT_SIZES, cardGb, ctxFor, decodeSpeed, fileSize, gb, k, replyMeta, shortAge, sourceDetail, verdictOf } from "./format.ts";
 import { homeTilde, libraryToolCanUse } from "./settings-rules.ts";
 
 const SP = String.fromCharCode(160);
@@ -126,31 +126,17 @@ describe("the context a model runs at", () => {
 });
 
 describe("verdictOf", () => {
-  it("a fitting report on a small model reads as any other fit, never as a refusal", () => {
-    const v = verdictOf({ ...base, numCtx: 2048, verdict: "fits" });
-    expect(v.k).toBe("gpu");
-    expect(v.word).toBe("Runs on GPU");
-  });
-
-  it("keeps the memory words for a memory refusal", () => {
-    const v = verdictOf({ ...base, needVramBytes: 20 * GIB, shortfallBytes: 3 * GIB });
+  it("prints the server's words and judges nothing itself", () => {
+    const refused: FitReport = { ...base, needVramBytes: 20 * GIB, shortfallBytes: 3 * GIB };
+    const v = verdictOf({ ...refused, words: fitWords(refused, "card", false) });
     expect(v.word).toBe("Not enough memory at 16k");
-    expect(v.chip).toBe("not enough memory");
-    expect(v.detail).toBe(`needs 3.0${SP}GB more`);
+    expect(v.need).toBe(20 * GIB);
+    // a report the server sent without words prints nothing, keeping only the colour of its verdict
+    expect(verdictOf({ ...base, verdict: "fits" })).toMatchObject({ k: "gpu", word: "", label: "" });
   });
 });
 
 const msg = (stats: Message["stats"]): Message => ({ id: "a", threadId: "t", role: "assistant", content: "x", createdAt: 1, ...(stats ? { stats } : {}) });
-
-const fits = (numCtx: number, need: number): FitReport => ({ ...base, numCtx, verdict: "fits", needVramBytes: need * GIB });
-
-describe("the other context size's words (F36b)", () => {
-  it("keeps the memory and GPU words otherwise", () => {
-    expect(otherCtxWords(fits(16384, 6), fits(32768, 8.5))).toBe(`still runs on GPU; uses 2.5${SP}GB more`);
-    expect(otherCtxWords(fits(16384, 6), { ...base, numCtx: 32768, needVramBytes: 20 * GIB, shortfallBytes: 3 * GIB })).toBe(`not enough memory; needs 3.0${SP}GB more`);
-  });
-
-});
 
 describe("decode speed", () => {
   it("divides by decode time, not the total that includes the load", () => {

@@ -13,7 +13,7 @@ import os from "node:os";
 import type { GpuOccupant, GpuStatus } from "@gates-local/contracts";
 import { MIB } from "./constants.ts";
 import { defaultNvidiaSmi, gpuReadingConflict, parseComputeApps, parseMemAvailable, processBasename, readNvidiaSmi } from "./gpu.ts";
-import { FitError, type MeminfoReader, type NvidiaSmiRunner } from "./types.ts";
+import { FitError, type GpuTenant, type MeminfoReader, type NvidiaSmiRunner } from "./types.ts";
 
 export const GPU_STATUS_ARGS = ["--query-gpu=name,memory.total,memory.used,memory.free", "--format=csv,noheader,nounits"] as const;
 
@@ -93,6 +93,44 @@ function chatOccupants(runnerBytes: number, models: readonly ResidentModel[], la
   }));
 }
 
+/**
+ * Everything holding GPU memory but the model runtime's runners, named for people as gpu.status
+ * names them, biggest first: Whisper, ComfyUI, other apps by name, and the memory no listed process
+ * accounts for. One naming for every surface that says who is on the card (gpu.status, the fit
+ * table's card.inTheWay). `whisper` and `image` add to what the tenant's own role says.
+ */
+export function holdersOf(
+  tenants: readonly GpuTenant[],
+  usedBytes: number,
+  is: { whisper?: (t: GpuTenant) => boolean; image?: (t: GpuTenant) => boolean } = {},
+): { holders: GpuOccupant[]; runnerBytes: number } {
+  let runnerBytes = 0;
+  let accounted = 0;
+  const grouped = new Map<string, GpuOccupant>();
+  const add = (o: GpuOccupant) => {
+    const key = `${o.kind}\0${o.label}`;
+    const prev = grouped.get(key);
+    grouped.set(key, prev ? { ...prev, bytes: prev.bytes + o.bytes } : o);
+  };
+  for (const t of tenants) {
+    // No reading for this process (every process on Windows, and any nvidia-smi may not inspect):
+    // it gets no row and no size. Its memory is in the measured remainder below.
+    if (t.usedBytes === undefined) continue;
+    const bytes = t.usedBytes;
+    accounted += bytes;
+    if (t.role === "whisper" || is.whisper?.(t) === true) add({ label: "Whisper", bytes, kind: "whisper", protected: true });
+    else if (t.role === "ollama") runnerBytes += bytes;
+    else if (is.image?.(t) === true) add({ label: "ComfyUI", bytes, kind: "image", protected: false });
+    else if (t.unnamed) accounted -= bytes; // measured, no name: it joins the remainder
+    else add({ label: t.label, bytes, kind: "other-app", protected: true });
+  }
+  const holders = [...grouped.values()];
+  const unknown = usedBytes - accounted;
+  if (unknown >= UNKNOWN_MIN_BYTES) holders.push({ label: "Not attributed to a process", bytes: unknown, kind: "unknown", protected: true });
+  holders.sort((a, b) => b.bytes - a.bytes);
+  return { holders, runnerBytes };
+}
+
 export async function readGpuStatus(deps: GpuStatusDeps = {}): Promise<GpuStatus> {
   const platform = deps.platform ?? process.platform;
   const now = deps.now ?? Date.now;
@@ -118,30 +156,11 @@ export async function readGpuStatus(deps: GpuStatusDeps = {}): Promise<GpuStatus
   const listed = new Set(deps.mayUnload?.() ?? []);
   const mine = (tag: string) => listed.has(tag);
 
-  let runnerBytes = 0;
-  let accounted = 0;
-  const grouped = new Map<string, GpuOccupant>();
-  const add = (o: GpuOccupant) => {
-    const key = `${o.kind}\0${o.label}`;
-    const prev = grouped.get(key);
-    grouped.set(key, prev ? { ...prev, bytes: prev.bytes + o.bytes } : o);
-  };
-  for (const t of tenants) {
-    // No reading for this process (every process on Windows, and any nvidia-smi may not inspect):
-    // it gets no row and no size. Its memory is in the measured remainder below.
-    if (t.usedBytes === undefined) continue;
-    const bytes = t.usedBytes;
-    accounted += bytes;
-    if (t.role === "whisper" || t.pid === whisperPid) add({ label: "Whisper", bytes, kind: "whisper", protected: true });
-    else if (t.role === "ollama") runnerBytes += bytes;
-    else if (t.pid === imagePid || comfy.has(t.pid)) add({ label: "ComfyUI", bytes, kind: "image", protected: false });
-    else if (t.unnamed) accounted -= bytes; // measured, no name: it joins the remainder
-    else add({ label: t.label, bytes, kind: "other-app", protected: true });
-  }
-  const occupants = [...chatOccupants(runnerBytes, models, label, mine), ...grouped.values()];
-  const unknown = totals.usedBytes - accounted;
-  if (unknown >= UNKNOWN_MIN_BYTES) occupants.push({ label: "Not attributed to a process", bytes: unknown, kind: "unknown", protected: true });
-  occupants.sort((a, b) => b.bytes - a.bytes);
+  const { holders, runnerBytes } = holdersOf(tenants, totals.usedBytes, {
+    whisper: (t) => t.pid === whisperPid,
+    image: (t) => t.pid === imagePid || comfy.has(t.pid),
+  });
+  const occupants = [...chatOccupants(runnerBytes, models, label, mine), ...holders].toSorted((a, b) => b.bytes - a.bytes);
 
   return {
     vendor: "nvidia",

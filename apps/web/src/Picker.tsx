@@ -3,7 +3,7 @@
 import "./picker.css";
 import { type KeyboardEvent, useLayoutEffect, useRef, useState } from "react";
 import type { ContextSize, FitTable, ModelInfo } from "@gates-local/contracts";
-import { CONTEXT_SIZES, type Verdict, cardGb, ctxFor, gb, k, noGpu, verdictOf } from "./format.ts";
+import { CONTEXT_SIZES, type SlowReason, type Verdict, cardGb, ctxFor, gb, k, noGpu, slowReason, verdictOf } from "./format.ts";
 import { markWhole } from "./MemoryMark.tsx";
 import { openFit } from "./fit-actions.ts";
 import { answers, canPick, cardFit, fitFor, refusedNow, stopsChat } from "./fit-table.ts";
@@ -19,7 +19,7 @@ import { FitSkel, PHONE, closePop, closeTip, esc, isTouch, openTip, tabStops, us
 const FAVORITES = "gates-local.model-favorites";
 /** Below this height the picker's rail, list and context column stop being usable. */
 const CRAMPED = 280;
-interface Row { tag: string; label: string; name: string; variant: string; info?: ModelInfo; v?: Verdict; downloading?: number; frees: boolean; notNow: boolean }
+interface Row { tag: string; label: string; name: string; variant: string; info?: ModelInfo; v?: Verdict; downloading?: number; frees: boolean; notNow: boolean; slow?: SlowReason | undefined }
 
 function savedFavorites(): string[] {
   try {
@@ -30,15 +30,20 @@ function savedFavorites(): string[] {
 
 /** A memory need as shown: an estimate carries a ~, a reading from a real load does not (audit T03). */
 const shownNeed = (v: Verdict) => `${v.measured ? "" : "~"}${gb(v.need)}`;
+/** The card holds it, right now it is slower: an amber gauge beside the card's own word. */
+const SlowMark = () => <span style={{ display: "inline-flex", color: "var(--amber-fg)" }}><Icon id="gauge" cls="s12" /></span>;
 
 /** Swappable presentation only. The verdict and all byte counts come from the fit table; before the first one, a same-size skeleton. */
-export function ContextMemory({ v, cpu, frees = false, ready = true, notNow = false }: { v: Verdict | undefined; cpu: boolean; frees?: boolean; ready?: boolean; notNow?: boolean }) {
+export function ContextMemory({ v, cpu, frees = false, ready = true, notNow = false, slow }: { v: Verdict | undefined; cpu: boolean; frees?: boolean; ready?: boolean; notNow?: boolean; slow?: SlowReason | undefined }) {
   if (!v) return ready ? <span className="pk-cost none">–</span> : <span className="pk-cost"><FitSkel w="104px" /></span>;
   const ruler = contextRuler(v);
   // notNow: the card would hold it, but a send now is refused (fit-table refusedNow); the icon says it, as on the row
-  const word = frees ? "Stops chat" : v.k === "no" ? "Too big" : notNow ? "Not now" : cpu ? "System memory" : v.k === "gpu" ? "Fits" : "Slower";
-  return <span className={`pk-cost ${notNow && !frees ? "no" : v.k}`} role="img" aria-label={`${gb(v.need)} ${v.measured ? "measured" : "estimated"}; ${word}`}>
-    <span className="pk-cost-caption"><span>{shownNeed(v)}</span><small>{notNow && !frees && v.k !== "no" ? <Icon id="xc" /> : null}{word}</small></span>
+  // slowNow: the card holds it (the word stays the card's), right now part of it spills: an amber gauge, who is in the way its tip
+  const slowNow = slow !== undefined && !frees && !notNow && !cpu && v.k === "gpu";
+  // the server's word for this size on the card, a stop or a refusal right now folded in (fit-words withNow)
+  const word = v.short;
+  return <span className={`pk-cost ${notNow && !frees ? "no" : v.k}`} role="img" aria-label={`${gb(v.need)} ${v.measured ? "measured" : "estimated"}; ${word}${slowNow ? `; slower now. ${slow.sentence}` : ""}`} {...slowNow ? { "data-tip": esc(`${slow.short}. ${slow.sentence}`), "data-testid": "models.picker.slow-now" } : {}}>
+    <span className="pk-cost-caption"><span>{shownNeed(v)}</span><small>{notNow && !frees && v.k !== "no" ? <Icon id="xc" /> : null}{slowNow ? <SlowMark /> : null}{word}</small></span>
     {cpu ? null : <span className="pk-cost-track"><i className="pk-cost-room" /><i className="pk-cost-fill" style={{ width: `${ruler.fill}%` }} />{ruler.overflow > 0 ? <i className="pk-cost-over" style={{ width: `${ruler.overflow}%` }} /> : null}<i className="pk-cost-edge" />{ruler.continues ? <b>→</b> : null}</span>}
   </span>;
 }
@@ -96,7 +101,7 @@ export function Picker() {
   const notNow = (tag: string, c = numCtx) => refusedNow(fitFor(table, tag, ctxFor(c, models, tag)));
   // In list order already: filtering keeps it.
   const rows: Row[] = pickerEntries(models, pulls, catalog, selected).map(({ pull, ...entry }) => ({ ...entry, v: report(entry.tag),
-    ...pull ? { downloading: pull.totalBytes ? Math.round(pull.completedBytes / pull.totalBytes * 100) : 0, frees: false, notNow: false } : { frees: stopsChat(fitOf(entry.tag)), notNow: notNow(entry.tag) } }));
+    ...pull ? { downloading: pull.totalBytes ? Math.round(pull.completedBytes / pull.totalBytes * 100) : 0, frees: false, notNow: false } : { frees: stopsChat(fitOf(entry.tag)), notNow: notNow(entry.tag), slow: slowReason(fitOf(entry.tag)?.slowNow) } }));
   const q = query.toLowerCase().trim();
   const filtered = rows.filter(r => q ? `${r.label} ${r.tag}`.toLowerCase().includes(q) : group === "all" || (group === "favorites" ? favorites.includes(r.tag) : makerOf(r.tag, makers) === group));
   const limit = phone ? 5 : 6; // Leave room for Show more alongside the phone's 44 px rows.
@@ -211,7 +216,7 @@ export function Picker() {
   // by colour, the fit. Screen readers get the size and the fit in words, from the table. Only a cut name has a tip.
   const facts = (row: Row) => {
     const fit = !row.v ? answered ? "No memory reading" : "Checking memory"
-      : `${gb(row.v.need)} ${row.v.measured ? "measured" : "estimated"}; ${row.frees ? "sending stops another chat first" : row.notNow ? "not enough memory now" : row.v.k === "no" ? "not enough memory" : cpu ? "runs in system memory" : row.v.k === "gpu" ? "fits on GPU" : `${gb(row.v.amt)} in system memory, slower`}`;
+      : `${gb(row.v.need)} ${row.v.measured ? "measured" : "estimated"}; ${row.frees ? "sending stops another chat first" : row.notNow ? "not enough memory now" : row.v.k === "no" ? "not enough memory" : cpu ? "runs in system memory" : row.v.k === "gpu" ? row.slow ? `fits on GPU; slower now. ${row.slow.sentence}` : "fits on GPU" : `${gb(row.v.amt)} in system memory, slower`}`;
     const speed = speedWords(speeds, row.tag);
     const said = speed === undefined ? fit : `${fit}; ${speed}`;
     return row.downloading === undefined ? said : `Downloading, ${row.downloading}%. ${said}`;
@@ -251,12 +256,12 @@ export function Picker() {
           buttons[(i + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
         }}>
           {CONTEXT_SIZES.map(c => {
-            const v = active ? report(active.tag, c) : undefined, frees = active ? stopsChat(fitOf(active.tag, c)) : false, now = active ? notNow(active.tag, c) : false;
+            const v = active ? report(active.tag, c) : undefined, frees = active ? stopsChat(fitOf(active.tag, c)) : false, now = active ? notNow(active.tag, c) : false, slow = active ? slowReason(fitOf(active.tag, c)?.slowNow) : undefined;
             const capped = activeMax !== undefined && c > activeMax;
             // a size the table has no reading for cannot be picked (finish refuses it), so it says so to assistive tech too;
             // before the table a size is not picked yet either, but stays focusable with its look (native disabled greys it)
             const disabled = !active || active.downloading !== undefined || capped || (answered && !pickable(active.tag, c));
-            return <button key={c} className="pk-ctx-row" role="radio" data-testid={`models.picker.context-${c}`} aria-checked={c === actual} aria-disabled={disabled || !answered} aria-busy={(!capped && !answered) || undefined} tabIndex={c === actual ? 0 : -1} data-ctx={c} disabled={disabled} onClick={() => { if (active) chooseContext(active, c); }}><span>{k(c)}</span>{capped ? <small className="pk-cap">Max {k(activeMax)}</small> : <ContextMemory v={v} cpu={cpu} frees={frees} ready={answered} notNow={now} />}<span className="pk-context-check">{c === actual ? <Icon id="check" cls="s12" /> : null}</span></button>;
+            return <button key={c} className="pk-ctx-row" role="radio" data-testid={`models.picker.context-${c}`} aria-checked={c === actual} aria-disabled={disabled || !answered} aria-busy={(!capped && !answered) || undefined} tabIndex={c === actual ? 0 : -1} data-ctx={c} disabled={disabled} onClick={() => { if (active) chooseContext(active, c); }}><span>{k(c)}</span>{capped ? <small className="pk-cap">Max {k(activeMax)}</small> : <ContextMemory v={v} cpu={cpu} frees={frees} ready={answered} notNow={now} slow={slow} />}<span className="pk-context-check">{c === actual ? <Icon id="check" cls="s12" /> : null}</span></button>;
           })}
         </div>
         {activeMax !== undefined && activeMax < numCtx ? <p className="pk-help">Runs at {k(activeMax)}, the most this model takes.</p> : null}

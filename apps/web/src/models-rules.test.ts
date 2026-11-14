@@ -1,5 +1,6 @@
-// The rules behind Settings › Models (models-rules.ts): fit words per
-// verdict, the installed order, the next default and the name truncation.
+// The rules behind Settings › Models (models-rules.ts): sizes, the installed
+// order, the next default and the name truncation. The fit words are the
+// server's (contracts fit-words.ts).
 import type { CatalogEntry, FitReport, FitVerdict } from "@gates-local/contracts";
 import { describe, expect, it } from "vitest";
 import {
@@ -7,7 +8,6 @@ import {
   about,
   canBeDefault,
   filterShows,
-  fitLabel,
   labelOf,
   nameOf,
   nextDefault,
@@ -44,24 +44,7 @@ const entry = (name: string, verdict: FitVerdict | undefined, more: Partial<Cata
 
 const row = (name: string, verdict: FitVerdict | undefined = "fits", chat = true, display = name): Row => ({ name, display, chat, verdict });
 
-describe("fit words", () => {
-  it("says an estimate is one, and keeps Runs for a model that really ran at that size", () => {
-    expect(fitLabel("fits")).toBe("Should run well");
-    expect(fitLabel("spills")).toBe("Should run slower");
-    expect(fitLabel("fits", true)).toBe("Runs well");
-    expect(fitLabel("spills", true)).toBe("Runs slower");
-  });
-
-  it("says a model that cannot load won't run, measured or not", () => {
-    expect(fitLabel("refuse")).toBe("Won't run here");
-    expect(fitLabel("refuse", true, true)).toBe("Won't run here");
-  });
-
-  it("says system memory when there is no supported GPU", () => {
-    expect(fitLabel("spills", false, true)).toBe("Should run in system memory");
-    expect(fitLabel("spills", true, true)).toBe("Runs in system memory");
-  });
-
+describe("sizes", () => {
   it("rounds sizes to one decimal under 10 GB", () => {
     expect(about(6.6 * GIB)).toBe("6.6 GB");
     expect(about(9.97 * GIB)).toBe("10 GB");

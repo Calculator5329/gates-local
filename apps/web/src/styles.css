@@ -1155,6 +1155,11 @@ a.btn{text-decoration:none}
 .mm.gpu .mm-bar i{background:var(--green)}.mm.spill .mm-bar i{background:var(--amber)}.mm.no .mm-bar i{background:var(--faint)}
 .mm-n{flex:none;width:78px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .mm.no .mm-n{color:var(--muted-foreground)}
+/* the card holds it, right now it is slower: who is in the way, one quiet line; the sizes are its tip */
+.mm-why{display:flex;align-items:center;gap:4px;margin-top:2px;width:max-content;max-width:100%;font-size:12.5px;line-height:16px;color:var(--amber-fg);cursor:default}
+.mm-why>span:not(.vh){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mm-why .ic{flex:none}
+.fp-set>.mm-why{margin:-4px 16px 10px}
 /* Measure (row 29): Speed and Score after the mark on the installed list, one button across both until
    measured; a downloading row keeps its menu in the last column */
 .mp-card.ms{--mp-cols:minmax(0,1fr) 80px 200px 84px 56px 40px}

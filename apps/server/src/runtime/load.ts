@@ -41,11 +41,13 @@
 // work, clears the owned list without pushes (models left in an external
 // Ollama are not the app's any more), aborts the old runtime's preloads and
 // waiting admissions, and ends every open "loading" notice with an error.
+// The owned list is the memory owner's one record of what is loaded
+// (gpu/memory.ts LoadedRecord): this module writes it, the GPU status reads it.
 // close() refuses new work and aborts and drains every preload, so a
 // shutdown never waits on a cold load holding its GPU claim.
 import type { FitOffer, FitReport, ModelLoad } from "@gates-local/contracts";
 import type { GpuLease } from "../gpu/lease.ts";
-import { ENGINE_BUSY_NOTE, type Handoff, type MemoryOwner, type Want } from "../gpu/memory.ts";
+import { ENGINE_BUSY_NOTE, createLoadedRecord, type Handoff, type MemoryOwner, type Want } from "../gpu/memory.ts";
 import { canonicalTag } from "./recommended.ts";
 import { sendMark, sendSpan } from "../chat/send-times.ts";
 import { GenerateResponse, decode, parseJson } from "./schemas.ts";
@@ -268,8 +270,8 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
   const log = deps.log ?? (() => undefined);
   const memory = deps.memory;
   const gate = memory?.gate ?? deps.gate ?? createFifoGate();
-  /** Tag -> the num_ctx it was loaded at. */
-  const owned = new Map<string, number>();
+  /** What is loaded and which of it is the app's: the memory owner's one record (a loader with no owner keeps its own). */
+  const record = memory?.loaded ?? createLoadedRecord();
   /** Tag -> reservations (turns and preloads) on it. */
   const reservations = new Map<string, number>();
   /** Tag -> admitted turns on it that have not ended: their replies keep the model in memory. */
@@ -314,12 +316,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
   const letGoOf = (tag: string) => count(reservations, tag, -1);
 
   const prune = (resident: readonly string[]) => {
-    const here = new Set(resident.map(canonicalTag));
-    for (const [tag, numCtx] of owned) {
-      if (here.has(tag)) continue;
-      owned.delete(tag);
-      send({ model: tag, numCtx, state: "unloaded" });
-    }
+    for (const [tag, numCtx] of record.observe(resident.map((name) => ({ name })))) send({ model: tag, numCtx, state: "unloaded" });
   };
 
   /** The GPU poll's last logged /api/ps failure; cleared when a read succeeds. */
@@ -384,7 +381,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       const afterPs = stopped();
       if (afterPs) return finish(afterPs);
       if (!here.ok) return finish({ model, numCtx, state: "error", message: PS_UNREADABLE_MESSAGE });
-      if (here.models.has(tag) && !owned.has(tag)) {
+      if (here.models.has(tag) && record.oursAt(tag) === undefined) {
         // Another program's: ready as it is, not preloaded again and not counted as the app's own load.
         // The owner still asks it to leave for the next thing (gpu/memory.ts), so the answer promises nothing more.
         return finish({ model, numCtx, state: "ready", message: `${model} is already in memory, loaded by another program.` });
@@ -409,7 +406,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       }
       const afterLoad = stopped();
       if (afterLoad) return finish(afterLoad);
-      owned.set(tag, numCtx);
+      record.loaded(tag, numCtx);
       const ready = finish({ model, numCtx, state: "ready" });
       deps.onLoaded?.();
       return ready;
@@ -435,7 +432,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
   };
 
   const loaded = (model: string, numCtx: number, notice: Notice | undefined) => {
-    owned.set(canonicalTag(model), numCtx);
+    record.loaded(model, numCtx);
     const ready: ModelLoad = { model, numCtx, state: "ready" };
     if (notice) closeNotice(notice, ready);
     else send(ready);
@@ -647,7 +644,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
 
     runtimeChanged() {
       generation++;
-      owned.clear();
+      record.clear();
       // Whatever the old runtime held is not in this app's memory any more.
       memory?.observe([]);
       switching = true;
@@ -673,14 +670,11 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       await Promise.allSettled(pendingLoads);
     },
 
-    appLoadedModels: () => [...owned.keys()],
+    appLoadedModels: () => record.ours(),
     replying: () => [...replying.keys()],
     unloaded(model) {
-      const tag = canonicalTag(model);
-      const numCtx = owned.get(tag);
-      if (numCtx === undefined) return;
-      owned.delete(tag);
-      send({ model: tag, numCtx, state: "unloaded" });
+      const numCtx = record.left(model);
+      if (numCtx !== undefined) send({ model: canonicalTag(model), numCtx, state: "unloaded" });
     },
     async residentModels() {
       const baseUrl = deps.baseUrl();

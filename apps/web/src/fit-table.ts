@@ -1,23 +1,31 @@
 // The server's fit table: every model at every offered context from one GPU reading, pushed as
 // fit.changed. The client keeps the last one and reads every fit value on screen from it; it asks
 // for no single fit and holds no verdict of its own.
-import type { FitReport, FitRow, FitTable } from "@gates-local/contracts";
+import type { FitReport, FitRow, FitTable, GpuOccupant } from "@gates-local/contracts";
 import { ctxFor } from "./format.ts";
 
-/** A row read as a report: its reading is the table's. */
-export type TableFit = FitReport & Pick<FitRow, "stops" | "card">;
+/** Right now the model spills though the card holds it: who holds the card (the server's card.inTheWay) and what spills. */
+export interface SlowNow {
+  readonly inTheWay: readonly GpuOccupant[];
+  readonly spillRamBytes: number;
+}
+
+/** A row read as a report: its reading is the table's. slowNow: set on a card reading only (cardFit). */
+export type TableFit = FitReport & Pick<FitRow, "stops" | "card"> & { readonly slowNow?: SlowNow };
 
 /**
  * What every list and Settings show for a row: an installed model's verdict against the card's own
  * memory (the row's card), whatever other programs hold right now; the row itself otherwise. A send
- * reads the row as it is, right now.
+ * reads the row as it is, right now. Where the server named who is in the way, the card reading
+ * carries it with the spill right now (slowNow), so a list can say why the model is slower.
  */
 export function cardFit(fit: TableFit | undefined): TableFit | undefined {
   if (fit?.card === undefined) return fit;
   let report = cards.get(fit);
   if (report === undefined) {
     const { shortfallBytes: _rightNow, card, ...rest } = fit;
-    report = { ...rest, ...card };
+    const { inTheWay, ...verdict } = card;
+    report = { ...rest, ...verdict, ...(inTheWay === undefined ? {} : { slowNow: { inTheWay, spillRamBytes: fit.spillRamBytes } }) };
     cards.set(fit, report);
   }
   return report;

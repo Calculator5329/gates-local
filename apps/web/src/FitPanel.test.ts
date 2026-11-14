@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
 import { readGpuStatus } from "../../server/src/fit/gpu-status.ts";
-import type { GpuStatus } from "@gates-local/contracts";
+import { fitWords, type FitReport, type GpuStatus } from "@gates-local/contracts";
 import { NO_GPU_TEXT } from "./format.ts";
 
 const store = vi.hoisted(() => ({ state: undefined as unknown }));
@@ -71,11 +71,13 @@ it("keeps the existing no-GPU wording when nvidia-smi is absent", async () => {
 
 // Owner 2026-11-13, a no-GPU laptop: the page said "system memory" and "16k" five times over.
 const GB = 1024 ** 3;
-const shown = (gpu: GpuStatus, verdict: "fits" | "spills", memory: object): string => {
+/** A row as the server sends it: with its words. */
+const said = (r: FitReport, cpu: boolean) => ({ ...r, stops: [], words: fitWords(r, "card", cpu) });
+const shown =(gpu: GpuStatus, verdict: "fits" | "spills", memory: object): string => {
   store.state = {
     model: "chat", numCtx: 16384, fitPanel: { model: null }, settings: { defaultNumCtx: 16384 },
     gpu, models: [], catalog: [], loads: {}, messages: {}, firstToken: {}, unavailable: {},
-    fitTable: { reading: { boot: "b", seq: 1, measuredAt: 1 }, memory, rows: [{ model: "chat", numCtx: 16384, freeVramBytes: 12 * GB, needVramBytes: 5 * GB, spillRamBytes: verdict === "spills" ? 5 * GB : 0, verdict, source: "estimate", stops: [] }] },
+    fitTable: { reading: { boot: "b", seq: 1, measuredAt: 1 }, memory, rows: [said({ model: "chat", numCtx: 16384, freeVramBytes: 12 * GB, needVramBytes: 5 * GB, spillRamBytes: verdict === "spills" ? 5 * GB : 0, verdict, source: "estimate", measuredAt: 1 }, gpu.vendor === "none")] },
   };
   // what a person reads before opening Details: tags and their attributes (tooltips) are not on the page
   return renderToStaticMarkup(createElement(GpuMemory)).split("<details")[0]!.replace(/<[^>]+>/g, " ");

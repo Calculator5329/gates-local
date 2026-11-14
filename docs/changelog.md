@@ -1,5 +1,48 @@
 # Changelog
 
+## 2026-11-14: One record of what is loaded
+
+- The memory owner (`apps/server/src/gpu/memory.ts`) holds the one
+  record of the chat models in memory: what the app's Ollama last listed
+  and which of them this app loaded. The model loader writes it from its
+  readings and loads, and the GPU status asks it which models may leave
+  for the next thing. Before, the loader kept its own list of the app's
+  models, and the GPU status kept a copy of the last listing.
+
+## 2026-11-14: One server function judges fit and says it in words
+
+- The server judges whether a model fits in one function, `judge` in
+  `apps/server/src/fit/fit.ts`, on one of two bases: the card (the
+  GPU's whole memory and the system memory the computer has) or right
+  now (what is free this moment). Lists, the Download tab and Settings
+  use the card; a send uses right now.
+- Every fit report carries its words (`words`: the status line, the
+  chip, the memory mark's name and the picker's short word), made by
+  `fitWords` in `packages/contracts/src/fit-words.ts` and said with the
+  basis they were judged on. The web prints them and judges nothing:
+  the label, mark and chip helpers it had are gone, and so is a
+  never-shown helper for the other context size's words.
+- What a person sees is unchanged. The picker's "Stops chat" and "Not
+  now" come with the card's words from the server.
+
+## 2026-11-14: A model the card holds says what makes it slower right now
+
+- When the graphics card fits a model but other programs hold enough of
+  it that part of the model goes to system memory right now, the model
+  row says "Slower now · Whisper in the way". The program with the most
+  memory comes first, and the list stops once the programs named cover
+  the gap. A program already named under the list is not named again.
+  The full sentence, with sizes, is in the row's tip, the picker's
+  context chip tip and Settings › Advanced › Details: "Fits this card
+  with Whisper (2.1 GB) and others (1.8 GB) off it. 2.7 GB is in system
+  memory now."
+- The verdict stays the card's ("Should run well", "Fits"). Nothing
+  offers to stop another program.
+- Settings › Advanced puts the measured speed beside "Slower now" once
+  the model has been measured.
+- The fit table carries the programs in the way on each row's card
+  verdict (`card.inTheWay`), biggest first.
+
 ## 2026-11-14: Measure leaves Pages out when it could not run them
 
 - In a desktop app started with Chromium's sandbox off, Measure's page

@@ -7,6 +7,7 @@
 //
 // A download size alone never proves a fit: the estimate adds KV cache and
 // overhead, and a measured /api/ps report replaces it after a real load.
+import { fitWords, type FitWords } from "@gates-local/contracts";
 import {
   KV_REFERENCE_CONTEXT,
   PREDOWNLOAD_KV_FRACTION_PER_16K,
@@ -87,7 +88,62 @@ export interface DecideInput {
   note?: string;
 }
 
-/** Pure verdict from an estimated need and measured free memory. */
+/**
+ * What a verdict is judged against. "card": the card's own memory and the system memory the
+ * computer has, whatever other programs hold right now (every list and Settings). "now": what a
+ * load would have right now (a send, the composer).
+ */
+export type FitBasis = FitWords["basis"];
+
+/** What a verdict needs of a GPU reading. */
+export type CardReading = Pick<GpuSnapshot, "gpuCount" | "freeBytes" | "totalBytes" | "measuredAt">;
+
+/** The card's own GPU memory, whatever other programs hold: the whole card; with no GPU, what is free. */
+export const cardFreeBytes = (gpu: CardReading): number => (gpu.gpuCount === 0 ? gpu.freeBytes : Math.max(gpu.freeBytes, gpu.totalBytes));
+
+/** A report with its words, on the basis it was judged on. */
+export const worded = <R extends FitReport>(report: R, basis: FitBasis, gpu: Pick<GpuSnapshot, "gpuCount">): R => ({ ...report, words: fitWords(report, basis, gpu.gpuCount === 0) });
+
+export interface JudgeInput {
+  model: string;
+  numCtx: number;
+  needBytes: number;
+  /** The reading: the card's size and the computer's memory come from it. */
+  gpu: CardReading;
+  memTotalBytes: number;
+  /** GPU memory a load would have right now: free plus what leaves for it. Absent: what is free. */
+  freeVramBytes?: number;
+  /** System memory a load would have right now: available plus what leaves with it. The "now" basis needs it. */
+  memAvailableBytes?: number;
+  margins?: Margins;
+  note?: string;
+}
+
+/**
+ * The one place the server judges a fit, on either basis, from one reading, with its words.
+ * now: GPU memory free plus what leaves for the load; system memory never below what the computer
+ * has (cardRamBytes): memory other programs hold at this instant is the system's to page out, and
+ * refusing on it kept every model that runs partly in system memory from loading on a 16 GB
+ * computer (WIN-MEM-01 and 02). card: the whole card, or more when what leaves for the load is
+ * more (no GPU), and the system memory the computer has.
+ */
+export function judge(basis: FitBasis, input: JudgeInput): FitReport {
+  const nowVram = input.freeVramBytes ?? input.gpu.freeBytes;
+  const ram = cardRamBytes(input.memTotalBytes);
+  const report = decideFit({
+    model: input.model,
+    numCtx: input.numCtx,
+    needBytes: input.needBytes,
+    freeVramBytes: basis === "card" ? Math.max(cardFreeBytes(input.gpu), nowVram) : nowVram,
+    memAvailableBytes: basis === "card" ? ram : Math.max(input.memAvailableBytes ?? 0, ram),
+    measuredAt: input.gpu.measuredAt,
+    ...(input.margins ? { margins: input.margins } : {}),
+    ...(input.note === undefined ? {} : { note: input.note }),
+  });
+  return worded(report, basis, input.gpu);
+}
+
+/** Pure verdict from an estimated need and measured free memory: judge's arithmetic, with no words. */
 export function decideFit(input: DecideInput): FitReport {
   const margins = input.margins ?? DEFAULT_MARGINS;
   const usableVram = Math.max(0, input.freeVramBytes - margins.vramMarginBytes);
@@ -143,7 +199,7 @@ export function measuredReport(model: string, entry: PsEntry, numCtx: number, gp
     runnerBytes === undefined
       ? "runner VRAM not attributable (nvidia-smi shows no single runner)"
       : `runner holds ${formatGb(runnerBytes)} on the GPU per nvidia-smi`;
-  return {
+  return worded({
     // The model asked about: /api/ps may list the copy under another name for it.
     model,
     numCtx: ctx,
@@ -157,7 +213,7 @@ export function measuredReport(model: string, entry: PsEntry, numCtx: number, gp
       `${entry.name} loaded at num_ctx ${ctx}: /api/ps ${formatGb(entry.size)} total, ${formatGb(entry.size_vram)} in VRAM; ${runnerNote}` +
       (spill > 0 ? `; ${formatBytes(spill)} spilled to system RAM` : "; nothing spilled") +
       `; ${formatGb(gpu.freeBytes)} VRAM free now (measured).`,
-  };
+  }, "now", gpu);
 }
 
 export interface FitDeps {
@@ -273,11 +329,11 @@ export async function fitWithReadings(deps: FitDeps, model: string, requested: n
   if (loaded && loaded.context_length === numCtx) {
     const spill = Math.max(0, need - held);
     return {
-      report: {
+      report: worded({
         model, numCtx, freeVramBytes: r.gpu.freeBytes + held, needVramBytes: need, spillRamBytes: spill,
         verdict: spill > 0 ? "spills" : "fits", source: "estimate", measuredAt: r.gpu.measuredAt,
         message: `${model} is loaded at num_ctx ${numCtx} with ${formatGb(held)} on the GPU and the rest in system memory; it needs ${formatGb(need)} in all (estimate).`,
-      },
+      }, "now", r.gpu),
       resident: true, gpu: r.gpu, memAvailableBytes: r.memAvailableBytes, estimate: estimate.need,
     };
   }
@@ -292,12 +348,8 @@ export async function fitWithReadings(deps: FitDeps, model: string, requested: n
   // refused while the loaded one runs. Above it, no more: weights mapped from disk are page cache.
   const smaller = loadedCtx !== undefined && numCtx <= loadedCtx && atLoaded !== undefined;
   const ramReclaim = loaded ? Math.max(loaded.size - loaded.size_vram, smaller ? offsetNeed(atLoaded, offset) - held : 0, 0) : 0;
-  // A send judges system memory as every list does, by what this computer has (cardRamBytes), never
-  // by less than is free now. Memory other programs hold at this instant is the system's to page
-  // out: refusing on it kept every model that runs partly in system memory from loading on a
-  // 16 GB computer (docs/evidence/windows-low-memory-bug-report.md, WIN-MEM-01 and 02).
+  // judge() never counts system memory below what this computer has (docs/evidence/windows-low-memory-bug-report.md).
   const ramNow = r.memAvailableBytes + ramReclaim;
-  const spillRam = Math.max(ramNow, cardRamBytes(r.memTotalBytes));
   const atCtx = loaded?.context_length === undefined ? "an unknown num_ctx (Ollama did not say)" : `num_ctx ${loaded.context_length}`;
   const freedFrom = r.ps.models.filter((m) => !isCopyOf(m, model) && (deps.reclaim ?? []).some((n) => sameModel(n, m.name)));
   const freed = freedFrom.reduce((sum, m) => sum + m.size_vram, 0);
@@ -306,15 +358,16 @@ export async function fitWithReadings(deps: FitDeps, model: string, requested: n
     ...(freedFrom.length > 0 ? [`free VRAM counts ${formatGb(freed)} held by ${freedFrom.map((m) => m.name).join(", ")}, which leave${freedFrom.length === 1 ? "s" : ""} to make room`] : []),
   ];
   if (estimate.rough !== undefined) notes.push(estimate.rough);
-  if (spillRam > ramNow) notes.push(`system RAM counts what this computer has; ${formatGb(ramNow)} is free now`);
-  const report = decideFit({
+  if (cardRamBytes(r.memTotalBytes) > ramNow) notes.push(`system RAM counts what this computer has; ${formatGb(ramNow)} is free now`);
+  const report = judge("now", {
     model,
     numCtx,
     needBytes: need,
+    gpu: r.gpu,
+    memTotalBytes: r.memTotalBytes,
     freeVramBytes: r.gpu.freeBytes + reclaim + freed,
-    memAvailableBytes: spillRam,
+    memAvailableBytes: ramNow,
     ...(deps.margins ? { margins: deps.margins } : {}),
-    measuredAt: r.gpu.measuredAt,
     ...(notes.length > 0 ? { note: notes.join("; ") } : {}),
   });
   // A refusal carries the system memory of the reading it was decided from, beside its free VRAM.
@@ -509,20 +562,19 @@ export function estimateBeforeDownload(input: {
   model: string;
   numCtx: number;
   downloadBytes: number;
-  freeVramBytes: number;
-  memAvailableBytes: number;
-  measuredAt: number;
+  /** The reading it is judged on, against the card (judge "card"). */
+  gpu: CardReading;
+  memTotalBytes: number;
   margins?: Margins;
 }): TotalReport {
   const kv = roughKvBytes(input.downloadBytes, input.numCtx);
   const need = preDownloadNeed(input.downloadBytes, input.numCtx);
-  const report = decideFit({
+  const report = judge("card", {
     model: input.model,
     numCtx: input.numCtx,
     needBytes: need,
-    freeVramBytes: input.freeVramBytes,
-    memAvailableBytes: input.memAvailableBytes,
-    measuredAt: input.measuredAt,
+    gpu: input.gpu,
+    memTotalBytes: input.memTotalBytes,
     ...(input.margins ? { margins: input.margins } : {}),
     note: `rough estimate before download (weights from the ${formatGb(input.downloadBytes)} download, KV cache ${formatGb(kv)}, overhead ${formatGb(RUNTIME_OVERHEAD_BYTES)})`,
   });
