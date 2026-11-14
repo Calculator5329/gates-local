@@ -304,15 +304,18 @@ export type FitRow = typeof FitRow.Type;
  * The memory line the picker's footer shows, from the table's reading. others: the programs holding
  * GPU memory above the card's steady baseline right now and how much they hold (programs empty when
  * no listed process explains it), shown as information beside verdicts that judge the card.
+ * totalBytes: the whole of what a model is judged against, the card's memory or, with no GPU, the
+ * computer's; each model's memory mark is drawn against it (absent from an older server).
  */
 export const FitMemory = S.Union([
   S.Struct({
     kind: S.Literal("gpu"),
     freeBytes: Count,
     usableBytes: Count,
+    totalBytes: S.optional(Count),
     others: S.optional(S.Struct({ programs: S.Array(S.String), bytes: Count })),
   }),
-  S.Struct({ kind: S.Literal("cpu") }),
+  S.Struct({ kind: S.Literal("cpu"), totalBytes: S.optional(Count) }),
   S.Struct({ kind: S.Literal("unreadable"), detail: S.String }),
 ]);
 export type FitMemory = typeof FitMemory.Type;

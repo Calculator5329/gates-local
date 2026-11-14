@@ -51,11 +51,15 @@ export interface FitTableSource {
   load(load: ModelLoad): void;
 }
 
-/** The footer's line right now, and the programs holding memory above the card's baseline (the download list names them). */
-function memoryOf(gpu: GpuSnapshot, margin: number, baseline: GpuBaseline | undefined, own: readonly number[]): FitMemory {
-  if (gpu.gpuCount === 0) return { kind: "cpu" };
+/**
+ * The footer's line right now, the programs holding memory above the card's baseline (said once under
+ * each list), and the whole each memory mark is drawn against: the card, or the computer's memory
+ * (memTotalBytes, when it was read) with no GPU.
+ */
+function memoryOf(gpu: GpuSnapshot, margin: number, baseline: GpuBaseline | undefined, own: readonly number[], memTotalBytes?: number): FitMemory {
+  if (gpu.gpuCount === 0) return memTotalBytes === undefined ? { kind: "cpu" } : { kind: "cpu", totalBytes: memTotalBytes };
   const others = baseline?.others(gpu, own);
-  return { kind: "gpu", freeBytes: gpu.freeBytes, usableBytes: Math.max(0, gpu.freeBytes - margin), ...(others ? { others } : {}) };
+  return { kind: "gpu", freeBytes: gpu.freeBytes, usableBytes: Math.max(0, gpu.freeBytes - margin), totalBytes: gpu.totalBytes, ...(others ? { others } : {}) };
 }
 
 /**
@@ -145,7 +149,7 @@ export function createFitTable(deps: FitTableDeps): FitTableSource {
       const comfyPid = deps.comfyPid();
       const own = comfyPid === undefined ? [] : [comfyPid];
       deps.fit?.baseline?.observe(r.gpu, own);
-      const memory = memoryOf(r.gpu, margin, deps.fit?.baseline, own);
+      const memory = memoryOf(r.gpu, margin, deps.fit?.baseline, own, r.memTotalBytes);
       const rows = await rowsFrom(deps, baseUrl, r, await deps.models(), comfyPid);
       return { reading: { boot, seq: at, measuredAt: r.gpu.measuredAt }, memory, rows };
     } catch (e) {

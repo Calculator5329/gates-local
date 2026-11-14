@@ -8,6 +8,7 @@ import { shortGpu } from "./FitPanel.tsx";
 import { type Verdict, etaText, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { MakerMark } from "./MakerMark.tsx";
+import { MemoryMark } from "./MemoryMark.tsx";
 import { answers, rowOf } from "./fit-table.ts";
 import { nameOf, pullName, shortTag, sizeText, splitTail } from "./models-rules.ts";
 import { awaitingInstall, modelNameKey, pendingDownload } from "./pick.ts";
@@ -164,6 +165,11 @@ function memoryTip(v: Verdict, context: number, cpu: boolean): string {
   return `${basis} ${gb(v.need)} of memory with ${k(context)} of context, ${where}.`;
 }
 
+/** The verdict in words, the memory mark's name: what its colour says. */
+function markWords(v: Verdict, cpu: boolean): string {
+  return v.k === "no" ? "Too big for this computer" : v.k === "gpu" ? "Runs on the GPU" : cpu ? "Runs in system memory, slower" : "Partly in system memory, slower";
+}
+
 function DlRow({ c, numCtx, report, mark, actions }: { c: CatalogEntry; numCtx: number; report: FitReport | undefined; mark: boolean; actions: DownloadActions }) {
   const p = useStore(s => Object.values(s.pulls).findLast(progress => downloadKey(progress.name) === downloadKey(c.name) && awaitingInstall(progress)));
   const installed = useStore((s) => c.installed || (s.models ?? []).some((m) => downloadKey(m.name) === downloadKey(c.name)));
@@ -192,6 +198,7 @@ function DlRow({ c, numCtx, report, mark, actions }: { c: CatalogEntry; numCtx: 
           )}
         </span>
       </div>
+      {report && v ? <MemoryMark report={report} words={markWords(v, cpu)} tip={tip} /> : <span className="mm" aria-hidden="true" />}
       <DlButton
         size={gb(c.downloadBytes)}
         label={c.label}
@@ -208,14 +215,15 @@ function DlRow({ c, numCtx, report, mark, actions }: { c: CatalogEntry; numCtx: 
 function BigRow({ c, report, numCtx }: { c: CatalogEntry; report: FitReport; numCtx: number }) {
   const v = verdictOf(report);
   const cpu = useStore((s) => noGpu(s.gpu));
+  const tip = `<b>${esc(c.label)}</b> · <span class="mono">${esc(c.name)}</span><br>${esc(memoryTip(v, report.numCtx || numCtx, cpu))}`;
   return (
     <div className="dlrow dl-big" data-cat={c.name} data-verdict={report.verdict}>
       <MakerMark tag={c.name} />
-      <div className="sl" data-tip={`<b>${esc(c.label)}</b> · <span class="mono">${esc(c.name)}</span><br>${esc(memoryTip(v, report.numCtx || numCtx, cpu))}`}>
+      <div className="sl" data-tip={tip}>
         <b>{c.label}</b>
         <span className="d">{c.purpose}</span>
       </div>
-      <span className="dl-need">needs {gb(v.need)} of memory</span>
+      <MemoryMark report={report} words={markWords(v, cpu)} tip={tip} />
     </div>
   );
 }
@@ -344,9 +352,13 @@ function GroupsPlaceholder({ rows, first }: { rows: number; first: number }) {
   );
 }
 
+/** What other programs hold on the GPU right now, from the table's reading; undefined when nothing or no GPU. */
+export const othersOf = (s: Pick<State, "fitTable">) => (s.fitTable?.memory.kind === "gpu" ? s.fitTable.memory.others : undefined);
+
 /**
- * Who holds GPU memory above the card's steady baseline right now, said once above the list. It is
- * information: the rows are judged against the card's own memory, and a send still judges right now.
+ * Who holds GPU memory above the card's steady baseline right now, said once under each list, never
+ * in a row's mark (row 28). It is information: the rows are judged against the card's own memory, and
+ * a send still judges right now.
  */
 export function othersLine(others: { programs: readonly string[]; bytes: number }): string {
   const [first, second] = others.programs;
@@ -476,7 +488,6 @@ export function DownloadTab() {
       {catalog === NA ? (
         <p className="na">The model list is not available in this build. You can still type a model name below.</p>
       ) : null}
-      {others && list.length > 0 ? <p className="na dl-others">{othersLine(others)}</p> : null}
       {/* the line's box stays while its words come and go, so the groups below never move */}
       {list.length > 0 ? (
         <p className="dl-once" data-wait="">
@@ -501,6 +512,8 @@ export function DownloadTab() {
           ))}
         </Grp>
       ) : null}
+      {/* what other programs hold, said once under the models and never in a row's mark (row 28) */}
+      {others && list.length > 0 ? <p className="na dl-others">{othersLine(others)}</p> : null}
       <Grp title="Something else"><CustomPull actions={actions} numCtx={numCtx} /></Grp>
       {big.length > 0 ? (
         <details className="grp dl-bigs">

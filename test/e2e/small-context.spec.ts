@@ -22,7 +22,8 @@ test.describe("a model with a 2,048 context window", () => {
     await test.step("show the usable model and default fallback", async () => {
     await openModels(page);
     const row = page.locator('.mp-row[data-dm="tiny-chat:2k"]');
-    await expect(row.locator(".mp-fitc")).toHaveText("Should run well");
+    // the memory mark's words are its name (row 28)
+    await expect(row.locator(".mp-fitc .mm")).toHaveAttribute("aria-label", /^Should run well: \d\.\d of \d+ GB$/);
     await expect(row).not.toHaveClass(/\bcant\b/);
     await expect(page.locator(".mp")).not.toContainText(/supports up to|too small|unsupported|won't run/i);
     // the fallback rule is the tip of "Default for new chats", not words on the row

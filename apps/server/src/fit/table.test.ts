@@ -92,7 +92,8 @@ it("one table is one GPU reading: one nvidia-smi and one /api/ps read, the foote
   const got = await t.get();
   expect({ nvidiaSmiTotals: smi.totals, ps: s.requests.filter((q) => q.path === "/api/ps").length }).toEqual({ nvidiaSmiTotals: 1, ps: 1 });
   const free = (16303 - (2202 + 1822 + Math.round(11.0e9 / MIB) + 300)) * MIB;
-  expect(got.memory).toEqual({ kind: "gpu", freeBytes: free, usableBytes: free - 512 * MIB });
+  // totalBytes: the whole card, what each model's memory mark is drawn against (settings row 28)
+  expect(got.memory).toEqual({ kind: "gpu", freeBytes: free, usableBytes: free - 512 * MIB, totalBytes: 16303 * MIB });
   expect(got.reading).toEqual({ boot: "boot-1", seq: 1, measuredAt: 1_000 });
 });
 

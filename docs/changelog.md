@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-13: One memory mark for a model, against the whole card
+
+- Models and Download show what a model takes as one mark: a bar that is
+  the whole card (the computer's memory when there is no GPU), a fill for
+  this model, and the number, "6.6 / 16 GB". Green runs on the GPU, amber
+  is slower, a grey full bar is too big. The verdict's words are the mark's
+  tooltip and name. "needs 15.0 GB of memory" on a too-big row is the mark
+  now.
+- What other programs hold on the GPU is said once under each list, never
+  in a row.
+
 ## 2026-11-13: A Default context click shows the size you picked at once
 
 - In Settings › Advanced, a click on a Default context size presses it at

@@ -11,7 +11,7 @@ import { copyText } from "./copy.ts";
 import { k, noGpu } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { type TableFit, rowOf } from "./fit-table.ts";
-import { DownloadTab, DownloadingRow, DownloadingRows, usePendingDownloads } from "./ModelDownloads.tsx";
+import { DownloadTab, DownloadingRow, DownloadingRows, othersLine, othersOf, usePendingDownloads } from "./ModelDownloads.tsx";
 import { cardDefault, makeDefault, removeModelAndMoveDefault, savedDefault } from "./models-actions.ts";
 import {
   FIT_DOT,
@@ -33,6 +33,7 @@ import {
 } from "./models-rules.ts";
 import { awaitingInstall, canChat, notForChat, pickedModel } from "./pick.ts";
 import { MakerMark } from "./MakerMark.tsx";
+import { MemoryMark } from "./MemoryMark.tsx";
 import { ModelSpeed } from "./model-speed.tsx";
 import { DialogHead } from "./Panel.tsx";
 import { leaveSettings, pull } from "./session.ts";
@@ -47,16 +48,26 @@ const cannotSaveDefault = (s: State) => s.settings === NA || s.unavailable["sett
 /** The failure of the last action a control ran; cleared when the next try starts. */
 // ---------------------------------------------------------------- names and fit
 
-/** A dot carries the verdict and the words stay body colour; the exceptions give their reason on hover or focus. */
+/** In the Default menu, an option that does not run well says so in words, with its reason on hover or focus. */
+function FitWords({ report }: { report: TableFit }) {
+  const cpu = useStore((s) => noGpu(s.gpu));
+  return (
+    <span className="mp-fit x" tabIndex={0} data-tip={esc(fitReason(report, cpu))}>
+      <span className={`dot ${FIT_DOT[report.verdict]}`} />
+      <span className="mp-w">{fitLabel(report.verdict, report.source === "measured", cpu)}</span>
+    </span>
+  );
+}
+
+/** The memory mark against the card (row 28); the verdict's words and reason are its name and tip. */
 function Fit({ report }: { report: TableFit | undefined }) {
   const cpu = useStore((s) => noGpu(s.gpu));
   const tabled = useStore((s) => s.fitTable !== undefined);
   if (report === undefined) return tabled ? <span className="mp-fit none">–</span> : <span className="mp-fit none" aria-busy="true"><FitSkel w="120px" /></span>;
-  const exception = report.verdict !== "fits";
+  const words = fitLabel(report.verdict, report.source === "measured", cpu);
   return (
-    <span className={`mp-fit${exception ? " x" : ""}`} tabIndex={exception ? 0 : undefined} data-tip={exception ? esc(fitReason(report, cpu)) : undefined}>
-      <span className={`dot ${FIT_DOT[report.verdict]}`} />
-      <span className="mp-w">{fitLabel(report.verdict, report.source === "measured", cpu)}</span>
+    <span className="mp-fit">
+      <MemoryMark report={report} words={words} tip={`<b>${esc(words)}</b><br>${esc(fitReason(report, cpu))}`} />
     </span>
   );
 }
@@ -175,6 +186,7 @@ function Installed() {
   const [removing, setRemoving] = useState<{ row: InstalledRow; back: HTMLElement | null } | null>(null);
   const settingsNA = useStore(cannotSaveDefault);
   const saved = useStore(savedDefault);
+  const others = useStore(othersOf);
   // A removal that worked but could not save the next default. Ends for good once a default is saved.
   const [note, setNote] = useState<{ removed: string; text: string } | null>(null);
   if (note !== null && noteSettled(note.removed, saved)) setNote(null);
@@ -219,6 +231,8 @@ function Installed() {
         ) : <ModelRowView key={r.name} r={r} def={shownDef} saved={saved} onRemove={(back) => setRemoving({ row: r, back })} />)}
         {shown.length === 0 ? <div className="mp-none">No installed model matches “{filter.trim()}”.</div> : null}
       </div>
+      {/* what other programs hold, said once under the list and never in a row's mark (row 28) */}
+      {others ? <p className="mp-others">{othersLine(others)}</p> : null}
       <div className="mp-foot">{sizeText(total)} on disk</div>
       {removing ? (
         <RemoveDialog
@@ -511,7 +525,7 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
         <span className="mp-nmn">{r.label.text}</span>
         {variantOf(r.name)}
       </span>
-      {r.report?.verdict !== "fits" ? <Fit report={r.report} /> : <span />}
+      {r.report === undefined ? <Fit report={undefined} /> : r.report.verdict !== "fits" ? <FitWords report={r.report} /> : <span />}
       <span className="mp-osz">{sizeText(r.info.sizeBytes)}</span>
     </div>
   );

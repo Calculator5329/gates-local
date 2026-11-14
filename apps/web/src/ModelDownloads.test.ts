@@ -152,7 +152,9 @@ it("F2: once grouped, the groups stay put, except that a row whose verdict becom
   const refused = render({ ...state, fitTable: table(fit("a:1", "fits"), fit("b:1", "refuse"), fit("c:1", "spills")) });
   expect(groups(refused)).toEqual({ Recommended: ["a:1"], "Also available": ["c:1"], "Something else": [], "Too big for this computer": ["b:1"] });
   expect(refused).toMatch(/<details class="grp dl-bigs">/);
-  expect(refused).toMatch(/data-cat="b:1" data-verdict="refuse">(?:(?!data-cat)[\s\S])*needs 6\.0 GB of memory/);
+  // what it needs is its memory mark (row 28)
+  expect(refused).toMatch(/data-cat="b:1" data-verdict="refuse">(?:(?!data-cat)[\s\S])*aria-label="Too big for this computer: 6\.0 (?:of \d+ )?GB"/);
+  expect(refused).not.toMatch(/needs 6\.0 GB of memory/);
   expect(refused).not.toMatch(/data-cat="b:1" data-verdict="refuse">(?:(?!data-cat)[\s\S])*<button/);
   // it runs again: it never goes back to Recommended this visit, it is with the rest
   const back = render({ ...state, fitTable: table(fit("a:1", "fits"), fit("b:1", "fits"), fit("c:1", "spills")) });
