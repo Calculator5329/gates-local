@@ -595,7 +595,8 @@ function SourceGroup({ title, kinds, items }: { title: string; kinds: readonly S
       ))}
       <div className="src-entry" ref={entry}>
         {adding === null ? (
-          <Row label={items.length > 0 ? "Add another source" : "No folders or files yet."}>
+          // the line is what sets folders and files apart (clones sit under Clone), and it keeps this row the add form's height
+          <Row label={items.length > 0 ? "Add another source" : "No folders or files yet."} desc={<span className="src-help">The model always sees the latest version.</span>}>
             {locked ? <Na>{COMPUTER_ONLY}</Na> : action}
           </Row>
         ) : <AddRow key={adding} kind={adding} close={close} />}

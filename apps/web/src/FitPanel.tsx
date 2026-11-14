@@ -1,7 +1,7 @@
 // GPU memory in Settings › Advanced (shell.md F16, F17b, F36, F48, F63): the
 // verdict for a model at a context, the context control, and where the memory
 // goes, from the server's fit table plus gpu.status when the server has it.
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import type { ContextSize, FitReport, GpuOccupant, GpuStatus } from "@gates-local/contracts";
 import { CONTEXT_SIZES, NO_GPU_TEXT, type Verdict, decodeSpeed, describeModel, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
@@ -263,17 +263,22 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
   const [err, run] = useAct();
   const cpu = noGpu(gpu);
   const gpuNotice = gpu?.vendor === "unreadable" ? gpu.detail ?? GPU_UNREADABLE_TEXT : gpu?.vendor === "none" ? gpu.detail ?? NO_GPU_TEXT : undefined;
+  // A picked size shows at once, while the server saves it (the chat already runs at it). It stays until
+  // the server answers: then the saved default is in the store, or it goes back to it with the error.
+  const [pending, setPending] = useState<ContextSize | undefined>(undefined);
   const pick = (c: ContextSize) => {
     closeTip();
     setContext(c);
-    if (!settingsNA) void run(updateSettings({ defaultNumCtx: c }));
+    if (settingsNA) return;
+    setPending(c);
+    void run(updateSettings({ defaultNumCtx: c })).then(() => setPending((p) => (p === c ? undefined : p)));
   };
   const memory = cpu ? "memory" : "GPU memory";
   // the table's row at the size this model runs at; it says estimate until the model has really run there.
   // Details needs the GPU reading too, so the row waits for it rather than growing when it lands.
   // Judged against the card's own memory (cardFit), whatever other programs hold right now.
   const fit = gpuRaw === undefined ? undefined : cardFit(fitFor(table, model, ctx));
-  const defaultSize = saved ?? numCtx;
+  const defaultSize = pending ?? saved ?? numCtx;
   // The row below carries the verdict; this line is only for a model that cannot take the saved default.
   const limited = max !== undefined && max < CONTEXT_SIZES[CONTEXT_SIZES.length - 1]!;
   const live = max !== undefined && defaultSize > max ? runsAtMost(max) : undefined;

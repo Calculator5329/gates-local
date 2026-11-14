@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-13: A Default context click shows the size you picked at once
+
+- In Settings › Advanced, a click on a Default context size presses it at
+  once. Before, the old size stayed pressed until the save came back, and
+  the line under it said "at 32k" for a moment and then dropped it. If the
+  save fails, the saved size comes back with the reason.
+- Settings › Library: Files and folders says again that the model always
+  sees the latest version, so the empty row and the add form are one
+  height and nothing jumps when you click Add folder or Add file.
+
 ## 2026-11-13: Small-machine speed readings separate the app from test work
 
 - Limited comparisons now reserve the small box for the app server and browser.
