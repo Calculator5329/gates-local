@@ -58,7 +58,7 @@ test("with no ComfyUI set up, Image opens a pop-up instead of Image mode, the se
     const pop = page.getByRole("dialog", { name: "Images are not set up" });
     await expect(pop).toBeVisible();
     await expect(pop.getByRole("button", { name: "Open Settings" })).toBeVisible();
-    await expect(pop.getByRole("button", { name: "Check again" })).toBeVisible();
+    await expect(pop.getByTestId("image.unset.check-again")).toBeVisible();
     // no service and no unit name anywhere a person reads
     await expect(page.locator("body")).not.toContainText(/service/i);
     // the server refuses an image send: no card, no question kept; Send answers at once, and the refusal is the turn's end (chat row 32)
@@ -69,12 +69,12 @@ test("with no ComfyUI set up, Image opens a pop-up instead of Image mode, the se
     await expect.poll(() => ends).toEqual([expect.stringContaining("Images are not set up on this computer.")]);
     expect((await client.call("threads.get", { threadId })).messages).toHaveLength(before);
     // Check again while nothing answers: the pop-up stays, says so, and Image stays off
-    await pop.getByRole("button", { name: "Check again" }).click();
+    await pop.getByTestId("image.unset.check-again").click();
     await expect(pop).toContainText("Still no answer.");
     await expect(imageBtn).toHaveAttribute("aria-pressed", "false");
     // ComfyUI answers now: Check again closes the pop-up and turns Image on
     comfy.down(false);
-    await pop.getByRole("button", { name: "Check again" }).click();
+    await pop.getByTestId("image.unset.check-again").click();
     await expect(pop).toBeHidden();
     await expect(imageBtn).toHaveAttribute("aria-pressed", "true");
   } finally { client.close(); }

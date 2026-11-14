@@ -82,7 +82,7 @@ function downloads(page: Page): Download[] {
 
 async function exportRow(page: Page, title: string): Promise<void> {
   await row(page, title).click({ button: "right" });
-  await page.locator("#threadMenu").getByRole("menuitem", { name: "Export as Markdown" }).click();
+  await page.getByTestId("sidebar.thread-menu.export").click();
 }
 
 test.describe("Export as Markdown from the thread menu", () => {
@@ -113,7 +113,7 @@ test.describe("Export as Markdown from the thread menu", () => {
       t.hold.add("threads.delete");
       t.hold.add("threads.changed");
       await row(page, OTHER).click({ button: "right" });
-      await page.locator("#threadMenu").getByRole("menuitem", { name: "Delete thread" }).click();
+      await page.getByTestId("sidebar.thread-menu.delete").click();
       await expect.poll(() => t.queued("threads.delete")).toBe(1);
       expect(t.release("threads.get")).toBe(held);
       await expect.poll(() => t.pending.size).toBe(1);

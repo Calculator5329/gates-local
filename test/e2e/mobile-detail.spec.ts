@@ -12,13 +12,13 @@ const NARROW = { viewport: { width: 360, height: 780 }, isMobile: true, hasTouch
 test.use({ seed: "design", seedAt: NOW, timezoneId: "America/Chicago", locale: "en-US" });
 
 async function openDrawer(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Open threads" }).tap();
+  await page.getByTestId("chat.header.open-threads").tap();
   await expect(page.locator(".sb .sb-row").first()).toBeInViewport({ ratio: 1 });
 }
 
 const phoneSettings = async (page: Page, section?: string) => {
   await openDrawer(page);
-  await page.locator(".sb").getByRole("button", { name: "Settings" }).tap();
+  await page.getByTestId("sidebar.foot.settings").tap();
   await expect(page.locator(".set-list")).toBeVisible();
   if (section !== undefined) await listButton(page, section).tap();
 };
@@ -51,7 +51,7 @@ for (const [width, use] of [["412", PHONE], ["360", NARROW]] as const) {
       const row = page.locator('.mp-row[data-dm="gemma4:12b"]');
       await expect(row).toBeVisible();
       await expect(page.locator(".mp")).not.toContainText("Remove");
-      const more = row.getByRole("button", { name: /^More for / });
+      const more = row.getByTestId("models.row-menu.open");
       const b = await more.boundingBox();
       expect(Math.min(b?.width ?? 0, b?.height ?? 0), "⋯ size").toBeGreaterThanOrEqual(44);
       await more.tap();
@@ -74,7 +74,7 @@ test.describe("the desktop's model rows", () => {
     const row = page.locator('.mp-row[data-dm="gemma4:12b"]');
     await expect(row).toBeVisible();
     await expect(page.locator(".mp")).not.toContainText("Remove");
-    await row.getByRole("button", { name: /^More for / }).click();
-    await expect(row.getByRole("menuitem", { name: /^Remove…/ })).toBeVisible();
+    await row.getByTestId("models.row-menu.open").click();
+    await expect(row.getByTestId("models.row-menu.remove")).toBeVisible();
   });
 });

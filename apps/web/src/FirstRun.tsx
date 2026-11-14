@@ -20,12 +20,12 @@ import { FirstRunLoading, Shell } from "./FirstRunShell.tsx";
 function Cta({ label, onGo, link, onLink }: { label: string; onGo: () => void; link?: string; onLink?: () => void }) {
   return (
     <div className="fr-cta">
-      <button type="button" className="btn primary lg" onClick={onGo}>
+      <button type="button" className="btn primary lg" data-testid="first-run.cta.go" onClick={onGo}>
         {label}
         <Icon id="arrow" cls="s14" />
       </button>
       {link ? (
-        <button type="button" className="link" onClick={onLink}>
+        <button type="button" className="link" data-testid="first-run.cta.link" onClick={onLink}>
           {link}
         </button>
       ) : null}
@@ -80,7 +80,7 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
         </span>
       </div>
       {!have && entry ? <div className="fr-sub">{gb(entry.downloadBytes)} download</div> : null}
-      <button type="button" className="think" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button type="button" className="think" data-testid="first-run.model.details" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span>Details</span>
         <span className="th-x">
           <Icon id="down" />
@@ -217,7 +217,7 @@ function NoModels() {
           />
           <p className="fr-note">
             Download cancelled. You can choose another model in{" "}
-            <button type="button" className="link" onClick={() => openSettings("models", true)}>
+            <button type="button" className="link" data-testid="first-run.cancelled.open-models" onClick={() => openSettings("models", true)}>
               Settings › Models
             </button>
             .

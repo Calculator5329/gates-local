@@ -192,34 +192,34 @@ export function Picker() {
     return row.downloading === undefined ? said : `Downloading, ${row.downloading}%. ${said}`;
   };
   if (!pop?.ready) return null;
-  return <div ref={ref} id="picker" className={`model-picker${pop ? " open" : ""}${step === "context" ? " step-context" : ""}`} role="dialog" aria-label="Choose a model" aria-modal={phone} onKeyDown={keys}>
+  return <div ref={ref} id="picker" className={`model-picker${pop ? " open" : ""}${step === "context" ? " step-context" : ""}`} role="dialog" aria-label="Choose a model" aria-modal={phone} data-testid="models.picker.dialog" onKeyDown={keys}>
     <div className="pk-layout">
       <nav className="pk-rail" aria-label="Model makers" inert={phone && step === "context"}>
-        <button className="pk-fam" aria-label="Favorites" aria-pressed={group === "favorites"} data-tip="Favorites" onClick={() => { setGroup("favorites"); setQuery(""); setHighlight(null); setExpanded(false); }}><Icon id="star" /></button>
+        <button className="pk-fam" data-testid="models.picker.favorites" aria-label="Favorites" aria-pressed={group === "favorites"} data-tip="Favorites" onClick={() => { setGroup("favorites"); setQuery(""); setHighlight(null); setExpanded(false); }}><Icon id="star" /></button>
         <span className="pk-rail-line" />
-        <button className="pk-fam" aria-label="All models" aria-pressed={group === "all"} data-tip="All models" onClick={() => { setGroup("all"); setQuery(""); setHighlight(null); setExpanded(false); }}><svg className="mark"><use href="#i-mark" /></svg></button>
-        {MAKERS.filter(m => present.has(m)).map(m => <button key={m} className="pk-fam" aria-label={m} aria-pressed={group === m} data-tip={esc(m)} onClick={() => { setGroup(m); setQuery(""); setHighlight(null); setExpanded(false); input.current?.focus({ preventScroll: true }); }}><MakerMark tag={m === "Phi" ? "phi4" : m} /></button>)}
+        <button className="pk-fam" data-testid="models.picker.all" aria-label="All models" aria-pressed={group === "all"} data-tip="All models" onClick={() => { setGroup("all"); setQuery(""); setHighlight(null); setExpanded(false); }}><svg className="mark"><use href="#i-mark" /></svg></button>
+        {MAKERS.filter(m => present.has(m)).map(m => <button key={m} className="pk-fam" data-testid="models.picker.maker" aria-label={m} aria-pressed={group === m} data-tip={esc(m)} onClick={() => { setGroup(m); setQuery(""); setHighlight(null); setExpanded(false); input.current?.focus({ preventScroll: true }); }}><MakerMark tag={m === "Phi" ? "phi4" : m} /></button>)}
       </nav>
       <div className="pk-main">
-        <div className="pk-search"><Icon id="search" /><input ref={input} id="pkSearch" role="combobox" placeholder="Search models…" aria-label="Search models" aria-controls="pkList" aria-expanded={!!pop} aria-autocomplete="list" aria-activedescendant={highlight && visible.some(r => r.tag === highlight) ? `pk-opt-${visible.findIndex(r => r.tag === highlight)}` : undefined} value={query} onChange={e => { setQuery(e.target.value); setHighlight(null); closeTip(); }} onKeyDown={modelKeys} /><button className="pk-close" aria-label="Close" onClick={() => closePop(true)}><Icon id="x" /></button></div>
+        <div className="pk-search"><Icon id="search" /><input ref={input} id="pkSearch" role="combobox" placeholder="Search models…" aria-label="Search models" data-testid="models.picker.search" aria-controls="pkList" aria-expanded={!!pop} aria-autocomplete="list" aria-activedescendant={highlight && visible.some(r => r.tag === highlight) ? `pk-opt-${visible.findIndex(r => r.tag === highlight)}` : undefined} value={query} onChange={e => { setQuery(e.target.value); setHighlight(null); closeTip(); }} onKeyDown={modelKeys} /><button className="pk-close" data-testid="models.picker.close" aria-label="Close" onClick={() => closePop(true)}><Icon id="x" /></button></div>
         <div className="pk-list-scroll">
           <div id="pkList" role="listbox" aria-label="Models">
             {/* before the first table every row is busy and cannot be picked yet, with the look it keeps after; once the table is in, a row it cannot pick (no reading, or too big) is disabled, except on the phone, whose context step offers other sizes */}
-            {visible.map((r, i) => <div key={r.tag} className={`pk-r${r.tag === selected ? " sel" : ""}${r.tag === highlight ? " hl" : ""}${r.downloading !== undefined || !pickable(r.tag) ? " dis" : ""}`} id={`pk-opt-${i}`} role="option" aria-selected={highlight ? r.tag === highlight : r.tag === selected} aria-busy={r.downloading === undefined && !answered || undefined} aria-disabled={r.downloading !== undefined || !answered || (!phone && !pickable(r.tag))} data-m={r.tag} data-i={i} onMouseMove={() => setHighlight(r.tag)}>
+            {visible.map((r, i) => <div key={r.tag} className={`pk-r${r.tag === selected ? " sel" : ""}${r.tag === highlight ? " hl" : ""}${r.downloading !== undefined || !pickable(r.tag) ? " dis" : ""}`} id={`pk-opt-${i}`} role="option" data-testid="models.picker.option" aria-selected={highlight ? r.tag === highlight : r.tag === selected} aria-busy={r.downloading === undefined && !answered || undefined} aria-disabled={r.downloading !== undefined || !answered || (!phone && !pickable(r.tag))} data-m={r.tag} data-i={i} onMouseMove={() => setHighlight(r.tag)}>
               {/* a name cut by its row reads in full in a tip, and only then (data-tipt) */}
-              <button type="button" className="pk-select" tabIndex={-1} aria-label={r.label} aria-describedby={`pk-facts-${i}`} data-tipt={r.name} onClick={() => choose(r)}><MakerMark tag={r.tag} busy={r.downloading !== undefined} /><span className="pk-name pk-n"><span className="pk-nm">{r.name}</span>{r.variant ? <small className="pk-variant">{r.variant}</small> : null}{r.tag === selected ? <Icon id="check" cls="s12" /> : null}<ModelSpeed tag={r.tag} /></span><span className={`pk-v${r.v?.k ?? ""}`}>{r.downloading !== undefined ? `${r.downloading}%` : r.v ? shownNeed(r.v) : answered ? "–" : <FitSkel />}</span></button>
+              <button type="button" className="pk-select" data-testid="models.picker.select" tabIndex={-1} aria-label={r.label} aria-describedby={`pk-facts-${i}`} data-tipt={r.name} onClick={() => choose(r)}><MakerMark tag={r.tag} busy={r.downloading !== undefined} /><span className="pk-name pk-n"><span className="pk-nm">{r.name}</span>{r.variant ? <small className="pk-variant">{r.variant}</small> : null}{r.tag === selected ? <Icon id="check" cls="s12" /> : null}<ModelSpeed tag={r.tag} /></span><span className={`pk-v${r.v?.k ?? ""}`}>{r.downloading !== undefined ? `${r.downloading}%` : r.v ? shownNeed(r.v) : answered ? "–" : <FitSkel />}</span></button>
               {/* after the row's name, so the option is announced name first */}
               <span className="vh" id={`pk-facts-${i}`}>{facts(r)}</span>
-              <button className="pk-favorite" aria-label={`${favorites.includes(r.tag) ? "Unfavorite" : "Favorite"} ${r.label}`} aria-pressed={favorites.includes(r.tag)} onClick={() => toggleFavorite(r.tag)}><Icon id="star" /></button>
+              <button className="pk-favorite" data-testid="models.picker.favorite" aria-label={`${favorites.includes(r.tag) ? "Unfavorite" : "Favorite"} ${r.label}`} aria-pressed={favorites.includes(r.tag)} onClick={() => toggleFavorite(r.tag)}><Icon id="star" /></button>
             </div>)}
             {visible.length === 0 ? <div className="pk-empty">{models === undefined ? "Couldn't read installed models." : group === "favorites" && !q ? "No favorites yet. Star a model to keep it here." : "No installed model matches."}</div> : null}
           </div>
-          <button className="pk-more" disabled={filtered.length <= limit || q !== ""} onClick={() => setExpanded(!expanded)}>{expanded ? "Show less" : "Show more"}</button>
+          <button className="pk-more" data-testid="models.picker.more" disabled={filtered.length <= limit || q !== ""} onClick={() => setExpanded(!expanded)}>{expanded ? "Show less" : "Show more"}</button>
         </div>
       </div>
       <section className="pk-context" aria-label="Context length">
-        <header className="pk-context-head"><button className="pk-back" aria-label="Back to models" onClick={e => backToModels(!isTouch() || pop?.kb === true || e.detail === 0)}><Icon id="left" /></button><span>Context length</span>{/* the wide picker shows the model list beside it; the phone's context screen does not */}{phone ? <small data-tip={active ? esc(active.label) : undefined}>{active?.label}</small> : null}</header>
-        <div className="pk-context-rows" role="radiogroup" aria-label={active ? `Context length for ${active.label}` : "Context length"} onKeyDown={e => {
+        <header className="pk-context-head"><button className="pk-back" data-testid="models.picker.back" aria-label="Back to models" onClick={e => backToModels(!isTouch() || pop?.kb === true || e.detail === 0)}><Icon id="left" /></button><span>Context length</span>{/* the wide picker shows the model list beside it; the phone's context screen does not */}{phone ? <small data-tip={active ? esc(active.label) : undefined}>{active?.label}</small> : null}</header>
+        <div className="pk-context-rows" role="radiogroup" aria-label={active ? `Context length for ${active.label}` : "Context length"} data-testid="models.picker.context-sizes" onKeyDown={e => {
           if (e.key === "ArrowLeft") { e.preventDefault(); backToModels(true); return; }
           if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
           e.preventDefault(); const buttons = [...e.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")], i = buttons.findIndex(button => button === document.activeElement);
@@ -231,14 +231,14 @@ export function Picker() {
             // a size the table has no reading for cannot be picked (finish refuses it), so it says so to assistive tech too;
             // before the table a size is not picked yet either, but stays focusable with its look (native disabled greys it)
             const disabled = !active || active.downloading !== undefined || capped || (answered && !pickable(active.tag, c));
-            return <button key={c} className="pk-ctx-row" role="radio" aria-checked={c === actual} aria-disabled={disabled || !answered} aria-busy={(!capped && !answered) || undefined} tabIndex={c === actual ? 0 : -1} data-ctx={c} disabled={disabled} onClick={() => { if (active) chooseContext(active, c); }}><span>{k(c)}</span>{capped ? <small className="pk-cap">Max {k(activeMax)}</small> : <ContextMemory v={v} cpu={cpu} frees={frees} ready={answered} />}<span className="pk-context-check">{c === actual ? <Icon id="check" cls="s12" /> : null}</span></button>;
+            return <button key={c} className="pk-ctx-row" role="radio" data-testid={`models.picker.context-${c}`} aria-checked={c === actual} aria-disabled={disabled || !answered} aria-busy={(!capped && !answered) || undefined} tabIndex={c === actual ? 0 : -1} data-ctx={c} disabled={disabled} onClick={() => { if (active) chooseContext(active, c); }}><span>{k(c)}</span>{capped ? <small className="pk-cap">Max {k(activeMax)}</small> : <ContextMemory v={v} cpu={cpu} frees={frees} ready={answered} />}<span className="pk-context-check">{c === actual ? <Icon id="check" cls="s12" /> : null}</span></button>;
           })}
         </div>
         {activeMax !== undefined && activeMax < numCtx ? <p className="pk-help">Runs at {k(activeMax)}, the most this model takes.</p> : null}
-        {activeMax !== undefined && activeMax < 8192 && active ? <button className="pk-detail" disabled={!pickable(active.tag)} onClick={() => finish(active)}>Use at {k(activeMax)}</button> : null}
-        {active?.v?.k === "no" ? <button className="pk-detail" onClick={() => { closePop(); openFit(active.tag); }}>Memory details</button> : null}
+        {activeMax !== undefined && activeMax < 8192 && active ? <button className="pk-detail" data-testid="models.picker.use-max" disabled={!pickable(active.tag)} onClick={() => finish(active)}>Use at {k(activeMax)}</button> : null}
+        {active?.v?.k === "no" ? <button className="pk-detail" data-testid="models.picker.memory-details" onClick={() => { closePop(); openFit(active.tag); }}>Memory details</button> : null}
       </section>
     </div>
-    <footer className="pk-bottom">{pullNA ? <span /> : <button onClick={() => { closePop(); openSettings("models", true); }}><Icon id="download" />Download models</button>}<span>{memoryLine(table)}</span></footer>
+    <footer className="pk-bottom">{pullNA ? <span /> : <button data-testid="models.picker.download-models" onClick={() => { closePop(); openSettings("models", true); }}><Icon id="download" />Download models</button>}<span>{memoryLine(table)}</span></footer>
   </div>;
 }

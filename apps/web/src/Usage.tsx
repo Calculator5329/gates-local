@@ -81,7 +81,7 @@ function Seg<T extends string>({ value, options, onPick, label }: { value: T; op
   return (
     <span className="mini-seg" role="group" aria-label={label}>
       {options.map(([v, text]) => (
-        <button key={v} type="button" className={v === value ? "on" : ""} aria-pressed={v === value} onClick={() => onPick(v)}>
+        <button key={v} type="button" className={v === value ? "on" : ""} data-testid={`usage.option.${v}`} aria-pressed={v === value} onClick={() => onPick(v)}>
           {text}
         </button>
       ))}
@@ -155,6 +155,7 @@ export function Usage() {
       </div>
       <div
         className="us-chart"
+        data-testid="usage.chart.plot"
         tabIndex={0}
         role="group"
         aria-label="Chart"

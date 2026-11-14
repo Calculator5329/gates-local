@@ -31,9 +31,9 @@ test("desktop overlay reserves native controls, follows geometry and keeps heade
   await page.keyboard.press("Escape");
   for (const width of [900, 600]) {
     await page.setViewportSize({ width, height: 800 });
-    await page.getByRole("button", { name: "Open threads", exact: true }).click();
+    await page.getByTestId("chat.header.open-threads").click();
     await expect(page.locator(".sb")).toBeVisible();
-    await page.getByRole("button", { name: "Close threads", exact: true }).click();
+    await page.getByTestId("sidebar.drawer.close").click();
   }
   await page.evaluate(() => {
     const overlay = Reflect.get(navigator, "windowControlsOverlay") as EventTarget & { visible: boolean };

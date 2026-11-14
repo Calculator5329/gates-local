@@ -50,7 +50,7 @@ test("one click sets up images: the pop-up shows the one download, Set up images
   const plan = pop.locator("#imageSetupPlan");
   await expect(plan).toContainText("FLUX.2 Klein 4B compact");
   await expect(plan).toContainText("With the image engine (ComfyUI 0.0.0-test)");
-  const setUp = pop.getByRole("button", { name: "Set up images" });
+  const setUp = pop.getByTestId("image.unset.set-up");
   await expect(setUp).toBeVisible();
   await page.waitForTimeout(300);
   await shot(page, "#imageUnset.open", "#imageSetupPlan, #imageUnset .unset-acts .btn:first-child", info.outputPath("setup-offer.png"));

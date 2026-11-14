@@ -19,7 +19,7 @@ test("no models: download, cancel, download again, then chat", async ({ page, op
   await page.getByRole("button", { name: "Download and start" }).click();
   await expect(page.getByRole("heading", { name: "Downloading your first model" })).toBeVisible();
   await expect(page.getByRole("progressbar")).toBeVisible();
-  await page.getByRole("button", { name: "Cancel download" }).click();
+  await page.getByTestId("models.download.cancel").click();
   await expect(page.locator(".fr-note")).toContainText("Download cancelled");
   await page.getByRole("button", { name: "Download and start" }).click();
   await page.getByRole("button", { name: "Start chatting" }).click();

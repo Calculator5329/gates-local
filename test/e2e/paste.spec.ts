@@ -152,7 +152,7 @@ test.describe("vision turns", () => {
     await expect.soft(notice).toHaveCount(0);
     await page.getByRole("button", { name: "Stop", exact: true }).click();
     const thread = page.url().split("#")[1]?.replace("thread=", "");
-    await page.getByRole("complementary").getByRole("button", { name: /^New thread/ }).click();
+    await page.getByTestId("sidebar.top.new-thread").click();
     await page.locator(`.sb-row[data-thread="${thread}"]`).click();
     await expect(page.locator(".turn.a")).toHaveCount(2);
     await page.screenshot({ path: info.outputPath("follow-up.png") });

@@ -16,8 +16,9 @@ async function clickSpot(page: Page, icon: Locator): Promise<void> {
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 }
 const dialog = (page: Page) => page.getByRole("dialog", { name: "Usage" });
-const range = (page: Page, name: string) => page.getByRole("group", { name: "Range" }).getByRole("button", { name, exact: true });
-const metric = (page: Page, name: string) => page.getByRole("group", { name: "Chart" }).getByRole("button", { name, exact: true });
+/** A Range or Chart button, by its value: 24h, 7d, 30d, all; tokens, speed. */
+const range = (page: Page, value: string) => dialog(page).getByTestId(`usage.option.${value}`);
+const metric = range;
 
 interface FrameWindow extends Window { usageFrames?: string[] }
 
@@ -54,7 +55,7 @@ test.describe("a week of three models", () => {
     expect((await frames()).filter((f) => f !== "none" && f !== "complete"), "every frame of the pop-up is complete").toEqual([]);
     // Guards the owner's ruling (2026-11-13): an X in the pop-up's top right corner closes it; a model's row has no bar under its name.
     // Close is in the header row, as in Models and Settings.
-    const x = dialog(page).getByRole("button", { name: "Close" });
+    const x = dialog(page).getByTestId("ui.dialog.close");
     await expect(x).toBeVisible();
     const [xb, db] = [(await x.boundingBox())!, (await dialog(page).boundingBox())!];
     expect(db.x + db.width - (xb.x + xb.width), "Close is at the right edge").toBeLessThan(56);
@@ -69,7 +70,7 @@ test.describe("a week of three models", () => {
     await expect(page.locator(".turn").first()).toBeVisible();
     expect(await page.locator("#app").evaluate((d) => (d as HTMLElement).inert)).toBe(true);
 
-    await expect(range(page, "7 d")).toHaveAttribute("aria-pressed", "true");
+    await expect(range(page, "7d")).toHaveAttribute("aria-pressed", "true");
     const rows = page.locator(".us-rows tbody tr");
     await expect(rows).toHaveCount(3);
     await expect(page.locator(".us-chart svg g")).toHaveCount(3);
@@ -78,7 +79,7 @@ test.describe("a week of three models", () => {
     const span = await at.innerText();
     const rangeRows = await rows.allInnerTexts();
     // the pointer on a day: the heading names it and the rows show that day
-    const chart = page.locator(".us-chart");
+    const chart = page.getByTestId("usage.chart.plot");
     const box = (await chart.boundingBox())!;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await expect(at).not.toHaveText(span);
@@ -100,26 +101,26 @@ test.describe("a week of three models", () => {
     // ranges: each one re-reads nothing and changes the heading's span; the choice is remembered
     // All starts at the first day with usage, which here is the week's first day: each range differs from the one before
     let before = span;
-    for (const name of ["24 h", "30 d", "All"]) {
+    for (const name of ["24h", "30d", "all"]) {
       await range(page, name).click();
       await expect(range(page, name)).toHaveAttribute("aria-pressed", "true");
       await expect(at).not.toHaveText(before);
       before = await at.innerText();
     }
     await expect(at).toHaveText(span);
-    await range(page, "30 d").click();
+    await range(page, "30d").click();
     await page.keyboard.press("Escape");
     await expect(dialog(page)).toHaveCount(0);
     await usageIcon(page).click();
-    await expect(range(page, "30 d")).toHaveAttribute("aria-pressed", "true");
+    await expect(range(page, "30d")).toHaveAttribute("aria-pressed", "true");
     await page.reload();
     await waitReady(page);
     await usageIcon(page).click();
-    await expect(range(page, "30 d")).toHaveAttribute("aria-pressed", "true");
-    await range(page, "7 d").click();
+    await expect(range(page, "30d")).toHaveAttribute("aria-pressed", "true");
+    await range(page, "7d").click();
 
     // Speed: tok/s, a line for each model and none for Other, gaps where a model was not used, never a zero
-    await metric(page, "Speed").click();
+    await metric(page, "speed").click();
     await expect(page.locator(".us-top")).toContainText("tok/s");
     await expect(page.locator(".us-chart svg g")).toHaveCount(3);
     const paths = await page.locator(".us-chart svg g").evaluateAll((gs) => gs.map((g) => [...g.querySelectorAll("path")].map((p) => p.getAttribute("d") ?? "").join("")));
@@ -128,7 +129,7 @@ test.describe("a week of three models", () => {
     const speeds = await rows.locator("td:nth-child(4)").allInnerTexts();
     for (const s of speeds) expect(s).toMatch(/^\d+$/);
     await expect(rows.first().locator("td:nth-child(4)")).toHaveAttribute("data-tip", /^Reads prompts at [\d,]+ tok\/s$/);
-    await metric(page, "Tokens").click();
+    await metric(page, "tokens").click();
 
     await page.keyboard.press("Escape");
     await expect(dialog(page)).toHaveCount(0);

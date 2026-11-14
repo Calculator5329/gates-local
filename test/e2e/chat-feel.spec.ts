@@ -157,7 +157,7 @@ test("no runtime dot or words on the sidebar's Settings icon while the runtime i
   await open();
   await waitReady(page);
   await expect(page.locator(".sb-foot")).toBeVisible();
-  const gear = page.locator(".sb-foot").getByRole("button", { name: "Settings", exact: true });
+  const gear = page.getByTestId("sidebar.foot.settings");
   await expect(gear).toHaveAttribute("data-tip", "Settings · Ctrl ,");
   await expect(gear.locator(".fdot")).toHaveCount(0);
   await expect(page.locator(".sb-foot")).not.toContainText("Ollama 0.40.4");
@@ -175,7 +175,7 @@ test.describe("runtime down", () => {
   // Guards the footer's Settings icon showing runtime state only when it is true (down half).
   test("the Settings icon shows a dot and the runtime's words when the runtime needs the user, and opens Settings > Runtime", async ({ page, open }) => {
     await open();
-    const gear = page.locator(".sb-foot").getByRole("button", { name: /^Settings/ });
+    const gear = page.getByTestId("sidebar.foot.settings");
     await expect(gear.locator(".fdot.red")).toBeVisible();
     await expect(gear).toHaveAccessibleName("Settings · Port 5288 · busy");
     await expect(gear).toHaveAttribute("data-tip", /^<b>Port 5288 · busy<\/b>/);

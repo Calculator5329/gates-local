@@ -164,7 +164,7 @@ it("F2: once grouped, the groups stay put, except that a row whose verdict becom
 it("the download's size is its button, and a running download fills that button with an × beside it (row 18)", () => {
   const a = entry("a:1", "A", true, "fits");
   const idle = render(base({ catalog: [a], fitTable: table(fit("a:1", "fits")) }));
-  expect(idle).toMatch(/<button type="button" class="dl-btn" aria-label="Download 5\.0 GB">/);
+  expect(idle).toMatch(/<button type="button" class="dl-btn" data-testid="models.download.start" aria-label="Download 5\.0 GB">/);
   // the × box is there, hidden, before any download
   expect(idle).toContain('<span class="dl-x off" aria-hidden="true"></span>');
   const p = { name: "a:1", state: "downloading", completedBytes: 2 * GIB, totalBytes: 5 * GIB, bytesPerSecond: 50e6 };

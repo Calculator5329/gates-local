@@ -136,13 +136,13 @@ const lightName = (s: Shot) => s.light ?? s.name.replace(/^(S-\d+)-/, "$1-light-
 const models = settings("Models");
 const kebab = (tag: string) => async (p: Page) => {
   await models(p);
-  await p.locator(`.mp-row[data-dm="${tag}"]`).getByRole("button", { name: /^More for / }).click();
+  await p.locator(`.mp-row[data-dm="${tag}"]`).getByTestId("models.row-menu.open").click();
 };
 /** Slow the fake's pulls so a download is still running when the shot is taken. */
 const slowPulls = () => stack.scenario("models", { pullTickMs: 1000, pullChunkBytes: 400 * 1024 ** 2 });
 const downloadTab = async (p: Page) => {
   await models(p);
-  await p.getByRole("tab", { name: /^Download/ }).click();
+  await p.getByTestId("models.tabs.download").click();
 };
 const runningDownload = async (p: Page) => {
   await slowPulls();
@@ -195,7 +195,7 @@ const MODELS_SHOTS: readonly ModelsShot[] = [
     theme: "dark",
     act: async (p) => {
       await models(p);
-      await p.getByRole("button", { name: /^Default for new chats:/ }).click();
+      await p.getByTestId("models.default.select").click();
     },
   },
 ];
@@ -327,7 +327,7 @@ interface MobileShot extends Omit<Shot, "light" | "seed"> {
 const tap = (sel: string) => (p: Page) => p.locator(sel).first().tap();
 const isPhoneWidth = (p: Page) => (p.viewportSize()?.width ?? 0) <= 640;
 const drawer = async (p: Page) => {
-  await p.getByRole("button", { name: "Open threads" }).tap();
+  await p.getByTestId("chat.header.open-threads").tap();
   await expect(p.locator(".sb .sb-row").first()).toBeInViewport({ ratio: 1 });
 };
 const threadMenu = async (p: Page) => {
@@ -336,14 +336,14 @@ const threadMenu = async (p: Page) => {
 };
 const phoneSettings = (section?: string) => async (p: Page) => {
   await drawer(p);
-  await p.locator(".sb").getByRole("button", { name: "Settings" }).tap();
+  await p.getByTestId("sidebar.foot.settings").tap();
   if (section === undefined) return;
   if (isPhoneWidth(p)) {
     await listButton(p, section).tap();
     return;
   }
   // a tablet's sections are in the drawer
-  await p.getByRole("button", { name: "Open threads" }).tap();
+  await p.getByTestId("chat.header.open-threads").tap();
   await navButton(p, section).tap();
 };
 

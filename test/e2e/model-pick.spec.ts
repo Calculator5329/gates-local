@@ -75,7 +75,7 @@ test("the picker never lists the embedding model and is a connected combobox and
   await expect(picker.locator(`[data-m="${EMBED}"]`)).toHaveCount(0);
   await expect(picker).not.toContainText(/nomic/i);
 
-  const box = page.getByRole("combobox", { name: "Search models" });
+  const box = page.getByTestId("models.picker.search");
   await expect(box).toHaveAttribute("aria-expanded", "true");
   await expect(box).toHaveAttribute("aria-controls", "pkList");
   const list = page.locator("#pkList");
@@ -163,15 +163,15 @@ test("Settings lists the embedding model as not for chat, with Remove and no def
   await expect(row).toBeVisible();
   await expect(row.locator(".mp-fitc")).toContainText("Embedding model, not for chat");
   await expect(row.getByRole("button")).toHaveCount(1);
-  await row.getByRole("button", { name: /^More for / }).click();
+  await row.getByTestId("models.row-menu.open").click();
   const menu = page.getByRole("menu");
-  await expect(menu.getByRole("menuitem", { name: /^Remove…/ })).toBeVisible();
-  await expect(menu.getByRole("menuitem", { name: "Use as default" })).toHaveCount(0);
+  await expect(menu.getByTestId("models.row-menu.remove")).toBeVisible();
+  await expect(menu.getByTestId("models.row-menu.make-default")).toHaveCount(0);
   await expect(page.locator(`.mp-row[data-dm="${EMBED}"]`)).toHaveCount(0);
   // the three chat models are rows, the 27b among them (it won't run here, so it is dimmed)
   await expect(page.locator(".mp-row[data-dm]")).toHaveCount(3);
   // nor can the Default card choose it: two choices, and the 27b disabled with its reason
-  await page.getByRole("button", { name: /^Default for new chats:/ }).click();
+  await page.getByTestId("models.default.select").click();
   const options = page.getByRole("listbox", { name: "Installed chat models" }).getByRole("option");
   await expect(options).toHaveCount(3);
   await expect(options.filter({ hasText: EMBED.split(":")[0] ?? EMBED })).toHaveCount(0);

@@ -11,7 +11,7 @@ test("returning to a live reply shows the already received prefix on the first c
   await start(page, "alpha");
   await expect(page.locator(".turn.a .md p")).toHaveCount(3);
   const received = Number(await page.locator(".turn.a").getAttribute("data-received"));
-  await page.getByRole("button", { name: "New thread" }).click();
+  await page.getByTestId("sidebar.top.new-thread").click();
   await start(page, "beta");
   await expect(page.locator(".turn.a .md p")).toHaveCount(3);
   const first = await page.locator(".sb-row", { hasText: "alpha" }).locator(".sb-thread").evaluate(button => new Promise<number>(resolve => {

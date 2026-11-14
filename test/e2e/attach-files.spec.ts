@@ -55,7 +55,7 @@ test("a dropped text file is read by the model by its name, survives a reload, a
     await expect(page.getByTestId("chat.user-message.turn").getByTestId("chat.attachment.file")).toContainText("notes.txt");
 
     await page.locator(".sb-row.on").click({ button: "right" });
-    await page.locator("#threadMenu").getByRole("menuitem", { name: "Delete thread" }).click();
+    await page.getByTestId("sidebar.thread-menu.delete").click();
     await expect.poll(async () => (await rpc.call("threads.list", {})).some(t => t.id === threadId)).toBe(false);
     // the server's copy is gone: a message naming it is refused, not sent; Send answers at once, and the refusal is the turn's end (chat row 32)
     const other = await rpc.call("threads.create", {});

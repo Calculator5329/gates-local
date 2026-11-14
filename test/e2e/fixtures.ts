@@ -242,7 +242,7 @@ export async function openModels(page: Page): Promise<void> {
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog", { name: "Settings" })).toHaveCount(0);
   }
-  await page.locator(".sb-foot").getByRole("button", { name: /^Models/ }).click();
+  await page.getByTestId("sidebar.foot.models").click();
   await expect(page.getByRole("dialog", { name: "Models" }).locator(".mp")).toBeVisible();
 }
 

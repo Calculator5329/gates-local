@@ -26,7 +26,7 @@ export function UpdateNoteView({ result, onDismiss }: { result: UpdateResult; on
           </div>
         ) : null}
         <div className="ba">
-          <button type="button" className="btn outline" onClick={onDismiss}>
+          <button type="button" className="btn outline" data-testid="ui.update-note.dismiss" onClick={onDismiss}>
             Dismiss
           </button>
         </div>

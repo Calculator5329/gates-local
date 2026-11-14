@@ -1,5 +1,59 @@
 # Changelog
 
+## 2026-11-13: First-run controls carry stable test names
+
+- The first-run screen's main button and its link (`first-run.cta.go`,
+  `first-run.cta.link`), a model's Details, the link to Settings › Models
+  after a cancelled download, and Reload on a page that could not load
+  carry `data-testid` names. The first-run browser tests keep reading the
+  main button by its words, since "Download and start" and "Start
+  chatting" are one button in two states. Its Cancel download is the
+  Models download button and is clicked by that name. Nothing changes on
+  screen.
+
+## 2026-11-13: Image and Pictures controls carry stable test names
+
+- The image model picker (its Defaults and Other models menus, rows,
+  Download and Stop, sizes, Back and Close), the Images-not-set-up
+  pop-up, and Pictures (the grid, the large view, Again, Copy, Save, Edit
+  prompt, Open thread and search) carry `data-testid` names such as
+  `image.picker.other` and `pictures.actions.again`. The browser tests
+  click these by name. Lookups whose label says what a button will do
+  next (Check again or Start ComfyUI, Open Settings) keep that label.
+  Nothing changes on screen.
+
+## 2026-11-13: Usage and pop-up controls carry stable test names
+
+- The Usage range and chart buttons (`usage.option.7d`,
+  `usage.option.speed`) and its chart, the pop-up's dim layer, panel and
+  Close (`ui.dialog.close`, shared by Models, Usage and Settings), a phone
+  sheet's Close (`ui.sheet.close`) and the Library's Turn on Tools carry
+  `data-testid` names. The browser tests click these by name. Nothing
+  changes on screen.
+
+## 2026-11-13: Models controls carry stable test names
+
+- The Models tabs, the row menu and its Remove dialog, the default
+  model select, the download buttons and the custom model field, the
+  model picker (search, makers, favorites, context sizes, Download
+  models, Close) and the fit panel carry `data-testid` names such as
+  `models.tabs.download` and `models.row-menu.open`. The browser tests
+  click these by name. Lookups that read a download's size from its
+  button label keep that label. Nothing changes on screen.
+
+## 2026-11-13: Sidebar and header controls carry stable test names
+
+- The thread list, its search, the thread menu, the drawer, the footer
+  buttons (Settings, Models, Usage, Pictures, Update) and the update ask,
+  and the chat header's Open threads, title and New thread carry
+  `data-testid` names such as `sidebar.foot.settings` and
+  `chat.header.open-threads`. The browser tests click these by name. The
+  footer button takes its name whole at each call site so the registry
+  reads it there. The failed-update note's Dismiss is
+  `ui.update-note.dismiss`, since that note shows in the main pane and in
+  Settings. The start-up check that reads the Settings gear by its exact
+  label keeps that label lookup. Nothing changes on screen.
+
 ## 2026-11-13: Stop also stops the reading
 
 - In talk mode, Stop on a reply silences it at once, including the

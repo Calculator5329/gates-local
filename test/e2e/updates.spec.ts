@@ -55,7 +55,7 @@ test("AV-05 success stays silent; failure spans the Settings top and dismisses w
   const before = await geometry();
   update.notice();
   await expect(page.locator(".upd-note")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Dismiss", exact: true })).toHaveCount(0);
+  await expect(page.getByTestId("ui.update-note.dismiss")).toHaveCount(0);
   expect(await geometry(), "AV-05 successful update changed Settings width").toEqual(before);
   update.failure();
   const notice = page.getByRole("alert").filter({ hasText: "The update did not finish" });
@@ -66,7 +66,7 @@ test("AV-05 success stays silent; failure spans the Settings top and dismisses w
   const contentBox = await page.locator(".set-in").boundingBox();
   if (!bannerBox || !contentBox) throw new Error("No Settings notice geometry");
   expect(bannerBox.y + bannerBox.height).toBeLessThanOrEqual(contentBox.y);
-  await notice.getByRole("button", { name: "Dismiss", exact: true }).click();
+  await notice.getByTestId("ui.update-note.dismiss").click();
   await expect(notice).toHaveCount(0);
   expect(await geometry(), "AV-05 dismissing changed Settings width").toEqual(before);
 });
@@ -88,7 +88,7 @@ test("an update turns the footer's update icon to Update without moving or resiz
   expect(before.every((box) => box !== null)).toBe(true);
   expect(after).toEqual(before);
   await button.click();
-  await page.getByRole("group", { name: "Confirm update" }).getByRole("button", { name: "Update and restart" }).click();
+  await page.getByRole("group", { name: "Confirm update" }).getByTestId("sidebar.update.go").click();
   await expect(page.locator("html")).toHaveAttribute("data-update-started", "yes");
   await expect(page.locator(".sb-foot .upd")).toBeDisabled();
 });
@@ -118,7 +118,7 @@ test("a reply running: one ask, in the footer's panel, that names the reply; can
   await expect(page.locator(".writing")).toBeVisible();
   await expect(page.locator("html")).not.toHaveAttribute("data-update-started", "yes");
   await button.click();
-  await ask.getByRole("button", { name: "Update and restart" }).click();
+  await ask.getByTestId("sidebar.update.go").click();
   await expect(page.locator("html")).toHaveAttribute("data-update-started", "yes");
   expect(dialogs, "one ask: no native prompt after the panel").toEqual([]);
 });

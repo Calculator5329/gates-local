@@ -282,8 +282,8 @@ export function ImagePicker() {
 
   /** A row that runs now: picked by a press. */
   function readyRow(p: Row, style?: string) {
-    return <div key={p.id} className={`pk-r${style === undefined ? "" : " style"}${p.id === chosen?.preset.id ? " sel" : ""}${p.id === active?.id ? " hl" : ""}`} role="option" aria-selected={p.id === chosen?.preset.id} data-preset={p.id} onMouseMove={() => setHighlight(p.id)}>
-      <button type="button" className="pk-select" tabIndex={p.id === (chosen?.preset.id ?? firstReady) ? 0 : -1} aria-label={style ?? p.name} onClick={() => choose(p)}>{rowLabel(p, style)}</button>
+    return <div key={p.id} className={`pk-r${style === undefined ? "" : " style"}${p.id === chosen?.preset.id ? " sel" : ""}${p.id === active?.id ? " hl" : ""}`} role="option" data-testid="image.picker.option" aria-selected={p.id === chosen?.preset.id} data-preset={p.id} onMouseMove={() => setHighlight(p.id)}>
+      <button type="button" className="pk-select" data-testid="image.picker.select" tabIndex={p.id === (chosen?.preset.id ?? firstReady) ? 0 : -1} aria-label={style ?? p.name} onClick={() => choose(p)}>{rowLabel(p, style)}</button>
     </div>;
   }
 
@@ -296,12 +296,12 @@ export function ImagePicker() {
     const waits = !running && downloading && (p.needs?.files ?? []).some((f) => fetching.has(baseName(f)));
     const shownDownload = running ? mine : waits ? download : undefined;
     const reason = rowError?.id === p.id ? rowError.message : stopped ? mine.message ?? "The download stopped." : needsText(p);
-    return <div key={p.id} className={`pk-r off${style === undefined ? "" : " style"}${p.id === active?.id ? " hl" : ""}`} role="option" aria-selected={false} data-preset={p.id} onMouseMove={() => setHighlight(p.id)}>
-      <button type="button" className="pk-select" tabIndex={-1} aria-disabled="true" aria-label={style ?? p.name} aria-describedby={`pk-why-${p.id}`} onClick={() => choose(p)}>{rowLabel(p, style)}</button>
+    return <div key={p.id} className={`pk-r off${style === undefined ? "" : " style"}${p.id === active?.id ? " hl" : ""}`} role="option" data-testid="image.picker.unready-option" aria-selected={false} data-preset={p.id} onMouseMove={() => setHighlight(p.id)}>
+      <button type="button" className="pk-select" data-testid="image.picker.unready-select" tabIndex={-1} aria-disabled="true" aria-label={style ?? p.name} aria-describedby={`pk-why-${p.id}`} onClick={() => choose(p)}>{rowLabel(p, style)}</button>
       {running
-        ? canStop ? <button type="button" className="pk-act" aria-label={`Stop downloading ${p.name}`} data-tip="Stop" onClick={() => void stopSetup(p)}><Icon id="x" /></button> : null
+        ? canStop ? <button type="button" className="pk-act" data-testid="image.picker.stop-download" aria-label={`Stop downloading ${p.name}`} data-tip="Stop" onClick={() => void stopSetup(p)}><Icon id="x" /></button> : null
         : p.needs?.download === true && canDownload && !waits
-          ? <button type="button" className="pk-act" aria-label={`Download ${p.name}`} data-tip={stopped ? "Download again" : "Download"} disabled={downloading} onClick={() => void fetchSetup(p)}><Icon id="download" /></button>
+          ? <button type="button" className="pk-act" data-testid="image.picker.download" aria-label={`Download ${p.name}`} data-tip={stopped ? "Download again" : "Download"} disabled={downloading} onClick={() => void fetchSetup(p)}><Icon id="download" /></button>
           : null}
       {shownDownload !== undefined
         ? <div className="pk-why" id={`pk-why-${p.id}`}><Downloading d={shownDownload} name={p.name} /></div>
@@ -311,7 +311,7 @@ export function ImagePicker() {
 
   if (pop === null) return null;
   const free = gpu && gpu !== NA ? gpu.freeBytes : undefined;
-  const close = <button className="pk-close" aria-label="Close" onClick={() => closePop(true)}><Icon id="x" /></button>;
+  const close = <button className="pk-close" data-testid="image.picker.close" aria-label="Close" onClick={() => closePop(true)}><Icon id="x" /></button>;
   if (listed.length === 0) {
     const empty = known === undefined ? (presets === NA ? "Image models are not available in this build." : "Reading the image models…")
       : known.readAt === undefined ? "Image models show here once ComfyUI has run."
@@ -321,19 +321,19 @@ export function ImagePicker() {
     // a start keeps saying so while ComfyUI comes up, though its state is then "starting", not "stopped"
     const as = state === "stopped" ? "start" : "check";
     const label = starting === "start" || state === "starting" ? "Starting ComfyUI…" : starting === "check" ? "Checking…" : as === "start" ? "Start ComfyUI" : "Check again";
-    return <div ref={ref} id="imagePicker" className="model-picker image-picker open blank" role="dialog" aria-label="Choose an image model" aria-modal={phone} onKeyDown={keys}>
+    return <div ref={ref} id="imagePicker" className="model-picker image-picker open blank" role="dialog" data-testid="image.picker.blank" aria-label="Choose an image model" aria-modal={phone} onKeyDown={keys}>
       <div className="pk-blank">
         <p>{empty}{startError === null ? null : <span className="pk-blank-error" role="status">{startError}</span>}</p>
-        {known === undefined || !canStart ? null : <button type="button" className="btn outline" disabled={starting !== null || state === "starting"} onClick={() => void start(as)}>{label}</button>}
+        {known === undefined || !canStart ? null : <button type="button" className="btn outline" data-testid="image.picker.start-comfy" disabled={starting !== null || state === "starting"} onClick={() => void start(as)}>{label}</button>}
         {close}
       </div>
     </div>;
   }
-  return <div ref={ref} id="imagePicker" className={`model-picker image-picker open${step === "sizes" ? " step-context" : ""}`} role="dialog" aria-label="Choose an image model" aria-modal={phone} aria-busy={saving || undefined} onKeyDown={keys}>
+  return <div ref={ref} id="imagePicker" className={`model-picker image-picker open${step === "sizes" ? " step-context" : ""}`} role="dialog" data-testid="image.picker.dialog" aria-label="Choose an image model" aria-modal={phone} aria-busy={saving || undefined} onKeyDown={keys}>
     <div className="pk-layout">
       <nav className="pk-rail" aria-label="Image model menus" inert={phone && step === "sizes"}>
-        <button className="pk-fam" aria-label="Defaults" data-tip="Defaults" aria-pressed={shown === "defaults"} onClick={() => switchTo("defaults")}><Icon id="star" /></button>
-        <button className="pk-fam" aria-label="Other models" data-tip="Other models" aria-pressed={shown === "other"} onClick={() => switchTo("other")}><Icon id="box" /></button>
+        <button className="pk-fam" data-testid="image.picker.defaults" aria-label="Defaults" data-tip="Defaults" aria-pressed={shown === "defaults"} onClick={() => switchTo("defaults")}><Icon id="star" /></button>
+        <button className="pk-fam" data-testid="image.picker.other" aria-label="Other models" data-tip="Other models" aria-pressed={shown === "other"} onClick={() => switchTo("other")}><Icon id="box" /></button>
       </nav>
       <div className="pk-main" inert={phone && step === "sizes"}>
         {/* a phone's Close; the button that opened the picker already names it */}
@@ -341,10 +341,10 @@ export function ImagePicker() {
         <div className="pk-list-scroll">
           {/* both menus in one cell, the other hidden: the list is as tall on either */}
           <div className="pk-menus">
-            <div className="pk-menu" role="listbox" aria-label="Defaults" inert={shown !== "defaults"} onKeyDown={listKeys}>
+            <div className="pk-menu" role="listbox" data-testid="image.picker.defaults-list" aria-label="Defaults" inert={shown !== "defaults"} onKeyDown={listKeys}>
               {defaults.length === 0 ? <p className="pk-empty">No style has a setup here yet.</p> : defaults.map(({ style, row }) => row.ready ? readyRow(row, style) : offRow(row, style))}
             </div>
-            <div className="pk-menu" role="listbox" aria-label="Other models" inert={shown !== "other"} onKeyDown={listKeys}>
+            <div className="pk-menu" role="listbox" data-testid="image.picker.other-list" aria-label="Other models" inert={shown !== "other"} onKeyDown={listKeys}>
               {others.length === 0 ? <p className="pk-empty">Every setup here is a default.</p> : others.map((g) => <div key={g.name} role="group" aria-label={g.name || undefined}>
                 {g.name === "" ? null : <div className="pk-group" aria-hidden="true">{g.name}</div>}
                 {g.rows.map((p) => p.ready ? readyRow(p) : offRow(p))}
@@ -354,8 +354,8 @@ export function ImagePicker() {
         </div>
       </div>
       <section className="pk-context" aria-label="Size" inert={phone && step !== "sizes"}>
-        <header className="pk-context-head"><button className="pk-back" aria-label="Back to image models" onClick={back}><Icon id="left" /></button><span>{active?.name}</span>{same === undefined ? null : <small>{gb(same)}</small>}</header>
-        <div className="pk-context-rows" role="radiogroup" aria-label="Size" onKeyDown={(e) => {
+        <header className="pk-context-head"><button className="pk-back" data-testid="image.picker.back" aria-label="Back to image models" onClick={back}><Icon id="left" /></button><span>{active?.name}</span>{same === undefined ? null : <small>{gb(same)}</small>}</header>
+        <div className="pk-context-rows" role="radiogroup" aria-label="Size" data-testid="image.picker.sizes" onKeyDown={(e) => {
           if (e.key === "ArrowLeft") { e.preventDefault(); back(); return; }
           if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
           e.preventDefault();
@@ -365,7 +365,7 @@ export function ImagePicker() {
           {active?.sizes.map((z) => {
             const on = active.id === chosen?.preset.id && z.width === width && z.height === height;
             const fit = imageFit(z.bytes, gpu);
-            return <button key={`${z.width}x${z.height}`} className="pk-ctx-row" role="radio" aria-checked={on} tabIndex={on ? 0 : -1} disabled={!active.ready} data-size={`${z.width}x${z.height}`} data-tip={fitWord(fitKind(z.bytes, fit, free), fit, cpu)} onClick={() => void pick({ preset: active.id, width: z.width, height: z.height })}>
+            return <button key={`${z.width}x${z.height}`} className="pk-ctx-row" role="radio" data-testid={`image.picker.size-${z.width}x${z.height}`} aria-checked={on} tabIndex={on ? 0 : -1} disabled={!active.ready} data-size={`${z.width}x${z.height}`} data-tip={fitWord(fitKind(z.bytes, fit, free), fit, cpu)} onClick={() => void pick({ preset: active.id, width: z.width, height: z.height })}>
               <span>{sizeLabel(z.width, z.height)}</span>
               <SizeMemory bytes={z.bytes} fit={fit} free={free} cpu={cpu} number={same === undefined} />
               <span className="pk-context-check">{on ? <Icon id="check" cls="s12" /> : null}</span>

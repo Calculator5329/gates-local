@@ -74,10 +74,10 @@ test("pictures: the grid, a picture in the inspector, Again in its thread, and t
   }
 
   // open from the footer: the grid shows all five under Today, and the newest is picked
-  await page.getByRole("button", { name: "Pictures", exact: true }).click();
+  await page.getByTestId("sidebar.foot.pictures").click();
   const pics = page.locator(".pics");
   await expect(pics.getByRole("heading", { name: /Pictures/ })).toContainText("5");
-  const tiles = pics.locator(".pics-tile");
+  const tiles = pics.getByTestId("pictures.grid.tile");
   await expect(tiles).toHaveCount(5);
   await expect(pics.locator(".pics-day").first()).toHaveText("Today");
   await expect(tiles.first()).toHaveAttribute("aria-pressed", "true");
@@ -96,7 +96,7 @@ test("pictures: the grid, a picture in the inspector, Again in its thread, and t
   await theme(page, "dark");
 
   // Again: its thread opens and a fourth card, for the same prompt, finishes there
-  await insp.getByRole("button", { name: "Again" }).click();
+  await insp.getByTestId("pictures.actions.again").click();
   await expect(page).toHaveURL(new RegExp(`#thread=${ships}$`));
   await expect(page.locator(".pics")).toHaveCount(0);
   const cards = page.locator("[data-image-job]");
@@ -108,7 +108,7 @@ test("pictures: the grid, a picture in the inspector, Again in its thread, and t
   await page.keyboard.press("Control+Shift+P");
   await expect(pics.getByRole("heading", { name: /Pictures/ })).toContainText("6");
   const sheet = pics.locator(".pics-insp");
-  await expect(sheet.getByRole("button", { name: "Again" })).toBeVisible();
+  await expect(sheet.getByTestId("pictures.actions.again")).toBeVisible();
   const box = await sheet.boundingBox();
   expect(box && Math.round(box.y + box.height)).toBe(844);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);

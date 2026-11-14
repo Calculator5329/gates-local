@@ -645,7 +645,7 @@ function Library() {
         {tools ? undefined : (
           <>
             Tools are off, so no chat reads these.{" "}
-            <button type="button" className="link" onClick={() => openSettings("tools")}>Turn on Tools</button>
+            <button type="button" className="link" data-testid="settings.library.turn-on-tools" onClick={() => openSettings("tools")}>Turn on Tools</button>
           </>
         )}
       </Head>

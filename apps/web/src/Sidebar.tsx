@@ -287,7 +287,7 @@ function ThreadList() {
               onPointerLeave={() => preloadThread(null)}
               onContextMenu={(e) => rowMenuClick(e, t.id)}
             >
-              <button type="button" className="sb-thread" onClick={() => closeDrawer(() => openThread(t.id), true)} onKeyDown={(e) => rowMenuKey(e, t.id)}
+              <button type="button" className="sb-thread" data-testid="sidebar.thread.open" onClick={() => closeDrawer(() => openThread(t.id), true)} onKeyDown={(e) => rowMenuKey(e, t.id)}
                 // a keyboard pause on a row reads it ahead, as a mouse pause does
                 onFocus={(e) => { if (e.currentTarget.matches(":focus-visible")) preloadThread(t.id); }}
                 onBlur={() => preloadThread(null)}>
@@ -299,6 +299,7 @@ function ThreadList() {
               <button
                 type="button"
                 className="ibtn xs sb-menu"
+                data-testid="sidebar.thread.menu"
                 aria-label={`Thread actions: ${t.title}`}
                 aria-haspopup="menu"
                 aria-expanded={menuFor === t.id}
@@ -326,6 +327,7 @@ function ChatNav() {
           <Icon id="search" />
           <input
             id="searchIn"
+            data-testid="sidebar.search.input"
             type="text"
             placeholder="Search"
             aria-label="Search threads"
@@ -348,6 +350,7 @@ function ChatNav() {
             <button
               type="button"
               className="sb-clear"
+              data-testid="sidebar.search.clear"
               aria-label="Clear search"
               data-tip="Clear · Esc"
               // the field keeps its focus through the press
@@ -362,7 +365,7 @@ function ChatNav() {
           )}
         </label>
         <div className="sb-tools">
-          <button type="button" className="ibtn" aria-label="New thread" data-tip="New thread · Ctrl N" onClick={goNew}>
+          <button type="button" className="ibtn" data-testid="sidebar.top.new-thread" aria-label="New thread" data-tip="New thread · Ctrl N" onClick={goNew}>
             <Icon id="pen" />
           </button>
         </div>
@@ -423,6 +426,7 @@ function SettingsButton() {
   const g = settingsIcon(info && { text: plain(info.text), tip: info.tip, dot: info.dot });
   return (
     <FootButton
+      testId="sidebar.foot.settings"
       icon="gear"
       label={g.label}
       tip={g.tip}
@@ -467,6 +471,7 @@ function ModelsButton() {
   const m = modelsIcon(all.filter((p) => p.state !== "error" || !seenFailures.has(p)), (tag) => describeModel(tag, catalog).name, burst.current);
   return (
     <FootButton
+      testId="sidebar.foot.models"
       icon="bot"
       label={m.label}
       tip={m.tip}
@@ -483,6 +488,7 @@ function UsageButton() {
   const open = useStore((s) => s.panel === "usage");
   return (
     <FootButton
+      testId="sidebar.foot.usage"
       icon="bars"
       label="Usage"
       tip="Usage"
@@ -499,6 +505,7 @@ function PicturesButton() {
   const open = useStore((s) => s.view === "pictures");
   return (
     <FootButton
+      testId="sidebar.foot.pictures"
       icon="image"
       label="Pictures"
       tip="Pictures"
@@ -522,7 +529,7 @@ export function Sidebar() {
           <use href="#i-mark" />
         </svg>
         <span className="wordmark">Gates Local</span>
-        <button type="button" className="ibtn sb-x" aria-label="Close threads" onClick={() => { cancelPendingSettings(); closeDrawer(); }}>
+        <button type="button" className="ibtn sb-x" data-testid="sidebar.drawer.close" aria-label="Close threads" onClick={() => { cancelPendingSettings(); closeDrawer(); }}>
           <Icon id="x" />
         </button>
       </div>

@@ -42,7 +42,7 @@ async function firstChatAnswering(page: Page): Promise<string> {
 
 /** The second chat, on the model whose load must stop the first. */
 async function secondChatReady(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "New thread" }).click();
+  await page.getByTestId("sidebar.top.new-thread").click();
   await pickModel(page, "qwen", "qwen3.5:9b");
   await page.locator("#ta").fill("A question for the other model");
 }
@@ -106,7 +106,7 @@ test("'Don't show this again' survives a reload and later sends stop the other c
   await waitReady(page);
   await expect.poll(() => page.evaluate(() => localStorage.getItem("gates-local.stop-others-ok"))).toBe("1");
 
-  await page.getByRole("button", { name: "New thread" }).click();
+  await page.getByTestId("sidebar.top.new-thread").click();
   const victim = await firstChatAnswering(page);
   const before = await runtimeState();
   expect(before.loaded.map((model) => model.name)).toEqual(["gemma4:12b"]);

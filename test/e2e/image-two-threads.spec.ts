@@ -51,7 +51,7 @@ test("A sends the default without a pick, then B picks: A's next send runs what 
     await run(0);
     expect(weights(0)).toBe("flux-2-klein-4b-fp8.safetensors");
     // B picks Z-Image and sends
-    await page.getByRole("button", { name: "New thread" }).click();
+    await page.getByTestId("sidebar.top.new-thread").click();
     await button.click();
     await pickRow(page, X.preset);
     await expect(button).toContainText("Z-Image");
@@ -143,7 +143,7 @@ test("two threads: sequential models, an impatient send, and a retry keep their 
       observations["A initial composer"] = await button.innerText();
       observations["A initial card words"] = await cards.first().innerText();
       await shot("a-initial-card-composer");
-      await page.getByRole("button", { name: "New thread" }).click();
+      await page.getByTestId("sidebar.top.new-thread").click();
       await pick(Y, "Klein 4B");
       await sendMessage(page, "IPT B mountains");
       await started(2);

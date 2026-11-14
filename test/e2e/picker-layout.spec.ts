@@ -79,14 +79,14 @@ test("approved picker keeps its columns fixed through hover, filtering and empty
 test("Download models reaches the real download tab and can start a pull", async ({ page, open }) => {
   await open(); await waitReady(page);
   await page.locator("#modelBtn").click();
-  await page.locator("#picker").getByRole("button", { name: "Download models", exact: true }).click();
+  await page.getByTestId("models.picker.download-models").click();
   await expect(page.locator("#picker")).toBeHidden();
-  await expect(page.getByRole("tab", { name: /^Download/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("models.tabs.download")).toHaveAttribute("aria-selected", "true");
   const row = page.locator('.dlrow[data-cat="qwen3.5:4b"]');
   const download = row.getByRole("button", { name: /^Download \d/ });
   await expect(download).toBeEnabled();
   await download.click();
   await expect(row.locator(".dl-done")).toHaveText("Installed", { timeout: 20_000 });
-  await page.getByRole("tab", { name: /^Installed/ }).click();
+  await page.getByTestId("models.tabs.installed").click();
   await expect(page.locator('.mp-row[data-dm="qwen3.5:4b"]')).toBeVisible();
 });

@@ -31,7 +31,7 @@ export function ScreenError() {
   return (
     <p role="alert" className="na">
       This page couldn't load. The app may have updated. {" "}
-      <button type="button" className="link" onClick={() => location.reload()}>Reload</button>
+      <button type="button" className="link" data-testid="ui.screen-error.reload" onClick={() => location.reload()}>Reload</button>
     </p>
   );
 }

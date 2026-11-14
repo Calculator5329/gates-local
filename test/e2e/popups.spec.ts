@@ -63,8 +63,8 @@ test("Models is its own pop-up over the chat: the shell's box, tabs and Close in
   await expect(models).toBeVisible();
   await expect(models.getByText("Default for new chats")).toBeVisible();
   await expectShape(page, models);
-  const close = models.getByRole("button", { name: "Close", exact: true });
-  await expectOneRow(models.getByRole("heading", { name: "Models" }), models.getByRole("tab", { name: /Installed/ }), close);
+  const close = models.getByTestId("ui.dialog.close");
+  await expectOneRow(models.getByRole("heading", { name: "Models" }), models.getByTestId("models.tabs.installed"), close);
   const b = await box(models);
   await expectBackdrop(page);
   await expect(page.locator(".sb #searchIn"), "the sidebar keeps its threads").toBeVisible();
@@ -73,11 +73,11 @@ test("Models is its own pop-up over the chat: the shell's box, tabs and Close in
   await expect(page.locator(".sb-foot .ibtn").first()).toHaveAttribute("aria-pressed", "false");
 
   // Download and back: the header stays put
-  await models.getByRole("tab", { name: "Download" }).click();
-  await expect(models.getByRole("tab", { name: "Download" })).toHaveAttribute("aria-selected", "true");
+  await models.getByTestId("models.tabs.download").click();
+  await expect(models.getByTestId("models.tabs.download")).toHaveAttribute("aria-selected", "true");
   expect(await box(models)).toEqual(b);
   await page.keyboard.press("Escape");
-  await expect(models.getByRole("tab", { name: /Installed/ })).toHaveAttribute("aria-selected", "true");
+  await expect(models.getByTestId("models.tabs.installed")).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("Escape");
   await expect(models).toHaveCount(0);
   await expect(page.locator("#ta"), "the caret back in the message box").toBeFocused();
@@ -111,7 +111,7 @@ test.describe("Usage", () => {
       usage.getByRole("heading", { name: "Usage", exact: true }),
       usage.getByRole("group", { name: "Range" }),
       usage.locator(".us-ctl").getByRole("group", { name: "Chart" }),
-      usage.getByRole("button", { name: "Close", exact: true }),
+      usage.getByTestId("ui.dialog.close"),
     );
     await expectBackdrop(page);
     await expect(page.locator(".sb #searchIn"), "the sidebar keeps its threads").toBeVisible();
@@ -130,7 +130,7 @@ test("Settings is the same pop-up: its sections at its left, the chat and thread
   const set = page.getByRole("dialog", { name: "Settings" });
   await expect(set.getByText("Theme", { exact: true })).toBeVisible();
   await expectShape(page, set);
-  await expectOneRow(set.getByRole("heading", { name: "Settings", exact: true }), set.getByRole("button", { name: "Close", exact: true }));
+  await expectOneRow(set.getByRole("heading", { name: "Settings", exact: true }), set.getByTestId("ui.dialog.close"));
   const b = await box(set);
   await expectBackdrop(page);
   await expect(page.locator(".sb #searchIn"), "the sidebar keeps its threads").toBeVisible();
@@ -219,7 +219,7 @@ test.describe("one shell for Models, Usage and Settings", () => {
     await body.evaluate((el) => { el.scrollTop = el.scrollHeight; });
     await expect(usage.locator(".us-rows tbody tr").last()).toBeInViewport();
     expect(await box(usage), "the box does not move or grow").toEqual(before);
-    await expect(usage.getByRole("button", { name: "Close", exact: true }), "the header stays in view").toBeInViewport();
+    await expect(usage.getByTestId("ui.dialog.close"), "the header stays in view").toBeInViewport();
   });
 
   test("Esc and a click on the padding close; a press in the box released on the padding does not", async ({ page, open }) => {
@@ -297,7 +297,7 @@ test.describe("one shell for Models, Usage and Settings", () => {
     await expect(usage.locator(".us-rows tbody tr").first()).toBeVisible();
     expect(await box(usage)).toEqual({ x: 24, y: 24, width: 672, height: 652 });
     expect((await box(usage.locator(".dlg-head"))).height).toBe(48);
-    const close = await box(usage.getByRole("button", { name: "Close", exact: true }));
+    const close = await box(usage.getByTestId("ui.dialog.close"));
     expect(close.x + close.width, "Close inside the box").toBeLessThanOrEqual(24 + 672);
     await page.mouse.move(0, 0);
     await page.screenshot({ path: info.outputPath("shell-usage-720.png"), animations: "disabled" });

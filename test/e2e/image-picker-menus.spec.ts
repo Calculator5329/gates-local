@@ -74,16 +74,16 @@ test("(a) the rail is two named menus, Defaults and Other models, and the popup'
 
   const first = await height(picker);
   expect(first).toBeGreaterThan(0);
-  await expect(rail.getByRole("button", { name: "Defaults" })).toHaveAttribute("aria-pressed", "true");
-  await rail.getByRole("button", { name: "Other models" }).click();
-  await expect(rail.getByRole("button", { name: "Other models" })).toHaveAttribute("aria-pressed", "true");
+  await expect(rail.getByTestId("image.picker.defaults")).toHaveAttribute("aria-pressed", "true");
+  await rail.getByTestId("image.picker.other").click();
+  await expect(rail.getByTestId("image.picker.other")).toHaveAttribute("aria-pressed", "true");
   expect(await height(picker), "Other models: the same height").toBe(first);
   // each Other row highlighted in turn shows its sizes: still the same height
   for (const row of await picker.locator(".pk-menu:not([inert]) .pk-r").all()) {
     await row.hover();
     expect(await height(picker)).toBe(first);
   }
-  await rail.getByRole("button", { name: "Defaults" }).click();
+  await rail.getByTestId("image.picker.defaults").click();
   expect(await height(picker), "back on Defaults: the same height").toBe(first);
   for (const row of await picker.locator(".pk-menu:not([inert]) .pk-r").all()) {
     await row.hover();
@@ -91,7 +91,7 @@ test("(a) the rail is two named menus, Defaults and Other models, and the popup'
   }
   await page.mouse.move(5, 5);
   await shot(page, info, "menus-defaults.png", picker.locator(".pk-menu:not([inert])"));
-  await rail.getByRole("button", { name: "Other models" }).click();
+  await rail.getByTestId("image.picker.other").click();
   await shot(page, info, "menus-other.png", picker.locator(".pk-menu:not([inert])"));
 });
 
@@ -102,7 +102,7 @@ test("(b) a Defaults row is the style's name alone, its setup in the size pane o
   const picker = await openPicker(page, open);
   await shot(page, info, "finding-b.png", picker.locator(".pk-list-scroll"));
   expect(await shownNames(picker)).toEqual(DEFAULTS);
-  const defaults = picker.getByRole("listbox", { name: "Defaults" });
+  const defaults = picker.getByTestId("image.picker.defaults-list");
   await expect(defaults.locator(".pk-group, .maker-mark, .mark, .pk-variant"), "no group header, mark or tier tag").toHaveCount(0);
   // this 16 GB card's General is the style bench's 16 GB winner, and it is the button's
   const general = defaults.locator(".pk-r").first();
@@ -120,8 +120,8 @@ test("(b) a Defaults row is the style's name alone, its setup in the size pane o
   await expect(picker.locator(".pk-context-head")).toContainText("FLUX.2 Klein 4B compact pixel art");
 
   // Other models: the General tier setups, marked and tagged as before; no style repeats
-  await picker.getByRole("button", { name: "Other models" }).click();
-  const other = picker.getByRole("listbox", { name: "Other models" });
+  await picker.getByTestId("image.picker.other").click();
+  const other = picker.getByTestId("image.picker.other-list");
   expect(await other.locator("[role=group]").evaluateAll((gs) => gs.map((g) => [g.getAttribute("aria-label"), ...[...g.querySelectorAll("[data-preset]")].map((r) => r.getAttribute("data-preset"))]))).toEqual([
     ["General", "flux2-klein-4b", "z-image-int8", "moss-image", "flux2-klein-4b-compact"],
   ]);
@@ -131,7 +131,7 @@ test("(b) a Defaults row is the style's name alone, its setup in the size pane o
   await expect(picker).toBeHidden();
   await expect(page.locator("#modelBtn")).toContainText("MOSS");
   await page.locator("#modelBtn").click();
-  await expect(picker.getByRole("button", { name: "Other models" })).toHaveAttribute("aria-pressed", "true");
+  await expect(picker.getByTestId("image.picker.other")).toHaveAttribute("aria-pressed", "true");
   await expect(other.locator('.pk-r[data-preset="moss-image"]')).toHaveAttribute("aria-selected", "true");
 });
 
@@ -184,7 +184,7 @@ test("(d) a greyed row's reason that does not fit shows whole in its tip", async
   comfy.bare();
   comfy.withFolders();
   const picker = await openPicker(page, open);
-  await picker.getByRole("button", { name: "Other models" }).click();
+  await picker.getByTestId("image.picker.other").click();
   const klein = picker.locator('.pk-r[data-preset="flux2-klein-4b"]');
   comfy.down(true);
   await klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" }).click();
@@ -209,7 +209,7 @@ test.describe("on a phone", () => {
     await page.screenshot({ path: info.outputPath("phone-defaults.png"), animations: "disabled" });
     const first = await height(picker);
     expect(first).toBeGreaterThan(0);
-    await picker.getByRole("button", { name: "Other models" }).click();
+    await picker.getByTestId("image.picker.other").click();
     expect(await height(picker)).toBe(first);
     await page.screenshot({ path: info.outputPath("phone-other.png"), animations: "disabled" });
     await picker.locator(".pk-menu:not([inert]) .pk-r .pk-select").first().click();
@@ -217,7 +217,7 @@ test.describe("on a phone", () => {
     expect(await height(picker), "the size step: the same height").toBe(first);
     await page.screenshot({ path: info.outputPath("phone-sizes.png"), animations: "disabled" });
     await picker.locator(".pk-back").click();
-    await picker.getByRole("button", { name: "Defaults" }).click();
+    await picker.getByTestId("image.picker.defaults").click();
     expect(await height(picker)).toBe(first);
   });
 });

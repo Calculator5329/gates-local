@@ -61,7 +61,7 @@ test.describe("while the server is down", () => {
 
     const restart = stack.restart(4000);
     // Settings has no banner; the sidebar footer's Settings icon says it, with a dot and in its tooltip
-    const gear = page.locator(".sb-foot").getByRole("button", { name: /^Settings/ });
+    const gear = page.getByTestId("sidebar.foot.settings");
     await expect(gear).toHaveAccessibleName("Settings · Reconnecting");
     await expect(gear).toHaveAttribute("data-tip", /^<b>Reconnecting<\/b>/);
     await page.getByTestId("settings.segment.theme-light").click();
@@ -72,16 +72,16 @@ test.describe("while the server is down", () => {
 
     await openModels(page);
     // Gemma: a tag without dots, so calm() can count one sentence
-    const more = page.getByRole("button", { name: "More for Gemma 4 12B" });
+    const more = page.locator('.mp-row[data-dm="gemma4:12b"]').getByTestId("models.row-menu.open");
     const label = (await more.getAttribute("aria-label")) ?? "";
     await more.click();
-    await page.getByRole("menuitem", { name: /^Remove…/ }).click();
+    await page.getByTestId("models.row-menu.remove").click();
     const dialog = page.getByRole("dialog");
-    await dialog.getByRole("button", { name: "Remove", exact: true }).click();
+    await dialog.getByTestId("models.remove.confirm").click();
     const removed = dialog.getByRole("alert");
     await expect(removed).toHaveText(/^Couldn't remove \S+ because Gates Local isn't connected; try again once it reconnects\.$/);
     calm(await removed.textContent());
-    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await dialog.getByTestId("models.remove.cancel").click();
     await restart;
     // back online (a healthy runtime puts no dot on the Settings icon), the model is still there
     await expect(gear.locator(".fdot")).toHaveCount(0, { timeout: 10_000 });

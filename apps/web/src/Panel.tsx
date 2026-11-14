@@ -26,8 +26,8 @@ export function Dialog({ label, onClose, children }: { label: string; onClose: (
   useLayoutEffect(() => box.current?.focus({ preventScroll: true }), []);
   return (
     <>
-      <div className="dlg-dim" aria-hidden="true" onClick={(e) => { const icon = footIconAt(e.clientX, e.clientY); if (icon === null) onClose(); else icon.click(); }} />
-      <div ref={box} className="dlg" role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}>
+      <div className="dlg-dim" data-testid="ui.dialog.scrim" aria-hidden="true" onClick={(e) => { const icon = footIconAt(e.clientX, e.clientY); if (icon === null) onClose(); else icon.click(); }} />
+      <div ref={box} className="dlg" role="dialog" aria-modal="true" aria-label={label} data-testid="ui.dialog.panel" tabIndex={-1}>
         {children}
       </div>
     </>
@@ -40,7 +40,7 @@ export function DialogHead({ title, onClose, children }: { title: string; onClos
     <div className="dlg-head">
       <h2>{title}</h2>
       {children}
-      <button type="button" className="ibtn dlg-x" aria-label="Close" data-tip="Close · Esc" onClick={onClose}>
+      <button type="button" className="ibtn dlg-x" data-testid="ui.dialog.close" aria-label="Close" data-tip="Close · Esc" onClick={onClose}>
         <Icon id="x" />
       </button>
     </div>

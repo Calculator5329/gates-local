@@ -284,8 +284,8 @@ test.describe("thread menu", () => {
     await expect(page.locator(".hdr h2")).toHaveText("Library: Effect Schema books");
     await expect(target.locator(".sb-menu")).toHaveAttribute("aria-expanded", "true");
 
-    await menu.getByRole("menuitem", { name: "Rename" }).click();
-    const input = page.getByRole("textbox", { name: "Thread title" });
+    await page.getByTestId("sidebar.thread-menu.rename").click();
+    const input = page.getByTestId("chat.header.title");
     await expect(input).toHaveValue("Fix the backup cron");
     await input.fill("Fix the nightly backup");
     await input.press("Enter");

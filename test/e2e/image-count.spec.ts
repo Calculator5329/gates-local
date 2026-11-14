@@ -94,7 +94,7 @@ test("each thread keeps its own count, after a reload too, and the menu shows th
   await page.setViewportSize({ width: page.viewportSize()?.width ?? 1280, height: 1200 });
   await shot(page, "[data-image-group]", "[data-image-group]", info.outputPath("count-2-three-tiles.png"));
   // a new thread starts at 1; the first is still 3, after a reload too
-  await page.getByRole("button", { name: "New thread" }).click();
+  await page.getByTestId("sidebar.top.new-thread").click();
   await expect(countBtn(page)).toHaveAccessibleName("Pictures per send: 1");
   await page.locator(".sb-row", { hasText: "three lighthouses" }).click();
   await expect(countBtn(page)).toHaveAccessibleName("Pictures per send: 3");

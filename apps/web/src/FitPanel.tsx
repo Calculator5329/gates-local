@@ -295,6 +295,7 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
                   <button
                     key={c}
                     type="button"
+                    data-testid={`models.fit-panel.context-${c}`}
                     data-ctx={c}
                     className={`${defaultSize === c ? "on" : ""}${f.wont ? " dim" : ""}`}
                     aria-pressed={defaultSize === c}
@@ -318,7 +319,7 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
       </Row>
       {fit === undefined ? null : (
         <details className="upd-more fp-more">
-          <summary>
+          <summary data-testid="models.fit-panel.details">
             <Icon id="right" cls="s14" />
             Details
           </summary>
@@ -341,7 +342,7 @@ export function GpuMemory() {
   const head = gpuHead(gpuRaw === NA ? undefined : gpuRaw);
   const action =
     shown !== null && chat !== undefined ? (
-      <button type="button" className="qa" onClick={() => setState({ fitPanel: { model: null } })}>
+      <button type="button" className="qa" data-testid="models.fit-panel.show-model" onClick={() => setState({ fitPanel: { model: null } })}>
         Show {describeModel(chat, catalog).name}
       </button>
     ) : null;

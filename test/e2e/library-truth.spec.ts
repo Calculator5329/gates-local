@@ -80,7 +80,7 @@ test("the Library's head says nothing while Tools are on, and plainly when they 
   await master.click(); await expect(master).toHaveAttribute("aria-checked", "false");
   await section(page, "Library");
   await expect(head).toContainText("Tools are off, so no chat reads these.");
-  await head.getByRole("button", { name: "Turn on Tools" }).click();
+  await head.getByTestId("settings.library.turn-on-tools").click();
   await expect(page.locator(".set h1").first()).toHaveText("Tools");
   await expect(master).toHaveAttribute("aria-checked", "false");
 });

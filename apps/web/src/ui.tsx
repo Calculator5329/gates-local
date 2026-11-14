@@ -141,7 +141,7 @@ export function SheetHead({ title, sub }: { title: string; sub?: string }) {
         {title}
         {sub === undefined ? null : <span className="fp-gpu">{sub}</span>}
       </span>
-      <button type="button" className="ibtn" aria-label="Close" onClick={() => closePop(true)}>
+      <button type="button" className="ibtn" data-testid="ui.sheet.close" aria-label="Close" onClick={() => closePop(true)}>
         <Icon id="x" />
       </button>
     </div>

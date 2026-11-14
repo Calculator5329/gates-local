@@ -117,7 +117,7 @@ function Draft({ under }: { under: boolean }) {
 function MenuButton() {
   const open = useStore((s) => s.drawer);
   return (
-    <button type="button" className="ibtn hb" id="menuBtn" aria-label="Open threads" aria-expanded={open} onClick={openDrawer}>
+    <button type="button" className="ibtn hb" id="menuBtn" data-testid="chat.header.open-threads" aria-label="Open threads" aria-expanded={open} onClick={openDrawer}>
       <Icon id="menu" cls="s18" />
     </button>
   );
@@ -238,6 +238,7 @@ function Header({ isNew }: { isNew: boolean }) {
         <input
           ref={input}
           className="inp hdr-in"
+          data-testid="chat.header.title"
           aria-label="Thread title"
           defaultValue={title}
           onBlur={() => done(true)}
@@ -252,7 +253,7 @@ function Header({ isNew }: { isNew: boolean }) {
       ) : (
         <h2 className={isNew ? "muted" : undefined}>{isNew ? "New thread" : title}</h2>
       )}
-      <button type="button" className="ibtn hb nb" aria-label="New thread" disabled={isNew && emptyDraft} onClick={goNew}>
+      <button type="button" className="ibtn hb nb" data-testid="chat.header.new-thread" aria-label="New thread" disabled={isNew && emptyDraft} onClick={goNew}>
         <Icon id="pen" cls="s18" />
       </button>
     </header>
@@ -334,20 +335,20 @@ function ThreadMenu() {
     if (pop.kb) el.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
   }, [pop]);
   return (
-    <div className={`pop menu${open ? " open" : ""}`} id="threadMenu" role="menu" aria-label="Thread actions" ref={ref} onKeyDown={menuKeys}>
+    <div className={`pop menu${open ? " open" : ""}`} id="threadMenu" data-testid="sidebar.thread-menu.menu" role="menu" aria-label="Thread actions" ref={ref} onKeyDown={menuKeys}>
       <SheetHead title="Thread" />
-      <button type="button" className="mi" role="menuitem" onClick={act((id) => closeDrawer(() => renameFromMenu(id)))}>
+      <button type="button" className="mi" data-testid="sidebar.thread-menu.rename" role="menuitem" onClick={act((id) => closeDrawer(() => renameFromMenu(id)))}>
         <Icon id="pencil" />
         <b>Rename</b>
       </button>
-      <button type="button" className="mi" role="menuitem" onClick={act((id) => void exportFromMenu(id))}>
+      <button type="button" className="mi" data-testid="sidebar.thread-menu.export" role="menuitem" onClick={act((id) => void exportFromMenu(id))}>
         <Icon id="download" />
         <b>Export as Markdown</b>
       </button>
       {canDelete ? (
         <>
           <div className="msep" />
-          <button type="button" className="mi danger" role="menuitem" onClick={act((id) => void deleteThread(id))}>
+          <button type="button" className="mi danger" data-testid="sidebar.thread-menu.delete" role="menuitem" onClick={act((id) => void deleteThread(id))}>
             <Icon id="trash" />
             <b>Delete thread</b>
           </button>
@@ -548,7 +549,7 @@ export function App() {
         <div style={{ display: "contents" }} inert={covered}>
           <Sidebar />
         </div>
-        {drawer ? <div className="scrim" aria-hidden="true" onClick={() => { cancelPendingSettings(); closeDrawer(); }} /> : null}
+        {drawer ? <div className="scrim" data-testid="sidebar.drawer.scrim" aria-hidden="true" onClick={() => { cancelPendingSettings(); closeDrawer(); }} /> : null}
         <main className="main" inert={covered || drawer}>
           {/* Pictures draws its own bar, in its own chunk */}
           {isSet ? <SettingsBar /> : isPics ? null : <Header isNew={isNew} />}
@@ -617,9 +618,9 @@ export function App() {
         </Dialog>
       ) : null}
       {/* a phone's sheets sit over a scrim; on the desktop it is not drawn */}
-      {popOpen ? <div className="scrim pop-scrim" aria-hidden="true" onClick={() => closePop(true)} /> : null}
-      {popId === "picker" ? picker.kind === "ready" ? <picker.value.Picker /> : picker.kind === "error" ? <div id="picker" className="model-picker open picker-error" role="dialog" aria-label="Choose a model"><button className="btn" onClick={() => closePop(true)}>Back to chat</button><ScreenError /></div> : null : null}
-      {popId === "images" ? imagePicker.kind === "ready" ? <imagePicker.value.ImagePicker /> : imagePicker.kind === "error" ? <div id="imagePicker" className="model-picker open picker-error" role="dialog" aria-label="Choose an image model"><button className="btn" onClick={() => closePop(true)}>Back to chat</button><ScreenError /></div> : null : null}
+      {popOpen ? <div className="scrim pop-scrim" data-testid="ui.pop.scrim" aria-hidden="true" onClick={() => closePop(true)} /> : null}
+      {popId === "picker" ? picker.kind === "ready" ? <picker.value.Picker /> : picker.kind === "error" ? <div id="picker" className="model-picker open picker-error" role="dialog" aria-label="Choose a model"><button className="btn" data-testid="models.picker.back-to-chat" onClick={() => closePop(true)}>Back to chat</button><ScreenError /></div> : null : null}
+      {popId === "images" ? imagePicker.kind === "ready" ? <imagePicker.value.ImagePicker /> : imagePicker.kind === "error" ? <div id="imagePicker" className="model-picker open picker-error" role="dialog" aria-label="Choose an image model"><button className="btn" data-testid="image.picker.back-to-chat" onClick={() => closePop(true)}>Back to chat</button><ScreenError /></div> : null : null}
       <PlusMenu />
       <CountMenu />
       <ImageUnset />

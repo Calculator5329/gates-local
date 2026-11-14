@@ -41,7 +41,7 @@ test("a new thread's send that waits over 30 s behind another reply stays sent, 
   await configure({ prompts: { alpha: { firstTokenDelayMs: 45_000 }, [B]: { toolCalls: 1, quietToolRounds: 1, holdAfterTokens: 5 } } });
   await sendMessage(page, "alpha");
   await expect.poll(async () => (await state()).turns.some((t) => t.prompt === "alpha")).toBe(true);
-  await page.getByRole("button", { name: "New thread" }).click();
+  await page.getByTestId("sidebar.top.new-thread").click();
   await sendMessage(page, B);
   // the thread at work stays on top; the new one waits under it
   // soft: a wrong order still lets the 30 s part below be seen

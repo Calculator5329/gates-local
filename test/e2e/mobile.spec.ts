@@ -30,7 +30,7 @@ async function noSideScroll(page: Page, state: string): Promise<void> {
 const drawerRow = (page: Page) => page.locator(".sb .sb-row").first();
 
 async function openDrawer(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Open threads" }).tap();
+  await page.getByTestId("chat.header.open-threads").tap();
   await expect(drawerRow(page)).toBeInViewport({ ratio: 1 });
 }
 
@@ -65,7 +65,7 @@ test("the thread, drawer, new thread, sheets and settings never scroll the page 
   await openDrawer(page);
   await noSideScroll(page, "drawer");
   await page.keyboard.press("Escape");
-  await page.locator(".hdr").getByRole("button", { name: "New thread" }).tap();
+  await page.getByTestId("chat.header.new-thread").tap();
   await expect(page.locator(".start-mark")).toBeVisible();
   await noSideScroll(page, "new thread");
   await page.locator("#modelBtn").tap();
@@ -75,10 +75,10 @@ test("the thread, drawer, new thread, sheets and settings never scroll the page 
   await page.getByRole("button", { name: "Chat options" }).tap();
   await expectSheet(page, "#optsMenu");
   await noSideScroll(page, "chat options");
-  await page.locator("#optsMenu").getByRole("button", { name: "Close" }).tap();
+  await page.locator("#optsMenu").getByTestId("ui.sheet.close").tap();
   await expect(page.locator("#optsMenu")).toBeHidden();
   await openDrawer(page);
-  await page.locator(".sb").getByRole("button", { name: "Settings" }).tap();
+  await page.getByTestId("sidebar.foot.settings").tap();
   await expect(page.locator(".set-list")).toBeVisible();
   await noSideScroll(page, "settings list");
   for (const section of ["General", "Models", "Instructions", "Library", "Tools", "Image generation", "Runtime", "Advanced", "Shortcuts"]) {
@@ -102,7 +102,7 @@ test("the drawer opens and closes, and picking a thread closes it", async ({ pag
   await expect.poll(() => page.evaluate(() => document.querySelector(".sb")?.contains(document.activeElement) ?? false), { message: "focus moves into the drawer" }).toBe(true);
   await page.locator(".scrim").tap({ position: { x: 380, y: 400 } });
   await expect(drawerRow(page)).not.toBeInViewport();
-  await expect(page.getByRole("button", { name: "Open threads" })).toBeFocused();
+  await expect(page.getByTestId("chat.header.open-threads")).toBeFocused();
 
   // Escape closes it
   await openDrawer(page);
@@ -158,7 +158,7 @@ test("the picker opens as a bottom sheet and picks a model", async ({ page, open
   // the search field does not grab focus, so the keyboard stays down
   await expect(page.locator("#pkSearch")).not.toBeFocused();
   const row = page.locator('#picker .pk-r[data-m="gemma4:12b"]');
-  await expect(page.locator("#picker").getByRole("button", { name: "Close" })).toBeVisible();
+  await expect(page.getByTestId("models.picker.close")).toBeVisible();
   await row.tap();
   await expect(page.locator("#picker .pk-context")).toBeVisible();
   await page.locator("#picker").getByRole("radio", { name: /^16k/ }).tap();
@@ -167,7 +167,7 @@ test("the picker opens as a bottom sheet and picks a model", async ({ page, open
 
   // the sheet's close button closes it
   await page.locator("#modelBtn").tap();
-  await page.locator("#picker").getByRole("button", { name: "Close" }).tap();
+  await page.getByTestId("models.picker.close").tap();
   await expect(page.locator("#picker")).toBeHidden();
 });
 
@@ -176,7 +176,7 @@ test("settings opens a section and goes back to the list and the chat", async ({
   await open();
   await waitReady(page);
   await openDrawer(page);
-  await page.locator(".sb").getByRole("button", { name: "Settings" }).tap();
+  await page.getByTestId("sidebar.foot.settings").tap();
   const list = page.locator(".set-list");
   await expect(list).toBeVisible();
   await expect(drawerRow(page)).not.toBeInViewport();

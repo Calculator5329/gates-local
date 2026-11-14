@@ -9,7 +9,7 @@ test("each thread keeps its draft across switches, reload and sending the other 
   await expect(page.locator(".turn.a")).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
   const a = page.url();
-  await page.getByRole("button", { name: "New thread" }).click();
+  await page.getByTestId("sidebar.top.new-thread").click();
   await sendMessage(page, "Second chat");
   await expect(page.locator(".turn.a")).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);

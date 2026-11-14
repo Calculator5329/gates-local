@@ -19,6 +19,8 @@ export function Ring({ progress }: { progress: number | null }) {
 }
 
 export interface FootProps {
+  /** Its stable test name, written whole at each call site so the registry reads it there. */
+  readonly testId: `sidebar.foot.${string}`;
   readonly icon: IconId;
   readonly label: string;
   readonly tip: string;
@@ -36,12 +38,13 @@ export interface FootProps {
 }
 
 /** One 32 px footer button: the icon, an optional ring and an optional dot, words only in data-tip and aria-label. */
-export function FootButton({ icon, label, tip, tone, dot = null, ring, spin = false, busy = false, cls, current = false, pressed, onClick }: FootProps) {
+export function FootButton({ testId, icon, label, tip, tone, dot = null, ring, spin = false, busy = false, cls, current = false, pressed, onClick }: FootProps) {
   const ringed = ring !== undefined;
   return (
     <button
       type="button"
       className={["ibtn", tone, cls].filter(Boolean).join(" ")}
+      data-testid={testId}
       aria-label={label}
       data-tip={tip}
       aria-disabled={busy || undefined}
@@ -150,10 +153,10 @@ function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStat
         </p>
       ) : null}
       <div className="ca">
-        <button ref={cancel} type="button" className="btn ghost" onClick={onCancel}>
+        <button ref={cancel} type="button" className="btn ghost" data-testid="sidebar.update.cancel" onClick={onCancel}>
           Cancel
         </button>
-        <button ref={goButton} type="button" className="btn primary" disabled={read !== null || wait} onClick={press}>
+        <button ref={goButton} type="button" className="btn primary" data-testid="sidebar.update.go" disabled={read !== null || wait} onClick={press}>
           {installed ? "Restart to update" : "Update and restart"}
         </button>
       </div>
@@ -278,6 +281,7 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
       ) : null}
       <span ref={button} className="end">
         <FootButton
+          testId="sidebar.foot.update"
           icon={look.icon}
           label={u.label}
           tip={u.tip}

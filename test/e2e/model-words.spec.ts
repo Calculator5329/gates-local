@@ -81,7 +81,7 @@ for (const width of [1440, 760]) {
     reports.refresh();
     await expect(picker).toBeVisible();
     await expect(picker.locator('.pk-r[aria-busy="true"]')).toHaveCount(0);
-    await expect(picker.locator(".pk-bottom").getByRole("button", { name: "Download models", exact: true })).toBeVisible();
+    await expect(picker.locator(".pk-bottom").getByTestId("models.picker.download-models")).toBeVisible();
     await expect(picker.locator(".fit-skel")).toHaveCount(0);
     expect(await picker.boundingBox(), "a pushed table keeps the picker under the resting pointer").toEqual(before);
     await rowsOpenNoTip(page);

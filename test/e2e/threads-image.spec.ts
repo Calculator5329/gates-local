@@ -36,7 +36,7 @@ test("image behind chat: the card explains its wait, and rendering starts only a
   await setup(page, open);
   await start(page, "alpha", "qwen3.5:9b");
   await expect(page.locator(".turn.a .md p")).toHaveCount(3);
-  await page.getByRole("button", { name: "New thread" }).click();
+  await page.getByTestId("sidebar.top.new-thread").click();
   await askForImage(page);
   const card = page.locator("[data-image-job]");
   await expect(card).toContainText("Waiting for the GPU");
@@ -63,7 +63,7 @@ test("chat behind image: the reply names image generation and sends to Ollama on
   await expect(card.getByRole("status", { name: /Making image/ })).toBeVisible();
   await expect.poll(() => comfy.state().length).toBe(1);
   const before = (await state()).turns.length;
-  await page.getByRole("button", { name: "New thread" }).click();
+  await page.getByTestId("sidebar.top.new-thread").click();
   await pick(page, SMALL[0] ?? "tiny-chat:2k");
   await sendMessage(page, "chat behind image");
   await expect(page.locator(".turn.u .bubble")).toHaveText("chat behind image");

@@ -19,7 +19,7 @@ test("another program's GPU memory leaves the download verdicts as they were, an
   await open();
   await waitReady(page);
   await page.locator("#modelBtn").click();
-  await page.locator("#picker").getByRole("button", { name: "Download models", exact: true }).click();
+  await page.getByTestId("models.picker.download-models").click();
   await expect(page.locator('.dlrow[data-cat="qwen3.5:4b"]')).toHaveAttribute("data-verdict", "fits");
   const idle = await verdicts(page);
 

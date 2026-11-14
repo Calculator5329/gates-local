@@ -11,13 +11,13 @@ test("background life: return mid-reply, finish away, and keep exact ordered wor
   await configure({ prompts: { alpha: { holdAfterTokens: 28, tokenDelayMs: 30 }, beta: { holdAfterTokens: 28 } } });
   const alpha = await start(page, "alpha");
   await expect(page.locator(".turn.a .md p")).toHaveCount(3);
-  await page.getByRole("button", { name: "New thread" }).click();
+  await page.getByTestId("sidebar.top.new-thread").click();
   await expect(page.locator(".turn")).toHaveCount(0);
   const beta = await start(page, "beta", SMALL[1]);
   await expect(page.locator(".turn.a .md p")).toHaveCount(3);
   await expect(page.locator(".sb-row", { hasText: "alpha" }).getByLabel("Reply in progress")).toBeVisible();
   await expect(page.locator(".sb-row", { hasText: "beta" }).getByLabel("Reply in progress")).toBeVisible();
-  await page.getByRole("button", { name: "New thread" }).click();
+  await page.getByTestId("sidebar.top.new-thread").click();
   await start(page, "gamma", SMALL[2]);
   await finished(page, "gamma");
   await release("alpha");
@@ -47,7 +47,7 @@ test("both fit: different models make independent progress with no warning and s
   await configure({ prompts: { alpha: { holdAfterTokens: 28 }, beta: { holdAfterTokens: 28 } } });
   await start(page, "alpha");
   await expect(page.locator(".turn.a .md p")).toHaveCount(3);
-  await page.getByRole("button", { name: "New thread" }).click();
+  await page.getByTestId("sidebar.top.new-thread").click();
   await observe(page);
   await start(page, "beta", SMALL[1]);
   await expect(page.locator(".turn.a .md p")).toHaveCount(3);
@@ -71,7 +71,7 @@ test.describe("same-model screen proof", () => {
       await configure({ parallelLimit, prompts: { alpha: { holdAfterTokens: 28 }, beta: { holdAfterTokens: 28 } } });
       await start(page, "alpha");
       await expect(page.locator(".turn.a .md p")).toHaveCount(3);
-      await page.getByRole("button", { name: "New thread" }).click();
+      await page.getByTestId("sidebar.top.new-thread").click();
       await observe(page);
       await start(page, "beta");
       await expect.poll(async () => (await state()).turns.length).toBe(2);
@@ -105,7 +105,7 @@ test("a background error stays visible with its partial words when returning", a
   await observer.goto(appUrl()); await waitReady(observer);
   await start(page, "alpha");
   await expect(page.locator(".turn.a .md p")).toHaveCount(3);
-  await page.getByRole("button", { name: "New thread" }).click();
+  await page.getByTestId("sidebar.top.new-thread").click();
   await start(page, "beta", SMALL[1]);
   await release("alpha");
   await expect.poll(async () => (await state()).turns.find((t) => t.prompt === "alpha")?.outcome).toBe("error");

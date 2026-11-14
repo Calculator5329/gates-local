@@ -54,6 +54,7 @@ export function MemoryMark({ report, words, tip }: { report: FitReport; words: s
       aria-label={`${words}: ${text.replace(" / ", " of ")}`}
       tabIndex={0}
       data-tip={tip}
+      data-testid="models.fit.memory-mark"
     >
       <span className="mm-bar" aria-hidden="true"><i style={{ width: `${(fill * 100).toFixed(1)}%` }} /></span>
       <span className="mm-n" aria-hidden="true">{text}</span>

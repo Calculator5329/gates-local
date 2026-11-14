@@ -52,7 +52,7 @@ const cannotSaveDefault = (s: State) => s.settings === NA || s.unavailable["sett
 function FitWords({ report }: { report: TableFit }) {
   const cpu = useStore((s) => noGpu(s.gpu));
   return (
-    <span className="mp-fit x" tabIndex={0} data-tip={esc(fitReason(report, cpu))}>
+    <span className="mp-fit x" data-testid="models.fit.reason" tabIndex={0} data-tip={esc(fitReason(report, cpu))}>
       <span className={`dot ${FIT_DOT[report.verdict]}`} />
       <span className="mp-w">{fitLabel(report.verdict, report.source === "measured", cpu)}</span>
     </span>
@@ -114,12 +114,13 @@ export function ModelsPage() {
     }
   };
   const tablist = (
-        <div className="mp-tabs" role="tablist" aria-label="Models" onKeyDown={onKey}>
+        <div className="mp-tabs" role="tablist" aria-label="Models" data-testid="models.tabs.list" onKeyDown={onKey}>
           <button
             ref={tabs[0]}
             type="button"
             role="tab"
             id="mp-tab-installed"
+            data-testid="models.tabs.installed"
             aria-selected={tab === "installed"}
             aria-controls="mp-panel"
             tabIndex={tab === "installed" ? 0 : -1}
@@ -137,6 +138,7 @@ export function ModelsPage() {
               type="button"
               role="tab"
               id="mp-tab-download"
+              data-testid="models.tabs.download"
               aria-selected={tab === "download"}
               aria-controls="mp-panel"
               tabIndex={tab === "download" ? 0 : -1}
@@ -321,11 +323,12 @@ function RowMenu({ r, saved, onRemove }: { r: InstalledRow; saved: string | unde
   }, [open]);
   const [head, tail] = splitTail(shortTag(r.name));
   return (
-    <div className="mp-acts" ref={box} onKeyDown={(e) => open && walk(e, box.current, "[role=menuitem]", close)}>
+    <div className="mp-acts" ref={box} data-testid="models.row-menu.actions" onKeyDown={(e) => open && walk(e, box.current, "[role=menuitem]", close)}>
       <button
         ref={btn}
         type="button"
         className={`mp-kebab${open ? " on" : ""}`}
+        data-testid="models.row-menu.open"
         aria-label={`More for ${r.label.text}`}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -344,6 +347,7 @@ function RowMenu({ r, saved, onRemove }: { r: InstalledRow; saved: string | unde
               type="button"
               role="menuitem"
               className="mp-mi"
+              data-testid="models.row-menu.make-default"
               onClick={() => {
                 void run(makeDefault(r.name)).then((ok) => ok && close());
               }}
@@ -356,6 +360,7 @@ function RowMenu({ r, saved, onRemove }: { r: InstalledRow; saved: string | unde
             type="button"
             role="menuitem"
             className={`mp-mi${copied === "yes" ? " ok" : ""}`}
+            data-testid="models.row-menu.copy-name"
             onClick={() => {
               void copyText(r.name).then((ok) => setCopied(ok ? "yes" : "no"));
             }}
@@ -374,6 +379,7 @@ function RowMenu({ r, saved, onRemove }: { r: InstalledRow; saved: string | unde
                 type="button"
                 role="menuitem"
                 className="mp-mi danger"
+                data-testid="models.row-menu.remove"
                 onClick={() => {
                   close(false);
                   onRemove(btn.current);
@@ -419,8 +425,8 @@ function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: Inst
     }
   };
   return (
-    <div className="mp-scrim" onPointerDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
-      <div className="mp-dlg" role="dialog" aria-modal="true" aria-labelledby="mp-dlg-t" ref={box} tabIndex={-1} onKeyDown={onKey}>
+    <div className="mp-scrim" data-testid="models.remove.scrim" onPointerDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
+      <div className="mp-dlg" role="dialog" aria-modal="true" aria-labelledby="mp-dlg-t" data-testid="models.remove.dialog" ref={box} tabIndex={-1} onKeyDown={onKey}>
         <h3 id="mp-dlg-t">Remove {name}?</h3>
         <p>
           Frees {sizeText(row.info.sizeBytes)}. Chats you made with {name} stay, and you can download it again later.
@@ -434,12 +440,13 @@ function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: Inst
         )}
         <Fail err={err} />
         <div className="mp-r2">
-          <button ref={cancel} type="button" className="btn outline" disabled={busy} onClick={onClose}>
+          <button ref={cancel} type="button" className="btn outline" data-testid="models.remove.cancel" disabled={busy} onClick={onClose}>
             Cancel
           </button>
           <button
             type="button"
             className="btn mp-danger"
+            data-testid="models.remove.confirm"
             disabled={busy}
             onClick={() => {
               setBusy(true);
@@ -512,6 +519,7 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
       aria-label={[r.label.text, r.name, sizeText(r.info.sizeBytes)].join(", ")}
       data-tip={esc(r.name)}
       className={`mp-opt${off ? " off" : ""}`}
+      data-testid="models.default.option"
       onClick={() => !off && pick(r.name)}
       onKeyDown={(e) => {
         if ((e.key === "Enter" || e.key === " ") && !off) {
@@ -530,7 +538,7 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
     </div>
   );
   return (
-    <div className="mp-defrow" ref={box} onKeyDown={(e) => open && walk(e, box.current, "[role=option]", close)}>
+    <div className="mp-defrow" ref={box} data-testid="models.default.row" onKeyDown={(e) => open && walk(e, box.current, "[role=option]", close)}>
       <div className="mp-dl-l">
         <b><Tipped tip={DEFAULT_TIP}>Default for new chats</Tipped></b>
         {limit === undefined && !locked ? null : (
@@ -550,6 +558,7 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
         ref={btn}
         type="button"
         className={`mp-select${open ? " on" : ""}`}
+        data-testid="models.default.select"
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`Default for new chats: ${currentWords}`}
@@ -618,12 +627,12 @@ function NoModels() {
       {pullNA ? null : (
         <div className="mp-r2">
           {pick ? (
-            <button type="button" className="btn primary" onClick={() => void run(pull(pick.name))}>
+            <button type="button" className="btn primary" data-testid="models.empty.download-suggested" onClick={() => void run(pull(pick.name))}>
               <Icon id="download" cls="s14" />
               Download {pick.label}
             </button>
           ) : null}
-          <button type="button" className={pick ? "btn outline" : "btn primary"} onClick={() => setState({ addPage: true })}>
+          <button type="button" className={pick ? "btn outline" : "btn primary"} data-testid="models.empty.browse" onClick={() => setState({ addPage: true })}>
             Browse models
           </button>
         </div>
@@ -646,6 +655,7 @@ function Field({ value, onChange, placeholder, label, cls }: { value: string; on
         value={value}
         placeholder={placeholder}
         aria-label={label}
+        data-testid="models.installed.filter"
         spellCheck={false}
         autoComplete="off"
         onChange={(e) => onChange(e.target.value)}
@@ -661,6 +671,7 @@ function Field({ value, onChange, placeholder, label, cls }: { value: string; on
           type="button"
           className="mp-x"
           aria-label="Clear"
+          data-testid="models.installed.clear-filter"
           onClick={() => {
             onChange("");
             ref.current?.focus();

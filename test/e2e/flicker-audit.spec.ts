@@ -58,11 +58,11 @@ test("every Settings section is whole on its first frame", async ({ page, open }
   await page.keyboard.press("Escape");
   await expect(page.locator(".dlg")).toHaveCount(0);
   await settled(delay, 3000);
-  r.check("open Models", await watchWhole(page, { root: ".dlg", arrive: { selector: ".dlg-head h2", text: "Models" } }, () => page.locator(".sb-foot").getByRole("button", { name: /^Models/ }).click(), delay));
+  r.check("open Models", await watchWhole(page, { root: ".dlg", arrive: { selector: ".dlg-head h2", text: "Models" } }, () => page.getByTestId("sidebar.foot.models").click(), delay));
   await settled(delay, 3000);
-  r.check("Models, Download tab", await watchWhole(page, { root: ".dlg", arrive: { selector: ".mp-tab[aria-selected=true] .mp-lbl", text: "Download" } }, () => page.getByRole("tab", { name: /Download/ }).click(), delay));
+  r.check("Models, Download tab", await watchWhole(page, { root: ".dlg", arrive: { selector: ".mp-tab[aria-selected=true] .mp-lbl", text: "Download" } }, () => page.getByTestId("models.tabs.download").click(), delay));
   await settled(delay, 3000);
-  r.check("Models, back to Installed", await watchWhole(page, { root: ".dlg", arrive: { selector: ".mp-tab[aria-selected=true] .mp-lbl", text: "Installed" } }, () => page.getByRole("tab", { name: /Installed/ }).click(), delay));
+  r.check("Models, back to Installed", await watchWhole(page, { root: ".dlg", arrive: { selector: ".mp-tab[aria-selected=true] .mp-lbl", text: "Installed" } }, () => page.getByTestId("models.tabs.installed").click(), delay));
   expect(r.all, "Settings: what arrived late, moved or changed its words").toEqual([]);
 });
 
@@ -139,7 +139,7 @@ test("the fit panel is whole on its first frame", async ({ page, open }) => {
   await settled(delay, 3000);
   await page.locator('#picker .pk-r[data-m="qwen3.8-abliterated:27b"]').hover();
   // No other route here: a detour through Settings would be watched as a passing screen.
-  const details = page.locator("#picker").getByRole("button", { name: "Memory details", exact: true });
+  const details = page.getByTestId("models.picker.memory-details");
   await expect(details).toBeVisible();
   r.check("open the fit panel", await watchWhole(page, { root: ".set", arrive: { selector: ".set-h h1", text: "Advanced" } }, () => details.click(), delay));
   expect(r.all, "fit panel: what arrived late, moved or changed its words").toEqual([]);

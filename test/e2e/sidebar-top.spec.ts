@@ -92,8 +92,8 @@ for (const overlay of [false, true]) {
 
     const sb = page.locator(".sb");
     const search = sb.locator(".sb-search");
-    const input = sb.getByRole("textbox", { name: "Search threads", exact: true });
-    const newThread = sb.getByRole("button", { name: "New thread", exact: true });
+    const input = page.getByTestId("sidebar.search.input");
+    const newThread = page.getByTestId("sidebar.top.new-thread");
     await expect(search).toBeVisible();
     await expect(input).toHaveAttribute("placeholder", "Search");
     await expect(newThread).toBeVisible();
@@ -137,7 +137,7 @@ for (const overlay of [false, true]) {
     // Settings is a pop-up: the sidebar under it keeps Search on the same row; Close names Esc
     await page.keyboard.press("Control+Comma");
     await expect(page.locator(".snav")).toBeVisible();
-    const close = page.getByRole("dialog", { name: "Settings" }).getByRole("button", { name: "Close", exact: true });
+    const close = page.getByRole("dialog", { name: "Settings" }).getByTestId("ui.dialog.close");
     await expect(close).toBeVisible();
     await expectNoShortcutText(page);
     expectSameRow(chat, await firstRow(page), where);
@@ -160,7 +160,7 @@ test("New thread by click and by Ctrl N; search by click and Ctrl K, filtering, 
   const row = sb.locator(".sb-body > :first-child");
   const search = sb.locator(".sb-search");
   const input = page.locator("#searchIn");
-  const newThread = sb.getByRole("button", { name: "New thread", exact: true });
+  const newThread = page.getByTestId("sidebar.top.new-thread");
 
   await sb.locator(".sb-row").filter({ hasText: "Fix the backup cron" }).click();
   await expect(page).toHaveURL(/#thread=/);
@@ -203,7 +203,7 @@ test("the Search field is always there and never moves: rest, pointer, focus, ty
   const search = sb.locator(".sb-search");
   const input = page.locator("#searchIn");
   const hint = search.locator(".sb-kbd");
-  const clear = search.getByRole("button", { name: "Clear search", exact: true });
+  const clear = page.getByTestId("sidebar.search.clear");
   await page.mouse.move(900, 600);
 
   // the measurement first, so a jump is what a regression reports
@@ -297,15 +297,15 @@ test.describe("phone drawer", () => {
   test("44 px touch targets, nothing over the close button", async ({ page, open }, info) => {
     await open();
     await waitReady(page);
-    await page.getByRole("button", { name: "Open threads" }).tap();
+    await page.getByTestId("chat.header.open-threads").tap();
     const sb = page.locator(".sb");
     await expect(sb.locator(".sb-row").first()).toBeInViewport({ ratio: 1 });
     // focus goes to New thread, never Close threads (Enter would shut the drawer again); the field would raise the keyboard
-    await expect(sb.getByRole("button", { name: "New thread", exact: true }), "opening the drawer focuses New thread").toBeFocused();
+    await expect(page.getByTestId("sidebar.top.new-thread"), "opening the drawer focuses New thread").toBeFocused();
     await settled(page);
     const search = sb.locator(".sb-search");
-    const newThread = sb.getByRole("button", { name: "New thread", exact: true });
-    const close = sb.getByRole("button", { name: "Close threads", exact: true });
+    const newThread = page.getByTestId("sidebar.top.new-thread");
+    const close = page.getByTestId("sidebar.drawer.close");
     await expectNoShortcutText(page);
     const s = await search.boundingBox();
     const n = await newThread.boundingBox();
@@ -323,7 +323,7 @@ test.describe("phone drawer", () => {
     expect(await sb.locator(".sb-search").boundingBox(), "the field holds still when tapped").toEqual(s);
     await expect(sb.locator(".sb-kbd"), "no shortcut hint on touch").toBeHidden();
     await page.keyboard.type("backup");
-    const clear = sb.getByRole("button", { name: "Clear search", exact: true });
+    const clear = page.getByTestId("sidebar.search.clear");
     await expect(clear).toBeVisible();
     const c = await clear.boundingBox();
     expect(c?.width, "the × is a 44 px target").toBeGreaterThanOrEqual(44);
@@ -333,7 +333,7 @@ test.describe("phone drawer", () => {
     await clear.tap();
     await expect(page.locator("#searchIn")).toHaveValue("");
     await expect(sb.locator(".sb-kbd")).toBeHidden();
-    await sb.getByRole("button", { name: "Settings" }).tap();
+    await page.getByTestId("sidebar.foot.settings").tap();
     await expect(page.locator(".set-list")).toBeVisible();
     await expect(page.locator("#app")).not.toHaveClass(/drawer/);
     await settled(page);
@@ -347,18 +347,18 @@ test.describe("tablet drawer", () => {
     await open();
     await waitReady(page);
     const sb = page.locator(".sb");
-    await page.getByRole("button", { name: "Open threads" }).tap();
+    await page.getByTestId("chat.header.open-threads").tap();
     await expect(sb.locator(".sb-row").first()).toBeInViewport({ ratio: 1 });
     await settled(page);
-    await expect(sb.getByRole("button", { name: "Close threads", exact: true })).toBeVisible();
-    await sb.getByRole("button", { name: "Close threads", exact: true }).tap();
+    await expect(page.getByTestId("sidebar.drawer.close")).toBeVisible();
+    await page.getByTestId("sidebar.drawer.close").tap();
     await expect(page.locator("#app")).not.toHaveClass(/drawer/);
     // wider than a phone Settings is a pop-up: its sections are inside it, not in the drawer
     await page.keyboard.press("Control+Comma");
     const set = page.getByRole("dialog", { name: "Settings" });
     await expect(set.locator(".snav .sb-act").first()).toBeInViewport({ ratio: 1 });
     expect((await set.locator(".snav .sb-act").first().boundingBox())?.height).toBeGreaterThanOrEqual(44);
-    expect((await set.getByRole("button", { name: "Close", exact: true }).boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    expect((await set.getByTestId("ui.dialog.close").boundingBox())?.height).toBeGreaterThanOrEqual(44);
     await shot(page, info, "tablet-settings-drawer");
   });
 });
@@ -369,7 +369,7 @@ test.describe("drawer with a keyboard and pointer", () => {
     await open();
     await waitReady(page);
     const sb = page.locator(".sb");
-    await page.getByRole("button", { name: "Open threads" }).click();
+    await page.getByTestId("chat.header.open-threads").click();
     await expect(sb.locator(".sb-row").first()).toBeInViewport({ ratio: 1 });
     await expect(page.locator("#searchIn"), "the first thing in the drawer, as the row's Search button was").toBeFocused();
     await page.keyboard.press("Escape");

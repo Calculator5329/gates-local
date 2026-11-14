@@ -74,6 +74,7 @@ export function DownloadingRow({ p }: { p: PullProgress }) {
           <button
             type="button"
             className="mp-kebab"
+            data-testid="models.downloading.cancel"
             aria-label="Cancel download"
             data-tip="Cancel download"
             disabled={p.state === "done"}
@@ -130,7 +131,7 @@ export function DlButton({ size, label, p, installed = false, disabled = false, 
           <span>{finishing ? "Finishing" : p.totalBytes ? `${pct}%` : "…"}</span>
         </span>
       ) : (
-        <button type="button" className="dl-btn" aria-label={size === undefined ? "Download" : `Download ${size}`} disabled={disabled} onClick={onStart}>
+        <button type="button" className="dl-btn" data-testid="models.download.start" aria-label={size === undefined ? "Download" : `Download ${size}`} disabled={disabled} onClick={onStart}>
           <Icon id="download" />
           {size ?? "Download"}
         </button>
@@ -139,6 +140,7 @@ export function DlButton({ size, label, p, installed = false, disabled = false, 
         <button
           type="button"
           className="dl-x"
+          data-testid="models.download.cancel"
           aria-label="Cancel download"
           data-tip="Cancel download"
           disabled={p.state === "done"}
@@ -285,7 +287,7 @@ function CustomPull({ actions, numCtx }: { actions: DownloadActions; numCtx: num
       label="Any model from the Ollama library"
       desc={
         said === undefined ? (
-          <a className="link" href="https://ollama.com/library" target="_blank" rel="noreferrer noopener" aria-label="Browse the Ollama library at ollama.com/library (opens your browser)">
+          <a className="link" data-testid="models.custom.library-link" href="https://ollama.com/library" target="_blank" rel="noreferrer noopener" aria-label="Browse the Ollama library at ollama.com/library (opens your browser)">
             Browse the Ollama library ↗
           </a>
         ) : (
@@ -293,22 +295,22 @@ function CustomPull({ actions, numCtx }: { actions: DownloadActions; numCtx: num
         )
       }
     >
-      <input className="inp" placeholder={`Model name, e.g. ${CHAT_MODELS.typedExample}`} aria-label="Model name" value={name} onChange={(e) => setName(e.target.value)} />
-      <div className="dl-typed-a" ref={box} onKeyDown={(e) => menu && walk(e, box.current, "[role=menuitem]", closeMenu)}>
+      <input className="inp" placeholder={`Model name, e.g. ${CHAT_MODELS.typedExample}`} aria-label="Model name" data-testid="models.custom.name" value={name} onChange={(e) => setName(e.target.value)} />
+      <div className="dl-typed-a" ref={box} data-testid="models.custom.actions" onKeyDown={(e) => menu && walk(e, box.current, "[role=menuitem]", closeMenu)}>
         <DlButton
           size={answer?.downloadBytes === undefined ? undefined : gb(answer.downloadBytes)}
           label={tag}
           disabled={tag === "" || big || answer?.found === "no"}
           onStart={start}
           side={big ? (
-            <button type="button" className={`dl-x${menu ? " on" : ""}`} aria-label={`More for ${tag}`} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(m => !m)}>
+            <button type="button" className={`dl-x${menu ? " on" : ""}`} data-testid="models.custom.more" aria-label={`More for ${tag}`} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(m => !m)}>
               <Icon id="more" />
             </button>
           ) : undefined}
         />
         {big && menu ? (
           <div className="mp-menu dl-menu" role="menu" aria-label={tag}>
-            <button type="button" role="menuitem" className="mp-mi" onClick={start}>
+            <button type="button" role="menuitem" className="mp-mi" data-testid="models.custom.download-anyway" onClick={start}>
               <Icon id="download" />
               Download anyway
               <span className="mp-k">{answer?.downloadBytes === undefined ? "" : gb(answer.downloadBytes)}</span>
@@ -517,7 +519,7 @@ export function DownloadTab() {
       <Grp title="Something else"><CustomPull actions={actions} numCtx={numCtx} /></Grp>
       {big.length > 0 ? (
         <details className="grp dl-bigs">
-          <summary className="grp-h">
+          <summary className="grp-h" data-testid="models.download.too-big">
             <div className="grp-l"><div className="grp-t">Too big for this computer<span className="grp-n">{big.length}</span><Icon id="down" cls="dl-chev" /></div></div>
           </summary>
           <div className="box">

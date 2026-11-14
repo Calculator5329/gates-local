@@ -154,7 +154,7 @@ test("desktop clipboard paths cannot be read by a timer or a renderer keyboard e
       contents.sendInputEvent({ type: "keyUp", keyCode: "V", modifiers: ["control"] });
     });
     await expect.poll(() => app.evaluate(() => (globalThis as typeof globalThis & { pasteReading?: boolean }).pasteReading)).toBe(true);
-    await page.getByRole("complementary").getByRole("button", { name: /^New thread/ }).click();
+    await page.getByTestId("sidebar.top.new-thread").click();
     await page.locator("#ta").focus();
     await app.evaluate(() => (globalThis as typeof globalThis & { releasePasteRead?: () => void }).releasePasteRead?.());
     await expect.poll(() => app.evaluate(({ BrowserWindow }: DesktopApi) => BrowserWindow.getAllWindows()[0]!.webContents.executeJavaScriptInIsolatedWorld(1004, [{ code: "globalThis.gatesNativePaste === undefined" }]))).toBe(true);

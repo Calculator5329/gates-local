@@ -110,7 +110,7 @@ function DoButton({ icon, label, act }: { icon: IconId; label: string; act: () =
   }, [state]);
   const tip = state === "failed" ? `Couldn't ${label.toLowerCase()}` : label;
   return (
-    <button type="button" className={`ibtn${state === "failed" ? " red" : ""}`} aria-label={tip} data-tip={tip} onClick={() => void act().then(() => show("ok"), () => show("failed"))}>
+    <button type="button" className={`ibtn${state === "failed" ? " red" : ""}`} data-testid={`pictures.actions.${icon}`} aria-label={tip} data-tip={tip} onClick={() => void act().then(() => show("ok"), () => show("failed"))}>
       <Icon id={state === "ok" ? "check" : state === "failed" ? "alert" : icon} />
     </button>
   );
@@ -121,18 +121,18 @@ function Actions({ p, phone }: { p: Picture; phone: boolean }) {
   const full = file(p.imagePath);
   return (
     <div className="pics-acts">
-      <button type="button" className="btn outline" onClick={() => again(p)}>
+      <button type="button" className="btn outline" data-testid="pictures.actions.again" onClick={() => again(p)}>
         <Icon id="redo" />
         Again
       </button>
-      <button type="button" className="ibtn" aria-label="Edit prompt" data-tip="Edit prompt" onClick={() => editPrompt(p)}>
+      <button type="button" className="ibtn" data-testid="pictures.actions.edit-prompt" aria-label="Edit prompt" data-tip="Edit prompt" onClick={() => editPrompt(p)}>
         <Icon id="pencil" />
       </button>
       <DoButton icon="copy" label="Copy" act={() => copyPicture(full)} />
       <DoButton icon="download" label="Save" act={() => savePicture(full, fileName(p))} />
       {/* the phone's sheet has no facts list, so its thread is a button here */}
       {phone ? (
-        <button type="button" className="ibtn" aria-label="Open thread" data-tip="Open thread" onClick={() => openThread(p.threadId)}>
+        <button type="button" className="ibtn" data-testid="pictures.actions.open-thread" aria-label="Open thread" data-tip="Open thread" onClick={() => openThread(p.threadId)}>
           <Icon id="chat" />
         </button>
       ) : null}
@@ -152,7 +152,7 @@ function Facts({ p }: { p: Picture }) {
       <dt>Made</dt><dd className="mono">{made(p.doneAt)}</dd>
       <dt>Thread</dt>
       <dd>
-        <button type="button" className="pics-lnk" onClick={() => openThread(p.threadId)}>{p.threadTitle}</button>
+        <button type="button" className="pics-lnk" data-testid="pictures.detail.thread-link" onClick={() => openThread(p.threadId)}>{p.threadTitle}</button>
       </dd>
     </dl>
   );
@@ -162,7 +162,7 @@ function One({ p }: { p: Picture }) {
   const file = useFiles();
   return (
     <>
-      <button type="button" className="pics-big" aria-label="Show large" data-tip="Show large" onClick={() => pictures.setLarge(true)} style={{ aspectRatio: `${p.width} / ${p.height}` }}>
+      <button type="button" className="pics-big" data-testid="pictures.detail.show-large" aria-label="Show large" data-tip="Show large" onClick={() => pictures.setLarge(true)} style={{ aspectRatio: `${p.width} / ${p.height}` }}>
         <img src={file(thumbPath(p))} alt="" draggable={false} />
       </button>
       <p className="pics-prompt">{p.prompt}</p>
@@ -180,7 +180,7 @@ function PhoneOne({ p }: { p: Picture }) {
   return (
     <>
       <div className="pics-row">
-        <button type="button" className="pics-th" aria-label="Show large" onClick={() => pictures.setLarge(true)}>
+        <button type="button" className="pics-th" data-testid="pictures.thumb.show-large" aria-label="Show large" onClick={() => pictures.setLarge(true)}>
           <img src={file(thumbPath(p))} alt="" draggable={false} />
         </button>
         <div className="pics-what">
@@ -201,7 +201,7 @@ function Several({ picked }: { picked: readonly Picture[] }) {
     <>
       <div className="pics-n">
         <span>{picked.length} selected</span>
-        <button type="button" className="pics-lnk dim" onClick={() => pictures.select([picked.at(-1)!.jobId])}>Clear</button>
+        <button type="button" className="pics-lnk dim" data-testid="pictures.selection.clear" onClick={() => pictures.select([picked.at(-1)!.jobId])}>Clear</button>
       </div>
       <div className="pics-ths">
         {picked.slice(0, 12).map((p) => (
@@ -227,18 +227,18 @@ function Large({ p, list }: { p: Picture; list: readonly Picture[] }) {
   const file = useFiles();
   const at = list.findIndex((x) => x.jobId === p.jobId);
   return (
-    <div className="pics-large" role="dialog" aria-label="Picture" onClick={(e) => { if (e.target === e.currentTarget) pictures.setLarge(false); }}>
+    <div className="pics-large" role="dialog" aria-label="Picture" data-testid="pictures.large.dialog" onClick={(e) => { if (e.target === e.currentTarget) pictures.setLarge(false); }}>
       <img src={file(p.imagePath)} alt={p.prompt} style={{ aspectRatio: `${p.width} / ${p.height}` }} draggable={false} />
-      <button type="button" className="ibtn pics-x" aria-label="Close" data-tip="Close" onClick={() => pictures.setLarge(false)}>
+      <button type="button" className="ibtn pics-x" data-testid="pictures.large.close" aria-label="Close" data-tip="Close" onClick={() => pictures.setLarge(false)}>
         <Icon id="x" cls="s18" />
       </button>
       {at > 0 ? (
-        <button type="button" className="ibtn pics-step l" aria-label="Newer" data-tip="Newer" onClick={() => step(list, -1)}>
+        <button type="button" className="ibtn pics-step l" data-testid="pictures.large.newer" aria-label="Newer" data-tip="Newer" onClick={() => step(list, -1)}>
           <Icon id="left" cls="s18" />
         </button>
       ) : null}
       {at >= 0 && at < list.length - 1 ? (
-        <button type="button" className="ibtn pics-step r" aria-label="Older" data-tip="Older" onClick={() => step(list, 1)}>
+        <button type="button" className="ibtn pics-step r" data-testid="pictures.large.older" aria-label="Older" data-tip="Older" onClick={() => step(list, 1)}>
           <Icon id="right" cls="s18" />
         </button>
       ) : null}
@@ -289,6 +289,7 @@ function TileRow({ row, list, sel, multi, onPick }: { row: Extract<Row, { kind: 
             key={p.jobId}
             type="button"
             className="pics-tile"
+            data-testid="pictures.grid.tile"
             data-job={p.jobId}
             aria-pressed={on}
             aria-label={p.prompt}
@@ -393,12 +394,12 @@ function Bar({ phone }: { phone: boolean }) {
   const field = (
     <label className="sb-search pics-search">
       <Icon id="search" />
-      <input placeholder="Search prompts" aria-label="Search prompts" value={q} autoFocus={phone} onChange={(e) => pictures.search(e.target.value)} />
+      <input placeholder="Search prompts" aria-label="Search prompts" data-testid="pictures.search.input" value={q} autoFocus={phone} onChange={(e) => pictures.search(e.target.value)} />
     </label>
   );
   return (
     <header className="hdr pics-bar">
-      <button type="button" className="ibtn hb" id="menuBtn" aria-label="Open threads" onClick={openDrawer}>
+      <button type="button" className="ibtn hb" id="menuBtn" data-testid="pictures.head.open-threads" aria-label="Open threads" onClick={openDrawer}>
         <Icon id="menu" cls="s18" />
       </button>
       {phone && searching ? field : (
@@ -411,6 +412,7 @@ function Bar({ phone }: { phone: boolean }) {
         <button
           type="button"
           className="ibtn hb"
+          data-testid="pictures.search.toggle"
           aria-label={searching ? "Stop searching" : "Search prompts"}
           onClick={() => {
             if (searching) pictures.search("");
@@ -431,7 +433,7 @@ function Empty({ status, q }: { status: PicturesView["status"]; q: string }) {
       {status === "error" ? (
         <p>
           Pictures couldn't load.{" "}
-          <button type="button" className="pics-lnk" onClick={() => void pictures.enter()}>Try again</button>
+          <button type="button" className="pics-lnk" data-testid="pictures.error.try-again" onClick={() => void pictures.enter()}>Try again</button>
         </p>
       ) : q.trim() !== "" ? (
         <p>No picture's prompt has those words.</p>

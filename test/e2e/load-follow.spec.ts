@@ -52,7 +52,7 @@ test("New thread starts on the model and context last used, already loaded, with
   await expect(btn).not.toHaveAttribute("aria-busy", "true");
   const asked = loadsAsked.length;
 
-  await page.getByRole("button", { name: "New thread" }).click();
+  await page.getByTestId("sidebar.top.new-thread").click();
   await expect(page.locator("#ta")).toHaveValue("");
   await expect(btn).toContainText("Gemma 4 12B");
   await expect(btn).toContainText("32k");
@@ -99,7 +99,7 @@ test("a model still loading follows New thread, and a second pick joins its one 
   await expect(btn).toHaveAttribute("aria-busy", "true");
 
   // S1: the new chat starts on the model chosen last, still loading.
-  await page.getByRole("button", { name: "New thread" }).click();
+  await page.getByTestId("sidebar.top.new-thread").click();
   await expect(page.locator("#ta")).toHaveValue("");
   await expect.soft(btn, "S1: the new chat shows the model still loading").toContainText("Gemma");
   await expect.soft(btn, "S1: and shows it loading").toHaveAttribute("aria-busy", "true");

@@ -66,12 +66,12 @@ for (const profile of PROFILES) {
     await open();
     await waitReady(page);
     await openModels(page);
-    await page.getByRole("tab", { name: /^Download/ }).click();
+    await page.getByTestId("models.tabs.download").click();
     const list = page.locator(".mp");
     await expect(list.locator('.dlrow[data-cat="qwen3.5:4b"]')).toBeVisible();
     await expect(list.locator("[aria-busy=true]")).toHaveCount(0);
     if (profile.download !== undefined) {
-      await list.locator(`.dlrow[data-cat="${profile.download}"]`).getByRole("button", { name: /^Download/ }).click();
+      await list.locator(`.dlrow[data-cat="${profile.download}"]`).getByTestId("models.download.start").click();
       await expect(list.locator(`.dlrow[data-cat="${profile.download}"]`).getByRole("progressbar")).toBeVisible();
       await page.mouse.move(0, 0);
       await page.waitForTimeout(2500);
@@ -114,8 +114,8 @@ test("a typed model name: its size and verdict, too big with Download anyway in 
   await open();
   await waitReady(page);
   await openModels(page);
-  await page.getByRole("tab", { name: /^Download/ }).click();
-  const field = page.getByRole("textbox", { name: "Model name" });
+  await page.getByTestId("models.tabs.download").click();
+  const field = page.getByTestId("models.custom.name");
   const row = field.locator("xpath=ancestor::*[contains(@class,'srow')][1]");
   const said = row.locator(".dl-typed");
   // the row, and the row menu when it is open below it
@@ -136,19 +136,19 @@ test("a typed model name: its size and verdict, too big with Download anyway in 
   await field.fill("qwen3.8:27b");
   await expect(said).toHaveText(/^Too big for this computer · needs \d+\.\d\sGB$/);
   await expect(row.getByRole("button", { name: /^Download \d+\.\d\sGB$/ })).toBeDisabled();
-  await row.getByRole("button", { name: "More for qwen3.8:27b" }).click();
-  const anyway = page.getByRole("menuitem", { name: /^Download anyway/ });
+  await row.getByTestId("models.custom.more").click();
+  const anyway = page.getByTestId("models.custom.download-anyway");
   await expect(anyway).toBeVisible();
   // the size is said whole in the menu (it was cut to "14.1 G")
   expect(await anyway.locator(".mp-k").evaluate(el => el.scrollWidth <= el.clientWidth), "the menu's size is not cut").toBe(true);
   await shot("typed-too-big.png");
   // Escape closes the row menu, not the Models pop-up
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("menuitem", { name: /^Download anyway/ })).toHaveCount(0);
-  await expect(row.getByRole("button", { name: "More for qwen3.8:27b" })).toBeFocused();
+  await expect(page.getByTestId("models.custom.download-anyway")).toHaveCount(0);
+  await expect(row.getByTestId("models.custom.more")).toBeFocused();
 
   await field.fill("no-such-model:1b");
   await expect(said).toHaveText("Not in the Ollama library. Check the name.");
-  await expect(row.getByRole("button", { name: /^Download/ })).toBeDisabled();
+  await expect(row.getByTestId("models.download.start")).toBeDisabled();
   await shot("typed-unknown.png");
 });

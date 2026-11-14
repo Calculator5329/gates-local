@@ -7,7 +7,7 @@ import { expect, stack, test, waitReady } from "./fixtures.ts";
 test.use({ scenario: "wrong-service", controlledRuntimePorts: true });
 
 /** The footer's Settings icon: while the runtime is not ready it carries the old runtime row's words and opens Settings › Runtime. */
-const gear = (page: Page) => page.locator(".sb-foot").getByRole("button", { name: /^Settings/ });
+const gear = (page: Page) => page.getByTestId("sidebar.foot.settings");
 
 test.describe("with the system Ollama chosen", () => {
   test.use({ runtimeMode: "system" });

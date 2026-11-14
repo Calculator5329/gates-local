@@ -118,8 +118,8 @@ async function showSection(page: Page, section: string): Promise<void> {
   const back = page.getByTestId("settings.shell.back");
   if (await back.isVisible()) await back.click();
   if (!(await page.locator(".set-list").isVisible())) {
-    await page.getByRole("button", { name: "Open threads" }).click();
-    await page.locator(".sb").getByRole("button", { name: "Settings" }).click();
+    await page.getByTestId("chat.header.open-threads").click();
+    await page.getByTestId("sidebar.foot.settings").click();
   }
   await listButton(page, section).click();
   await expect(bar).toHaveText(section);
@@ -153,12 +153,12 @@ test("the phone reads, sends, stops and switches models, and nothing it offers i
   await expect(page.locator(".composer:not(.blocked)")).toBeAttached({ timeout: 10_000 });
 
   // Open a thread from the drawer; its menu can rename but not delete.
-  await page.getByRole("button", { name: "Open threads" }).click();
+  await page.getByTestId("chat.header.open-threads").click();
   await page.locator(".sb .sb-row .sb-thread").first().focus();
   await page.keyboard.press("Shift+F10");
   await expect(page.locator("#threadMenu")).toHaveClass(/\bopen\b/);
-  await expect(page.locator("#threadMenu").getByRole("menuitem", { name: "Rename" })).toBeVisible();
-  await expect(page.locator("#threadMenu").getByRole("menuitem", { name: "Delete thread" })).toHaveCount(0);
+  await expect(page.getByTestId("sidebar.thread-menu.rename")).toBeVisible();
+  await expect(page.getByTestId("sidebar.thread-menu.delete")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await page.locator(".sb .sb-row .sb-thread").first().click();
   await expect(page.locator(".turn").first()).toBeVisible();
@@ -172,21 +172,21 @@ test("the phone reads, sends, stops and switches models, and nothing it offers i
 
   // Pick another installed model. Downloading a new one is not offered.
   await page.locator("#modelBtn").click();
-  await expect(page.locator("#picker").getByRole("button", { name: "Download models" })).toHaveCount(0);
+  await expect(page.getByTestId("models.picker.download-models")).toHaveCount(0);
   await page.locator('#picker .pk-r[data-m="gemma4:12b"] .pk-select').click();
   await page.locator('#picker [data-ctx="32768"]').click();
   await expect(page.locator("#picker")).toBeHidden({ timeout: 10_000 });
   await expect(page.locator("#modelBtn")).toContainText("Gemma 4 12B");
 
-  await page.getByRole("button", { name: "Open threads" }).click();
-  await page.locator(".sb").getByRole("button", { name: "Settings" }).click();
+  await page.getByTestId("chat.header.open-threads").click();
+  await page.getByTestId("sidebar.foot.settings").click();
   await expect(page.locator(".set-list")).toBeVisible();
 
   await showSection(page, "Models");
   await expect(page.getByRole("tab", { name: "Installed" })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "Download" })).toHaveCount(0);
-  await page.locator(".mp-kebab").first().click();
-  await expect(page.getByRole("menuitem", { name: "Copy Ollama name" })).toBeVisible();
+  await expect(page.getByTestId("models.tabs.download")).toHaveCount(0);
+  await page.getByTestId("models.row-menu.open").first().click();
+  await expect(page.getByTestId("models.row-menu.copy-name")).toBeVisible();
   await expect(page.getByRole("menuitem", { name: /Use as default|Remove/ })).toHaveCount(0);
   await page.keyboard.press("Escape");
   await showSection(page, "Library");

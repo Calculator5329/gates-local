@@ -10,21 +10,21 @@ test("set a default from the row menu, then download a model into the list", asy
   await waitReady(page);
   await openModels(page);
 
-  const installedTab = page.getByRole("tab", { name: /^Installed/ });
+  const installedTab = page.getByTestId("models.tabs.installed");
   await expect(installedTab).toHaveAttribute("aria-selected", "true");
   await expect(page.locator(".mp-row[data-dm]")).toHaveCount(3);
   await expect(page.locator('.mp-row[data-dm="qwen3.5:9b"] .mp-l1 .mp-chip')).toHaveText("Default");
 
   // another default, from the row menu
   const gemma = page.locator('.mp-row[data-dm="gemma4:12b"]');
-  await gemma.getByRole("button", { name: "More for Gemma 4 12B" }).click();
-  await page.getByRole("menuitem", { name: "Use as default" }).click();
+  await gemma.getByTestId("models.row-menu.open").click();
+  await page.getByTestId("models.row-menu.make-default").click();
   await expect(page.getByRole("menu")).toHaveCount(0);
   await expect(gemma.locator(".mp-l1 .mp-chip")).toHaveText("Default");
-  await expect(page.getByRole("button", { name: /^Default for new chats:/ })).toHaveAccessibleName("Default for new chats: Gemma 4 12B");
+  await expect(page.getByTestId("models.default.select")).toHaveAccessibleName("Default for new chats: Gemma 4 12B");
 
   // download one from the Download tab
-  await page.getByRole("tab", { name: /^Download/ }).click();
+  await page.getByTestId("models.tabs.download").click();
   const row = page.locator('.dlrow[data-cat="qwen3.5:4b"]');
   // the button is labelled with the download's size (row 18)
   await row.getByRole("button", { name: /^Download \d/ }).click();
@@ -41,7 +41,7 @@ test("a running download shows its detail in the row and on Installed, and Cance
   await waitReady(page);
   await stack.scenario("models", { pullTickMs: 1000, pullChunkBytes: 100 * 1024 ** 2 });
   await openModels(page);
-  await page.getByRole("tab", { name: /^Download/ }).click();
+  await page.getByTestId("models.tabs.download").click();
 
   const row = page.locator('.dlrow[data-cat="qwen3.5:4b"]');
   await row.getByRole("button", { name: /^Download \d/ }).click();
@@ -52,13 +52,13 @@ test("a running download shows its detail in the row and on Installed, and Cance
   await expect(row.getByRole("progressbar", { name: "Qwen 3.5 4B download" })).toHaveText(/^\d+%$/);
 
   // Installed keeps showing it with its own Cancel download
-  await page.getByRole("tab", { name: /^Installed/ }).click();
+  await page.getByTestId("models.tabs.installed").click();
   const running = page.locator('.mp-row.mp-dling[data-pull="qwen3.5:4b"]');
   await expect(running.locator(".prog-l span")).toHaveText(/^[\d.]+ of [\d.]+\sGB · \d+\sMB\/s · about .+ left$/);
-  await expect(running.getByRole("button", { name: "Cancel download" })).toBeVisible();
+  await expect(running.getByTestId("models.downloading.cancel")).toBeVisible();
 
-  await page.getByRole("tab", { name: /^Download/ }).click();
-  await row.getByRole("button", { name: "Cancel download" }).click();
+  await page.getByTestId("models.tabs.download").click();
+  await row.getByTestId("models.download.cancel").click();
   await expect(row.getByRole("button", { name: /^Download \d/ })).toBeVisible();
   await expect(row.getByRole("progressbar")).toHaveCount(0);
 });
@@ -69,9 +69,9 @@ test("the model name field has one focus ring and takes a pasted ollama command"
   await open();
   await waitReady(page);
   await openModels(page);
-  await page.getByRole("tab", { name: /^Download/ }).click();
+  await page.getByTestId("models.tabs.download").click();
 
-  const field = page.getByRole("textbox", { name: "Model name" });
+  const field = page.getByTestId("models.custom.name");
   await field.fill("ollama run qwen3.5:4b");
   await expect(field).toBeFocused();
   const ring = await field.evaluate((el) => {
@@ -82,6 +82,6 @@ test("the model name field has one focus ring and takes a pasted ollama command"
   expect(ring.shadow).not.toBe("none");
   await field.locator("xpath=ancestor::*[contains(@class,'srow')][1]").screenshot({ path: testInfo.outputPath("model-name-focus.png") });
 
-  await page.getByRole("button", { name: /^Download/ }).last().click();
+  await page.getByTestId("models.download.start").last().click();
   await expect(page.locator('.dlrow[data-cat="qwen3.5:4b"] .dl-done')).toHaveText("Installed", { timeout: 20_000 });
 });

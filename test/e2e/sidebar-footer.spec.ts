@@ -5,8 +5,8 @@
 import { expect, test, waitReady } from "./fixtures.ts";
 import { QWEN14, QWEN4, desktopBridge, footerBoxes, footerSocket, footerWords } from "./footer-fixture.ts";
 
-const settings = (page: import("@playwright/test").Page) => page.locator(".sb-foot").getByRole("button", { name: /^Settings/ });
-const models = (page: import("@playwright/test").Page) => page.locator(".sb-foot").getByRole("button", { name: /^Models/ });
+const settings = (page: import("@playwright/test").Page) => page.getByTestId("sidebar.foot.settings");
+const models = (page: import("@playwright/test").Page) => page.getByTestId("sidebar.foot.models");
 
 // Guards the owner's ruling on the footer: one row of icon buttons that never move.
 test("one row of five icon buttons whose boxes never move, in any state or in Settings", async ({ page, open }) => {
@@ -118,7 +118,7 @@ test("a clone's update asks once in the footer, and Cancel puts focus back", asy
   await expect(ask).toHaveCount(0);
   await expect(update).toBeFocused();
   await update.click();
-  await ask.getByRole("button", { name: "Update and restart" }).click();
+  await ask.getByTestId("sidebar.update.go").click();
   await expect(page.locator("html")).toHaveAttribute("data-update-started", "yes");
   // after the one ask, focus is on the update button, now closing to update
   await expect(page.locator(".sb-foot .upd")).toBeFocused();

@@ -25,7 +25,7 @@ async function connect(page: import("@playwright/test").Page) {
   await page.getByTestId("settings.nav.open-general").click();
   await page.getByTestId("settings.voice.address").fill(whisper.url);
   await page.getByTestId("settings.voice.connect").click();
-  await expect(page.getByRole("button", { name: "Disconnect", exact: true })).toBeVisible();
+  await expect(page.getByTestId("settings.voice.disconnect")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator(".voice")).toBeVisible();
 }
