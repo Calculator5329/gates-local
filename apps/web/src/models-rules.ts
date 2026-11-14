@@ -2,7 +2,7 @@
 // fit words, the installed order, the next default after a removal and the
 // name truncation.
 import type { CatalogEntry, FitReport, FitVerdict } from "@gates-local/contracts";
-import { friendlyName } from "./format.ts";
+import { NBSP, cardGb, friendlyName } from "./format.ts";
 
 // ---------------------------------------------------------------- fit words
 
@@ -30,14 +30,17 @@ export const about = (bytes: number) => {
 /** A model's size in the Size column: MB under 1 GB, else as `about`. */
 export const sizeText = (bytes: number) => (bytes < GB ? `${Math.round(bytes / 1024 ** 2)} MB` : about(bytes));
 
-/** The reason behind a verdict, outcome first, one number per resource. */
-export function fitReason(r: FitReport, cpu = false): string {
-  const head = `Needs about ${about(r.needVramBytes)}.`;
-  if (cpu) return `${head} This computer has no supported GPU, ${r.verdict === "refuse" ? "and system memory can't hold it, so it can't load." : "so it runs in slower system memory."}`;
-  const gpu = `Your GPU has ${about(r.freeVramBytes)} free`;
-  if (r.verdict === "fits") return `${head} ${gpu}, so it runs entirely on the GPU.`;
-  if (r.verdict === "spills") return `${head} ${gpu}, so the rest runs in slower system memory.`;
-  return `${head} ${gpu}, and system memory can't hold the rest, so it can't load.`;
+/**
+ * The reason behind a verdict in a few words, against the card's size (the mark's whole), never
+ * what happens to be free right now: "Needs about 22 GB of a 16 GB GPU; the rest in system memory."
+ */
+export function fitReason(r: FitReport, cpu = false, whole: number = r.freeVramBytes): string {
+  const need = `Needs about ${about(r.needVramBytes)}`;
+  if (cpu) return r.verdict === "refuse" ? `${need}; system memory can't hold it.` : `${need}, all in system memory.`;
+  const of = `${need} of a ${cardGb(whole).replace(NBSP, " ")} GPU`;
+  if (r.verdict === "fits") return `${of}.`;
+  if (r.verdict === "spills") return `${of}; the rest in system memory.`;
+  return `${of}; system memory can't hold the rest.`;
 }
 
 // ---------------------------------------------------------------- what a model is
@@ -58,6 +61,9 @@ export function nameOf(tag: string, catalog: readonly CatalogEntry[] | undefined
   const short = shortTag(tag);
   return { text: friendlyName(short.slice(short.lastIndexOf("/") + 1)), purpose: "", id: tag };
 }
+
+/** A Download row's name: the one Installed shows for the same model ("Qwen 3.8 27B abliterated", never its Ollama tag). */
+export const labelOf = (c: CatalogEntry): string => nameOf(c.name, [c]).text;
 
 /**
  * What tells apart options that would otherwise read alike, by model name:

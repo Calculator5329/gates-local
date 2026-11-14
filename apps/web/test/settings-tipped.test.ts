@@ -53,10 +53,10 @@ it("F4: every tipped label carries its tip as aria-description, unescaped", () =
   expect(seen, "the sections have tipped labels to check").toBeGreaterThan(3);
 });
 
-it("F4: Image generation says what a short GPU costs in its visible line, once, and not in the tooltip", () => {
+it("F4: Image generation says what an image costs the chat model in its visible line, once, and not in the tooltip", () => {
   const html = render("images");
-  const sentence = "If the GPU is short, the chat model is unloaded while an image renders.";
+  const sentence = "The chat model unloads while an image renders.";
   expect(html.split(sentence).length - 1).toBe(1);
-  expect(html).not.toMatch(/data-tip="[^"]*If the GPU is short/);
-  expect(html).toMatch(/<span class="d">[^<]*If the GPU is short, the chat model is unloaded while an image renders\./);
+  expect(html).not.toMatch(/data-tip="[^"]*chat model unloads/);
+  expect(html).toMatch(/<span class="d">[^<]*The chat model unloads while an image renders\./);
 });

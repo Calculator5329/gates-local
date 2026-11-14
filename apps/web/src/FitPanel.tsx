@@ -3,7 +3,7 @@
 // goes, from the server's fit table plus gpu.status when the server has it.
 import { type ReactNode, useState } from "react";
 import type { ContextSize, FitReport, GpuOccupant, GpuStatus } from "@gates-local/contracts";
-import { CONTEXT_SIZES, NO_GPU_TEXT, type Verdict, decodeSpeed, describeModel, gb, k, noGpu, verdictOf } from "./format.ts";
+import { CONTEXT_SIZES, NO_GPU_TEXT, type Verdict, cardGb, decodeSpeed, describeModel, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { cardFit, fitFor } from "./fit-table.ts";
 import { setContext, updateSettings } from "./session.ts";
@@ -15,7 +15,7 @@ export { openFit } from "./fit-actions.ts";
 import { FIT_DOT, fitLabel } from "./models-rules.ts";
 
 const gpuHead = (gpu: GpuStatus | undefined): string =>
-  gpu === undefined ? "" : gpu.vendor === "none" ? gpu.detail ? "NVIDIA GPU unavailable" : "No supported GPU" : gpu.totalBytes ? `${shortGpu(gpu.name)} · ${gb(gpu.totalBytes)}` : shortGpu(gpu.name);
+  gpu === undefined ? "" : gpu.vendor === "none" ? gpu.detail ? "NVIDIA GPU unavailable" : "No supported GPU" : gpu.totalBytes ? `${shortGpu(gpu.name)} · ${cardGb(gpu.totalBytes)}` : shortGpu(gpu.name);
 
 const GPU_UNREADABLE_TEXT = "GPU memory could not be read. Try again before loading a model.";
 
@@ -84,7 +84,7 @@ function MemoryBar({ gpu, name, v, loaded }: { gpu: GpuStatus; name: string; v: 
       </div>
       <div className="axis">
         <span>0</span>
-        <span>{gb(gpu.totalBytes ?? 0)}</span>
+        <span>{cardGb(gpu.totalBytes ?? 0)}</span>
       </div>
       <div className="legend">
         {parts.map((p, i) => {
@@ -183,7 +183,8 @@ function Numbers({ r, v, name, gpu, loaded }: { r: FitReport; v: Verdict; name: 
   }
   return (
     <div className="fp-n fp-numbers">
-      Estimated {gb(r.needVramBytes)}; {noGpu(gpu) ? gpu?.detail ? gpuHead(gpu) : "no supported GPU" : `${gb(r.freeVramBytes)} on the GPU`}.
+      {/* the fit judges a model against the whole card (freeVramBytes is its size), so the card is named as it is everywhere: 16 GB */}
+      Estimated {gb(r.needVramBytes)}{noGpu(gpu) ? `; ${gpu?.detail ? gpuHead(gpu) : "no supported GPU"}` : ` of a ${cardGb(r.freeVramBytes)} GPU`}.
       <br />
       {v.k === "spill" ? `${gb(v.amt)} in system memory; slower replies.` : "Runs entirely on the GPU."}
       <br />

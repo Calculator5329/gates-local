@@ -9,6 +9,7 @@
 // rows' .pk-cost) and the image picker (ImagePicker.tsx, the size rows' bars) are where the same part
 // goes next.
 import type { FitReport } from "@gates-local/contracts";
+import { NBSP, cardGb } from "./format.ts";
 import { type State, useStore } from "./store.ts";
 
 const GIB = 1024 ** 3;
@@ -28,7 +29,7 @@ const amount = (bytes: number) => {
 
 /** "6.6 / 16 GB": what the model takes over the whole card, in the app's GB (GiB). */
 export function markText(need: number, whole: number): string {
-  return `${amount(need)} / ${Math.round(whole / GIB)} GB`;
+  return `${amount(need)} / ${cardGb(whole).replace(NBSP, " ")}`;
 }
 
 /** The fill as a share of the bar: the need over the whole, the whole bar when it cannot run or needs more. */

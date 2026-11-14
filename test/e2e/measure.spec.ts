@@ -33,7 +33,7 @@ test("Measure runs only on a click, shows its steps, and the row keeps the speed
 
   const speed = row.locator(".mp-spd");
   const score = row.locator(".mp-score");
-  await expect(speed).toHaveText(/^\d+(\.\d)? TPS$/, { timeout: 30_000 });
+  await expect(speed).toHaveText(/^\d+(\.\d)? tok\/s$/, { timeout: 30_000 });
   await expect(score).toHaveText(/^\d{1,3}$/);
   await expect(button).toHaveCount(0);
   await expect(score).toHaveAttribute("data-tip", /^Passed \d of 8 checks on this computer: tool use \d of 3, database questions \d of 5/);

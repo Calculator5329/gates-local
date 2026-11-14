@@ -8,12 +8,12 @@ const { ModelSpeed, speedTip, tpsText } = await import("./model-speed.tsx");
 
 describe("tpsText: whole numbers from 10 up, one decimal below", () => {
   it.each([
-    [101.6, "102 TPS"],
-    [10, "10 TPS"],
-    [9.96, "10 TPS"], // rounds to 10.0, so it reads as a whole number
-    [9.94, "9.9 TPS"],
-    [8.4, "8.4 TPS"],
-    [0.06, "0.1 TPS"],
+    [101.6, "102 tok/s"],
+    [10, "10 tok/s"],
+    [9.96, "10 tok/s"], // rounds to 10.0, so it reads as a whole number
+    [9.94, "9.9 tok/s"],
+    [8.4, "8.4 tok/s"],
+    [0.06, "0.1 tok/s"],
   ])("%s reads %s", (value, text) => {
     expect(tpsText(value)).toBe(text);
   });
@@ -43,12 +43,12 @@ describe("ModelSpeed", () => {
     expect(html).toBe(
       '<span class="tps" data-tip="Measured on this computer over the last 14 days · 8 replies">' +
         '<svg class="ic s14" aria-hidden="true"><use href="#i-speed"></use></svg>' +
-        '<span aria-label="102 tokens per second">102 TPS</span></span>',
+        '<span aria-label="102 tokens per second">102 tok/s</span></span>',
     );
   });
 
   it("matches a tag with or without :latest", () => {
-    expect(render("llama3:latest", measured)).toContain('aria-label="8.4 tokens per second">8.4 TPS<');
+    expect(render("llama3:latest", measured)).toContain('aria-label="8.4 tokens per second">8.4 tok/s<');
   });
 
   it.each([

@@ -33,13 +33,12 @@ import {
 } from "./models-rules.ts";
 import { awaitingInstall, canChat, notForChat, pickedModel } from "./pick.ts";
 import { MakerMark } from "./MakerMark.tsx";
-import { MemoryMark } from "./MemoryMark.tsx";
+import { MemoryMark, markWhole } from "./MemoryMark.tsx";
 import { ModelSpeed } from "./model-speed.tsx";
 import { MeasureCells, MeasureFail, MeasureMeta, canMeasure, useMeasureItem } from "./ModelMeasure.tsx";
 import { measureOf } from "./session/measures.ts";
 import { DialogHead } from "./Panel.tsx";
 import { leaveSettings, pull } from "./session.ts";
-import { PathText } from "./settings-controls.tsx";
 import { COMPUTER_ONLY, Fail, Tipped, useAct, useOutside, walk } from "./settings-ui.tsx";
 import { NA, type State, setState, useStore } from "./store.ts";
 import { FitSkel, PHONE, closeTip, esc, useMedia } from "./ui.tsx";
@@ -53,15 +52,16 @@ const cannotSaveDefault = (s: State) => s.settings === NA || s.unavailable["sett
 /** In the Default menu, an option that does not run well says so in words, with its reason on hover or focus. */
 function FitWords({ report }: { report: TableFit }) {
   const cpu = useStore((s) => noGpu(s.gpu));
+  const whole = useStore(markWhole);
   return (
-    <span className="mp-fit x" data-testid="models.fit.reason" tabIndex={0} data-tip={esc(fitReason(report, cpu))}>
+    <span className="mp-fit x" data-testid="models.fit.reason" tabIndex={0} data-tip={esc(fitReason(report, cpu, whole))}>
       <span className={`dot ${FIT_DOT[report.verdict]}`} />
       <span className="mp-w">{fitLabel(report.verdict, report.source === "measured", cpu)}</span>
     </span>
   );
 }
 
-/** The memory mark against the card (row 28); the verdict's words and reason are its name and tip. */
+/** The memory mark against the card (row 28); the verdict's words are its name and its tip, the number says the rest. */
 function Fit({ report }: { report: TableFit | undefined }) {
   const cpu = useStore((s) => noGpu(s.gpu));
   const tabled = useStore((s) => s.fitTable !== undefined);
@@ -69,7 +69,7 @@ function Fit({ report }: { report: TableFit | undefined }) {
   const words = fitLabel(report.verdict, report.source === "measured", cpu);
   return (
     <span className="mp-fit">
-      <MemoryMark report={report} words={words} tip={`<b>${esc(words)}</b><br>${esc(fitReason(report, cpu))}`} />
+      <MemoryMark report={report} words={words} tip={`<b>${esc(words)}</b>`} />
     </span>
   );
 }
@@ -293,13 +293,8 @@ function ModelRowView({ r, def, saved, onRemove }: { r: InstalledRow; def: strin
           {/* the measured speed says it once, in its own column (row 29) */}
           {measured ? null : <ModelSpeed tag={r.name} />}
         </div>
-        {r.label.purpose ? (
-          <div className="mp-p">{r.label.purpose}</div>
-        ) : r.label.id === undefined ? null : (
-          <div className="mp-p">
-            <PathText path={r.label.id} shown={shortTag(r.label.id)} />
-          </div>
-        )}
+        {/* a model with no purpose has no second line: its Ollama name is in the row menu (Copy Ollama name) */}
+        {r.label.purpose ? <div className="mp-p">{r.label.purpose}</div> : null}
         <div className="mp-meta">
           <span>{sizeText(r.info.sizeBytes)}</span>
           <span aria-hidden="true">·</span>

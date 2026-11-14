@@ -14,6 +14,11 @@ export function gb(bytes: number): string {
   return `${(bytes / GIB).toFixed(1)}${NBSP}GB`;
 }
 
+/** A whole card's size, the same on every surface: "16 GB" (16303 MiB is a 16 GB card, never "15.9 GB"). */
+export function cardGb(bytes: number): string {
+  return `${Math.round(bytes / GIB)}${NBSP}GB`;
+}
+
 /** The drawer's one time format: "now", "5m", "3h", "2d", "3w", "5mo", "2y". */
 export function shortAge(ms: number, now: number): string {
   const s = Math.floor((now - ms) / 1000);

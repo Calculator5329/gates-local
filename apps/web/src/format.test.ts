@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FitReport, Message } from "@gates-local/contracts";
-import { CONTEXT_SIZES, ctxFor, decodeSpeed, fileSize, gb, k, otherCtxWords, replyMeta, shortAge, sourceDetail, verdictOf } from "./format.ts";
+import { CONTEXT_SIZES, cardGb, ctxFor, decodeSpeed, fileSize, gb, k, otherCtxWords, replyMeta, shortAge, sourceDetail, verdictOf } from "./format.ts";
 import { homeTilde, libraryToolCanUse } from "./settings-rules.ts";
 
 const SP = String.fromCharCode(160);
@@ -35,6 +35,10 @@ describe("libraryToolCanUse: a tool is ready only with a source it can really re
 describe("gb", () => {
   it("keeps the number and its unit on one line", () => {
     expect(gb(5.1 * 1024 ** 3)).toBe(`5.1${SP}GB`);
+  });
+
+  it("says a whole card's size in whole GB, as the memory marks do (16303 MiB is a 16 GB card)", () => {
+    expect(cardGb(16303 * 1024 ** 2)).toBe(`16${SP}GB`);
   });
 });
 

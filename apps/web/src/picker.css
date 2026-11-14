@@ -11,8 +11,7 @@
 .pk-list-scroll{flex:1;min-height:0;overflow-y:auto;scrollbar-gutter:stable;padding:8px 12px}
 .model-picker .pk-r{height:34px;min-height:34px;width:100%;position:relative;padding:0;display:block;border-radius:var(--r-picker)}
 .model-picker .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
-/* the selected model is a bar at the row's edge (and its check); the highlighted row is the filled one: both at once read apart (WIN-MEM-07) */
-.model-picker .pk-r.sel{box-shadow:inset 2px 0 0 var(--foreground)}
+/* the selected model is the row with the check; the highlighted row is the filled one: the two read apart (WIN-MEM-07) with one mark each, as T3's picker does */
 /* before the first table: not pickable yet, with the look it keeps once the table lands (nothing pops) */
 .model-picker .pk-r[aria-busy=true] .pk-select,.pk-ctx-row[aria-busy=true]{cursor:progress}
 .model-picker .pk-r.hl,.model-picker .pk-r:hover{background:var(--selected)}

@@ -424,7 +424,7 @@ function Images() {
       <Head title="Image generation" />
       {settings === NA || settings === undefined ? null : (
         <Grp>
-          <Row label="Generate images" desc={locked ? `${on ? "On" : "Off"}. ${COMPUTER_ONLY}` : "If the GPU is short, the chat model is unloaded while an image renders."} tip="Images are made on this computer. Turn Image on in a chat's message box." err={genErr}>
+          <Row label="Generate images" desc={locked ? `${on ? "On" : "Off"}. ${COMPUTER_ONLY}` : "The chat model unloads while an image renders."} tip="Images are made on this computer. Turn Image on in a chat's message box." err={genErr}>
             {locked ? null : <button type="button" className="switch" role="switch" data-testid="settings.images.enable" aria-checked={on} aria-label="Generate images" onClick={() => void runGen(updateSettings({ imageGen: !on }))} />}
           </Row>
           {/* an address set is the person's own ComfyUI: nothing to install */}

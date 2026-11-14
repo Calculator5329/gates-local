@@ -9,6 +9,7 @@ import {
   filterShows,
   fitLabel,
   fitReason,
+  labelOf,
   nameOf,
   nextDefault,
   optionVariants,
@@ -63,10 +64,11 @@ describe("fit words", () => {
     expect(fitLabel("spills", true, true)).toBe("Runs in system memory");
   });
 
-  it("gives the reason outcome first, one number per resource", () => {
-    expect(fitReason(fit("spills", 15.3 * GIB, 13.6 * GIB))).toBe("Needs about 15 GB. Your GPU has 14 GB free, so the rest runs in slower system memory.");
-    expect(fitReason(fit("fits", 7.5 * GIB, 13.6 * GIB))).toBe("Needs about 7.5 GB. Your GPU has 14 GB free, so it runs entirely on the GPU.");
-    expect(fitReason(fit("refuse", 49 * GIB))).toMatch(/^Needs about 49 GB\. .*can't load\.$/);
+  it("gives the reason against the card's size, never what is free right now", () => {
+    expect(fitReason(fit("spills", 22 * GIB, 6.3 * GIB), false, 15.92 * GIB)).toBe("Needs about 22 GB of a 16 GB GPU; the rest in system memory.");
+    expect(fitReason(fit("fits", 7.5 * GIB, 6.3 * GIB), false, 15.92 * GIB)).toBe("Needs about 7.5 GB of a 16 GB GPU.");
+    expect(fitReason(fit("refuse", 49 * GIB), false, 16 * GIB)).toBe("Needs about 49 GB of a 16 GB GPU; system memory can't hold the rest.");
+    expect(fitReason(fit("spills", 9 * GIB), true)).toBe("Needs about 9.0 GB, all in system memory.");
   });
 
   it("rounds sizes like the tooltips: one decimal under 10 GB", () => {
@@ -87,6 +89,14 @@ describe("names", () => {
     expect(nameOf("qwen3.5:9b", cat)).toEqual({ text: "Qwen 3.5 9B", purpose: "Fast everyday answers" });
     expect(nameOf("mine:latest", cat)).toEqual({ text: "mine", purpose: "", id: "mine:latest" });
     expect(nameOf("other3:7b", undefined)).toEqual({ text: "Other 3 7B", purpose: "", id: "other3:7b" });
+  });
+
+  it("names a Download row as Installed names the same model", () => {
+    const own = entry("qwen3.8-abliterated:27b", "spills", { label: "qwen3.8-abliterated:27b", purpose: "Installed by you" });
+    const curated = entry("qwen3.5:9b", "fits", { label: "Qwen 3.5 9B", purpose: "Fast everyday answers" });
+    expect(labelOf(own)).toBe("Qwen 3.8 27B abliterated");
+    expect(labelOf(own)).toBe(nameOf(own.name, [own]).text);
+    expect(labelOf(curated)).toBe("Qwen 3.5 9B");
   });
 
   it("leaves the owner's path out of a cleaned hf.co name", () => {

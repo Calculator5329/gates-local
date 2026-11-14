@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-11-13: Settings, Models and the pickers say each thing once
+
+- Fixes from the audit of 0.2.4.
+- A model you installed yourself has the same name under Installed and
+  under Download. Under Installed, a model with no purpose has no second
+  line; its Ollama name is in the row menu.
+- The GPU is "16 GB" everywhere, the Advanced card too. The memory
+  mark's tip says what a model needs against that card in one sentence,
+  and how much goes to system memory.
+- Generate images says what is true: "The chat model unloads while an
+  image renders."
+- Speeds read "tok/s" in Models, the pickers and Usage, as the reply
+  line already did.
+- Both pickers mark the chosen row with its check alone. The highlight
+  that follows the mouse or keys is still a fill, so you can tell the
+  two apart.
+- The image picker: style names sit on the left; the folder, what is
+  left to fetch and the GPU figure share one footer row with no stray
+  dot; the box is the same height with nothing installed; a row you
+  can download shows its size, since the button already says download.
+
 ## 2026-11-14: First run and updates say each thing once
 
 - First run: the status line above the heading is the dot and "Ollama";

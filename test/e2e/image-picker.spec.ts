@@ -166,11 +166,12 @@ test("the picker groups setups by theme, greys what ComfyUI lacks with the reaso
   await expect(picker).not.toContainText("Image model");
   // Klein is in Other models; the Characters style setup loads the same three files
   const characters = defaults.locator('.pk-r[data-preset="characters--klein-official4"]');
-  await expect(characters.locator(".pk-why")).toHaveText(/^Needs 3 files · \d+\.\d\sGB$/);
+  // its Download button says it needs fetching, so the line is the size alone
+  await expect(characters.locator(".pk-why")).toHaveText(/^\d+\.\d\sGB$/);
   await picker.getByTestId("image.picker.other").click();
   const klein = picker.locator('.pk-r[data-preset="flux2-klein-4b"]');
   await expect(klein).toHaveClass(/\boff\b/);
-  await expect(klein.locator(".pk-why")).toHaveText(/^Needs 3 files · \d+\.\d\sGB$/);
+  await expect(klein.locator(".pk-why")).toHaveText(/^\d+\.\d\sGB$/);
 
   // before any download, one row: where the files go (ComfyUI's own folder), what is left to fetch, what is free there
   const disk = picker.getByTestId("image.picker.disk");

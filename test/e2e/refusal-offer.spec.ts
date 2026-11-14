@@ -111,6 +111,9 @@ test("WIN-MEM-07: the picker names whose numbers it shows, tells the selected ro
   // told apart at a glance: the two rows do not look the same
   const look = (row: typeof gemma) => row.evaluate((el) => { const s = getComputedStyle(el); return `${s.backgroundColor}|${s.boxShadow}`; });
   expect(await look(gemma)).not.toBe(await look(qwen));
+  // one mark each: the check is the selection, the fill is the highlight
+  await expect(gemma.locator('use[href="#i-check"]')).toHaveCount(1);
+  await expect(qwen.locator('use[href="#i-check"]')).toHaveCount(0);
   // Gemma cannot run here now, which is what a send would say
   await expect(gemma.getByTestId("models.picker.need")).toHaveClass(/\bnow\b/);
   await expect(qwen.getByTestId("models.picker.need")).not.toHaveClass(/\bnow\b/);

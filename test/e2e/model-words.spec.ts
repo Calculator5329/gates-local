@@ -99,7 +99,7 @@ test("GPU memory distinguishes available from free memory and leaves context fit
   await expect(panel.locator(".fp-v")).not.toContainText("16k");
   await expect(panel).not.toContainText("16k context");
   await panel.locator("summary", { hasText: "Details" }).click();
-  await expect(panel.locator(".fp-n").filter({ hasText: /^Estimated/ })).toContainText(/Estimated [\d.]+\sGB; [\d.]+\sGB on the GPU\./);
+  await expect(panel.locator(".fp-n").filter({ hasText: /^Estimated/ })).toContainText(/Estimated [\d.]+\sGB of a \d+\sGB GPU\./);
   // the bar is what holds the GPU right now: a model that is not loaded is not drawn on it
   await expect(panel.locator(".legend")).toContainText("Currently free");
   await expect(panel.locator(".legend .sw-chat")).toHaveCount(0);

@@ -11,7 +11,7 @@ import { Icon } from "./icons.tsx";
 import { MakerMark } from "./MakerMark.tsx";
 import { MemoryMark } from "./MemoryMark.tsx";
 import { answers, rowOf } from "./fit-table.ts";
-import { nameOf, pullName, shortTag, sizeText, splitTail } from "./models-rules.ts";
+import { labelOf, nameOf, pullName, shortTag, sizeText, splitTail } from "./models-rules.ts";
 import { awaitingInstall, modelNameKey, pendingDownload } from "./pick.ts";
 import { type ActionResult, cancelPull, estimateModel, pull } from "./session.ts";
 import { PathText } from "./settings-controls.tsx";
@@ -184,12 +184,13 @@ function DlRow({ c, numCtx, report, mark, actions }: { c: CatalogEntry; numCtx: 
   const v = report ? verdictOf(report) : undefined;
   const dling = p !== undefined && awaitingInstall(p) && !installed;
   const err = installed ? null : actions.error(c.name);
-  const tip = `<b>${esc(c.label)}</b> · <span class="mono">${esc(c.name)}</span>${v ? `<br>${esc(memoryTip(v, report?.numCtx ?? numCtx, cpu))}` : ""}`;
+  const name = labelOf(c);
+  const tip = `<b>${esc(name)}</b> · <span class="mono">${esc(c.name)}</span>${v ? `<br>${esc(memoryTip(v, report?.numCtx ?? numCtx, cpu))}` : ""}`;
   return (
     <div className="dlrow" data-cat={c.name} data-verdict={report?.verdict}>
       <MakerMark tag={c.name} />
       <div className="sl" data-tip={tip}>
-        <b>{c.label}</b>
+        <b>{name}</b>
         <span className="d dl-status">
           {err ? (
             <span role="alert" className="dl-error">{err}</span>
@@ -207,7 +208,7 @@ function DlRow({ c, numCtx, report, mark, actions }: { c: CatalogEntry; numCtx: 
       {report && v ? <MemoryMark report={report} words={markWords(v, cpu)} tip={markTip(v, cpu)} /> : <span className="mm" aria-hidden="true" />}
       <DlButton
         size={gb(c.downloadBytes)}
-        label={c.label}
+        label={name}
         p={dling ? p : undefined}
         installed={installed}
         onStart={() => void actions.start(c.name)}
@@ -221,12 +222,13 @@ function DlRow({ c, numCtx, report, mark, actions }: { c: CatalogEntry; numCtx: 
 function BigRow({ c, report, numCtx }: { c: CatalogEntry; report: FitReport; numCtx: number }) {
   const v = verdictOf(report);
   const cpu = useStore((s) => noGpu(s.gpu));
-  const tip = `<b>${esc(c.label)}</b> · <span class="mono">${esc(c.name)}</span><br>${esc(memoryTip(v, report.numCtx || numCtx, cpu))}`;
+  const name = labelOf(c);
+  const tip = `<b>${esc(name)}</b> · <span class="mono">${esc(c.name)}</span><br>${esc(memoryTip(v, report.numCtx || numCtx, cpu))}`;
   return (
     <div className="dlrow dl-big" data-cat={c.name} data-verdict={report.verdict}>
       <MakerMark tag={c.name} />
       <div className="sl" data-tip={tip}>
-        <b>{c.label}</b>
+        <b>{name}</b>
         <span className="d">{c.purpose}</span>
       </div>
       <MemoryMark report={report} words={markWords(v, cpu)} tip={markTip(v, cpu)} />

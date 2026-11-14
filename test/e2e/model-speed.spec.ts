@@ -47,7 +47,7 @@ test("a model that has replied shows its TPS in the picker and in Models, the ot
   const used = page.locator("#pkList .pk-r.sel");
   const tag = await used.getAttribute("data-m");
   if (!tag) throw new Error("No selected model in the picker");
-  const tps = /^\d+(?:\.\d)? TPS$/;
+  const tps = /^\d+(?:\.\d)? tok\/s$/;
   await expect(used.locator(".tps")).toHaveText(tps);
   await expect(page.locator("#pkList .pk-r:not(.sel) .tps"), "a model never run here shows nothing").toHaveCount(0);
   await page.screenshot({ path: info.outputPath("tps-picker.png"), animations: "disabled" });

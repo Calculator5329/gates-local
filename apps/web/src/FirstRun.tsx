@@ -7,7 +7,7 @@ import type { CatalogEntry } from "@gates-local/contracts";
 import { suggestedOf } from "./picker-models.ts";
 import { CONNECTING, booting, ownCopyNote, portOf, rtOf, unread } from "./Banner.tsx";
 import { DlButton, canCancelPull } from "./ModelDownloads.tsx";
-import { ctxFor, describeModel, etaText, gb, k, noGpu, verdictOf } from "./format.ts";
+import { cardGb, ctxFor, describeModel, etaText, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { type RowPhase, phaseOf, rowOf } from "./fit-table.ts";
 import { finishFirstRun, firstPull, openSettings, pull, cancelPull, recheckRuntime } from "./session.ts";
@@ -116,7 +116,7 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
             {fit ? (
               <tr>
                 <td>{cpu ? "Memory" : "GPU memory"}</td>
-                <td>{cpu ? `Estimated ${gb(fit.needVramBytes)}, all in system memory (no supported GPU)` : `Estimated ${gb(fit.needVramBytes)} of ${gb(fit.freeVramBytes)} on the GPU`}</td>
+                <td>{cpu ? `Estimated ${gb(fit.needVramBytes)}, all in system memory (no supported GPU)` : `Estimated ${gb(fit.needVramBytes)} of a ${cardGb(fit.freeVramBytes)} GPU`}</td>
               </tr>
             ) : null}
           </tbody>

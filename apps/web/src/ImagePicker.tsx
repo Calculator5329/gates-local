@@ -6,8 +6,8 @@
 // click. The same shape and parts as Picker.tsx; what a chat model needs (search, favorites,
 // context lengths) is not here. A setup ComfyUI lacks files or nodes for is listed greyed out
 // with its reason, and a Download button when the app can fetch every missing file
-// (image.download). The download is said once, in the disk row under the lists: where the files
-// go, what is left to fetch and free there, one bar with Stop. With nothing to list the picker is one row that says why, with
+// (image.download). The download is said once, at the start of the one footer row: where the files
+// go, what is left to fetch and free there, one bar with Stop; the GPU figure ends the row. With nothing to list the picker is one row that says why, with
 // Start ComfyUI or Check again: nothing starts on open.
 import "./picker.css";
 import "./image-picker.css";
@@ -80,10 +80,16 @@ function defaultsOf(rows: readonly Row[]): { style: string; row: Row }[] {
 /** A tier row's quiet label after its name, as the chat picker shows a variant. */
 const tierTag = (p: Row) => p.tier === undefined ? null : <span className="pk-variant">{p.tier}</span>;
 
-/** Why a greyed row cannot run: what ComfyUI lacks, in words, or the files it needs and what is left of them to fetch. */
-function needsText(p: ImagePreset): string {
+/**
+ * Why a greyed row cannot run: what ComfyUI lacks, in words, or what is left of its files to fetch.
+ * Where the row has its download button, that mark already says it needs fetching, so a known size
+ * is said alone; without the button, or while the size is unknown, the words say it.
+ */
+export function needsText(p: ImagePreset, button: boolean): string {
   if (p.why !== undefined) return p.why;
-  const n = p.needs?.files.length ?? 0, bytes = p.needs?.leftBytes ?? p.needs?.bytes;
+  const bytes = p.needs?.leftBytes ?? p.needs?.bytes;
+  if (button && bytes !== undefined) return gb(bytes);
+  const n = p.needs?.files.length ?? 0;
   return `Needs ${n} ${n === 1 ? "file" : "files"}${bytes === undefined ? "" : ` · ${gb(bytes)}`}`;
 }
 
@@ -310,10 +316,11 @@ export function ImagePicker() {
     const kept = mine !== undefined && mine.ended === true && mine.state === "cancelled";
     const failed = mine !== undefined && mine.ended === true && mine.state === "error";
     const waits = downloading && (mine !== undefined || (p.needs?.files ?? []).some((f) => fetching.has(baseName(f))));
-    const reason = rowError?.id === p.id ? rowError.message : waits ? "Waiting on the download" : failed ? mine.message ?? "The download failed." : needsText(p);
+    const button = p.needs?.download === true && canDownload && !waits;
+    const reason = rowError?.id === p.id ? rowError.message : waits ? "Waiting on the download" : failed ? mine.message ?? "The download failed." : needsText(p, button);
     return <div key={p.id} className={`pk-r off${style === undefined ? "" : " style"}${p.id === active?.id ? " hl" : ""}`} role="option" data-testid="image.picker.unready-option" aria-selected={false} data-preset={p.id} data-state={waits ? "waiting" : "needs"} onMouseMove={() => setHighlight(p.id)}>
       <button type="button" className="pk-select" data-testid="image.picker.unready-select" tabIndex={-1} aria-disabled="true" aria-label={style ?? p.name} aria-describedby={`pk-why-${p.id}`} onClick={() => choose(p)}>{rowLabel(p, style)}</button>
-      {p.needs?.download === true && canDownload && !waits
+      {button
         ? <button type="button" className="pk-act" data-testid="image.picker.download" aria-label={`${kept ? "Resume downloading" : "Download"} ${p.name}`} data-tip={kept ? "Resume" : "Download"} disabled={downloading} onClick={() => { setHighlight(p.id); void fetchSetup(p); }}><Icon id={kept ? "redo" : "download"} /></button>
         : null}
       <div className="pk-why" id={`pk-why-${p.id}`} data-tipt={reason}><span className="pk-why-t t">{reason}</span></div>
@@ -344,8 +351,9 @@ export function ImagePicker() {
         {downloading && canStop ? <button type="button" className="pk-act" data-testid="image.picker.stop-download" aria-label={`Stop downloading ${name}`} data-tip="Stop" onClick={() => void stopImageDownload(run.preset).then((failed) => { if (failed !== null) setRowError({ id: run.preset, message: failed }); })}><Icon id="x" /></button> : null}
       </>;
     } else {
+      // the dot only between two parts, never after the last
       numbers = <span className="pk-disk-n">
-        {left === undefined ? null : <span data-testid="image.picker.disk-left">{gb(left)} to fetch · </span>}
+        {left === undefined ? null : <span data-testid="image.picker.disk-left">{gb(left)} to fetch{disk.freeBytes === undefined ? "" : " · "}</span>}
         {disk.freeBytes === undefined ? null : <span className={short ? "short" : undefined} data-testid="image.picker.disk-free">{gb(disk.freeBytes)} free on disk</span>}
       </span>;
     }
@@ -362,6 +370,7 @@ export function ImagePicker() {
 
   if (pop === null) return null;
   const free = gpu && gpu !== NA ? gpu.freeBytes : undefined;
+  const disk = diskRow();
   const close = <button className="pk-close" data-testid="image.picker.close" aria-label="Close" onClick={() => closePop(true)}><Icon id="x" /></button>;
   if (listed.length === 0) {
     const empty = known === undefined ? (presets === NA ? "Image models are not available in this build." : "Reading the image models…")
@@ -426,8 +435,11 @@ export function ImagePicker() {
         {error === null ? null : <p className="pk-help pk-choice" role="status">{error}</p>}
       </section>
     </div>
-    {diskRow()}
-    {/* under 4 GB no default, on the CPU how slow, said once; the free figure stays when there is one */}
-    <footer className="pk-bottom"><span className="pk-nogpu" role={note === undefined ? undefined : "status"}>{note}</span><span>{note !== undefined && (cpu || free === undefined) ? null : cpu ? "Runs in system memory" : free === undefined ? "GPU reading unavailable" : `${gb(free)} free`}</span></footer>
+    {/* one footer row, as the chat picker's: where downloads go, under 4 GB no default or on the CPU how slow (said once), and the GPU figure at the end when there is one */}
+    <footer className="pk-bottom">
+      {disk}
+      {disk === null || note !== undefined ? <span className="pk-nogpu" role={note === undefined ? undefined : "status"}>{note}</span> : null}
+      <span className="pk-gpu">{note !== undefined && (cpu || free === undefined) ? null : cpu ? "Runs in system memory" : free === undefined ? "GPU reading unavailable" : `${gb(free)} free`}</span>
+    </footer>
   </div>;
 }
