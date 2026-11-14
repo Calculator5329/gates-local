@@ -21,7 +21,10 @@ import { createGpuLease, type GpuLease } from "../src/gpu/lease.ts";
 import { createImageModule, type ImageModule } from "../src/image/module.ts";
 import { comfyInfo, ZIMAGE_FILES } from "./comfy/info.ts";
 import { json, startFakeServer, type FakeServer } from "../src/fit/fake-http.ts";
-import { createModelCatalog } from "../src/runtime/models.ts";
+import { createModelCatalog, listLoaded } from "../src/runtime/models.ts";
+import { createModelLoader, type ModelLoader } from "../src/runtime/load.ts";
+import { planLoad } from "../src/fit/fit.ts";
+import { createMemoryOwner, ENGINE_BUSY_NOTE, type MemoryEngine, type MemoryOwner } from "../src/gpu/memory.ts";
 import { createOllamaRuntime, type OllamaRuntime } from "../src/runtime/runtime.ts";
 import { createRuntimeSwitch } from "../src/runtime/switch.ts";
 import { defaultSettings } from "../src/settings/store.ts";
@@ -85,6 +88,18 @@ interface Gpu {
   memAvailableKb: number;
   /** nvidia-smi --query-compute-apps rows (pid, name, MiB); none by default. */
   apps?: string;
+  /** The card's memory.total; 16,303 MiB unless a test says (a 6 GiB laptop card says 6,144). */
+  totalMib?: number;
+  /** memory.used; total minus free unless a test says (the driver keeps some of neither). */
+  usedMib?: number;
+}
+
+/** One /api/ps row of the rig's Ollama. */
+interface PsRow {
+  name: string;
+  size: number;
+  size_vram: number;
+  context_length?: number;
 }
 
 interface Rig {
@@ -108,15 +123,26 @@ interface Rig {
   catalog: ReturnType<typeof createModelCatalog>;
   /** Replaces the /api/tags answer: what Ollama has installed. */
   setTags(tags: typeof TAGS): void;
+  /** What the rig's Ollama lists on /api/ps: an unload (keep_alive 0) takes a row out, a preload puts one in. */
+  ps: PsRow[];
+  /** The memory owner, when the rig was built with `loader`. */
+  memory: MemoryOwner | undefined;
+  loader: ModelLoader | undefined;
   waitFor<C extends Channel>(channel: C, match: (p: Payload<C>) => boolean, timeoutMs?: number): Promise<Payload<C>>;
 }
 
-/** `image` builds an image module over the rig's GPU lease; only then does the app get a lease. */
-async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: ThreadStore, dir: string) => ImageModule; show?: unknown; admit?: () => void; onTerminal?: () => void; onDelta?: (turnId: string) => void; log?: (line: string) => void; dbPath?: string; draftEveryMs?: number; settings?: AppDeps["settings"] } = {}): Promise<Rig> {
+/**
+ * `image` builds an image module over the rig's GPU lease; only then does the app get a lease.
+ * `loader` gives the app the model loader and the memory owner services.ts gives it, so a send
+ * takes the load gate and its handoff. `ps` is what Ollama has in memory at the start; `onUnload`
+ * runs when an unload request takes a row out (a test moves the GPU and RAM readings there).
+ */
+async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: ThreadStore, dir: string, memory?: MemoryOwner) => ImageModule; show?: unknown; admit?: () => void; onTerminal?: () => void; onDelta?: (turnId: string) => void; log?: (line: string) => void; dbPath?: string; draftEveryMs?: number; settings?: AppDeps["settings"]; loader?: boolean; ps?: PsRow[]; tags?: typeof TAGS; gpu?: Partial<Gpu>; onUnload?: (model: string) => void; engine?: () => MemoryEngine | undefined } = {}): Promise<Rig> {
   const ollamaUp = opts.ollamaUp ?? true;
   let chat: ChatRoute = quickReply;
   let show: ChatRoute = (res) => json(res, 200, opts.show ?? SHOW);
-  let tags = TAGS;
+  let tags = opts.tags ?? TAGS;
+  const ps: PsRow[] = [...(opts.ps ?? [])];
   const ollama = await startFakeServer({
     "GET /": (_b, res) => {
       res.writeHead(200, { "content-type": "text/plain" });
@@ -124,9 +150,32 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
     },
     "GET /api/version": (_b, res) => json(res, 200, { version: "0.0.9-fake" }),
     "GET /api/tags": (_b, res) => json(res, 200, tags),
-    "GET /api/ps": (_b, res) => json(res, 200, { models: [] }),
+    "GET /api/ps": (_b, res) => json(res, 200, { models: ps }),
     "POST /api/show": (body, res) => show(res, body),
-    "POST /api/chat": (body, res) => chat(res, body),
+    "POST /api/chat": (body, res) => {
+      // With the loader, a chat request loads its model the way Ollama does.
+      const { model, options } = body as { model: string; options?: { num_ctx?: number } };
+      if (opts.loader && !ps.some((m) => m.name === model)) {
+        const size = tags.models.find((m) => m.name === model)?.size ?? 0;
+        ps.push({ name: model, size, size_vram: size, ...(options?.num_ctx === undefined ? {} : { context_length: options.num_ctx }) });
+      }
+      return chat(res, body);
+    },
+    // Ollama's own: keep_alive 0 unloads the model; an empty prompt loads it at its num_ctx.
+    "POST /api/generate": (body, res) => {
+      const { model, keep_alive, options } = body as { model: string; keep_alive?: unknown; options?: { num_ctx?: number } };
+      if (keep_alive === 0) {
+        const at = ps.findIndex((m) => m.name === model);
+        if (at >= 0) {
+          ps.splice(at, 1);
+          opts.onUnload?.(model);
+        }
+        return json(res, 200, { model, response: "", done: true, done_reason: "unload" });
+      }
+      const size = tags.models.find((m) => m.name === model)?.size ?? 0;
+      if (!ps.some((m) => m.name === model)) ps.push({ name: model, size, size_vram: size, ...(options?.num_ctx === undefined ? {} : { context_length: options.num_ctx }) });
+      return json(res, 200, { model, response: "", done: true, done_reason: "load" });
+    },
   });
   cleanups.push(() => ollama.close());
 
@@ -150,22 +199,61 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
   });
   const catalog = createModelCatalog(() => runtime.baseUrl());
   cleanups.push(() => catalog.stop()); // no discovery retry outlives the test (MP2-04)
-  const gpu: Gpu = { freeMib: 15000, memAvailableKb: 30_000_000 };
+  const gpu: Gpu = { freeMib: 15000, memAvailableKb: 30_000_000, ...opts.gpu };
   const storedAtDonePush: number[] = [];
   const replayedAtDone: Payload<"chat.event">[] = [];
+  const fitReads = {
+    runNvidiaSmi: async (args: readonly string[]) => {
+      if (!args[0]?.startsWith("--query-gpu")) return gpu.apps ?? "";
+      const total = gpu.totalMib ?? 16303;
+      return `${total}, ${gpu.usedMib ?? total - gpu.freeMib}, ${gpu.freeMib}\n`;
+    },
+    // A send judges system memory by what the computer has, so a test that wants a refusal for
+    // memory needs a small computer, not a busy one: under 2 GB free here is a 3 GB machine.
+    readMeminfo: async () => `MemTotal: ${gpu.memAvailableKb < 2_000_000 ? 3_000_000 : 32541464} kB\nMemAvailable: ${gpu.memAvailableKb} kB\n`,
+  };
 
   let server: WsServer | undefined;
-  const lease = opts.image ? createGpuLease() : undefined;
+  const lease = opts.image || opts.loader ? createGpuLease() : undefined;
+  // As services.ts wires them: one memory owner, its gate the loader's.
+  let loader: ModelLoader | undefined;
+  let imageModule: ImageModule | undefined;
+  const memory = opts.loader
+    ? createMemoryOwner({
+        ollamaUrl: () => runtime.baseUrl(),
+        listLoaded: (url, signal) => listLoaded(url, undefined, signal),
+        replying: () => loader?.replying() ?? [],
+        engine: opts.engine ?? (() => imageModule),
+        readFree: async () => gpu.freeMib * 1024 ** 2,
+        onUnloaded: (model) => loader?.unloaded(model),
+        waitMs: 2000,
+        pollMs: 20,
+      })
+    : undefined;
+  if (memory) {
+    loader = createModelLoader({
+      baseUrl: () => runtime.baseUrl(),
+      push: () => undefined,
+      listLoaded: (url, signal) => listLoaded(url, undefined, signal),
+      fit: async (model, numCtx, baseUrl, signal) => (await planLoad({ ...fitReads, baseUrl, model, numCtx, signal, busy: loader?.busyModels() ?? [] })).report,
+      memory,
+      ...(lease ? { lease } : {}),
+    });
+    const made = loader;
+    cleanups.push(() => made.close());
+  }
+  imageModule = lease && opts.image ? opts.image(lease, store, dir, memory) : undefined;
   const app: App = createApp({
     dataDir: dir,
     store,
     runtime: createRuntimeSwitch({ initialMode: "system", make: () => runtime }),
     catalog,
+    ...(loader ? { models: { handlers: {}, loader }, ...(lease && !opts.image ? { lease } : {}) } : {}),
     ...(opts.admit ? { admit: opts.admit } : {}),
     ...(opts.draftEveryMs === undefined ? {} : { draftEveryMs: opts.draftEveryMs }),
     ...(opts.settings === undefined ? {} : { settings: opts.settings }),
     // Tools › Make images on: a send with tools: true offers the chat model the image tool.
-    ...(lease && opts.image ? { lease, image: opts.image(lease, store, dir), imageTool: () => ({ preset: "z-image-int8", width: 1024, height: 1024 }) } : {}),
+    ...(lease && imageModule ? { lease, image: imageModule, imageTool: () => ({ preset: "z-image-int8", width: 1024, height: 1024 }) } : {}),
     push: (c, p) => {
       if (c === "chat.event") {
         const { turnId, threadId, event } = p as Payload<"chat.event">;
@@ -178,12 +266,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
       }
       server?.push(c, p);
     },
-    fit: {
-      runNvidiaSmi: async (args) => (args[0]?.startsWith("--query-gpu") ? `16303, ${16303 - gpu.freeMib}, ${gpu.freeMib}\n` : (gpu.apps ?? "")),
-      // A send judges system memory by what the computer has, so a test that wants a refusal for
-      // memory needs a small computer, not a busy one: under 2 GB free here is a 3 GB machine.
-      readMeminfo: async () => `MemTotal: ${gpu.memAvailableKb < 2_000_000 ? 3_000_000 : 32541464} kB\nMemAvailable: ${gpu.memAvailableKb} kB\n`,
-    },
+    fit: fitReads,
     log: opts.log ?? (() => undefined),
   });
   cleanups.push(() => app.shutdown());
@@ -229,7 +312,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
   // The pushes below come from this discover(): runtime.changed, then the
   // catalog refresh it triggers, then models.changed.
   await runtime.discover();
-  return { app, server, client, store, runtime, ollama, gpu, lease, setChat: (r) => (chat = r), setShow: (r) => (show = r), pushes, storedAtDonePush, replayedAtDone, catalog, setTags: (t) => (tags = t), waitFor };
+  return { app, server, client, store, runtime, ollama, gpu, lease, setChat: (r) => (chat = r), setShow: (r) => (show = r), pushes, storedAtDonePush, replayedAtDone, catalog, setTags: (t) => (tags = t), waitFor, ps, memory, loader };
 }
 
 const events = (r: Rig, turnId: string) =>
@@ -852,24 +935,32 @@ async function stalledThinkTurn(more: Pick<Parameters<typeof rig>[0] & object, "
 
 /**
  * A fake image module: an idle ComfyUI with this owner (MainPID 4242 when the app's); stopIdle
- * claims the GPU alone, as image/module.ts does.
+ * claims the GPU alone, as image/module.ts does; leave is the handoff's ask (POST /free), and
+ * `onFree` is what that gives back.
  */
-function idleComfy(owner: "app" | "external" | "none", onStop: () => void) {
+function idleComfy(owner: "app" | "external" | "none", onStop: () => void, onFree: () => void = () => undefined) {
   let stops = 0;
+  let frees = 0;
   let current = owner;
   const build = (lease: GpuLease) => ({
     current: () => ({ state: "ready", owner: current }),
     reclaimable: () => (current === "app" && stops === 0 ? 4242 : undefined),
     stopIdle: () => lease.run("image", undefined, async () => { stops += 1; onStop(); }),
+    leave: async () => {
+      if (current === "none") return "absent";
+      frees += 1;
+      onFree();
+      return "freed";
+    },
   }) as unknown as ImageModule;
-  return { build, stops: () => stops, setOwner: (next: typeof owner) => (current = next) };
+  return { build, stops: () => stops, frees: () => frees, setOwner: (next: typeof owner) => (current = next) };
 }
 
 describe("chat.send frees an idle ComfyUI the app started", () => {
-  it("stops it and measures again when the turn would not fit beside it", async () => {
+  it("asks it to free its memory (never stops it) and measures again when the turn would not fit beside it", async () => {
     let gpu: Gpu | undefined;
-    const comfy = idleComfy("app", () => { if (gpu) { gpu.freeMib = 15000; delete gpu.apps; } });
-    const r = await rig({ image: comfy.build });
+    const comfy = idleComfy("app", () => undefined, () => { if (gpu) { gpu.freeMib = 15000; delete gpu.apps; } });
+    const r = await rig({ image: comfy.build, loader: true });
     gpu = r.gpu;
     const t = await r.client.call("threads.create", {});
     r.gpu.freeMib = 3000;
@@ -878,13 +969,14 @@ describe("chat.send frees an idle ComfyUI the app started", () => {
     r.gpu.apps = "4242, /usr/bin/python3 main.py --port 8188, 12000\n";
     const sent = await sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
-    expect(comfy.stops()).toBe(1);
+    expect(comfy.frees()).toBe(1);
+    expect(comfy.stops()).toBe(0);
   });
 
-  it("decides after the turn's claim: a ComfyUI an image job started while the turn waited is stopped, and the turn admitted", async () => {
+  it("decides after the turn's claim: a ComfyUI an image job started while the turn waited is freed, and the turn admitted", async () => {
     let gpu: Gpu | undefined;
-    const comfy = idleComfy("none", () => { if (gpu) gpu.freeMib = 15000; });
-    const r = await rig({ image: comfy.build });
+    const comfy = idleComfy("none", () => undefined, () => { if (gpu) gpu.freeMib = 15000; });
+    const r = await rig({ image: comfy.build, loader: true });
     gpu = r.gpu;
     const t = await r.client.call("threads.create", {});
     // An image job holds the GPU alone; no ComfyUI the app started is up yet.
@@ -898,7 +990,8 @@ describe("chat.send frees an idle ComfyUI the app started", () => {
     releaseImage();
     const sent = await sending;
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
-    expect(comfy.stops()).toBe(1);
+    expect(comfy.frees()).toBe(1);
+    expect(comfy.stops()).toBe(0);
     expect(r.lease!.status()).toEqual({ holder: null, holders: 0, waiting: [] });
   });
 
@@ -942,7 +1035,6 @@ function fakeComfyImage() {
       dataDir, lease, store,
       settings: () => ({ imageGen: true, comfyUrl: "http://remote-comfy:8188" }),
       lookupHost: async () => ["10.0.0.5"], localAddresses: () => [],
-      imageMayUnload: () => [], ollamaUrl: () => undefined,
       service: { inspect: refuseUnit, start: refuseUnit, stop: refuseUnit },
       socket: () => {
         socket = Object.assign(new EventTarget(), { close() {} });
@@ -975,7 +1067,7 @@ function fakeComfyImage() {
  * comfyUrl setting, so the module starts the user unit itself and owns it.
  * Fetch, socket and the unit are injected; no request leaves the process.
  */
-function managedComfy(hooks: { onStart?: () => void; onStop?: () => void } = {}) {
+function managedComfy(hooks: { onStart?: () => void; onStop?: () => void; onFree?: () => void } = {}) {
   const imageEvents: ImageEvent[] = [];
   const calls: string[] = [];
   const unit: Array<"start" | "stop"> = [];
@@ -992,14 +1084,14 @@ function managedComfy(hooks: { onStart?: () => void; onStop?: () => void } = {})
     /** While set, every /system_stats (health) answer waits on it. */
     health: undefined as Promise<void> | undefined,
   };
-  const build = (lease: GpuLease, store: ThreadStore, dir: string) => {
+  const build = (lease: GpuLease, store: ThreadStore, dir: string, memory?: MemoryOwner) => {
     dataDir = path.join(dir, "image-data");
     let socket: EventTarget | undefined;
     module = createImageModule({
       dataDir, lease, store, requiredBytes: 1, idleMs: 60_000,
       settings: () => ({ imageGen: true }),
+      ...(memory ? { memory } : {}),
       localAddresses: () => [], lookupHost: async () => { throw new Error("no DNS in tests"); },
-      imageMayUnload: () => [], ollamaUrl: () => undefined,
       readGpu: async () => ({ freeBytes: 2 ** 40, holders: "none", tenants: [] }),
       service: {
         inspect: async () => ({ present: true, active: up, activeState: up ? "active" : "inactive", pid: up ? 4242 : 0 }),
@@ -1020,6 +1112,12 @@ function managedComfy(hooks: { onStart?: () => void; onStop?: () => void } = {})
         }
         if (pathname === "/object_info") return Response.json(comfyInfo(ZIMAGE_FILES));
         if (pathname === "/queue") return Response.json({ queue_running: [], queue_pending: ctl.busy ? [[0, "someone-else"]] : [] });
+        // The handoff's ask: ComfyUI lets go of its weights and stays up.
+        if (pathname === "/free") {
+          if (!up) return new Response("down", { status: 503 });
+          hooks.onFree?.();
+          return new Response(null, { status: 200 });
+        }
         if (pathname === "/prompt") {
           prompts += 1;
           const id = `p${prompts}`;
@@ -1055,21 +1153,25 @@ const gate = () => {
   return { shut, open };
 };
 
-describe("chat.send reclaims an app-started ComfyUI until it fits or gives up", () => {
-  it("a second queued image runs in the turn's first reclaim; the turn tries again, stops ComfyUI once and is admitted", async () => {
+describe("chat.send asks an app-started ComfyUI to free its memory, never stops it", () => {
+  it("a second image queued behind the turn waits; the turn's handoff frees ComfyUI once, measures and is admitted", async () => {
     let gpu: Gpu | undefined;
     const comfy = managedComfy({
-      // Its weights stay resident after a job; stopping it frees them.
+      // Its weights stay resident after a job; POST /free gives them back.
       onStart: () => { if (gpu) { gpu.freeMib = 3000; gpu.memAvailableKb = 1_000_000; } },
-      onStop: () => { if (gpu) gpu.freeMib = 15000; },
+      onFree: () => { if (gpu) gpu.freeMib = 15000; },
     });
-    const r = await rig({ image: comfy.build });
+    const r = await rig({ image: comfy.build, loader: true });
     gpu = r.gpu;
     cleanups.push(() => comfy.module().close());
     const image = comfy.module();
-    // A first job starts ComfyUI: the app owns it now.
+    // A first job starts ComfyUI: the app owns it now. Its first handoff asked ComfyUI to free too
+    // (what an engine holds is unknown until then); its weights are in memory again after it.
     await image.wait((await image.generate({ prompt: "warm up" })).jobId);
     expect(image.current().owner).toBe("app");
+    r.gpu.freeMib = 3000;
+    r.gpu.memAvailableKb = 1_000_000;
+    const freesBefore = comfy.calls.filter((c) => c === "/free").length;
 
     // Image A holds the GPU; the turn waits for its claim; image B queues behind the turn.
     const holdA = gate();
@@ -1089,16 +1191,18 @@ describe("chat.send reclaims an app-started ComfyUI until it fits or gives up", 
     await image.wait(b.jobId);
     expect(comfy.states(a.jobId).at(-1)).toBe("done");
     expect(comfy.states(b.jobId).at(-1)).toBe("done");
-    expect(comfy.unit).toEqual(["start", "stop"]);
-    expect(image.current().owner).toBe("none");
+    // The turn's handoff freed it once; image B after the turn found it empty and asked nothing.
+    expect(comfy.calls.filter((c) => c === "/free")).toHaveLength(freesBefore + 1);
+    expect(comfy.unit).toEqual(["start"]);
+    expect(image.current().owner).toBe("app");
     expect(r.app.activeTurns()).toBe(0);
     expect(r.lease!.status()).toEqual({ holder: null, holders: 0, waiting: [] });
   });
 
-  it("a ComfyUI another client keeps busy: three declined stops, then wont-fit, no claim held", async () => {
+  it("a ComfyUI another client keeps busy: no /free, then wont-fit saying why, no claim held", async () => {
     let gpu: Gpu | undefined;
     const comfy = managedComfy({ onStart: () => { if (gpu) { gpu.freeMib = 3000; gpu.memAvailableKb = 1_000_000; } } });
-    const r = await rig({ image: comfy.build });
+    const r = await rig({ image: comfy.build, loader: true });
     gpu = r.gpu;
     cleanups.push(() => comfy.module().close());
     const image = comfy.module();
@@ -1110,8 +1214,10 @@ describe("chat.send reclaims an app-started ComfyUI until it fits or gives up", 
     const t = await r.client.call("threads.create", {});
     const err = await rejection(within(3000, sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }), "chat.send"));
     expect(err.code).toBe("wont-fit");
-    // Each stopIdle asks ComfyUI's queue once and declines.
-    expect(comfy.calls.slice(mark).filter((c) => c === "/queue")).toHaveLength(3);
+    expect(err.message).toContain(ENGINE_BUSY_NOTE);
+    // The handoff read the queue, saw another client's job and sent nothing.
+    expect(comfy.calls.slice(mark)).toContain("/queue");
+    expect(comfy.calls.slice(mark)).not.toContain("/free");
     expect(comfy.unit).toEqual(["start"]);
     expect(image.current().owner).toBe("app");
     expect(r.app.activeTurns()).toBe(0);
@@ -1119,35 +1225,32 @@ describe("chat.send reclaims an app-started ComfyUI until it fits or gives up", 
     expect(r.store.getThread(t.id).messages).toEqual([]);
   });
 
-  it("shutdown during the fit check after ComfyUI stops ends the turn as cancelled and lets the claim go (A2-01)", async () => {
+  it("shutdown during the fit check after ComfyUI freed ends the turn as cancelled and lets the claim go (A2-01)", async () => {
     let gpu: Gpu | undefined;
     const comfy = managedComfy({
       onStart: () => { if (gpu) { gpu.freeMib = 3000; gpu.memAvailableKb = 1_000_000; } },
-      onStop: () => { if (gpu) gpu.freeMib = 15000; },
+      onFree: () => { if (gpu) gpu.freeMib = 15000; },
     });
-    const r = await rig({ image: comfy.build });
+    const r = await rig({ image: comfy.build, loader: true });
     gpu = r.gpu;
     cleanups.push(() => comfy.module().close());
     const image = comfy.module();
     await image.wait((await image.generate({ prompt: "warm up" })).jobId);
     expect(image.current().owner).toBe("app");
 
-    // The first fit check (beside ComfyUI) answers; the one after the stop never does until released.
+    // The fit check after the handoff's /free never answers until released.
     await fitSettled(r);
     const stalled = gate();
     let shows = 0;
     r.setShow(async (res) => {
       shows += 1;
-      if (shows >= 2) {
-        await stalled.shut;
-        return json(res, 503, { error: "late" });
-      }
-      json(res, 200, SHOW);
+      await stalled.shut;
+      return json(res, 503, { error: "late" });
     });
     const t = await r.client.call("threads.create", {});
     const sending = rejection(sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
-    await until(() => shows === 2);
-    expect(comfy.unit).toEqual(["start", "stop"]);
+    await until(() => shows >= 1 && comfy.calls.includes("/free"));
+    expect(comfy.unit).toEqual(["start"]);
     expect(r.lease!.status().holder).toBe("chat");
 
     await within(1000, r.app.shutdown(), "shutdown");
@@ -1160,6 +1263,172 @@ describe("chat.send reclaims an app-started ComfyUI until it fits or gives up", 
     expect(r.store.getThread(t.id).messages).toEqual([]);
   });
 });
+
+// ------------------------------------------------- one thing in memory
+
+const MIB = 1024 ** 2;
+/** kB of `gib` GiB, as /proc/meminfo says it. */
+const kbOf = (gib: number) => Math.round(gib * 1024 * 1024);
+/** qwen3.5:4b as /api/ps listed it on the 6 GiB laptop (Windows report WIN-MEM-01). */
+const QWEN_4B: PsRow = { name: "qwen3.5:4b", size: 3_553_760_377, size_vram: 3_553_760_377, context_length: 4096 };
+/** With the show fixture's layers, this file size makes gemma4:e4b at 16,384 need 8,200,560,697 bytes: the report's estimate. */
+const E4B_BYTES = 6_589_947_961;
+const LAPTOP_TAGS = {
+  models: [
+    { name: "qwen3.5:4b", model: "qwen3.5:4b", size: 3_386_000_000, digest: "sha256:q4", modified_at: "2026-11-01T10:00:00Z" },
+    { name: "gemma4:e4b", model: "gemma4:e4b", size: E4B_BYTES, digest: "sha256:e4", modified_at: "2026-11-01T10:00:00Z" },
+    ...TAGS.models,
+  ],
+};
+/** whisper on the GPU: measured, never asked anything. */
+const WHISPER_ROW = "2101, /usr/bin/whisper-server, 180\n";
+
+describe("one thing in memory: a send asks the rest to leave, then measures", () => {
+  it("WIN-MEM-01: qwen3.5:4b is unloaded before gemma4:e4b's fit, and the refusal is decided from the reading after", async () => {
+    let gpu: Gpu | undefined;
+    const r = await rig({
+      loader: true,
+      tags: LAPTOP_TAGS,
+      ps: [{ ...QWEN_4B }],
+      gpu: { totalMib: 6144, usedMib: 5481, freeMib: 486, memAvailableKb: kbOf(2.66), apps: WHISPER_ROW },
+      // His GPU reading after the unload: 1,297 MiB used, 4,670 MiB free. A send judges system memory by
+      // what the computer has, and his 16 GB laptop would spill and run; under 2 GB free the rig is a
+      // 3 GB computer, so the decision here is a refusal and it carries the reading it was made from.
+      onUnload: () => { if (gpu) Object.assign(gpu, { usedMib: 1297, freeMib: 4670, memAvailableKb: kbOf(1.8) }); },
+    });
+    gpu = r.gpu;
+    const t = await r.client.call("threads.create", {});
+    const { turnId } = await r.client.call("chat.send", { threadId: t.id, content: "hello", model: "gemma4:e4b", numCtx: 16384 });
+    const { event } = await r.waitFor("chat.event", (p) => p.turnId === turnId && p.event.type === "error", 10_000);
+    if (event.type !== "error") throw new Error("unreachable");
+    expect(event.code).toBe("wont-fit");
+    // The one unload, then the decision: from 4,670 MiB free, not from 486 MiB plus a guess.
+    expect(r.ollama.requests.filter((q) => q.path === "/api/generate").map((q) => q.body)).toEqual([{ model: "qwen3.5:4b", keep_alive: 0 }]);
+    expect(r.ps).toEqual([]);
+    expect(event.fit).toMatchObject({ verdict: "refuse", needVramBytes: 8_200_560_697, freeVramBytes: 4670 * MIB });
+    expect(event.message).not.toMatch(/qwen3\.5:4b/);
+    expect(r.ollama.requests.filter((q) => q.path === "/api/chat")).toEqual([]);
+    expect(r.store.getThread(t.id).messages).toEqual([]);
+  });
+
+  it("a reply running on qwen3.5:4b in one thread keeps its model while gemma4:e4b is sent in another", async () => {
+    const r = await rig({ loader: true, tags: LAPTOP_TAGS, ps: [{ ...QWEN_4B, context_length: 16384 }] });
+    const held = gate();
+    cleanups.push(held.open);
+    r.setChat(async (res, body) => {
+      if ((body as { model: string }).model !== "qwen3.5:4b") return quickReply(res, body);
+      res.writeHead(200, { "content-type": "application/x-ndjson" });
+      res.write(piece("one "));
+      await held.shut;
+      res.end(doneLine);
+    });
+    const a = await r.client.call("threads.create", {});
+    const b = await r.client.call("threads.create", {});
+    const first = await sendStarted(r, { threadId: a.id, content: "long", model: "qwen3.5:4b", numCtx: 16384 });
+    await r.waitFor("chat.event", (p) => p.turnId === first.turnId && p.event.type === "delta");
+    const second = await sendStarted(r, { threadId: b.id, content: "short", model: "gemma4:e4b", numCtx: 16384 });
+    await r.waitFor("chat.event", (p) => p.turnId === second.turnId && p.event.type === "done", 10_000);
+    expect(r.ollama.requests.filter((q) => q.path === "/api/generate" && (q.body as { keep_alive?: unknown }).keep_alive === 0)).toEqual([]);
+    expect(r.ps.map((m) => m.name)).toContain("qwen3.5:4b");
+    held.open();
+    await r.waitFor("chat.event", (p) => p.turnId === first.turnId && p.event.type === "done");
+  });
+
+  it("chat, then an image, then chat with both runtimes external: unload chat, free the engine, load chat, each after the last answered", async () => {
+    const order: string[] = [];
+    const comfy = externalComfy(order);
+    const r = await rig({ loader: true, image: comfy.build, onUnload: (model) => order.push(`unload ${model}`) });
+    cleanups.push(() => comfy.module().close());
+    r.setChat((res, body) => {
+      order.push(`chat ${(body as { model: string }).model}`);
+      return quickReply(res, body);
+    });
+    const t = await r.client.call("threads.create", {});
+    const one = await sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    await r.waitFor("chat.event", (p) => p.turnId === one.turnId && p.event.type === "done");
+    const image = comfy.module();
+    const job = await image.generate({ prompt: "a tree" });
+    await image.wait(job.jobId);
+    expect(comfy.states(job.jobId).at(-1)).toBe("done");
+    const two = await sendStarted(r, { threadId: t.id, content: "y", model: MODEL, numCtx: 16384 });
+    await r.waitFor("chat.event", (p) => p.turnId === two.turnId && p.event.type === "done");
+    // The first free: what the engine holds is unknown when the app starts, so the first handoff asks
+    // it once; the image after it finds it empty, and the chat after the image frees what it loaded.
+    expect(order).toEqual(["free", `chat ${MODEL}`, `unload ${MODEL}`, "prompt", "free", `chat ${MODEL}`]);
+    // Neither runtime was stopped, restarted or reconfigured: the only requests were these.
+    expect(comfy.calls.filter((c) => !["/system_stats", "/queue", "/object_info", "/free", "/prompt", "/view"].includes(c) && !c.startsWith("/history/"))).toEqual([]);
+  });
+
+  it("an external ComfyUI with a job of its own queued is not asked to free; the send measures and decides", async () => {
+    const order: string[] = [];
+    const comfy = externalComfy(order);
+    const r = await rig({ loader: true, image: comfy.build, onUnload: (model) => order.push(`unload ${model}`) });
+    cleanups.push(() => comfy.module().close());
+    const image = comfy.module();
+    await image.wait((await image.generate({ prompt: "warm" })).jobId);
+    comfy.ctl.pending = [[0, "someone-else"]];
+    const mark = order.length;
+    const t = await r.client.call("threads.create", {});
+    const sent = await sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+    expect(order.slice(mark)).not.toContain("free");
+  });
+});
+
+/**
+ * The real image module over an external ComfyUI on this computer (a Settings address): the app
+ * never starts, stops or reconfigures it. `order` hears its /free and /prompt; `ctl.pending` is
+ * another client's queue. Fetch and socket are injected: no request leaves the process.
+ */
+function externalComfy(order: string[]) {
+  const imageEvents: ImageEvent[] = [];
+  const calls: string[] = [];
+  const ctl = { pending: [] as unknown[] };
+  let module: ImageModule | undefined;
+  let prompts = 0;
+  const build = (lease: GpuLease, store: ThreadStore, dir: string, memory?: MemoryOwner) => {
+    let socket: EventTarget | undefined;
+    module = createImageModule({
+      dataDir: path.join(dir, "image-data"), lease, store, requiredBytes: 1,
+      settings: () => ({ imageGen: true, comfyUrl: "http://127.0.0.1:18188" }),
+      localAddresses: () => ["127.0.0.1"], lookupHost: async () => ["127.0.0.1"],
+      ...(memory ? { memory } : {}),
+      readGpu: async () => ({ freeBytes: 2 ** 40, holders: "none", tenants: [] }),
+      service: { inspect: refuseUnit, start: refuseUnit, stop: refuseUnit },
+      socket: () => {
+        socket = Object.assign(new EventTarget(), { close() {} });
+        Object.defineProperty(socket, "readyState", { value: 1 });
+        return socket as unknown as globalThis.WebSocket;
+      },
+      fetch: async (input) => {
+        const { pathname } = new URL(String(input));
+        calls.push(pathname);
+        // DynamicVRAM: torch reserves 32 MiB while the weights sit elsewhere (WIN-MEM-03).
+        if (pathname === "/system_stats") return Response.json({ system: {}, devices: [{ name: "cuda:0", type: "cuda", vram_total: 6_442_123_264, vram_free: 3_757_325_224, torch_vram_total: 33_554_432, torch_vram_free: 0 }] });
+        if (pathname === "/object_info") return Response.json(comfyInfo(ZIMAGE_FILES));
+        if (pathname === "/queue") return Response.json({ queue_running: [], queue_pending: ctl.pending });
+        if (pathname === "/free") { order.push("free"); return new Response(null, { status: 200 }); }
+        if (pathname === "/prompt") {
+          order.push("prompt");
+          prompts += 1;
+          const id = `p${prompts}`;
+          queueMicrotask(() => socket?.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "executing", data: { prompt_id: id, node: null } }) })));
+          return Response.json({ prompt_id: id });
+        }
+        if (pathname.startsWith("/history/")) {
+          const id = decodeURIComponent(pathname.slice("/history/".length));
+          return Response.json({ [id]: { outputs: { "8": { images: [{ filename: "out.png" }] } } } });
+        }
+        if (pathname === "/view") return new Response(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+        throw new Error(`unexpected ComfyUI request ${pathname}`);
+      },
+      push: (channel, payload) => { if (channel === "image.event") imageEvents.push(payload as ImageEvent); },
+    } as Parameters<typeof createImageModule>[0]);
+    return module;
+  };
+  const states = (jobId: string) => imageEvents.filter((e) => e.jobId === jobId).map((e) => e.state);
+  return { build, ctl, calls, states, module: () => module! };
+}
 
 describe("threads.delete marks the thread before it waits", () => {
   it("a send and an image.generate for the thread while an earlier image's cancel is pending are refused; nothing outlives the delete", async () => {

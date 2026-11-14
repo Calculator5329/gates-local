@@ -77,15 +77,15 @@ describe("gpu.status occupants", () => {
     ]);
   });
 
-  it("a chat model is unprotected exactly when an image job may unload it: in the fed list, or every one in an Ollama the app started", async () => {
+  it("a chat model is unprotected exactly when the next thing may ask it to leave: the fed list alone decides", async () => {
     const apps = "1, /usr/bin/ollama, 3000\n2, /usr/bin/ollama, 1000\n";
     const read = (over: Partial<GpuStatusDeps>) => readGpuStatus(
       linux({ runNvidiaSmi: smi(apps, "RTX, 16303, 4000, 12000"), residentModels: async () => [{ name: "warm:9b", sizeVramBytes: 3 }, { name: "other:4b", sizeVramBytes: 1 }], ...over }),
     );
     const guarded = async (over: Partial<GpuStatusDeps>) => Object.fromEntries((await read(over)).occupants.map((o) => [o.label, o.protected]));
-    expect(await guarded({ mayUnload: () => ["warm:9b"] }), "the fed list: a warm model a turn answered on").toEqual({ "warm:9b": false, "other:4b": true });
-    expect(await guarded({ mayUnload: () => [], ownsRuntime: () => true }), "the app's own Ollama: every resident model").toEqual({ "warm:9b": false, "other:4b": false });
-    expect(await guarded({ mayUnload: () => [], ownsRuntime: () => false }), "an Ollama the app did not start: only the list").toEqual({ "warm:9b": true, "other:4b": true });
+    expect(await guarded({ mayUnload: () => ["warm:9b"] }), "a reply runs on other:4b: only warm:9b may leave").toEqual({ "warm:9b": false, "other:4b": true });
+    expect(await guarded({ mayUnload: () => ["warm:9b", "other:4b"] }), "nothing replying: every resident model, whoever loaded it").toEqual({ "warm:9b": false, "other:4b": false });
+    expect(await guarded({ mayUnload: () => [] }), "replies on both").toEqual({ "warm:9b": true, "other:4b": true });
   });
 
   it("the machine fixture: whisper and Media Vault are protected, the desktop is named", async () => {

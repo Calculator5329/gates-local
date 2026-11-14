@@ -11,8 +11,13 @@ export interface OwnedComfy {
   readonly image: ImageModule;
   /** comfyui.service stop calls so far. */
   stops(): number;
-  /** The next service.inspect() or stop() waits for release(); `asked` resolves when it is called. */
-  hold(call: "inspect" | "stop"): { asked: Promise<void>; release(): void };
+  /** POST /free calls so far (the memory owner's handoff): ComfyUI stays up and gives its weights back. */
+  frees(): number;
+  /**
+   * The next service.inspect(), stop() or POST /free waits for release() (a /free also ends on its
+   * request's abort); `asked` resolves when it is called.
+   */
+  hold(call: "inspect" | "stop" | "free"): { asked: Promise<void>; release(): void };
   close(): void;
 }
 
@@ -33,8 +38,6 @@ export async function ownedIdleComfy(lease: GpuLease, dir: string): Promise<Owne
     store,
     push: () => undefined,
     settings: () => ({ imageGen: true }),
-    imageMayUnload: () => [],
-    ollamaUrl: () => undefined,
     readGpu: async () => ({ freeBytes: 1e12, holders: "nothing else" }),
     requiredBytes: 1,
     // Only close() stops it: no idle timer fires during a test.
@@ -57,11 +60,18 @@ export async function ownedIdleComfy(lease: GpuLease, dir: string): Promise<Owne
         active = false;
       },
     },
-    fetch: async (input) => {
+    fetch: async (input, init) => {
       const route = new URL(String(input)).pathname;
       if (!active) throw new Error("connect ECONNREFUSED (fake ComfyUI is stopped)");
       if (route === "/system_stats") return Response.json({ system: { comfyui_version: "fake" }, devices: [{ type: "cuda", torch_vram_total: 0 }] });
       if (route === "/queue") return Response.json({ queue_running: [], queue_pending: [] });
+      if (route === "/free") {
+        const signal = init?.signal ?? undefined;
+        const aborted = new Promise<never>((_, reject) => signal?.addEventListener("abort", () => reject(signal.reason), { once: true }));
+        await Promise.race([held("free"), aborted]);
+        calls.push("free");
+        return new Response(null, { status: 200 });
+      }
       // The job ends here, before rendering: the module keeps the ComfyUI it started.
       return Response.json({ error: `no ${route} in this fake` }, { status: 500 });
     },
@@ -69,12 +79,12 @@ export async function ownedIdleComfy(lease: GpuLease, dir: string): Promise<Owne
   const { jobId } = await image.generate({ prompt: "a tree" });
   await image.wait(jobId);
   if (image.current().owner !== "app" || !calls.includes("start")) throw new Error(`the fake ComfyUI was not app-owned: ${JSON.stringify(image.current())}`);
-  const hold = (call: "inspect" | "stop") => {
+  const hold = (call: "inspect" | "stop" | "free") => {
     let ask!: () => void;
     let release!: () => void;
     const asked = new Promise<void>((r) => (ask = r));
     holds.set(call, { ask, until: new Promise<void>((r) => (release = r)) });
     return { asked, release };
   };
-  return { image, stops: () => calls.filter((c) => c === "stop").length, hold, close: () => store.close() };
+  return { image, stops: () => calls.filter((c) => c === "stop").length, frees: () => calls.filter((c) => c === "free").length, hold, close: () => store.close() };
 }

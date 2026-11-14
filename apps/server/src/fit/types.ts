@@ -15,6 +15,8 @@ export interface FitReport {
   source: "measured" | "estimate";
   measuredAt: number;
   message?: string;
+  /** On a refusal: the system memory available in the reading it was decided from. */
+  memAvailableBytes?: number;
 }
 
 /** Who holds GPU memory. Whisper is the permanent tenant the fit plans around. */

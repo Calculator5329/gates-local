@@ -63,6 +63,17 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
     /** Nothing queued and nothing running, except possibly `except` (our own prompt stuck past its cancel deadline). */
     async idle(except?: string) { const q = await queue(); return q.queue_pending.length === 0 && q.queue_running.every((row) => except !== undefined && row[1] === except); },
     async running(signal?: AbortSignal) { return (await queue(signal)).queue_running.map((row) => String(row[1])); },
+    /**
+     * Asks ComfyUI to let go of its models and cached memory (POST /free), only when its queue is
+     * empty: nothing running and nothing pending. "busy": something was queued, nothing was sent.
+     * Never stops, restarts or reconfigures it.
+     */
+    async free(signal?: AbortSignal): Promise<"freed" | "busy"> {
+      const q = await queue(signal);
+      if (q.queue_running.length > 0 || q.queue_pending.length > 0) return "busy";
+      await post("/free", { unload_models: true, free_memory: true }, signal);
+      return "freed";
+    },
     /** ComfyUI's /object_info answer: every node class with its inputs, including the file lists. */
     async info(signal?: AbortSignal): Promise<Info> {
       return S.decodeUnknownSync(ObjectInfo)(await (await request("/object_info", undefined, signal)).json());

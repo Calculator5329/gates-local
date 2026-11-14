@@ -32,7 +32,7 @@ export interface FitTableDeps {
   readonly models: () => Promise<readonly TableModel[]>;
   /** Models of admitted turns: a load would have to stop their chats to use their memory. */
   readonly busy: () => readonly string[];
-  /** The idle ComfyUI the app started, which a load may stop. */
+  /** The ComfyUI the app started: the card's own memory counts it as the app's (baseline). */
   readonly comfyPid: () => number | undefined;
   readonly push: (table: FitTable) => void;
   readonly boot?: string;
@@ -68,7 +68,7 @@ function memoryOf(gpu: GpuSnapshot, margin: number, baseline: GpuBaseline | unde
  * against the card (`card`: the GPU's memory and the system memory the computer has), which every
  * list and Settings show; one offered for download is judged against the card.
  */
-async function rowsFrom(deps: FitTableDeps, baseUrl: string, r: Readings, models: readonly TableModel[], comfyPid: number | undefined): Promise<TableRow[]> {
+async function rowsFrom(deps: FitTableDeps, baseUrl: string, r: Readings, models: readonly TableModel[]): Promise<TableRow[]> {
   const rows: TableRow[] = [];
   const busy = deps.busy();
   const baseline = deps.fit?.baseline;
@@ -95,7 +95,7 @@ async function rowsFrom(deps: FitTableDeps, baseUrl: string, r: Readings, models
     for (const numCtx of TABLE_CONTEXTS) {
       try {
         const row = entry.installed
-          ? await planWith({ ...deps.fit, baseUrl, model: entry.name, numCtx, busy, ...(comfyPid === undefined ? {} : { comfyPid }) }, r).then((plan) => {
+          ? await planWith({ ...deps.fit, baseUrl, model: entry.name, numCtx, busy }, r).then((plan) => {
               const planned = rowOf(plan.report, plan.stop);
               return onCard ? cardOf(planned) : planned;
             })
@@ -150,7 +150,7 @@ export function createFitTable(deps: FitTableDeps): FitTableSource {
       const own = comfyPid === undefined ? [] : [comfyPid];
       deps.fit?.baseline?.observe(r.gpu, own);
       const memory = memoryOf(r.gpu, margin, deps.fit?.baseline, own, r.memTotalBytes);
-      const rows = await rowsFrom(deps, baseUrl, r, await deps.models(), comfyPid);
+      const rows = await rowsFrom(deps, baseUrl, r, await deps.models());
       return { reading: { boot, seq: at, measuredAt: r.gpu.measuredAt }, memory, rows };
     } catch (e) {
       deps.log?.(`fit table: ${(e as Error).message}`);

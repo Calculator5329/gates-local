@@ -354,3 +354,31 @@ that rule covers plain replies, and a tool turn saves the same race as interrupt
 with every word kept.
 **Owner text (in chat):** Stop must keep the partial reply (confirmed 2026-11-09).
 
+## 2026-11-13 · One thing in GPU memory, one owner of it
+
+**Decided:** one memory owner (`apps/server/src/gpu/memory.ts`) runs every request
+for memory (a send, `models.load`, a preload, an image job) inside the load gate, in
+order: ask everything else to leave, wait (bounded) until the runtime says it left,
+take a new reading, decide from that reading alone, load. The planner no longer
+guesses which idle models will leave, and the image job no longer keeps its own
+unload list or credits ComfyUI's memory as free.
+
+What may be asked to leave:
+
+- A chat model in the Ollama the app talks to, whoever loaded it, unless a running
+  reply of this app uses it: an unload request (`keep_alive: 0`). Never a stop.
+- A ComfyUI on this computer, whoever started it: `POST /free` with
+  `unload_models` and `free_memory`, only while its queue is empty. While another
+  job runs or waits nothing is sent, and a refusal says so. An external ComfyUI is
+  never stopped, restarted or reconfigured; an app-started one is stopped only by
+  its idle timer, as before.
+- A same-setup image (preset and size) leaves nothing and is not refused; a
+  changed setup frees the engine first, then measures.
+
+Never touched: whisper and every other GPU program (measured only), and a running
+reply's model. The resident thing and the handoff stage (leaving, measuring,
+loading) are pushed as `memory.changed`.
+**Owner text (in chat, 2026-11-13):** "It really should only allow you to have one
+thing in memory at a time, and whatever model is in memory is the one that's
+defaulting on the model picker bar thing."
+

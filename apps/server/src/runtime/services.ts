@@ -11,7 +11,8 @@ import { catalogModels } from "./catalog.ts";
 import type { FitReport } from "../fit/types.ts";
 import { cached, procListeningPids, readGpuStatus, systemdMainPid } from "../fit/gpu-status.ts";
 import { createGpuWatcher, type GpuWatcher } from "../fit/gpu-watch.ts";
-import { forgetGpuReadings } from "../fit/gpu.ts";
+import { defaultNvidiaSmi, forgetGpuReadings, readGpu } from "../fit/gpu.ts";
+import { createMemoryOwner, type MemoryEngine, type MemoryOwner } from "../gpu/memory.ts";
 import { createGpuHandlers } from "../fit/handlers.ts";
 import { createSettingsHandlers } from "../settings/handlers.ts";
 import { openSettingsStore, type SettingsStore } from "../settings/store.ts";
@@ -45,6 +46,10 @@ export interface ModelServices {
   readonly gpu: GpuWatcher;
   readonly pulls: PullManager;
   readonly loader: ModelLoader;
+  /** The one owner of memory: the image module hands off through it too. */
+  readonly memory: MemoryOwner;
+  /** The image engine the handoff asks to free (bound once the image module exists). */
+  bindEngine(engine: MemoryEngine): void;
   readonly handlers: Partial<Handlers>;
   /** Abort downloads, stop polling, stop the app's own Ollama if this process started it. */
   close(options: { stopRuntime: boolean }): Promise<void>;
@@ -90,6 +95,8 @@ export async function createModelServices(options: ModelServicesOptions): Promis
   // status's ownership, and the watcher refreshes after loads.
   let pulls: PullManager | undefined;
   let loader: ModelLoader | undefined;
+  /** The image engine, bound by main once the image module exists. */
+  let engine: MemoryEngine | undefined;
   const runtime = createRuntimeSwitch({
     initialMode: settings.get().runtimeMode,
     // Everything follows --data-dir: the ownership record, the serve log, the
@@ -140,6 +147,8 @@ export async function createModelServices(options: ModelServicesOptions): Promis
   });
 
   const whisperPid = cached(() => systemdMainPid("whisper-server.service"), WHISPER_PID_TTL_MS);
+  /** The models the GPU status last read in the app's Ollama: all but a running reply's leave for the next thing. */
+  let resident: readonly string[] = [];
   const gpu = createGpuWatcher({
     read: () =>
       readGpuStatus({
@@ -148,26 +157,49 @@ export async function createModelServices(options: ModelServicesOptions): Promis
         listeningPids: procListeningPids,
         ...options.imagePid ? { imagePid: options.imagePid } : {},
         modelLabel,
-        // Unprotected is what an image job may unload (the loader's imageMayUnload), without a second /api/ps.
-        mayUnload: () => loader?.loadedOrAnswered() ?? [],
-        ownsRuntime: () => runtime.status().owner === "app",
+        // Unprotected is what the next thing in memory asks to leave (gpu/memory.ts): every resident
+        // model no running reply uses, whoever loaded it. From the same /api/ps, no second read.
+        mayUnload: () => {
+          const replying = new Set(loader?.replying() ?? []);
+          return resident.filter((tag) => !replying.has(tag));
+        },
         // The loader reads /api/ps for the runtime it owns now and prunes against it.
-        residentModels: async () => ((await loader?.residentModels()) ?? []).map((m) => ({ name: canonicalTag(m.name), sizeVramBytes: m.sizeVramBytes })),
+        residentModels: async () => {
+          const models = ((await loader?.residentModels()) ?? []).map((m) => ({ name: canonicalTag(m.name), sizeVramBytes: m.sizeVramBytes }));
+          resident = models.map((m) => m.name);
+          return models;
+        },
       }),
     push: (status) => options.push("gpu.changed", status),
     log,
   });
 
+  // The one owner of memory (gpu/memory.ts): every load, send and image job hands off through it.
+  const owner = createMemoryOwner({
+    ollamaUrl: () => runtime.baseUrl(),
+    listLoaded: (url, signal) => listLoaded(url, undefined, signal),
+    replying: () => loader?.replying() ?? [],
+    engine: () => engine,
+    readFree: async (signal) => (await readGpu(options.fit?.runNvidiaSmi ?? defaultNvidiaSmi, Date.now, signal)).freeBytes,
+    onUnloaded: (model) => {
+      loader?.unloaded(model);
+      forgetGpuReadings();
+      gpu.poke();
+    },
+    onChanged: (state) => options.push("memory.changed", state),
+    log,
+  });
   loader = createModelLoader({
     baseUrl: () => runtime.baseUrl(),
     push: (load) => options.push("models.load", load),
     listLoaded: (url, signal) => listLoaded(url, undefined, signal),
     // The runtime the load captured, never whatever baseUrl() says by the time the fit runs.
     // `signal` (shutdown, a switch) ends every request and child process of the check.
-    // The planner chat.send uses (fit/planLoad). A preload stops nothing: models a turn or another
-    // preload holds are busy, and it never reclaims ComfyUI (it runs inside a shared chat claim).
+    // The planner chat.send uses (fit/planLoad), after the handoff: the reading alone decides.
+    // A preload stops nothing: models a turn or another preload holds are busy.
     fit: async (model, numCtx, baseUrl, signal) =>
-      (await planLoad({ ...options.fit, baseUrl, model, numCtx, signal, busy: loader?.busyModels() ?? [] })).report,
+      (await planLoad({ ...options.fit, baseUrl, model, numCtx, signal, busy: loader?.busyModels() ?? [], measured: true })).report,
+    memory: owner,
     // A refusal's offer: what runs instead, planned the same way on the reading that refused.
     offer: (refused, baseUrl) => offerAfterRefusal({
       ...options.fit,
@@ -178,8 +210,6 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     }, refused),
     // a load changed the GPU: no fit after it reuses a reading from before it
     onLoaded: () => { forgetGpuReadings(); gpu.poke(); },
-    // An Ollama this app started (now or on an earlier run, per the ownership record) holds only the app's models.
-    ownsRuntime: () => runtime.status().owner === "app",
     ...(options.lease ? { lease: options.lease } : {}),
     log,
   });
@@ -230,6 +260,8 @@ export async function createModelServices(options: ModelServicesOptions): Promis
   });
 
   const handlers = {
+    // What is in memory now, and the handoff under way (gpu/memory.ts); memory.changed pushes each change.
+    "memory.status": () => owner.status(),
     ...createSettingsHandlers({ settings, push: options.push, baseUrl: () => runtime.baseUrl() }),
     ...createGpuHandlers({ gpu }),
     // The catalog's fit survey reads the same injected GPU and memory as every other fit.
@@ -252,6 +284,8 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     gpu,
     pulls,
     loader,
+    memory: owner,
+    bindEngine: (next) => { engine = next; },
     handlers,
     killRuntimeNow: () => runtime.killNow(),
     async close({ stopRuntime }) {

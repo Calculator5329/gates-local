@@ -81,28 +81,32 @@ it("S-08: two services with different data dirs run their own Ollama against the
   expect(await models(rb.baseUrl)).toBe(appModelsDir(b));
 });
 
-it("an image may unload a model the app never loaded only from an Ollama the app started", async () => {
+it("one thing in memory: the handoff asks a model the app never loaded to leave an Ollama it did not start, and never stops that Ollama", async () => {
   const MODEL = "qwen3.5:9b";
+  let ps = [{ name: MODEL, size: 1, size_vram: 1, context_length: 16384 }];
+  const asked: unknown[] = [];
   const external = await startFakeServer({
     "GET /": (_b, res) => { res.writeHead(200, { "content-type": "text/plain" }); res.end("Ollama is running"); },
     "GET /api/version": (_b, res) => json(res, 200, { version: "0.0.9-fake" }),
     "GET /api/tags": (_b, res) => json(res, 200, { models: [] }),
-    "GET /api/ps": (_b, res) => json(res, 200, { models: [{ name: MODEL, size: 1, size_vram: 1, context_length: 16384 }] }),
+    "GET /api/ps": (_b, res) => json(res, 200, { models: ps }),
+    "POST /api/generate": (body, res) => {
+      const request = body as { model: string; keep_alive?: number };
+      asked.push(request);
+      if (request.keep_alive === 0) ps = ps.filter((m) => m.name !== request.model);
+      json(res, 200, { done: true });
+    },
   });
   servers.push(external);
   const system = await services(path.join(work, "data-system"), { appPort: await freePort(), externalBaseUrl: external.baseUrl });
   expect((await system.runtime.ensure()).owner).toBe("external");
-  expect(await system.loader.imageMayUnload()).toEqual([]);
+  expect(system.loader.appLoadedModels(), "resident from before the app: not the app's load").toEqual([]);
 
-  const dataDir = path.join(work, "data-app");
-  writeFakeBinary(installedBinary(dataDir, VERSION), loadableOllamaScript(MODEL));
-  const app = await services(dataDir, { appPort: await freePort(), externalBaseUrl: await nothingAt() });
-  const status = await app.runtime.ensure();
-  expect(status.owner).toBe("app");
-  // Resident, but not through the app's loader (a load from an earlier run of the app).
-  await (await fetch(new URL("/api/generate", status.baseUrl), { method: "POST", body: JSON.stringify({ model: MODEL, prompt: "" }) })).text();
-  expect(app.loader.appLoadedModels()).toEqual([]);
-  expect(await app.loader.imageMayUnload()).toEqual([MODEL]);
+  const handoff = await system.memory.gate(() => system.memory.handoff({ kind: "chat", model: "gemma4:e4b", numCtx: 16384 }, new AbortController().signal));
+  expect(handoff).toMatchObject({ left: [MODEL], stayed: [] });
+  expect(asked, "an unload request (keep_alive 0) is all an Ollama the app did not start is asked").toEqual([{ model: MODEL, keep_alive: 0 }]);
+  expect(system.runtime.status(), "still the external Ollama, never stopped or adopted").toMatchObject({ state: "ready", owner: "external" });
+  expect(system.memory.status().handoff).toMatchObject({ to: { kind: "chat", model: "gemma4:e4b" }, stage: "measuring" });
 });
 
 it("S-02: a preload's fit reads the URL the load captured, not whatever the runtime says later", async () => {
@@ -306,16 +310,36 @@ const smi = (freeMib: number) => async (args: readonly string[]) => (args[0]?.st
 /** An /api/ps entry resident at 16k. */
 const entry = (name: string, vram: number) => ({ name, size: vram, size_vram: vram, context_length: 16384 });
 /**
- * About 1 GB free, RAM under its margin, and the idle app-owned ComfyUI (MainPID 4242) holding
- * `comfyMib`, which nvidia-smi gives back once it is stopped.
+ * Models a test's Ollama was asked to unload (keep_alive 0): its /api/ps stops listing them, as
+ * Ollama does once the runner exits. Cleared by each rig.
  */
-function withComfyToo(comfy: OwnedComfy, comfyMib: number) {
+const gone = new Set<string>();
+/** The /api/ps rows still resident. */
+const here = <T extends { name: string }>(rows: readonly T[]) => rows.filter((row) => !gone.has(row.name));
+/** VRAM given back by the unloads so far, in MiB, of the rows a test lists. */
+const freedMib = (rows: readonly { name: string; vram: number }[]) => rows.filter((row) => gone.has(row.name)).reduce((sum, row) => sum + row.vram / 1024 ** 2, 0);
+/** nvidia-smi with `freeMib` free plus whatever the unloads of `rows` gave back. */
+const smiAfter = (freeMib: number, rows: () => readonly { name: string; vram: number }[]) => async (args: readonly string[]) => smi(Math.round(freeMib + freedMib(rows())))(args);
+const noRows = (): readonly { name: string; vram: number }[] => [];
+/** The unload route: keep_alive 0 takes the model out of /api/ps; anything else is a preload. */
+const unloadRoute: Route = (b, res) => {
+  const { model, keep_alive } = b as { model: string; keep_alive?: unknown };
+  if (keep_alive === 0) gone.add(model);
+  json(res, 200, { model, response: "", done: true });
+};
+
+/**
+ * About 1 GB free, RAM under its margin, and the idle app-owned ComfyUI (MainPID 4242) holding
+ * `comfyMib`, which nvidia-smi gives back once it is stopped or freed (POST /free), plus what
+ * `rows` gave back when unloaded.
+ */
+function withComfyToo(comfy: OwnedComfy, comfyMib: number, rows: () => readonly { name: string; vram: number }[] = () => []) {
   return {
     readMeminfo: async () => "MemAvailable: 1000000 kB\n",
     runNvidiaSmi: async (args: readonly string[]) => {
-      const up = comfy.stops() === 0;
+      const up = comfy.stops() === 0 && comfy.frees() === 0;
       if (args[0]?.startsWith("--query-gpu")) {
-        const free = 1000 + (up ? 0 : comfyMib);
+        const free = Math.round(1000 + (up ? 0 : comfyMib) + freedMib(rows()));
         return `16303, ${16303 - free}, ${free}\n`;
       }
       return up ? `4242, /usr/bin/python3 main.py --port 8188, ${comfyMib}\n` : "";
@@ -338,6 +362,7 @@ interface RigOptions {
  * routes say otherwise, the services and the app around it, sharing one lease when given.
  */
 async function rig(routes: Record<string, Route>, options: RigOptions = {}) {
+  gone.clear();
   const old = await startFakeServer({
     "GET /": (_b, res) => {
       res.writeHead(200, { "content-type": "text/plain" });
@@ -346,13 +371,16 @@ async function rig(routes: Record<string, Route>, options: RigOptions = {}) {
     "GET /api/version": (_b, res) => json(res, 200, { version: "0.0.9-fake" }),
     "GET /api/tags": (_b, res) => json(res, 200, { models: [{ name: MODEL, size: 6_600_000_000, digest: "d", modified_at: "2026-11-01T00:00:00Z" }] }),
     // Wholly on the GPU and at least its weights: a measurement of the whole model.
-    "GET /api/ps": (_b, res) => json(res, 200, { models: [{ name: MODEL, size: 7_000_000_000, size_vram: 7_000_000_000, context_length: 16384 }] }),
+    "GET /api/ps": (_b, res) => json(res, 200, { models: here([{ name: MODEL, size: 7_000_000_000, size_vram: 7_000_000_000, context_length: 16384 }]) }),
     "POST /api/show": (_b, res) => json(res, 200, SHOW),
+    "POST /api/generate": unloadRoute,
     ...routes,
   });
   servers.push(old);
   // The preloads (models.load) read the machine the way the turns do.
   const s = await services(path.join(work, "data"), { appPort: await freePort(), externalBaseUrl: old.baseUrl }, options.lease, options.turnDrainMs, options.fit ?? fit);
+  // As main.ts does: the image module is the engine the memory owner asks to free.
+  if (options.image) s.bindEngine(options.image);
   expect(s.runtime.mode()).toBe("system");
   expect((await s.runtime.ensure()).state).toBe("ready");
   const store = openThreadStore(path.join(work, "threads.sqlite"));
@@ -645,10 +673,9 @@ describe("a turn's stream ends once", () => {
   });
 });
 
-describe("R2-02: chat.send's ComfyUI reclaim ends with the turn", () => {
+describe("R2-02: chat.send's ask to ComfyUI ends with the turn", () => {
   /**
-   * Little free VRAM, so a cold MODEL spills unless chat.send reclaims the idle app-owned ComfyUI
-   * (MainPID 4242, listed holding 8000 MiB) first.
+   * Little free VRAM, with the idle app-owned ComfyUI (MainPID 4242) listed holding 8000 MiB.
    */
   const tight = {
     ...fit,
@@ -681,60 +708,42 @@ describe("R2-02: chat.send's ComfyUI reclaim ends with the turn", () => {
     comfy.close();
   });
 
-  it("the reclaim's GPU claim: waiting behind another chat claim ends at shutdown, and the cancelled reclaim never stops ComfyUI", async () => {
+  // The turn no longer stops ComfyUI or takes the image claim: the memory owner's handoff asks it to
+  // free (POST /free) inside the turn's own chat claim. A held /free ends with the turn.
+  it("the handoff's /free, held: shutdown ends the turn as cancelled, ComfyUI is never stopped and the claim goes", async () => {
     const lease = createGpuLease();
     const comfy = await ownedIdleComfy(lease, work);
     const r = await rig(cold, { image: comfy.image, lease, fit: tight });
-    const other = await lease.acquire("chat");
+    const free = comfy.hold("free");
     const send = Promise.resolve(sendStarted(r.app, { threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).catch((e: unknown) => e);
-    await until(() => lease.status().waiting.length !== 0);
-    expect(lease.status().waiting).toEqual(["image"]);
+    expect(await settled(free.asked, "ComfyUI /free readiness")).toEqual({ resolved: undefined });
+    expect(lease.status()).toMatchObject({ holder: "chat" });
     expect(await settled(r.app.shutdown(), "application shutdown")).toEqual({ resolved: undefined });
     expect(await send).toMatchObject({ code: "cancelled" });
     expect(r.app.activeTurns()).toBe(0);
-    expect(lease.status()).toMatchObject({ holders: 1, waiting: [] });
-    other();
-    await sleep(50);
+    free.release();
+    await sleep(20);
     expect(comfy.stops()).toBe(0);
     expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
     await r.done();
     comfy.close();
   });
 
-  it("the reclaim holding its claim, in a held service.inspect(): a switch ends the turn and the image claim with it", async () => {
+  it("the handoff's /free, held: a switch ends the turn and its claim; ComfyUI is never stopped", async () => {
     const lease = createGpuLease();
     const comfy = await ownedIdleComfy(lease, work);
     const r = await rig(cold, { image: comfy.image, lease, fit: tight });
-    const inspect = comfy.hold("inspect");
+    const free = comfy.hold("free");
     const send = Promise.resolve(sendStarted(r.app, { threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).catch((e: unknown) => e);
-    expect(await settled(inspect.asked, "ComfyUI inspection readiness")).toEqual({ resolved: undefined });
-    expect(lease.status()).toMatchObject({ holder: "image" });
+    expect(await settled(free.asked, "ComfyUI /free readiness")).toEqual({ resolved: undefined });
     const switched = r.s.runtime.setMode("app");
     expect(await settled(send, "chat send admission")).toMatchObject({ resolved: { code: "runtime-changed" } });
     expect(await settled(r.s.loader.turnsEnded(), "model turns to drain")).toEqual({ resolved: undefined });
     expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
     await switched;
-    inspect.release();
+    free.release();
     await sleep(20);
     expect(comfy.stops()).toBe(0);
-    await r.done();
-    comfy.close();
-  });
-
-  it("a ComfyUI stop already begun: the turn ends when it does, and a stop past the drain bound fails the switch", async () => {
-    const lease = createGpuLease();
-    const comfy = await ownedIdleComfy(lease, work);
-    const r = await rig(cold, { image: comfy.image, lease, fit: tight, turnDrainMs: 200 });
-    const stop = comfy.hold("stop");
-    const send = Promise.resolve(sendStarted(r.app, { threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).catch((e: unknown) => e);
-    expect(await settled(stop.asked, "ComfyUI stop readiness")).toEqual({ resolved: undefined });
-    expect(await settled(r.s.runtime.setMode("app"), "runtime switch")).toMatchObject({ rejected: expect.objectContaining({ message: expect.stringMatching(/still running/) }) });
-    expect(r.s.runtime.mode()).toBe("system");
-    expect(lease.status()).toMatchObject({ holder: "image" });
-    stop.release();
-    expect(await send).toMatchObject({ code: "runtime-changed" });
-    expect(comfy.stops()).toBe(1);
-    expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
     await r.done();
     comfy.close();
   });
@@ -743,8 +752,10 @@ describe("R2-02: chat.send's ComfyUI reclaim ends with the turn", () => {
 describe("a load that needs a busy model's GPU: turns.blocking and chat.send stopOthers", () => {
   const Y = "gemma3:12b";
   const X_VRAM = 9_000_000_000;
-  /** 1000 MiB free beside X: Y (6.6 GB) does not fit beside X, and fits in what X holds. */
-  const tight = { ...fit, runNvidiaSmi: smi(1000) };
+  /** The resident rows of the last twoModels: what an unload of each gives back to nvidia-smi. */
+  let resident: () => readonly { name: string; vram: number }[] = noRows;
+  /** 1000 MiB free beside X: Y (6.6 GB) does not fit beside X, and fits in what X held once it left. */
+  const tight = { ...fit, runNvidiaSmi: smiAfter(1000, () => resident()) };
   /** Plenty free: Y fits beside X. */
   const roomy = { ...fit, runNvidiaSmi: smi(15000) };
   const ndjson = { "content-type": "application/x-ndjson" };
@@ -764,7 +775,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
         json(res, 200, {
           models: [MODEL, Y, ...(idle ? [idle.name] : [])].map((name) => ({ name, size: 6_600_000_000, digest: name, modified_at: "2026-11-01T00:00:00Z" })),
         }),
-      "GET /api/ps": (_b, res) => json(res, 200, { models: [entry(MODEL, xVram), ...(idle ? [entry(idle.name, idle.vram)] : [])] }),
+      "GET /api/ps": (_b, res) => json(res, 200, { models: here([entry(MODEL, xVram), ...(idle ? [entry(idle.name, idle.vram)] : [])]) }),
       "POST /api/chat": async (b, res) => {
         const { model } = b as { model: string };
         res.writeHead(200, ndjson);
@@ -782,7 +793,10 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
         res.end(line({ model, message: { role: "assistant", content: "Y here" }, done: false }) + line({ model, message: { role: "assistant", content: "" }, done: true, done_reason: "stop" }));
       },
     };
-    return { routes, xStreaming, xClosed };
+    /** What each resident model holds: nvidia-smi gives it back once it was unloaded. */
+    const rows = () => [{ name: MODEL, vram: xVram }, ...(idle ? [idle] : [])];
+    resident = rows;
+    return { routes, xStreaming, xClosed, rows };
   }
 
   async function withX(fitDeps: AppDeps["fit"], options: RigOptions = {}, m = twoModels()) {
@@ -930,7 +944,8 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     await until(() => t.terminal(y.turnId).length !== 0);
     expect(t.terminal(t.x.turnId)).toMatchObject([{ type: "error", code: "preempted", neededBy: Y }]);
     expect(t.of(y.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
-    // X's memory, idle once its turn ended, was enough: ComfyUI kept running and nothing waits on the lease.
+    // X's memory, given back once its turn ended and it was asked to leave, was enough: ComfyUI was
+    // asked to free (one thing in memory), never stopped, and nothing waits on the lease.
     expect(comfy.stops()).toBe(0);
     expect(lease.status().waiting).toEqual([]);
     await t.r.done();
@@ -1023,10 +1038,11 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     const xAsked = signalled();
     const xOpen = new Set<Promise<void>>();
     let atYChat: { xEnded: boolean; holders: number } | undefined;
+    resident = () => [{ name: MODEL, vram: X_VRAM }];
     const r = await rig(
       {
         "GET /api/tags": (_b, res) => json(res, 200, { models: [MODEL, Y].map((name) => ({ name, size: 6_600_000_000, digest: name, modified_at: "2026-11-01T00:00:00Z" })) }),
-        "GET /api/ps": (_b, res) => json(res, 200, { models: xResident ? [entry(MODEL, X_VRAM)] : [] }),
+        "GET /api/ps": (_b, res) => json(res, 200, { models: xResident ? here([entry(MODEL, X_VRAM)]) : [] }),
         "POST /api/chat": async (b, res) => {
           const { model } = b as { model: string };
           res.writeHead(200, ndjson);
@@ -1064,17 +1080,18 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     await r.done();
   });
 
-  it("R5-02: Y needs X's memory and ComfyUI's together: X is stopped and drained, then ComfyUI, then Y is admitted", async () => {
+  it("R5-02: Y needs X's memory and ComfyUI's together: X is stopped and asked to leave, ComfyUI freed (never stopped), then Y is admitted", async () => {
     const lease = createGpuLease();
     const comfy = await ownedIdleComfy(lease, work);
     // Y needs about 7830 MiB plus the 512 MiB margin: 1000 free + X's 1907 + ComfyUI's 6000, and neither alone is enough.
-    const t = await withX(withComfyToo(comfy, 6000), { image: comfy.image, lease }, twoModels(2e9));
+    const t = await withX(withComfyToo(comfy, 6000, () => resident()), { image: comfy.image, lease }, twoModels(2e9));
     const sent = await settled(Promise.resolve(sendStarted(t.r.app, { threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx)), "chat send admission");
     expect(sent).toMatchObject({ resolved: { turnId: expect.any(String) } });
     const y = (sent as { resolved: { turnId: string } }).resolved;
     await until(() => t.terminal(y.turnId).length !== 0);
     expect(t.terminal(t.x.turnId)).toMatchObject([{ type: "error", code: "preempted", neededBy: Y }]);
-    expect(comfy.stops()).toBe(1);
+    expect(comfy.frees()).toBeGreaterThanOrEqual(1);
+    expect(comfy.stops()).toBe(0);
     expect(t.of(y.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
     expect(t.terminal(y.turnId)).toMatchObject([{ type: "done" }]);
     await t.r.done();
@@ -1130,14 +1147,14 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     const r = await rig(
       {
         "GET /api/tags": (_b, res) => json(res, 200, { models: [Y, Z].map((name) => ({ name, size: 6_600_000_000, digest: name, modified_at: "2026-11-01T00:00:00Z" })) }),
-        "GET /api/ps": (_b, res) => json(res, 200, { models: [entry(Z, 9e9)] }),
-        "POST /api/generate": (_b, res) => json(res, 200, { model: Y, response: "", done: true }),
+        "GET /api/ps": (_b, res) => json(res, 200, { models: here([entry(Z, 9e9)]) }),
         "POST /api/chat": (_b, res) => {
           res.writeHead(200, ndjson);
           res.end(line({ model: Y, message: { role: "assistant", content: "Y here" }, done: false }) + line({ model: Y, message: { role: "assistant", content: "" }, done: true, done_reason: "stop" }));
         },
       },
-      { fit: { runNvidiaSmi: smi(1000), readMeminfo: async () => "MemAvailable: 1000000 kB\n" } },
+      // Z's 9 GB comes back to nvidia-smi once Z was asked to leave.
+      { fit: { runNvidiaSmi: smiAfter(1000, () => [{ name: Z, vram: 9e9 }]), readMeminfo: async () => "MemAvailable: 1000000 kB\n" } },
     );
     const table = await r.app.handlers["fit.table"]({}, ctx);
     expect(table.rows.find((row) => row.model === Y && row.numCtx === 16384)).toMatchObject({ verdict: "fits" });

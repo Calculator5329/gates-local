@@ -29,7 +29,7 @@ import { createFitTable, type FitTableSource } from "./fit/table.ts";
 import type { FitReport } from "./fit/types.ts";
 import { catalogModels } from "./runtime/catalog.ts";
 import { onChatList } from "./runtime/chat-list.ts";
-import { AdmitCancelled, ModelActionError, type ModelLoader, type TurnLoad, type TurnReservation } from "./runtime/load.ts";
+import { AdmitCancelled, ModelActionError, type AdmitContext, type ModelLoader, type TurnLoad, type TurnReservation } from "./runtime/load.ts";
 import type { ModelCatalog } from "./runtime/models.ts";
 import type { RuntimeSwitch } from "./runtime/switch.ts";
 import type { ThreadStore } from "./threads/store.ts";
@@ -80,7 +80,7 @@ export type AppErrorCode =
 export class AppError extends Error {
   override readonly name = "AppError";
   readonly code: AppErrorCode;
-  /** The refusing report, for wont-fit. Not on the wire (the message carries it). */
+  /** The refusing report, for wont-fit: on the wire as error.fit, with the reading it was decided from. */
   readonly report?: FitReport;
   /** For preempted: the model whose load needed the GPU (the terminal event's neededBy). */
   readonly neededBy?: string;
@@ -299,7 +299,7 @@ export function createApp(deps: AppDeps): App {
     ...(deps.fit ? { fit: deps.fit } : {}),
     models: async () => catalogModels(catalog.current() ?? (await catalog.refresh()).models),
     busy: () => [...turns.values()].filter((t) => t.started).map((t) => t.model),
-    comfyPid: () => reclaimableComfy(),
+    comfyPid: () => (deps.image?.current().owner === "app" ? deps.image.reclaimable() : undefined),
     push: (table) => push("fit.changed", table),
     log,
   });
@@ -610,21 +610,19 @@ export function createApp(deps: AppDeps): App {
     }
   };
 
-  /** The idle ComfyUI this app started (its MainPID): the one GPU tenant besides chat models a load may reclaim. */
-  const reclaimableComfy = () => (deps.image?.current().owner === "app" ? deps.image.reclaimable() : undefined);
-
   /**
    * A load of `model` at `numCtx` as the fit plans it (fit/planLoad) beside the admitted turns on
-   * other models (a halted one too, until it ends), the turns it would push out of the GPU, and
-   * whether it needs the ComfyUI `comfyPid` names stopped too. Reads only. Inside the load gate no
-   * turn is admitted meanwhile, so the plan is current.
+   * other models (a halted one too, until it ends), and the turns it would push out of the GPU.
+   * Reads only. `measured`: inside the load gate after the handoff, where no turn is admitted
+   * meanwhile, the reading alone decides; before it, the models the handoff will ask to leave count
+   * as free.
    */
   const planBeside = async (
     baseUrl: string,
     model: string,
     numCtx: number,
-    options: { signal?: AbortSignal; comfyPid?: number | undefined } = {},
-  ): Promise<{ report: FitReport; stop: Turn[]; comfy: boolean }> => {
+    options: { signal?: AbortSignal; measured?: boolean } = {},
+  ): Promise<{ report: FitReport; stop: Turn[] }> => {
     const running = [...turns.values()].filter((t) => t.started && !sameModel(t.model, model));
     const plan = await planLoad({
       ...deps.fit,
@@ -633,22 +631,20 @@ export function createApp(deps: AppDeps): App {
       numCtx,
       busy: running.map((t) => t.model),
       ...(options.signal ? { signal: options.signal } : {}),
-      ...(options.comfyPid === undefined ? {} : { comfyPid: options.comfyPid }),
+      ...(options.measured === true ? { measured: true } : {}),
     });
-    return { report: plan.report, stop: running.filter((t) => plan.stop.some((n) => sameModel(n, t.model))), comfy: plan.comfy };
+    return { report: plan.report, stop: running.filter((t) => plan.stop.some((n) => sameModel(n, t.model))) };
   };
 
   /** What a wont-fit offers instead (fit/alternatives.ts), planned as planBeside plans; undefined when it cannot tell. */
   const offerFor = async (baseUrl: string, report: FitReport) => {
     const installed = catalogModels(catalog.current() ?? []).filter((m) => m.installed).map((m) => m.name);
-    const comfyPid = reclaimableComfy();
     return offerAfterRefusal({
       ...deps.fit,
       baseUrl,
       models: installed,
       defaultNumCtx: deps.settings?.get().defaultNumCtx ?? report.numCtx,
       busy: [...turns.values()].filter((t) => t.started && !sameModel(t.model, report.model)).map((t) => t.model),
-      ...(comfyPid === undefined ? {} : { comfyPid }),
     }, report);
   };
 
@@ -892,7 +888,7 @@ export function createApp(deps: AppDeps): App {
       if (![...turns.values()].some((t) => t.started)) return [];
       const baseUrl = runtime.baseUrl();
       if (baseUrl === undefined) throw notReady();
-      return blockingTurns((await planBeside(baseUrl, model, numCtx, { comfyPid: reclaimableComfy() })).stop);
+      return blockingTurns((await planBeside(baseUrl, model, numCtx)).stop);
     },
 
     // `image` is an older client's Image button: accepted and ignored (Tools › Make images decides now).
@@ -1008,13 +1004,13 @@ export function createApp(deps: AppDeps): App {
         };
         // The plan beside the admitted turns. stopOthers ends the ones whose model holds memory this
         // load needs, the way a switch does (each saves what it sent and ends "preempted"), waits
-        // for them and plans again until none is in the way: the plan that returns counts their
-        // memory, idle by then, as reclaimable. Without it, Ollama queues this load until those
-        // turns end on their own. `comfyPid` lets the plan count the idle ComfyUI this app started;
-        // this never stops it. admit passes its own signal (the turn's and the runtime's).
-        const fit = async (signal: AbortSignal, comfyPid?: number): Promise<{ report: FitReport; stop: Turn[]; comfy: boolean }> => {
+        // for them and plans again until none is in the way. Inside the gate the handoff runs again
+        // first (their models are no reply's any more, so they are asked to leave too) and the plan
+        // measures what that left. Without it, Ollama queues this load until those turns end on
+        // their own. admit passes its own signal (the turn's and the runtime's).
+        const fit = async (signal: AbortSignal, context?: AdmitContext): Promise<{ report: FitReport; stop: Turn[] }> => {
           for (;;) {
-            const plan = await planBeside(baseUrl, model, numCtx, { signal, comfyPid });
+            const plan = await planBeside(baseUrl, model, numCtx, { signal, measured: context?.handoff !== undefined });
             // Asked about every turn the plan needs, not only the new ones, so the next yes covers them all.
             const unagreed = stopOthers === true ? plan.stop.filter((t) => stopTurns !== undefined && !stopTurns.includes(t.turnId)) : askFirst === true ? plan.stop : [];
             if (unagreed.length > 0) {
@@ -1024,65 +1020,37 @@ export function createApp(deps: AppDeps): App {
             if (victims.length === 0) return plan;
             for (const t of victims) t.halt(preemptedBy(model, plan.report.numCtx, t.model));
             await untilAborted(Promise.all(victims.map((t) => t.ended)), signal);
+            await context?.leave();
           }
         };
-        const planned = async (comfyPid?: number) => {
+        const planned = async () => {
           try {
-            return await fit(turnSignal, comfyPid);
+            return await fit(turnSignal);
           } catch (e) {
             if (turnSignal.aborted) throw stoppedEarly();
             throw e;
           }
         };
         // Before the load gate: a cold turn holds the gate until its first token or its end, so the
-        // turns this load needs stopped (that one included) are stopped here, the ComfyUI stop it
-        // also needs counted. No plan fits, even with every turn and ComfyUI gone: refuse now, never
-        // wait on a claim. The plan inside the gate decides again.
-        if (stopOthers === true) {
-          const ahead = await planned(reclaimableComfy());
-          if (ahead.report.verdict === "refuse" && !ahead.comfy) throw await refusal(ahead.report);
-        } else if (askFirst === true && [...turns.values()].some((t) => t.started)) {
-          // Before the claim and the gate, where this send would otherwise wait behind that reply; fit refuses it.
-          const ahead = await planned(reclaimableComfy());
-          if (ahead.report.verdict === "refuse" && !ahead.comfy) throw await refusal(ahead.report);
+        // turns this load needs stopped (that one included) are stopped here. A plan that refuses
+        // even with every turn stopped and every idle model gone refuses now, never waiting on a
+        // claim, unless the image engine may hold memory the handoff frees (no plan counts that).
+        // The plan inside the gate decides again, from its own reading.
+        const engineMayHold = deps.image !== undefined && deps.image.current().state !== "off";
+        if (stopOthers === true || (askFirst === true && [...turns.values()].some((t) => t.started))) {
+          // askFirst: before the claim and the gate, where this send would otherwise wait behind that reply.
+          const ahead = await planned();
+          if (ahead.report.verdict === "refuse" && !engineMayHold) throw await refusal(ahead.report);
         }
         // Waits while an image job holds the GPU; admit's load gate runs inside this claim.
-        const claim = async () => {
-          try {
-            releaseGpu = await deps.lease?.acquire("chat", turnSignal);
-          } catch {
-            throw stoppedEarly();
-          }
-        };
-        await claim();
-        // An idle ComfyUI this app started is the one GPU tenant besides chat models a turn may free.
-        // The check runs inside the claim, so a ComfyUI an image job started while this turn waited
-        // counts. With ComfyUI idle the plan decides (its nvidia-smi memory, or a try when unlisted);
-        // with a job still registered (one queued behind this turn) the turn tries when it does not
-        // fit. stopIdle claims the GPU alone: the turn lets its claim go first (a nested claim would
-        // wait on itself), then claims again and plans again. stopIdle declines while a job is
-        // registered: at most three tries, then admission decides as usual. A cancel, switch or
-        // shutdown ends a try at once, unless the ComfyUI stop has begun: the turn then ends with
-        // the stop, so a switch's drain waits for it (or fails the switch).
-        for (let attempt = 0; attempt < 3 && deps.image?.current().owner === "app"; attempt += 1) {
-          const idlePid = reclaimableComfy();
-          const inside = await planned(idlePid);
-          if (!inside.comfy && (idlePid !== undefined || inside.report.verdict === "fits")) break;
-          // Turns this turn may not stop are in the way too: stopIdle would wait on their claims.
-          if (inside.stop.length > 0) break;
-          releaseGpu?.();
-          releaseGpu = undefined;
-          try {
-            await deps.image.stopIdle(turnSignal);
-          } catch (e) {
-            if (turnSignal.aborted) throw stoppedEarly();
-            throw e;
-          }
-          await claim();
+        try {
+          releaseGpu = await deps.lease?.acquire("chat", turnSignal);
+        } catch {
+          throw stoppedEarly();
         }
-        // Inside the gate: a passing fit admits the turn, so the next load plans around it.
-        const admitted = async (signal: AbortSignal) => {
-          const r = (await fit(signal)).report;
+        // Inside the gate, after the handoff: a passing fit admits the turn, so the next load plans around it.
+        const admitted = async (signal: AbortSignal, context?: AdmitContext) => {
+          const r = (await fit(signal, context)).report;
           if (r.verdict !== "refuse") turn.started = true;
           return r;
         };
@@ -1155,13 +1123,15 @@ export function createApp(deps: AppDeps): App {
    * saved, so the sender's words go back to its composer.
    */
   function refused(turn: Turn, e: unknown): void {
-    const { code, message, blocking, neededBy, offer } = typeof e === "object" && e !== null ? (e as { code?: unknown; message?: unknown; blocking?: readonly BlockingTurn[]; neededBy?: string; offer?: FitOffer }) : {};
+    const { code, message, blocking, neededBy, report, offer } = typeof e === "object" && e !== null ? (e as { code?: unknown; message?: unknown; blocking?: readonly BlockingTurn[]; neededBy?: string; report?: FitReport; offer?: FitOffer }) : {};
     const failure: TurnFailure = {
       type: "error",
       code: typeof code === "string" && code !== "" ? code : "internal",
       message: typeof message === "string" ? message : String(e),
       ...(blocking === undefined ? {} : { blocking }),
       ...(neededBy === undefined ? {} : { neededBy }),
+      // wont-fit: the reading the refusal was decided from (taken after everything else was asked to leave)
+      ...(code === "wont-fit" && report !== undefined ? { fit: report } : {}),
       ...(offer === undefined ? {} : { offer }),
     };
     if (failure.code === "internal") log(`turn ${turn.turnId} refused: ${failure.message}`);

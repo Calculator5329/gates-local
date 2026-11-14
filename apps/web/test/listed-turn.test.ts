@@ -63,7 +63,7 @@ it("a listed turn that fails before its start puts the sidebar's dot out, holds 
       baseUrl: "http://fake", signal, cold: false, firstToken: () => {}, end: () => {},
       admit: async (_ctx, options) => {
         if (options?.fit === undefined) throw new Error("missing app fit");
-        const report = await options.fit(signal);
+        const report = await options.fit(signal, { handoff: undefined, leave: async () => undefined });
         admitted.resolve(); await gate.promise; return report;
       },
     }) } },

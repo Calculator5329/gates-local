@@ -353,75 +353,91 @@ async function turnOn(loader: ModelLoader, model: string) {
   turn.end();
 }
 
-describe("what an image may unload: the app's loads, the models its turns ran on, an app-started Ollama's all", () => {
-  it("a model warm before the app started joins once a chat turn of this app answers on it; appLoadedModels never lists it", async () => {
+/**
+ * One thing in memory (owner ruling 2026-11-13): the next thing asks every resident model to leave
+ * that no running reply uses, whoever loaded it (gpu/memory.ts). The loader answers only "which
+ * models is a reply running on"; who loaded a model no longer protects or exposes it.
+ */
+describe("what the next thing may ask to leave: every resident model no running reply uses", () => {
+  it("a reply counts from its admission to its end, on a model warm before the app started too; appLoadedModels never lists it", async () => {
     const s = await fakeOllama(["qwen3.5:9b", "other:7b"]);
     const loader = loaderFor(s, []);
-    expect(await loader.imageMayUnload()).toEqual([]);
-    await turnOn(loader, "qwen3.5:9b");
-    expect(await loader.imageMayUnload()).toEqual(["qwen3.5:9b"]);
+    expect(loader.replying()).toEqual([]);
+    const turn = loader.reserve("qwen3.5:9b");
+    await turn.admit(16384);
+    expect(loader.replying(), "admitted, before its first token: a running reply").toEqual(["qwen3.5:9b"]);
+    turn.firstToken();
+    expect(loader.replying()).toEqual(["qwen3.5:9b"]);
+    turn.end();
+    expect(loader.replying(), "ended: the next thing may ask it to leave").toEqual([]);
     expect(loader.appLoadedModels(), "the picker's answer and the reclaim list keep their meaning").toEqual([]);
   });
-  it("the GPU status says what an image may unload: a warm model is protected until a turn answers on it, and that answer refreshes the status", async () => {
-    const s = await fakeOllama(["qwen3.5:9b"]);
-    let pokes = 0;
-    const loader = loaderFor(s, [], "fits", { onLoaded: () => { pokes += 1; } });
+  it("the GPU status marks a resident model protected only while a reply runs on it", async () => {
+    const s = await fakeOllama(["qwen3.5:9b", "stray:7b"]);
+    const loader = loaderFor(s, []);
     // the status reader wired as services.ts wires it, on fake GPU and memory reads
-    const guarded = async () => (await readGpuStatus({
-      platform: "win32",
-      freemem: () => 0,
-      runNvidiaSmi: async (args) => (args[0]?.startsWith("--query-gpu") ? "RTX, 16303, 7000, 9303\n" : ""),
-      residentModels: async () => (await loader.residentModels()).map((m) => ({ name: canonicalTag(m.name), sizeVramBytes: m.sizeVramBytes })),
-      mayUnload: () => loader.loadedOrAnswered(),
-      ownsRuntime: () => false,
-    })).occupants.filter((o) => o.kind === "chat-model").map((o) => [o.label, o.protected]);
+    const guarded = async () => {
+      const resident = (await loader.residentModels()).map((m) => ({ name: canonicalTag(m.name), sizeVramBytes: m.sizeVramBytes }));
+      return (await readGpuStatus({
+        platform: "win32",
+        freemem: () => 0,
+        runNvidiaSmi: async (args) => (args[0]?.startsWith("--query-gpu") ? "RTX, 16303, 7000, 9303\n" : ""),
+        residentModels: async () => resident,
+        mayUnload: () => resident.map((m) => m.name).filter((tag) => !loader.replying().includes(tag)),
+      })).occupants.filter((o) => o.kind === "chat-model").map((o) => [o.label, o.protected]);
+    };
+    expect(await guarded(), "nothing replying: both may be asked to leave, whoever loaded them").toEqual([["qwen3.5:9b", false], ["stray:7b", false]]);
     const turn = loader.reserve("qwen3.5:9b");
     await turn.admit(16384);
-    expect(await guarded(), "warm, before this app's first token: another program's").toEqual([["qwen3.5:9b", true]]);
-    turn.firstToken();
-    expect(pokes, "joining the list refreshes the status at once, not at the next poll").toBe(1);
-    expect(await guarded(), "a turn of this app answered on it: an image may unload it").toEqual([["qwen3.5:9b", false]]);
+    expect(await guarded(), "a reply runs on qwen3.5:9b").toEqual([["qwen3.5:9b", true], ["stray:7b", false]]);
     turn.end();
-    await turnOn(loader, "qwen3.5:9b");
-    expect(pokes, "a model already in the list asks no second refresh").toBe(1);
+    expect(await guarded()).toEqual([["qwen3.5:9b", false], ["stray:7b", false]]);
   });
-  it("a turn that never answered does not count", async () => {
+  it("two replies on one model: it stays protected until the second ends", async () => {
+    const s = await fakeOllama(["qwen3.5:9b"]);
+    const loader = loaderFor(s, []);
+    const a = loader.reserve("qwen3.5:9b");
+    const b = loader.reserve("qwen3.5:9b");
+    await a.admit(16384);
+    await b.admit(16384);
+    a.end();
+    expect(loader.replying()).toEqual(["qwen3.5:9b"]);
+    b.end();
+    expect(loader.replying()).toEqual([]);
+  });
+  it("a refused turn never counted as replying", async () => {
+    const s = await fakeOllama(["qwen3.5:9b"]);
+    const loader = loaderFor(s, [], "refuse");
+    const turn = loader.reserve("big:70b");
+    expect((await turn.admit(16384)).verdict).toBe("refuse");
+    expect(loader.replying()).toEqual([]);
+    turn.end();
+    expect(loader.replying()).toEqual([]);
+  });
+  it("a runtime switch ends every reply on the old runtime", async () => {
     const s = await fakeOllama(["qwen3.5:9b"]);
     const loader = loaderFor(s, []);
     const turn = loader.reserve("qwen3.5:9b");
     await turn.admit(16384);
-    turn.end();
-    expect(await loader.imageMayUnload()).toEqual([]);
-  });
-  it("in an Ollama the app started, a model it never loaded or used is the app's too", async () => {
-    const s = await fakeOllama(["stray:7b"]);
-    expect(await loaderFor(s, [], "fits", { ownsRuntime: () => true }).imageMayUnload()).toEqual(["stray:7b"]);
-    expect(await loaderFor(s, [], "fits", { ownsRuntime: () => false }).imageMayUnload()).toEqual([]);
-  });
-  it("a runtime switch forgets the models the old runtime's turns ran on", async () => {
-    const ps = ["qwen3.5:9b"];
-    const s = await fakeOllama(ps);
-    const loader = loaderFor(s, []);
-    await turnOn(loader, "qwen3.5:9b");
     loader.runtimeChanged();
+    turn.end();
     loader.runtimeSettled();
-    expect(await loader.imageMayUnload()).toEqual([]);
+    expect(loader.replying()).toEqual([]);
   });
-  it("unloaded() drops a model from both lists, with an unloaded push for a loaded one; a reading without it prunes it", async () => {
+  it("unloaded() drops a loaded model with an unloaded push; a reading without it prunes it", async () => {
     const ps: string[] = ["warm:7b"];
     const s = await fakeOllama(ps);
     const pushes: ModelLoad[] = [];
     const loader = loaderFor(s, pushes);
     await loader.load("cold:7b", 16384);
     await turnOn(loader, "cold:7b");
-    await turnOn(loader, "warm:7b");
-    expect((await loader.imageMayUnload()).toSorted()).toEqual(["cold:7b", "warm:7b"]);
+    expect(loader.appLoadedModels()).toEqual(["cold:7b"]);
     loader.unloaded("cold:7b");
     expect(pushes.at(-1)).toEqual({ model: "cold:7b", numCtx: 16384, state: "unloaded" });
     expect(loader.appLoadedModels()).toEqual([]);
-    expect(await loader.imageMayUnload()).toEqual(["warm:7b"]);
+    await loader.load("cold:7b", 16384);
     loader.prune([]);
-    expect(await loader.imageMayUnload()).toEqual([]);
+    expect(loader.appLoadedModels()).toEqual([]);
   });
 });
 

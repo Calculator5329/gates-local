@@ -83,7 +83,7 @@ import { createApp, type App } from "./app.ts";
 import { createGpuBaseline } from "./fit/baseline.ts";
 import { createShellStatus } from "./chat/shell.ts";
 import { probeSandbox } from "../../../packages/harness/src/sandbox/index.ts";
-import { createNvidiaSmiRunner, forgetGpuReadings, parseMemTotal } from "./fit/gpu.ts";
+import { createNvidiaSmiRunner, parseMemTotal } from "./fit/gpu.ts";
 import { OLLAMA_REGISTRY } from "./runtime/registry-size.ts";
 import { chatList, useChatList } from "./runtime/chat-list.ts";
 import { boundedGet } from "./update/installed/feed.ts";
@@ -298,10 +298,8 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     ...engineTest ? { service: NO_UNIT } : {},
     thumbnail: (jobId, png) => makeThumbnail(dataDir, jobId, png),
     settings: () => services.settings.get(),
-    imageMayUnload: () => services.loader.imageMayUnload(),
-    // The loader forgets a model the image module unloaded (keep_alive 0).
-    onModelUnloaded: (model) => { forgetGpuReadings(); services.loader.unloaded(model); },
-    ollamaUrl: () => runtime.baseUrl(),
+    // One thing in memory: an image job hands off through the same owner every chat load does.
+    memory: services.memory,
     // The default and the picker's tiers read the GPU as the picker does.
     gpuStatus: () => services.gpu.read(),
     // MOSS is a default only with 32 GB of memory: a test's fake meminfo, else this computer's
@@ -312,6 +310,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     ...(comfyDefault ? { defaultUrl: comfyDefault } : {}),
   });
   imageModule = image;
+  services.bindEngine(image);
   imageSetup = createImageSetup({
     appDataDir: dataDir, own, image,
     engine: (gpuName) => {

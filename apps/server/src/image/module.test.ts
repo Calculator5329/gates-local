@@ -16,7 +16,8 @@ import { comfyInfo, KLEIN_COMPACT_FILES, KLEIN_FILES, MOSS_FILES, SDXL_FILES, ZI
 import { createGpuLease } from "../gpu/lease.ts";
 import { openThreadStore } from "../threads/store.ts";
 import { startWsServer } from "../ws/server.ts";
-import { createImageModule, IMAGES_UNSET, imageFitError, imageRoom, isLocalHost, type GpuHolder, type ImageDeps } from "./module.ts";
+import { createImageModule, IMAGES_UNSET, imageFitError, imageRoom, isLocalHost, type ImageDeps, type ImageModule } from "./module.ts";
+import { createMemoryOwner } from "../gpu/memory.ts";
 import { createImageHandlers } from "./handlers.ts";
 import { createComfyService } from "./service.ts";
 import { createServerShutdown, HARD_EXIT_MS } from "../shutdown.ts";
@@ -54,8 +55,22 @@ afterEach(async () => {
   }
 });
 
-/** `realOllama`: requests to this address go to that server (the repo's fake Ollama), the rest to the fake Comfy below. */
-async function fixture(options: Partial<ImageDeps> = {}, realOllama?: string) {
+/** What a fixture adds beside ImageDeps: the memory owner's wiring, as services.ts wires it. */
+interface OwnerOptions {
+  /** A chat model left (services.ts: the loader forgets it). */
+  onModelUnloaded?: (model: string) => void;
+  /** Models a running chat reply uses: never asked to leave. */
+  replying?: () => readonly string[];
+  /** The owner's bound on each wait (unload, settle) and its poll. */
+  waitMs?: number;
+  pollMs?: number;
+}
+
+/**
+ * `realOllama`: requests to this address go to that server (the repo's fake Ollama), the rest to the fake Comfy below.
+ * The module hands off through one memory owner (gpu/memory.ts) unless `options.memory` replaces it.
+ */
+async function fixture(options: Partial<ImageDeps> & OwnerOptions = {}, realOllama?: string) {
   const dataDir = await mkdtemp(path.join(tmpdir(), "gates-image-"));
   dirs.push(dataDir);
   const lease = createGpuLease();
@@ -83,22 +98,44 @@ async function fixture(options: Partial<ImageDeps> = {}, realOllama?: string) {
   // ComfyUI's template, saved-workflow and folder routes (path and query): what each answers; any other is a 404
   let workflowRoutes: Record<string, unknown> = {};
   let moreLoras: string[] = []; // LoRAs /object_info lists besides the app's own
-  // Ollama's /api/ps (undefined: it answers 500), and the app's loaded models, pruned on unload as main.ts does
-  let listed: string[] | undefined = ["foreign-chat", "app-chat"];
-  let appLoaded = ["app-chat"];
+  // Ollama's /api/ps (undefined: it answers 500), empty until a test lists chat models (ollamaLists);
+  // an unload (keep_alive 0) drops the model from it and frees what it held: app-chat 6000 bytes, any other 0
+  let listed: string[] | undefined = [];
+  const chatBytes: Record<string, number> = { "app-chat": 6000 };
+  /** Models /api/ps keeps listing after their unload (a runner that never exits). */
+  let sticky: string[] = [];
   const graphs: Record<string, { class_type: string; inputs: Record<string, unknown> }>[] = [];
   const ollamaPosts: unknown[] = [];
   let fakeFetch!: typeof fetch;
   let socket: EventTarget | undefined;
   const store = openThreadStore(path.join(dataDir, "threads.sqlite"));
   instances.push({ close: async () => store.close() });
+  const { onModelUnloaded, replying, waitMs = 50, pollMs = 5, ...imageOptions } = options;
+  // The settle after something left reads the same GPU the fit does (services.ts: one nvidia-smi).
+  const reader = "readGpu" in imageOptions ? imageOptions.readGpu : async () => ({ freeBytes });
+  const ollamaUrl = realOllama ?? "http://fake-ollama";
+  const memory = createMemoryOwner({
+    ollamaUrl: () => ollamaUrl,
+    listLoaded: async (url, signal) => {
+      if (realOllama !== undefined) return listLoaded(url, undefined, signal);
+      const res = await fakeFetch(new URL("/api/ps", url), { signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return ((await res.json()) as { models: { name: string }[] }).models.map((m) => ({ name: m.name, sizeBytes: 0, sizeVramBytes: 0 }));
+    },
+    replying: () => replying?.() ?? [],
+    engine: () => module,
+    fetch: (input, init) => fakeFetch(input, init),
+    onUnloaded: (model) => onModelUnloaded?.(model),
+    ...(reader === undefined ? {} : { readFree: async () => (await reader()).freeBytes }),
+    waitMs, pollMs,
+  });
   const module = createImageModule({
     dataDir, lease, store, requiredBytes: 10_000, idleMs: 20,
     log: () => {},
     // No test reaches real DNS or this machine's real interfaces.
     localAddresses: () => ["192.168.1.20"], lookupHost: fakeLookup,
     settings: () => ({ imageGen: enabled, ...(comfyUrl ? { comfyUrl } : {}), ...(choice ? { imageChoice: choice } : {}), ...(imageFolder ? { imageFolder } : {}) }),
-    imageMayUnload: () => appLoaded, ollamaUrl: () => "http://fake-ollama",
+    memory,
     readGpu: async () => {
       measurements++;
       if (gpuError) throw Object.assign(new Error("nvidia-smi failed"), { code: "gpu-unreadable" });
@@ -120,9 +157,10 @@ async function fixture(options: Partial<ImageDeps> = {}, realOllama?: string) {
       if (realOllama !== undefined && String(input).startsWith(realOllama)) { ollamaPosts.push(JSON.parse(String(init?.body))); return fetch(input, init); }
       if (url.host === "fake-ollama") {
         if (url.pathname === "/api/ps") return listed === undefined ? new Response("down", { status: 500 }) : Response.json({ models: listed.map((name) => ({ name })) });
-        const body: unknown = JSON.parse(String(init?.body)); ollamaPosts.push(body);
-        expect(body).toEqual({ model: "app-chat", keep_alive: 0 });
-        freeBytes += 6000; return Response.json({});
+        const body = JSON.parse(String(init?.body)) as { model: string; keep_alive?: number }; ollamaPosts.push(body);
+        expect(body.keep_alive, "the only request the image path makes of Ollama is an unload").toBe(0);
+        if (!sticky.includes(body.model)) listed = listed?.filter((m) => m !== body.model);
+        freeBytes += chatBytes[body.model] ?? 0; return Response.json({});
       }
       if (!answering) throw new Error("offline");
       if (url.pathname.startsWith("/templates/") || url.pathname.startsWith("/userdata") || url.pathname.startsWith("/internal/")) {
@@ -162,6 +200,7 @@ async function fixture(options: Partial<ImageDeps> = {}, realOllama?: string) {
       if (url.pathname === "/history/p1") return Response.json(hold ? {} : { p1: { outputs: noImage ? {} : { "8": { images: [{ filename: "out.png", subfolder: "", type: "output" }] } } } });
       if (url.pathname === "/view") return new Response(invalidPng ? Buffer.from("not a PNG") : png);
       if (url.pathname === "/interrupt") { if (!stuck) running.delete(url.host); return Response.json({}); }
+      if (url.pathname === "/free") { expect(JSON.parse(String(init?.body))).toEqual({ unload_models: true, free_memory: true }); return Response.json({}); }
       throw new Error(`unexpected ${url.pathname}`);
     },
     push: (channel, payload) => {
@@ -169,19 +208,18 @@ async function fixture(options: Partial<ImageDeps> = {}, realOllama?: string) {
       if (channel === "image.download") downloads.push(payload as ImageDownload);
       if (channel === "threads.changed") changed.push((payload as { threadId: string }).threadId);
     },
-    swapWaitMs: 50, swapPollMs: 5,
-    ...options,
-    onModelUnloaded: (model) => { appLoaded = appLoaded.filter((m) => m !== model); options.onModelUnloaded?.(model); },
+    ...imageOptions,
   });
   instances.push(module);
   const handlers = createImageHandlers({ image: module });
-  return { module, handlers, lease, store, events, downloads, changed, calls, dataDir, ollamaPosts, graphs, ps: () => fakeFetch("http://fake-ollama/api/ps"), measurements: () => measurements,
+  return { module, handlers, lease, store, memory, events, downloads, changed, calls, dataDir, ollamaPosts, graphs, ps: () => fakeFetch("http://fake-ollama/api/ps"), measurements: () => measurements,
     choose: (next: ImageChoice | undefined) => { choice = next; },
     files: (v: { noMoss?: boolean; flux?: boolean; loras?: string[]; bare?: boolean }) => { noMoss = v.noMoss ?? noMoss; flux = v.flux ?? flux; moreLoras = v.loras ?? moreLoras; bare = v.bare ?? bare; },
     pickFolder: (folder: string | undefined) => { imageFolder = folder; },
     sendFrames: (make: typeof frames) => { frames = make; },
     workflows: (routes: Record<string, unknown>) => { workflowRoutes = routes; },
     ollamaLists: (models: string[] | undefined) => { listed = models; },
+    stickyChat: (models: string[]) => { sticky = models; },
     configure: (v: { enabled?: boolean; answering?: boolean; present?: boolean; pid?: number; freeBytes?: number; hold?: boolean; missingModel?: boolean; die?: boolean; swapPidOnQueue?: boolean; freeAfterStart?: number; activeOverride?: boolean; activeState?: string; resident?: number; comfyUrl?: string; cpu?: boolean; gpuError?: boolean; stuck?: boolean; queueErrors?: number; busy?: boolean; noImage?: boolean; invalidPng?: boolean }) => {
       enabled = v.enabled ?? enabled; answering = v.answering ?? answering; present = v.present ?? present;
       pid = v.pid ?? pid; freeBytes = v.freeBytes ?? freeBytes; hold = v.hold ?? hold;
@@ -301,7 +339,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     instances.push({ close: async () => store.close() });
     const fetcher = vi.fn(); const log = vi.fn();
     const recovered = createImageModule({ dataDir: f.dataDir, store, lease: f.lease, fetch: fetcher, log,
-      settings: () => ({ imageGen: false }), imageMayUnload: () => [], ollamaUrl: () => undefined, push: () => {},
+      settings: () => ({ imageGen: false }), push: () => {},
     });
     instances.push(recovered);
     expect(store.getThread(thread.id).messages.map(m => m.imageJob)).toEqual(["queued", "running"].map(jobId => ({
@@ -409,28 +447,33 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     f.configure({ pid: 99 }); const count = f.calls.filter((c) => c === "stop").length;
     await f.module.stopIdle(); expect(f.calls.filter((c) => c === "stop")).toHaveLength(count);
   });
-  it("unloads only app-loaded chat and measures again; refuses with numbers and occupants if still short", async () => {
-    const f = await fixture(); f.configure({ freeBytes: 5000 });
-    expect(await (await f.ps()).json()).toEqual({ models: [{ name: "foreign-chat" }, { name: "app-chat" }] });
+  it("asks every chat model no reply uses to leave, whoever loaded it, and measures again; a different setup still short refuses with numbers and occupants", async () => {
+    const f = await fixture({ replying: () => ["replying-chat"] }); f.configure({ freeBytes: 5000 });
+    f.ollamaLists(["foreign-chat", "app-chat", "replying-chat"]);
     const first = await f.module.generate({ prompt: "a tree" }); await f.module.wait(first.jobId);
-    expect(f.events.at(-1)?.state).toBe("done"); expect(f.calls.filter((c) => c === "/api/generate")).toHaveLength(1);
-    expect(f.ollamaPosts).toEqual([{ model: "app-chat", keep_alive: 0 }]);
-    f.configure({ freeBytes: 100 }); const next = await f.module.generate({ prompt: "a tree" }); await f.module.wait(next.jobId);
+    expect(f.events.at(-1)?.state).toBe("done"); expect(f.calls.filter((c) => c === "/api/generate")).toHaveLength(2);
+    expect(f.ollamaPosts, "a model a running reply uses is never asked").toEqual([{ model: "foreign-chat", keep_alive: 0 }, { model: "app-chat", keep_alive: 0 }]);
+    expect(await (await f.ps()).json()).toEqual({ models: [{ name: "replying-chat" }] });
+    f.configure({ freeBytes: 100 }); f.choose({ preset: "moss-image", width: 1024, height: 1024 });
+    const next = await f.module.generate({ prompt: "a tree" }); await f.module.wait(next.jobId);
     expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "wont-fit" });
     expect(f.module.current().detail).toMatch(/needs 0.0 GiB, 0.0 GiB free, 0.0 GiB short.*whisper.*other-app/);
     expect(f.lease.status().holder).toBeNull();
   });
-  it("the swap waits for the memory: reads that still show the old number after the unload do not refuse", async () => {
+  it("the swap waits for the memory: a read that still shows the old number after the unload does not refuse", async () => {
+    // GiB-sized numbers: the settle counts a rise under 64 MiB as flat
+    const gib = 1024 ** 3;
     let unloaded = false, after = 0;
-    const f = await fixture({ swapWaitMs: 5000, swapPollMs: 1, onModelUnloaded: () => { unloaded = true; }, readGpu: async () => {
+    const f = await fixture({ requiredBytes: 10 * gib, waitMs: 5000, pollMs: 1, onModelUnloaded: () => { unloaded = true; }, readGpu: async () => {
       if (unloaded) after++;
-      return { freeBytes: unloaded && after > 4 ? 20_000 : 5000, holders: "ollama", tenants: [] };
+      return { freeBytes: unloaded && after > 1 ? 12 * gib : 5 * gib, holders: "ollama", tenants: [] };
     } });
+    f.ollamaLists(["app-chat"]);
     f.choose({ preset: "z-image-int8", width: 1024, height: 1024 }); // saved: the fit runs first, ComfyUI after it
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
     expect(f.ollamaPosts).toEqual([{ model: "app-chat", keep_alive: 0 }]);
     expect(f.events.at(-1)?.state).toBe("done");
-    expect(after).toBeGreaterThan(4);
+    expect(after, "the settle read past the lagging read, then the fit read once").toBeGreaterThan(2);
     // "Freeing memory" is said while the unload and the wait run, and only then: the wait's own
     // event ends it, before ComfyUI's start and the model load, not the render's first progress
     const running = f.events.filter((e) => e.state === "running");
@@ -443,8 +486,8 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
   });
   it("a reading after the unload that cannot be right (negative free) ends in the error alone, with no freeing-ended event before it", async () => {
     // ComfyUI's credit covers the need on that reading, so the fit alone would say it fits
-    const f: Awaited<ReturnType<typeof fixture>> = await fixture({ swapWaitMs: 50, swapPollMs: 1, onModelUnloaded: () => f.configure({ freeBytes: -1, resident: 20_000 }) });
-    f.configure({ freeBytes: 5000 });
+    const f: Awaited<ReturnType<typeof fixture>> = await fixture({ waitMs: 50, pollMs: 1, onModelUnloaded: () => f.configure({ freeBytes: -1, resident: 20_000 }) });
+    f.configure({ freeBytes: 5000 }); f.ollamaLists(["app-chat"]);
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
     expect(f.ollamaPosts).toEqual([{ model: "app-chat", keep_alive: 0 }]);
     expect(f.events.at(-1)).toMatchObject({ state: "error" });
@@ -454,74 +497,78 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
   });
   it("memory back at exactly the need after the unload: made at once, no wait for the bound", async () => {
     let unloaded = false, after = 0;
-    const f = await fixture({ swapWaitMs: 5000, swapPollMs: 1, onModelUnloaded: () => { unloaded = true; }, readGpu: async () => {
+    const f = await fixture({ waitMs: 5000, pollMs: 1, onModelUnloaded: () => { unloaded = true; }, readGpu: async () => {
       if (unloaded) after++;
       return { freeBytes: unloaded ? 10_000 : 5000, holders: "ollama", tenants: [] }; // requiredBytes is 10_000
     } });
+    f.ollamaLists(["app-chat"]);
     const started = Date.now();
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
     expect(f.events.at(-1)?.state).toBe("done");
     expect(Date.now() - started).toBeLessThan(2000);
-    expect(after, "one read after the unload, then the second fit's").toBeLessThanOrEqual(2);
+    expect(after, "the settle's three reads (two flat), then the fit's one").toBeLessThanOrEqual(4);
   });
-  it("the swap refuses when the memory never comes back: after the bound, not before, and not hung", async () => {
-    let unloadedAt = 0, reads = 0;
-    const f = await fixture({ swapWaitMs: 300, swapPollMs: 20, onModelUnloaded: () => { unloadedAt = Date.now(); reads = 0; },
-      readGpu: async () => { reads++; return { freeBytes: 5000, holders: "ollama", tenants: [] }; } });
-    const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
-    const waited = Date.now() - unloadedAt;
+  it("the swap refuses when the model never leaves: after the bound, not before, and not hung", async () => {
+    let askedAt = 0, reads = 0;
+    const f = await fixture({ waitMs: 300, pollMs: 20, readGpu: async () => { reads++; return { freeBytes: 5000, holders: "ollama", tenants: [{ pid: 7, role: "ollama", usedBytes: 6000 }] }; } });
+    f.ollamaLists(["app-chat"]); f.stickyChat(["app-chat"]);
+    const started = f.module.generate({ prompt: "a tree" });
+    await vi.waitFor(() => expect(f.ollamaPosts).toHaveLength(1), { interval: 1 });
+    askedAt = Date.now(); reads = 0;
+    const { jobId } = await started; await f.module.wait(jobId);
+    const waited = Date.now() - askedAt;
     expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "wont-fit" });
+    expect(f.events.at(-1)?.message, "still listed when the wait ended: named as what holds the memory").toContain("app-chat");
     expect(f.events.at(-1)).not.toHaveProperty("phase");
-    expect(waited).toBeGreaterThanOrEqual(300);
+    expect(waited).toBeGreaterThanOrEqual(280);
     expect(waited).toBeLessThan(3000);
-    expect(reads).toBeGreaterThan(3);
+    expect(f.calls.filter((c) => c === "/api/ps").length, "it read /api/ps through the wait").toBeGreaterThan(3);
+    expect(reads, "then one reading decided").toBeGreaterThanOrEqual(1);
   });
   describe("a refusal says what is true, in one sentence from the measured holders", () => {
     const gib = 1024 ** 3;
-    /** `listed`: what Ollama's /api/ps lists after the wait ("down": it cannot be read). 3.5 GiB free fits no setup: none offered. */
-    const refuse = async (options: Partial<ImageDeps>, listed: string[] | "down" = ["foreign-chat", "app-chat"]) => {
+    /**
+     * `listed`: what Ollama's /api/ps lists before the handoff ("down": it cannot be read); `sticky`: the
+     * models it still lists after their unload. 3.5 GiB free fits no setup: none offered.
+     */
+    const refuse = async (options: Partial<ImageDeps>, listed: string[] | "down" = ["foreign-chat", "app-chat"], sticky: string[] = []) => {
       const f = await fixture({ requiredBytes: 9 * gib, ...options });
       f.ollamaLists(listed === "down" ? undefined : listed);
+      f.stickyChat(sticky);
       const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
       expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "wont-fit" });
       return { f, said: f.events.at(-1)?.message ?? "" };
     };
-    it("this app's chat model still holding the memory: names it and never says to close another app", async () => {
+    it("a chat model of the app's Ollama still listed after the wait: names it and never says to close another app", async () => {
       const { f, said } = await refuse({ readGpu: async () => ({ freeBytes: 3.5 * gib, holders: "ollama; whisper", tenants: [
-        { pid: 7, label: "whisper-server", role: "whisper", usedBytes: 2 * gib }, { pid: 8, label: "ollama", role: "ollama", usedBytes: 8.3 * gib }] }) });
+        { pid: 7, label: "whisper-server", role: "whisper", usedBytes: 2 * gib }, { pid: 8, label: "ollama", role: "ollama", usedBytes: 8.3 * gib }] }) }, undefined, ["app-chat"]);
       expect(said).toBe("The image needs 9.0 GiB and 3.5 GiB is free; this app's chat model app-chat still holds 8.3 GiB, try again in a moment.");
       expect(said).not.toMatch(/close/i);
       expect(f.module.current().detail, "the long form stays in the status").toContain("GPU memory by process: ollama; whisper");
     });
     it("another app holding the most: names it and says to close it", async () => {
-      const { said } = await refuse({ imageMayUnload: () => [], readGpu: async () => ({ freeBytes: 3.5 * gib, holders: "media-vault", tenants: [
+      const { said } = await refuse({ readGpu: async () => ({ freeBytes: 3.5 * gib, holders: "media-vault", tenants: [
         { pid: 8, label: "ollama", role: "ollama", usedBytes: 1 * gib }, { pid: 9, label: "media-vault vision runtime", role: "occupant", usedBytes: 6 * gib }] }) });
       expect(said).toBe("The image needs 9.0 GiB and 3.5 GiB is free; media-vault vision runtime holds 6.0 GiB, close it.");
     });
-    it("a chat model this app never used holding the most: says so, not that it is this app's", async () => {
-      const { said } = await refuse({ imageMayUnload: () => [], readGpu: async () => ({ freeBytes: 3.5 * gib, holders: "ollama", tenants: [
+    it("every model of the app's Ollama left and Ollama memory still holds the most: another Ollama's, not called this app's", async () => {
+      const { f, said } = await refuse({ readGpu: async () => ({ freeBytes: 3.5 * gib, holders: "ollama", tenants: [
         { pid: 8, label: "ollama", role: "ollama", usedBytes: 7 * gib }] }) });
+      expect(f.ollamaPosts, "both were asked, whoever loaded them").toEqual([{ model: "foreign-chat", keep_alive: 0 }, { model: "app-chat", keep_alive: 0 }]);
       expect(said).toBe("The image needs 9.0 GiB and 3.5 GiB is free; a chat model this app did not load holds 7.0 GiB, stop it.");
     });
-    it("ComfyUI's own memory is credited, never named as the holder", async () => {
-      const { said } = await refuse({ imageMayUnload: () => [], readGpu: async () => ({ freeBytes: 1 * gib, holders: "ComfyUI", tenants: [
+    it("nothing is credited to ComfyUI: the need is the setup's whole need, and ComfyUI is never named as the holder", async () => {
+      const { said } = await refuse({ readGpu: async () => ({ freeBytes: 1 * gib, holders: "ComfyUI", tenants: [
         { pid: 42, label: "python3", role: "occupant", usedBytes: 2 * gib }, { pid: 9, label: "steam", role: "occupant", usedBytes: 3 * gib }] }) });
-      expect(said).toBe("The image needs 7.0 GiB and 1.0 GiB is free; steam holds 3.0 GiB, close it.");
+      expect(said).toBe("The image needs 9.0 GiB and 1.0 GiB is free; steam holds 3.0 GiB, close it.");
     });
-    // The app loaded app-chat and unloaded it for this job; it is gone from Ollama's list, and what holds the rest is not it.
-    const gone = (top: GpuHolder) => refuse({ readGpu: async () => ({ freeBytes: 3.5 * gib, holders: "rest", tenants: [top] }) }, ["foreign-chat"]);
-    it("this app's model unloaded and gone, another Ollama model holding the rest: not called this app's, waiting not offered", async () => {
-      const { f, said } = await gone({ pid: 8, label: "ollama", role: "ollama", usedBytes: 7 * gib });
-      expect(f.ollamaPosts, "app-chat was unloaded").toEqual([{ model: "app-chat", keep_alive: 0 }]);
-      expect(said).toBe("The image needs 9.0 GiB and 3.5 GiB is free; a chat model this app did not load holds 7.0 GiB, stop it.");
-    });
-    it("this app's model unloaded and gone, another app holding the rest: names that app", async () => {
-      const { said } = await gone({ pid: 9, label: "steam", role: "occupant", usedBytes: 7 * gib });
+    it("every chat model left, another app holding the rest: names that app", async () => {
+      const { said } = await refuse({ readGpu: async () => ({ freeBytes: 3.5 * gib, holders: "rest", tenants: [{ pid: 9, label: "steam", role: "occupant", usedBytes: 7 * gib }] }) });
       expect(said).toBe("The image needs 9.0 GiB and 3.5 GiB is free; steam holds 7.0 GiB, close it.");
     });
-    it("this app's model still listed but another app holding the most: names that app, not this app's model", async () => {
+    it("a chat model still listed but another app holding the most: names that app, not the chat model", async () => {
       const { said } = await refuse({ readGpu: async () => ({ freeBytes: 3.5 * gib, holders: "rest", tenants: [
-        { pid: 8, label: "ollama", role: "ollama", usedBytes: 2 * gib }, { pid: 9, label: "steam", role: "occupant", usedBytes: 7 * gib }] }) });
+        { pid: 8, label: "ollama", role: "ollama", usedBytes: 2 * gib }, { pid: 9, label: "steam", role: "occupant", usedBytes: 7 * gib }] }) }, undefined, ["app-chat"]);
       expect(said).toBe("The image needs 9.0 GiB and 3.5 GiB is free; steam holds 7.0 GiB, close it.");
     });
     it("Ollama's list unreadable: names Ollama and claims nothing about whose model it is", async () => {
@@ -532,7 +579,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
   describe("a refusal offers a way out only when one exists, from the picker's own list", () => {
     const gib = 1024 ** 3;
     const refused = async (choice: ImageChoice, freeBytes: number) => {
-      const f = await fixture({ requiredBytes: undefined, imageMayUnload: () => [],
+      const f = await fixture({ requiredBytes: undefined,
         readGpu: async () => ({ freeBytes, holders: "steam", tenants: [{ pid: 9, label: "steam", role: "occupant", usedBytes: 5 * gib }] }) });
       f.files({ flux: true }); f.choose(choice);
       expect((await f.module.presets()).presets.map((p) => p.id), "the list the picker shows").toEqual([...PRESETS, ...cellsFor("16")].map((p) => p.id));
@@ -559,14 +606,14 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
   });
   describe("an unset default settles before the first fit, on the files ComfyUI lists", () => {
     const gib = 1024 ** 3;
-    it("list never read, Klein absent, Z-Image int8 fits beside the chat model: read first, fitted on its need, nothing unloaded", async () => {
+    it("list never read, Klein absent: read first, Z-Image int8 fitted on its need (one thing in memory: the chat model leaves even though it would fit beside)", async () => {
       const f = await fixture({ requiredBytes: undefined, readGpu: async () => ({ freeBytes: 9.5 * gib, holders: "ollama", tenants: [chat(3 * gib)] }) });
+      f.ollamaLists(["app-chat"]);
       const thread = f.store.createThread();
       const { jobId } = await f.module.generate({ prompt: "a tree", threadId: thread.id, choice: DEFAULT_CHOICE });
       await f.module.wait(jobId);
       expect(f.events.at(-1)?.state).toBe("done");
-      expect(f.ollamaPosts, "nothing unloaded").toEqual([]);
-      expect(f.events.map((e) => e.phase), "no freeing step").not.toContain("freeing");
+      expect(f.ollamaPosts, "the chat model left first").toEqual([{ model: "app-chat", keep_alive: 0 }]);
       expect(Object.values(f.graphs[0]!).map((n) => n.class_type)).toContain("ModelSamplingAuraFlow");
       // the card ran Z-Image and keeps the shape it was first drawn with
       expect(f.store.getThread(thread.id).messages[0]?.imageJob).toMatchObject({ state: "done", choice: { preset: "z-image-int8", width: 1024, height: 1024 }, sent: DEFAULT_CHOICE });
@@ -575,11 +622,14 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     });
   });
   describe("the fit's edges, the same table the picker's mark is tested on (contracts imageFitEdges)", () => {
+    // On the server nothing is credited: ComfyUI's own memory (creditedBytes) comes back when the
+    // handoff asks it to free (POST /free), and a chat model's (freeableBytes) when it leaves; the
+    // reading after that decides.
     it.each(imageFitEdges)("$name: $verdict", async ({ estimateBytes, freeBytes, creditedBytes, freeableBytes = 0, verdict }) => {
       let unloaded = false;
-      const f = await fixture({ requiredBytes: estimateBytes, swapWaitMs: 30, swapPollMs: 1,
-        imageMayUnload: () => freeableBytes > 0 ? ["app-chat"] : [], onModelUnloaded: () => { unloaded = true; },
-        readGpu: async () => ({ freeBytes: freeBytes + (unloaded ? freeableBytes : 0), holders: "ollama", tenants: [] }) });
+      const f: Awaited<ReturnType<typeof fixture>> = await fixture({ requiredBytes: estimateBytes, waitMs: 30, pollMs: 1, onModelUnloaded: () => { unloaded = true; },
+        readGpu: async () => ({ freeBytes: freeBytes + (unloaded ? freeableBytes : 0) + (f.calls.includes("/free") ? creditedBytes : 0), holders: "ollama", tenants: [] }) });
+      f.ollamaLists(freeableBytes > 0 ? ["app-chat"] : []);
       f.configure({ resident: creditedBytes }); // ComfyUI's own memory, read from its stats
       const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
       const answer = f.events.at(-1)?.errorKind === "wont-fit" ? "refuse" : f.ollamaPosts.length > 0 ? "frees" : "fits";
@@ -587,22 +637,23 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
       if (verdict !== "refuse") expect(f.events.at(-1)?.state).toBe("done");
     });
   });
-  describe("side by side when both fit, against the preset's own need (size.bytes)", () => {
+  describe("one thing in memory, against the preset's own need (size.bytes)", () => {
     const gib = 1024 ** 3;
     const { size } = resolveChoice(DEFAULT_CHOICE);
-    it("a small chat model stays loaded: free memory exactly the need makes the image beside it", async () => {
+    it("a small chat model leaves too, though the image would fit beside it (owner ruling 2026-11-13)", async () => {
       const f = await fixture({ requiredBytes: undefined, readGpu: async () => ({ freeBytes: size.bytes, holders: "ollama", tenants: [chat(3 * gib)] }) });
       f.files({ flux: true }); // Klein's files listed: the default stays Klein, at Klein's need
+      f.ollamaLists(["app-chat"]);
       const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
       expect(f.events.at(-1)?.state).toBe("done");
-      expect(f.ollamaPosts, "nothing unloaded").toEqual([]);
-      expect(f.events.map((e) => e.phase)).not.toContain("freeing");
+      expect(f.ollamaPosts).toEqual([{ model: "app-chat", keep_alive: 0 }]);
     });
     it("a large chat model is unloaded first: a byte short of the need swaps, then the image is made", async () => {
       let unloaded = false;
       const f = await fixture({ requiredBytes: undefined, onModelUnloaded: () => { unloaded = true; },
         readGpu: async () => unloaded ? { freeBytes: size.bytes + 11 * gib, holders: "", tenants: [] } : { freeBytes: size.bytes - 1, holders: "ollama", tenants: [chat(11 * gib)] } });
       f.files({ flux: true });
+      f.ollamaLists(["app-chat"]);
       const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
       expect(f.ollamaPosts).toEqual([{ model: "app-chat", keep_alive: 0 }]);
       expect(f.events.at(-1)?.state).toBe("done");
@@ -626,7 +677,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
       expect(loader.appLoadedModels()).toEqual([MODEL]);
       // The GPU as the fake Ollama holds it: with the chat model resident the image does not fit
       const resident = () => fake.state().loaded.length > 0;
-      const f = await fixture({ requiredBytes: undefined, ollamaUrl: () => fake.url, imageMayUnload: () => loader.imageMayUnload(),
+      const f = await fixture({ requiredBytes: undefined, replying: () => loader.replying(),
         onModelUnloaded: (model) => loader.unloaded(model),
         readGpu: async () => ({ freeBytes: resident() ? size.bytes - gib : size.bytes + 6 * gib, holders: "ollama", tenants: resident() ? [chat(7 * gib)] : [] }) }, fake.url);
       f.files({ flux: true });
@@ -644,9 +695,10 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     });
     /**
      * The owner's restart: the chat model stayed in Ollama, so the app's loader never loaded it.
-     * `turns` chat turns of this app run on it, then an image needs its memory.
+     * `turns` chat turns of this app run on it, then an image needs its memory; with `open` one more
+     * turn is still replying on it when the image asks.
      */
-    async function warmModel(turns: number) {
+    async function warmModel(turns: number, open = false) {
       const fake = await startFakeOllama({ scenario: "threads", options: { firstTokenDelayMs: 0, tokenDelayMs: 0 } });
       instances.push({ close: () => fake.close() });
       const MODEL = "qwen3.5:9b";
@@ -663,12 +715,15 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
         turn.firstToken(); turn.end();
       }
       expect(loader.appLoadedModels(), "warm: the loader never loaded it").toEqual([]);
+      const running = open ? loader.reserve(MODEL) : undefined;
+      await running?.admit(16384);
       const resident = () => fake.state().loaded.length > 0;
-      const f = await fixture({ requiredBytes: undefined, ollamaUrl: () => fake.url, imageMayUnload: () => loader.imageMayUnload(),
+      const f = await fixture({ requiredBytes: undefined, replying: () => loader.replying(),
         onModelUnloaded: (model) => loader.unloaded(model),
         readGpu: async () => ({ freeBytes: resident() ? size.bytes - gib : size.bytes + 6 * gib, holders: "ollama", tenants: resident() ? [chat(7 * gib)] : [] }) }, fake.url);
       f.files({ flux: true });
       const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+      running?.end();
       return { f, fake, loader, MODEL };
     }
     it("a model warm before the app started, one chat turn on it, then an image: the image unloads it and is made", async () => {
@@ -676,12 +731,18 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
       expect(f.events.at(-1)?.state).toBe("done");
       expect(f.ollamaPosts).toEqual([{ model: MODEL, keep_alive: 0 }]);
       expect(fake.state().loaded).toEqual([]);
-      expect(await loader.imageMayUnload(), "unloaded: no longer the app's to unload").toEqual([]);
+      expect(loader.replying()).toEqual([]);
     });
-    it("the same warm model with no turn of this app is another program's: left loaded, and the refusal says so", async () => {
+    it("the same warm model with no turn of this app: asked to leave all the same, whoever loaded it (WIN-MEM-01)", async () => {
       const { f, fake, MODEL } = await warmModel(0);
+      expect(f.events.at(-1)?.state).toBe("done");
+      expect(f.ollamaPosts).toEqual([{ model: MODEL, keep_alive: 0 }]);
+      expect(fake.state().loaded).toEqual([]);
+    });
+    it("a reply still running on the warm model: never asked to leave, and the refusal names it", async () => {
+      const { f, fake, MODEL } = await warmModel(0, true);
       expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "wont-fit" });
-      expect(f.events.at(-1)?.message).toContain("a chat model this app did not load holds 7.0 GiB, stop it");
+      expect(f.events.at(-1)?.message).toContain(`this app's chat model ${MODEL} still holds 7.0 GiB`);
       expect(f.ollamaPosts, "nothing unloaded").toEqual([]);
       expect(fake.state().loaded.map((l) => l.name)).toEqual([MODEL]);
     });
@@ -698,11 +759,10 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     expect(asked.some((a) => a.startsWith("--query-gpu"))).toBe(true);
   });
   it("a cancel ends the swap's wait at once", async () => {
-    let unloaded = false;
-    const f = await fixture({ swapWaitMs: 60_000, swapPollMs: 20, onModelUnloaded: () => { unloaded = true; },
-      readGpu: async () => ({ freeBytes: 5000, holders: "ollama", tenants: [] }) });
+    const f = await fixture({ waitMs: 60_000, pollMs: 20, readGpu: async () => ({ freeBytes: 5000, holders: "ollama", tenants: [] }) });
+    f.ollamaLists(["app-chat"]); f.stickyChat(["app-chat"]); // its runner never exits: the wait runs to its bound
     const { jobId } = await f.module.generate({ prompt: "a tree" });
-    await vi.waitFor(() => expect(unloaded).toBe(true));
+    await vi.waitFor(() => expect(f.ollamaPosts).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 50));
     const at = Date.now();
     expect(f.module.cancel(jobId)).toEqual({ cancelled: true }); await f.module.wait(jobId);
@@ -760,7 +820,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     expect(f.events.at(-1)?.state).toBe("error"); expect(f.calls).not.toContain("/prompt");
   });
 
-  it.each(["unit-pid", "system-stats", "unknown-pid"])("credits a warm external Comfy on the second image without unloading chat (%s)", async (source) => {
+  it.each(["unit-pid", "system-stats", "unknown-pid"])("a second image of the same setup on a warm ComfyUI runs at once: nothing measured, nothing freed (%s)", async (source) => {
     const gib = 1024 ** 3;
     let free = 10 * gib;
     // unknown-pid: the unit has no MainPID; a stray pid-0 row of 1 byte must not stand in for ComfyUI's /system_stats reservation.
@@ -771,35 +831,39 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     const first = await f.module.generate({ prompt: "a tree" }); await f.module.wait(first.jobId);
     expect(f.events.at(-1)?.state).toBe("done");
     free = 2.5 * gib; f.configure({ freeBytes: 2.5 * gib, resident: 7.9 * gib });
+    const frees = f.calls.filter((c) => c === "/free").length;
     const second = await f.module.generate({ prompt: "a tree" }); await f.module.wait(second.jobId);
     expect(f.events.at(-1)?.state).toBe("done");
+    expect(f.calls.filter((c) => c === "/free").length, "the engine holds this setup: not asked to free").toBe(frees);
     expect(f.calls).not.toContain("/api/generate"); expect(f.ollamaPosts).toEqual([]);
   });
 
-  it("uses the local unit MainPID resident bytes instead of system stats", async () => {
-    const f = await fixture({ readGpu: async () => ({ freeBytes: 2500, holders: "ComfyUI; whisper", tenants: [{ pid: 42, usedBytes: 3900 }, { pid: 42, usedBytes: 4000 }, { pid: 99, usedBytes: 100_000 }] }) });
+  it("nothing is credited to ComfyUI's MainPID: what its /free gives back is measured", async () => {
+    const f: Awaited<ReturnType<typeof fixture>> = await fixture({ readGpu: async () => ({ freeBytes: f.calls.includes("/free") ? 10_400 : 2500, holders: "ComfyUI; whisper",
+      tenants: [{ pid: 42, usedBytes: 3900 }, { pid: 42, usedBytes: 4000 }, { pid: 99, usedBytes: 100_000 }] }) });
     f.configure({ resident: 0 });
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
     expect(f.events.at(-1)?.state).toBe("done"); expect(f.calls).not.toContain("/api/generate");
+    expect(f.calls.indexOf("/free")).toBeLessThan(f.calls.indexOf("/prompt"));
   });
 
   it("never credits another GPU holder to Comfy's MainPID", async () => {
-    const f = await fixture({ imageMayUnload: () => [], readGpu: async () => ({ freeBytes: 1000, holders: "ComfyUI; whisper", tenants: [{ pid: 42, usedBytes: 1000 }, { pid: 99, usedBytes: 100_000 }] }) });
+    const f = await fixture({ readGpu: async () => ({ freeBytes: 1000, holders: "ComfyUI; whisper", tenants: [{ pid: 42, usedBytes: 1000 }, { pid: 99, usedBytes: 100_000 }] }) });
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
     expect(f.events.at(-1)?.state).toBe("error"); expect(f.calls).not.toContain("/prompt");
   });
 
   it("a cold healthy Comfy needs the full estimate and reports GiB with raw fit fields", async () => {
     const gib = 1024 ** 3;
-    const f = await fixture({ requiredBytes: 9 * gib, imageMayUnload: () => [] });
+    const f = await fixture({ requiredBytes: 9 * gib });
     f.configure({ freeBytes: 2.4 * gib, resident: 0 });
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
     expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "wont-fit" });
     expect(f.module.current().detail).toContain("needs 9.0 GiB, 2.4 GiB free, 6.6 GiB short");
     expect(f.calls).not.toContain("/prompt");
-    const error = imageFitError(9 * gib, gib, 2.4 * gib, "whisper; ComfyUI");
-    expect(error).toMatchObject({ code: "wont-fit", estimatedBytes: 9 * gib, needBytes: 8 * gib, creditedBytes: gib, freeBytes: 2.4 * gib, shortfallBytes: 5.6 * gib, holders: "whisper; ComfyUI" });
-    expect(error.message).toContain("credited ComfyUI resident 1.0 GiB");
+    const error = imageFitError(9 * gib, 2.4 * gib, "whisper; ComfyUI");
+    expect(error).toMatchObject({ code: "wont-fit", needBytes: 9 * gib, freeBytes: 2.4 * gib, shortfallBytes: 6.6 * gib, holders: "whisper; ComfyUI" });
+    expect(error.message, "nothing is credited: the reading after the handoff is the free memory").not.toContain("credited");
   });
 
   it.each(["active", "activating", "deactivating", "reloading"])("generate waits for an external %s unit and never adopts it", async (activeState) => {
@@ -897,12 +961,14 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     expect(holder).toBeNull();
   });
 
-  it("falls back to ComfyUI's own torch reservation when its MainPID has no measured GPU row", async () => {
+  it("a ComfyUI whose MainPID has no measured GPU row: nothing is credited; /free gives its weights back and the new reading admits", async () => {
     const gib = 1024 ** 3;
-    const f = await fixture({ requiredBytes: 9 * gib, readGpu: async () => ({ freeBytes: 2.5 * gib, holders: "ComfyUI ([N/A])", tenants: [{ pid: 42 }] }) });
+    // What /free gave back shows in every reading after it.
+    const f: Awaited<ReturnType<typeof fixture>> = await fixture({ requiredBytes: 9 * gib, readGpu: async () => ({ freeBytes: f.calls.includes("/free") ? 10.4 * gib : 2.5 * gib, holders: "ComfyUI ([N/A])", tenants: [{ pid: 42 }] }) });
     f.configure({ resident: 7.9 * gib });
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
     expect(f.events.at(-1)?.state).toBe("done"); expect(f.ollamaPosts).toEqual([]);
+    expect(f.calls.filter((c) => c === "/free")).toHaveLength(1);
   });
 
   it.each(["0.0.0.0", "127.0.0.2", "[::ffff:127.0.0.1]", "192.168.1.20", "mybox", "localhost.", "mybox.", "[::ffff:192.168.1.20]", "mybox.home.arpa", "no-such-name"])("runs the VRAM fit for a ComfyUI on this machine at %s", async (host) => {
@@ -1870,5 +1936,123 @@ describe("the card Image mode is judged by: each tier's row by its memory, no de
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
     expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "wont-fit", message: NO_GPU });
     expect(f.calls).not.toContain("/prompt");
+  });
+});
+
+/** The compact General cell at 512x512 his warm images ran, and the pixel-art cell at 640x640 (Windows report WIN-MEM-03). */
+const GENERAL_512: ImageChoice = { preset: "general--fit-8b-klein-compact8", width: 512, height: 512 };
+const PIXEL_640: ImageChoice = { preset: "pixel-art--r2-1a-klein-compact8", width: 640, height: 640 };
+const GIB = 1024 ** 3;
+
+/**
+ * An external ComfyUI on this computer (a Settings address) with DynamicVRAM, as WIN-MEM-03 read
+ * it: /system_stats says torch holds 32 MiB of a 6 GiB card while its weights hold the rest, and
+ * no process row says how much. The GPU has 5.2 GiB free while ComfyUI holds nothing; a render
+ * leaves its weights in, 3,757,325,224 bytes free; /free gives them back. The real memory owner
+ * decides; no Ollama answers (nothing of chat is in memory).
+ */
+async function externalEngine() {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "gates-image-"));
+  dirs.push(dataDir);
+  const lease = createGpuLease();
+  const store = openThreadStore(path.join(dataDir, "threads.sqlite"));
+  instances.push({ close: async () => store.close() });
+  const events: ImageEvent[] = [];
+  const order: string[] = [];
+  const state = { free: 5.2 * GIB, pending: [] as unknown[], prompts: 0 };
+  let socket: EventTarget | undefined;
+  let module: ImageModule | undefined;
+  const memory = createMemoryOwner({
+    ollamaUrl: () => undefined,
+    listLoaded: async () => [],
+    replying: () => [],
+    engine: () => module,
+    readFree: async () => state.free,
+    waitMs: 200, pollMs: 5,
+  });
+  module = createImageModule({
+    dataDir, lease, store, requiredBytes: 4.5 * GIB, idleMs: 60_000, log: () => {},
+    localAddresses: () => ["192.168.1.20"], lookupHost: fakeLookup,
+    settings: () => ({ imageGen: true, comfyUrl: "http://mybox:8188" }),
+    memory,
+    readGpu: async () => { order.push("measure"); return { freeBytes: state.free, holders: "python3 (unknown)", tenants: [] }; },
+    service: { inspect: async () => { throw new Error("an external ComfyUI's unit is never read"); }, start: async () => { throw new Error("never started"); }, stop: async () => { throw new Error("never stopped"); } },
+    socket: () => {
+      socket = new EventTarget();
+      Object.defineProperty(socket, "readyState", { value: 1 });
+      Object.assign(socket, { close() {} });
+      return socket as WebSocket;
+    },
+    fetch: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/system_stats") return Response.json({ system: { comfyui_version: "fake" }, devices: [{ name: "cuda:0", type: "cuda", vram_total: 6_442_123_264, vram_free: 3_757_325_224, torch_vram_total: 33_554_432, torch_vram_free: 0 }] });
+      if (url.pathname === "/object_info") return Response.json(comfyInfo(KLEIN_COMPACT_FILES, ZIMAGE_FILES));
+      if (url.pathname === "/queue") return Response.json({ queue_running: [], queue_pending: state.pending });
+      if (url.pathname === "/free") { order.push("free"); state.free = 5.2 * GIB; return new Response(null, { status: 200 }); }
+      if (url.pathname === "/prompt") {
+        order.push("prompt");
+        state.prompts += 1;
+        const id = `p${state.prompts}`;
+        state.free = 3_757_325_224; // the weights stay in after the render
+        queueMicrotask(() => socket?.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "executing", data: { prompt_id: id, node: null } }) })));
+        return Response.json({ prompt_id: id });
+      }
+      if (url.pathname.startsWith("/history/")) {
+        const id = decodeURIComponent(url.pathname.slice("/history/".length));
+        return Response.json({ [id]: { outputs: { "8": { images: [{ filename: "out.png", subfolder: "", type: "output" }] } } } });
+      }
+      if (url.pathname === "/view") return new Response(png);
+      throw new Error(`unexpected ${url.pathname}`);
+    },
+    push: (channel, payload) => { if (channel === "image.event") events.push(payload as ImageEvent); },
+  } as ImageDeps);
+  instances.push(module);
+  const runOne = async (choice: ImageChoice) => {
+    const { jobId } = await module!.generate({ prompt: "a tree", choice });
+    await module!.wait(jobId);
+    return events.filter((e) => e.jobId === jobId).at(-1)!;
+  };
+  /** The job ended done; a refusal's own sentence is the failure message. */
+  const done = async (choice: ImageChoice) => {
+    const end = await runOne(choice);
+    expect(end.state, end.message).toBe("done");
+  };
+  return { module, memory, order, state, run: runOne, done };
+}
+
+describe("one thing in memory: the image engine (WIN-MEM-03)", () => {
+  it("two more same-setup images are admitted beside an external ComfyUI's warm weights; nothing is credited, nothing refused", async () => {
+    const e = await externalEngine();
+    await e.done(GENERAL_512);
+    // 3.5 GiB free with the weights in: the old fit credited 32 MiB and refused the next one.
+    expect(e.state.free).toBe(3_757_325_224);
+    // The setup the first job settled to (an unset choice settles to the default) is what is in memory.
+    const first = e.memory.status().resident;
+    expect(first).toMatchObject({ kind: "image" });
+    const mark = e.order.length;
+    await e.done(GENERAL_512);
+    await e.done(GENERAL_512);
+    expect(e.order.slice(mark)).toEqual(["prompt", "prompt"]);
+    expect(e.memory.status().resident).toEqual(first);
+  });
+
+  it("a different setup at 640x640 frees the engine while its queue is empty, then measures", async () => {
+    const e = await externalEngine();
+    await e.run(GENERAL_512);
+    const mark = e.order.length;
+    await e.done(PIXEL_640);
+    expect(e.order.slice(mark)).toEqual(["free", "measure", "prompt"]);
+    expect(e.memory.status().resident).toMatchObject({ kind: "image", setup: "pixel-art--r2-1a-klein-compact8 640x640" });
+  });
+
+  it("with another client's job pending, no /free is sent: the job measures and refuses with that reason", async () => {
+    const e = await externalEngine();
+    await e.run(GENERAL_512);
+    e.state.pending = [[0, "someone-else"]];
+    const mark = e.order.length;
+    const end = await e.run(PIXEL_640);
+    expect(e.order.slice(mark)).toEqual(["measure"]);
+    expect(end).toMatchObject({ state: "error", errorKind: "wont-fit" });
+    expect(end.message).toMatch(/ComfyUI is running another job/);
   });
 });

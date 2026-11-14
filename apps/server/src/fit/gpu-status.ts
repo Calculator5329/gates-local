@@ -49,12 +49,10 @@ export interface GpuStatusDeps {
   /** Friendly model name for a tag ("Qwen 3.5 9B"). */
   modelLabel?: (tag: string) => string;
   /**
-   * Models this app loaded or a turn of it answered on: what an image job may unload, so those
-   * (and, in an Ollama the app started, every resident model) are the unprotected chat models.
+   * Resident models no running reply uses: what the next thing in memory asks to leave
+   * (gpu/memory.ts), so those are the unprotected chat models.
    */
   mayUnload?: () => readonly string[];
-  /** The app started this Ollama: every model in it is the app's to unload. Read with the same /api/ps, no second read. */
-  ownsRuntime?: () => boolean;
   now?: () => number;
 }
 
@@ -116,10 +114,9 @@ export async function readGpuStatus(deps: GpuStatusDeps = {}): Promise<GpuStatus
   const comfy = pythons.length > 0 && deps.listeningPids ? await deps.listeningPids(COMFYUI_PORT, pythons).catch(() => new Set<number>()) : new Set<number>();
   const imagePid = deps.imagePid?.();
   const label = deps.modelLabel ?? ((tag: string) => tag);
-  // Unprotected is what an image job may unload (the loader's imageMayUnload), read here without a second /api/ps.
-  const owns = deps.ownsRuntime?.() === true;
+  // Unprotected is what the next thing in memory asks to leave (gpu/memory.ts), read here without a second /api/ps.
   const listed = new Set(deps.mayUnload?.() ?? []);
-  const mine = (tag: string) => owns || listed.has(tag);
+  const mine = (tag: string) => listed.has(tag);
 
   let runnerBytes = 0;
   let accounted = 0;

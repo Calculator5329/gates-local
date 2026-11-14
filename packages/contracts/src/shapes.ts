@@ -314,6 +314,11 @@ export const FitReport = S.Struct({
   measuredAt: Millis,
   /** One sentence that names the numbers behind the verdict. */
   message: S.optional(S.String),
+  /**
+   * The system memory free in the reading the verdict was decided from (freeVramBytes is that
+   * reading's GPU side). A send's reading is taken after everything else was asked to leave.
+   */
+  memAvailableBytes: S.optional(Count),
   /** Set when the refusal is the model's own context ceiling, not memory: the most it supports. */
 });
 export type FitReport = typeof FitReport.Type;
@@ -429,6 +434,8 @@ export const ChatEvent = S.Union([
     neededBy: S.optional(S.String),
     /** Refused before its start, code "would-stop" (chat.send askFirst or stopTurns): the running turns in the way. */
     blocking: S.optional(S.Array(BlockingTurn)),
+    /** code "wont-fit": the fit that refused, with the GPU and system memory of the reading it was decided from. */
+    fit: S.optional(FitReport),
     /** code "wont-fit": what does run, from the same reading. Absent when that could not be worked out. */
     offer: S.optional(FitOffer),
   }),
@@ -613,6 +620,27 @@ export const ModelLoad = S.Struct({
   offer: S.optional(FitOffer),
 });
 export type ModelLoad = typeof ModelLoad.Type;
+
+/**
+ * The one thing the app keeps in memory: a chat model at a context, or the image engine's loaded
+ * setup (its preset id and size, as ImageChoice names them). `since`: when it became resident.
+ */
+export const MemoryThing = S.Union([
+  S.Struct({ kind: S.Literal("chat"), model: S.String, numCtx: S.optional(NumCtx), since: S.optional(Millis) }),
+  S.Struct({ kind: S.Literal("image"), setup: S.String, since: S.optional(Millis) }),
+]);
+export type MemoryThing = typeof MemoryThing.Type;
+
+/**
+ * What is in memory, and the handoff to the next thing while one runs: everything else is asked
+ * to leave ("leaving"), the memory is read again ("measuring"), then the thing loads ("loading").
+ * `resident` is absent when nothing the app may hand off is in memory.
+ */
+export const MemoryState = S.Struct({
+  resident: S.optional(MemoryThing),
+  handoff: S.optional(S.Struct({ to: MemoryThing, stage: S.Literals(["leaving", "measuring", "loading"]) })),
+});
+export type MemoryState = typeof MemoryState.Type;
 
 /** A model the app recommends or the user can download, with the reason to pick it. */
 export const CatalogEntry = S.Struct({

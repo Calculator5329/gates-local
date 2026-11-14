@@ -216,7 +216,7 @@ describe("nvidia-smi parsing", () => {
       expect(status.detail).toBeUndefined();
       const deps = { baseUrl: s.baseUrl, model: "qwen3.5:9b", numCtx: 16384, runNvidiaSmi: run, readMeminfo: async () => MACHINE_MEMINFO };
       await expect(checkFit(deps)).resolves.toMatchObject({ gpu: { gpuCount: 0 }, report: { verdict: "spills" } });
-      await expect(planLoad({ ...deps, busy: ["resident"], comfyPid: 999 })).resolves.toMatchObject({ stop: [], comfy: false, report: { verdict: "spills" } });
+      await expect(planLoad({ ...deps, busy: ["resident"] })).resolves.toMatchObject({ stop: [], report: { verdict: "spills" } });
       await expect(measuredFit({ ...deps, model: "resident" })).resolves.toMatchObject({ gpu: { gpuCount: 0 }, report: { source: "measured", verdict: "fits" } });
       return;
     }
@@ -665,7 +665,7 @@ describe("blockingModels: which busy resident models a load would push out", () 
       runNvidiaSmi: async () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); } };
     const alone = await planLoad({ ...base, busy: [] });
     expect(alone.report.verdict).toBe("spills");
-    expect(await planLoad({ ...base, busy: [QWEN27], comfyPid: 999 })).toEqual({ report: alone.report, stop: [], comfy: false });
+    expect(await planLoad({ ...base, busy: [QWEN27] })).toEqual({ report: alone.report, stop: [] });
   });
 
   it("none when the model fits beside them, is resident at this num_ctx, or is the busy model itself", async () => {
@@ -700,7 +700,7 @@ describe("blockingModels: which busy resident models a load would push out", () 
     const s = await fakeOllama(resident([{ name: QWEN27, vram: 12e9 }]));
     const check = await checkFit({ baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, reclaim: [QWEN27], runNvidiaSmi: gpuWith(500), readMeminfo: plenty });
     expect(check.report).toMatchObject({ verdict: "fits", freeVramBytes: 500 * MIB + 12e9 });
-    expect(check.report.message).toContain(`held by ${QWEN27}, which Ollama unloads to make room`);
+    expect(check.report.message).toContain(`held by ${QWEN27}, which leaves to make room`);
   });
 });
 

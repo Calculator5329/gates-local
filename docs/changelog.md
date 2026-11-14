@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-11-13: One thing in GPU memory at a time
+
+- A send, a model load or an image job first asks everything else to
+  leave: every other chat model in the app's Ollama gets an unload
+  request, whoever loaded it, unless a running reply uses it. A ComfyUI
+  on this computer is asked to free its models (POST /free) while its
+  queue is empty. The app waits until they left, takes a new reading,
+  and decides from that reading alone.
+- A second image with the same preset and size starts at once on the
+  weights already loaded; nothing is freed and nothing is refused. A
+  different preset or size frees the engine first, then measures.
+- Chat → image → chat works with Ollama and ComfyUI both started outside
+  the app: the chat model unloads, the image engine is freed, the chat
+  model loads again, each after the one before answered.
+- A ComfyUI another program is using is never freed under it: the
+  refusal says it is busy. Neither runtime is ever stopped, restarted or
+  reconfigured by this; whisper and other GPU programs are only measured.
+- A refused send carries the reading it was decided from.
+- Why: image generation refused beside a warm external ComfyUI (WIN-MEM-03)
+  and idle chat models stayed in memory when an image or another model
+  wanted it (WIN-MEM-01). The owner's rule is one thing in memory.
+
 ## 2026-11-13: Restart to update observed on Windows
 
 - `apps/desktop/scripts/packaged-windows-update.ts` drives IU-W1, IU-W2 and

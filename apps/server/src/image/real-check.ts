@@ -16,6 +16,7 @@ import type { ImageEvent } from "@gates-local/contracts";
 import { planLoad } from "../fit/fit.ts";
 import { readGpu } from "../fit/gpu.ts";
 import { createGpuLease } from "../gpu/lease.ts";
+import { createMemoryOwner, type MemoryEngine } from "../gpu/memory.ts";
 import { createModelLoader, type ModelLoader } from "../runtime/load.ts";
 import { listLoaded } from "../runtime/models.ts";
 import { canonicalTag } from "../runtime/recommended.ts";
@@ -80,7 +81,8 @@ async function warmTurn(swap: SwapOptions, loader: ModelLoader): Promise<ModelLo
     turn.end();
   }
   assert.deepEqual(loader.appLoadedModels(), [], `${swap.model} was loaded by this check, so it was not warm`);
-  assert.deepEqual(await loader.imageMayUnload(), [canonicalTag(swap.model)], "the turn did not make the warm model the app's to unload");
+  // A resident model no running reply uses is the next thing's to ask to leave, whoever loaded it.
+  assert.deepEqual(loader.replying(), [], "the turn still counts as a running reply, so the image may not unload it");
   console.log(JSON.stringify({ warmChatTurn: swap.model, numCtx: swap.numCtx }));
   return loader;
 }
@@ -108,11 +110,19 @@ export async function realCheck(dataDir: string, comfyUrl?: string, swap?: SwapO
   let progressFrames = 0;
   let freeingAt: number | undefined, freedAt: number | undefined;
   let server: Awaited<ReturnType<typeof startWsServer>> | undefined;
+  let engine: MemoryEngine | undefined;
   const image = createImageModule({ dataDir, store, lease: createGpuLease(),
     settings: () => ({ imageGen: true, ...(comfyUrl ? { comfyUrl } : {}) }),
-    // Wired as main.ts wires the app's loader.
-    imageMayUnload: () => loader?.imageMayUnload() ?? [], ollamaUrl: () => swap?.ollamaUrl,
-    onModelUnloaded: (model) => loader?.unloaded(model),
+    // Wired as services.ts wires the app's memory owner.
+    memory: createMemoryOwner({
+      ollamaUrl: () => swap?.ollamaUrl,
+      listLoaded: (url, signal) => listLoaded(url, undefined, signal),
+      replying: () => loader?.replying() ?? [],
+      engine: () => engine,
+      readFree: async () => (await readGpu()).freeBytes,
+      onUnloaded: (model) => loader?.unloaded(model),
+      log: (line) => console.log(JSON.stringify({ memory: line })),
+    }),
     push: (channel, payload) => {
       server?.push(channel, payload);
       if (channel === "image.event") {
@@ -124,6 +134,7 @@ export async function realCheck(dataDir: string, comfyUrl?: string, swap?: SwapO
       }
     },
   });
+  engine = image;
   try {
     const token = randomUUID(); // per-launch only, never logged or persisted
     const handlers = createImageHandlers({ image });
@@ -143,7 +154,6 @@ export async function realCheck(dataDir: string, comfyUrl?: string, swap?: SwapO
       assert(freeingAt !== undefined, `the image fit beside ${swap.model}, so no swap ran; pick a larger --swap-model or --num-ctx`);
       assert(freedAt !== undefined, "the job never left its freeing step");
       assert.deepEqual(loader.appLoadedModels(), [], "the chat model is still counted as loaded");
-      assert.deepEqual(await loader.imageMayUnload(), [], "the chat model is still counted as the app's to unload");
       const resident = (await listLoaded(swap.ollamaUrl)).map((m) => canonicalTag(m.name));
       assert(!resident.includes(canonicalTag(swap.model)), `${swap.model} is still resident in Ollama`);
       console.log(JSON.stringify({ swap: { model: swap.model, unloadAndWaitMs: freedAt - freeingAt } }));

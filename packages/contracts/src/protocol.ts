@@ -30,6 +30,7 @@ import {
   ModelMeasure,
   MeasureRun,
   NumCtx,
+  MemoryState,
   ModelLoad,
   PullProgress,
   RuntimeStatus,
@@ -266,6 +267,8 @@ export const methods = {
   "settings.model.update": { params: S.Struct({ model: S.String.check(S.isMinLength(1)), patch: S.NullOr(ModelSettingsPatch) }), result: Settings, phone: "deny" },
   "settings.modelDefaults": { params: S.Struct({ model: S.String.check(S.isMinLength(1)) }), result: ModelDefaults, phone: "allow" },
   "gpu.status": { params: NoParams, result: GpuStatus, phone: "allow" },
+  /** What the app keeps in memory now (one thing at a time), and the handoff while one runs; changes come on memory.changed. */
+  "memory.status": { params: NoParams, result: MemoryState, phone: "allow" },
   "models.catalog": { params: NoParams, result: S.Array(CatalogEntry), phone: "allow" },
   /** The chat list in use (built in, or a newer signed one from the release page): maker groups and example names. */
   "models.suggested": { params: NoParams, result: SuggestedList, phone: "allow" },
@@ -361,6 +364,8 @@ export const pushes = {
   /** One per progress step of every download, until done, error or cancelled. */
   "models.pull": { payload: PullProgress },
   "models.load": { payload: ModelLoad },
+  /** What is in memory changed, or a handoff moved to its next stage (leaving, measuring, loading). */
+  "memory.changed": { payload: MemoryState },
   /** The whole list again, after a finished reply or a deletion changed what it counts. */
   "models.speed": { payload: S.Array(ModelSpeed) },
   /** The whole list again, after a Measure run finished. */

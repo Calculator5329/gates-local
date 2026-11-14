@@ -59,7 +59,7 @@ function rig(admit: () => Promise<void> = async () => {}) {
         await gate.promise;
         await admit();
         if (options?.fit === undefined) throw new Error("missing app fit");
-        return options.fit(signal);
+        return options.fit(signal, { handoff: undefined, leave: async () => undefined });
       },
     }) } },
   });

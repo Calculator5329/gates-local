@@ -12,7 +12,7 @@ import type { Push } from "../app.ts";
 import { forgetGpuReadings, holdersSummary, readGpu, untilAborted } from "../fit/gpu.ts";
 import type { NvidiaSmiRunner } from "../fit/types.ts";
 import type { GpuLease } from "../gpu/lease.ts";
-import { canonicalTag } from "../runtime/recommended.ts";
+import { ENGINE_BUSY_NOTE, imageSetup, type EngineLeave, type MemoryEngine, type MemoryOwner, type Want } from "../gpu/memory.ts";
 import { pngFacts } from "../pictures/png.ts";
 import type { PictureFacts } from "../pictures/table.ts";
 import type { ThreadStore } from "../threads/store.ts";
@@ -54,12 +54,11 @@ export interface ImageDeps extends ComfyClientDeps {
   thumbnail?(jobId: string, png: Buffer): Promise<void>;
   settings(): { imageGen: boolean; comfyUrl?: string; imageChoice?: ImageChoice; imageFolder?: string };
   /**
-   * The chat models this app may unload for an image (the loader's imageMayUnload()): ones it
-   * loaded or ran a turn on, or any in an Ollama it started. Never another program's.
+   * The one owner of memory (gpu/memory.ts): a job's fit runs its handoff in its gate, so every chat
+   * model leaves and the engine frees a setup it holds before the job measures. Absent (tests, the
+   * real check): the job measures what is there.
    */
-  imageMayUnload(): readonly string[] | Promise<readonly string[]>;
-  ollamaUrl(): string | undefined;
-  onModelUnloaded?(model: string): void;
+  memory?: MemoryOwner;
   readGpu?(): Promise<{ freeBytes: number; holders: string; tenants?: readonly GpuHolder[] }>;
   /**
    * The GPU as the picker sees it (the app's GPU watcher): what decides the default and the tiers
@@ -88,10 +87,6 @@ export interface ImageDeps extends ComfyClientDeps {
   requiredBytes?: number;
   idleMs?: number;
   startupTimeoutMs?: number;
-  /** How long a swap waits for unloaded memory to show as free; SWAP_WAIT_MS unless a test sets it. */
-  swapWaitMs?: number;
-  /** The spacing of those reads; SWAP_POLL_MS unless a test sets it. */
-  swapPollMs?: number;
   jobTimeoutMs?: number;
   queueTimeoutMs?: number;
   /** This machine's own interface addresses; tests inject them. */
@@ -125,7 +120,7 @@ export interface ImageEngine {
   files?: KnownFiles;
 }
 
-export interface ImageModule {
+export interface ImageModule extends MemoryEngine {
   /** Queued and running jobs, including jobs waiting for GPU memory. */
   activeJobs?(): number;
   current(): ImageStatus;
@@ -245,14 +240,6 @@ export async function isLocalHost(hostname: string, own: readonly string[] = loc
   }
 }
 
-/**
- * After unloading chat models, how long the fit keeps reading the GPU before it refuses.
- * Ollama answers the unload before its runner has handed the memory back.
- */
-export const SWAP_WAIT_MS = 20_000;
-/** The spacing of those reads, as readNvidiaSmi spaces its retries. */
-export const SWAP_POLL_MS = 250;
-
 const detail = (error: unknown) => error instanceof Error ? error.message : String(error);
 const imageError = (code: string, message: string) => Object.assign(new Error(message), { code });
 const gib = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
@@ -264,9 +251,10 @@ export interface GpuHolder { pid: number; usedBytes?: number; label?: string; ro
 /**
  * The refusal the card shows, in one sentence: what the image needs, what is free, who holds the
  * most of the rest, and a setup that would fit when one does (`smaller`, from smallerFit). `ours`
- * are this app's chat models Ollama still lists after the unload and the wait: an Ollama runner is
- * then this app's, and the sentence never says to close another app. Undefined when Ollama's list
- * could not be read; the sentence then names Ollama and claims nothing about whose model it is.
+ * are the chat models the app's Ollama still lists after the handoff and its wait (a running reply's,
+ * or slow to leave): an Ollama runner is then the app's, and the sentence never says to close
+ * another app. Undefined when Ollama's list could not be read; the sentence then names Ollama and
+ * claims nothing about whose model it is.
  */
 export function fitSentence(needBytes: number, freeBytes: number, holders: readonly GpuHolder[], ours: readonly string[] | undefined, smaller?: string): string {
   const base = `The image needs ${gib(needBytes)} and ${gib(freeBytes)} is free`;
@@ -282,12 +270,14 @@ export function fitSentence(needBytes: number, freeBytes: number, holders: reado
   return `${base}; ${top.label ?? `process ${top.pid}`} holds ${held}, close it${out}.`;
 }
 
-/** The long form (status detail and log) keeps every number; `said` is the card's one sentence. */
-export function imageFitError(estimatedBytes: number, creditedBytes: number, freeBytes: number, holders: string, said?: string) {
-  const needBytes = Math.max(0, estimatedBytes - creditedBytes);
+/**
+ * The long form (status detail and log) keeps every number; `said` is the card's one sentence. The
+ * free memory is a reading taken after the handoff: nothing else is counted as free.
+ */
+export function imageFitError(needBytes: number, freeBytes: number, holders: string, said?: string) {
   const shortfallBytes = Math.max(0, needBytes - freeBytes);
-  return Object.assign(imageError("wont-fit", `Image generation needs ${gib(needBytes)}, ${gib(freeBytes)} free, ${gib(shortfallBytes)} short (estimated total ${gib(estimatedBytes)}, credited ComfyUI resident ${gib(creditedBytes)}). GPU memory by process: ${holders}. Protected occupants are left running.`),
-    { estimatedBytes, creditedBytes, needBytes, freeBytes, shortfallBytes, holders, said: said ?? fitSentence(needBytes, freeBytes, [], []) });
+  return Object.assign(imageError("wont-fit", `Image generation needs ${gib(needBytes)}, ${gib(freeBytes)} free, ${gib(shortfallBytes)} short. GPU memory by process: ${holders}. Protected occupants are left running.`),
+    { needBytes, freeBytes, shortfallBytes, holders, said: said ?? fitSentence(needBytes, freeBytes, [], []) });
 }
 
 /**
@@ -414,92 +404,54 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     return { freeBytes: gpu.freeBytes, tenants: gpu.tenants, holders: holdersSummary(gpu.tenants, gib) };
   });
   /**
-   * `needBytes`: the preset's need at the job's size (presets.ts). `freeing` is told when the
-   * unload of this app's chat models begins (true) and when the memory is back or the wait gave up (false).
+   * The one answer to "may this image load" (owner ruling 2026-11-13: one thing in memory). Inside
+   * the memory owner's gate: the handoff asks every chat model to leave and the engine to free a
+   * setup other than `want` (only while its queue is empty), then one new reading decides, crediting
+   * nothing. The engine already holding `want` (a warm image of the same setup) leaves nothing to
+   * measure: the job runs. `needBytes`: the preset's need at the job's size (presets.ts).
+   * `freeing` is told when something is asked to leave (true), and once the reading after it says
+   * the image fits (false): a refusal or an error ends the freeing step itself. Resolves with `want` staged "loading" (the caller settles or ends it), or undefined when no fit
+   * applies (a ComfyUI on another computer, or on the CPU).
    */
-  const fit = async (cfg: ReturnType<typeof config>, needBytes: number, signal: AbortSignal, freeing: (on: boolean) => void) => {
-    if (!await isLocalHost(cfg.hostname, deps.localAddresses?.() ?? localAddresses(), deps.lookupHost ?? lookupHost, signal)) return;
+  const fit = async (cfg: ReturnType<typeof config>, needBytes: number, want: Want, signal: AbortSignal, freeing: (on: boolean) => void): Promise<Want | undefined> => {
+    if (!await isLocalHost(cfg.hostname, deps.localAddresses?.() ?? localAddresses(), deps.lookupHost ?? lookupHost, signal)) return undefined;
     signal.throwIfAborted();
     const stats = await client(cfg.baseUrl).stats(signal).catch(() => undefined);
     signal.throwIfAborted();
-    if (stats && stats.devices.length > 0 && stats.devices.every((device) => device.type === "cpu")) return;
+    if (stats && stats.devices.length > 0 && stats.devices.every((device) => device.type === "cpu")) return undefined;
     const estimate = deps.requiredBytes ?? needBytes;
-    const unit = stats && cfg.managed ? await serviceAt(cfg.baseUrl).inspect() : undefined;
-    const resident = (gpu: Awaited<ReturnType<typeof measure>>) => {
-      if (!stats) return 0;
-      let bytes: number | undefined;
-      if (unit && unit.present && unit.pid > 0) {
-        const sum = (gpu.tenants ?? []).filter((tenant) => tenant.pid === unit.pid).reduce((total, tenant) => total + (tenant.usedBytes ?? 0), 0);
-        if (sum > 0) bytes = sum;
+    const decide = async () => {
+      let asked = false;
+      const handoff = await deps.memory?.handoff(want, signal, { onLeave: (on) => { if (on) { asked = true; freeing(true); } } });
+      const fits = () => { if (asked) freeing(false); };
+      if (handoff?.engine === "kept") return fits();
+      const gpu = await measure();
+      signal.throwIfAborted();
+      if (!Number.isFinite(gpu.freeBytes) || gpu.freeBytes < 0) throw new Error(asked ? "GPU free memory could not be measured after unloading what held it. Retry when the GPU status is available." : "GPU free memory could not be measured. Retry when the GPU status is available.");
+      // The picker's mark comes from the same function (contracts/image-fit.ts).
+      if (imageFitVerdict({ estimateBytes: estimate, freeBytes: gpu.freeBytes, creditedBytes: 0 }).verdict === "fits") return fits();
+      // The app's own ComfyUI is the engine this job runs on: the sentence never says to close it.
+      const others = (gpu.tenants ?? []).filter((tenant) => !(owned !== undefined && tenant.pid === owned.pid));
+      const smaller = smallerFit(knownFiles(), estimate, gpu.freeBytes, extras());
+      // What stayed in the app's Ollama is this app's to wait for; an unreadable /api/ps claims nothing.
+      const said = fitSentence(estimate, gpu.freeBytes, others, handoff === undefined ? [] : handoff.stayed, smaller);
+      throw imageFitError(estimate, gpu.freeBytes, gpu.holders, handoff?.engine === "busy" ? `${said} ${ENGINE_BUSY_NOTE}` : said);
+    };
+    const memory = deps.memory;
+    if (memory === undefined) {
+      await decide();
+      return want;
+    }
+    return memory.gate(async () => {
+      try {
+        await decide();
+      } catch (error) {
+        memory.ended();
+        throw error;
       }
-      // No measured row for the MainPID (not listed, or [N/A]): ComfyUI's own torch reservation is still only its memory.
-      bytes ??= stats.devices[0]?.torch_vram_total ?? 0;
-      return Number.isFinite(bytes) ? Math.max(0, bytes) : 0;
-    };
-    let gpu = await measure();
-    let credited = resident(gpu);
-    let need = Math.max(0, estimate - credited);
-    if (!Number.isFinite(gpu.freeBytes) || gpu.freeBytes < 0) throw new Error("GPU free memory could not be measured. Retry when the GPU status is available.");
-    const remeasure = async () => {
-      gpu = await measure();
-      credited = resident(gpu);
-      need = Math.max(0, estimate - credited);
-    };
-    // The picker's mark comes from the same function (contracts/image-fit.ts).
-    const fits = () => imageFitVerdict({ estimateBytes: estimate, freeBytes: gpu.freeBytes, creditedBytes: credited }).verdict === "fits";
-    let models: string[] = [];
-    if (!fits()) {
-      models = [...new Set(await deps.imageMayUnload())];
-      signal.throwIfAborted();
-      const ollama = deps.ollamaUrl();
-      if (ollama && models.length > 0) {
-        freeing(true);
-        for (const model of models) {
-          signal.throwIfAborted();
-          const response = await (deps.fetch ?? fetch)(`${ollama.replace(/\/$/, "")}/api/generate`, {
-            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model, keep_alive: 0 }),
-            signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
-          });
-          if (!response.ok) throw new Error(`Could not unload app chat model ${model}: Ollama HTTP ${response.status}.`);
-          await response.arrayBuffer();
-          deps.onModelUnloaded?.(model);
-        }
-        // Ollama answers before its runner has handed the memory back: read until it shows, or the bound passes.
-        const deadline = Date.now() + (deps.swapWaitMs ?? SWAP_WAIT_MS);
-        for (;;) {
-          await remeasure();
-          if (!Number.isFinite(gpu.freeBytes) || gpu.freeBytes < 0 || fits() || Date.now() >= deadline) break;
-          await delay(deps.swapPollMs ?? SWAP_POLL_MS, undefined, { signal });
-        }
-        // a refusal's or a bad reading's own event ends the step otherwise
-        if (Number.isFinite(gpu.freeBytes) && gpu.freeBytes >= 0 && fits()) freeing(false);
-      } else await remeasure();
-    }
-    signal.throwIfAborted();
-    if (!Number.isFinite(gpu.freeBytes) || gpu.freeBytes < 0) throw new Error("GPU free memory could not be measured after unloading app chat.");
-    if (!fits()) {
-      const others = (gpu.tenants ?? []).filter((tenant) => !(unit && unit.pid > 0 && tenant.pid === unit.pid)); // ComfyUI's own memory is credited
-      // this app's only while Ollama still lists it: an unloaded model that is gone holds nothing
-      const ours = await stillListed([...new Set([...models, ...await deps.imageMayUnload()])], signal);
-      const smaller = smallerFit(knownFiles(), estimate, gpu.freeBytes + credited, extras());
-      throw imageFitError(estimate, credited, gpu.freeBytes, gpu.holders, fitSentence(need, gpu.freeBytes, others, ours, smaller));
-    }
-  };
-  /** Of `models`, the ones Ollama's /api/ps still lists; undefined when that list cannot be read. */
-  const stillListed = async (models: readonly string[], signal: AbortSignal): Promise<string[] | undefined> => {
-    const ollama = deps.ollamaUrl();
-    if (models.length === 0) return [];
-    if (!ollama) return undefined;
-    try {
-      const response = await (deps.fetch ?? fetch)(`${ollama.replace(/\/$/, "")}/api/ps`, { signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) });
-      if (!response.ok) return undefined;
-      const body = await response.json() as { models?: readonly { name?: unknown }[] };
-      const listed = new Set((body.models ?? []).flatMap((m) => typeof m.name === "string" ? [canonicalTag(m.name)] : []));
-      return models.filter((model) => listed.has(canonicalTag(model)));
-    } catch {
-      signal.throwIfAborted();
-      return undefined;
-    }
+      memory.stage(want, "loading");
+      return want;
+    });
   };
   const ensure = async (baseUrl: string, managed: boolean, signal: AbortSignal) => {
     const comfy = client(baseUrl);
@@ -653,6 +605,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     const baseUrl = owned.baseUrl;
     owned = undefined;
     clearIdle();
+    deps.memory?.engineGone();
     if (jobs.size === 0) update({ state: "stopped", owner: "none", baseUrl, detail: "ComfyUI stopped on its own. It starts again when you make an image; its log says why." });
   });
   const module: ImageModule = {
@@ -763,6 +716,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       let timeout: ReturnType<typeof setTimeout> | undefined;
       let timedOut = false;
       let stage = "image-config";
+      /** The setup this job handed memory to, while it loads: settled at done, ended on a failure. */
+      let staged: Want | undefined;
       const event = (state: ImageEvent["state"], rest: Partial<ImageEvent> = {}, picture?: PictureFacts) => {
         const payload: ImageEvent = { jobId, ...params.threadId ? { threadId: params.threadId } : {}, state, choice, ...same(choice, sent) ? {} : { sent }, ...group ? { group } : {}, ...rest };
         deps.store.saveImageJob(payload, prompt, picture);
@@ -808,21 +763,28 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             const early = unset && knownFiles() === undefined ? await ensure(cfg.baseUrl, cfg.managed, signal) : undefined;
             if (early) await read(early);
             if (unset) await settle();
+            // One answer, before ComfyUI starts: everything else leaves, then the reading decides.
             stage = "image-fit";
-            await fit(cfg, size.bytes, signal, freeing);
+            staged = await fit(cfg, size.bytes, { kind: "image", setup: imageSetup(choice) }, signal, freeing);
             stage = "image-missing";
             const comfy = early ?? await ensure(cfg.baseUrl, cfg.managed, signal);
             // read before: the read now ComfyUI is up catches files gone since
-            if (unset && !early) { await read(comfy); await settle(); }
+            if (unset && !early) {
+              await read(comfy);
+              const was = choice;
+              await settle();
+              // the default settled to another setup: that one is what loads, so it is the one handed off to
+              if (!same(was, choice)) {
+                stage = "image-fit";
+                staged = await fit(cfg, size.bytes, { kind: "image", setup: imageSetup(choice) }, signal, freeing);
+              }
+            }
             stage = "image-render";
             const earlier = stuck.get(cfg.baseUrl);
             if (earlier) {
               if ((await comfy.running(signal)).includes(earlier.promptId)) throw imageError("image-busy", "ComfyUI is still running an earlier image from this app that did not stop when cancelled. Wait for it to finish, then retry.");
               stuck.delete(cfg.baseUrl);
             }
-            stage = "image-fit";
-            await fit(cfg, size.bytes, signal, freeing); // startup or another GPU app may have changed the room
-            stage = "image-render";
             update({ state: "busy", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
             // The run time is ComfyUI's time making the picture, not the wait before it.
             const started = performance.now();
@@ -842,11 +804,17 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             // a default is kept as settled once it has made a picture; the threads.changed below says so
             if (unset && pinIn !== undefined) deps.store.fillImageChoice(pinIn, choice);
             const made = await pngFacts(bytes) ?? size;
+            // the engine holds this setup now: the one thing in memory
+            if (staged !== undefined) deps.memory?.settled(staged);
+            staged = undefined;
             event("done", { progress: 1, imagePath, runMs }, { width: made.width, height: made.height, seed, ...steps === undefined ? {} : { steps }, runMs, bytes: bytes.length });
             if (params.threadId) emit("threads.changed", { threadId: params.threadId });
             update({ state: "ready", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
           });
         } catch (error) {
+          // a load that did not finish: what the engine holds is unknown, and the next handoff asks it to free
+          if (staged !== undefined) deps.memory?.ended();
+          staged = undefined;
           const message = timedOut && !controller.signal.aborted ? "Image exceeded its run timeout. Retry when ComfyUI is ready." : detail(error);
           const cancelDetail = error instanceof Error && "cancelDetail" in error && typeof error.cancelDetail === "string" ? error.cancelDetail : undefined;
           const stuckPromptId = error instanceof Error && "stuckPromptId" in error && typeof error.stuckPromptId === "string" ? error.stuckPromptId : undefined;
@@ -928,6 +896,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
         forgetGpuReadings();
         const baseUrl = owned.baseUrl; owned = undefined;
         stuck.delete(baseUrl);
+        deps.memory?.engineGone();
         update({ state: "stopped", owner: "none", baseUrl });
       }).catch((error: unknown) => {
         // A cancelled reclaim leaves ComfyUI to its idle timer.
@@ -936,6 +905,24 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       });
     },
     reclaimable: () => (owned && jobs.size === 0 && !closed ? owned.pid : undefined),
+    /**
+     * The handoff's ask (gpu/memory.ts), inside its gate: a ComfyUI on this computer that answers
+     * frees every model (POST /free) while its queue is empty, whoever started it. It is never
+     * stopped, restarted or reconfigured here. A ComfyUI on another computer holds none of this
+     * GPU's memory: absent, like none at all.
+     */
+    async leave(signal) {
+      let cfg: ReturnType<typeof config>;
+      try { cfg = config(); }
+      catch { return "absent"; }
+      if (!cfg.enabled) return "absent";
+      if (!await isLocalHost(cfg.hostname, deps.localAddresses?.() ?? localAddresses(), deps.lookupHost ?? lookupHost, signal)) return "absent";
+      const comfy = client(cfg.baseUrl);
+      if (!await comfy.healthy()) return "absent";
+      signal.throwIfAborted();
+      const answer: EngineLeave = await comfy.free(signal);
+      return answer;
+    },
     killRuntimeNow() {
       if (!owned) return;
       const { pid, baseUrl } = owned;

@@ -205,6 +205,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "settings.model.update": { params: { model: "qwen3.5:9b", patch: { temperature: 0.6 } }, result: { ...settings, modelSettings: { "qwen3.5:9b": { temperature: 0.6 } } } },
   "settings.modelDefaults": { params: { model: "qwen3.5:9b" }, result: { system: "", parameters: "temperature 0.8" } },
   "gpu.status": { params: {}, result: gpu },
+  "memory.status": { params: {}, result: { resident: { kind: "chat", model: "qwen3.5:9b", numCtx: 16384, since: 1 } } },
   "models.catalog": {
     params: {},
     result: [
@@ -358,6 +359,10 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
   "models.load": [
     { model: "qwen3.5:9b", numCtx: 16384, state: "loading" },
     { model: "qwen3.5:9b", numCtx: 32768, state: "error", message: "Not enough memory at 32k" },
+  ],
+  "memory.changed": [
+    { resident: { kind: "image", setup: "z-image-int8 1024x1024", since: 2 }, handoff: { to: { kind: "chat", model: "qwen3.5:9b", numCtx: 16384 }, stage: "leaving" } },
+    {},
   ],
   "models.speed": [[{ model: "qwen3.5:9b", tokensPerSecond: 101.6, replies: 8 }, { model: "gemma3:4b", tokensPerSecond: 8.4, replies: 1 }], []],
   "models.measures": [[measured], []],
