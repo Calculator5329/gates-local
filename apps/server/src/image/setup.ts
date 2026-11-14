@@ -61,6 +61,8 @@ export interface ImageSetupDeps {
   gpuStatus(): Promise<GpuStatus>;
   /** Settings' ComfyUI address: while one is set, the app reads it and not its own engine, so there is nothing to set up. */
   settingsAddress(): string | undefined;
+  /** Settings' picked folder for image downloads: the model goes there, not the app's drive (the download checks that drive itself). */
+  pickedFolder?(): string | undefined;
   push(channel: "image.setup", payload: ImageSetupProgress): void;
   freeBytes?(dir: string): Promise<number>;
   log?(line: string): void;
@@ -95,7 +97,7 @@ export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
   let last: ImageSetupProgress | undefined;
   let running: Promise<void> | undefined;
   /** The model step, while it runs: its setup, the bytes before it, and the whole run's. */
-  let model: { preset: string; before: number; bytes: number; total: number } | undefined;
+  let model: { preset: string; before: number; bytes: number; total: number; end(ended: { ok: boolean; message?: string }): void } | undefined;
   const say = (p: ImageSetupProgress) => { last = p; deps.push("image.setup", p); };
 
   const read = async (): Promise<{ info: ImageSetup; plan?: EnginePlan; cpu?: boolean }> => {
@@ -124,7 +126,7 @@ export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
         model: { preset: preset.id, name: preset.name, bytes },
         ...cpu ? { cpu: CPU_SECONDS } : {},
         ...freeBytes === undefined ? {} : { freeBytes },
-        needBytes: (installed ? 0 : engineBytes * UNPACK_FACTOR) + bytes,
+        needBytes: (installed ? 0 : engineBytes * UNPACK_FACTOR) + (deps.pickedFolder?.() === undefined ? bytes : 0),
         ...progress,
       },
     };
@@ -149,12 +151,19 @@ export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
           else await plan.run(onProgress, controller.signal);
         }
         deps.setDevice(cpu === true ? "cpu" : "gpu");
-        say({ step: "starting", completedBytes: engineBytes, totalBytes: total });
-        await deps.image.start();
-        model = { preset, before: engineBytes, bytes: info.model!.bytes, total };
+        // The model is fetched with the engine stopped (a download never needs it), then the engine
+        // starts once, to read what it has; its idle stop ends it.
+        let end!: (ended: { ok: boolean; message?: string }) => void;
+        const ended = new Promise<{ ok: boolean; message?: string }>((resolve) => { end = resolve; });
+        model = { preset, before: engineBytes, bytes: info.model!.bytes, total, end };
         say({ step: "model", completedBytes: engineBytes, totalBytes: total });
         const { files } = await deps.image.download(preset);
-        if (files.length === 0) { model = undefined; say({ step: "done", completedBytes: total, totalBytes: total }); }
+        const result = files.length === 0 ? { ok: true } : await ended;
+        model = undefined;
+        if (!result.ok) throw new Error(result.message ?? "The model download stopped.");
+        say({ step: "starting", completedBytes: total, totalBytes: total });
+        await deps.image.start();
+        say({ step: "done", completedBytes: total, totalBytes: total });
       })().catch((error: unknown) => {
         model = undefined;
         const message = error instanceof Error ? error.message : String(error);
@@ -172,10 +181,11 @@ export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
         : (p.file - 1 + (p.totalBytes ? p.completedBytes / p.totalBytes : 0)) / p.files;
       const completedBytes = model.before + Math.round(Math.min(1, share) * model.bytes);
       const { total } = model;
+      // the run says what follows the download's end: the engine's start, or the error
       if (p.ended === true) {
+        if (p.state !== "done") say({ step: "model", completedBytes, totalBytes: total });
+        model.end({ ok: p.state === "done", ...p.message === undefined ? {} : { message: p.message } });
         model = undefined;
-        if (p.state === "done") say({ step: "done", completedBytes: total, totalBytes: total });
-        else say({ step: "error", completedBytes, totalBytes: total, message: p.message ?? "The model download stopped." });
       } else say({ step: "model", completedBytes, totalBytes: total });
     },
   };

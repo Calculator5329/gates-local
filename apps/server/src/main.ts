@@ -279,7 +279,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
   }
   const { runtime, catalog } = services;
   // The app's own ComfyUI (image/own.ts), on a port free at startup; Set up images installs it.
-  const own = createOwnComfy({ appDataDir: dataDir, port: await freePort(), ...engineTest ? { address: engineTest.address } : {} });
+  const own = createOwnComfy({ appDataDir: dataDir, port: await freePort(), extraModels: () => services.settings.get().imageFolder, ...engineTest ? { address: engineTest.address } : {} });
   let imageSetup: ImageSetupModule | undefined;
   const image = createImageModule({
     admit: admission.admit,
@@ -322,6 +322,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     },
     gpuStatus: () => services.gpu.read(),
     settingsAddress: () => services.settings.get().comfyUrl,
+    pickedFolder: () => services.settings.get().imageFolder,
     push: (channel, payload) => server?.push(channel, payload),
     setDevice: (device) => writeDevice(dataDir, device),
     log: (line) => log(`image setup ${line}`),

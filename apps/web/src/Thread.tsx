@@ -568,20 +568,38 @@ function ImageGroup({ first, thread, origin, token }: { first: Message; thread: 
   );
 }
 
-/** What a pending card is doing, as a screen reader hears it; on screen a running job is the spinner and its numbers. */
+/** What a pending card is doing, as a screen reader hears it: steady words, not the ticking line. */
 function jobWords(job: ImageEvent): string {
   if (job.phase === "freeing") return "Freeing memory";
   if (job.state === "queued") return "Waiting for the GPU";
-  const pct = Math.round((job.progress ?? 0) * 100);
-  return pct > 0 ? `Making image · ${pct}%` : "Making image";
+  return "Making image";
 }
 
-/** A running job beside its spinner: the percent once there is one, and the seconds since it was asked for. */
-function RunningNumbers({ job, since }: { job: ImageEvent; since: number }) {
+/**
+ * A pending card's stage, only as the engine reported it (WIN-MEM-06): its queue, a model load,
+ * the prompt read, each sampling step, the decode. With nothing reported, only that it works.
+ * A load before any sampling is the one place the first run's wait is explained.
+ */
+export function stageWords(job: ImageEvent, sampled: boolean): string {
+  if (job.phase === "freeing") return "Freeing memory";
+  if (job.state === "queued") return "Waiting for the GPU";
+  switch (job.stage) {
+    case "queued": return "In the queue";
+    case "loading": return sampled ? "Loading the model" : "First run: loading the model";
+    case "encoding": return "Reading the prompt";
+    case "sampling": return job.steps === undefined ? "Sampling" : `Sampling ${job.steps.done}/${job.steps.total}`;
+    case "decoding": return "Decoding";
+    default: return "Working";
+  }
+}
+
+/** A pending card's live line, in a chat reply's form: a lit dot, the stage, the running time. Only words and digits change. */
+function JobLine({ job, since }: { job: ImageEvent; since: number }) {
   const now = useTicker(1000, true);
-  const pct = Math.round((job.progress ?? 0) * 100);
+  const [sampled, setSampled] = useState(false);
+  useEffect(() => { if (job.stage === "sampling" || job.stage === "decoding") setSampled(true); }, [job.stage]);
   const secs = Math.max(0, Math.floor((now - since) / 1000));
-  return <p aria-hidden="true">{pct > 0 ? `${pct}% · ${secs} s` : `${secs} s`}</p>;
+  return <p className="image-job-live" aria-hidden="true"><i className="lv-dot" /><span className="lv-w">{stageWords(job, sampled)}</span><span className="lv-t">{` · ${secs} s`}</span></p>;
 }
 
 /** The first card after the user message an Image turn sent: the card that turn's Stop cancels. */
@@ -634,8 +652,7 @@ function ImageJob({ msg, thread, origin, token, tile = false }: { msg: Message; 
     {/* the model and size belong to the result: while it runs the composer already names them */}
     {ran === undefined || pending || line || tile ? null : <span className="image-job-model">{model} · {sizeLabel(ran.width, ran.height)}</span>}
     {job.state === "done" && job.imagePath ? <ImageOut path={job.imagePath} origin={origin} token={token} /> : <div className="image-job-state" role="status" aria-label={pending ? jobWords(job) : undefined}>
-      <Icon id={pending ? "spin" : "alert"} cls={pending ? "spin" : undefined} />
-      {job.state === "running" && job.phase === undefined ? <RunningNumbers job={job} since={since} /> : <p>{pending ? jobWords(job) : job.message ?? "The image did not finish; try again."}</p>}
+      {pending ? <JobLine job={job} since={since} /> : <><Icon id="alert" /><p>{job.message ?? "The image did not finish; try again."}</p></>}
       {stopCovers ? null : <button type="button" className="qa" data-testid="chat.image-job.action" disabled={busy} onClick={() => void action()}>{pending ? "Cancel image" : "Try again"}</button>}
       {error ? <p>{error}</p> : null}
     </div>}

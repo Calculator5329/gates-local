@@ -181,14 +181,13 @@ test("(c) with room free the same sizes are green and fit", async ({ page, open 
 
 // Guards the owner's report (d): a greyed row's reason was cut off.
 test("(d) a greyed row's reason that does not fit shows whole in its tip", async ({ page, open }, info) => {
+  // no model folders reported and none picked: a download is refused, never guessed onto a drive
   comfy.bare();
-  comfy.withFolders();
   const picker = await openPicker(page, open);
   await picker.getByTestId("image.picker.other").click();
   const klein = picker.locator('.pk-r[data-preset="flux2-klein-4b"]');
-  comfy.down(true);
   await klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" }).click();
-  const reason = "Start ComfyUI on this computer first: downloads go into its model folders.";
+  const reason = "ComfyUI has not said where its models go. Pick a folder for the image files first.";
   await expect(klein.locator(".pk-why")).toHaveText(reason);
   await shot(page, info, "finding-d.png", klein);
   expect(await klein.locator(".pk-why-t").evaluate((el) => el.scrollWidth > el.clientWidth), "the reason is cut on the row").toBe(true);

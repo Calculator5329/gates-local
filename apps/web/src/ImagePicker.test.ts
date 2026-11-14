@@ -1,5 +1,5 @@
 // The image picker's rows and buttons, read from its element tree with React's hooks stubbed (as
-// FirstRun-actions.test.ts does): what a download shows on each row, which controls a listener
+// FirstRun-actions.test.ts does): what a download shows once, in the disk row, and on each row, which controls a listener
 // that refuses their methods (the phone's) offers, and the empty picker's button.
 import { isValidElement, type ReactElement } from "react";
 import type { ImageDownload, ImagePreset } from "@gates-local/contracts";
@@ -15,8 +15,11 @@ vi.mock("react", async (original) => ({
   useState: (initial: unknown) => [initial, () => undefined],
 }));
 vi.mock("./store.ts", () => ({ NA: "na", useStore: (fn: (s: unknown) => unknown) => fn(probe.state) }));
-vi.mock("./session.ts", () => Object.fromEntries(["downloadImageSetup", "loadImagePresets", "pickImage", "startImage", "stopImageDownload"]
-  .map((name) => [name, async () => { probe.calls.push(name); return null; }])));
+vi.mock("./session.ts", () => ({
+  ...Object.fromEntries(["downloadImageSetup", "loadImagePresets", "pickImage", "saveImageFolder", "startImage", "stopImageDownload"]
+    .map((name) => [name, async () => { probe.calls.push(name); return null; }])),
+  folderDialog: () => undefined,
+}));
 vi.mock("./Sidebar.tsx", () => ({ focusComposer: () => undefined }));
 vi.mock("./icons.tsx", () => ({ Icon: () => null }));
 vi.mock("./ImageMark.tsx", () => ({ ImageMark: () => null }));
@@ -24,7 +27,9 @@ vi.mock("./picker-models.ts", () => ({ memoryRuler: () => undefined }));
 vi.mock("./image-choice.ts", () => ({ chosenImage: () => undefined, imageFit: () => undefined, sizeLabel: (w: number, h: number) => `${w}×${h}` }));
 vi.mock("./ui.tsx", () => ({ PHONE: "", closePop: () => undefined, closeTip: () => undefined, isTouch: () => false, tabStops: () => [], useMedia: () => false }));
 
-const { ImagePicker } = await import("./ImagePicker.tsx");
+const { ImagePicker, middle } = await import("./ImagePicker.tsx");
+const { gb, timeLeft } = await import("./format.ts");
+const GIB = 1024 ** 3;
 
 type Node = ReactElement<Record<string, unknown>>;
 function nodes(node: unknown): Node[] {
@@ -62,31 +67,63 @@ function picker(over: Record<string, unknown> = {}) {
 }
 beforeEach(() => { probe.calls = []; });
 
-it("a running download is one bar for the whole setup: the setup's bytes, not the file's", () => {
-  picker({ imageDownload: running });
-  const klein = row("flux2-klein-4b").all;
-  expect(bar(klein)?.props["aria-valuenow"]).toBe(25);
-  expect(text(row("flux2-klein-4b").node)).toContain("File 2/3 · 25% · 10 s left");
+const disk = () => {
+  const found = tree().find((n) => n.props["data-testid"] === "image.picker.disk");
+  if (!found) throw new Error("no disk row");
+  return { node: found, all: nodes(found.props["children"]) };
+};
+const bars = () => tree().filter((n) => n.props["role"] === "progressbar");
+
+it("WIN-SETUP-01: seven setups that load the same files show one download, once: one bar in the disk row, each row only waiting", () => {
+  const seven = Array.from({ length: 7 }, (_, i) => off(`klein-${i + 1}`, `FLUX.2 Klein 4B ${i + 1}`, KLEIN_FILES));
+  const setup = { ...running, preset: "klein-1", setupCompletedBytes: 2 * GIB, setupTotalBytes: 8 * GIB, bytesPerSecond: 100 * 1024 ** 2 };
+  picker({ imagePresets: { presets: [ready], others: [...seven, others[2]], readAt: 1, disk: { folder: "F:\\ComfyUI\\models", freeBytes: 876 * GIB, picked: false } }, imageDownload: setup });
+  expect(bars()).toHaveLength(1);
+  expect(bar(disk().all)?.props["aria-valuenow"]).toBe(25);
+  expect(text(disk().node)).toContain(`${gb(2 * GIB)} of ${gb(8 * GIB)} · ${timeLeft((6 * GIB) / (100 * 1024 ** 2))} left`);
+  expect(labels(disk().all)).toContain("Stop downloading FLUX.2 Klein 4B 1");
+  for (const p of seven) {
+    expect(text(row(p.id).node)).toBe(`FLUX.2 Klein 4B ${p.id.slice(-1)}Waiting on the download`);
+    expect(labels(row(p.id).all).filter((l) => /^(Download|Stop|Resume)/.test(l))).toEqual([]);
+  }
+  // a setup that needs other files keeps its Download, held while the one download runs
+  expect(row("other").all.find((n) => n.props["aria-label"] === "Download Other")?.props["disabled"]).toBe(true);
 });
 
-it("a row whose files the running download brings shows its progress, with no button; one that needs others keeps its Download, held", () => {
-  picker({ imageDownload: running });
-  const portraits = row("flux2-klein-4b-portraits").all;
-  expect(bar(portraits)?.props["aria-valuenow"]).toBe(25);
-  expect(labels(portraits).filter((l) => l.startsWith("Download") || l.startsWith("Stop"))).toEqual([]);
-  expect(text(row("flux2-klein-4b-portraits").node)).not.toContain("Needs");
-  const other = row("other").all;
-  expect(bar(other)).toBeUndefined();
-  expect(other.find((n) => n.props["aria-label"] === "Download Other")?.props["disabled"]).toBe(true);
-  expect(labels(row("flux2-klein-4b").all)).toContain("Stop downloading FLUX.2 Klein 4B");
+it("WIN-SETUP-01: before any download the disk row says where the files go, what is left to fetch and what is free there, red when short", () => {
+  const left = 4_070_624_520 + 3_848_213_998 + 336_211_292;
+  const klein = { ...others[0]!, needs: { files: KLEIN_FILES, download: true, bytes: left, leftBytes: left } };
+  const folder = "F:\\ComfyUI_windows_portable\\ComfyUI\\models\\diffusion_models";
+  picker({ imagePresets: { presets: [], others: [klein], readAt: 1, disk: { folder, freeBytes: Math.round(4.6 * GIB), picked: false } } });
+  const row0 = disk();
+  const shown = row0.all.find((n) => n.props["data-testid"] === "image.picker.disk-folder")!;
+  expect(text(shown)).toBe(middle(folder));
+  expect(text(shown).length).toBeLessThan(folder.length);
+  expect(shown.props["data-tipt"]).toBe(folder);
+  expect(text(row0.node)).toContain(`${gb(left)} to fetch · ${gb(4.6 * GIB)} free on disk`);
+  expect(row0.all.find((n) => n.props["data-testid"] === "image.picker.disk-free")?.props["className"]).toBe("short");
+  expect(labels(row0.all)).toContain("Change the download folder");
+  expect(bars()).toHaveLength(0);
+  picker({ imagePresets: { presets: [], others: [klein], readAt: 1, disk: { folder: "F:\\models", freeBytes: 876 * GIB, picked: true } } });
+  expect(disk().all.find((n) => n.props["data-testid"] === "image.picker.disk-free")?.props["className"]).toBeUndefined();
 });
 
-it("a listener that refuses downloads (the phone's) shows no Download or Stop: the rows keep their reasons and progress", () => {
+it("a stopped download keeps its part: the bar stays there, no Stop, and the row's button says Resume", () => {
+  picker({ imagePresets: { presets: [ready], others, readAt: 1, disk: { folder: "F:\\models", freeBytes: 876 * GIB, picked: false } }, imageDownload: { ...running, state: "cancelled", ended: true } });
+  expect(bars()).toHaveLength(1);
+  expect(bar(disk().all)?.props["aria-valuenow"]).toBe(25);
+  expect(labels(disk().all).filter((l) => l.startsWith("Stop"))).toEqual([]);
+  expect(labels(row("flux2-klein-4b").all)).toContain("Resume downloading FLUX.2 Klein 4B");
+  expect(text(row("flux2-klein-4b").node)).toContain("Needs 3 files");
+});
+
+it("a listener that refuses downloads (the phone's) shows no Download, Stop or disk row: the rows keep their reasons", () => {
   picker({ unavailable: { "image.download": true, "image.stopDownload": true, "image.start": true } });
   for (const id of ["flux2-klein-4b", "other"]) expect(labels(row(id).all).filter((l) => /^(Download|Stop)/.test(l))).toEqual([]);
   expect(text(row("other").node)).toContain("Needs 1 file");
-  picker({ imageDownload: running, unavailable: { "image.download": true, "image.stopDownload": true } });
-  expect(bar(row("flux2-klein-4b").all)?.props["aria-valuenow"]).toBe(25);
+  picker({ imagePresets: { presets: [ready], others, readAt: 1, disk: { folder: "F:\\models", picked: false } }, imageDownload: running, unavailable: { "image.download": true, "image.stopDownload": true } });
+  expect(tree().some((n) => n.props["data-testid"] === "image.picker.disk")).toBe(false);
+  expect(text(row("flux2-klein-4b").node)).toContain("Waiting on the download");
   expect(labels(row("flux2-klein-4b").all).filter((l) => /^(Download|Stop)/.test(l))).toEqual([]);
 });
 

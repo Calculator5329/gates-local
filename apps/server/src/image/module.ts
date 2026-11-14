@@ -17,11 +17,19 @@ import { pngFacts } from "../pictures/png.ts";
 import type { PictureFacts } from "../pictures/table.ts";
 import type { ThreadStore } from "../threads/store.ts";
 import { createComfyClient, type ComfyClientDeps } from "./client.ts";
-import { downloadFile, type DownloadOptions } from "./download.ts";
+import { downloadFile, haveFile, partBytes, sizeOf, volumeFree, volumeOf, type DownloadOptions } from "./download.ts";
 import { isLocalComfy } from "./installed.ts";
-import { appPreset, cardBytes, DEFAULT_CHOICE, defaultChoice, describeChoice, isDefaultChoice, listPresets, MIN_ROOM, NO_GPU, resolveChoice, SLOW, smallerFit, tiersFor, workflowPreset, type ComfyLists, type KnownWorkflow, type Preset } from "./presets.ts";
+import { appPreset, cardBytes, DEFAULT_CHOICE, defaultChoice, describeChoice, isDefaultChoice, listPresets, MIN_ROOM, NO_GPU, presetFiles, resolveChoice, SLOW, smallerFit, tiersFor, workflowPreset, type ComfyLists, type KnownWorkflow, type Preset } from "./presets.ts";
 import { createComfyService, type ComfyService } from "./service.ts";
-import type { OwnComfy } from "./own.ts";
+import { MODEL_KINDS, type OwnComfy } from "./own.ts";
+
+/** The deepest folder every one of `dirs` is in (the first itself, when there is one). */
+export function sharedFolder(dirs: readonly string[]): string {
+  let at = path.resolve(dirs[0] ?? ".");
+  const inside = (dir: string) => { const rel = path.relative(at, path.resolve(dir)); return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel)); };
+  while (!dirs.every(inside) && path.dirname(at) !== at) at = path.dirname(at);
+  return at;
+}
 
 /**
  * ComfyUI's last file lists and node classes, and the workflows it had (its templates and the
@@ -32,7 +40,8 @@ import type { OwnComfy } from "./own.ts";
 const FILES_NAME = "image-files.json";
 const Source = S.Struct({ directory: S.optional(S.String), url: S.optional(S.String), bytes: S.optional(S.Finite), sha256: S.optional(S.String) });
 const Workflow = S.Struct({ id: S.String, name: S.String, group: S.String, graph: S.optional(S.Unknown), why: S.optional(S.String), sources: S.optional(S.Record(S.String, Source)), family: S.optional(S.String) });
-const KnownFiles = S.Struct({ baseUrl: S.String, readAt: S.Finite, files: S.Record(S.String, S.Array(S.String)), classes: S.optional(S.Array(S.String)), workflows: S.optional(S.Array(Workflow)) });
+// folders: its model folders by kind (/internal/folder_paths), so a download needs no running ComfyUI
+const KnownFiles = S.Struct({ baseUrl: S.String, readAt: S.Finite, files: S.Record(S.String, S.Array(S.String)), classes: S.optional(S.Array(S.String)), workflows: S.optional(S.Array(Workflow)), folders: S.optional(S.Record(S.String, S.Array(S.String))) });
 type KnownFiles = typeof KnownFiles.Type;
 
 export interface ImageDeps extends ComfyClientDeps {
@@ -43,7 +52,7 @@ export interface ImageDeps extends ComfyClientDeps {
   push: Push;
   /** The finished picture's thumbnail (pictures/thumbs.ts), made before done; a failure is logged and the picture kept. */
   thumbnail?(jobId: string, png: Buffer): Promise<void>;
-  settings(): { imageGen: boolean; comfyUrl?: string; imageChoice?: ImageChoice };
+  settings(): { imageGen: boolean; comfyUrl?: string; imageChoice?: ImageChoice; imageFolder?: string };
   /**
    * The chat models this app may unload for an image (the loader's imageMayUnload()): ones it
    * loaded or ran a turn on, or any in an Ollama it started. Never another program's.
@@ -169,6 +178,8 @@ const DEFAULT_URL = "http://127.0.0.1:8188";
  * refusal and Settings. It names no service (Windows has none) and no unit.
  */
 export const IMAGES_UNSET = "Images are not set up on this computer. No ComfyUI answered; start one, or set its address in Settings › Image generation.";
+/** An address the person set that does not answer (WIN-MEM-04): it is not running there, not missing from this computer. */
+export const notRunning = (baseUrl: string) => `ComfyUI at ${baseUrl} is not running. Start it there, then try again.`;
 
 /**
  * One spelling per IP address: lowercase, no brackets or zone, IPv6 written
@@ -323,7 +334,16 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     const url = new URL(settings.comfyUrl ?? own ?? deps.defaultUrl ?? DEFAULT_URL);
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw imageError("image-config", "Set a ComfyUI HTTP address without credentials or query parameters in Settings.");
     const baseUrl = url.href.replace(/\/$/, "");
-    return { enabled: settings.imageGen, baseUrl, managed: settings.comfyUrl === undefined && (own !== undefined || (deps.defaultUrl === undefined && baseUrl === DEFAULT_URL)), hostname: url.hostname };
+    return { enabled: settings.imageGen, baseUrl, managed: settings.comfyUrl === undefined && (own !== undefined || (deps.defaultUrl === undefined && baseUrl === DEFAULT_URL)), hostname: url.hostname, addressSet: settings.comfyUrl !== undefined };
+  };
+  /** Nothing answers and there is nothing to start: an address the person set is not running there; with none, images are not set up. */
+  const missingWords = (baseUrl: string, asStatus = false) => {
+    let set = false;
+    try { set = config().addressSet; } catch { /* a bad address says so on its own */ }
+    return !set ? IMAGES_UNSET : asStatus ? `No ComfyUI answers at ${baseUrl}.` : notRunning(baseUrl);
+  };
+  const marked = (baseUrl: string): { addressSet?: true } => {
+    try { return config().addressSet && config().baseUrl === baseUrl ? { addressSet: true } : {}; } catch { return {}; }
   };
   /** What starts and stops the ComfyUI at `baseUrl`: the app's own engine at its address, else the unit. */
   const serviceAt = (baseUrl: string): ComfyService =>
@@ -334,11 +354,12 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   try { known = S.decodeUnknownSync(KnownFiles)(JSON.parse(readFileSync(filesPath, "utf8"))); }
   catch { known = undefined; /* absent or unreadable: read again from ComfyUI */ }
   /** Workflows from a source that was not read this time are kept from the last read at this address. */
-  const remember = (baseUrl: string, lists: ComfyLists, read: { templates?: readonly KnownWorkflow[]; saved?: readonly KnownWorkflow[]; installed?: readonly KnownWorkflow[] } = {}) => {
+  const remember = (baseUrl: string, lists: ComfyLists, read: { templates?: readonly KnownWorkflow[]; saved?: readonly KnownWorkflow[]; installed?: readonly KnownWorkflow[]; folders?: Record<string, string[]> } = {}) => {
     const before = known?.baseUrl === baseUrl ? known.workflows ?? [] : [];
     const kept = (prefix: string, fresh: readonly KnownWorkflow[] | undefined) => fresh ?? before.filter((w) => w.id.startsWith(prefix));
     const workflows = [...kept("template:", read.templates), ...kept("saved:", read.saved), ...kept("file:", read.installed)];
-    known = { baseUrl, readAt: Date.now(), files: lists.files, ...lists.classes === undefined ? {} : { classes: lists.classes }, ...workflows.length > 0 ? { workflows } : {} };
+    const folders = read.folders ?? (known?.baseUrl === baseUrl ? known.folders : undefined);
+    known = { baseUrl, readAt: Date.now(), files: lists.files, ...lists.classes === undefined ? {} : { classes: lists.classes }, ...workflows.length > 0 ? { workflows } : {}, ...folders === undefined ? {} : { folders } };
     try {
       const tmp = `${filesPath}.${process.pid}.tmp`;
       writeFileSync(tmp, JSON.stringify(known));
@@ -379,14 +400,14 @@ export function createImageModule(deps: ImageDeps): ImageModule {
         if (unit.pid !== owned.pid || !unit.active) owned = undefined;
       }
       if (jobs.size > 0) return status;
-      return update({ state: "ready", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
+      return update({ state: "ready", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl, ...marked(cfg.baseUrl) });
     }
     const unit = cfg.managed ? await serviceAt(cfg.baseUrl).inspect() : { present: false, active: false, activeState: "unknown", pid: 0 };
     const starting =unit.present && !["inactive", "failed"].includes(unit.activeState);
     if (jobs.size > 0) return status;
     if (owned?.baseUrl === cfg.baseUrl && (!unit.active || unit.pid !== owned.pid)) owned = undefined;
-    return update({ state: starting ? "starting" : unit.present ? "stopped" : "missing", owner: owned?.baseUrl === cfg.baseUrl ? "app" : starting ? "external" : "none", baseUrl: cfg.baseUrl,
-      detail: starting ? "ComfyUI is running or changing state but its HTTP interface is not ready yet." : unit.present ? "ComfyUI will start when you make an image." : IMAGES_UNSET });
+    return update({ state: starting ? "starting" : unit.present ? "stopped" : "missing", owner: owned?.baseUrl === cfg.baseUrl ? "app" : starting ? "external" : "none", baseUrl: cfg.baseUrl, ...marked(cfg.baseUrl),
+      detail: starting ? "ComfyUI is running or changing state but its HTTP interface is not ready yet." : unit.present ? "ComfyUI will start when you make an image." : missingWords(cfg.baseUrl, true) });
   };
   const measure = deps.readGpu ?? (async () => {
     const gpu = await readGpu(deps.runNvidiaSmi);
@@ -488,7 +509,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       return comfy;
     }
     const before = managed ? await service.inspect() : { present: false, active: false, activeState: "unknown", pid: 0 };
-    if (!before.present) throw imageError("image-missing", IMAGES_UNSET);
+    if (!before.present) throw imageError("image-missing", missingWords(baseUrl));
     const canStart = ["inactive", "failed"].includes(before.activeState);
     update({ state: "starting", owner: owned ? "app" : canStart ? "none" : "external", baseUrl });
     signal.throwIfAborted();
@@ -524,6 +545,84 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   /** The running download: its setup, and its last push until that push ends it. */
   let downloadOf: string | undefined, lastDownload: ImageDownload | undefined;
   const say = (p: ImageDownload) => { lastDownload = p; emit("image.download", p); };
+  /** Sizes a download learned from where a file is served (a HEAD, or its own progress), by address. */
+  const learned = new Map<string, number>();
+  type Cfg = ReturnType<typeof config>;
+  /**
+   * Where image downloads go, never by guessing: Settings' picked folder; else the app's own
+   * engine's models folder (known while it is stopped); else the folders a ComfyUI on this
+   * computer last reported. `dirOf` is undefined when none of these is known, or ComfyUI is on
+   * another computer (its folders are not this one's). Each kind goes in a gates-local folder.
+   */
+  const downloadPlace = (cfg: Cfg): { root?: string; picked: boolean; dirOf?: (kind: string) => string | undefined } | undefined => {
+    if (!isLocalComfy(cfg.baseUrl)) return undefined;
+    const picked = deps.settings().imageFolder;
+    if (picked !== undefined) return { root: picked, picked: true, dirOf: (kind) => path.join(picked, kind, "gates-local") };
+    const own = serviceAt(cfg.baseUrl) === deps.own ? deps.own?.modelsDir?.() : undefined;
+    if (own !== undefined) return { root: own, picked: false, dirOf: (kind) => path.join(own, kind, "gates-local") };
+    const folders = knownFiles()?.folders;
+    const firsts = (folders === undefined ? [] : MODEL_KINDS.map((k) => folders[k]?.[0])).filter((f): f is string => f !== undefined);
+    if (folders === undefined || firsts.length === 0) return { picked: false };
+    return { root: sharedFolder(firsts), picked: false, dirOf: (kind) => { const first = folders[kind]?.[0]; return first === undefined ? undefined : path.join(first, "gates-local"); } };
+  };
+  const freeAt = (dir: string) => (deps.download?.freeBytes ?? volumeFree)(dir).then((b) => Math.floor(b));
+  /** The picker's disk row: where the files go and the room on that volume. */
+  const diskRow = async (cfg: Cfg): Promise<NonNullable<ImagePresets["disk"]> | undefined> => {
+    const place = downloadPlace(cfg);
+    if (place === undefined) return undefined;
+    if (place.root === undefined) return { picked: place.picked };
+    const free = await freeAt(place.root).catch(() => undefined);
+    return { folder: place.root, ...free === undefined ? {} : { freeBytes: free }, picked: place.picked };
+  };
+  /** One file of a download's plan: its address, and its folder here. */
+  interface Planned { readonly name: string; readonly url: string; readonly dir: string; readonly sha256?: string; readonly bytes?: number }
+  /** What is left to fetch of each file: its size less a part already there (0 for a file whole there); undefined while a size is unknown. */
+  const leftOf = (files: readonly Planned[], sizes: readonly (number | undefined)[]) => Promise.all(files.map(async (f, i) => {
+    const size = sizes[i];
+    if (await haveFile(f.dir, f.name, size)) return 0;
+    return size === undefined ? undefined : Math.max(0, size - await partBytes(f.dir, f.name, f.url));
+  }));
+  /** A file's size as far as it is known without a request: the app's record (unless records are off), else one learned. */
+  const knownSize = (f: Planned) => (deps.download?.records === false ? undefined : f.bytes) ?? learned.get(f.url);
+  /** The setup's files with an address and a folder here; a file without either is left out (the download itself says why). */
+  const plannedFiles = (id: string, names: readonly string[], cfg: Cfg): Planned[] => {
+    const preset = appPreset(id) ?? extras().find((p) => p.id === id);
+    const place = downloadPlace(cfg);
+    return names.flatMap((name) => {
+      const source = preset?.sources?.[name];
+      const dir = source?.directory === undefined ? undefined : place?.dirOf?.(source.directory);
+      return source?.url === undefined || dir === undefined ? [] : [{ name: path.basename(name), url: source.url, dir, ...source.sha256 === undefined ? {} : { sha256: source.sha256 }, ...source.bytes === undefined ? {} : { bytes: source.bytes } }];
+    });
+  };
+  /** The picker's "left to fetch" for a setup's missing files, when every one's size is known. */
+  const leftToFetch = async (id: string, names: readonly string[], cfg: Cfg): Promise<number | undefined> => {
+    const files = plannedFiles(id, names, cfg);
+    if (files.length !== names.length) return undefined;
+    const left = await leftOf(files, files.map(knownSize));
+    return left.every((b) => b !== undefined) ? left.reduce((a, b) => a + b, 0) : undefined;
+  };
+  /**
+   * The room check before any byte and again before each file: on each volume the files go to, what
+   * is left to fetch of them against what is free there. Files of unknown size are checked by
+   * their own download (download.ts), once their size is said.
+   */
+  const roomFor = async (files: readonly Planned[], sizes: readonly (number | undefined)[]) => {
+    const left = await leftOf(files, sizes);
+    const volumes = new Map<number, { dirs: string[]; need: number }>();
+    for (const [i, f] of files.entries()) {
+      const bytes = left[i];
+      if (bytes === undefined || bytes === 0) continue;
+      const volume = await volumeOf(f.dir);
+      const at = volumes.get(volume) ?? { dirs: [], need: 0 };
+      at.dirs.push(path.dirname(path.dirname(f.dir))); at.need += bytes;
+      volumes.set(volume, at);
+    }
+    for (const { dirs, need } of volumes.values()) {
+      const folder = sharedFolder(dirs);
+      const free = await freeAt(folder);
+      if (free < need) throw imageError("image-disk", `Not enough disk space in ${folder}: ${gib(need)} is left to fetch and ${gib(free)} is free.`);
+    }
+  };
   /** The last room read (imageRoom), for the default between reads; undefined until one is. */
   let lastRoom: number | undefined;
   /** This computer's memory, read with the room for a ComfyUI on this computer; undefined otherwise. */
@@ -586,17 +685,26 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       if (!cfg.enabled) return { presets: [], current: currentChoice() };
       const comfy = client(cfg.baseUrl);
       if (await comfy.healthy()) {
-        try { const { lists, ...read } = await comfy.catalog(); remember(cfg.baseUrl, lists, read); }
-        catch (error) { log(`ComfyUI file list not read: ${detail(error)}`); }
+        try {
+          const [{ lists, ...read }, folders] = await Promise.all([comfy.catalog(), comfy.folders()]);
+          remember(cfg.baseUrl, lists, { ...read, ...folders === undefined ? {} : { folders } });
+        } catch (error) { log(`ComfyUI file list not read: ${detail(error)}`); }
       }
       const room = await readRoom();
       const last = knownFiles();
-      if (last === undefined) return { presets: [], current: currentChoice(), ...roomWords(room) };
+      const disk = await diskRow(cfg);
+      const onDisk = disk === undefined ? {} : { disk };
+      if (last === undefined) return { presets: [], current: currentChoice(), ...roomWords(room), ...onDisk };
       const { ready, others } = listPresets(last, extras(), room, lastRam);
       const tiers = tiersFor(room);
       const tag = <T extends { id: string }>(p: T): T => { const t = tiers.find((x) => x.preset === p.id); return t === undefined ? p : { ...p, tier: t.tier }; };
       const download = lastDownload?.ended === true ? undefined : lastDownload;
-      return { presets: ready.map(tag), ...others.length > 0 ? { others: others.map(tag) } : {}, readAt: last.readAt, current: currentChoice(), ...roomWords(room), ...download === undefined ? {} : { download } };
+      const counted = await Promise.all(others.map(async (p) => {
+        if (p.needs?.download !== true) return p;
+        const left = await leftToFetch(p.id, p.needs.files, cfg);
+        return left === undefined ? p : { ...p, needs: { ...p.needs, leftBytes: left } };
+      }));
+      return { presets: ready.map(tag), ...counted.length > 0 ? { others: counted.map(tag) } : {}, readAt: last.readAt, current: currentChoice(), ...roomWords(room), ...download === undefined ? {} : { download }, ...onDisk };
     },
     async start() {
       if (closed) throw imageError("shutting-down", "Image generation is shutting down.");
@@ -613,7 +721,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     async generate(params) {
       if (closed) throw imageError("shutting-down", "Image generation is shutting down.");
       deps.admit?.();
-      let cfg = { enabled: false, baseUrl: "", managed: false, hostname: "" };
+      let cfg = { enabled: false, baseUrl: "", managed: false, hostname: "", addressSet: false };
       // The thread's own choice (its last pick or send), else Settings' (the last pick anywhere).
       const kept = params.threadId ? deps.store.imageChoiceOf(params.threadId) : undefined;
       const jobId = randomUUID();
@@ -718,7 +826,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             update({ state: "busy", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
             // The run time is ComfyUI's time making the picture, not the wait before it.
             const started = performance.now();
-            const { bytes, seed, steps } = await comfy.render(prompt, jobId, signal, (progress) => event("running", { progress }), () => {
+            const { bytes, seed, steps } = await comfy.render(prompt, jobId, signal, (progress, said) => event("running", { progress, ...said }), () => {
               const job = jobs.get(jobId);
               if (job) job.committing = true;
               clearTimeout(timeout);
@@ -752,7 +860,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             "image-off": "Turn on image generation in Settings, then try again.",
             "image-fit": "GPU memory could not be checked; check the GPU status and try again.",
             "wont-fit": "There is not enough GPU memory for this image.", // the fit's own sentence wins below
-            "image-missing": noComfy ? IMAGES_UNSET : "ComfyUI did not start. Check its log, then try again.",
+            "image-missing": noComfy ? missingWords(cfg.baseUrl) : "ComfyUI did not start. Check its log, then try again.",
             "image-model": missingFile === undefined ? "Pick an image model ComfyUI has, then try again." : `Install ${missingFile} in ComfyUI, then try again.`,
             "image-busy": "ComfyUI is busy; wait for its other job to finish and try again.",
             "image-disconnected": "ComfyUI disconnected; wait until it is ready and try again.",
@@ -774,7 +882,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             if (activeJob === jobId) update({ state: healthy ? "ready" : "stopped", owner: owned?.baseUrl === cfg.baseUrl ? "app" : healthy ? "external" : "none", baseUrl: cfg.baseUrl });
           } else if (!controller.signal.aborted && noComfy && (activeJob === jobId || activeJob === undefined)) {
             // nothing to draw with is the state, not a fault: the Image button reads it and stays out of Image mode
-            update({ state: "missing", owner: "none", baseUrl: cfg.baseUrl, detail: IMAGES_UNSET });
+            update({ state: "missing", owner: "none", baseUrl: cfg.baseUrl, ...marked(cfg.baseUrl), detail: missingWords(cfg.baseUrl, true) });
           } else if (!controller.signal.aborted && (activeJob === jobId || activeJob === undefined)) {
             update({ state: "error", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "none", baseUrl: cfg.baseUrl, detail: message });
           }
@@ -841,7 +949,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       const controller = new AbortController();
       // set before the plan is made, so a Stop pressed while it is made stops it
       downloads = controller; downloadOf = id; lastDownload = undefined;
-      try { return await startDownload(id, cfg.baseUrl, controller); }
+      try { return await startDownload(id, cfg, controller); }
       catch (error) { if (downloading === undefined) { downloads = undefined; downloadOf = undefined; } throw error; }
     },
     stopDownload(id) {
@@ -859,36 +967,45 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     },
   };
   /** Plans the files to fetch, then fetches them in the background (module.download). */
-  async function startDownload(id: string, baseUrl: string, controller: AbortController): Promise<{ files: string[] }> {
-    const comfy = client(baseUrl);
-    if (!isLocalComfy(baseUrl) || !await comfy.healthy()) throw imageError("image-download", "Start ComfyUI on this computer first: downloads go into its model folders.");
+  async function startDownload(id: string, cfg: Cfg, controller: AbortController): Promise<{ files: string[] }> {
+    // Never needs ComfyUI running, and never starts it: its list and folders are read only when it
+    // answers (presets), and the last ones read are used when it does not.
+    if (!isLocalComfy(cfg.baseUrl)) throw imageError("image-download", "Start ComfyUI on this computer first: downloads go into its model folders.");
     await module.presets();
     const last = knownFiles();
     const row = last && listPresets(last, extras(), lastRoom, lastRam).others.find((p) => p.id === id);
     const preset = appPreset(id) ?? extras().find((p) => p.id === id);
     if (preset === undefined) throw imageError("image-model", `There is no image setup ${id}.`);
     if (row?.why !== undefined) throw imageError("image-model", `${preset.name}: ${row.why}`);
-    const folders = await comfy.folders();
-    const plan = (row?.needs?.files ?? []).map((name) => {
-      const source = preset.sources?.[name];
-      if (source?.url === undefined) throw imageError("image-download", `${preset.name}: ${name} has no download address. Install it in ComfyUI's model folders yourself.`);
-      const folder = source.directory === undefined ? undefined : folders?.[source.directory]?.[0];
-      if (folder === undefined) throw imageError("image-download", `${preset.name}: ComfyUI did not say which folder ${name} goes in.`);
-      return { name: path.basename(name), url: source.url, dir: path.join(folder, "gates-local"), sha256: source.sha256, bytes: source.bytes };
-    });
+    // never read from this ComfyUI: every file the setup loads (those already in the folder are passed over below)
+    const names = last === undefined ? [...new Set(presetFiles(preset))] : row?.needs?.files ?? [];
+    for (const name of names) {
+      if (preset.sources?.[name]?.url === undefined) throw imageError("image-download", `${preset.name}: ${name} has no download address. Install it in ComfyUI's model folders yourself.`);
+    }
+    if (names.length > 0 && downloadPlace(cfg)?.dirOf === undefined) throw imageError("image-folder", "ComfyUI has not said where its models go. Pick a folder for the image files first.");
+    const planned = plannedFiles(id, names, cfg);
+    const lost = names.find((name) => !planned.some((f) => f.name === path.basename(name)));
+    if (lost !== undefined) throw imageError("image-download", `${preset.name}: ComfyUI did not say which folder ${lost} goes in.`);
+    // a file already whole in its folder is not fetched again
+    const plan = (await Promise.all(planned.map(async (f) => await haveFile(f.dir, f.name, knownSize(f)) ? undefined : f))).filter((f): f is Planned => f !== undefined);
     if (plan.length === 0) { downloads = undefined; downloadOf = undefined; return { files: [] }; }
-    // each file's size: the record's, then the file's own once its download says it; the setup's bar needs them all
+    // each file's size: the record's, else where it is served says (a HEAD); the room is checked
+    // for all of them before a byte, and the setup's bar counts them all from the start
     const { records, ...fetching } = deps.download ?? {};
-    const sizes = plan.map((f) => records === false ? undefined : f.bytes);
+    const sizes: (number | undefined)[] = await Promise.all(plan.map(async (f) => knownSize(f) ?? (controller.signal.aborted ? undefined
+      : await sizeOf({ ...fetching, url: f.url, name: f.name, signal: controller.signal }).then((b) => { learned.set(f.url, b); return b; }, () => undefined))));
+    if (!controller.signal.aborted) await roomFor(plan, sizes);
     const run: Promise<void> = (async () => {
       const pins = readPins();
       for (const [i, file] of plan.entries()) {
         const place = { preset: id, file: i + 1, files: plan.length };
         try {
           const pinned = (records === false ? undefined : file.sha256) ?? pins[file.url];
+          // again before each file: the disk may have filled since
+          if (i > 0) await roomFor(plan.slice(i), sizes.slice(i));
           // The last file's done is the download's last word; the list is read again after it.
           const progress = (p: PullProgress) => {
-            if (p.totalBytes !== undefined) sizes[i] = p.totalBytes;
+            if (p.totalBytes !== undefined) { sizes[i] = p.totalBytes; learned.set(file.url, p.totalBytes); }
             const all = sizes.every((b) => b !== undefined) ? sizes as number[] : undefined;
             const setup = all === undefined ? {} : { setupCompletedBytes: all.slice(0, i).reduce((a, b) => a + b, 0) + p.completedBytes, setupTotalBytes: all.reduce((a, b) => a + b, 0) };
             say({ ...p, ...place, ...setup, ...p.state === "done" && i === plan.length - 1 ? { ended: true } : {} });
@@ -902,7 +1019,9 @@ export function createImageModule(deps: ImageDeps): ImageModule {
           const said = lastDownload as ImageDownload | undefined;
           const completedBytes = said?.file === place.file ? said.completedBytes : 0;
           const totalBytes = said?.file === place.file ? said.totalBytes : undefined;
-          say({ name: file.name, ...place, state: cancelled ? "cancelled" : "error", completedBytes, ...totalBytes === undefined ? {} : { totalBytes }, message: cancelled ? "Download stopped; the part already downloaded is kept." : detail(error), ended: true });
+          // the whole setup's bytes in, so a stop's bar stays at the part kept; the control, not a sentence, says it resumes
+          const setup = said?.file === place.file && said.setupTotalBytes !== undefined && said.setupCompletedBytes !== undefined ? { setupCompletedBytes: said.setupCompletedBytes, setupTotalBytes: said.setupTotalBytes } : {};
+          say({ name: file.name, ...place, state: cancelled ? "cancelled" : "error", completedBytes, ...totalBytes === undefined ? {} : { totalBytes }, ...setup, ...cancelled ? {} : { message: detail(error) }, ended: true });
           log(`image download ${file.name}: ${detail(error)}`);
           break;
         }

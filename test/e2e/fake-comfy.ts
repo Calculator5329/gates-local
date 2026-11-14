@@ -42,7 +42,8 @@ export async function fakeComfy() {
   /** The file sets /object_info lists, besides what a download put in its folders. */
   let listed: readonly FakeFiles[] = [KLEIN_FILES];
   const lists = () => missingModel ? listed.map((f) => ({ ...f, diffusion_models: [] })) : listed;
-  let folders: string | undefined, slow = false, slowFile: string | undefined;
+  /** folders: where it lists models from; made: the folder withFolders() made, removed at close. */
+  let folders: string | undefined, made: string | undefined, slow = false, slowFile: string | undefined;
   /** What /view serves: a 1×1 PNG unless a test set a picture of its own. */
   let viewPng: Buffer = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
   /** engine(): the fake engine's tar.gz, its folder, and the arguments its last run started with. */
@@ -84,7 +85,13 @@ export async function fakeComfy() {
     const url = new URL(req.url ?? "/", "http://fake");
     if (url.pathname.includes("/resolve/")) { serveFile(req.method ?? "GET", req.headers.range, path.basename(url.pathname), res); return; }
     if (url.pathname === ENGINE_PATH && engineArchive !== undefined) { res.writeHead(200, { "content-length": String(engineArchive.length) }); res.end(engineArchive); return; }
-    if (url.pathname === "/__engine/up") { down = false; engineArgs = JSON.parse(Buffer.concat(chunks).toString("utf8") || "[]") as string[]; res.end("{}"); return; }
+    if (url.pathname === "/__engine/up") {
+      down = false; engineArgs = JSON.parse(Buffer.concat(chunks).toString("utf8") || "[]") as string[];
+      // as ComfyUI does: started with --base-directory, its model folders are that folder's models/
+      const base = engineArgs[engineArgs.indexOf("--base-directory") + 1];
+      if (engineArgs.includes("--base-directory") && base !== undefined) folders = path.join(base, "models");
+      res.end("{}"); return;
+    }
     if (url.pathname === "/__engine/down") { down = true; res.end("{}"); return; }
     if (down) { res.writeHead(503); res.end("{}"); return; }
     let body: unknown = {};
@@ -151,6 +158,20 @@ export async function fakeComfy() {
       if (payload.length > 125) throw new Error("progress frame too long for a one-byte length");
       for (const socket of sockets) socket.write(Buffer.concat([Buffer.from([0x81, payload.length]), payload]));
     },
+    /**
+     * Say the newest running prompt is executing its first node of this class (as ComfyUI's
+     * `executing` frame names it, by node id), as a real run does before each node.
+     */
+    executing: (classType: string) => {
+      const id = [...active].at(-1);
+      if (id === undefined) throw new Error("no prompt is running");
+      const graph = prompts.at(-1)?.prompt ?? {};
+      const node = Object.entries(graph).find(([, entry]) => entry.class_type === classType)?.[0];
+      if (node === undefined) throw new Error(`the graph has no ${classType}`);
+      const payload = Buffer.from(JSON.stringify({ type: "executing", data: { node, prompt_id: id } }));
+      if (payload.length > 125) throw new Error("executing frame too long for a one-byte length");
+      for (const socket of sockets) socket.write(Buffer.concat([Buffer.from([0x81, payload.length]), payload]));
+    },
     /** Fail /object_info (on) or answer it again (off): the app then has never read the file list. */
     unlisted: (on: boolean) => { unlisted = on; },
     /** Answer nothing but 503 (on), as a ComfyUI that is not running; downloads are still served. */
@@ -159,7 +180,7 @@ export async function fakeComfy() {
     withFolders: () => {
       const root = path.join(homedir(), ".cache", "gates-local-e2e");
       mkdirSync(root, { recursive: true });
-      folders = mkdtempSync(path.join(root, "comfy-models-"));
+      folders = made = mkdtempSync(path.join(root, "comfy-models-"));
     },
     /** Trickle every download, or only `file`'s, and never finish it (on); off sends the rest of the held ones. */
     slowDownloads: (on: boolean, file?: string) => { slow = on; slowFile = file; if (!on) for (const release of held) release(); },
@@ -196,7 +217,7 @@ export async function fakeComfy() {
     restore: (finish = true) => { missingModel = false; complete = finish; },
     close: () => new Promise<void>((resolve, reject) => {
       for (const socket of sockets) socket.destroy();
-      if (folders !== undefined) rmSync(folders, { recursive: true, force: true });
+      if (made !== undefined) rmSync(made, { recursive: true, force: true }); // its own, never the app's models folder
       if (engineDir !== undefined) rmSync(engineDir, { recursive: true, force: true });
       server.close(error => error ? reject(error) : resolve());
       server.closeAllConnections();

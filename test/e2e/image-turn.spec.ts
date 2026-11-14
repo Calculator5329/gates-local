@@ -143,11 +143,41 @@ test("a restart cannot strand an unfinished image", async ({ page, open }, info)
   const card = page.locator("[data-image-job]");
   await expect(card.getByRole("status", { name: /Making image/ })).toBeVisible();
   // an Image turn's card: the composer's Stop cancels it, so the card has no Cancel; the model and
-  // size wait for the result; beside the spinner only numbers, the seconds since the ask
+  // size wait for the result; one live line: a lit dot, the stage, the seconds since the ask
   await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
   await expect(card.getByRole("button", { name: "Cancel image" })).toHaveCount(0);
   await expect(card.locator(".image-job-model")).toHaveCount(0);
-  await expect(card.locator(".image-job-state p")).toHaveText(/^(\d+% · )?\d+ s$/);
+  const live = card.locator(".image-job-live");
+  // before ComfyUI has said anything, Working; once it took the prompt, In the queue
+  await expect(live).toHaveText(/^(Working|In the queue) · \d+ s$/);
+  await expect(live.locator(".lv-dot")).toBeVisible();
+  // WIN-MEM-06: only the stages ComfyUI reports, and the card's box never moves while they change;
+  // nor does the dot, whatever the length of the words beside it
+  const box = await card.boundingBox();
+  const dot = await live.locator(".lv-dot").boundingBox();
+  const still = async () => {
+    expect(await card.boundingBox()).toEqual(box);
+    expect(await live.locator(".lv-dot").boundingBox()).toEqual(dot);
+    // and the words are whole on screen, not cut to fit
+    expect(await live.locator(".lv-w").evaluate((el) => el.scrollWidth <= el.clientWidth), "the stage's words fit").toBe(true);
+  };
+  // the server's socket to ComfyUI may open after the prompt: send until the card shows it
+  await expect.poll(async () => {
+    try { comfy.executing("UNETLoader"); } catch { /* no prompt yet */ }
+    return await live.textContent();
+  }).toMatch(/^First run: loading the model · \d+ s$/);
+  await page.screenshot({ path: info.outputPath("image-turn-loading.png"), animations: "disabled" });
+  await still();
+  comfy.progress(2, 4);
+  await expect(live).toHaveText(/^Sampling 2\/4 · \d+ s$/);
+  await still();
+  comfy.executing("VAEDecode");
+  await expect(live).toHaveText(/^Decoding · \d+ s$/);
+  await still();
+  // after sampling, a load is no longer the first run's
+  comfy.executing("UNETLoader");
+  await expect(live).toHaveText(/^Loading the model · \d+ s$/);
+  await still();
   await page.screenshot({ path: info.outputPath("image-turn-running.png"), animations: "disabled" });
   await stack.restart();
   await expect(card).toContainText(/cancelled|restarted/);

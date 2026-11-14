@@ -2,7 +2,7 @@
 // by scripts/build.ts. See README.md for the server contract and the
 // renderer's reconnect duties.
 
-import { app, BrowserWindow, clipboard, ipcMain, Menu, net, protocol, session, shell, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, protocol, session, shell, type IpcMainInvokeEvent } from "electron";
 import { parseClipboardPaths, pathClipboardTypes } from "./clipboard.ts";
 import { capturePaste, finishPaste, type PasteResult } from "./native-paste.ts";
 import { randomUUID } from "node:crypto";
@@ -321,6 +321,12 @@ function run(start: StartApp = {}): void {
   ipcMain.handle(IPC.openModelsFolder, async (event): Promise<string | null> => {
     if (!fromOurWindow(event)) throw new Error("refused");
     return modelFolders.openModelsFolder();
+  });
+  // The image download folder's change control: the system dialog, nothing read or written here.
+  ipcMain.handle(IPC.pickFolder, async (event, from: unknown): Promise<string | null> => {
+    if (!fromOurWindow(event) || win === null) throw new Error("refused");
+    const picked = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"], ...typeof from === "string" && from !== "" ? { defaultPath: from } : {} });
+    return picked.canceled ? null : picked.filePaths[0] ?? null;
   });
   ipcMain.handle(IPC.openDataFolder, async (event): Promise<string | null> => {
     if (!fromOurWindow(event)) throw new Error("refused");

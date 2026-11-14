@@ -885,6 +885,12 @@ a.btn{text-decoration:none}
 .image-job .img-out,.image-job .img-miss{width:100%;height:100%;object-fit:contain}
 .image-job-state{display:flex;align-items:center;flex-direction:column;gap:12px;padding:24px;text-align:center;color:var(--muted-foreground)}
 .image-job-state p{margin:0;font-variant-numeric:tabular-nums}
+/* a pending card's live line, a chat reply's form: one row that never wraps, so the card keeps its size */
+.image-job-state{max-width:100%;min-width:0}
+/* one width for every stage's words, so the dot and the seconds stay put as the words change */
+.image-job-live{display:flex;align-items:center;width:22em;max-width:100%;min-width:0;height:20px;white-space:nowrap;overflow:hidden;text-align:left}
+.image-job-live .lv-w{overflow:hidden;text-overflow:ellipsis}
+.image-job-live .lv-dot{margin-right:4px}
 /* a prompt the chat model wrote, under its own card */
 /* A send that made several pictures: one card, its model, size and count on top, the pictures as tiles (2 in a row, 3 or 4 two by two) */
 .image-group{width:768px;max-width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--card)}

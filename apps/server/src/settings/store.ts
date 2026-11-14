@@ -107,19 +107,21 @@ function writeAtomic(file: string, settings: Settings, rename: (from: string, to
 const stamp = (ms: number) => new Date(ms).toISOString().replace(/[:.]/g, "-");
 
 export function applyPatch(current: Settings, patch: SettingsPatch): Settings {
-  const { defaultModel, comfyUrl, whisperUrl, systemPrompt, modelSettings, imageChoice, imageTool, ...rest } = { ...current };
+  const { defaultModel, comfyUrl, imageFolder, whisperUrl, systemPrompt, modelSettings, imageChoice, imageTool, ...rest } = { ...current };
   const next: Settings = { ...rest };
   const model = patch.defaultModel === undefined ? defaultModel : (patch.defaultModel ?? undefined);
   // null: back to unset, which is on once a setup can run (Reset settings)
   const tool = patch.imageTool === undefined ? imageTool : (patch.imageTool ?? undefined);
   const choice = patch.imageChoice === undefined ? imageChoice : (patch.imageChoice ?? undefined);
   const comfy = patch.comfyUrl === undefined ? comfyUrl : (patch.comfyUrl ?? undefined);
+  const folder = patch.imageFolder === undefined ? imageFolder : (patch.imageFolder ?? undefined);
   const whisper = patch.whisperUrl === undefined ? whisperUrl : (patch.whisperUrl ?? undefined);
   const prompt = patch.systemPrompt === undefined ? systemPrompt : (patch.systemPrompt ?? undefined);
   return {
     ...next,
     ...(model === undefined ? {} : { defaultModel: model }),
     ...(comfy === undefined ? {} : { comfyUrl: comfy }),
+    ...(folder === undefined ? {} : { imageFolder: folder }),
     ...(whisper === undefined ? {} : { whisperUrl: whisper }),
     ...(prompt === undefined ? {} : { systemPrompt: prompt }),
     ...(choice === undefined ? {} : { imageChoice: choice }),

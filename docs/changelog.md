@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-11-13: Image downloads plan the disk first and show once
+
+- Before a download, the image picker shows one row: the folder the files
+  go to (shortened, the whole path in its tip), what is left to fetch, and
+  what is free on that drive, red when it is short. The server checks the
+  space again before each file and refuses with both numbers.
+- The files go where the ComfyUI in use keeps its models, or into a folder
+  picked with the row's folder button (a folder dialog on the desktop app,
+  a path field elsewhere, also in Settings › Image generation). The pick is
+  remembered for later downloads; nothing already downloaded moves. With no
+  folder known the download is refused instead of guessed onto a drive.
+- A download is one bar with the amount done of the total and the time
+  left, wherever it is shown. Every setup that loads the same files only
+  says it is waiting on the download. Stop keeps the part, and the setup's
+  button resumes it.
+- A download never needs ComfyUI running and never starts it.
+- An address set in Settings that does not answer says ComfyUI is not
+  running there, with the address and Check again, instead of "not set up".
+  The app's own ComfyUI is offered only as a choice to press.
+- A picture being made shows one live line: a lit dot, what ComfyUI says it
+  is doing (in the queue, loading the model, sampling 2/4, decoding), and
+  the seconds so far. The card's box does not change while it runs.
+- Why: windows-low-memory-bug-report.md entries WIN-SETUP-01, WIN-MEM-04 and
+  WIN-MEM-06: a 7.7 GB download started with 4.6 GB free, seven bars showed
+  one download, and an address that did not answer was offered as an
+  install.
+
 ## 2026-11-13: A model that runs partly in system memory is no longer refused
 
 - A send was refused when the part of a model that does not fit the GPU

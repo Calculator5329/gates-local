@@ -29,8 +29,10 @@ async function shot(page: Page, around: string, marked: string, path: string) {
   await outline(false);
 }
 
-// Guards the owner's ask: Image mode is not reachable, and no picture-sized card, with no ComfyUI set up.
-test("with no ComfyUI set up, Image opens a pop-up instead of Image mode, the server refuses an image send, and a picture that cannot start is one line", async ({ page, open }, info) => {
+// Guards the owner's ask: Image mode is not reachable, and no picture-sized card, with no ComfyUI
+// answering; and WIN-MEM-04: an address set in Settings that refuses is said as not running there,
+// never as not set up or something to install, and the app's own engine is only a choice pressed.
+test("an address set in Settings that does not answer: Image opens a pop-up saying it is not running there, the server refuses an image send, and a picture that cannot start is one line", async ({ page, open }, info) => {
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
   const server = new URL(page.url()).searchParams.get("server");
@@ -50,15 +52,20 @@ test("with no ComfyUI set up, Image opens a pop-up instead of Image mode, the se
     await page.waitForTimeout(300);
     await shot(page, ".composer, #imageUnset.open", "#imageUnset.open, .composer .pill.gate[aria-label=Image]", info.outputPath("unset-composer.png"));
 
-    // the card says it in one line, not in a 1024 box
+    // the card says it in one line, not in a 1024 box: not running at that address, not "not set up"
     expect((await card.boundingBox())?.height ?? 0, "a one-line card").toBeLessThan(80);
-    await expect(card).toContainText("Images are not set up on this computer.");
-    // Image mode stays off; the pop-up says why, with Settings and Check again
+    await expect(card).toContainText(`ComfyUI at ${comfy.url} is not running.`);
+    await expect(card).not.toContainText(/not set up|install/i);
+    // Image mode stays off; the pop-up says not running, the address, and Check again
     await expect(imageBtn).toHaveAttribute("aria-pressed", "false");
-    const pop = page.getByRole("dialog", { name: "Images are not set up" });
+    const pop = page.getByRole("dialog", { name: "ComfyUI is not running" });
     await expect(pop).toBeVisible();
-    await expect(pop.getByRole("button", { name: "Open Settings" })).toBeVisible();
+    await expect(pop.locator("#imageUnsetAddress")).toHaveText(comfy.url);
     await expect(pop.getByTestId("image.unset.check-again")).toBeVisible();
+    // the app's own engine only as a choice: nothing to set up or install is offered in its place
+    await expect(pop.getByTestId("image.unset.use-own")).toBeVisible();
+    await expect(pop.getByTestId("image.unset.set-up")).toHaveCount(0);
+    await expect(pop).not.toContainText(/not set up|install/i);
     // no service and no unit name anywhere a person reads
     await expect(page.locator("body")).not.toContainText(/service/i);
     // the server refuses an image send: no card, no question kept; Send answers at once, and the refusal is the turn's end (chat row 32)
@@ -66,8 +73,21 @@ test("with no ComfyUI set up, Image opens a pop-up instead of Image mode, the se
     const ends: string[] = [];
     client.subscribe("chat.event", p => { if (p.threadId === threadId && p.event.type === "error") ends.push(p.event.message); });
     await client.call("chat.send", { threadId, content: "a ship", model: "qwen3.5:9b", numCtx: 16384, draw: { preset: "flux2-klein-4b", width: 1024, height: 1024 } });
-    await expect.poll(() => ends).toEqual([expect.stringContaining("Images are not set up on this computer.")]);
+    await expect.poll(() => ends).toEqual([expect.stringContaining(`ComfyUI at ${comfy.url} is not running.`)]);
     expect((await client.call("threads.get", { threadId })).messages).toHaveLength(before);
+    // Settings says the same: Not running, the address with Test connection as the one retry, and no install guide
+    await pop.press("Escape");
+    await page.keyboard.press("Control+Comma");
+    await page.getByTestId("settings.nav.open-images").click();
+    await expect(page.locator(".srow", { hasText: "Not running" })).toBeVisible();
+    await expect(page.getByTestId("settings.images.retry")).toHaveCount(0);
+    await expect(page.getByTestId("settings.images.address")).toHaveValue(comfy.url);
+    await expect(page.getByTestId("settings.images.test-connection")).toBeVisible();
+    await expect(page.getByTestId("settings.images.setup-guide")).toHaveCount(0);
+    await shot(page, ".srow:has-text('Not running'), [data-testid='settings.images.address']", ".srow:has-text('Not running')", info.outputPath("unset-settings.png"));
+    await page.keyboard.press("Escape");
+    await imageBtn.click();
+    await expect(pop).toBeVisible();
     // Check again while nothing answers: the pop-up stays, says so, and Image stays off
     await pop.getByTestId("image.unset.check-again").click();
     await expect(pop).toContainText("Still no answer.");

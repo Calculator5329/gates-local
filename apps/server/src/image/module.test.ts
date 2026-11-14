@@ -28,6 +28,8 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 
 const png = Buffer.from("iVBORw0KGgo=", "base64");
 const noop = () => undefined;
+/** One websocket frame of prompt p1, as ComfyUI sends it. */
+const frame = (type: string, data: object = {}) => ({ type, data: { prompt_id: "p1", ...data } });
 /** This machine is 192.168.1.20 and is called mybox; the hosts file maps mybox to 127.0.1.1. */
 const NAMES: Record<string, readonly string[]> = {
   "mybox": ["127.0.1.1"], "mybox.home.arpa": ["192.168.1.20"], "remote-comfy": ["10.0.0.5"],
@@ -74,6 +76,10 @@ async function fixture(options: Partial<ImageDeps> = {}, realOllama?: string) {
   let comfyUrl: string | undefined, cpu = false, gpuError = false, stuck = false, queueErrors = 0;
   let measurements = 0;
   let choice: ImageChoice | undefined, noMoss = false, flux = false;
+  // bare: ComfyUI lists Z-Image's files alone (no FLUX.2 VAE from MOSS); imageFolder: Settings' picked download folder
+  let bare = false, imageFolder: string | undefined;
+  /** Set: the websocket frames ComfyUI sends for a prompt, from its graph, in place of one progress and the end. */
+  let frames: ((graph: Record<string, { class_type: string }>) => object[]) | undefined;
   // ComfyUI's template, saved-workflow and folder routes (path and query): what each answers; any other is a 404
   let workflowRoutes: Record<string, unknown> = {};
   let moreLoras: string[] = []; // LoRAs /object_info lists besides the app's own
@@ -91,7 +97,7 @@ async function fixture(options: Partial<ImageDeps> = {}, realOllama?: string) {
     log: () => {},
     // No test reaches real DNS or this machine's real interfaces.
     localAddresses: () => ["192.168.1.20"], lookupHost: fakeLookup,
-    settings: () => ({ imageGen: enabled, ...(comfyUrl ? { comfyUrl } : {}), ...(choice ? { imageChoice: choice } : {}) }),
+    settings: () => ({ imageGen: enabled, ...(comfyUrl ? { comfyUrl } : {}), ...(choice ? { imageChoice: choice } : {}), ...(imageFolder ? { imageFolder } : {}) }),
     imageMayUnload: () => appLoaded, ollamaUrl: () => "http://fake-ollama",
     readGpu: async () => {
       measurements++;
@@ -125,6 +131,7 @@ async function fixture(options: Partial<ImageDeps> = {}, realOllama?: string) {
       }
       if (url.pathname === "/system_stats") return Response.json({ system: { comfyui_version: "fake" }, devices: [{ type: cpu ? "cpu" : "cuda", torch_vram_total: resident }] });
       // Z-Image int8's and MOSS's files (missingModel: neither diffusion model; noMoss: MOSS's text encoder gone), a person's own SDXL files, and with `flux` Klein's
+      if (url.pathname === "/object_info" && bare) return Response.json(comfyInfo(ZIMAGE_FILES));
       if (url.pathname === "/object_info") return Response.json(comfyInfo(
         { ...ZIMAGE_FILES, ...missingModel ? { diffusion_models: [] } : {} },
         { ...MOSS_FILES, ...missingModel ? { diffusion_models: [] } : {}, ...noMoss ? { text_encoders: [] } : {} },
@@ -137,6 +144,14 @@ async function fixture(options: Partial<ImageDeps> = {}, realOllama?: string) {
         const body = JSON.parse(String(init?.body));
         graphs.push(body.prompt);
         if (!flux) expect(Object.values(body.prompt as Record<string, { inputs: { text?: unknown } }>).map((n) => n.inputs.text)).toContain("a tree");
+        if (frames !== undefined) {
+          const sent = frames(body.prompt);
+          void (async () => {
+            for (const one of sent) { await new Promise((r) => setTimeout(r, 2)); socket?.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(one) })); }
+            running.delete(url.host);
+          })();
+          return Response.json({ prompt_id: "p1" });
+        }
         queueMicrotask(() => {
           socket?.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "progress", data: { prompt_id: "p1", value: 2, max: 4 } }) }));
           if (die) { running.delete(url.host); answering = false; socket?.dispatchEvent(new Event("close")); }
@@ -162,7 +177,9 @@ async function fixture(options: Partial<ImageDeps> = {}, realOllama?: string) {
   const handlers = createImageHandlers({ image: module });
   return { module, handlers, lease, store, events, downloads, changed, calls, dataDir, ollamaPosts, graphs, ps: () => fakeFetch("http://fake-ollama/api/ps"), measurements: () => measurements,
     choose: (next: ImageChoice | undefined) => { choice = next; },
-    files: (v: { noMoss?: boolean; flux?: boolean; loras?: string[] }) => { noMoss = v.noMoss ?? noMoss; flux = v.flux ?? flux; moreLoras = v.loras ?? moreLoras; },
+    files: (v: { noMoss?: boolean; flux?: boolean; loras?: string[]; bare?: boolean }) => { noMoss = v.noMoss ?? noMoss; flux = v.flux ?? flux; moreLoras = v.loras ?? moreLoras; bare = v.bare ?? bare; },
+    pickFolder: (folder: string | undefined) => { imageFolder = folder; },
+    sendFrames: (make: typeof frames) => { frames = make; },
     workflows: (routes: Record<string, unknown>) => { workflowRoutes = routes; },
     ollamaLists: (models: string[] | undefined) => { listed = models; },
     configure: (v: { enabled?: boolean; answering?: boolean; present?: boolean; pid?: number; freeBytes?: number; hold?: boolean; missingModel?: boolean; die?: boolean; swapPidOnQueue?: boolean; freeAfterStart?: number; activeOverride?: boolean; activeState?: string; resident?: number; comfyUrl?: string; cpu?: boolean; gpuError?: boolean; stuck?: boolean; queueErrors?: number; busy?: boolean; noImage?: boolean; invalidPng?: boolean }) => {
@@ -1166,6 +1183,39 @@ describe("image presets (fake ComfyUI file lists)", () => {
     expect(f.module.engine().pid).toBeUndefined();
   });
 
+  it("WIN-MEM-04: an address set in Settings that does not answer is not running there, never not set up, and is left alone", async () => {
+    const f = await fixture();
+    f.configure({ answering: false, comfyUrl: "http://127.0.0.1:9999" });
+    expect(await f.module.status()).toEqual({ state: "missing", owner: "none", baseUrl: "http://127.0.0.1:9999", addressSet: true, detail: "No ComfyUI answers at http://127.0.0.1:9999." });
+    await expect(f.module.start()).rejects.toThrow("ComfyUI at http://127.0.0.1:9999 is not running. Start it there, then try again.");
+    const job = await f.module.generate({ prompt: "a tree" }); await f.module.wait(job.jobId);
+    expect(f.events.at(-1)).toMatchObject({ state: "error", message: "ComfyUI at http://127.0.0.1:9999 is not running. Start it there, then try again." });
+    expect(f.calls.filter((c) => c === "inspect" || c === "start" || c === "stop")).toEqual([]);
+  });
+
+  it("WIN-MEM-06: a render says each stage ComfyUI reports, in order, and nothing it did not", async () => {
+    const f = await fixture();
+    f.sendFrames((graph) => {
+      const node = (pattern: RegExp) => Object.entries(graph).find(([, n]) => pattern.test(n.class_type))?.[0];
+      return [
+        frame("execution_start"),
+        frame("executing", { node: node(/^CLIPLoader/) }), frame("executing", { node: node(/^UNETLoader/) }),
+        frame("executing", { node: node(/^CLIPTextEncode/) }), frame("executing", { node: node(/Sampler/) }),
+        ...[1, 2, 3, 4].map((value) => frame("progress", { value, max: 4 })),
+        frame("executing", { node: node(/^VAELoader/) }), frame("executing", { node: node(/^VAEDecode/) }),
+        frame("executing", { node: null }),
+      ];
+    });
+    const job = await f.module.generate({ prompt: "a tree", choice: { preset: "z-image-int8", width: 1024, height: 1024 } }); await f.module.wait(job.jobId);
+    const said = f.events.filter((e) => e.state === "running" && e.stage !== undefined).map((e) => `${e.stage}${e.steps ? ` ${e.steps.done}/${e.steps.total}` : ""}`);
+    expect(said.filter((s, i) => s !== said[i - 1])).toEqual(["queued", "loading", "encoding", "sampling", "sampling 1/4", "sampling 2/4", "sampling 3/4", "sampling 4/4", "loading", "decoding"]);
+    expect(f.events.at(-1)).toMatchObject({ state: "done" });
+    // the plain fake sends one progress frame and the end: sampling 2/4, and no stage it did not report
+    const plain = await fixture();
+    const second = await plain.module.generate({ prompt: "a tree", choice: { preset: "z-image-int8", width: 1024, height: 1024 } }); await plain.module.wait(second.jobId);
+    expect(plain.events.filter((e) => e.state === "running" && e.stage !== undefined).map((e) => e.stage)).toEqual(["queued", "sampling"]);
+  });
+
   it("Start ComfyUI says why when there is nothing to start", async () => {
     const f = await fixture();
     f.configure({ answering: false, present: false });
@@ -1262,7 +1312,9 @@ describe("image presets (fake ComfyUI file lists)", () => {
         }), { headers });
       };
       // these fake bytes are not the files the app's records name, so most tests check pins alone
-      const download = { fetch: fileServer, allow: () => true, freeBytes: async () => 10 ** 12, intervalMs: 0 };
+      /** Free bytes on every download folder's volume. */
+      let free = 10 ** 12;
+      const download = { fetch: fileServer, allow: () => true, freeBytes: async () => free, intervalMs: 0 };
       // a saved MOSS-Image copy with a model of the person's own: a file with no download address
       const own = structuredClone(mine);
       own["18:1"]!.inputs["unet_name"] = "my-own.safetensors";
@@ -1272,7 +1324,7 @@ describe("image presets (fake ComfyUI file lists)", () => {
         const kinds = ["checkpoints", "loras", "diffusion_models", "text_encoders", "vae"];
         const f = await fixture({ ...deps, download: records === "checked" ? download : { ...download, records: false } });
         f.workflows({ ...workflows, "/internal/folder_paths": Object.fromEntries(kinds.map((k) => [k, [path.join(root, k), "/elsewhere/" + k]])) });
-        served.length = 0; version = 1; holdAfter = undefined;
+        served.length = 0; version = 1; holdAfter = undefined; free = 10 ** 12;
         return { f, root, done: (n: number) => vi.waitFor(() => expect(f.downloads.filter((p) => p.state !== "downloading" && p.state !== "verifying")).toHaveLength(n)) };
       };
 
@@ -1287,6 +1339,61 @@ describe("image presets (fake ComfyUI file lists)", () => {
         expect(finished.map((p) => p.name)).toEqual(["flux-2-klein-4b-fp8.safetensors", "qwen_3_4b.safetensors"]);
         for (const p of finished) expect(p.message).toBeUndefined();
         expect(served[0]).toBe("HEAD huggingface.co/black-forest-labs/FLUX.2-klein-4b-fp8/resolve/" + served[0]!.split("/resolve/")[1]);
+      });
+
+      it("WIN-SETUP-01: the disk is planned before any transfer; 4.6 GiB free does not start Klein compact's three files, 876 GiB does", async () => {
+        const { f, root } = await setup("checked");
+        f.files({ bare: true }); // ComfyUI has none of the three
+        const GiB = 1024 ** 3, left = 4_070_624_520 + 3_848_213_998 + 336_211_292;
+        free = Math.round(4.6 * GiB);
+        await expect(f.module.download("flux2-klein-4b-compact")).rejects.toMatchObject({ code: "image-disk", message: `Not enough disk space in ${root}: 7.7 GiB is left to fetch and 4.6 GiB is free.` });
+        expect(served).toEqual([]);
+        expect(f.downloads).toEqual([]);
+        // the picker's row says the same two numbers before anything is pressed
+        const listed = await f.module.presets();
+        expect(listed.disk).toEqual({ folder: root, freeBytes: Math.round(4.6 * GiB), picked: false });
+        expect(listed.others?.find((p) => p.id === "flux2-klein-4b-compact")?.needs).toMatchObject({ download: true, bytes: left, leftBytes: left });
+        free = 876 * GiB;
+        expect((await f.module.download("flux2-klein-4b-compact")).files).toHaveLength(3);
+        await vi.waitFor(() => expect(served[0]).toMatch(/^HEAD .*flux-2-klein-4b-fp8\.safetensors$/));
+      });
+
+      it("a download needs no engine: stopped, it goes where ComfyUI last said; never told, it waits for a picked folder; the app's own engine stays off", async () => {
+        const { f, root, done } = await setup();
+        f.files({ bare: true });
+        await f.module.presets(); // read while it runs: its files and folders are kept
+        f.configure({ answering: false }); f.calls.length = 0;
+        expect(await f.module.download("flux2-klein-4b-compact")).toEqual({ files: ["flux-2-klein-4b-fp8.safetensors", "qwen_3_4b_fp4_flux2.safetensors", "flux2-vae.safetensors"] });
+        await done(3);
+        expect(await readdir(path.join(root, "vae", "gates-local"))).toEqual(["flux2-vae.safetensors"]);
+        expect(f.calls).not.toContain("start");
+        // nothing read from this ComfyUI ever, and no folder picked: no guess on the system drive
+        const fresh = await fixture({ download: { ...download, records: false } });
+        fresh.configure({ answering: false });
+        expect((await fresh.module.presets()).disk).toEqual({ picked: false });
+        await expect(fresh.module.download("flux2-klein-4b-compact")).rejects.toMatchObject({ code: "image-folder" });
+        const picked = await mkdtemp(path.join(tmpdir(), "gates-image-picked-")); dirs.push(picked);
+        fresh.pickFolder(picked);
+        expect((await fresh.module.presets()).disk).toEqual({ folder: picked, freeBytes: 10 ** 12, picked: true });
+        await fresh.module.download("flux2-klein-4b-compact");
+        await vi.waitFor(() => expect(fresh.downloads.at(-1)).toMatchObject({ state: "done", ended: true }));
+        expect(await readdir(path.join(picked, "diffusion_models", "gates-local"))).toEqual(["flux-2-klein-4b-fp8.safetensors"]);
+        expect(fresh.calls).not.toContain("start");
+        // the app's own engine, installed and stopped: its models folder in the app's data, and it is not started
+        const engine = await mkdtemp(path.join(tmpdir(), "gates-image-engine-")); dirs.push(engine);
+        const started: string[] = [];
+        const appEngine = await fixture({ download: { ...download, records: false }, own: {
+          installed: () => true, address: () => "http://127.0.0.1:41234", modelsDir: () => engine,
+          inspect: async () => ({ present: true, active: false, activeState: "inactive", pid: 0 }),
+          start: async () => { started.push("start"); }, stop: async () => {}, onExit: () => {},
+        } });
+        appEngine.configure({ answering: false });
+        expect((await appEngine.module.presets()).disk).toEqual({ folder: engine, freeBytes: 10 ** 12, picked: false });
+        await appEngine.module.download("flux2-klein-4b-compact");
+        await vi.waitFor(() => expect(appEngine.downloads.at(-1)).toMatchObject({ state: "done", ended: true }));
+        expect(await readdir(path.join(engine, "text_encoders", "gates-local"))).toEqual(["qwen_3_4b_fp4_flux2.safetensors"]);
+        expect(started).toEqual([]);
+        expect(appEngine.calls).not.toContain("start");
       });
 
       it("a file that is not the one the app's record names is not put with ComfyUI's models, and the download stops there", async () => {
@@ -1348,12 +1455,12 @@ describe("image presets (fake ComfyUI file lists)", () => {
         await checked.f.module.download("flux2-klein-4b");
         await checked.done(1);
         expect(checked.f.downloads.find((p) => p.state === "downloading")).toMatchObject({ setupCompletedBytes: 0, setupTotalBytes: a + 8_044_982_048 });
-        // with no records (the fake's own files) a size is known once its download says it: the setup's when every one is
+        // with no records (the fake's own files) each size comes from where it is served, asked before the first byte
         const { f, done } = await setup();
         await f.module.download("flux2-klein-4b");
         await done(2);
         const finished = f.downloads.filter((p) => p.state === "done");
-        expect(finished.map((p) => p.setupCompletedBytes)).toEqual([undefined, a + b]);
+        expect(finished.map((p) => p.setupCompletedBytes)).toEqual([a, a + b]);
         expect(finished.at(-1)!.setupTotalBytes).toBe(a + b);
       });
 

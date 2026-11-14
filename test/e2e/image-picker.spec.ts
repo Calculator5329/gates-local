@@ -172,36 +172,46 @@ test("the picker groups setups by theme, greys what ComfyUI lacks with the reaso
   await expect(klein).toHaveClass(/\boff\b/);
   await expect(klein.locator(".pk-why")).toHaveText(/^Needs 3 files · \d+\.\d\sGB$/);
 
-  // refused (ComfyUI is not answering): the row says why, and no bar is left from the press
+  // before any download, one row: where the files go (ComfyUI's own folder), what is left to fetch, what is free there
+  const disk = picker.getByTestId("image.picker.disk");
+  await expect(disk.getByTestId("image.picker.disk-folder")).toHaveAttribute("data-tipt", /models/);
+  await expect(disk.getByTestId("image.picker.disk-left")).toHaveText(/^\d+\.\d\sGB to fetch/);
+  await expect(disk.getByTestId("image.picker.disk-free")).toHaveText(/^\d+\.\d\sGB free on disk$/);
+  await expect(disk.getByTestId("image.picker.change-folder")).toBeVisible();
+
+  // WIN-SETUP-01 and WIN-MEM-04: a download needs no running ComfyUI, and never starts one
   comfy.down(true);
   await klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" }).click();
-  await expect(klein.locator(".pk-why")).toHaveText("Start ComfyUI on this computer first: downloads go into its model folders.");
-  await expect(klein.getByRole("progressbar")).toHaveCount(0);
-  comfy.down(false);
-
-  await klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" }).click();
-  await expect(klein.getByRole("progressbar")).toBeVisible();
-  await expect(klein.locator(".pk-why")).toContainText(/File 1\/3 · \d+%/);
-  await expect.poll(async () => Number(await klein.getByRole("progressbar").getAttribute("aria-valuenow")), "the bar moves").toBeGreaterThan(0);
+  // one bar, in the disk row; the row only says it waits on that download
+  await expect(picker.getByRole("progressbar")).toHaveCount(1);
+  await expect(disk.getByRole("progressbar")).toBeVisible();
+  await expect(disk.getByTestId("image.picker.download-amount")).toHaveText(/^\d+\.\d\sGB of \d+\.\d\sGB/);
+  await expect(klein.locator(".pk-why")).toHaveText("Waiting on the download");
+  await expect.poll(async () => Number(await disk.getByRole("progressbar").getAttribute("aria-valuenow")), "the bar moves").toBeGreaterThan(0);
   await page.mouse.move(5, 5);
   await shot(page, "image-picker-downloading.png", info);
-  // the setups that load the same files show that download, said once: no "Needs 3 files" and no button to press
+  // the setups that load the same files show that download, said once: no bar of their own and no button to press
   await picker.getByTestId("image.picker.defaults").click();
-  await expect(characters.getByRole("progressbar")).toBeVisible();
-  await expect(characters.locator(".pk-why")).toContainText(/File 1\/3 · \d+%/);
-  await expect(characters.getByRole("button", { name: /^(Download|Stop)/ })).toHaveCount(0);
+  await expect(characters.locator(".pk-why")).toHaveText("Waiting on the download");
+  await expect(characters.getByRole("progressbar")).toHaveCount(0);
+  await expect(characters.getByRole("button", { name: /^(Download|Stop|Resume)/ })).toHaveCount(0);
+  await expect(picker.getByRole("progressbar")).toHaveCount(1);
   await picker.getByTestId("image.picker.other").click();
 
-  await klein.getByTestId("image.picker.stop-download").click();
-  await expect(klein.locator(".pk-why")).toHaveText("Download stopped; the part already downloaded is kept.");
-  await expect(klein.getByRole("progressbar")).toHaveCount(0);
-  await picker.getByTestId("image.picker.defaults").click();
-  await expect(picker.getByRole("button", { name: "Download FLUX.2 Klein 4B characters" })).toBeEnabled();
-  await picker.getByTestId("image.picker.other").click();
+  // Stop keeps the part: the bar stays where it stopped, and the row's button resumes
+  await disk.getByTestId("image.picker.stop-download").click();
+  await expect(disk.getByTestId("image.picker.stop-download")).toHaveCount(0);
+  await expect(disk.getByRole("progressbar")).toBeVisible();
+  const resume = klein.getByRole("button", { name: "Resume downloading FLUX.2 Klein 4B" });
+  await expect(resume).toBeEnabled();
+  await expect(picker).not.toContainText("Download stopped");
+  await page.mouse.move(5, 5);
+  await shot(page, "image-picker-stopped.png", info);
+  comfy.down(false);
 
   // again, unheld: it carries on from the part and the row turns ready, with the setups sharing its files
   comfy.slowDownloads(false);
-  await klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" }).click();
+  await resume.click();
   await expect(klein).not.toHaveClass(/\boff\b/, { timeout: 20_000 });
   await picker.getByTestId("image.picker.defaults").click();
   await expect(characters).not.toHaveClass(/\boff\b/);
@@ -233,15 +243,14 @@ async function downloadable(page: Page, open: () => Promise<void>) {
 }
 
 test("a setup's download is one bar for all its files: on the last of three it is past two thirds", async ({ page, open }, info) => {
-  const { klein } = await downloadable(page, open);
+  const { picker, klein } = await downloadable(page, open);
   comfy.slowDownloads(true, "flux2-vae.safetensors"); // the first two arrive at once, the third trickles
   await klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" }).click();
-  await expect(klein.locator(".pk-why")).toContainText(/File 3\/3 · \d+%/);
+  const bar = picker.getByTestId("image.picker.disk").getByRole("progressbar");
+  await expect.poll(async () => Number(await bar.getAttribute("aria-valuenow")), "two of three equal files are in").toBeGreaterThanOrEqual(66);
   await page.mouse.move(5, 5);
   await shot(page, "image-picker-downloading-setup.png", info);
-  const pct = Number(await klein.getByRole("progressbar").getAttribute("aria-valuenow"));
-  expect(pct, "two of three equal files are in").toBeGreaterThanOrEqual(66);
-  await expect(klein.locator(".pk-why")).toContainText(`File 3/3 · ${pct}%`);
+  await expect(picker.getByRole("progressbar")).toHaveCount(1);
   comfy.slowDownloads(false);
   await expect(klein).not.toHaveClass(/\boff\b/, { timeout: 20_000 });
 });
@@ -255,14 +264,14 @@ test.describe("across a server restart", () => {
     const { picker, klein } = await downloadable(page, open);
     comfy.slowDownloads(true);
     await klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" }).click();
-    await expect(klein.getByRole("progressbar")).toBeVisible();
+    await expect(picker.getByRole("progressbar")).toBeVisible();
     // a crash, so no push ends the download: a SIGTERM's close() would send that push and hide the bug
     await stack.restart(500, true);
     await waitReady(page);
     if (!await picker.isVisible()) await page.locator("#modelBtn").click();
     await picker.getByTestId("image.picker.other").click();
-    await expect(klein.getByRole("progressbar")).toHaveCount(0);
-    await expect(klein.getByTestId("image.picker.stop-download")).toHaveCount(0);
+    await expect(picker.getByRole("progressbar")).toHaveCount(0);
+    await expect(picker.getByTestId("image.picker.stop-download")).toHaveCount(0);
     await expect(klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" })).toBeEnabled();
     await picker.getByTestId("image.picker.defaults").click();
     await expect(picker.getByRole("button", { name: "Download FLUX.2 Klein 4B characters" })).toBeEnabled();
@@ -297,6 +306,7 @@ test.describe("on the phone", () => {
     await page.mouse.move(5, 5);
     await shot(page, "image-picker-phone.png", info);
     await expect(picker.getByRole("button", { name: /^(Download|Stop downloading)/ })).toHaveCount(0);
+    await expect(picker.getByTestId("image.picker.disk")).toHaveCount(0);
     // a ready row, then its size: the thread keeps it; Settings is the computer's, so it is not written
     await picker.getByTestId("image.picker.other").click();
     await picker.locator('.pk-r[data-preset="z-image-int8"] .pk-select').click();

@@ -13,7 +13,7 @@ import { Icon, type IconId } from "./icons.tsx";
 import LibraryImports from "./LibraryImports.tsx";
 import { ModelsPage } from "./Models.tsx";
 import { sizeText } from "./models-rules.ts";
-import { addSource, canOpenFolder, checkImageStatus, checkShell, dataFolder, openDataFolder, openSettings, refreshSource, removeSource, resetSettings, settingsReads, updateSettings } from "./session.ts";
+import { addSource, canOpenFolder, checkImageStatus, checkShell, dataFolder, folderDialog, openDataFolder, openSettings, refreshSource, removeSource, resetSettings, saveImageFolder, settingsReads, updateSettings } from "./session.ts";
 import { NA, setState, useStore } from "./store.ts";
 import { CopyButton, PathText, Status } from "./settings-controls.tsx";
 import { type LibraryTool, libraryToolCanUse } from "./settings-rules.ts";
@@ -352,10 +352,16 @@ const SetupLink = () => (
   </a>
 );
 
-/** ComfyUI's state in words, for this page's status row and the Tools row. */
+/**
+ * ComfyUI's state in words, for this page's status row and the Tools row. Three cases the
+ * person can tell apart (WIN-MEM-04): no engine known (Not connected), an address they set that
+ * does not answer (Not running), and the engine the app started (Running) beside one it found.
+ */
 function imageFace(status: ImageStatus | "na" | undefined) {
   const state = status === undefined || status === NA || status.state === "off" ? "checking" : status.state;
-  const word = { checking: "Checking", missing: "Not connected", stopped: "Found", starting: "Starting", ready: "Connected", busy: "Making an image", error: "Something went wrong" }[state];
+  const set = status !== undefined && status !== NA && status.addressSet === true;
+  const mine = status !== undefined && status !== NA && status.owner === "app";
+  const word = { checking: "Checking", missing: set ? "Not running" : "Not connected", stopped: "Found", starting: "Starting", ready: mine ? "Running" : "Connected", busy: "Making an image", error: "Something went wrong" }[state];
   const usable = state === "ready" || state === "busy" || state === "stopped";
   // ComfyUI not being there is a thing to set up; only a real error is red
   return { state, word, usable, dot: usable ? "ok" : state === "error" ? "err" : state === "missing" ? "warn" : "run" };
@@ -367,7 +373,8 @@ function ImageState({ address }: { address: string }) {
   const [err, run] = useAct();
   if (status === NA) return null;
   const { state, word, dot } = imageFace(status);
-  // Not connected says no more: the address it tried is in the field below (audit W08).
+  // Not connected and Not running say no more: the address is in the field below (audit W08), and
+  // an address that does not answer is retried by Test connection beside it, nothing to install.
   const desc =
     state === "stopped"
         ? "It starts when a chat asks for an image."
@@ -420,9 +427,12 @@ function Images() {
           <Row label="Generate images" desc={locked ? `${on ? "On" : "Off"}. ${COMPUTER_ONLY}` : "If the GPU is short, the chat model is unloaded while an image renders."} tip="Images are made on this computer. Turn Image on in a chat's message box." err={genErr}>
             {locked ? null : <button type="button" className="switch" role="switch" data-testid="settings.images.enable" aria-checked={on} aria-label="Generate images" onClick={() => void runGen(updateSettings({ imageGen: !on }))} />}
           </Row>
-          <Row label="Set up ComfyUI">
-            <SetupLink />
-          </Row>
+          {/* an address set is the person's own ComfyUI: nothing to install */}
+          {comfy === undefined ? (
+            <Row label="Set up ComfyUI">
+              <SetupLink />
+            </Row>
+          ) : null}
         </Grp>
       )}
       {on ? (
@@ -439,9 +449,35 @@ function Images() {
               </button>
             </Row>
           )}
+          {locked ? null : <ImageFolder />}
         </Grp>
       ) : null}
     </>
+  );
+}
+
+/**
+ * Where image downloads go: empty, ComfyUI's own model folders (the app's own engine's in the
+ * app's data); a folder picked here takes every later download. Nothing downloaded moves.
+ */
+function ImageFolder() {
+  const settings = useStore((s) => s.settings);
+  const presets = useStore((s) => s.imagePresets);
+  const [value, setValue] = useState<string | null>(null);
+  const [err, run] = useAct();
+  const saved = settings === NA ? undefined : settings?.imageFolder;
+  const disk = presets === NA || presets === undefined ? undefined : presets.disk;
+  const dialog = folderDialog();
+  const save = async (folder: string | null) => { if (await run(saveImageFolder(folder))) setValue(null); };
+  return (
+    <Row label="Download folder" desc="New downloads go here; nothing downloaded moves." err={err}>
+      <input className="inp" data-testid="settings.images.folder" aria-label="Image download folder" placeholder={disk?.picked === false && disk.folder !== undefined ? disk.folder : "ComfyUI's model folders"} spellCheck={false} value={value ?? saved ?? ""} onChange={(e) => setValue(e.target.value)} onBlur={() => { if (value !== null) void save(value.trim() === "" ? null : value.trim()); }} />
+      {dialog === undefined ? null : (
+        <button type="button" className="btn outline" data-testid="settings.images.choose-folder" aria-label="Choose the download folder" data-tip="Choose folder" onClick={() => void dialog(saved ?? disk?.folder).then((picked) => picked === null ? undefined : save(picked)).catch(() => undefined)}>
+          <Icon id="folder" />
+        </button>
+      )}
+    </Row>
   );
 }
 

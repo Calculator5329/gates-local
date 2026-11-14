@@ -64,11 +64,51 @@ const GB = (n: number) => n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${(n / 1e6)
 const fail = (message: string) => Object.assign(new Error(message), { code: "image-download" });
 const diskFree = async (dir: string) => { const s = await statfs(dir); return s.bavail * s.bsize; };
 
+/** The nearest folder of `dir` that exists: itself, or a parent (a Windows drive's root at the top, `F:\`). */
+export async function nearestFolder(dir: string): Promise<string> {
+  for (let at = path.resolve(dir); ; at = path.dirname(at)) {
+    if (await stat(at).then((s) => s.isDirectory(), () => false)) return at;
+    if (path.dirname(at) === at) return at;
+  }
+}
+
+/** Free bytes on the volume `dir` is on (or will be, once made): statfs of its nearest existing folder. */
+export async function volumeFree(dir: string): Promise<number> {
+  return diskFree(await nearestFolder(dir));
+}
+
+/** The volume `dir` is on, to add up what goes to one disk: the device of its nearest existing folder. */
+export async function volumeOf(dir: string): Promise<number> {
+  return (await stat(await nearestFolder(dir))).dev;
+}
+
+/** The bytes a part of `name` in `dir` already holds, when they are vouched for by its note (so a resume keeps them). */
+export async function partBytes(dir: string, name: string, url: string): Promise<number> {
+  const part = path.join(dir, `${name}.part`);
+  const kept = await readPartOf(`${part}.json`);
+  if (kept?.url !== url) return 0;
+  return stat(part).then((s) => Math.min(s.size, kept.size), () => 0);
+}
+
+/** The file is already in `dir`, whole: a download of it would only fetch it again. */
+export async function haveFile(dir: string, name: string, bytes: number | undefined): Promise<boolean> {
+  return stat(path.join(dir, name)).then((s) => s.isFile() && (bytes === undefined || s.size === bytes), () => false);
+}
+
+/** The file's size, from a HEAD of where it is served (no record of it, or records not trusted). */
+export async function sizeOf(options: Pick<DownloadOptions, "url" | "name" | "signal" | "fetch" | "allow">): Promise<number> {
+  const head = await locate(options, "HEAD");
+  if (!head.response.ok) throw fail(`${options.name}: the download answered ${head.response.status}.`);
+  const total = Number(head.response.headers.get("content-length"));
+  if (!Number.isSafeInteger(total) || total <= 0) throw fail(`${options.name}: the download did not say its size.`);
+  return total;
+}
+
 /** The answer from where the file is served now, and the headers of the first answer (Hugging Face's own, before its CDN). */
 interface Located { readonly response: Response; readonly first: Headers }
 
 /** The address the file is served from now: the first, or the one place it redirects to. */
-async function locate(options: DownloadOptions, method: "HEAD" | "GET", headers: Record<string, string> = {}): Promise<Located> {
+async function locate(options: Pick<DownloadOptions, "url" | "name" | "signal" | "fetch" | "allow">, method: "HEAD" | "GET", headers: Record<string, string> = {}): Promise<Located> {
   const get = options.fetch ?? fetch, allow = options.allow ?? huggingFace;
   let url = new URL(options.url);
   if (!allow(url, false)) throw fail(`Downloads come from Hugging Face only, not ${url.host}.`);

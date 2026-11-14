@@ -1198,7 +1198,9 @@ describe("threads.delete marks the thread before it waits", () => {
     expect(await within(3000, deleting, "threads.delete")).toEqual({ threadId: t.id });
     await sleep(300); // room for anything that slipped past the delete to run
     expect(new Set(comfy.events.map((e) => e.jobId))).toEqual(new Set([jobId]));
-    expect(comfy.states(jobId)).toEqual(["queued", "running", "cancelled"]);
+    // running twice: started, then ComfyUI took the prompt into its queue (the card's live line)
+    expect(comfy.states(jobId)).toEqual(["queued", "running", "running", "cancelled"]);
+    expect(comfy.events.filter((e) => e.jobId === jobId).map((e) => e.stage)).toEqual([undefined, undefined, "queued", undefined]);
     expect(comfy.calls.filter((c) => c === "/prompt")).toHaveLength(1);
     expect(comfy.pngs()).toEqual([]);
     expect((await rejection(r.client.call("threads.get", { threadId: t.id }))).code).toBe("thread-not-found");

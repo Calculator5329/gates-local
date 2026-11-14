@@ -63,13 +63,15 @@ test("one click sets up images: the pop-up shows the one download, Set up images
   await expect(pop.getByRole("progressbar", { name: "Image setup" })).toBeVisible();
   await expect(pop.getByRole("button", { name: "Setting up…" })).toBeDisabled();
   await shot(page, "#imageUnset.open", "#imageSetupRun", info.outputPath("setup-running.png"));
-  // the engine the app started runs on the graphics card, at its own port
-  expect(comfy.engineArgs()).toEqual(expect.arrayContaining(["--port"]));
-  expect(comfy.engineArgs()).not.toContain("--cpu");
+  // the model downloads with the engine stopped: a download never needs it (WIN-SETUP-01)
+  expect(comfy.engineArgs(), "no engine started for the download").toBeUndefined();
 
   comfy.slowDownloads(false);
   await expect(pop).toBeHidden();
   await expect(imageBtn).toHaveAttribute("aria-pressed", "true");
+  // then the engine the app started runs on the graphics card, at its own port
+  expect(comfy.engineArgs()).toEqual(expect.arrayContaining(["--port"]));
+  expect(comfy.engineArgs()).not.toContain("--cpu");
 });
 
 // Guards the owner's ask: where images cannot run, the app says so plainly.

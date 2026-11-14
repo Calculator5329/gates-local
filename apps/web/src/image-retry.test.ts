@@ -83,10 +83,11 @@ describe("a retry takes over its failed card's box", () => {
   });
 
   it.each([
-    [{ state: "queued" }, "Waiting for the GPU", "<p>Waiting for the GPU</p>"],
-    [{ state: "running", progress: 0, phase: "freeing" }, "Freeing memory", "<p>Freeing memory</p>"],
-    // running, the spinner says it: on screen only the percent and the seconds since it was asked for
-    [{ state: "running", progress: 0.4 }, "Making image · 40%", '<p aria-hidden="true">40% · '],
+    // one live line: a lit dot, the stage ComfyUI reported (else Working), the seconds since it was asked for
+    [{ state: "queued" }, "Waiting for the GPU", '<span class="lv-w">Waiting for the GPU</span>'],
+    [{ state: "running", progress: 0, phase: "freeing" }, "Freeing memory", '<span class="lv-w">Freeing memory</span>'],
+    [{ state: "running", progress: 0.4 }, "Making image", '<span class="lv-w">Working</span>'],
+    [{ state: "running", progress: 0.4, stage: "sampling", steps: { done: 2, total: 4 } }, "Making image", '<span class="lv-w">Sampling 2/4</span>'],
   ] as const)("while the retry is %o the one box says %s, not the old reason", async (retry, words, shown) => {
     const { html, boxes } = await render(retry);
     expect(boxes).toHaveLength(1);

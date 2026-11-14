@@ -28,6 +28,7 @@ const rows: Record<Exclude<keyof GatesLocalBridge, "updateApprovalVersion" | "on
   openDataFolder: [b => b.openDataFolder(), IPC.openDataFolder, []],
   modelsFolder: [b => b.modelsFolder(), IPC.modelsFolder, []],
   openModelsFolder: [b => b.openModelsFolder(), IPC.openModelsFolder, []],
+  pickFolder: [b => b.pickFolder("F:\\models"), IPC.pickFolder, ["F:\\models"]],
 };
 
 it("covers every method the bridge exposes", () => {

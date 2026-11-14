@@ -22,6 +22,8 @@ interface DesktopBridge {
   openDataFolder?(): Promise<string | null>;
   modelsFolder?(): Promise<string | null>;
   openModelsFolder?(): Promise<string | null>;
+  /** The system's folder dialog, opened at `start`; null when the person closed it. Missing on older desktop builds. */
+  pickFolder?(start?: string): Promise<string | null>;
 }
 
 declare global {
@@ -89,6 +91,12 @@ export async function dataFolder(): Promise<string | null> {
 export async function openDataFolder(): Promise<string | null> {
   return (await window.gatesLocal?.openDataFolder?.()) ?? null;
 }
+
+/** The desktop window's folder dialog, or undefined where there is none (a browser, a phone): a path field then. */
+export const folderDialog = (): ((start?: string) => Promise<string | null>) | undefined => {
+  const pick = window.gatesLocal?.pickFolder;
+  return pick === undefined ? undefined : (start) => pick(start);
+};
 
 /** Only the desktop window can open a folder. */
 export const canOpenFolder = (): boolean => window.gatesLocal?.modelsFolder !== undefined && window.gatesLocal.openModelsFolder !== undefined;

@@ -20,6 +20,8 @@ export interface OwnComfy extends ComfyService {
   address(): string;
   /** Told the pid of a run that ends without the app asking (a crash, a kill from outside); stop and killRuntimeNow are not told. */
   onExit(listener: (pid: number) => void): void;
+  /** Its models folder (kind folders inside), known without starting it: where image downloads go unless the person picked a folder. */
+  modelsDir?(): string;
 }
 
 export type OwnComfyOptions = {
@@ -31,7 +33,21 @@ export type OwnComfyOptions = {
   platform?: NodeJS.Platform;
   /** How long a stop waits for the engine to exit before it kills it. */
   stopTimeoutMs?: number;
+  /** The folder the person picked for image downloads (Settings' imageFolder), read at each start: the engine looks there too. */
+  extraModels?: () => string | undefined;
 };
+
+/** The kinds of model folder the app downloads into, each a folder of that name inside the download folder. */
+export const MODEL_KINDS = ["checkpoints", "loras", "diffusion_models", "text_encoders", "vae"] as const;
+
+/**
+ * ComfyUI's extra_model_paths config naming a picked folder: its kind folders are searched as well
+ * as the engine's own. Single-quoted YAML, so a Windows path's backslashes are taken as they are.
+ */
+export function extraModelPaths(folder: string): string {
+  const quoted = `'${folder.replaceAll("'", "''")}'`;
+  return ["gates_local:", `  base_path: ${quoted}`, ...MODEL_KINDS.map((k) => `  ${k}: ${k}`), ""].join("\n");
+}
 
 /** A local TCP port free now, for the engine to listen on (picked once at startup). */
 export function freePort(): Promise<number> {
@@ -101,6 +117,7 @@ export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
   const own: OwnComfy = {
     installed: () => find() !== undefined,
     address: () => opts.address ?? `http://127.0.0.1:${opts.port}`,
+    modelsDir: () => path.join(engineDataDir(opts.appDataDir), "models"),
     async inspect() {
       const active = child !== undefined;
       return { present: find() !== undefined, active, activeState: active ? "active" : "inactive", pid: child?.pid ?? 0 };
@@ -113,6 +130,9 @@ export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
       endLeftover();
       mkdirSync(engineDataDir(opts.appDataDir), { recursive: true });
       mkdirSync(runtimeDir(opts.appDataDir), { recursive: true });
+      const picked = opts.extraModels?.();
+      const extra = path.join(runtimeDir(opts.appDataDir), "comfyui-extra-models.yaml");
+      if (picked !== undefined) writeFileSync(extra, extraModelPaths(picked));
       const args = [
         ...layout === "windows-portable" ? ["-s"] : [],
         files.main,
@@ -120,6 +140,7 @@ export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
         "--port", String(opts.port),
         "--disable-auto-launch",
         "--base-directory", engineDataDir(opts.appDataDir),
+        ...picked === undefined ? [] : ["--extra-model-paths-config", extra],
         ...onCpu(opts.appDataDir) ? ["--cpu"] : [],
         ...layout === "windows-portable" ? ["--windows-standalone-build"] : [],
       ];

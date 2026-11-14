@@ -37,7 +37,7 @@ import type { NewMessage } from "./threads/types.ts";
 import type { Handlers } from "./ws/server.ts";
 import { createImageHandlers } from "./image/handlers.ts";
 import type { ImageSetupModule } from "./image/setup.ts";
-import { IMAGES_UNSET, type ImageModule } from "./image/module.ts";
+import { IMAGES_UNSET, notRunning, type ImageModule } from "./image/module.ts";
 import type { GpuLease } from "./gpu/lease.ts";
 import { createMeasure } from "./measure/handlers.ts";
 import { createUpdateHandlers, type UpdateModule } from "./update/module.ts";
@@ -726,7 +726,8 @@ export function createApp(deps: AppDeps): App {
       await new Promise((resolve) => setImmediate(resolve));
       // No ComfyUI answered last time and the app has none to start: ask once more, and refuse before
       // any card or question is kept, so the words go back to the composer with one line of why.
-      if (image.current().state === "missing" && (await image.status()).state === "missing") throw new AppError("image-input", IMAGES_UNSET);
+      const missing = image.current().state === "missing" ? await image.status() : undefined;
+      if (missing?.state === "missing") throw new AppError("image-input", missing.addressSet === true && missing.baseUrl !== undefined ? notRunning(missing.baseUrl) : IMAGES_UNSET);
       if (turn.controller.signal.aborted) throw turn.halted ?? cancelledBeforeStart();
       userMessage = store.appendMessage({ ...(messageId === undefined ? {} : { id: messageId }), threadId, role: "user", content }, replaced);
       try {

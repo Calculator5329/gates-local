@@ -32,7 +32,7 @@ import { type ActionResult, codeOf, createConnection, failure, isNA } from "./se
 export { threadMarkdown } from "./session/threads.ts";
 export { queueReason, firstPull, cancelStopAsk, canRetry, removeQueued, editQueued } from "./session/chat.ts";
 export { type ActionCall, type ActionResult, failure, isNA } from "./session/connection.ts";
-export { fileUrl, dataFolder, openDataFolder, canOpenFolder, canUpdateHere } from "./session/platform.ts";
+export { fileUrl, dataFolder, openDataFolder, canOpenFolder, canUpdateHere, folderDialog } from "./session/platform.ts";
 export { threadFromHash } from "./session/navigation.ts";
 
 export const applyServerEvent = createServerState(getState, setState);
@@ -438,6 +438,16 @@ export async function downloadImageSetup(preset: string): Promise<ActionResult> 
   if (!r.ok) return r.message;
   if (r.value.files.length === 0) void loadImagePresets();
   return null;
+}
+
+/**
+ * Settings' folder for image downloads (null clears it), then the list again for that folder's
+ * free space. Later downloads go there; nothing already downloaded moves.
+ */
+export async function saveImageFolder(folder: string | null): Promise<ActionResult> {
+  const failed = await updateSettings({ imageFolder: folder });
+  if (failed === null) void loadImagePresets();
+  return failed;
 }
 
 export async function stopImageDownload(preset: string): Promise<ActionResult> {

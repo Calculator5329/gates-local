@@ -6,11 +6,12 @@
 // click. The same shape and parts as Picker.tsx; what a chat model needs (search, favorites,
 // context lengths) is not here. A setup ComfyUI lacks files or nodes for is listed greyed out
 // with its reason, and a Download button when the app can fetch every missing file
-// (image.download, with Stop). With nothing to list the picker is one row that says why, with
+// (image.download). The download is said once, in the disk row under the lists: where the files
+// go, what is left to fetch and free there, one bar with Stop. With nothing to list the picker is one row that says why, with
 // Start ComfyUI or Check again: nothing starts on open.
 import "./picker.css";
 import "./image-picker.css";
-import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ImageChoice, ImageDownload, ImagePreset } from "@gates-local/contracts";
 import { gb, noGpu, timeLeft } from "./format.ts";
 import { Icon } from "./icons.tsx";
@@ -18,7 +19,7 @@ import { chosenImage, imageFit, sizeLabel } from "./image-choice.ts";
 import { ImageMark } from "./ImageMark.tsx";
 import { memoryRuler } from "./picker-models.ts";
 import { focusComposer } from "./Sidebar.tsx";
-import { downloadImageSetup, loadImagePresets, pickImage, startImage, stopImageDownload } from "./session.ts";
+import { downloadImageSetup, folderDialog, loadImagePresets, pickImage, saveImageFolder, startImage, stopImageDownload } from "./session.ts";
 import { NA, useStore } from "./store.ts";
 import { PHONE, closePop, closeTip, isTouch, tabStops, useMedia } from "./ui.tsx";
 
@@ -79,10 +80,10 @@ function defaultsOf(rows: readonly Row[]): { style: string; row: Row }[] {
 /** A tier row's quiet label after its name, as the chat picker shows a variant. */
 const tierTag = (p: Row) => p.tier === undefined ? null : <span className="pk-variant">{p.tier}</span>;
 
-/** Why a greyed row cannot run: what ComfyUI lacks, in words, or the files it needs and their size. */
+/** Why a greyed row cannot run: what ComfyUI lacks, in words, or the files it needs and what is left of them to fetch. */
 function needsText(p: ImagePreset): string {
   if (p.why !== undefined) return p.why;
-  const n = p.needs?.files.length ?? 0, bytes = p.needs?.bytes;
+  const n = p.needs?.files.length ?? 0, bytes = p.needs?.leftBytes ?? p.needs?.bytes;
   return `Needs ${n} ${n === 1 ? "file" : "files"}${bytes === undefined ? "" : ` · ${gb(bytes)}`}`;
 }
 
@@ -124,21 +125,21 @@ function SizeMemory({ bytes, fit, free, cpu, number }: { bytes: number; fit: Fit
   </span>;
 }
 
+/** A long path loses its middle first: the drive and the last folders say where it is. */
+export function middle(path: string, max = 34): string {
+  if (path.length <= max) return path;
+  const tail = Math.ceil((max - 1) * 0.6);
+  return `${path.slice(0, max - 1 - tail)}…${path.slice(-tail)}`;
+}
+
 /**
- * A greyed row's second line while its files download: one bar for the whole setup, then which
- * file, how far and how long, short enough for the row. The setup's bytes when the server knows
- * every file's size, else this file's.
+ * The one download, said once for the whole picker: bytes in of all, and the time left. The
+ * setup's bytes when the server knows every file's size, else this file's.
  */
-function Downloading({ d, name }: { d: ImageDownload; name: string }) {
+function amounts(d: ImageDownload): { done: number; total: number | undefined; pct: number } {
   const done = d.setupTotalBytes === undefined ? d.completedBytes : d.setupCompletedBytes ?? d.completedBytes;
   const total = d.setupTotalBytes ?? d.totalBytes;
-  const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
-  const left = d.state === "downloading" && d.bytesPerSecond && total ? ` · ${timeLeft(Math.max(0, total - done) / d.bytesPerSecond)} left` : "";
-  const words = d.state === "queued" ? "Starting" : d.state === "verifying" ? `File ${d.file}/${d.files} · checking` : `File ${d.file}/${d.files} · ${pct}%${left}`;
-  return <>
-    <span className="prog" role="progressbar" aria-label={`${name} download`} aria-valuenow={pct}><i style={{ width: `${pct}%` }} /></span>
-    <span className="pk-why-t">{words}</span>
-  </>;
+  return { done, total, pct: total ? Math.min(100, Math.round((done / total) * 100)) : 0 };
 }
 
 export function ImagePicker() {
@@ -164,6 +165,9 @@ export function ImagePicker() {
   const canStop = useStore((s) => s.unavailable["image.stopDownload"] !== true);
   const canStart = useStore((s) => s.unavailable["image.start"] !== true);
   const [startError, setStartError] = useState<string | null>(null);
+  // the download folder: the path field while it is open (no folder dialog here), and a save's refusal
+  const [folderField, setFolderField] = useState<string | null>(null);
+  const [folderError, setFolderError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const known = presets === undefined || presets === NA ? undefined : presets;
   // the server's word on this machine: no default on too small a GPU, or how slow the CPU is
@@ -234,9 +238,17 @@ export function ImagePicker() {
     const failed = await downloadImageSetup(p.id);
     if (failed !== null) setRowError({ id: p.id, message: failed });
   }
-  async function stopSetup(p: Row) {
-    const failed = await stopImageDownload(p.id);
-    if (failed !== null) setRowError({ id: p.id, message: failed });
+  async function changeFolder() {
+    setFolderError(null);
+    const dialog = folderDialog();
+    if (dialog === undefined) { setFolderField(known?.disk?.folder ?? ""); return; }
+    const picked = await dialog(known?.disk?.folder).catch(() => null);
+    if (picked !== null) await saveFolder(picked);
+  }
+  async function saveFolder(folder: string) {
+    const failed = await saveImageFolder(folder.trim() === "" ? null : folder.trim());
+    if (failed === null) setFolderField(null);
+    setFolderError(failed);
   }
   async function start(as: "start" | "check") {
     setStarting(as); setStartError(null);
@@ -287,25 +299,64 @@ export function ImagePicker() {
     </div>;
   }
 
-  /** A row ComfyUI cannot run yet: greyed, its reason or its download on the second line, the whole reason in its tip. */
+  /**
+   * A row ComfyUI cannot run yet: greyed, and on its second line one of three things: what it
+   * needs, that it waits on the download running now (its own or another setup's with the same
+   * files), or why a download of it failed. The transfer itself is said once, in the disk row.
+   */
   function offRow(p: Row, style?: string) {
     const mine = download?.preset === p.id ? download : undefined;
-    const running = mine !== undefined && mine.ended !== true;
-    const stopped = mine !== undefined && mine.ended === true && mine.state !== "done";
-    // another setup's download brings this row's files: its progress here, said once, with no button
-    const waits = !running && downloading && (p.needs?.files ?? []).some((f) => fetching.has(baseName(f)));
-    const shownDownload = running ? mine : waits ? download : undefined;
-    const reason = rowError?.id === p.id ? rowError.message : stopped ? mine.message ?? "The download stopped." : needsText(p);
-    return <div key={p.id} className={`pk-r off${style === undefined ? "" : " style"}${p.id === active?.id ? " hl" : ""}`} role="option" data-testid="image.picker.unready-option" aria-selected={false} data-preset={p.id} onMouseMove={() => setHighlight(p.id)}>
+    // a stop keeps the part fetched: the row's button then resumes it
+    const kept = mine !== undefined && mine.ended === true && mine.state === "cancelled";
+    const failed = mine !== undefined && mine.ended === true && mine.state === "error";
+    const waits = downloading && (mine !== undefined || (p.needs?.files ?? []).some((f) => fetching.has(baseName(f))));
+    const reason = rowError?.id === p.id ? rowError.message : waits ? "Waiting on the download" : failed ? mine.message ?? "The download failed." : needsText(p);
+    return <div key={p.id} className={`pk-r off${style === undefined ? "" : " style"}${p.id === active?.id ? " hl" : ""}`} role="option" data-testid="image.picker.unready-option" aria-selected={false} data-preset={p.id} data-state={waits ? "waiting" : "needs"} onMouseMove={() => setHighlight(p.id)}>
       <button type="button" className="pk-select" data-testid="image.picker.unready-select" tabIndex={-1} aria-disabled="true" aria-label={style ?? p.name} aria-describedby={`pk-why-${p.id}`} onClick={() => choose(p)}>{rowLabel(p, style)}</button>
-      {running
-        ? canStop ? <button type="button" className="pk-act" data-testid="image.picker.stop-download" aria-label={`Stop downloading ${p.name}`} data-tip="Stop" onClick={() => void stopSetup(p)}><Icon id="x" /></button> : null
-        : p.needs?.download === true && canDownload && !waits
-          ? <button type="button" className="pk-act" data-testid="image.picker.download" aria-label={`Download ${p.name}`} data-tip={stopped ? "Download again" : "Download"} disabled={downloading} onClick={() => void fetchSetup(p)}><Icon id="download" /></button>
-          : null}
-      {shownDownload !== undefined
-        ? <div className="pk-why" id={`pk-why-${p.id}`}><Downloading d={shownDownload} name={p.name} /></div>
-        : <div className="pk-why" id={`pk-why-${p.id}`} data-tipt={reason}><span className="pk-why-t t">{reason}</span></div>}
+      {p.needs?.download === true && canDownload && !waits
+        ? <button type="button" className="pk-act" data-testid="image.picker.download" aria-label={`${kept ? "Resume downloading" : "Download"} ${p.name}`} data-tip={kept ? "Resume" : "Download"} disabled={downloading} onClick={() => { setHighlight(p.id); void fetchSetup(p); }}><Icon id={kept ? "redo" : "download"} /></button>
+        : null}
+      <div className="pk-why" id={`pk-why-${p.id}`} data-tipt={reason}><span className="pk-why-t t">{reason}</span></div>
+    </div>;
+  }
+
+  /**
+   * Where the downloads go, said once under the lists at one height: the folder (its middle
+   * shortened, the whole path in its tip) with the one control that changes it, then what the
+   * highlighted setup has left to fetch and what is free there. While a download runs: its one
+   * bar, bytes in of all and the time left, with Stop; a stopped one's bar stays at the part kept.
+   */
+  function diskRow() {
+    const disk = known?.disk;
+    if (disk === undefined || !canDownload) return null;
+    const run = download !== undefined && (downloading || download.state === "cancelled") ? download : undefined;
+    const name = listed.find((p) => p.id === run?.preset)?.name ?? run?.preset ?? "";
+    const left = active?.needs?.download === true ? active.needs.leftBytes ?? active.needs.bytes : undefined;
+    const short = left !== undefined && disk.freeBytes !== undefined && disk.freeBytes < left;
+    const field = folderField !== null;
+    let numbers: ReactNode;
+    if (run !== undefined) {
+      const { done, total, pct } = amounts(run);
+      const time = downloading && run.state === "downloading" && run.bytesPerSecond && total ? ` · ${timeLeft(Math.max(0, total - done) / run.bytesPerSecond)} left` : "";
+      numbers = <>
+        <span className="prog" role="progressbar" aria-label={`${name} download`} aria-valuenow={pct}><i style={{ width: `${pct}%` }} /></span>
+        <span className="pk-disk-n" data-testid="image.picker.download-amount">{run.state === "queued" ? "Starting" : total ? `${gb(done)} of ${gb(total)}${time}` : gb(done)}</span>
+        {downloading && canStop ? <button type="button" className="pk-act" data-testid="image.picker.stop-download" aria-label={`Stop downloading ${name}`} data-tip="Stop" onClick={() => void stopImageDownload(run.preset).then((failed) => { if (failed !== null) setRowError({ id: run.preset, message: failed }); })}><Icon id="x" /></button> : null}
+      </>;
+    } else {
+      numbers = <span className="pk-disk-n">
+        {left === undefined ? null : <span data-testid="image.picker.disk-left">{gb(left)} to fetch · </span>}
+        {disk.freeBytes === undefined ? null : <span className={short ? "short" : undefined} data-testid="image.picker.disk-free">{gb(disk.freeBytes)} free on disk</span>}
+      </span>;
+    }
+    return <div className="pk-disk" data-testid="image.picker.disk">
+      <button type="button" className="pk-act" data-testid="image.picker.change-folder" aria-label="Change the download folder" data-tip="Change folder" aria-pressed={field || undefined} disabled={downloading} onClick={() => void changeFolder()}><Icon id="folder" /></button>
+      {field
+        ? <input className="pk-disk-field" data-testid="image.picker.folder-field" aria-label="Download folder" value={folderField} autoFocus spellCheck={false}
+            onChange={(e) => setFolderField(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void saveFolder(folderField); } else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setFolderField(null); setFolderError(null); } }} />
+        : <span className="pk-disk-folder" data-testid="image.picker.disk-folder" data-tipt={disk.folder}>{disk.folder === undefined ? "No folder yet" : middle(disk.folder)}</span>}
+      {folderError === null ? numbers : <span className="pk-disk-n short" role="status" data-tipt={folderError}>{folderError}</span>}
     </div>;
   }
 
@@ -375,6 +426,7 @@ export function ImagePicker() {
         {error === null ? null : <p className="pk-help pk-choice" role="status">{error}</p>}
       </section>
     </div>
+    {diskRow()}
     {/* under 4 GB no default, on the CPU how slow, said once; the free figure stays when there is one */}
     <footer className="pk-bottom"><span className="pk-nogpu" role={note === undefined ? undefined : "status"}>{note}</span><span>{note !== undefined && (cpu || free === undefined) ? null : cpu ? "Runs in system memory" : free === undefined ? "GPU reading unavailable" : `${gb(free)} free`}</span></footer>
   </div>;

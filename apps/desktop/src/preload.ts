@@ -28,6 +28,7 @@ const bridge: GatesLocalBridge = {
   openDataFolder: async () => (await ipcRenderer.invoke(IPC.openDataFolder)) as string | null,
   modelsFolder: async () => (await ipcRenderer.invoke(IPC.modelsFolder)) as string | null,
   openModelsFolder: async () => (await ipcRenderer.invoke(IPC.openModelsFolder)) as string | null,
+  pickFolder: async (start) => (await ipcRenderer.invoke(IPC.pickFolder, start)) as string | null,
 };
 
 contextBridge.exposeInMainWorld(BRIDGE_KEY, bridge);

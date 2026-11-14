@@ -2,12 +2,13 @@
 // menus' Image rows) open this in place of Image mode, whose Send could not work. Where the app can
 // set images up here, it shows the one download (the app's own ComfyUI and the recommended setup)
 // and Set up images starts it; where it cannot, one sentence says why. Settings and Check again
-// stay for a ComfyUI the person runs.
+// stay for a ComfyUI the person runs. An address set in Settings that does not answer is said as
+// that: not running, the address, Check again, and the app's own engine only as a choice pressed.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ImageSetup, ImageSetupProgress } from "@gates-local/contracts";
 import { gb } from "./format.ts";
 import { imagesUnset } from "./image-choice.ts";
-import { checkImageStatus, loadImageSetup, openSettings, startImageSetup } from "./session.ts";
+import { checkImageStatus, loadImageSetup, openSettings, startImageSetup, updateSettings } from "./session.ts";
 import { NA, getState, setState, useStore } from "./store.ts";
 import { SheetHead, closePop, place } from "./ui.tsx";
 
@@ -55,6 +56,8 @@ export function ImageUnset() {
   const address = useStore((s) => (s.imageStatus === NA ? undefined : s.imageStatus?.baseUrl));
   const setup = useStore((s) => s.imageSetup);
   const canSetUp = useStore((s) => s.unavailable["image.setup"] !== true);
+  const canSave = useStore((s) => s.unavailable["settings.update"] !== true);
+  const notRunning = useStore((s) => s.imageStatus !== NA && s.imageStatus?.addressSet === true && s.imageStatus.state === "missing");
   const [checking, setChecking] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -85,7 +88,29 @@ export function ImageUnset() {
     const error = await startImageSetup();
     if (error !== null) setNote(error);
   };
+  // the app's own engine instead of the address set: an explicit choice, never a fallback the app takes
+  const useOwn = async () => {
+    setNote(null);
+    const error = await updateSettings({ comfyUrl: null });
+    if (error !== null) { setNote(error); return; }
+    await Promise.all([checkImageStatus(), loadImageSetup()]);
+  };
   const offer = canSetUp && setup !== undefined && setup.why === undefined && setup.model !== undefined;
+  if (notRunning) {
+    // an address the person set that does not answer: it is not running, not uninstalled (WIN-MEM-04)
+    return (
+      <div className={`pop unset-pop${open ? " open" : ""}`} id="imageUnset" role="dialog" aria-labelledby="imageUnsetT" ref={ref} data-state="not-running">
+        <SheetHead title="Image" />
+        <p className="unset-t" id="imageUnsetT">ComfyUI is not running</p>
+        <p className="unset-d" id="imageUnsetAddress"><code>{address}</code></p>
+        {note === null ? null : <p className="unset-d unset-note" role="status">{note}</p>}
+        <div className="unset-acts">
+          <button type="button" className="btn" data-testid="image.unset.check-again" disabled={checking} onClick={() => void check()}>{checking ? "Checking…" : "Check again"}</button>
+          {canSetUp && canSave ? <button type="button" className="btn outline" data-testid="image.unset.use-own" onClick={() => void useOwn()}>Set up here instead</button> : null}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={`pop unset-pop${open ? " open" : ""}`} id="imageUnset" role="dialog" aria-labelledby="imageUnsetT" ref={ref}>
       <SheetHead title="Image" />

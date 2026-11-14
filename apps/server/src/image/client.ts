@@ -17,6 +17,24 @@ const Queue = S.Struct({ queue_running: S.Array(S.Array(S.Unknown)), queue_pendi
 const ObjectInfo = S.Record(S.String, S.Unknown);
 const failure = (code: string, message: string) => Object.assign(new Error(message), { code });
 
+/** What ComfyUI said it is doing for a prompt (contracts ImageEvent's stage and steps). */
+export interface RenderSaid {
+  readonly stage: "queued" | "loading" | "encoding" | "sampling" | "decoding";
+  readonly steps?: { readonly done: number; readonly total: number };
+}
+/**
+ * The stage a node of this class is, when ComfyUI says it is executing it. A loader that executes
+ * reads its model from disk (a loader whose output is cached is not executed, and says nothing);
+ * any other class says nothing new.
+ */
+export function stageOfNode(classType: string): RenderSaid["stage"] | undefined {
+  if (/Loader/.test(classType)) return "loading";
+  if (/TextEncode/.test(classType)) return "encoding";
+  if (/^(KSampler|KSamplerAdvanced|SamplerCustom|SamplerCustomAdvanced)$/.test(classType)) return "sampling";
+  if (classType.startsWith("VAEDecode")) return "decoding";
+  return undefined;
+}
+
 export interface ComfyClientDeps {
   fetch?: typeof fetch;
   socket?: (url: string) => WebSocket;
@@ -70,7 +88,8 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
       catch { return undefined; }
     },
     /** `extra`: the workflows ComfyUI had, as setups (presets.ts workflowPreset), for a choice that names one. `seed` omitted: a random one. */
-    async render(prompt: string, clientId: string, signal: AbortSignal, progress: (value: number) => void, fetched: () => void = () => {}, choice: ImageChoice = DEFAULT_CHOICE, extra: readonly Preset[] = [], seed: number = Math.floor(Math.random() * 2 ** 32)): Promise<{ bytes: Buffer; seed: number; steps?: number }> {
+    /** `progress`: the sampler's fraction, and with it what ComfyUI said it is doing, whenever either changes. */
+    async render(prompt: string, clientId: string, signal: AbortSignal, progress: (value: number, said?: RenderSaid) => void, fetched: () => void = () => {}, choice: ImageChoice = DEFAULT_CHOICE, extra: readonly Preset[] = [], seed: number = Math.floor(Math.random() * 2 ** 32)): Promise<{ bytes: Buffer; seed: number; steps?: number }> {
       const { preset, size } = resolveChoice(choice, extra);
       const graph = jobGraph(preset, await this.info(signal), { prompt, seed, width: size.width, height: size.height });
       // The steps the graph asks for, for the Pictures screen; a graph with none or several gives none.
@@ -90,12 +109,26 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
       const completed = new Promise<void>((resolve, reject) => { done = () => { settled = true; resolve(); }; fail = (error) => { settled = true; reject(error); }; });
       // A socket can fail while POST /prompt is still in flight.
       void completed.catch(() => {});
+      let fraction = 0, said: RenderSaid | undefined;
+      const say = (next: RenderSaid | undefined, value = fraction) => {
+        fraction = value;
+        said = next;
+        progress(fraction, said);
+      };
       const handle = (frame: { type: string; data: Record<string, unknown> }) => {
         if (promptId === undefined) { pending.push(frame); return; }
         if (frame.data["prompt_id"] !== promptId) return;
+        if (frame.type === "executing" && typeof frame.data["node"] === "string") {
+          const stage = stageOfNode(graph[frame.data["node"]]?.class_type ?? "");
+          if (stage !== undefined && stage !== said?.stage) say({ stage });
+        }
         if (frame.type === "progress") {
           const value = frame.data["value"], max = frame.data["max"];
-          if (typeof value === "number" && typeof max === "number" && max > 0) progress(Math.max(0, Math.min(1, value / max)));
+          if (typeof value === "number" && typeof max === "number" && max > 0) {
+            // a tiled decode reports progress too; anything else that counts steps is the sampler
+            const counted = { done: Math.round(value), total: Math.round(max) };
+            say(said?.stage === "decoding" ? said : { stage: "sampling", steps: counted }, Math.max(0, Math.min(1, value / max)));
+          }
         }
         if (frame.type === "execution_success" || (frame.type === "executing" && frame.data["node"] === null)) done();
         if (frame.type === "execution_error" || frame.type === "execution_interrupted") fail(failure("image-workflow", `ComfyUI ${frame.type}: ${String(frame.data["exception_message"] ?? "image did not finish")}`));
@@ -127,6 +160,7 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
         signal.throwIfAborted();
         // Do not abort submission: retain prompt_id if cancellation races server acceptance.
         promptId = S.decodeUnknownSync(Prompt)(await (await post("/prompt", { prompt: graph, client_id: clientId })).json()).prompt_id;
+        say({ stage: "queued" }); // ComfyUI took it: in its queue until a node of it runs
         for (const frame of pending) handle(frame);
         if (signal.aborted) aborted();
         // History also handles cache hits and keeps failure bounded if progress stops.

@@ -83,6 +83,14 @@ export const ImageEvent = S.Struct({
   state: S.Literals(["queued", "running", "done", "error", "cancelled"]),
   /** Running, and still freeing GPU memory (unloading this app's chat models and waiting for the memory). Absent once that step ends. */
   phase: S.optional(S.Literals(["freeing"])),
+  /**
+   * Running: what ComfyUI said it is doing, only as it reported it. "queued": taken, not begun;
+   * "loading": a loader node ran (a model read from disk, so a cold first run); "encoding": the
+   * prompt's text encoder; "sampling" with `steps`; "decoding": the VAE. Absent: nothing reported yet.
+   */
+  stage: S.optional(S.Literals(["queued", "loading", "encoding", "sampling", "decoding"])),
+  /** Sampling: the step ComfyUI reported and of how many. */
+  steps: S.optional(S.Struct({ done: S.Int, total: S.Int })),
   progress: S.optional(S.Finite),
   imagePath: S.optional(S.String),
   message: S.optional(S.String),
@@ -517,6 +525,8 @@ export const Settings = S.Struct({
   imageTool: S.optional(S.Boolean),
   /** A ComfyUI the user points at; unset means discover the local install. */
   comfyUrl: S.optional(S.String),
+  /** The folder image model downloads go in (its kind folders inside: diffusion_models, vae…), picked by the person; unset means the engine's own models folder. Files already downloaded stay where they are. */
+  imageFolder: S.optional(S.String),
   /** Local dictation; absent means off. Only a loopback HTTP IP literal is accepted. */
   whisperUrl: S.optional(S.String),
   /** Updates take every change on the main branch, not only releases. Unset means off. */
@@ -544,6 +554,7 @@ export const SettingsPatch = S.Struct({
   /** null: back to unset (Reset settings). */
   imageTool: S.optional(S.NullOr(S.Boolean)),
   comfyUrl: S.optional(S.NullOr(S.String)),
+  imageFolder: S.optional(S.NullOr(S.String)),
   whisperUrl: S.optional(S.NullOr(S.String)),
   updateEveryChange: S.optional(S.Boolean),
   updateAutomatic: S.optional(S.Boolean),
@@ -678,6 +689,8 @@ export const ImageStatus = S.Struct({
   owner: RuntimeOwner,
   baseUrl: S.optional(S.String),
   detail: S.optional(S.String),
+  /** The address is the one the person set in Settings (not the app's own engine or the default): nothing answering there means "not running", never "not set up". */
+  addressSet: S.optional(S.Boolean),
 });
 export type ImageStatus = typeof ImageStatus.Type;
 
@@ -717,7 +730,11 @@ export const ImagePreset = S.Struct({
    * Not ready: the files ComfyUI does not list (names as the workflow gives them), once known their
    * total size, and `download` when every one has an address image.download fetches from.
    */
-  needs: S.optional(S.Struct({ files: S.Array(S.String), bytes: S.optional(Count), download: S.optional(S.Boolean) })),
+  needs: S.optional(S.Struct({
+    files: S.Array(S.String), bytes: S.optional(Count), download: S.optional(S.Boolean),
+    /** What is left to fetch into the download folder: `bytes` less the parts already there. Absent while a size is unknown. */
+    leftBytes: S.optional(Count),
+  })),
   /** Not runnable here, in words: a node class ComfyUI lacks, or no single prompt, size, seed or output. */
   why: S.optional(S.String),
 });
@@ -788,6 +805,12 @@ export const ImagePresets = S.Struct({
   slow: S.optional(S.String),
   /** The download running now, as its last image.download push said. */
   download: S.optional(ImageDownload),
+  /**
+   * Where image downloads go and the room there, read before any transfer: `folder` absent means
+   * there is no folder to put them in until the person picks one (an engine that never said where
+   * its models are). `picked`: Settings' imageFolder.
+   */
+  disk: S.optional(S.Struct({ folder: S.optional(S.String), freeBytes: S.optional(Count), picked: S.Boolean })),
 });
 export type ImagePresets = typeof ImagePresets.Type;
 
