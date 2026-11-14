@@ -103,6 +103,9 @@ describe("section 8, word for word", () => {
       .toEqual({ text: fill(quoted(cell("rollback failed: the old version did not start either (B4; failure page)"))[0] ?? "", all), link: true });
     expect(words.windowsDidNotFinish("1.5.0", paths["kept installer path"]))
       .toEqual({ text: fill(quoted(cell("Windows did not finish"))[0] ?? "", all), link: true });
+    expect(words.installerDidNotStart("C:\\d\\updates\\1.5.0\\Setup.exe"))
+      .toEqual({ text: fill(quoted(cell("Windows installer did not start"))[0] ?? "", { "installer path": "C:\\d\\updates\\1.5.0\\Setup.exe" }) });
+    expect(words.windowsGoBack(paths["kept installer path"])).toEqual({ text: fill(quoted(cell("Windows go back (status page)"))[0] ?? "", all) });
   });
 
   it("B3's page says whether the saved old version is missing or is something else", () => {

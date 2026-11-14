@@ -30,7 +30,8 @@ export interface InstalledClick {
 const NOT_READY = "The app server is not ready to approve an update. Try again after it reconnects.";
 
 function cannot(restart: Exclude<Restart, "yes">, version: string): string {
-  if (restart === "none") return INSTALL_REFUSAL;
+  // A Windows install updates through windows.ts; this click replaces an AppImage only.
+  if (restart === "none" || restart === "windows") return INSTALL_REFUSAL;
   if (restart === "pinned") return words.pinnedDataFolder(version).text;
   return words.cannotReplace(restart, version).text;
 }

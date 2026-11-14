@@ -4,9 +4,11 @@
 // preload bridge (window.gatesLocal), so it works with the sandbox on.
 
 import { describeCrash, type BridgeState } from "./bridge.ts";
+import { windowsGoBack } from "./installed-update/words.ts";
 
 export type StatusView =
-  | { readonly kind: "server"; readonly state: BridgeState }
+  /** goBack: on Windows, the kept installer of the version before this one (installed updates, design section 3, step 7). */
+  | { readonly kind: "server"; readonly state: BridgeState; readonly goBack?: string | undefined }
   | { readonly kind: "client-load-failed"; readonly url: string; readonly error: string };
 
 export function escapeHtml(text: string): string {
@@ -84,6 +86,7 @@ export function renderStatusPage(view: StatusView): string {
 ${tail}
 ${state.logPath === undefined ? "" : `<p>A failure report is kept at <code>${escapeHtml(state.logPath)}</code>. Include it when reporting this problem.</p><p><button data-action="openDataFolder">Open data folder</button></p>`}
 ${blocked}
+${view.goBack === undefined ? "" : `<p>${escapeHtml(windowsGoBack(view.goBack).text)}</p>`}
 <p><button data-action="restart">Restart</button></p>
 <p id="action-status" role="status"></p>`,
     );

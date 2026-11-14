@@ -95,3 +95,8 @@ export const transactionUnreadable = (file: string): Words =>
   say(`Gates Local cannot read its update record at ${file}, so it changed nothing and did not start. Move that file somewhere else, then start Gates Local again.`);
 export const windowsDidNotFinish = (version: string, installer: string): Words =>
   withLink(`The update to version ${version} did not finish. Run ${installer} or download version ${version} from the release page to finish or repair it.`);
+/** The click on Windows: the checked installer was refused or ended at once, and the running app stays as it was. */
+export const installerDidNotStart = (installer: string): Words =>
+  say(`Gates Local could not start the installer, so nothing changed; to update, run ${installer}.`);
+/** The status page of a version whose server failed, when the installer of an earlier version is kept (section 3, W-A step 7). */
+export const windowsGoBack = (installer: string): Words => say(`To go back, run ${installer}.`);

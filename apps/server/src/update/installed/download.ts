@@ -148,15 +148,16 @@ export function artifactUrl(base: URL, version: string, file: string): URL {
 
 const artifactFor = (manifest: ReleaseManifest, o: Identity) => manifest.artifacts.find((a) => a.platform === o.platform && a.arch === o.arch);
 
-/** The stored list's own checks, from bytes: trusted, this version, above the running one, a file for this copy. */
-function trustList(list: Buffer, signature: Buffer, version: string, o: Identity): { manifest: ReleaseManifest; artifact: ReleaseArtifact } | string {
+/** The stored list's own checks, from bytes: trusted, this version, above the running one (unless kept), a file for this copy. */
+function trustList(list: Buffer, signature: Buffer, version: string, o: Identity, kept = false): { manifest: ReleaseManifest; artifact: ReleaseArtifact } | string {
   let manifest: ReleaseManifest;
   try { manifest = verifyManifest(list, signature, o.keys); }
   catch (error) { return `the release list did not pass its signature check: ${message(error)}`; }
   if (manifest.version !== version) return `the release list is for version ${manifest.version}, not ${version}`;
   const listed = parseRelease(`v${manifest.version}`);
   const own = parseRelease(`v${o.running}`);
-  if (listed === null || own === null || compare(listed, own) <= 0) return `version ${manifest.version} is not newer than the running ${o.running}`;
+  if (listed === null || own === null) return `version ${manifest.version} or the running ${o.running} is not a release version`;
+  if (!kept && compare(listed, own) <= 0) return `version ${manifest.version} is not newer than the running ${o.running}`;
   const artifact = artifactFor(manifest, o);
   if (artifact === undefined) return `the release list has no file for ${o.platform} ${o.arch}`;
   return { manifest, artifact };
@@ -186,7 +187,20 @@ export async function verifyPrepared(o: Identity & { readonly version: string })
   return { ok: false, reason };
 }
 
-async function check(folder: string, o: Identity & { readonly version: string }): Promise<PreparedRelease | string> {
+/**
+ * A kept installer (Windows, design section 3): the folder of version, at or
+ * below the running one, checked from its bytes like a download. Unlike
+ * verifyPrepared it never deletes: a folder that fails is only not offered.
+ */
+export async function verifyKept(o: Identity & { readonly version: string }): Promise<Verified> {
+  let folder: string;
+  try { folder = versionFolder(o.dataDir, o.version); }
+  catch (error) { return { ok: false, reason: message(error) }; }
+  const reason = await check(folder, o, true).catch((error: unknown) => `the folder could not be read: ${message(error)}`);
+  return typeof reason === "string" ? { ok: false, reason } : { ok: true, prepared: reason };
+}
+
+async function check(folder: string, o: Identity & { readonly version: string }, kept = false): Promise<PreparedRelease | string> {
   // Links are never followed: a link's target can change after its bytes were hashed.
   if (!(await fs.promises.lstat(folder)).isDirectory()) return "the version folder is not a real folder";
   const names = await fs.promises.readdir(folder);
@@ -194,7 +208,7 @@ async function check(folder: string, o: Identity & { readonly version: string })
   if (!names.includes(LIST_FILE) || !names.includes(SIGNATURE_FILE)) return "the folder has no release list or no signature";
   const list = await fs.promises.readFile(path.join(folder, LIST_FILE));
   const signature = await fs.promises.readFile(path.join(folder, SIGNATURE_FILE));
-  const trusted = trustList(list, signature, o.version, o);
+  const trusted = trustList(list, signature, o.version, o, kept);
   if (typeof trusted === "string") return trusted;
   const { manifest, artifact } = trusted;
   const file = fileIn(folder, artifact.file);

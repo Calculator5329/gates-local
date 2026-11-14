@@ -82,6 +82,13 @@ describe("status page", () => {
     expect(html).toContain("Restart opens again at");
   });
 
+  it("names the kept installer to go back with on Windows after an update (design section 3, W-A step 7), and nothing without one", () => {
+    const state = { status: "crashed", launch: 1, reason: { kind: "exit", code: 1, signal: null }, stderrTail: [], restartBlockedUntil: null } as const;
+    const html = renderStatusPage({ kind: "server", state, goBack: "C:\\Users\\a&b\\updates\\1.2.3\\Gates-Local-1.2.3-Setup-x64.exe" });
+    expect(html).toContain("<p>To go back, run C:\\Users\\a&amp;b\\updates\\1.2.3\\Gates-Local-1.2.3-Setup-x64.exe.</p>");
+    expect(renderStatusPage({ kind: "server", state })).not.toContain("To go back");
+  });
+
   it("offers a reload that calls the bridge when the web client failed to load", async () => {
     const html = renderStatusPage({ kind: "client-load-failed", url: "http://127.0.0.1:5187/", error: "ERR_CONNECTION_REFUSED" });
     const bridge = { reloadClient: vi.fn(async () => undefined) };

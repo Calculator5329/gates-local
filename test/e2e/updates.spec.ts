@@ -321,6 +321,50 @@ test.describe("Version and the update state in two rows", () => {
     await group.screenshot({ path: test.info().outputPath("update-row9-no-tags-switch-off.png") });
   });
 
+  // Updates row 2 (Windows W-A): the downloaded, checked installer is offered as Restart to update, not a second download.
+  // The platform is faked: the server's Windows lines are replayed into the web client; the click itself is unit-tested (windows.test.ts).
+  test("row 2 a Windows install with the checked installer on disk offers Restart to update in the same row", async ({ page, open }) => {
+    await page.addInitScript(() => {
+      Object.assign(window, { gatesLocal: { updateApprovalVersion: 2, getServerUrl: async () => new URLSearchParams(location.search).get("server"), onState: () => () => undefined, updateAndRestart: async () => ({ ok: true }) } });
+    });
+    const PAGE = "https://example.invalid/releases/tag/v0.2.2";
+    const ready = { state: "newer", checkedAt: Date.UTC(2026, 10, 13, 7, 0), current: "0.2.1", target: "0.2.2", forThisCopy: true, page: PAGE, download: "ready" } as const;
+    // What 0.2.1 says on Windows today, and what this branch's server says for the same download.
+    const before: UpdateCheck = { ...ready, lines: ["Version 0.2.2 is downloaded and checked. This copy cannot install it by itself yet. To update now, download it from the release page."] };
+    const after: UpdateCheck = { ...ready, restart: true, lines: ["Version 0.2.2 is downloaded and checked.", "If version 0.2.2 does not start, Gates Local will not go back by itself. To go back, download version 0.2.1 from https://example.invalid/releases/tag/v0.2.1."] };
+    const idle: UpdateStatus = { version: { kind: "installed", version: "0.2.1" }, result: null, lastCheck: before, activity: [] };
+    let route: WebSocketRoute | undefined;
+    await page.routeWebSocket(/\/\?token=/, (socket) => {
+      route = socket;
+      const server = socket.connectToServer();
+      socket.onMessage((raw) => {
+        const message = JSON.parse(String(raw)) as { method?: string; id: string };
+        if (message.method === "update.status") socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result: { ...idle, canControl: true } }));
+        else server.send(raw);
+      });
+    });
+    await open(); await waitReady(page);
+    await page.keyboard.press("Control+Comma");
+    await expect(page.locator(".set .set-h h1")).toHaveText("General");
+    const group = page.locator(".grp").filter({ has: page.locator(".grp-t", { hasText: /^Updates$/ }) });
+    const row = group.locator(".srow").nth(1);
+    await expect(row.locator(".sl b")).toHaveText("Update available: 0.2.2");
+    await expect(row).toContainText("This copy cannot install it by itself yet.");
+    await expect(group.getByRole("button", { name: "Restart to update", exact: true })).toHaveCount(0);
+    await group.scrollIntoViewIfNeeded();
+    const box = () => group.evaluate((el) => { const r = el.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; });
+    const start = await box();
+    await group.screenshot({ path: test.info().outputPath("update-windows-row2-before.png") });
+    route?.send(JSON.stringify({ type: "push", channel: "update.changed", payload: { ...idle, lastCheck: after, approval: "approval-1", canControl: true } }));
+    const restart = group.getByRole("button", { name: "Restart to update", exact: true });
+    await expect(restart).toBeVisible();
+    await expect(row.locator(".src-help")).toHaveText("Version 0.2.2 is downloaded and checked.");
+    await expect(row).not.toContainText("download it from the release page");
+    await expect(row.locator(".tipped")).toHaveAttribute("aria-description", /To go back, download version 0\.2\.1 from .*Gates Local will close, update and reopen\./);
+    expect(await box(), "the Updates card moved or changed size").toEqual(start);
+    await group.screenshot({ path: test.info().outputPath("update-windows-row2-after.png") });
+  });
+
   // Guards the owner's ruling (updates row 10): the release page goes in the tip, so the row keeps its height.
   test("row 10 at 390px a listener's release page goes in the tip, so the row keeps its height", async ({ page, open }) => {
     await page.setViewportSize({ width: 390, height: 844 });

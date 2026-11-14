@@ -156,6 +156,8 @@ The install over the top was observed once, `0.0.8-native` → `0.0.9-native` (r
 6. Next launch: the version equals the pending version, so the app shows "Updated to version <v>." once and keeps that installer as the go-back installer for the next update. If it does not, the update did not finish (section 8), and part of the install may have changed.
 7. If the new version's server fails, its desktop status page, which needs no server, adds: "To go back, run <path to the kept installer>." If its main process cannot start, the sentence from step 2 is all the person has.
 
+**Built, 2026-11-13:** `apps/desktop/src/installed-update/windows.ts` (steps 4, 6, 7), `apps/desktop/build/installer.nsh` (step 5), the server's Windows ready lines (step 2). Observed on Windows 11 the same day: a native unsigned build with `installer.nsh` installs silently (exit 0, no Code Integrity events) and its uninstaller, which also runs the check, removes every file and key. That is IU-W1's install step only; the rest of IU-W1, and IU-W2 and IU-W3 (releasing.md, "Restart to update on Windows"), need a Windows test build with a loopback feed and have not run. A refused installer start leaves the app running and names the checked installer (section 8, "Windows installer did not start").
+
 Promised: the files that run are verified and nothing installs without a click. Not promised: going back by itself. A known gap: after a release that migrated the thread store, a reinstalled old version stops at "cannot open the thread store" (`StoreVersionTooNewError`), even though `store-copies/` holds its copy. Cost: one pending file, one kept installer of about 122 MB (releasing.md L232–389), no watcher and no copied runtime.
 
 ### W-B, a sketch: a recovery entry outside the replaced folder
@@ -297,6 +299,8 @@ L1 names the copy **"Installed copy"**. It replaces "Not a git clone" (SettingsU
 | cleanup pending | "Gates Local could not remove files left by the last update in <path>. Check that folder's permissions, then try Restart to update again." |
 | transaction unreadable | "Gates Local cannot read its update record at <path>, so it changed nothing and did not start. Move that file somewhere else, then start Gates Local again." |
 | Windows did not finish | "The update to version <new> did not finish. Run <kept installer path> or download version <new> from the release page to finish or repair it." + link |
+| Windows installer did not start | "Gates Local could not start the installer, so nothing changed; to update, run <installer path>." |
+| Windows go back (status page) | "To go back, run <kept installer path>." |
 
 ## 9. electron-updater, honestly
 

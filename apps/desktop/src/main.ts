@@ -37,6 +37,7 @@ import { replaceability } from "./installed-update/replaceable.ts";
 import { hasEarlierFailure } from "./installed-update/results.ts";
 import { copyOf, tokenWait } from "./installed-update/routing.ts";
 import { beginUpdate } from "./installed-update/watch.ts";
+import { goBackInstaller, settlePending, startInstaller, startWindowsUpdate } from "./installed-update/windows.ts";
 import * as updateWords from "./installed-update/words.ts";
 import type { Words } from "./installed-update/words.ts";
 import { dataUrl, renderStatusPage, type StatusView } from "./status-page.ts";
@@ -104,8 +105,8 @@ function isTestBuild(): boolean {
 const testBuild = isTestBuild();
 // Read before the routing below can move a page-only process to its own profile folder.
 const dataDir = serverDataDir({ platform: process.platform, env: process.env, home: app.getPath("home"), userData: app.getPath("userData"), packaged: app.isPackaged });
-// Whether this copy can replace its own file (an AppImage on Linux), and the file.
-const replace = replaceability({ platform: process.platform, packaged: app.isPackaged, env: process.env, testBuild });
+// Whether this copy can replace its own file (an AppImage on Linux, or an install the Windows installer made), and the file.
+const replace = replaceability({ platform: process.platform, packaged: app.isPackaged, env: process.env, testBuild, execPath: process.execPath });
 const installedCopy = replace.program === null ? null : copyOf(replace.program, dataDir);
 const feed = installedFeed(process.env, { testBuild });
 const appWindow = () => windowOptions({
@@ -149,6 +150,16 @@ function run(start: StartApp = {}): void {
     console.error(`[desktop] could not write the pid file: ${(e as Error).message}`);
   }
   process.on("exit", () => clearRunning(dataDir, process.pid));
+  // Windows W-A step 6: the note the click left becomes the result the server shows once, before the server starts.
+  const windowsUpdates = replace.restart === "windows";
+  if (windowsUpdates) {
+    try {
+      const settled = settlePending(dataDir, app.getVersion());
+      if (settled.kind !== "none") console.error(`[desktop] Windows update note: ${settled.kind === "dropped" ? `dropped, ${settled.why}` : `${settled.kind} ${settled.to}`}`);
+    } catch (e) {
+      console.error(`[desktop] could not read the Windows update note: ${(e as Error).message}`);
+    }
+  }
   // The server allows the client's WebSocket Origin; a file: client gets none, so it cannot connect.
   const env = serverEnv({ env: process.env, clientOrigin: originOf(clientUrl()), webRoot: webRoot(), installedVersion: app.isPackaged ? app.getVersion() : null });
   // The server offers "Restart to update" only when this copy can replace its file, and says why not otherwise.
@@ -210,6 +221,21 @@ function run(start: StartApp = {}): void {
     void win.loadURL(dataUrl(renderStatusPage(view)));
   }
 
+  // Windows W-A step 7: a crashed server's page names the kept installer of the version before, looked up (and checked) on the first crash.
+  let goBack: { readonly file: string | null } | "looking" | null = null;
+  function showCrashed(state: SupervisorState): void {
+    const file = goBack !== null && goBack !== "looking" ? goBack.file : null;
+    showStatus({ kind: "server", state: toBridgeState(state), ...(file === null ? {} : { goBack: file }) });
+    if (!windowsUpdates || goBack !== null) return;
+    goBack = "looking";
+    void goBackInstaller({ dataDir, running: app.getVersion(), keys: feed.keys, platform: process.platform, arch: process.arch })
+      .catch(() => null)
+      .then((found) => {
+        goBack = { file: found };
+        if (found !== null && supervisor.state.status === "crashed") showStatus({ kind: "server", state: toBridgeState(supervisor.state), goBack: found });
+      });
+  }
+
   function showClient(): void {
     if (win === null || win.isDestroyed()) return;
     showingClient = true;
@@ -242,7 +268,7 @@ function run(start: StartApp = {}): void {
         const current = win.webContents.getURL();
         if (showingClient && isClientUrl(current)) lastClientUrl = current;
         console.error(`[desktop] server crashed: ${describeCrash(state.reason)}`);
-        showStatus({ kind: "server", state: toBridgeState(state) });
+        showCrashed(state);
         break;
       }
       case "starting":
@@ -306,6 +332,20 @@ function run(start: StartApp = {}): void {
   const startInstalled = (request: UpdateInstallRequest): Promise<UpdateAndRestartResult> => {
     const state = supervisor.state;
     if (state.status !== "ready") return Promise.resolve({ ok: false, message: "The app server is not ready to approve an update. Try again after it reconnects." });
+    if (windowsUpdates) {
+      // Windows W-A step 4: re-verify, write the note, start the checked installer; a refused start leaves this app as it was.
+      return withUpdateControl(state.url, (control) => launchApprovedUpdate(request, control, (target) => startWindowsUpdate(target, {
+        dataDir,
+        running: app.getVersion(),
+        verify: (version) => verifyPrepared({ dataDir, running: app.getVersion(), keys: feed.keys, platform: process.platform, arch: process.arch, version }),
+        start: (installer) => startInstaller(installer),
+        log: (line) => console.error(`[desktop] ${line}`),
+        quit: () => {
+          console.error("[desktop] installer started; quitting so it can replace this install");
+          setTimeout(() => app.quit(), 200);
+        },
+      }))).catch(() => ({ ok: false, message: "Could not validate the update with the app server. Check for updates again to retry." }));
+    }
     const stopAt = loggedStopAt(dataDir, process.env, testBuild);
     return withUpdateControl(state.url, (control) => launchApprovedUpdate(request, control, (target) => startInstalledUpdate(target, {
       restart: replace.restart,

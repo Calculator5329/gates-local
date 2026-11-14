@@ -14,8 +14,11 @@
 // is checked: the status carries an approval pinned to the version and the
 // SHA-512 of the signed list, and the click reserves and commits admission
 // with that identity as its target (docs/design/installed-updates.md, 1).
-// The desktop app does the rest (apps/desktop/src/installed-update/). Any
-// other copy says why it cannot and sends the person to the release page.
+// The desktop app does the rest (apps/desktop/src/installed-update/). A
+// Windows install offers the same button (section 3, W-A): the desktop runs
+// the checked installer silently, and the row says how to go back, naming
+// the running version's kept installer, which no cleanup deletes. Any other
+// copy says why it cannot and sends the person to the release page.
 //
 // Results: the watcher leaves one in update-result.json. A token launch
 // (GATES_LOCAL_UPDATE_STARTUP_TOKEN) keeps admission closed until it reads a
@@ -26,14 +29,14 @@
 // retry. Settings reads the switch itself for the bracketed sentences.
 import type { UpdateCheck, UpdateCommitRequest, UpdateDownload, UpdatePreparation, UpdateResult, UpdateStatus } from "@gates-local/contracts";
 import { randomUUID } from "node:crypto";
-import { cannotReplace, type CannotReplace, earlierFailure, pinnedDataFolder } from "../../../../desktop/src/installed-update/words.ts";
+import { cannotReplace, type CannotReplace, earlierFailure, pinnedDataFolder, readyWindows } from "../../../../desktop/src/installed-update/words.ts";
 import { createUpdateAdmission, FINISHING, UPDATE_PAUSED, type UpdateAdmission } from "../admission.ts";
 import { REPO_URL } from "../cli.ts";
 import type { UpdateModule } from "../module.ts";
 import { readRecord, removeRecord, takeRecord, type UpdateRecord, writeRecord } from "../record.ts";
 import { parseReleaseKey, type ReleaseArtifact, TRUSTED_RELEASE_KEYS } from "../release-manifest.ts";
 import { checkInstalled, type InstalledOutcome } from "./check.ts";
-import { type DownloadOutcome, downloadRelease, listHash, preparedRelease, removeVersions, type Space } from "./download.ts";
+import { type DownloadOutcome, downloadRelease, listHash, preparedRelease, removeVersions, type Space, verifyKept } from "./download.ts";
 import { boundedGet, type Get, refusedAddress, type Stream, streamGet } from "./feed.ts";
 
 export const INSTALLED_VERSION_ENV = "GATES_LOCAL_INSTALLED_VERSION";
@@ -91,13 +94,19 @@ export const INSTALL_REFUSAL = "This installed copy of Gates Local cannot update
 export const RESTART_ENV = "GATES_LOCAL_INSTALLED_RESTART";
 /**
  * Whether this copy can replace its own file, as the desktop app found it at
- * startup (section 2, "Who may update"): yes, one of the refusal cases, or
- * none, for a copy with no installer step yet (Windows), which keeps the old
- * words.
+ * startup (section 2, "Who may update"): yes, one of the refusal cases,
+ * windows for an install made by the Windows installer (section 3, W-A: the
+ * checked installer runs silently), or none, for a copy with no installer
+ * step, which keeps the old words.
  */
-export type Restart = "yes" | "none" | "pinned" | CannotReplace;
-const RESTARTS: readonly Restart[] = ["yes", "none", "pinned", "read-only", "no-permission", "not-appimage"];
+export type Restart = "yes" | "windows" | "none" | "pinned" | CannotReplace;
+const RESTARTS: readonly Restart[] = ["yes", "windows", "none", "pinned", "read-only", "no-permission", "not-appimage"];
 export const parseRestart = (value: string | undefined): Restart => RESTARTS.find((r) => r === value) ?? "none";
+/** Restart to update is offered: an AppImage that can replace its file, or a Windows install. */
+export const canRestart = (restart: Restart): restart is "yes" | "windows" => restart === "yes" || restart === "windows";
+
+/** Where a Windows copy goes back to (section 3, W-A step 2): its own version's kept installer, else that version's release page. */
+export type GoBack = { readonly installer: string } | { readonly current: string; readonly releasePage: string };
 
 /** The admission target of an installed copy: the version and the SHA-512 of the exact signed list bytes. */
 export const installedTarget = (version: string, listDigest: string) => `${version}:${listDigest}`;
@@ -105,7 +114,7 @@ export const installedTarget = (version: string, listDigest: string) => `${versi
 const blocked = (message: string) => ({ state: "blocked" as const, message });
 
 /** Why the click is refused, for a copy that cannot replace its file. */
-function refusal(restart: Exclude<Restart, "yes">, target: string): string {
+function refusal(restart: Exclude<Restart, "yes" | "windows">, target: string): string {
   if (restart === "none") return INSTALL_REFUSAL;
   return restart === "pinned" ? pinnedDataFolder(target).text : cannotReplace(restart, target).text;
 }
@@ -153,8 +162,8 @@ function mb(bytes: number, round: (n: number) => number = Math.round): string {
 }
 
 /** The download's words, in place of "Version <new> is available.". Settings adds the bracketed sentence while the switch is on.
- *  Ready: a copy that can restart into it says so beside its Restart button; any other says why not. */
-export function downloadLines(target: string, fetch: Fetch, restart: Restart = "none"): string[] {
+ *  Ready: a copy that can restart into it says so beside its Restart button (a Windows copy also says how to go back); any other says why not. */
+export function downloadLines(target: string, fetch: Fetch, restart: Restart = "none", goBack?: GoBack): string[] {
   switch (fetch.state) {
     case "downloading":
       return [`Downloading version ${target} (${mb(fetch.received, Math.floor)} of ${mb(fetch.total)} MB). You can keep chatting.`];
@@ -167,6 +176,10 @@ export function downloadLines(target: string, fetch: Fetch, restart: Restart = "
       return [`Not enough free space on ${fetch.volume} for version ${target} (needs ${mb(fetch.needed, Math.ceil)} MB, ${mb(fetch.free, Math.floor)} MB free). Free some space, then use Check for updates.`];
     case "ready":
       if (restart === "yes") return [`Version ${target} is downloaded and checked.`];
+      if (restart === "windows") {
+        const detail = goBack === undefined ? undefined : readyWindows(target, goBack).detail;
+        return [`Version ${target} is downloaded and checked.`, ...(detail === undefined ? [] : [detail])];
+      }
       if (restart !== "none") return [refusal(restart, target)];
       return [`Version ${target} is downloaded and checked. This copy cannot install it by itself yet. To update now, download it from the release page.`];
   }
@@ -258,7 +271,9 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
   };
 
   const restart = deps.restart ?? "none";
-  const admission = deps.admission ?? createUpdateAdmission({ finishing: deps.startupToken !== undefined });
+  // Windows: set once the running version's kept installer has been looked for.
+  let goBack: GoBack | undefined;
+  const admission =deps.admission ?? createUpdateAdmission({ finishing: deps.startupToken !== undefined });
 
   // The last run's note. failed: an undismissed rollback-failed note, which
   // stays on disk, keeps the folders it names and refuses a new update.
@@ -301,16 +316,17 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
   /** The last check, with the download's words in place of "is available." for this copy. */
   const shown = (c: UpdateCheck | null): UpdateCheck | null => {
     if (c?.state !== "newer" || !c.forThisCopy || fetch?.target !== c.target) return c;
-    const checked = fetch.fetch.state === "ready" && restart === "yes";
+    const checked = fetch.fetch.state === "ready" && canRestart(restart);
     // An undismissed rollback-failed note refuses the update: no button, and the row says why.
-    const ready = checked && failed === undefined;
-    const lines = checked && !ready ? [earlierFailure().text] : downloadLines(c.target, fetch.fetch, restart);
+    // Windows: the button turns on once the kept installer has been looked for (section 3, W-A step 2).
+    const ready = checked && failed === undefined && (restart !== "windows" || goBack !== undefined);
+    const lines = checked && failed !== undefined ? [earlierFailure().text] : downloadLines(c.target, fetch.fetch, restart, goBack);
     return { ...c, lines, download: fetch.fetch.state, ...(ready ? { restart: true } : {}) };
   };
   let offer: { readonly token: string; readonly fingerprint: string } | undefined;
   /** The admission target of the found version, when it is the checked, ready one Restart would install. */
   const readyTarget = (c: UpdateCheck | null): string | undefined => {
-    if (restart !== "yes" || found === undefined || failed !== undefined || c?.state !== "newer" || c.target !== found.target || c.download !== "ready") return undefined;
+    if (!canRestart(restart) || found === undefined || failed !== undefined || c?.state !== "newer" || c.target !== found.target || c.download !== "ready" || c.restart !== true) return undefined;
     return installedTarget(found.target, listHash(found.list));
   };
   const status = (): UpdateStatus => {
@@ -327,9 +343,21 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
   };
   const push = () => { if (!closed) deps.changed?.(status()); };
   const offAdmission = admission.onChange(push);
-  /** Folders no cleanup deletes: the caller's, an undismissed failure's, and the one being installed. */
+  if (restart === "windows") {
+    // Looked for once: cleanup never deletes it while this version runs.
+    const releasePage = `${deps.feed.base.href.replace(/\/+$/, "")}/tag/v${deps.version}`;
+    void verifyKept({ ...identity, version: deps.version })
+      .catch((error: unknown) => ({ ok: false as const, reason: error instanceof Error ? error.message : String(error) }))
+      .then((kept) => {
+        if (!kept.ok) log(`no kept installer for ${deps.version}: ${kept.reason}`);
+        goBack = kept.ok ? { installer: kept.prepared.file } : { current: deps.version, releasePage };
+        push();
+      });
+  }
+  /** Folders no cleanup deletes: the caller's, an undismissed failure's, the one being installed, and on Windows the running version's installer. */
   const kept = (): string[] => [
     ...deps.keep(),
+    ...(restart === "windows" ? [deps.version] : []),
     ...(failed?.installed === undefined ? [] : [failed.installed.to]),
     ...(admission.installing() && found !== undefined ? [found.target] : []),
   ];
@@ -496,7 +524,7 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
   async function prepare(approval: string): Promise<UpdatePreparation> {
     if (closed || admission.installing()) return blocked(UPDATE_PAUSED);
     if (admission.finishing()) return blocked(FINISHING);
-    if (restart !== "yes") return blocked(refusal(restart, found?.target ?? ""));
+    if (!canRestart(restart)) return blocked(refusal(restart, found?.target ?? ""));
     if (failed !== undefined) return blocked(earlierFailure().text);
     const busy = deps.uninterruptible?.() ?? [];
     if (busy.length > 0) return blocked(`Wait for ${busy.join(", ")} to finish before updating.`);

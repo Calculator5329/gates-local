@@ -80,7 +80,8 @@ await packageApp({
     asar: true, npmRebuild: false,
     linux: { category: "Utility", executableName: "gates-local", icon: path.join(desktop, "assets/icon.png"), syncDesktopName: true },
     win: { icon: path.join(desktop, "assets/icon.png"), signExecutable: false },
-    nsis: { oneClick: true, perMachine: false, allowElevation: false, packElevateHelper: false, deleteAppDataOnUninstall: false, runAfterFinish: true },
+    // build/installer.nsh: a running-app check that waits for this install's processes and never kills (installed updates, design section 3).
+    nsis: { oneClick: true, perMachine: false, allowElevation: false, packElevateHelper: false, deleteAppDataOnUninstall: false, runAfterFinish: true, include: path.join(desktop, "build", "installer.nsh") },
     // Linux cross-builds need Wine to extract NSIS's generated uninstaller.
     // This is a build tool only; it is not shipped or used to test Windows.
     toolsets: { wine: "1.0.1" },

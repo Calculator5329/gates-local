@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-11-13: Restart to update on Windows
+
+- On a copy the Windows installer put on the computer, once a new version
+  is downloaded and checked, Settings › Updates shows **Restart to update**
+  instead of "download it from the release page". The click uses the
+  installer that is already in the data folder's `updates/<version>/`; it
+  is checked again first, and nothing is downloaded a second time.
+- Gates Local closes, the installer waits for it to close (it never ends
+  Gates Local by force), installs the new version over it with the data
+  kept, and opens it. The next start says "Updated to version N." once, or
+  that the update did not finish and which installer to run.
+- If Windows will not start the installer (Smart App Control, Defender, a
+  policy), Gates Local stays open as it was and says "Gates Local could not
+  start the installer, so nothing changed; to update, run <path>."
+- The ready line names the installer of the running version, kept from the
+  last update, to go back with; when there is none, it names the release
+  page of the running version. If the new version's server will not start,
+  the page it shows names that installer too.
+- The first copy that can do this is the first release built with this
+  change. Copies up to 0.2.3 still say to download from the release page.
+- Seen on Windows 11: an unsigned installer built natively with the new
+  check installed silently (exit 0) and its uninstaller, which runs the
+  same check, removed it. That is the install step of IU-W1 only. The
+  click, the update itself, and IU-W2 and IU-W3 in `docs/releasing.md` have
+  not run yet: they need a Windows test build with a local feed.
+
 ## 2026-11-13: Measure a model on this computer
 
 - Settings › Models has Speed and Score columns. A model nobody has

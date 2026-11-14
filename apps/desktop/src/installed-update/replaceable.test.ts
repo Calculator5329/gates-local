@@ -71,9 +71,20 @@ describe("Restart to update: who may update", () => {
     expect(replaceability(facts({ env: { APPIMAGE: file, GATES_LOCAL_DATA_DIR: "/data" }, testBuild: true })).restart).toBe("yes");
   });
 
-  it("RP-05 Windows, macOS and a clone never restart to update", () => {
+  it("RP-06 a Windows install made by the installer restarts to update through it (design section 3); a pinned data folder is refused", () => {
+    const app = path.join(folder(), "Programs", "gates-local");
+    mkdirSync(app, { recursive: true });
+    writeFileSync(path.join(app, "Uninstall Gates Local.exe"), "");
+    const execPath = path.join(app, "Gates Local.exe");
+    expect(replaceability(facts({ platform: "win32", execPath }))).toEqual({ restart: "windows", program: null });
+    expect(replaceability(facts({ platform: "win32", execPath, env: { GATES_LOCAL_DATA_DIR: "/data" } }))).toEqual({ restart: "pinned", program: null });
+    expect(replaceability(facts({ platform: "win32", execPath, packaged: false }))).toEqual({ restart: "none", program: null });
+  });
+
+  it("RP-05 a Windows copy the installer did not make, macOS and a clone never restart to update", () => {
     const file = appImage(path.join(folder(), "app"));
     expect(replaceability(facts({ platform: "win32", env: { APPIMAGE: file } }))).toEqual({ restart: "none", program: null });
+    expect(replaceability(facts({ platform: "win32", execPath: path.join(folder(), "win-unpacked", "Gates Local.exe") }))).toEqual({ restart: "none", program: null });
     expect(replaceability(facts({ platform: "darwin", env: { APPIMAGE: file } }))).toEqual({ restart: "none", program: null });
     expect(replaceability(facts({ packaged: false, env: { APPIMAGE: file } }))).toEqual({ restart: "none", program: null });
   });

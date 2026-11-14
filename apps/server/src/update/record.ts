@@ -67,6 +67,8 @@ export function writeRecord(dataDir: string, record: UpdateRecord): string {
 }
 
 function flushFolder(dir: string): void {
+  // Windows cannot open a folder to flush it (EISDIR); the rename is all it has.
+  if (process.platform === "win32") return;
   const fd = fs.openSync(dir, "r");
   try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
 }

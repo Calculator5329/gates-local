@@ -317,6 +317,8 @@ describe("downloading a newer version", () => {
     });
     return { module, sw, pushes };
   }
+  /** An install the Windows installer made (design section 3, W-A). */
+  const windows = (over: Partial<InstalledModuleDeps> = {}) => installed(true, { platform: "win32", restart: "windows", ...over });
   /** Headers and the first bytes, then silence: a download in flight. */
   const hold = () => page.route((p, res) => {
     if (p !== ARTIFACT) return false;
@@ -729,6 +731,84 @@ describe("downloading a newer version", () => {
         expect(await module.prepare("anything")).toEqual({ state: "blocked", message: sentence });
         await module.close();
       }
+    });
+
+    describe("on Windows (design section 3, W-A)", () => {
+      const WIN = artifactFile(VERSION, "win32");
+      const RUNNING = "1.2.3";
+      const serveWin = () => {
+        const files = listFor(VERSION, BYTES, key.privateKey);
+        page.serve(files, { file: WIN, bytes: BYTES });
+        return files;
+      };
+      /** The running version's installer, kept from the update that installed it: a signed list for it and its file. */
+      const keepInstaller = (bytes: Buffer = BYTES) => {
+        const signed = listFor(RUNNING, BYTES, key.privateKey);
+        fs.mkdirSync(folder(RUNNING), { recursive: true });
+        fs.writeFileSync(path.join(folder(RUNNING), LIST_FILE), signed.list);
+        fs.writeFileSync(path.join(folder(RUNNING), SIGNATURE_FILE), signed.sig);
+        fs.writeFileSync(path.join(folder(RUNNING), artifactFile(RUNNING, "win32")), bytes);
+        return path.join(folder(RUNNING), artifactFile(RUNNING, "win32"));
+      };
+
+      it("IM-W1 offers Restart to update once the download is checked, names the kept installer to go back with, and keeps that installer", async () => {
+        const kept = keepInstaller();
+        // A version folder no one keeps: cleanup still removes it.
+        fs.mkdirSync(folder("1.1.0"), { recursive: true });
+        serveWin();
+        const { module } = windows();
+        await module.check();
+        await settled(module);
+        await vi.waitFor(() => { if (shown(module).restart !== true) throw new Error("no Restart yet"); });
+        expect(shown(module)).toMatchObject({
+          download: "ready", restart: true,
+          lines: ["Version 1.3.0 is downloaded and checked.", `If version 1.3.0 does not start, Gates Local will not go back by itself. To go back, run ${kept}.`],
+        });
+        expect(typeof module.status().approval).toBe("string");
+        expect(fs.readdirSync(path.join(dataDir, "updates")).toSorted()).toEqual([RUNNING, VERSION]);
+        expect(fs.existsSync(kept)).toBe(true);
+        await module.close();
+      });
+
+      it("IM-W2 with no kept installer, or one that does not match its list, sends the person to the running version's release page to go back", async () => {
+        for (const prepare of [() => undefined, () => { keepInstaller(Buffer.from("not the installer")); }]) {
+          prepare();
+          serveWin();
+          const { module } = windows();
+          await module.check();
+          await settled(module);
+          await vi.waitFor(() => { if (shown(module).restart !== true) throw new Error("no Restart yet"); });
+          expect(shown(module).lines).toEqual([
+            "Version 1.3.0 is downloaded and checked.",
+            `If version 1.3.0 does not start, Gates Local will not go back by itself. To go back, download version 1.2.3 from ${page.base.href}/tag/v1.2.3.`,
+          ]);
+          await module.close();
+        }
+      });
+
+      it("IM-W3 the click reserves admission for the version and the exact list, as on Linux", async () => {
+        const files = serveWin();
+        const admission = createUpdateAdmission();
+        const { module } = windows({ admission });
+        await module.check();
+        await settled(module);
+        await vi.waitFor(() => { if (module.status().approval === undefined) throw new Error("no approval yet"); });
+        const prepared = await module.prepare(module.status().approval!);
+        expect(prepared).toEqual({ state: "ready", reservation: expect.any(String), target: identityOf(files) });
+        await module.close();
+      });
+
+      it("IM-W4 switching automatic checks off keeps the running version's installer", async () => {
+        const kept = keepInstaller();
+        serveWin();
+        const { module, sw } = windows();
+        await module.check();
+        await settled(module);
+        sw.set(false);
+        await vi.waitFor(() => { if (fs.existsSync(folder())) throw new Error("download still there"); });
+        expect(fs.existsSync(kept)).toBe(true);
+        await module.close();
+      });
     });
 
     it("IM-03 a reply that must finish blocks the click, and new work changes the approval", async () => {

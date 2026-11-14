@@ -449,6 +449,37 @@ policy; do not promise a particular dialog or a bypass. See Microsoft's
 [SmartScreen guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)
 and [download-zone documentation](https://support.microsoft.com/en-us/windows/security/information-about-the-attachment-manager-in-microsoft-windows).
 
+### Restart to update on Windows: IU-W rounds
+
+An install made by the Windows installer offers **Restart to update** once the
+new version's installer is downloaded and checked
+(`docs/design/installed-updates.md`, section 3, W-A). The click checks the
+file again, writes `updates/windows-pending.json`, starts
+`<installer> /S --updated --force-run` and quits. The installer's running-app
+check (`apps/desktop/build/installer.nsh`) waits for this install's processes
+to end and never kills. The next launch turns the note into "Updated to
+version N." or "The update to version N did not finish…".
+
+Each round needs two installers built natively from the branch, as in the
+rounds above (`pnpm release:artifact`, or `GATES_LOCAL_BUILD_VERSION=<v>
+pnpm package:win`), and a signed list for the newer one that the older one
+trusts. A test build's list on a local release page does that without the
+real key. Record every location absent first, and clean them afterwards.
+
+| Round | Steps | Passes when |
+| --- | --- | --- |
+| IU-W1 | Install N with `/S --no-desktop-shortcut`. Launch it, check, download N+1, click Restart to update. Time from the click to the app's exit, from the exit to the installer's end, and to N+1's server `ready`. | `windows-pending.json` is written before the installer starts and gone after N+1 starts; Settings says "Updated to version N+1." once; `updates/` keeps N+1's folder and the next update names it to go back with; no process was killed (installer log has no `Stop-Process` or `taskkill`). The measured app exit sets the check's wait bound (`GATES_LOCAL_WAIT_SECONDS`, 60 s until measured). |
+| IU-W2 | As IU-W1, with N+1 a build whose server exits at start. | Nothing goes back by itself. The status page names the kept installer of N: "To go back, run <path>." Running it puts N back over N+1 with the data kept. |
+| IU-W3 | Copy the installed folder to `%LOCALAPPDATA%\Programs\gates-local-old\` and start that copy. Update the real install as in IU-W1. | The copy is still running after the update: the check matches `<install folder>\` with its separator and waits only for the real install. |
+
+A refused installer (Smart App Control, Defender, a policy) must leave the
+running app as it was. Settings shows "Gates Local could not start the
+installer, so nothing changed; to update, run <path>." and no pending note
+stays. Smart App Control blocks every fresh unsigned installer, so on a
+machine with it on, IU-W1 stops at the click with that sentence, which is a
+pass for the refusal path and leaves IU-W1 itself unobserved. Do not change
+the machine's security settings to get past it.
+
 ## Prepare a signed release directory
 
 Signing happens on the Linux machine only. The private key never goes to the
