@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-14: First run offers the download once Ollama is in
+
+- On a computer with no Ollama, first run installs the app's own copy,
+  then asked people to type `ollama pull` in a terminal, and Retry did
+  not help. The model list was read while Ollama was still installing,
+  so nothing was recommended. The list is now read again when Ollama
+  turns ready and on Retry, so the screen offers "Download and start".
+
 ## 2026-11-14: The running line puts its seconds first
 
 - A running reply's line reads dot, seconds, words: "● 2 s Thinking".

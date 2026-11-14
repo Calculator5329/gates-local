@@ -1,7 +1,7 @@
 // Journey: first launch with Ollama but no models. First run recommends a
 // model from models.catalog and downloads it with models.pull (the fake
 // Ollama streams the pull), with Cancel, then the chat opens.
-import { expect, sendMessage, test } from "./fixtures.ts";
+import { expect, sendMessage, stack, test } from "./fixtures.ts";
 
 test.use({ scenario: "no-models", skipFirstRun: false });
 
@@ -28,4 +28,18 @@ test("no models: download, cancel, download again, then chat", async ({ page, op
   await sendMessage(page, "Hello there");
   await expect(page.locator(".qt-r .qt-s")).toHaveAttribute("data-tip", "Sends when the download finishes");
   await expect(page.locator(".turn.a .md").last()).toContainText("You asked: Hello there", { timeout: 20_000 });
+});
+
+test.describe("when Ollama answers only after the page opened", () => {
+  test.use({ scenario: "wrong-service", runtimeMode: "system", controlledRuntimePorts: true });
+  // Guards a bug that happened on a fresh Windows install: the catalog read before Ollama answered recommended nothing, so first run sent people to a terminal.
+  test("first run offers the recommended download, not a terminal command", async ({ page, open }) => {
+    await open();
+    await expect(page.getByTestId("first-run.cta.go")).toHaveText("Retry");
+    await stack.scenario("no-models");
+    await page.getByTestId("first-run.cta.go").click();
+    await expect(page.getByRole("heading", { name: "Download your first model" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Download and start" })).toBeEnabled();
+    await expect(page.locator(".fr")).not.toContainText("ollama pull");
+  });
 });

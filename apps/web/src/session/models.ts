@@ -223,6 +223,7 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
     const runtime = await asked.catch(() => undefined);
     if (runtime !== undefined) applyServerEvent({ runtime });
     await refreshModels();
+    if (runtime?.state === "ready") void refreshCatalog();
   }
 
   function runtimeChanged(runtime: Payload<"runtime.changed">): void {
@@ -233,6 +234,8 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
       if (runtime.state === "ready") {
         flushQueued();
         void refreshModels();
+        // A catalog read before Ollama answered recommends nothing, so first run had no Download button.
+        void refreshCatalog();
       }
   }
 
