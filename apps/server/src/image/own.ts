@@ -28,6 +28,26 @@ export interface OwnComfy extends ComfyService {
    * it on. Undefined while none is whole.
    */
   build?(): { version: string; cpu: boolean } | undefined;
+  /**
+   * A card build that has not shown it starts is held: with the processor's build whole beside it,
+   * start() runs the processor's, which is known to work. The setup holds the card's build before
+   * it makes one beside the processor's.
+   */
+  holdCard?(version: string): void;
+  /** The held card build that is whole on disk beside the processor's, waiting to be tried. */
+  heldCard?(): string | undefined;
+  /** The next start is the held card build's, to see it start. */
+  tryCard?(): void;
+  /** The engine start() ran answered: a card build is held no longer. */
+  answered?(): void;
+  /**
+   * The engine start() ran is not there (it ended while starting, or could not be run). A card
+   * build with the processor's whole beside it is held and its version returned: the next start is
+   * the processor's. Undefined where there is nothing else to start, or the engine is still running.
+   */
+  failed?(): string | undefined;
+  /** Told the version of a card build failed() held. */
+  onHeld?(listener: (version: string) => void): void;
 }
 
 export type OwnComfyOptions = {
@@ -103,8 +123,9 @@ const pidFile = (appDataDir: string) => path.join(runtimeDir(appDataDir), "comfy
 /**
  * What the computer has for pictures, as the setup last saw it (setup.ts, at its run, at the app's
  * start and each time it is read): "cpu" where no card runs them. A card build runs on it, and with
- * both builds whole it picks which one starts (find). Outside the pinned tree, so its checksum
- * stays whole. The processor build always runs with --cpu, whatever it says (own.build).
+ * both builds whole it picks which one starts (find), a held card build aside. Outside the pinned
+ * tree, so its checksum stays whole. The processor build always runs with --cpu, whatever it says
+ * (own.build).
  */
 const deviceFile = (appDataDir: string) => path.join(runtimeDir(appDataDir), "comfyui-device");
 
@@ -117,23 +138,69 @@ const onCpu = (appDataDir: string) => {
   try { return readFileSync(deviceFile(appDataDir), "utf8").trim() === "cpu"; } catch { return false; }
 };
 
+/**
+ * The card builds that have not shown they start, a version a line: one being made beside the
+ * processor's, and one that was not there after its start. A line goes the first time its build
+ * answers. Kept on disk so the app's next start still runs the build that works; outside the
+ * pinned tree. Unreadable, nothing is held.
+ */
+const heldFile = (appDataDir: string) => path.join(runtimeDir(appDataDir), "comfyui-card-held");
+
+const readHeld = (appDataDir: string): string[] => {
+  try { return readFileSync(heldFile(appDataDir), "utf8").split("\n").map((line) => line.trim()).filter((line) => line !== ""); } catch { return []; }
+};
+
+function writeHeld(appDataDir: string, versions: readonly string[]): void {
+  mkdirSync(runtimeDir(appDataDir), { recursive: true });
+  writeFileSync(heldFile(appDataDir), versions.join("\n"));
+}
+
 export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
   const platform = opts.platform ?? process.platform;
   const layout: EngineLayout = platform === "win32" ? "windows-portable" : "uv-venv";
   const whole = (dir: string) => { const f = engineFiles(dir, layout); return existsSync(f.python) && existsSync(f.main); };
+  /** The whole versions under runtime/comfyui/, newest first. */
+  const builds = (): string[] => {
+    let entries: string[];
+    try { entries = readdirSync(engineRoot(opts.appDataDir)); } catch { return []; }
+    return entries.filter((e) => !e.startsWith(".")).toSorted((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+      .filter((v) => whole(engineDir(opts.appDataDir, v)));
+  };
+  /** Held in this run of the app: what the file says, and what could not be written to it. */
+  const heldHere = new Set<string>();
+  const heldNow = () => [...readHeld(opts.appDataDir), ...heldHere];
+  /** tryCard was asked: the next start is a held card build's, until it answers or is not there. */
+  let trying = false;
+  /** The version start() last ran. */
+  let ran: string | undefined;
   /**
-   * The newest whole version under runtime/comfyui/ for what the computer has (the device file):
-   * the card's build where it has a card for pictures, the processor's where it has none; the other
-   * where only that one is whole. A build made for one stays when the other is made beside it.
+   * The newest whole version for what the computer has (the device file): the card's build where it
+   * has a card for pictures, the processor's where it has none; the other where only that one is
+   * whole. A build made for one stays when the other is made beside it. With the processor's build
+   * whole, a held card build is passed over until it is tried: the build that works is never left
+   * for one that has not started.
    */
   const find = (): string | undefined => {
-    let entries: string[];
-    try { entries = readdirSync(engineRoot(opts.appDataDir)); } catch { return undefined; }
-    const dirs = entries.filter((e) => !e.startsWith(".")).toSorted((a, b) => b.localeCompare(a, undefined, { numeric: true }))
-      .map((v) => engineDir(opts.appDataDir, v)).filter(whole);
-    const card = !onCpu(opts.appDataDir);
-    return dirs.find((dir) => isProcessorBuild(path.basename(dir)) !== card) ?? dirs[0];
+    const versions = builds();
+    const processor = versions.find(isProcessorBuild);
+    const held = processor === undefined || trying ? [] : heldNow();
+    const card = onCpu(opts.appDataDir) ? undefined : versions.find((v) => !isProcessorBuild(v) && !held.includes(v));
+    const version = card ?? processor ?? versions[0];
+    return version === undefined ? undefined : engineDir(opts.appDataDir, version);
   };
+  const hold = (version: string) => {
+    heldHere.add(version);
+    const onDisk = readHeld(opts.appDataDir);
+    if (onDisk.includes(version)) return;
+    try { writeHeld(opts.appDataDir, [...onDisk, version]); } catch { /* held for this run of the app */ }
+  };
+  const release = (version: string) => {
+    heldHere.delete(version);
+    const onDisk = readHeld(opts.appDataDir);
+    if (!onDisk.includes(version)) return;
+    try { writeHeld(opts.appDataDir, onDisk.filter((v) => v !== version)); } catch { /* offered again at the app's next start */ }
+  };
+  const heldListeners: ((version: string) => void)[] = [];
   let child: ChildProcess | undefined;
   let exited: Promise<void> = Promise.resolve();
   /** The run the app asked to end (stop, killRuntimeNow): its exit is not news. */
@@ -158,6 +225,28 @@ export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
   const own: OwnComfy = {
     installed: () => find() !== undefined,
     build: () => { const dir = find(); return dir === undefined ? undefined : buildOf(dir); },
+    holdCard: hold,
+    heldCard() {
+      const versions = builds();
+      if (!versions.some(isProcessorBuild)) return undefined;
+      const held = heldNow();
+      return versions.find((v) => !isProcessorBuild(v) && held.includes(v));
+    },
+    tryCard: () => { trying = true; },
+    answered() {
+      trying = false;
+      if (ran !== undefined) release(ran);
+    },
+    failed() {
+      const version = ran;
+      if (child !== undefined) return undefined;
+      trying = false;
+      if (version === undefined || isProcessorBuild(version) || !builds().some(isProcessorBuild)) return undefined;
+      hold(version);
+      for (const listener of heldListeners) listener(version);
+      return version;
+    },
+    onHeld: (listener) => { heldListeners.push(listener); },
     address: () => opts.address ?? `http://127.0.0.1:${opts.port}`,
     modelsDir: () => path.join(engineDataDir(opts.appDataDir), "models"),
     async inspect() {
@@ -168,6 +257,8 @@ export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
       if (child !== undefined) return;
       const dir = find();
       if (dir === undefined) throw new Error("The image engine is not installed.");
+      // before anything that can fail, so failed() knows which build could not be run
+      ran = path.basename(dir);
       const files = engineFiles(dir, layout);
       endLeftover();
       // ComfyUI lists <base>/custom_nodes before it serves and exits when the folder is missing.

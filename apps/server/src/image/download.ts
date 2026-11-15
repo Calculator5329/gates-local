@@ -2,7 +2,9 @@
 // it may redirect once, to Hugging Face's own file hosts (its CDN), never anywhere else. The size
 // comes from a HEAD of the file it redirects to; the free space is checked before a byte is
 // written; the bytes go to `<name>.part` beside the file and are renamed once complete, never
-// more than that size.
+// more than that size. A file already under that name (the caller fetches again when its size is
+// not the one expected) is never written over: it is moved to `<name>.replaced-<time>` first, and
+// the download's last progress says so.
 //
 // A part already there is resumed only when it is of the same upload: `<name>.part.json` beside it
 // keeps the address, the upload's ETag (Hugging Face's `x-linked-etag` on its redirect, else the
@@ -18,7 +20,7 @@
 import { gb, type PullProgress } from "@gates-local/contracts";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdir, open, readFile, rename, rm, stat, statfs, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, rename, rm, stat, statfs, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 /** Hugging Face, and the hosts its downloads redirect to. */
@@ -58,7 +60,11 @@ export interface DownloadOptions {
   readonly intervalMs?: number;
 }
 
-export interface Downloaded { readonly file: string; readonly bytes: number; readonly sha256: string }
+export interface Downloaded {
+  readonly file: string; readonly bytes: number; readonly sha256: string;
+  /** Where a file that was already under this name went: beside it, under a dated name. */
+  readonly replaced?: string;
+}
 
 const fail = (message: string) => Object.assign(new Error(message), { code: "image-download" });
 const diskFree = async (dir: string) => { const s = await statfs(dir); return s.bavail * s.bsize; };
@@ -220,8 +226,28 @@ export async function downloadFile(options: DownloadOptions): Promise<Downloaded
     await rm(sidecar, { force: true });
     throw fail(`${name} is not the file expected: its sha256 is ${sha256}, not ${options.sha256}. It was not put with ComfyUI's models; the bytes stay in ${name}.part.`);
   }
+  // A file already under this name is not this download's to remove: it could be a model of the
+  // person's own. It is moved aside, and the download's last word names where it went.
+  const replaced = await moveAside(file, now());
   await rename(part, file);
   await rm(sidecar, { force: true });
-  report({ state: "done", completedBytes: done, totalBytes: total });
-  return { file, bytes: done, sha256 };
+  const message = replaced === undefined ? {} : { message: `A file named ${name} was already there. It was kept as ${path.basename(replaced)}.` };
+  report({ state: "done", completedBytes: done, totalBytes: total, ...message });
+  return { file, bytes: done, sha256, ...replaced === undefined ? {} : { replaced } };
 }
+
+/**
+ * Moves whatever is at `file` (a file, a link, a folder; a link is never followed) to
+ * `<file>.replaced-<time>` beside it, a name no model list reads, and returns that path; undefined
+ * when nothing is there. A name already taken gets a number after it, so nothing is written over.
+ */
+async function moveAside(file: string, at: number): Promise<string | undefined> {
+  if (!await taken(file)) return undefined;
+  const base = `${file}.replaced-${new Date(at).toISOString().replace(/[:.]/g, "-")}`;
+  let aside = base;
+  for (let i = 1; await taken(aside); i++) aside = `${base}.${i}`;
+  await rename(file, aside);
+  return aside;
+}
+
+const taken = (file: string) => lstat(file).then(() => true, () => false);

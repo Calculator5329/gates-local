@@ -21,6 +21,7 @@ import { acquireFileLock, type LockOptions } from "@gates-local/update/lock";
 import { verifyManifest, type ReleaseArtifact, type ReleaseManifest } from "@gates-local/update/release-manifest";
 import { compare, parseRelease } from "@gates-local/update/semver";
 import { exists, identify, ioCode, ioDest, ioPath, isFullDisk, realFileOps, sameIdentity, savedFile, type FileOps, type Identity } from "@gates-local/update/installed/files";
+import { inUse } from "@gates-local/update/installed/in-use";
 import { flushProgramFolder, holds, keepPrevious, programPaths, putBack, recoverStage, removeKept, removeStaging, renameIntoPlace, type ProgramPaths } from "./linux.ts";
 import { asideFolder, copyPath, installCopy, restoreEntry, setAside, STORE_NAME, storeVersion } from "./restore.ts";
 import type { StopPoint } from "./stop-points.ts";
@@ -731,12 +732,14 @@ function noAppRunning(r: Run): boolean {
  * Row C's deletes: `.previous-<id>` and the download, then the transaction.
  * False when one returned an error; the transaction then stays. Only row H
  * passes `keep`: a download folder the new approval needs is left in place.
+ * A download folder that could be in use (a person starts the app from it)
+ * is left too, by the same rule as every other delete of a version folder.
  */
 function cleanupFiles(file: string, tx: InstalledTransaction, fs: FileOps, keep: string | null = null): boolean {
   try {
     removeKept(programPaths(tx.copy.program, tx.id), fs);
     const download = downloadFolder(tx);
-    if (download !== keep) fs.removeTree(download);
+    if (download !== keep && inUse(download) === null) fs.removeTree(download);
     removeTransaction(file, fs);
   } catch (e) {
     if (ioCode(e) === null) throw e;

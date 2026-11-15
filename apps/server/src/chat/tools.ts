@@ -95,9 +95,12 @@ export async function* streamToolTurn(input: ToolTurnInput): AsyncGenerator<Chat
 
 const lowerFirst = (word: string) => word.charAt(0).toLowerCase() + word.slice(1);
 
+/** What a turn that ran out of window says happened; Measure reads a turn's ending by it. */
+export const windowFullWords = (numCtx: number) => `This model's ${contextWords(numCtx)} context has no room left for the tool results, so the turn stopped here.`;
+
 /** The reply when not even a trimmed request fits: the turn ends in a plain sentence, with no request made. */
 async function* windowFull(numCtx: number): AsyncGenerator<ModelEvent> {
-  yield { type: "complete", content: `This model's ${contextWords(numCtx)} context has no room left for the tool results, so the turn stopped here. Ask something narrower or pick a model with more context.`, calls: [], stopReason: "stop" };
+  yield { type: "complete", content: `${windowFullWords(numCtx)} Ask something narrower or pick a model with more context.`, calls: [], stopReason: "stop" };
 }
 
 async function* ollamaStep(deps: { input: ToolTurnInput; fetcher: typeof fetch; signal: AbortSignal; messages: readonly ModelMessage[]; definitions?: ReturnType<typeof createTools>["definitions"] }): AsyncGenerator<ModelEvent> {

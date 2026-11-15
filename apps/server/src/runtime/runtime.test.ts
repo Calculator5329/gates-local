@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { httpGet } from "./http.ts";
@@ -210,6 +210,34 @@ describe("stopped (installed, nothing answering)", () => {
     expect(s.detail).toContain("boom: cannot bind");
     expect(s.failure).toBe("start");
     expect(existsSync(ownedStateFile(appDataDir))).toBe(false);
+  });
+
+  it("a data folder that cannot be written ends in an error that names it and can be retried, never a start left on screen", async () => {
+    const binDir = path.join(work, "bin");
+    writeFakeBinary(path.join(binDir, "ollama"));
+    // a file where the data folder's parent should be: nothing can be made under it, as in a
+    // read-only folder
+    const taken = path.join(work, "taken");
+    writeFileSync(taken, "");
+    const { rt, seen } = await makeRuntime({ appDataDir: path.join(taken, "gates-local"), externalBaseUrl: await nothingAt(), env: { PATH: binDir, HOME: home } });
+    const s = await rt.ensure();
+    expect(s).toMatchObject({ state: "error", owner: "none", failure: "start" });
+    expect(s.detail).toContain(taken);
+    expect(rt.status()).toEqual(s);
+    expect(seen.at(-1)).toEqual(s);
+    // the folder put right, Retry starts it
+    renameSync(taken, `${taken}-aside`);
+    expect(await rt.ensure()).toMatchObject({ state: "ready", owner: "app" });
+  });
+
+  it("a look that stops on an error ends in an error too, and the next look is free to run", async () => {
+    let fails = true;
+    const { rt } = await makeRuntime({ externalBaseUrl: await nothingAt(), env: { get PATH(): string { if (fails) throw new Error("the look broke"); return emptyPathDir; }, HOME: home } });
+    const s = await rt.discover();
+    expect(s).toMatchObject({ state: "error", owner: "none" });
+    expect(s.detail).toContain("the look broke");
+    fails = false;
+    expect(await rt.discover()).toMatchObject({ state: "missing" });
   });
 });
 

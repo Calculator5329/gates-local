@@ -524,20 +524,38 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     update({ state: "starting", owner: owned ? "app" : canStart ? "none" : "external", baseUrl });
     signal.throwIfAborted();
     // Active and transitional units belong to their existing owner. Wait, never adopt.
-    if (canStart) {
-      await service.start();
-      const after = await service.inspect();
-      if (!after.active || after.pid <= 0) throw new Error("ComfyUI started but is not running. Check its log, then try again.");
-      owned = { pid: after.pid, baseUrl };
+    const up = async () => {
+      if (canStart) {
+        await service.start();
+        const after = await service.inspect();
+        if (!after.active || after.pid <= 0) throw new Error("ComfyUI started but is not running. Check its log, then try again.");
+        owned = { pid: after.pid, baseUrl };
+      }
+      const deadline = Date.now() + (deps.startupTimeoutMs ?? 60_000);
+      while (!await comfy.healthy()) {
+        signal.throwIfAborted();
+        if (Date.now() >= deadline) throw new Error("ComfyUI did not become ready within the startup timeout. Check its log, then try again.");
+        // The app's own engine is a child: one that exited will not answer, so say so now, not at the timeout.
+        if (service === deps.own && !(await service.inspect()).active) { owned = undefined; throw new Error("ComfyUI stopped while it was starting. Check its log, then try again."); }
+        await delay(250, undefined, { signal });
+      }
+    };
+    const mine = canStart && service === deps.own ? deps.own : undefined;
+    try { await up(); }
+    catch (error) {
+      // The app's own engine is not there after its start: where that was the card's build and the
+      // processor's is whole beside it, own.ts passes the card's over and the processor's starts
+      // now. One still running (slow to answer) is left to finish, and a stop is nobody's failure.
+      if (mine === undefined || signal.aborted || (await mine.inspect().catch(() => undefined))?.active !== false) throw error;
+      const passed = mine.failed?.();
+      if (passed === undefined) throw error;
+      owned = undefined;
+      log(`the image engine's card build ${passed} was not there after its start (${detail(error)}); the processor's build runs in its place`);
+      await up();
+      // the room and the limits are the processor's from here on
+      await readRoom(signal).catch(() => undefined);
     }
-    const deadline = Date.now() + (deps.startupTimeoutMs ?? 60_000);
-    while (!await comfy.healthy()) {
-      signal.throwIfAborted();
-      if (Date.now() >= deadline) throw new Error("ComfyUI did not become ready within the startup timeout. Check its log, then try again.");
-      // The app's own engine is a child: one that exited will not answer, so say so now, not at the timeout.
-      if (service === deps.own && !(await service.inspect()).active) { owned = undefined; throw new Error("ComfyUI stopped while it was starting. Check its log, then try again."); }
-      await delay(250, undefined, { signal });
-    }
+    mine?.answered?.();
     signal.throwIfAborted();
     return comfy;
   };
@@ -1115,6 +1133,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
           controller.signal.throwIfAborted(); // stopped while the plan was made
           const got = await downloadFile({ ...fetching, name: file.name, url: file.url, dir: file.dir, ...pinned === undefined ? {} : { sha256: pinned }, signal: controller.signal, progress });
           if (pinned === undefined) { pins[file.url] = got.sha256; writePins(pins); }
+          if (got.replaced !== undefined) log(`image download ${file.name}: a file of that name was already there; kept as ${got.replaced}`);
         } catch (error) {
           const cancelled = controller.signal.aborted;
           // say() set it since; TypeScript still sees the undefined from before the loop

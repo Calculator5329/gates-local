@@ -15,10 +15,10 @@
 // the window runs it later (score.ts). Nothing here takes the GPU lease or checks the fit: the
 // caller does both before it calls measureModel.
 import { MEASURE_VERSION, type MeasureCheck, type ModelMeasure, type ShellStatus, type ToolStep } from "@gates-local/contracts";
-import { createTools, type LibraryEntry, type ToolCall, type ToolResult } from "@gates-local/harness";
-import { streamToolTurn } from "../chat/tools.ts";
+import { CALL_CLOSE, CALL_OPEN, createTools, type LibraryEntry, type ToolCall, type ToolResult } from "@gates-local/harness";
+import { streamToolTurn, windowFullWords, type ToolTurnInput } from "../chat/tools.ts";
 import type { TurnMessage } from "../chat/types.ts";
-import { BUDGET, CASES, SHOP_ID, pageIn, type MeasureCase, type Turn } from "./cases.ts";
+import { BUDGET, CASES, SHOP_ID, pageIn, toolCallOf, type AnswerCase, type MeasureCase, type Turn } from "./cases.ts";
 import { partsOf, scoreOf } from "./score.ts";
 
 /** A model this slow writes slower than a person reads: about 250 words a minute is 5.5 tokens a second; twice that. */
@@ -80,10 +80,9 @@ export const THINK_BUDGET = 1500;
 
 /**
  * One check's tokens. `cap`: its answer's; `think`: its thinking's allowance (0 with Thinking
- * off). `used` is every token it wrote, `thought` the ones it thought. `afterTool`: a tool ran
- * and no request to the model has gone since.
+ * off). `used` is every token it wrote, `thought` the ones it thought.
  */
-interface Meter { cap: number; think: number; used: number; thought: number; start: number; firstMs?: number; cut: boolean; cutThinking: boolean; afterTool: boolean }
+interface Meter { cap: number; think: number; used: number; thought: number; start: number; firstMs?: number; cut: boolean; cutThinking: boolean }
 /** Answer tokens a check used: thinking past its allowance counts as answer. */
 const answered = (m: Meter) => m.used - Math.min(m.thought, m.think);
 
@@ -123,7 +122,7 @@ export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasu
     }
     owed -= BUDGET[c.part];
     const cap = Math.max(0, Math.min(CEILING * BUDGET[c.part], runLeft - owed));
-    const meter: Meter = { cap, think: think === true ? THINK_BUDGET : 0, used: 0, thought: 0, start: now(), cut: false, cutThinking: false, afterTool: false };
+    const meter: Meter = { cap, think: think === true ? THINK_BUDGET : 0, used: 0, thought: 0, start: now(), cut: false, cutThinking: false };
     const metered = meterFetch(fetcher, meter, now, (count, ns) => { evalCount += count; evalNs += ns; });
     const calls: string[] = [];
     const tools = createTools({ sources, platform: input.platform, ...(noDatabase ? { shell: false } : {}) });
@@ -136,16 +135,15 @@ export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasu
       } catch (e) {
         calls.push(`${named} → ${clip((e as Error).message, CALL_KEPT)}`);
         throw e;
-      } finally {
-        meter.afterTool = true;
       }
     };
     const messages: TurnMessage[] = [...(system ? [{ role: "system" as const, content: system }] : []), ...c.history ?? [], { role: "user", content: c.prompt }];
-    const end = await turnEnd(streamToolTurn({
-      baseUrl: input.baseUrl, model: input.model, messages, numCtx: input.numCtx, signal: input.signal, fetch: metered,
-      sources, execute, ...(input.platform ? { platform: input.platform } : {}), ...(input.shell ? { shell: input.shell } : {}),
+    const turn: ToolTurnInput = {
+      baseUrl: input.baseUrl, model: input.model, messages, numCtx: input.numCtx, signal: input.signal,
+      sources, ...(input.platform ? { platform: input.platform } : {}), ...(input.shell ? { shell: input.shell } : {}),
       ...(think === undefined ? {} : { think }), settings: { temperature: SAMPLING.temperature, ...(input.keepAlive === undefined ? {} : { keep_alive: input.keepAlive }) },
-    }));
+    };
+    const end = await turnEnd(streamToolTurn({ ...turn, fetch: metered, execute }));
     input.signal.throwIfAborted();
     // The question itself did not fit the window: the app's sentence, and the check is skipped.
     if (end.type === "error" && end.code === "context-too-small") {
@@ -165,7 +163,8 @@ export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasu
       tokens: meter.used, ...(meter.thought > 0 ? { thinkTokens: meter.thought } : {}), ms: Math.round(now() - meter.start),
       ...(meter.cut ? { cut: true } : {}), ...(meter.cut && meter.cutThinking ? { cutThinking: true } : {}),
     };
-    const noTools = needsTools(c) ? toolsWent(steps, answer, meter.afterTool) : undefined;
+    const noTools = needsTools(c) ? toolsLeftOut(steps) ?? await windowTooSmall(c, answer, turn, details, windows) : undefined;
+    input.signal.throwIfAborted();
     checks.push(noTools !== undefined
       ? { id: c.id, kind: c.part, ok: false, state: "skipped", needs: c.needs, why: noTools, ...evidence }
       : grade(c, { answer, steps: steps.filter((s) => s.name !== "note") }, evidence));
@@ -187,23 +186,45 @@ export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasu
 type Evidence = Pick<MeasureCheck, "reply" | "calls" | "tokens" | "thinkTokens" | "ms" | "cut" | "cutThinking">;
 
 /** A check a model that gets it right does with the Library's tools. */
-const needsTools = (c: MeasureCase) => c.kind === "answer" && c.reference.calls.length > 0;
+const needsTools = (c: MeasureCase): c is AnswerCase => c.kind === "answer" && c.reference.calls.length > 0;
+
+// A check is skipped, not failed, only where the window kept it from being asked: the window is a
+// setting, not what the model wrote. The chat's tool turn (chat/tools.ts) says so in two ways,
+// read by the two functions below. A turn the model itself brought to its end (calls the tools
+// refused, calls up to the turn limit, a window filled with reads the check has no use for) is
+// graded like any other, and fails.
 
 /**
- * Why the window left the turn without its tools, in the turn's own words, if it did; then the
- * check is skipped, not failed: the window is a setting, not what the model wrote. Two ways the
- * chat's tool turn says so (chat/tools.ts): the tools did not fit beside the question, so it
- * answered without them and the turn's only step is a note saying why (Measure offers no
- * database it cannot read, so the shell's note never comes here); or the tool results filled the
- * window, so the turn ended in the app's own sentence after a tool ran, with no request to the
- * model after it (`afterTool`).
+ * The tools did not fit beside the question, so the turn answered without them and its only step
+ * is a note saying why: that note. (Measure offers no database it cannot read, so the shell's
+ * note never comes here.)
  */
-function toolsWent(steps: readonly ToolStep[], answer: string, afterTool: boolean): string | undefined {
+function toolsLeftOut(steps: readonly ToolStep[]): string | undefined {
   const note = steps.length > 0 && steps.every((s) => s.name === "note") ? steps.at(-1)?.summary : undefined;
-  if (note) return `${note}.`;
-  if (!afterTool) return undefined;
-  const said = answer.trim().split(/\n\n/).at(-1) ?? "";
-  return said.match(/^.*?[.!](?=\s|$)/)?.[0] ?? said;
+  return note ? `${note}.` : undefined;
+}
+
+/**
+ * The turn ended on the full window, and so does the check done right: its reference calls and
+ * answer (cases.ts), played through the same tool turn with the same tools and no model asked.
+ * Then the sentence the turn ended on. A full window the right calls fit in is the model's doing.
+ */
+async function windowTooSmall(c: AnswerCase, answer: string, turn: ToolTurnInput, show: { capabilities?: unknown }, windows: boolean): Promise<string | undefined> {
+  const full = windowFullWords(turn.numCtx);
+  const endedFull = (said: string) => (said.trim().split(/\n\n/).at(-1) ?? "").startsWith(full);
+  if (!endedFull(answer)) return undefined;
+  const native = Array.isArray(show.capabilities) && show.capabilities.includes("tools");
+  let round = 0;
+  const right = (async (url: URL | string) => {
+    if (!String(url).endsWith("/api/chat")) return Response.json(show);
+    const call = c.reference.calls[round++];
+    const fn = call === undefined ? undefined : toolCallOf(call, windows);
+    const message = fn === undefined ? { content: c.reference.answer }
+      : native ? { content: "", tool_calls: [{ function: fn }] } : { content: `${CALL_OPEN}${JSON.stringify(fn)}${CALL_CLOSE}` };
+    return new Response(`${JSON.stringify({ message: { role: "assistant", ...message }, done: false })}\n${JSON.stringify({ message: { role: "assistant", content: "" }, done: true, done_reason: "stop" })}\n`);
+  }) as typeof fetch;
+  const end = await turnEnd(streamToolTurn({ ...turn, fetch: right }));
+  return end.type === "done" && endedFull(end.answer) ? full : undefined;
 }
 
 /** Why a cut check failed: still thinking when its tokens ran out, or out of answer tokens. */
@@ -257,7 +278,6 @@ async function warmUp(input: MeasureInput, fetcher: typeof fetch, think: boolean
 function meterFetch(base: typeof fetch, meter: Meter, now: () => number, counted: (tokens: number, ns: number) => void): typeof fetch {
   return async (url, init) => {
     if (!String(url).endsWith("/api/chat") || typeof init?.body !== "string") return base(url, init);
-    meter.afterTool = false;
     const answerLeft = meter.cap - answered(meter);
     const thinkLeft = Math.max(0, meter.think - meter.thought);
     if (answerLeft <= 0) {

@@ -120,6 +120,35 @@ describe("downloadFile", () => {
     ]);
   });
 
+  it("a file already there under the same name is moved aside under a dated name, never overwritten, and the download says so", async () => {
+    const folder = options().dir, own = Buffer.from("a model of the person's own, of another size");
+    await mkdir(folder, { recursive: true });
+    await writeFile(path.join(folder, "model.safetensors"), own);
+    const pushed: PullProgress[] = [];
+    const done = await downloadFile(options({ progress: (p) => pushed.push(p), sha256: SHA, now: () => Date.UTC(2026, 0, 2, 3, 4, 5, 678) }));
+    const aside = "model.safetensors.replaced-2026-01-02T03-04-05-678Z";
+    expect(await readdir(folder)).toEqual(["model.safetensors", aside]);
+    expect(await readFile(path.join(folder, aside))).toEqual(own);
+    expect(await readFile(done.file)).toEqual(BODY);
+    expect(done.replaced).toBe(path.join(folder, aside));
+    expect(pushed.at(-1)).toEqual({ name: "model.safetensors", state: "done", completedBytes: BODY.length, totalBytes: BODY.length, message: `A file named model.safetensors was already there. It was kept as ${aside}.` });
+    // a second file moved aside in the same instant takes its own name: neither is written over
+    await writeFile(path.join(folder, "model.safetensors"), "another");
+    await downloadFile(options({ now: () => Date.UTC(2026, 0, 2, 3, 4, 5, 678) }));
+    expect(await readdir(folder)).toEqual(["model.safetensors", aside, `${aside}.1`]);
+    expect(await readFile(path.join(folder, aside))).toEqual(own);
+    expect(await readFile(path.join(folder, `${aside}.1`), "utf8")).toBe("another");
+  });
+
+  it("a download whose sha256 is wrong leaves the file already there where it is", async () => {
+    const folder = options().dir;
+    await mkdir(folder, { recursive: true });
+    await writeFile(path.join(folder, "model.safetensors"), "the person's own");
+    await expect(downloadFile(options({ sha256: NEWER_SHA }))).rejects.toThrow("is not the file expected");
+    expect(await readFile(path.join(folder, "model.safetensors"), "utf8")).toBe("the person's own");
+    expect((await readdir(folder)).toSorted()).toEqual(["model.safetensors", "model.safetensors.part"]);
+  });
+
   it("refuses a second redirect, and a redirect to a host that is not Hugging Face's, before fetching it", async () => {
     await expect(downloadFile(options({ url: `http://127.0.0.1:${port}/hf/twice` }))).rejects.toThrow("redirected more than once");
     seen.length = 0;

@@ -93,9 +93,15 @@ const pieces = (rt: ReturnType<typeof fakeRuntime>): ReturnType<typeof fakeRunti
     return new Response(`${lines.join("\n")}\n`);
   }) as typeof fetch,
 });
-/** A window the tools do not fit beside the question; one they fit, but not a long file read again and again. */
+/**
+ * A window the tools do not fit beside the question; one they fit as text, but not the results of
+ * some checks' own calls; one every check fits, but not a long file read again and again.
+ */
 const SMALL = 512;
+const NARROW = 640;
 const TIGHT = 4096;
+/** A check a model that gets it right does with the Library's tools. */
+const needsTools = (c: MeasureCase) => c.kind === "answer" && c.reference.calls.length > 0;
 
 describe("Measure's fixtures", () => {
   it("hold the facts the checks ask about", async () => {
@@ -453,12 +459,48 @@ describe("measureModel", () => {
     expect(m.parts?.map((p) => p.part)).toEqual(["tools", "instructions"]);
   });
 
-  it("skips a check whose tool results filled the window, with the sentence the app ended the turn on", async () => {
-    // a check that needs a tool reads the whole Library each round; the window fills, and the turn ends with no request
+  it("skips the checks whose right calls do not fit the window either, with the sentence the app ended the turn on", async () => {
+    // written as text, the tools fit beside the question at this window; the results of three checks' own calls do not
+    const rt = fakeRuntime(["completion"], reference(true, true));
+    const m = await run(rt, { numCtx: NARROW });
+    const why = `This model's ${contextWords(NARROW)} context has no room left for the tool results, so the turn stopped here.`;
+    expect(m.checks.filter((c) => c.state === "skipped").map((c) => [c.id, c.why])).toEqual(["tools-recover", "tools-chain", "files-nested"].map((id) => [id, why]));
+    expect(m.checks.filter((c) => c.state === undefined && !c.ok).map((c) => [c.id, c.why])).toEqual([]);
+  });
+
+  it("fails a check whose model filled the window itself, where the right calls fit", async () => {
+    // it reads the long notes eight times a round and never answers; the window fills, and the turn ends with no request
     const rt = fakeRuntime(["completion", "tools"], (c, round) => c?.id === "files-needle" ? { calls: Array.from({ length: 8 }, (_, i) => ({ function: { name: "read", arguments: { path: `/library/measure-notes/meeting-notes.md?${round}-${i}` } } })) } : reference(true)(c, round));
     const m = await run(rt, { numCtx: TIGHT });
-    expect(check(m, "files-needle")).toMatchObject({ state: "skipped", why: `This model's ${contextWords(TIGHT)} context has no room left for the tool results, so the turn stopped here.` });
-    expect(m.checks.filter((c) => c.state === undefined && !c.ok).map((c) => [c.id, c.why])).toEqual([]);
+    const filled = check(m, "files-needle");
+    expect(filled.reply).toContain(`This model's ${contextWords(TIGHT)} context has no room left for the tool results`);
+    expect([filled.state, filled.ok]).toEqual([undefined, false]);
+    expect(m.checks.filter((c) => c.state === "skipped").map((c) => c.id)).toEqual([]);
+    expect(m.score).toBeLessThan(100);
+    // the same window asks the same check of a model that reads the notes once, and passes it
+    expect(check(await run(fakeRuntime(["completion", "tools"], reference(true)), { numCtx: TIGHT }), "files-needle").ok).toBe(true);
+  });
+
+  it("fails a model that gets every tool call wrong: three invalid calls end the turn, and no check is skipped for it", async () => {
+    // every check that needs a tool gets a read with no path, round after round, and never an answer
+    const rt = fakeRuntime(["completion", "tools"], (c, round) => c && needsTools(c) ? { calls: [{ function: { name: "read", arguments: {} } }] } : reference(true)(c, round));
+    const m = await run(rt);
+    expect(m.checks.filter((c) => c.state === "skipped").map((c) => [c.id, c.why])).toEqual([]);
+    expect(m.checks.filter((c) => c.state === undefined && !c.ok).map((c) => c.id)).toEqual(CASES.filter(needsTools).map((c) => c.id));
+    // the calls reached the tool and it refused them, and the turn ended in the loop's own words
+    expect(check(m, "tools-count")).toMatchObject({ ok: false, reply: expect.stringContaining("three invalid tool calls") });
+    expect(check(m, "tools-count").calls).toHaveLength(3);
+    expect(m.parts?.find((p) => p.part === "files")).toMatchObject({ passed: 0, total: CASES.filter((c) => c.part === "files").length });
+    expect(m.score).toBeLessThan(50);
+  });
+
+  it("fails a check whose model called tools up to the turn limit and never answered", async () => {
+    const rt = fakeRuntime(["completion", "tools"], (c, round) => c?.id === "tools-count" ? { calls: [{ function: { name: "read", arguments: { path: "/library/measure-notes" } } }], evalCount: 1 } : reference(true)(c, round));
+    const m = await run(rt);
+    const limit = check(m, "tools-count");
+    expect(limit.reply).toContain("tool turn limit");
+    expect([limit.state, limit.ok, limit.why]).toEqual([undefined, false, "The count, 6, was not given."]);
+    expect(m.score).toBeLessThan(100);
   });
 
   it("stops on a runtime error, saying what the runtime said", async () => {

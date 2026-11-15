@@ -342,7 +342,7 @@ export type MeasureCheck = typeof MeasureCheck.Type;
  * checks run changes, so a score from before is marked as earlier and never sits beside a new one
  * as if made alike.
  */
-export const MEASURE_VERSION = 3;
+export const MEASURE_VERSION = 4;
 
 /** A part's count: checks passed of the ones that ran, and its weight in the score. */
 export const MeasurePartCount = S.Struct({ part: MeasurePart, passed: S.Int, total: S.Int, weight: S.Int });
@@ -354,7 +354,9 @@ export type MeasurePartCount = typeof MeasurePartCount.Type;
  * model with new weights is measured again. Without `version` it is an older measure of eight
  * single-shot checks, kept readable until the model is measured again. Version 2 is the five parts
  * with earlier checks and grades: fewer tasks, some replies graded differently, the chat's own
- * sampling; its score is not alike with a version 3 one.
+ * sampling; its score is not alike with a version 3 one. Version 3 has this build's checks, but
+ * skipped a check whose turn the model itself ended (tool calls the tools refused, calls up to the
+ * turn limit, a window it filled), where this build fails it: its score can be higher.
  */
 export const ModelMeasure = S.Struct({
   model: S.String,
@@ -362,7 +364,7 @@ export const ModelMeasure = S.Struct({
   /** When it was measured, ms since 1970. */
   at: S.Finite,
   /** 2 and on: the checks ran through the chat's own loop and tools, in parts. MEASURE_VERSION: this build's checks, grades and way of running them. */
-  version: S.optional(S.Literals([2, 3])),
+  version: S.optional(S.Literals([2, 3, 4])),
   /** The window the checks ran at: version 2 uses the one a chat with this model uses. */
   numCtx: S.Int,
   /** Version 2: whether the model thought, as a chat with it does. */

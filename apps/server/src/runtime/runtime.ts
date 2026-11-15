@@ -243,6 +243,16 @@ export const childHome = (appDataDir: string): string => path.join(runtimeDir(ap
  * a file that is not the pinned one ("checksum"), a disk short of room ("disk"), or the unpack or
  * move ("install", and anything that is not an InstallError).
  */
+/**
+ * The words for a look or a start that threw: a file error names the path it could not use, so the
+ * person can put it right; anything else is said as it came.
+ */
+export function stoppedOn(e: unknown): string {
+  const { path: file, code } = (typeof e === "object" && e !== null ? e : {}) as NodeJS.ErrnoException;
+  if (typeof file === "string" && typeof code === "string") return `The app could not use ${file} (${code}). Check that it can be written to, then retry.`;
+  return `The app stopped on an error: ${e instanceof Error ? e.message : String(e)}`;
+}
+
 export function failureOf(e: unknown): NonNullable<RuntimeStatus["failure"]> {
   if (!(e instanceof InstallError)) return "install";
   switch (e.code) {
@@ -706,6 +716,33 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     return { stopped: true, pid };
   }
 
+  /** Ends the process this object spawned, if it still runs: its group on POSIX, its handle on Windows. */
+  const killSpawned = () => {
+    const child = spawned;
+    if (!child || child.exitCode !== null || child.signalCode !== null) return;
+    if (platform === "win32") child.kill("SIGKILL");
+    else if (child.pid !== undefined) {
+      try { process.kill(-child.pid, "SIGKILL"); }
+      catch { /* The owned group already ended. */ }
+    }
+  };
+
+  /**
+   * Every look and every start ends in a status the person can act on. A step that throws outside
+   * the guarded ones (a data folder that cannot be written, a spawn the system refuses) would
+   * leave the search or the start on screen for ever: it is an error instead, which the window
+   * shows with Retry. `starting`: the run could have spawned an Ollama, which is ended unless it
+   * was recorded as the app's (a recorded one is found again by the next look).
+   */
+  const ended = (fn: () => Promise<RuntimeStatus>, starting: boolean) => async (): Promise<RuntimeStatus> => {
+    try {
+      return await fn();
+    } catch (e) {
+      if (starting && spawned !== undefined && spawned.pid !== startedPid) killSpawned();
+      return setStatus({ state: "error", owner: "none", baseUrl: appBaseUrl, ...(starting ? { failure: "start" as const } : {}), detail: stoppedOn(e) });
+    }
+  };
+
   const serial = (fn: () => Promise<RuntimeStatus>): Promise<RuntimeStatus> => {
     if (inFlight) return inFlight;
     inFlight = fn().finally(() => {
@@ -717,11 +754,11 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
   return {
     status: () => current,
     baseUrl: () => (current.state === "ready" ? current.baseUrl : undefined),
-    discover: () => serial(async () => setStatus(statusFor(await classify()))),
+    discover: () => serial(ended(async () => setStatus(statusFor(await classify())), false)),
     ensure: () => {
       // Retry while the download has stalled ends that attempt; a moving download is left to finish
       if (inFlight !== undefined && download?.fetching === true && Date.now() - download.lastBytesAt >= stallMs) download.abort.abort(new Restart("Retry"));
-      return serial(ensureOnce);
+      return serial(ended(ensureOnce, true));
     },
     async stop() {
       if (platform === "win32" || (spawned !== undefined && spawned.pid !== undefined && spawned.exitCode === null && spawned.signalCode === null)) return stopSpawned();
@@ -730,15 +767,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       if (r.stopped) setStatus({ state: "stopped", owner: "none", baseUrl: appBaseUrl, detail: `Stopped the app-owned Ollama (pid ${r.pid}).` });
       return r;
     },
-    killNow() {
-      const child = spawned;
-      if (!child || child.exitCode !== null || child.signalCode !== null) return;
-      if (platform === "win32") child.kill("SIGKILL");
-      else if (child.pid !== undefined) {
-        try { process.kill(-child.pid, "SIGKILL"); }
-        catch { /* The owned group already ended. */ }
-      }
-    },
+    killNow: killSpawned,
     startedByThisProcess() {
       if (startedPid === undefined) return false;
       return spawned !== undefined && spawned.pid === startedPid && spawned.exitCode === null && spawned.signalCode === null;

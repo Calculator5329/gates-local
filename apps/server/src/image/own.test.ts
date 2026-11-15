@@ -188,4 +188,64 @@ describe.skipIf(process.platform === "win32")("createOwnComfy", () => {
     expect(args[0]).toBe(engineFiles(engineDir(appDataDir, "1.0.0"), "uv-venv").main);
     expect(args).not.toContain("--cpu");
   });
+
+  it("a card build that ends while it starts is passed over for the processor's beside it, until it is tried again and answers", async () => {
+    installFake("1.0.0-cpu");
+    installFake("1.0.0");
+    const cardPython = engineFiles(engineDir(appDataDir, "1.0.0"), "uv-venv").python;
+    const working = readFileSync(cardPython, "utf8");
+    // a build that cannot run here: it ends at once, as Python does on an import that fails
+    writeFileSync(cardPython, "#!/bin/sh\nexit 3\n");
+    const port = await freePort();
+    own = createOwnComfy({ appDataDir, port, platform: "linux" });
+    expect(own.build?.()).toEqual({ version: "1.0.0", cpu: false });
+    await own.start();
+    await vi.waitFor(async () => expect((await own!.inspect()).active).toBe(false), { timeout: 5000 });
+    expect(own.failed?.()).toBe("1.0.0");
+    // the next start is the processor's, on the processor
+    expect(own.build?.()).toEqual({ version: "1.0.0-cpu", cpu: true });
+    await own.start();
+    await vi.waitFor(async () => expect(await answers(own!.address())).toBe(true), { timeout: 5000 });
+    own.answered?.();
+    const args = JSON.parse(readFileSync(path.join(work, "args.json"), "utf8")) as string[];
+    expect(args[0]).toBe(engineFiles(engineDir(appDataDir, "1.0.0-cpu"), "uv-venv").main);
+    expect(args).toContain("--cpu");
+    await own.stop();
+
+    // the app's next start remembers: the build that works is the one that runs
+    own = createOwnComfy({ appDataDir, port, platform: "linux" });
+    expect(own.build?.()).toEqual({ version: "1.0.0-cpu", cpu: true });
+    expect(own.heldCard?.()).toBe("1.0.0");
+    // tried again once it can run (a driver put right), it answers, and is the one that runs from then on
+    writeFileSync(cardPython, working);
+    own.tryCard?.();
+    expect(own.build?.()).toEqual({ version: "1.0.0", cpu: false });
+    await own.start();
+    await vi.waitFor(async () => expect(await answers(own!.address())).toBe(true), { timeout: 5000 });
+    own.answered?.();
+    await own.stop();
+    own = createOwnComfy({ appDataDir, port, platform: "linux" });
+    expect(own.build?.()).toEqual({ version: "1.0.0", cpu: false });
+    expect(own.heldCard?.()).toBeUndefined();
+  });
+
+  it("nothing is passed over where there is nothing else to start, or the engine is still there", async () => {
+    installFake("1.0.0");
+    const cardPython = engineFiles(engineDir(appDataDir, "1.0.0"), "uv-venv").python;
+    const working = readFileSync(cardPython, "utf8");
+    writeFileSync(cardPython, "#!/bin/sh\nexit 3\n");
+    own = createOwnComfy({ appDataDir, port: await freePort(), platform: "linux" });
+    await own.start();
+    await vi.waitFor(async () => expect((await own!.inspect()).active).toBe(false), { timeout: 5000 });
+    // the only build: it stays the one that starts, and the start's own error is what is said
+    expect(own.failed?.()).toBeUndefined();
+    expect(own.build?.()).toEqual({ version: "1.0.0", cpu: false });
+    // the processor's build beside it, and the card's engine running (slow to answer is not ended)
+    installFake("1.0.0-cpu");
+    writeFileSync(cardPython, working);
+    await own.start();
+    expect((await own.inspect()).active).toBe(true);
+    expect(own.failed?.()).toBeUndefined();
+    expect(own.build?.()).toEqual({ version: "1.0.0", cpu: false });
+  });
 });

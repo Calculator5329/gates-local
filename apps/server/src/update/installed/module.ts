@@ -38,7 +38,7 @@ import { readRecord, removeRecord, takeRecord, type UpdateRecord, writeRecord } 
 import type { ReleaseArtifact } from "@gates-local/update/release-manifest";
 import { checkInstalled, type InstalledOutcome } from "./check.ts";
 import { canRestart, downloadLines, type Fetch, type GoBack, INSTALL_REFUSAL, INSTALLED_VERSION_ENV, type InstalledFeed, installedTarget, type Restart, runningAppImage } from "@gates-local/update/installed/copy";
-import { type DownloadOutcome, downloadRelease, inUpdatesFolder, listHash, preparedRelease, removeVersions, type Space, type Verified, verifyKept } from "@gates-local/update/installed/download";
+import { type DownloadOutcome, downloadRelease, inUpdatesFolder, listHash, noteStartedFrom, preparedRelease, removeVersions, type Space, type Verified, verifyKept } from "@gates-local/update/installed/download";
 import { boundedGet, type Get, type Stream, streamGet } from "@gates-local/update/installed/feed";
 import type { ModelLists } from "./models-list.ts";
 
@@ -160,6 +160,7 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
   const progressMs = deps.progressMs ?? 1_000;
   const program = deps.program === undefined ? (deps.platform === "linux" ? runningAppImage(process.env) : null) : deps.program;
   // No delete removes a folder holding the running program: the AppImage, or this process's executable.
+  // Every delete also asks, by itself, whether the folder could be in use by anyone else (update/installed/in-use).
   const programs = [...(program === null ? [] : [program]), process.execPath];
   const identity = { dataDir: deps.dataDir, running: deps.version, keys: deps.feed.keys, platform: deps.platform, arch: deps.arch, programs };
   const controller = new AbortController();
@@ -189,6 +190,11 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
 
   // A copy started from inside updates/ never replaces itself: that folder is this updater's to fill and clean.
   const restart = deps.restart === "yes" && program !== null && inUpdatesFolder(deps.dataDir, program) ? "download-folder" : deps.restart ?? "none";
+  // It is also a file the person starts the app from: the note it leaves keeps every later cleanup, by any copy, off its folder.
+  if (program !== null) {
+    try { noteStartedFrom(deps.dataDir, program); }
+    catch (error) { log(`could not note that this copy was started from its download folder: ${error instanceof Error ? error.message : String(error)}`); }
+  }
   // Windows: set once the running version's kept installer has been looked for.
   let goBack: GoBack | undefined;
   const admission =deps.admission ?? createUpdateAdmission({ finishing: deps.startupToken !== undefined });
@@ -353,7 +359,7 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     // A folder left by an earlier start is ready only after it checks out again, holding this very list.
     const prepared = await preparedRelease({ ...identity, version: f.target, list: f.list }).catch(() => null);
     if (prepared?.ok === true) { fetch = { target: f.target, fetch: { state: "ready" } }; return; }
-    if (prepared !== null) log(`update download ${f.target}: deleted a folder that did not check out: ${prepared.reason}`);
+    if (prepared !== null) log(`update download ${f.target}: its folder did not check out: ${prepared.reason}`);
     // Off: a failure is not retried by itself; "Check for updates" offers Download again.
     if (!deps.automatic.enabled()) { fetch = undefined; return; }
     // A list whose file did not match stays "did not match" until a click or new list bytes.

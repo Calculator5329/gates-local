@@ -20,6 +20,8 @@ const ELSEWHERE = "A ComfyUI on another computer works too: set its address in S
 export const NO_ENGINE = "The app cannot set up images on this computer. A ComfyUI you run yourself works: set its address in Settings.";
 /** A computer the app sets images up on, in a release that does not offer it yet (engine.ts ENGINE_OFFERED): the version, not the computer. */
 export const NOT_YET = "Picture setup is not in this version yet. A ComfyUI you run yourself works: set its address in Settings.";
+/** The card's engine was not there after its start, and the processor's build runs in its place. */
+export const CARD_NOT_STARTED = "The picture engine for the graphics card stopped while it was starting, so pictures still run on the processor. Its log says why.";
 export const addressSet = (address: string) => `Settings names a ComfyUI at ${address}, and it did not answer. Start it there, or clear the address in Settings so the app can set images up here.`;
 
 /**
@@ -73,7 +75,11 @@ export const planFor = (plan: EnginePlan, cpu: boolean): EnginePlan => cpu && pl
 
 export interface ImageSetupDeps {
   appDataDir: string;
-  own: Pick<OwnComfy, "installed" | "build">;
+  /**
+   * holdCard, heldCard, tryCard, onHeld: the card's build made beside the processor's is held until
+   * it has started once (own.ts), so pictures keep running on the build that works.
+   */
+  own: Pick<OwnComfy, "installed" | "build" | "holdCard" | "heldCard" | "tryCard" | "onHeld">;
   /**
    * stopIdle: before a setup that built the card's engine starts it, the processor's ends if it is
    * idle. setupLeft: the model's files not already whole where its download goes.
@@ -175,7 +181,9 @@ export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
     // no card that runs pictures: the processor build, with no CUDA libraries to fetch
     const plan = planFor(found, cpu);
     const preset = PRESETS.find((p) => p.id === SETUP_PRESET)!;
-    const installed = !toCard && deps.own.installed();
+    // The card's build beside the processor's counts as installed once it is whole on disk, held
+    // until it is tried (a run whose model or start failed): nothing of it is left to fetch.
+    const installed = toCard ? deps.own.heldCard?.() === planVersion(plan) : deps.own.installed();
     const engineBytes = planBytes(plan);
     // what the download fetches: a file already whole where it goes is skipped there, so it is not
     // said here, put on the drive or counted to; unknown, the whole model as the records give it
@@ -185,7 +193,7 @@ export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
       plan, cpu, toCard,
       info: {
         // installed, the build that is there (a card build the device runs on the processor stays the card's)
-        engine: { version: installed && built !== undefined ? built.version : planVersion(plan), bytes: engineBytes, installed },
+        engine: { version: installed && !toCard && built !== undefined ? built.version : planVersion(plan), bytes: engineBytes, installed },
         ...toCard ? { toCard: true as const } : {},
         model: { preset: preset.id, name: preset.name, bytes },
         ...cpu ? { cpu: CPU_SECONDS } : {},
@@ -195,6 +203,12 @@ export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
       },
     };
   };
+
+  // A card build that was not there after its start, at a picture: the row that offers the card
+  // says so (a setup in progress says it at its own end).
+  deps.own.onHeld?.(() => {
+    if (running === undefined) say({ step: "error", completedBytes: 0, totalBytes: 0, message: CARD_NOT_STARTED, toCard: true });
+  });
 
   // at the app's start, before a picture starts the engine
   void deps.gpuStatus().then(follow).catch((error: unknown) => log(`device not checked: ${error instanceof Error ? error.message : String(error)}`));
@@ -241,8 +255,10 @@ export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
     say({ step: "engine", completedBytes: 0, totalBytes: total });
     const mine = running;
     void (async () => {
-      // the processor's build is installed: the card's is built beside it, under its own name
-      if (toCard === true || !deps.own.installed()) {
+      // the processor's build is installed: the card's is built beside it, under its own name, and
+      // held from before its tree is whole, so no start takes it until this run tries it
+      if (toCard === true) deps.own.holdCard?.(planVersion(plan));
+      if (toCard === true ? !info.engine!.installed : !deps.own.installed()) {
         const onProgress = (p: InstallProgress) => say({ step: "engine", completedBytes: Math.min(p.receivedBytes, engineBytes), totalBytes: total });
         if (plan.kind === "archive") await installEngine({ appDataDir: deps.appDataDir, manifest: plan.manifest, layout: plan.layout, onProgress, signal: controller.signal });
         else await plan.run(onProgress, controller.signal);
@@ -261,8 +277,15 @@ export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
       say({ step: "starting", completedBytes: total, totalBytes: total });
       // The processor's engine, idle, ends first, so this start is the card build's; one making a
       // picture keeps going, and its idle stop ends it (the next start is the card build's).
-      if (toCard === true) await deps.image.stopIdle?.().catch((error: unknown) => log(`the processor engine was not stopped: ${error instanceof Error ? error.message : String(error)}`));
+      if (toCard === true) {
+        await deps.image.stopIdle?.().catch((error: unknown) => log(`the processor engine was not stopped: ${error instanceof Error ? error.message : String(error)}`));
+        deps.own.tryCard?.();
+      }
       await deps.image.start();
+      // the card's engine was not there after its start: the processor's started in its place
+      // (module.ts ensure), and is the build that runs until the card's is tried again
+      const runs = deps.own.build?.();
+      if (toCard === true && runs !== undefined && isProcessorBuild(runs.version)) throw new Error(CARD_NOT_STARTED);
       say({ step: "done", completedBytes: total, totalBytes: total });
     })().catch((error: unknown) => {
       model = undefined;

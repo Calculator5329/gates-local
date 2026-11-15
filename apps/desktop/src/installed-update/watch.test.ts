@@ -599,6 +599,18 @@ describe("endings outside the matrix", () => {
     expect([existsSync(w.paths.previous), existsSync(w.paths.incoming)]).toEqual([true, true]);
   });
 
+  it("C: a download folder the app was once started from is left, and the update still ends cleaned up", async () => {
+    const w = new World();
+    // The note a copy leaves in its version folder when it finds itself started from there.
+    writeFileSync(path.join(w.download, "started-here"), "2026-01-01T00:00:00.000Z\n");
+    const { end, log } = await update(w);
+    expect(end).toEqual({ outcome: "updated", cleaned: true, startApp: false });
+    expect(w.transaction()).toBeNull();
+    expect(holds(w.program, w.old, w.new)).toBe("new");
+    expect(readFileSync(w.artifactFile)).toEqual(readFileSync(w.program));
+    expect(log.deleted).not.toContain(w.download);
+  });
+
   it("C: a cleanup that fails leaves cleanup, and a watcher resuming it starts the app anyway", async () => {
     const w = new World();
     const denied = (): Fault => ({ op: "removeTree", match: is(w.download), code: "EACCES" });

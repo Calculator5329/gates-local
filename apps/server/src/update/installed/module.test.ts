@@ -633,6 +633,26 @@ describe("downloading a newer version", () => {
     await module.close();
   });
 
+  it("a folder the app was once started from is still there after another copy finds a newer version and cleans up", async () => {
+    // One day the person started the AppImage an earlier download left in updates/1.1.0/, and made a shortcut to it.
+    const launched = path.join(folder("1.1.0"), artifactFile("1.1.0"));
+    fs.mkdirSync(folder("1.1.0"), { recursive: true });
+    fs.writeFileSync(launched, "the program the shortcut starts");
+    fs.mkdirSync(folder("1.0.0"), { recursive: true });
+    fs.writeFileSync(path.join(folder("1.0.0"), "note"), "never started from");
+    const first = installed(false, { version: "1.1.0", restart: "yes", program: launched });
+    await first.module.close();
+    // Another day they start the copy in their programs folder; it finds 1.3.0 and cleans up the others.
+    serveGood();
+    const { module } = installed(true);
+    await module.check();
+    await settled(module);
+    expect(shown(module).download).toBe("ready");
+    expect(fs.existsSync(folder("1.0.0"))).toBe(false);
+    expect(fs.readFileSync(launched, "utf8")).toBe("the program the shortcut starts");
+    await module.close();
+  });
+
   it("sends progress at most about once a second", async () => {
     serveGood();
     page.route((p, res) => {

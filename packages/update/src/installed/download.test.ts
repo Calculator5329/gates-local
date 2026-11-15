@@ -6,8 +6,9 @@ import fs from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type DownloadOptions, downloadRelease, fileIn, freeSpace, LIST_FILE, preparedRelease, removeVersions, SIGNATURE_FILE, verifyPrepared, versionFolder } from "./download.ts";
+import { type DownloadOptions, downloadRelease, fileIn, freeSpace, LIST_FILE, noteStartedFrom, preparedRelease, removeVersions, SIGNATURE_FILE, verifyPrepared, versionFolder } from "./download.ts";
 import { streamGet } from "./feed.ts";
+import type { Look } from "./in-use.ts";
 import { artifactFile, listFor, releaseKey, releasePage, type ReleasePage, sha512 } from "./testing.ts";
 
 const key = releaseKey();
@@ -42,6 +43,7 @@ function options(files = good(), over: Partial<DownloadOptions> = {}): DownloadO
     stream: streamGet({ allowLoopbackHttp: true, idleMs: 2_000 }), signal: new AbortController().signal, freeSpace: plenty, ...over,
   };
 }
+const updatesDir = () => path.join(dataDir, "updates");
 const folder = () => path.join(dataDir, "updates", VERSION);
 const inFolder = () => fs.readdirSync(folder()).toSorted();
 const artifactRequests = () => page.requests.filter((p) => p === ARTIFACT_PATH).length;
@@ -52,6 +54,8 @@ function complete(files = good(), bytes = BYTES, at = folder()): void {
   fs.writeFileSync(path.join(at, SIGNATURE_FILE), files.sig);
   fs.writeFileSync(path.join(at, FILE), bytes);
 }
+/** Three finished downloads side by side. */
+const three = () => { for (const v of ["1.0.0", "1.1.0", "1.3.0"]) complete(good(), BYTES, path.join(updatesDir(), v)); };
 /** Headers and the first bytes, then silence the test ends: a download in flight. */
 function holdAfter(bytes: number): void {
   page.route((p, res) => {
@@ -370,8 +374,58 @@ describe("the folder's place", () => {
     expect(await removeVersions(dataDir, ["1.1.0", "1.3.0"])).toEqual(["1.0.0"]);
     expect(fs.readdirSync(updates).toSorted()).toEqual(["1.1.0", "1.3.0", "installed-update.json", "notes"]);
     expect(fs.existsSync(path.join(dataDir, "beside.txt"))).toBe(true);
-    expect(await removeVersions(dataDir, ["1.1.0"])).toEqual(["1.3.0"]);
-    expect(fs.readdirSync(updates).toSorted()).toEqual(["1.1.0", "installed-update.json", "notes"]);
+    expect(await removeVersions(dataDir, ["1.3.0"])).toEqual(["1.1.0"]);
+    expect(fs.readdirSync(updates).toSorted()).toEqual(["1.3.0", "installed-update.json", "notes"]);
+  });
+
+  describe("a folder that could be in use is left by every delete", () => {
+    const nothing: Look = { running: () => [], launchers: () => [] };
+
+    it("a program running from it that is not this process", async () => {
+      three();
+      const other = path.join(updatesDir(), "1.0.0", FILE);
+      expect(await removeVersions(dataDir, ["1.3.0"], [], { ...nothing, running: () => [other] })).toEqual(["1.1.0"]);
+      expect(fs.readdirSync(updatesDir()).toSorted()).toEqual(["1.0.0", "1.3.0"]);
+    });
+
+    it("a launcher that starts a file inside it", async () => {
+      three();
+      const launchers = () => [`[Desktop Entry]\nName=Gates Local\nExec=${path.join(updatesDir(), "1.1.0", FILE)} %U\n`];
+      expect(await removeVersions(dataDir, ["1.3.0"], [], { ...nothing, launchers })).toEqual(["1.0.0"]);
+      expect(fs.readdirSync(updatesDir()).toSorted()).toEqual(["1.1.0", "1.3.0"]);
+    });
+
+    it("a folder the app was started from, long after that copy closed", async () => {
+      three();
+      expect(noteStartedFrom(dataDir, path.join(updatesDir(), "1.0.0", FILE))).toBe(path.join(updatesDir(), "1.0.0"));
+      expect(await removeVersions(dataDir, ["1.3.0"], [], nothing)).toEqual(["1.1.0"]);
+      expect(fs.readFileSync(path.join(updatesDir(), "1.0.0", FILE))).toEqual(BYTES);
+      // A program outside updates/ leaves no note anywhere.
+      expect(noteStartedFrom(dataDir, path.join(dataDir, "elsewhere", FILE))).toBeNull();
+    });
+
+    it("the newest version on disk, whoever asks and whatever they keep", async () => {
+      three();
+      expect(await removeVersions(dataDir, [], [], nothing)).toEqual(["1.0.0", "1.1.0"]);
+      expect(fs.readdirSync(updatesDir())).toEqual(["1.3.0"]);
+      expect(await removeVersions(dataDir, [], [], nothing)).toEqual([]);
+    });
+
+    it("everything, when what is running cannot be read", async () => {
+      three();
+      expect(await removeVersions(dataDir, ["1.3.0"], [], { ...nothing, running: () => null })).toEqual([]);
+      expect(fs.readdirSync(updatesDir()).toSorted()).toEqual(["1.0.0", "1.1.0", "1.3.0"]);
+    });
+
+    it("a download that fails its checks stays too, and still is not ready", async () => {
+      complete(good(), Buffer.from("not the listed bytes"));
+      const look: Look = { ...nothing, launchers: () => [path.join(folder(), FILE)] };
+      expect(await verifyPrepared({ ...identity(), version: VERSION, look })).toMatchObject({ ok: false });
+      expect(await preparedRelease({ ...identity(), version: VERSION, list: good().list, look })).toMatchObject({ ok: false });
+      expect(await downloadRelease(options(good(), { look }))).toEqual({ kind: "could-not-download", detail: "its folder is in use: a launcher starts a file in it" });
+      expect(inFolder()).toEqual([FILE, LIST_FILE, SIGNATURE_FILE].toSorted());
+      expect(page.requests).toEqual([]);
+    });
   });
 
   it("never deletes a folder that holds the running program, whatever asked for it", async () => {

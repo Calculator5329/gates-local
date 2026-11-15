@@ -1,5 +1,42 @@
 # Changelog
 
+## 2026-11-15: five ways the app could lose a file, leave you stuck or flatter a model
+
+- If you started Gates Local from the file an update had downloaded
+  (inside the app's `updates` folder), a later check or update by another
+  copy could delete that file, and your shortcut then started nothing.
+  A version folder is now left alone when the app was ever started from
+  it, when a program is running from it, or when a launcher or link
+  points into it. The newest downloaded version is kept too. When the
+  app cannot tell, it leaves the folder.
+- When a picture model file in the models folder had the name of one the
+  app downloads but another size, the download wrote over it, so a model
+  of your own under that name was gone. The file already there is now
+  moved beside the new one as `<name>.replaced-<date and time>`, and the
+  download's last line says where it went.
+- After "Use the card" on a computer set up without one, a picture
+  engine for the card that could not start left you with no pictures at
+  all: every one said ComfyUI stopped while starting, although the
+  engine for the processor was still on disk and working, and the line
+  in Settings that could try again was gone. The card's engine now takes
+  over only once it has started and answered. Until then, and whenever
+  it ends while starting, pictures run on the processor's engine, and
+  Settings keeps the "Pictures run on the processor" line with what
+  happened and Try again, which builds nothing a second time.
+- When the app could not write to its data folder (a read-only folder is
+  one way), the window stayed on "Looking for Ollama" or "Starting
+  Ollama" for ever, with nothing to press. A look or a start that stops
+  on an error now ends as "Ollama didn't start", names the folder or
+  file it could not use, and offers Retry.
+- Measure skipped a check when the model ended its own turn badly: three
+  tool calls the tools refused, tool calls up to the turn limit with no
+  answer, or a window it filled with reads the check has no use for. A
+  skipped check is left out of the score, so a model that got every tool
+  call wrong could show 100. Those checks now fail. A check is skipped
+  only where the window is too small for it however well it is done.
+  Scores made before this are marked "Earlier checks"; measure again to
+  set them beside new ones.
+
 ## 2026-11-15: code comments say why, not where they came from
 
 - Internal only: comments that repeated the code or told its history are gone; the compiled code is unchanged.

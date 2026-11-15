@@ -1230,6 +1230,61 @@ describe("image presets (fake ComfyUI file lists)", () => {
     expect(own.calls).toEqual(["start", "stop"]);
   });
 
+  it("the card's engine ends while it starts and the processor's build is beside it: that one starts instead, and nothing is said to have failed", async () => {
+    // own.ts in small: the card's build is not there after its start; failed() passes it over
+    const own = { card: true, active: false, started: [] as string[], answered: 0, failed: 0 };
+    let f!: Awaited<ReturnType<typeof fixture>>;
+    const address = "http://127.0.0.1:41234";
+    const lines: string[] = [];
+    f = await fixture({ log: (line) => { lines.push(line); }, own: {
+      installed: () => true, address: () => address,
+      inspect: async () => ({ present: true, active: own.active, activeState: own.active ? "active" : "inactive", pid: own.active ? 77 : 0 }),
+      start: async () => { own.started.push(own.card ? "card" : "processor"); if (!own.card) { own.active = true; f.configure({ answering: true, cpu: true }); } },
+      stop: async () => { own.active = false; f.configure({ answering: false }); },
+      onExit: () => {},
+      build: () => own.card ? { version: "1.0.0", cpu: false } : { version: "1.0.0-cpu", cpu: true },
+      failed: () => { own.failed++; if (!own.card) return undefined; own.card = false; return "1.0.0"; },
+      answered: () => { own.answered++; },
+    }, gpuStatus: async () => ({ vendor: "nvidia", name: "Test card", totalBytes: 16 * 1024 ** 3, occupants: [], systemMemoryAvailableBytes: 0, measuredAt: 0 }) });
+    f.configure({ answering: false });
+    await f.module.status();
+    expect(f.module.engine().room).toBeGreaterThan(15 * 1024 ** 3);
+    await f.module.start();
+    expect(own.started).toEqual(["card", "processor"]);
+    expect(own.answered).toBe(1);
+    expect(f.module.current()).toMatchObject({ state: "ready", owner: "app", baseUrl: address });
+    // the limits and the room are the processor's from here on
+    expect(f.module.engine().room).toBe(0);
+    expect(lines.some((line) => line.includes("1.0.0") && line.includes("processor"))).toBe(true);
+  });
+
+  it("an engine with nothing to fall back to, or one still running at the deadline, fails in the start's own words", async () => {
+    const own = { active: false, failed: 0, answered: 0 };
+    let f!: Awaited<ReturnType<typeof fixture>>;
+    const service = (start: () => void) => ({
+      installed: () => true, address: () => "http://127.0.0.1:41234",
+      inspect: async () => ({ present: true, active: own.active, activeState: own.active ? "active" : "inactive", pid: own.active ? 77 : 0 }),
+      start: async () => { start(); },
+      stop: async () => { own.active = false; },
+      onExit: () => {},
+      failed: () => { own.failed++; return undefined; },
+      answered: () => { own.answered++; },
+    });
+    f = await fixture({ own: service(() => {}) });
+    f.configure({ answering: false });
+    await expect(f.module.start()).rejects.toThrow("ComfyUI started but is not running. Check its log, then try again.");
+    expect(own.failed).toBe(1);
+    // running and not answering yet: it is left to finish, and is not a build that failed
+    f = await fixture({ startupTimeoutMs: 0, own: service(() => { own.active = true; }) });
+    f.configure({ answering: false });
+    await expect(f.module.start()).rejects.toThrow("ComfyUI did not become ready within the startup timeout. Check its log, then try again.");
+    expect(own.failed).toBe(1);
+    expect(own.answered).toBe(0);
+    // the fake engine ends, and the module reads that, before the fixture closes
+    own.active = false;
+    expect(await f.module.status()).toMatchObject({ state: "stopped", owner: "none" });
+  });
+
   it("the held engine value: the own engine's end is written when it happens, and the room is read with the status", async () => {
     let ended: ((pid: number) => void) | undefined;
     const own = { active: false };
@@ -1409,6 +1464,23 @@ describe("image presets (fake ComfyUI file lists)", () => {
         expect(finished.map((p) => p.name)).toEqual(["flux-2-klein-4b-fp8.safetensors", "qwen_3_4b.safetensors"]);
         for (const p of finished) expect(p.message).toBeUndefined();
         expect(served[0]).toBe("HEAD huggingface.co/black-forest-labs/FLUX.2-klein-4b-fp8/resolve/" + served[0]!.split("/resolve/")[1]);
+      });
+
+      it("a file of the wrong size under a model's name is kept under a dated name when the model is fetched again, and the download's last word says so", async () => {
+        const { f, root, done } = await setup();
+        await f.module.download("flux2-klein-4b");
+        await done(2);
+        // The person puts a model of their own there under the same name: another size, so the setup fetches its file again.
+        const folder = path.join(root, "diffusion_models", "gates-local"), name = "flux-2-klein-4b-fp8.safetensors";
+        await writeFile(path.join(folder, name), "a model of the person's own under the same name");
+        expect(await f.module.download("flux2-klein-4b")).toEqual({ files: [name] });
+        await done(3);
+        const names = await readdir(folder);
+        const aside = names.find((n) => n.startsWith(`${name}.replaced-`));
+        expect(names.toSorted()).toEqual([name, aside]);
+        expect(await readFile(path.join(folder, aside!), "utf8")).toBe("a model of the person's own under the same name");
+        expect(await readFile(path.join(folder, name), "utf8")).toBe(`${name} v1`);
+        expect(f.downloads.at(-1)).toMatchObject({ name, state: "done", ended: true, message: `A file named ${name} was already there. It was kept as ${aside}.` });
       });
 
       it("WIN-SETUP-01: the disk is planned before any transfer; 4.6 GiB free does not start Klein compact's three files, 876 GiB does", async () => {

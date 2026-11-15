@@ -15,8 +15,12 @@
 // artifact's hash) before anything calls it ready, and deleted if it fails.
 // Nothing outside <data dir>/updates/ is ever deleted: every recursive delete
 // resolves its version folder first and refuses a name that is not
-// major.minor.patch. That holds by path. A version folder that holds the
-// running program (a person started an AppImage from it) is never deleted. If the person made updates/ itself a
+// major.minor.patch. That holds by path. A version folder that could be in
+// use is never deleted, by any delete here, whoever asks: one a program runs
+// from, one the app was started from before (a copy that finds itself started
+// from its version folder leaves a note there, noteStartedFrom), one a
+// launcher points into (in-use.ts decides). Cleanup of other versions also
+// leaves the newest one on disk. If the person made updates/ itself a
 // link, the deletes follow it to wherever it points; a version folder or an
 // artifact that is a link is never trusted, and deleting one removes only
 // the link.
@@ -26,6 +30,7 @@ import path from "node:path";
 import { type ReleaseArtifact, type ReleaseManifest, validateReleaseVersion, verifyManifest } from "../release-manifest.ts";
 import { compare, parseRelease } from "../semver.ts";
 import type { Body, Stream, Streamed } from "./feed.ts";
+import { inUse, type Look, once, real, realLook, STARTED_FILE } from "./in-use.ts";
 
 export const UPDATES_FOLDER = "updates";
 export const LIST_FILE = "release.json";
@@ -56,6 +61,8 @@ export interface Identity {
   readonly arch: string;
   /** The running program's files: no delete removes a version folder that holds one. */
   readonly programs?: readonly string[];
+  /** Tests say what runs and which launchers exist; the default reads the computer. */
+  readonly look?: Look;
 }
 
 /** A folder verifyPrepared has just checked from its bytes on disk. */
@@ -125,41 +132,40 @@ export function versionFolder(dataDir: string, version: string): string {
 }
 
 /**
- * The one recursive delete: a version folder, its path checked first. On
- * Windows a scanner may hold a fresh file for a moment; the retries keep that
- * from turning "did not match" into "could not download".
+ * The one recursive delete: a version folder, its path checked first, and
+ * only when nothing could be using it (in-use.ts). Returns why it was left,
+ * or null once it is gone. On Windows a scanner may hold a fresh file for a
+ * moment; the retries keep that from turning "did not match" into "could not
+ * download".
  */
-async function removeVersion(dataDir: string, version: string, programs: readonly string[] | undefined): Promise<boolean> {
+async function removeVersion(dataDir: string, version: string, who: { readonly programs?: readonly string[] | undefined; readonly look?: Look | undefined }): Promise<string | null> {
   const folder = versionFolder(dataDir, version);
-  if (holdsProgram(folder, programs ?? [])) return false;
+  const used = inUse(folder, who.programs ?? [], who.look ?? realLook);
+  if (used !== null) return used;
   await fs.promises.rm(folder, { recursive: true, force: true, maxRetries: 3 });
-  return true;
-}
-
-/** The real path, or the resolved one when it cannot be read (a file already gone). */
-function real(file: string): string {
-  try { return fs.realpathSync(file); } catch { return path.resolve(file); }
-}
-
-/**
- * Whether one of programs is inside folder, by real paths. A folder that is a
- * link is not holding anything: deleting it removes only the link.
- */
-function holdsProgram(folder: string, programs: readonly string[]): boolean {
-  if (programs.length === 0) return false;
-  let inside: string;
-  try {
-    if (fs.lstatSync(folder).isSymbolicLink()) return false;
-    inside = `${fs.realpathSync(folder)}${path.sep}`;
-  } catch {
-    return false;
-  }
-  return programs.some((file) => real(file).startsWith(inside));
+  return null;
 }
 
 /** Whether file runs from inside <data dir>/updates/, the folder this updater downloads into and cleans. */
 export function inUpdatesFolder(dataDir: string, file: string): boolean {
   return real(file).startsWith(`${real(updatesRoot(dataDir))}${path.sep}`);
+}
+
+/**
+ * A copy that finds itself started from program calls this: when program is
+ * inside a version folder under updates/, it leaves a note there with the
+ * time, and from then on no cleanup deletes that folder. Returns the folder,
+ * or null when program is not in one. Throws when the note cannot be written.
+ */
+export function noteStartedFrom(dataDir: string, program: string, now: Date = new Date()): string | null {
+  const root = real(updatesRoot(dataDir));
+  const file = real(program);
+  if (!file.startsWith(`${root}${path.sep}`)) return null;
+  const version = file.slice(root.length + 1).split(path.sep)[0] ?? "";
+  let folder: string;
+  try { folder = versionFolder(dataDir, version); } catch { return null; }
+  fs.writeFileSync(path.join(folder, STARTED_FILE), `${now.toISOString()}\n`);
+  return folder;
 }
 
 /** The listed file's path in folder, or a throw when the name is not a plain name inside it. Called before any file is opened. */
@@ -214,7 +220,7 @@ export async function verifyPrepared(o: Identity & { readonly version: string })
   catch (error) { return { ok: false, reason: message(error) }; }
   const reason = await check(folder, o).catch((error: unknown) => `the folder could not be read: ${message(error)}`);
   if (typeof reason !== "string") return { ok: true, prepared: reason };
-  await removeVersion(o.dataDir, o.version, o.programs);
+  await removeVersion(o.dataDir, o.version, o);
   return { ok: false, reason };
 }
 
@@ -265,24 +271,40 @@ export async function preparedRelease(o: Identity & { readonly version: string; 
   if (!exists) return null;
   const verified = await verifyPrepared(o);
   if (!verified.ok || verified.prepared.listSha512 === listHash(o.list)) return verified;
-  await removeVersion(o.dataDir, o.version, o.programs);
+  await removeVersion(o.dataDir, o.version, o);
   return { ok: false, reason: "the folder holds another signed list for this version" };
 }
 
-/** Deletes every version folder under updates/ that keep does not name and no running program is inside. Returns the versions deleted. */
-export async function removeVersions(dataDir: string, keep: readonly string[], programs: readonly string[] = []): Promise<readonly string[]> {
+/**
+ * Deletes the version folders under updates/ that keep does not name, except
+ * any that could be in use and the newest one: the newest on disk, unless
+ * keep names a newer version still (the one being fetched). The newest is the
+ * file a copy that cannot replace itself told the person to start. Returns
+ * the versions deleted.
+ */
+export async function removeVersions(dataDir: string, keep: readonly string[], programs: readonly string[] = [], look: Look = realLook): Promise<readonly string[]> {
   const entries = await fs.promises.readdir(updatesRoot(dataDir), { withFileTypes: true }).catch((error: unknown) => {
     if (errorCode(error) === "ENOENT") return [];
     throw error;
   });
+  // Only a name versionFolder accepts is ever deleted; anything else in updates/ is not ours.
+  const isVersion = (name: string) => {
+    try { versionFolder(dataDir, name); return true; } catch { return false; }
+  };
+  const versions = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).filter(isVersion);
+  const newest = [...versions, ...keep.filter(isVersion)].reduce<string | undefined>((best, name) => (best === undefined || newer(name, best) ? name : best), undefined);
+  const who = { programs, look: once(look) };
   const removed: string[] = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory() || keep.includes(entry.name)) continue;
-    // Only a name versionFolder accepts is ever deleted; anything else in updates/ is not ours.
-    try { versionFolder(dataDir, entry.name); } catch { continue; }
-    if (await removeVersion(dataDir, entry.name, programs)) removed.push(entry.name);
+  for (const name of versions) {
+    if (name === newest || keep.includes(name)) continue;
+    if ((await removeVersion(dataDir, name, who)) === null) removed.push(name);
   }
   return removed;
+}
+
+function newer(a: string, b: string): boolean {
+  const [left, right] = [parseRelease(`v${a}`), parseRelease(`v${b}`)];
+  return left !== null && right !== null && compare(left, right) > 0;
 }
 
 /** The volume a folder is on: the drive on Windows, the mount point elsewhere. */
@@ -408,15 +430,16 @@ export async function downloadRelease(o: DownloadOptions): Promise<DownloadOutco
     const existing = await preparedRelease(o);
     if (existing?.ok === true) return { kind: "ready", prepared: existing.prepared, fetched: false };
     // preparedRelease deleted a folder that failed; anything else left is not trusted either.
-    if (!(await removeVersion(o.dataDir, o.version, o.programs))) return { kind: "could-not-download", detail: "its folder holds the running program" };
+    const used = await removeVersion(o.dataDir, o.version, o);
+    if (used !== null) return { kind: "could-not-download", detail: `its folder is in use: ${used}` };
     if (o.signal.aborted) return { kind: "cancelled" };
     const outcome = await fetchInto(folder, final, artifact, o);
     if (outcome !== undefined) {
-      await removeVersion(o.dataDir, o.version, o.programs);
+      await removeVersion(o.dataDir, o.version, o);
       return outcome;
     }
   } catch (error) {
-    await removeVersion(o.dataDir, o.version, o.programs).catch(() => undefined);
+    await removeVersion(o.dataDir, o.version, o).catch(() => undefined);
     if (o.signal.aborted) return { kind: "cancelled" };
     if (errorCode(error) === "ENOSPC") return disk(o, artifact);
     return { kind: "could-not-download", detail: message(error) };

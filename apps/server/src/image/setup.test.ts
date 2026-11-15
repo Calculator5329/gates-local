@@ -8,7 +8,7 @@ import type { InstallProgress } from "../runtime/types.ts";
 import { engineDir, engineFiles } from "./engine.ts";
 import { LINUX_ENGINE, linuxBuild } from "./linux-build.ts";
 import { createOwnComfy, writeDevice } from "./own.ts";
-import { BUILD_MARGIN, CPU_SECONDS, createImageSetup, type BuildPlan, type EnginePlan, type ImageSetupDeps } from "./setup.ts";
+import { BUILD_MARGIN, CARD_NOT_STARTED, CPU_SECONDS, createImageSetup, type BuildPlan, type EnginePlan, type ImageSetupDeps } from "./setup.ts";
 
 const GIB = 1024 ** 3;
 
@@ -242,6 +242,71 @@ describe("what was built against what the computer has now", () => {
       await setup.run();
       expect(await settled(setup)).toMatchObject({ progress: { step: "done" } });
       expect(calls).toEqual(["stopIdle", "start 1.0.0"]);
+    } finally { removeDir(appDataDir); }
+  });
+
+  it("the model step fails after the card build is in: pictures stay on the processor's build, the row still offers the card, and Try again builds nothing twice", async () => {
+    const appDataDir = tmpDir("setup-card-model-fails");
+    try {
+      writeTree(appDataDir, "1.0.0-cpu");
+      writeDevice(appDataDir, "cpu");
+      const own = createOwnComfy({ appDataDir, port: 1, platform: "linux" });
+      const ran: string[] = [];
+      const calls: string[] = [];
+      let fails = true;
+      const plan: EnginePlan = { ...fakeBuild("1.0.0", 3000, ran), run: async () => { ran.push("1.0.0"); writeTree(appDataDir, "1.0.0"); }, cpu: fakeBuild("1.0.0-cpu", 1000, ran) };
+      const image = {
+        status: async () => ({ state: "stopped", owner: "none" }) as never, engine: () => ({ owner: "none", state: "stopped", room: 0 }) as never,
+        start: async () => { calls.push(`start ${own.build?.()?.version}`); return {} as never; },
+        download: async () => { if (fails) throw new Error("The model download stopped."); return { files: [] }; },
+        setupLeft: async () => 0,
+      };
+      const setup = createImageSetup({ appDataDir, own, image, setDevice: (d) => writeDevice(appDataDir, d), engine: () => plan, gpuStatus: card(16), settingsAddress: () => undefined, push: () => {}, freeBytes: async () => 500 * GIB });
+      await setup.run();
+      await vi.waitFor(async () => expect((await setup.info()).progress).toMatchObject({ step: "error", toCard: true, message: "The model download stopped." }));
+      // the card's build is whole on disk and has never started: the one that works is still what runs
+      expect(ran).toEqual(["1.0.0"]);
+      expect(own.build?.()).toEqual({ version: "1.0.0-cpu", cpu: true });
+      // and at the app's next start
+      expect(createOwnComfy({ appDataDir, port: 1, platform: "linux" }).build?.()).toEqual({ version: "1.0.0-cpu", cpu: true });
+      // the row is still there, with nothing of the engine left to fetch
+      const again = await setup.info();
+      expect(again.toCard).toBe(true);
+      expect(again.engine).toEqual({ version: "1.0.0", bytes: 3000, installed: true });
+      expect(again.needBytes).toBe(0);
+      fails = false;
+      await setup.run();
+      expect(await settled(setup)).toMatchObject({ progress: { step: "done", toCard: true } });
+      expect(ran).toEqual(["1.0.0"]);
+      expect(calls).toEqual(["start 1.0.0"]);
+    } finally { removeDir(appDataDir); }
+  });
+
+  it("the card's engine did not start and the processor's started in its place: the setup ends saying so, and the row stays", async () => {
+    const appDataDir = tmpDir("setup-card-no-start");
+    try {
+      writeTree(appDataDir, "1.0.0-cpu");
+      writeDevice(appDataDir, "cpu");
+      const own = createOwnComfy({ appDataDir, port: 1, platform: "linux" });
+      const plan: EnginePlan = { ...fakeBuild("1.0.0", 3000, []), run: async () => { writeTree(appDataDir, "1.0.0"); }, cpu: fakeBuild("1.0.0-cpu", 1000, []) };
+      const pushed: { step: string; toCard?: boolean; message?: string }[] = [];
+      const image = {
+        status: async () => ({ state: "stopped", owner: "none" }) as never, engine: () => ({ owner: "none", state: "stopped", room: 0 }) as never,
+        // the tree's python is an empty file, so the start fails as a build that cannot run does; then
+        // what the image module does when the engine it started is not there (module.ts ensure)
+        start: async () => { await own.start().catch(() => undefined); own.failed?.(); return {} as never; },
+        download: async () => ({ files: [] }),
+      };
+      const setup = createImageSetup({ appDataDir, own, image, setDevice: (d) => writeDevice(appDataDir, d), engine: () => plan, gpuStatus: card(16), settingsAddress: () => undefined, push: (_c, p) => { pushed.push(p); }, freeBytes: async () => 500 * GIB });
+      await setup.run();
+      await vi.waitFor(() => expect(pushed.at(-1)).toMatchObject({ step: "error", toCard: true, message: CARD_NOT_STARTED }));
+      expect(own.build?.()).toEqual({ version: "1.0.0-cpu", cpu: true });
+      expect((await setup.info()).toCard).toBe(true);
+      // the same word when it happens at a picture, with no setup running
+      pushed.length = 0;
+      own.tryCard?.();
+      await image.start();
+      await vi.waitFor(() => expect(pushed).toEqual([expect.objectContaining({ step: "error", toCard: true, message: CARD_NOT_STARTED })]));
     } finally { removeDir(appDataDir); }
   });
 
