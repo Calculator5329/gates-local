@@ -267,7 +267,8 @@ transaction stays unfinished until that acknowledgement. If a build or the
 first startup fails, or startup takes over 60 seconds, it restores and builds
 the version you had, starts it once, and tells you where it stopped.
 If it is cut off, run it again and it
-finishes the job. Add `--check` to only see what is new.
+finishes the job; starting the app does the same before it opens.
+Add `--check` to only see what is new.
 
 Once the project has releases (`v1.2.3` tags), it follows releases and
 never goes backwards. Until then, and whenever you pass `--channel main`

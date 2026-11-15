@@ -41,6 +41,7 @@ import { checkInstalled, type InstalledOutcome } from "./check.ts";
 import { canRestart, downloadLines, type Fetch, type GoBack, INSTALL_REFUSAL, INSTALLED_VERSION_ENV, type InstalledFeed, installedTarget, type Restart, runningAppImage } from "@gates-local/update/installed/copy";
 import { type DownloadOutcome, downloadRelease, inUpdatesFolder, listHash, noteStartedFrom, preparedRelease, removeVersions, type Space, type Verified, verifyKept } from "@gates-local/update/installed/download";
 import { boundedGet, type Get, type Stream, streamGet } from "@gates-local/update/installed/feed";
+import { INSTALLED_APPROVAL_MS } from "@gates-local/update/installed/transaction";
 import type { ModelLists } from "./models-list.ts";
 
 /** The installed module when the desktop app said this is an installed copy, else the clone updater. */
@@ -443,7 +444,8 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     },
     prepare,
     commit: ({ reservation, target, release: requested }: UpdateCommitRequest, disconnected?: AbortSignal) => {
-      const release = admission.commit(reservation, target, requested, disconnected);
+      // The watcher gives the old app INSTALLED_APPROVAL_MS to close and goes ahead if it does, so no work is let in sooner.
+      const release = admission.commit(reservation, target, requested, disconnected, INSTALLED_APPROVAL_MS);
       return release === null ? { accepted: false } : { accepted: true, release };
     },
     cancel: (reservation: string) => ({ cancelled: admission.cancel(reservation) }),

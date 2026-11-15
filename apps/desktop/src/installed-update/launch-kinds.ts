@@ -9,6 +9,7 @@
 // `acquireFileLock` judges it: "held" means a live owner other than this
 // process; an owner that is dead by pid and start time counts as free,
 // because the lock can be taken over.
+import { brokenForTest } from "@gates-local/update/break-for-test";
 import { STARTUP_TOKEN_ENV } from "@gates-local/update/startup";
 import { transactionFile, type InstalledTransaction } from "@gates-local/update/installed/transaction";
 import * as words from "@gates-local/update/installed/words";
@@ -124,6 +125,7 @@ export function decideLaunch(f: LaunchFacts): LaunchKind {
     return { kind: "token-launch", token, row, profileLockRetryMs: PROFILE_LOCK_RETRY_MS, admission: "closed", words: words.updateStartup() };
   }
 
+  if (brokenForTest("installed-start-skips-the-look")) return { kind: "ordinary" };
   const tx = f.transaction;
   if (tx === null) return startOrEarlierFailure(f.rollbackFailed);
   if (tx === "unreadable") return { kind: "transaction-unreadable", transactionFile: ours, words: words.transactionUnreadable(ours) };

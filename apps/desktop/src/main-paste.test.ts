@@ -35,6 +35,11 @@ vi.mock("electron", () => ({
   Menu: { setApplicationMenu: vi.fn() }, net: {}, protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
   session: { defaultSession: { setPermissionRequestHandler: vi.fn(), setPermissionCheckHandler: vi.fn() } }, shell: {},
 }));
+// No update of this checkout is in flight (main-checkout-start.test.ts covers the starts where one is).
+vi.mock("@gates-local/update/checkout-start", async (original) => ({
+  ...(await original<typeof import("@gates-local/update/checkout-start")>()),
+  checkoutStartFacts: () => ({ updating: false, transaction: null, token: undefined, tried: false, left: null }),
+}));
 vi.mock("./running.ts", () => ({ writeRunning: vi.fn(), clearRunning: vi.fn() }));
 vi.mock("./supervisor.ts", () => ({ Supervisor: class { state = { status: "idle" }; subscribe = vi.fn(); start = vi.fn(); killNow = vi.fn(); } }));
 

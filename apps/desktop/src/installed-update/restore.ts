@@ -10,6 +10,7 @@
 // after a crash, it finishes from whatever is on disk.
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
+import { brokenForTest } from "@gates-local/update/break-for-test";
 import { exists, identify, moveInto, removeIfPresent, sameIdentity, type FileOps } from "@gates-local/update/installed/files";
 
 export const STORE_NAME = "threads.sqlite";
@@ -75,7 +76,8 @@ function moveLiveAside(dataDir: string, id: string, names: readonly StoreFile[],
     ops.fsyncDir(path.dirname(aside));
   }
   for (const name of present) {
-    moveInto(path.join(dataDir, name), aside, ops);
+    if (brokenForTest("go-back-drops-the-store")) ops.unlink(path.join(dataDir, name));
+    else moveInto(path.join(dataDir, name), aside, ops);
     afterRename?.(name);
   }
   ops.fsyncDir(aside);

@@ -20,17 +20,16 @@ import { hidesMenu, installWindowKeys } from "./keys.ts";
 import { launchMode, quitOnAllClosed, secondInstanceAction, serverEnv, windowAtStart } from "./launch.ts";
 import { guardNavigation } from "./links.ts";
 import { clearRunning, writeRunning } from "./running.ts";
-import { approvedHandoffEnv, cannotUpdate, launchApprovedUpdate, onceUntilFailed, targetKind, updaterLaunch, validUpdateRequest, type UpdaterLaunch } from "./update-launch.ts";
+import { approvedHandoffEnv, cannotStartUpdater, cannotUpdate, launchApprovedUpdate, onceUntilFailed, targetKind, updaterLaunch, validUpdateRequest, type UpdaterLaunch } from "./update-launch.ts";
 import { withUpdateControl } from "./update-control.ts";
 import type { UpdateInstallRequest } from "@gates-local/contracts";
 import { acknowledgeStartup, reportStartupFailure, STARTUP_TOKEN_ENV } from "@gates-local/update/startup";
 import { verifyKept, verifyPrepared } from "@gates-local/update/installed/download";
 import { installedFeed, RESTART_ENV } from "@gates-local/update/installed/copy";
 import { processRecord } from "@gates-local/update/identity";
-import { uptime } from "node:os";
 import { writeAck } from "./installed-update/ack.ts";
 import { startInstalledUpdate } from "./installed-update/click.ts";
-import { routeInstalled, routeUnreplaceable, updatePageUrl, type StartApp } from "./installed-update/desktop.ts";
+import { routeCheckout, routeInstalled, routeUnreplaceable, updatePageUrl, type StartApp } from "./installed-update/desktop.ts";
 import { bootId, loggedStopAt, logLine, spawnWatcher, TEST_DEBUG_PORT_ENV } from "./installed-update/handoff.ts";
 import { pageAction, type PageAction } from "./installed-update/page.ts";
 import { replaceability } from "./installed-update/replaceable.ts";
@@ -126,6 +125,10 @@ const appWindow = () => windowOptions({
 if (installedCopy !== null) {
   // An AppImage: an update may be in flight, so the launch is routed first (installed-update/desktop.ts).
   routeInstalled({ copy: installedCopy, testBuild, trustedKeys: feed.keys, releasePage: feed.page, window: appWindow, background: mode.background }, run);
+} else if (!app.isPackaged) {
+  // A source checkout: an update of it may be running or cut off, so the start reads the checkout before it
+  // takes the single-instance lock or starts anything (checkout-start.ts).
+  routeCheckout({ root: repoRoot, dataDir, window: appWindow, releasePage: feed.page, background: mode.background }, () => run());
 } else if (!app.requestSingleInstanceLock({ background: mode.background })) {
   // A second launch reaches this instance through the lock; it says whether it
   // was itself a background launch (systemd starting it again wants no window).
@@ -142,7 +145,7 @@ function startDetached(plan: UpdaterLaunch, env: NodeJS.ProcessEnv): Promise<Upd
   return new Promise((resolve) => {
     const child = spawn(plan.command, [...plan.args], { cwd: plan.cwd, env, detached: true, stdio: "ignore", windowsHide: true });
     child.once("error", (e) =>
-      resolve({ ok: false, message: `The updater could not be started (${e.message}). Install Node 24 on your PATH, or run pnpm run app-update in the Gates Local folder.` }),
+      resolve({ ok: false, message: cannotStartUpdater(e.message) }),
     );
     child.once("spawn", () => {
       child.unref();
@@ -372,7 +375,7 @@ function run(start: StartApp = {}): void {
       }))).catch(() => ({ ok: false, message: "Could not validate the update with the app server. Check for updates again to retry." }));
     }
     const stopAt = loggedStopAt(dataDir, process.env, testBuild);
-    return withUpdateControl(state.url, (control) => launchApprovedUpdate(request, control, (target) => startInstalledUpdate(target, {
+    return withUpdateControl(state.url, (control) => launchApprovedUpdate(request, control, (target, askedAt) => startInstalledUpdate(target, {
       restart: replace.restart,
       copy: installedCopy,
       running: app.getVersion(),
@@ -384,7 +387,7 @@ function run(start: StartApp = {}): void {
         ...(stopAt === undefined ? {} : { stopAt }),
       }),
       record: (pid) => processRecord(pid),
-      uptime,
+      askedAt,
       bootId,
       quit: () => {
         console.error("[desktop] update watcher started; quitting so it can replace the program file");
@@ -398,9 +401,9 @@ function run(start: StartApp = {}): void {
     if (refused !== null) return { ok: false, message: refused };
     const state = supervisor.state;
     if (state.status !== "ready") return { ok: false, message: "The app server is not ready to approve an update. Try again after it reconnects." };
-    return withUpdateControl(state.url, (control) => launchApprovedUpdate(request, control, async (approvedCommit) => {
+    return withUpdateControl(state.url, (control) => launchApprovedUpdate(request, control, async (approvedCommit, askedAt) => {
       const plan = updaterLaunch({ repoRoot, pid: process.pid, dataDir, argv: process.argv, cwd: process.cwd(), env: process.env, exists: existsSync, approvedCommit });
-      const started = await startDetached(plan, approvedHandoffEnv(process.env));
+      const started = await startDetached(plan, approvedHandoffEnv(process.env, askedAt));
       if (started.ok) {
         console.error(`[desktop] approved updater started; quitting so it can update ${repoRoot}`);
         setTimeout(() => app.quit(), 200);

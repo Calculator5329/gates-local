@@ -22,7 +22,8 @@ export interface InstalledClick {
   /** beginUpdate with the real effects. */
   readonly begin: (approval: Approval) => Begin;
   readonly record: (pid: number) => ProcessRecord;
-  readonly uptime: () => number;
+  /** The uptime read before the server was asked to commit (launchApprovedUpdate): the deadline counts from it, not from the end of the re-check below. */
+  readonly askedAt: number;
   readonly bootId: () => string;
   readonly quit: () => void;
 }
@@ -50,7 +51,7 @@ export async function startInstalledUpdate(target: string, o: InstalledClick): P
   }
   const begun = o.begin({
     copy: o.copy, from: o.running, to: version, listDigest: digest, artifact: verified.prepared.artifact,
-    uptime: o.uptime(), boot: o.bootId(), main: o.record(process.pid), server: o.record(o.serverPid),
+    uptime: o.askedAt, boot: o.bootId(), main: o.record(process.pid), server: o.record(o.serverPid),
   });
   if (begun.kind === "refused") return { ok: false, message: begun.words.text };
   o.quit();

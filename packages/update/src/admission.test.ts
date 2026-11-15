@@ -14,6 +14,18 @@ it("AV-01 a committed handoff expires after its desktop connection disappears wi
   expect(admission.installing()).toBe(false);
   expect(() => admission.admit()).not.toThrow();
 });
+it("a committed handoff that names its own wait stays closed for all of it after the desktop connection disappears", async () => {
+  vi.useFakeTimers();
+  const admission = createUpdateAdmission();
+  const connection = new AbortController();
+  const token = admission.reserve("1.3.0:" + "a".repeat(128));
+  admission.commit(token, "1.3.0:" + "a".repeat(128), "main-release", connection.signal, 30_000);
+  connection.abort();
+  await vi.advanceTimersByTimeAsync(29_999);
+  expect(() => admission.admit()).toThrow("closing to update");
+  await vi.advanceTimersByTimeAsync(1);
+  expect(() => admission.admit()).not.toThrow();
+});
 it("AU-01 a reservation blocks work, rejects another lease, and only its token can reopen admission", () => {
   const admission = createUpdateAdmission();
   expect(() => admission.admit()).not.toThrow();

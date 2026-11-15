@@ -90,6 +90,19 @@ export function publish(seed: string): void {
 
 export const head = (repo: string) => git(repo, "rev-parse", "HEAD");
 
+/** The fake with a runner that throws at the first matching command, before it runs: the way a power cut ends an update there. */
+export function crashAt<F extends { readonly runner: Runner }>(fake: F, when: (command: string, args: readonly string[]) => boolean): F {
+  let crashed = false;
+  const runner: Runner = async (command, args, options) => {
+    if (!crashed && when(command, args)) {
+      crashed = true;
+      throw new Error("the power went out");
+    }
+    return fake.runner(command, args, options);
+  };
+  return { ...fake, runner };
+}
+
 export interface PnpmCall {
   readonly args: readonly string[];
   /** The clone's commit when the call ran. */

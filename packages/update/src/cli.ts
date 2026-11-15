@@ -10,17 +10,24 @@
 // --wait-pid <its pid> --restart: the command waits for the app to exit,
 // updates, writes the result for the app's next start and opens the app
 // again with --relaunch-cwd and the --relaunch-arg list it was given.
+//
+// The app's own start runs it with --finish when it finds an update a crash
+// left (checkout-start.ts): it finishes that update or takes it back, and
+// looks for nothing new. It opens the app again only with --restart, since
+// without it the start that ran it is still there and waiting.
 import { closeSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeSync } from "node:fs";
 import path from "node:path";
 import { uptime } from "node:os";
 import { parseArgs } from "node:util";
 import { type Pnpm, type Refusal, type UpdateRun, STEP_WORDS, runUpdate } from "./apply.ts";
+import { brokenForTest } from "./break-for-test.ts";
 import type { ChannelChoice, Inspection } from "./check.ts";
 import { UpdateGuardError } from "./guard.ts";
 import { type UpdateRecord, writeRecord } from "./record.ts";
 import { realRunner, type Runner } from "./run.ts";
 import { waitForExit } from "./wait.ts";
 import { waitForStartup, type StartupProcess } from "./startup.ts";
+import { clearLeft, readTransaction, saveLeft } from "./transaction.ts";
 
 export const REPO_URL = "https://github.com/Calculator5329/gates-local.git";
 /** How long the detached updater waits for the app to close. */
@@ -239,6 +246,7 @@ export async function runCli(deps: CliDeps): Promise<number> {
         "wait-pid": { type: "string" },
         "target-commit": { type: "string" },
         restart: { type: "boolean" },
+        finish: { type: "boolean" },
         "relaunch-cwd": { type: "string" },
         "relaunch-arg": { type: "string", multiple: true },
         help: { type: "boolean" },
@@ -277,6 +285,11 @@ export async function runCli(deps: CliDeps): Promise<number> {
   }
   const checkOnly = values.check === true;
   const restart = values.restart === true;
+  const finishOnly = values.finish === true;
+  if (finishOnly && (checkOnly || approvedCommit !== undefined)) {
+    print("--finish only finishes an update that was cut off; it takes no --check and no --target-commit.");
+    return 2;
+  }
   const relaunch: Relaunch = { cwd: values["relaunch-cwd"] ?? path.join(deps.root, "apps", "desktop"), args: values["relaunch-arg"] ?? [path.join(deps.root, "apps", "desktop")] };
 
   const log = checkOnly ? undefined : openLog(dataDir, now());
@@ -291,9 +304,22 @@ export async function runCli(deps: CliDeps): Promise<number> {
       say(`Could not save the result for the app (${(e as Error).message}).`);
     }
   };
+  // A start asked for this run. When the update is still saved at the end, that start shows these lines
+  // and opens nothing: they are what it can tell the person about where the copy stands.
+  const leave = (lines: readonly string[]) => {
+    if (!finishOnly) return;
+    try {
+      const unfinished = readTransaction(deps.root);
+      if (unfinished !== null) saveLeft(deps.root, { to: unfinished.to.commit, lines });
+    } catch (e) {
+      if (e instanceof UpdateGuardError) throw e;
+      say(`Could not save these lines for the app's window (${(e as Error).message}).`);
+    }
+  };
   let attemptedStartup = false;
   const reopen = async () => {
-    if (!restart && !attemptedStartup) return;
+    // A start that asked for the finish and did not quit for it is still there: it opens the app, or says why not.
+    if (!restart && (finishOnly || !attemptedStartup)) return;
     try {
       await deps.relaunch(relaunch);
       say("Opening Gates Local again.");
@@ -307,7 +333,7 @@ export async function runCli(deps: CliDeps): Promise<number> {
       say("Waiting for Gates Local to close…");
       const remaining = () => approvalDeadline === undefined ? Infinity : (approvalDeadline - (deps.uptime ?? uptime)()) * 1000;
       const closed = await waitForExit(waitPid, { timeoutMs: Math.min(deps.closeWaitMs ?? CLOSE_WAIT_MS, Math.max(0, remaining())), ...(deps.alive ? { alive: deps.alive } : {}) });
-      if (remaining() <= 0) {
+      if (remaining() <= 0 && !brokenForTest("deadline-read-once")) {
         // This updater no longer owns admission. Do not reopen or overwrite a
         // later attempt's result, even when the old desktop has finally quit.
         say("The desktop update approval expired before Gates Local closed. Nothing was installed. Check for updates again and approve the current activity.");
@@ -324,6 +350,8 @@ export async function runCli(deps: CliDeps): Promise<number> {
 
     let run: UpdateRun;
     try {
+      // What an earlier attempt said is not this one's finding.
+      if (finishOnly) clearLeft(deps.root);
       run = await runUpdate({
         root: deps.root,
         runner: deps.runner ?? realRunner,
@@ -331,6 +359,7 @@ export async function runCli(deps: CliDeps): Promise<number> {
         pnpm: deps.pnpm,
         appRunning: () => deps.appRunning(dataDir),
         checkOnly,
+        ...(finishOnly ? { finishOnly } : {}),
         ...(approvedCommit === undefined ? {} : { approvedCommit }),
         say,
         log: (chunk) => log?.write(chunk),
@@ -346,8 +375,9 @@ export async function runCli(deps: CliDeps): Promise<number> {
     } catch (e) {
       // The test guard's refusal is the test's to see.
       if (e instanceof UpdateGuardError) throw e;
-      say(`The updater stopped on an error it did not expect: ${(e as Error).message}`);
-      if (log) say(`The full log is in ${log.file}`);
+      const lines = [`The updater stopped on an error it did not expect: ${(e as Error).message}`, ...(log ? [`The full log is in ${log.file}`] : [])];
+      for (const line of lines) say(line);
+      leave(lines);
       record({ outcome: "refused", reason: (e as Error).message });
       await reopen();
       return 1;
@@ -356,11 +386,17 @@ export async function runCli(deps: CliDeps): Promise<number> {
       case "refused": {
         const lines = refusalLines(run.refusal);
         for (const line of lines) say(line);
+        // Another updater has this copy now: where it stands is that one's to say.
+        if (run.refusal.reason !== "busy" && run.refusal.reason !== "lost-lock") leave(lines);
         if (waitPid !== undefined) record({ outcome: "refused", reason: lines.join(" ") });
         // Not while something may still be replacing what the app runs from.
         if (!["busy", "lost-lock", "still-running"].includes(run.refusal.reason) && !(run.refusal.reason === "cannot-save" && run.refusal.pid !== null)) await reopen();
         return 1;
       }
+      case "settled":
+        say("No update is left unfinished in this copy.");
+        await reopen();
+        return 0;
       case "up-to-date":
         say(`Gates Local is up to date (${run.inspection.head.label}). ${channelLine(run.inspection.channel)}`);
         await reopen();
@@ -384,14 +420,19 @@ export async function runCli(deps: CliDeps): Promise<number> {
         record({ outcome: "stopped", channel: run.channel, from: run.from, to: run.to, step: run.step, reason: run.reason });
         await reopen();
         return 1;
-      case "rollback-failed":
-        say(`${run.from.commit === run.to.commit ? "Repairing" : "The update to"} ${run.to.label} stopped at ${STEP_WORDS[run.step]}: ${run.reason}.`);
-        say(`${run.from.commit === run.to.commit ? "Retrying the repair" : `Going back to ${run.from.label}`} did not finish either. Gates Local may not start until you run these commands in ${deps.root}:`);
-        for (const c of run.commands ?? []) say(`  ${c}`);
-        if (log) say(`The full log is in ${log.file}`);
+      case "rollback-failed": {
+        const lines = [
+          `${run.from.commit === run.to.commit ? "Repairing" : "The update to"} ${run.to.label} stopped at ${STEP_WORDS[run.step]}: ${run.reason}.`,
+          `${run.from.commit === run.to.commit ? "Retrying the repair" : `Going back to ${run.from.label}`} did not finish either. Gates Local may not start until you run these commands in ${deps.root}:`,
+          ...(run.commands ?? []).map((c) => `  ${c}`),
+          ...(log ? [`The full log is in ${log.file}`] : []),
+        ];
+        for (const line of lines) say(line);
+        leave(lines);
         record({ outcome: "rollback-failed", channel: run.channel, from: run.from, to: run.to, step: run.step, reason: run.reason, commands: run.commands ?? [] });
         await reopen();
         return 1;
+      }
       default:
         return run satisfies never;
     }

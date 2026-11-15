@@ -19,6 +19,7 @@
 import fs from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { brokenForTest } from "../break-for-test.ts";
 
 /** The note in a version folder the app was started from: the time of the last such start. */
 export const STARTED_FILE = "started-here";
@@ -118,6 +119,7 @@ export function once(look: Look): Look {
  * there, or is a link, is never in use: deleting a link removes only the link.
  */
 export function inUse(folder: string, programs: readonly string[] = [], look: Look = realLook): string | null {
+  if (brokenForTest("delete-a-folder-in-use")) return null;
   let inside: string;
   try {
     if (fs.lstatSync(folder).isSymbolicLink()) return null;

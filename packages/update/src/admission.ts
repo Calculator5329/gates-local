@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { brokenForTest } from "./break-for-test.ts";
 
 export const HANDOFF_GRACE_MS = 5_000;
 
@@ -38,7 +39,8 @@ export function createUpdateAdmission(o: { readonly finishing?: boolean } = {}) 
     /** Called synchronously before a producer registers work or reaches its first await. */
     admit() {
       if (finishing && !closed) throw Object.assign(new Error(FINISHING), { code: "update-finishing" });
-      if (closed || lease !== undefined) throw Object.assign(new Error(UPDATE_PAUSED), { code: "update-installing" });
+      const held = lease !== undefined && !(brokenForTest("reservation-lets-work-in") && !lease.committed);
+      if (closed || held) throw Object.assign(new Error(UPDATE_PAUSED), { code: "update-installing" });
       revision++;
     },
     revision: () => revision,
@@ -60,11 +62,17 @@ export function createUpdateAdmission(o: { readonly finishing?: boolean } = {}) 
       notify();
       return token;
     },
-    commit(token: string, target: string, release: string, disconnected?: AbortSignal) {
+    /**
+     * `graceMs`: how long after main's connection goes this stays closed while
+     * main is still open. It is never shorter than the time the program that
+     * makes the change gives the old app to close: that program goes ahead if
+     * the app closes inside its time, and work let in before then would be cut.
+     */
+    commit(token: string, target: string, release: string, disconnected?: AbortSignal, graceMs = HANDOFF_GRACE_MS) {
       if (lease?.token !== token || lease.target !== target || lease.committed || release === "" || release === token) return null;
       // Transfer cancellation authority to main. A late renderer cancellation
       // must not reopen admission after main has started the detached updater.
-      lease.token = release;
+      if (!brokenForTest("commit-leaves-the-window-its-key")) lease.token = release;
       lease.committed = true;
       // Main already knows this capability even if its reply is lost. Only
       // explicit failure cancellation or server exit releases a committed install.
@@ -72,15 +80,16 @@ export function createUpdateAdmission(o: { readonly finishing?: boolean } = {}) 
       if (disconnected) {
         // Main normally quits immediately after handoff. If it disconnects
         // but stays open, the detached updater is still waiting for its PID;
-        // let normal work resume instead of stranding every client.
-        const lost = () => expire(release, HANDOFF_GRACE_MS);
+        // once that updater has given up, let normal work resume instead of
+        // stranding every client.
+        const lost = () => expire(release, brokenForTest("grace-is-the-short-one") ? HANDOFF_GRACE_MS : graceMs);
         if (disconnected.aborted) lost();
         else {
           disconnected.addEventListener("abort", lost, { once: true });
           lease.detach = () => disconnected.removeEventListener("abort", lost);
         }
       }
-      return lease.token;
+      return release;
     },
     cancel,
     close() { closed = true; clearTimeout(expiry); lease?.detach?.(); },

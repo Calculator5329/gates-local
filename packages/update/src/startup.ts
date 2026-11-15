@@ -1,6 +1,7 @@
 // Durable handoff from the detached updater to the app's first ready server.
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { brokenForTest } from "./break-for-test.ts";
 import { clearTransaction, readTransaction } from "./transaction.ts";
 import { readHeadCommit } from "./version.ts";
 import { writeRecord } from "./record.ts";
@@ -42,7 +43,7 @@ function writeAck(dataDir: string, ack: StartupAck): void {
 export function readStartupAck(dataDir: string, token: string, commit: string): StartupAck | undefined {
   try {
     const value: unknown = JSON.parse(readFileSync(path.join(dataDir, STARTUP_ACK_FILE), "utf8"));
-    if (typeof value !== "object" || value === null || !("token" in value) || value.token !== token || !("commit" in value) || value.commit !== commit || !("state" in value) || (value.state !== "ready" && value.state !== "failed")) return undefined;
+    if (typeof value !== "object" || value === null || !("token" in value) || (value.token !== token && !brokenForTest("any-ready-note-counts")) || !("commit" in value) || value.commit !== commit || !("state" in value) || (value.state !== "ready" && value.state !== "failed")) return undefined;
     return { token, commit, state: value.state, ...("reason" in value && typeof value.reason === "string" ? { reason: value.reason } : {}) };
   } catch { return undefined; }
 }
@@ -50,7 +51,7 @@ export function readStartupAck(dataDir: string, token: string, commit: string): 
 /** Called only after the desktop supervisor reports a ready server. */
 export function acknowledgeStartup(root: string, dataDir: string, token?: string): boolean {
   const transaction = readTransaction(root);
-  if (transaction?.phase !== "launch" || transaction.startupToken !== token || readHeadCommit(root) !== transaction.to.commit) return false;
+  if (transaction?.phase !== "launch" || (transaction.startupToken !== token && !brokenForTest("any-ready-note-counts")) || readHeadCommit(root) !== transaction.to.commit) return false;
   writeRecord(dataDir, { at: Date.now(), outcome: "updated", channel: transaction.channel, from: transaction.from, to: transaction.to, changes: transaction.changes });
   if (token !== undefined) writeAck(dataDir, { token, commit: transaction.to.commit, state: "ready" });
   clearTransaction(root);

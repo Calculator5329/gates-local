@@ -271,6 +271,14 @@ If an update is cut off (a crash, a power cut, Ctrl+C), run
 finishes going back, before it looks for anything newer. Until then
 `--check` and "Check for updates" say the last update did not finish.
 
+Starting the app does the same without being asked. Before it opens its
+window or its server, the app reads whether an update of this copy is
+running or was cut off. While one is running it shows "Gates Local is
+updating. It will reopen by itself." and waits. One that was cut off it
+finishes or takes back first, showing "Gates Local is finishing an update.",
+and looks for nothing newer. If that cannot be done it says what is in the
+way, in the words below, and starts nothing on the half-installed copy.
+
 Three states stop the next run until you step in, and each says what to do:
 
 - A step ran past its limit and could not be stopped. Nothing else runs

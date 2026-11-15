@@ -49,14 +49,12 @@ function flushDir(dir: string): void {
   }
 }
 
-/** Atomic and on disk before it returns. Throws when it cannot be saved: nothing may move without it. */
-export function saveTransaction(root: string, t: Transaction): void {
-  const file = fileOf(root);
-  if (file === null) return;
+/** Atomic and on disk before it returns. */
+function save(file: string, value: object): void {
   const tmp = `${file}.${process.pid}.tmp`;
   const fd = openSync(tmp, "w");
   try {
-    writeSync(fd, `${JSON.stringify({ version: 1, ...t }, null, 2)}\n`);
+    writeSync(fd, `${JSON.stringify({ version: 1, ...value }, null, 2)}\n`);
     fsyncSync(fd);
   } finally {
     closeSync(fd);
@@ -65,11 +63,56 @@ export function saveTransaction(root: string, t: Transaction): void {
   flushDir(path.dirname(file));
 }
 
+/** Throws when it cannot be saved: nothing may move without it. */
+export function saveTransaction(root: string, t: Transaction): void {
+  const file = fileOf(root);
+  if (file !== null) save(file, t);
+}
+
+/** The saved update is done with, and so is whatever a run said about it (`saveLeft`). */
 export function clearTransaction(root: string): void {
   const file = fileOf(root);
   if (file === null) return;
   rmSync(file, { force: true });
+  rmSync(path.join(path.dirname(file), LEFT_FILE), { force: true });
   flushDir(path.dirname(file));
+}
+
+export const LEFT_FILE = "gates-local-update-left.json";
+
+/**
+ * What a run that was asked to finish the saved update, and could not, said
+ * is in the way: the lines it printed, for the start that asked (checkout-start.ts).
+ * `to` is the commit of the update they are about; they mean nothing for another.
+ */
+export interface Left {
+  readonly to: string;
+  readonly lines: readonly string[];
+}
+
+export function saveLeft(root: string, left: Left): void {
+  const dir = stateDir(root);
+  if (dir !== null) save(path.join(dir, LEFT_FILE), left);
+}
+
+export function clearLeft(root: string): void {
+  const dir = stateDir(root);
+  if (dir !== null) rmSync(path.join(dir, LEFT_FILE), { force: true });
+}
+
+/** Null when there are none, or the file cannot be read as lines: the start then says only that the update did not finish. */
+export function readLeft(root: string): Left | null {
+  const dir = stateDir(root);
+  if (dir === null) return null;
+  try {
+    const v = JSON.parse(readFileSync(path.join(dir, LEFT_FILE), "utf8")) as Record<string, unknown>;
+    const { version, to, lines } = v;
+    if (version !== 1 || !isString(to) || !Array.isArray(lines) || lines.length === 0 || !lines.every((l) => typeof l === "string")) return null;
+    return { to, lines: lines as string[] };
+  } catch {
+    // No file, or not ours to read: there is nothing to add to the plain words.
+    return null;
+  }
 }
 
 const STEPS: ReadonlySet<string> = new Set(["switch", "install", "build-web", "build-desktop", "start"]);

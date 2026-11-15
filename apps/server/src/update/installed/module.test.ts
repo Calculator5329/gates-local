@@ -15,6 +15,7 @@ import { readRecord, RECORD_FILE, writeRecord } from "@gates-local/update/record
 import { LIST_FILE, SIGNATURE_FILE, verifyKept } from "@gates-local/update/installed/download";
 import { type Stream, streamGet } from "@gates-local/update/installed/feed";
 import { INSTALL_REFUSAL, type InstalledFeed } from "@gates-local/update/installed/copy";
+import { INSTALLED_APPROVAL_MS } from "@gates-local/update/installed/transaction";
 import { chooseUpdateModule, createInstalledUpdateModule, type InstalledModuleDeps } from "./module.ts";
 import { artifactFile, BASE, LIST_URL, listFor, memoryFeed, releaseKey, releasePage, type ReleasePage, sha512, SIG_URL, signedList } from "@gates-local/update/installed/testing";
 
@@ -716,6 +717,31 @@ describe("downloading a newer version", () => {
       expect(fs.readdirSync(folder()).toSorted()).toEqual([FILE, LIST_FILE, SIGNATURE_FILE]);
       expect(module.cancel("main")).toEqual({ cancelled: true });
       expect(admission.installing()).toBe(false);
+      await module.close();
+    });
+
+    it("after main lets go without quitting, no work is let in before the approval's deadline has passed", async () => {
+      serveGood();
+      const admission = createUpdateAdmission();
+      const { module } = installed(true, { restart: "yes", admission });
+      await module.check();
+      await settled(module);
+      const prepared = await module.prepare(module.status().approval!);
+      if (prepared.state !== "ready") throw new Error("not ready");
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const main = new AbortController();
+        expect(module.commit({ reservation: prepared.reservation, target: prepared.target, release: "main" }, main.signal)).toEqual({ accepted: true, release: "main" });
+        main.abort();
+        // The program that replaces the file gives the old app this long to close, and goes ahead if it does.
+        await vi.advanceTimersByTimeAsync(INSTALLED_APPROVAL_MS - 1);
+        expect(() => admission.admit(), "a reply let in now could be cut off by the update").toThrow(UPDATE_PAUSED);
+        expect(module.status()).toMatchObject({ installing: true });
+        // Past the deadline that program changes nothing, so the app that stayed open takes work again.
+        await vi.advanceTimersByTimeAsync(1);
+        expect(() => admission.admit()).not.toThrow();
+        expect(module.status()).not.toMatchObject({ installing: true });
+      } finally { vi.useRealTimers(); }
       await module.close();
     });
 

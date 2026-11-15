@@ -144,6 +144,11 @@ and is the next one to get a check.
 | Heavy GPU work goes through the one lease, one job at a time, and never touches whisper. | test `apps/server/src/gpu/lease.test.ts` |
 | Free VRAM is measured before a real load and never exceeded; a check unloads what it loaded. | prose |
 | The app stops only processes it started. | prose |
+| A start reads the update's lock and saved state before it starts anything; no server starts beside an update that is running or was cut off. | tests `apps/desktop/src/main-checkout-start.test.ts`, `apps/desktop/src/checkout-start.test.ts` (a source checkout); `apps/desktop/src/installed-update/launch-kinds.test.ts` (an installed copy); with the update cut off at every step, `test/update-crash-matrix.test.ts` and `apps/desktop/src/installed-update/start-matrix.test.ts` |
+| From "Restart to update" on, no new work is let in while the update can still go ahead; once work is let back in, the update does not go ahead. | test `test/update-handoff-rules.test.ts` (both kinds of copy, over the real modules) |
+| An update never writes over, or deletes, a file of the person's: their edits, their untracked and ignored files, a version folder that could be in use, the thread store. | tests `test/update-crash-matrix.test.ts`, `apps/desktop/src/installed-update/start-matrix.test.ts` |
+| A rule of the update code is written with `rule` (`packages/update/src/rules-testing.ts`): its test also runs with the guard it rests on switched off, and must fail there. | the second test `rule` registers; `packages/update/src/break-for-test.test.ts` (every guard is read by the product and turned off by a test) |
+| Only a test can switch a guard of the update code off. | test `packages/update/src/break-for-test.test.ts` (reads every source file) |
 | A screen is whole on its first frame: placeholders hold the space, nothing arrives late or moves. | test `test/e2e/flicker-audit.spec.ts`; bug finder kinds `moves`, `resized`, `late`, `flicker` in `test/finder/detectors.ts` |
 | A screen says a thing once. | bug finder kind `twice` in `test/finder/detectors.ts` |
 | No description line under a title; a tooltip only names an icon-only button. | prose (`docs/design.md`, Settings text) |

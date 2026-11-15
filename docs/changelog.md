@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-11-15: starting the app during or after a cut-off update
+
+- If an update of a copy run from source was cut off (a crash, a power
+  cut), starting the app could open it on a half-installed version: the
+  new files with the old packages, or no build at all. It could also open
+  while an update was still replacing files. The app now looks first.
+  While an update is running it shows "Gates Local is updating. It will
+  reopen by itself." and waits. An update that was cut off is finished or
+  taken back by that start, behind "Gates Local is finishing an update.",
+  and nothing newer is looked for. If it cannot be finished, the window
+  says what is in the way and the app does not start on the half.
+- On an installed copy, after "Restart to update" the app could take a new
+  reply or download 5 seconds later if it was slow to close, and the
+  update, which waits 30 seconds for the app to close, then went ahead and
+  cut that work off. The app now takes no new work for the same 30 seconds
+  the update waits. An app that never closes refuses new work for those 30
+  seconds, with "Gates Local is closing to update", and then carries on;
+  the update is not installed.
+- If a crash caught an update of a copy run from source while git was
+  writing the new files, the copy was left part way between two versions
+  and the app could still be started on it. The app does not start on it
+  now. Its window says "Gates Local did not start.", that the copy is
+  part way between two versions, which files differ, and the way back:
+  copy your own edits somewhere safe, run `git reset --hard`, then
+  `pnpm run app-update`. Nothing is cleaned up for you, because your own
+  edits would be among those files.
+- Nothing you see changes with this one: the rules an update keeps are now
+  tests. An update is cut off at every step, on both kinds of copy, and
+  the app is then started; it must open on one whole version or say why
+  not, with your own files untouched. Each rule's test is also run with
+  the line of code it depends on switched off, and has to fail there.
+
 ## 2026-11-15: an earlier Measure score says what was different
 
 - A score from the build before this one says that a check the model cut

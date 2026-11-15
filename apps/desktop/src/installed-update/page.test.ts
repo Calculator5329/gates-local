@@ -21,6 +21,12 @@ describe("update page", () => {
     expect(renderUpdatePage({ words: { text: "Download it.", link: true }, releasePage: null, actions: [] })).not.toContain("href=");
   });
 
+  it("shows more lines under the words, each its own paragraph and escaped", () => {
+    const html = renderUpdatePage({ words: { text: "Gates Local did not start." }, lines: ["The last update, to v2, did not finish.", "These files differ: <app.txt> & more"], releasePage: RELEASE, actions: [] });
+    expect(html).toContain("<p>Gates Local did not start.</p>\n\n<p>The last update, to v2, did not finish.</p>\n<p>These files differ: &lt;app.txt&gt; &amp; more</p>");
+    expect(renderUpdatePage({ words: { text: "Updating." }, releasePage: RELEASE, actions: [] }).match(/<p>/g)).toHaveLength(1);
+  });
+
   it("PG-03 an action is a link main catches; no script runs on the page", () => {
     const html = renderUpdatePage({ words: { text: "An earlier update did not finish." }, releasePage: RELEASE, actions: ["continue"] });
     const href = /href="([^"]+)"/.exec(html)?.[1];

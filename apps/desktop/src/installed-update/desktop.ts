@@ -3,14 +3,23 @@
 // before any window or server, the watcher process, and the pages that need
 // no server. main.ts calls routeInstalled for every launch of a copy whose
 // program is an AppImage, and routeUnreplaceable for every other packaged
-// Linux launch, which shares the data folder.
+// Linux launch, which shares the data folder. A source checkout's start goes
+// through routeCheckout: its update is the checkout's own (packages/update),
+// and the same rule holds, nothing starts beside an unfinished update.
 import { app, BrowserWindow, Menu, shell, type BrowserWindowConstructorOptions } from "electron";
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
+import { checkoutStartFacts, decideCheckoutStart, DID_NOT_START, FINISH_TRIED_FLAG } from "@gates-local/update/checkout-start";
+import { UpdateGuardError } from "@gates-local/update/guard";
 import { acquireFileLock } from "@gates-local/update/lock";
 import { STARTUP_TOKEN_ENV } from "@gates-local/update/startup";
+import { startCheckout, type Started } from "../checkout-start.ts";
 import { hidesMenu } from "../keys.ts";
 import { openOutside } from "../links.ts";
+import { clearRunning, writeRunning } from "../running.ts";
 import { dataUrl } from "../status-page.ts";
+import { cannotStartUpdater, finisherEnv, finisherLaunch } from "../update-launch.ts";
 import { logLine, sweepOwnTmp, watcherEffects } from "./handoff.ts";
 import { decideLaunch, WATCH_FLAG } from "./launch-kinds.ts";
 import { pageAction, renderUpdatePage, type PageAction } from "./page.ts";
@@ -50,8 +59,8 @@ export const updatePageUrl = (words: Words, releasePage: string, actions: readon
 /** What a page-only process needs: the app's window options and the release page. */
 export type PageHost = Pick<InstalledHost, "window" | "releasePage">;
 
-/** A window with one page and no server behind it. A release page link opens in the system browser; nothing else navigates. */
-function openPage(host: PageHost, words: Words): BrowserWindow {
+/** A window for pages with no server behind them. A release page link opens in the system browser; nothing else navigates. */
+function pageWindow(host: PageHost): BrowserWindow {
   if (hidesMenu(process.platform)) Menu.setApplicationMenu(null);
   const window = new BrowserWindow(host.window());
   const contents = window.webContents;
@@ -60,6 +69,12 @@ function openPage(host: PageHost, words: Words): BrowserWindow {
     event.preventDefault();
     if (pageAction(url) === null) openOutside(url, { openExternal: (target) => shell.openExternal(target), log });
   });
+  return window;
+}
+
+/** A window with one page. */
+function openPage(host: PageHost, words: Words): BrowserWindow {
+  const window = pageWindow(host);
   void window.loadURL(updatePageUrl(words, host.releasePage));
   return window;
 }
@@ -143,6 +158,122 @@ export function routeUnreplaceable(host: PageHost, dataDir: string, start: (o?: 
     },
   });
   if (kind.kind !== "ordinary") log(`launch with no program to replace: ${kind.kind}`);
+}
+
+export interface CheckoutHost extends PageHost {
+  /** The checkout this app runs from: apps/desktop/../.. */
+  readonly root: string;
+  readonly dataDir: string;
+  /** Whether this launch asked for no window: it then says what it has to say in the log. */
+  readonly background: boolean;
+}
+
+/**
+ * A source checkout's start (../checkout-start.ts has the order of its
+ * steps). It reads the checkout's lock and saved update before anything
+ * else. With no update in flight it takes the single-instance lock and calls
+ * `start`. While an updater runs it shows a page and waits; an update a crash
+ * left is handed to the updater to finish or take back; an update still
+ * unfinished after that is said in the page, and nothing starts.
+ */
+export function routeCheckout(host: CheckoutHost, start: () => void): void {
+  let window: BrowserWindow | null = null;
+  let opening = false;
+  let page: string | null = null;
+  const put = (words: Words, lines: readonly string[] = []): void => {
+    for (const line of [words.text, ...lines]) log(line);
+    page = dataUrl(renderUpdatePage({ words, lines, releasePage: host.releasePage, actions: [] }));
+    if (host.background) return;
+    if (window !== null && !window.isDestroyed()) void window.loadURL(page);
+    if (opening) return;
+    opening = true;
+    void app.whenReady().then(() => {
+      window = pageWindow(host);
+      // The updater, if one is running, goes on without this window and opens the app itself when it has finished.
+      window.on("closed", () => app.exit(0));
+      if (page !== null) void window.loadURL(page);
+    });
+  };
+  /** The updater told only to finish or take back; `ended` settles when its process has gone. */
+  const finisher = (quits: boolean): Promise<Started & { readonly ended?: Promise<void> }> =>
+    new Promise((resolve) => {
+      const plan = finisherLaunch({ repoRoot: host.root, pid: process.pid, dataDir: host.dataDir, argv: process.argv, cwd: process.cwd(), env: process.env, exists: existsSync, quits });
+      const child = spawn(plan.command, [...plan.args], { cwd: plan.cwd, env: finisherEnv(process.env), detached: true, stdio: "ignore", windowsHide: true });
+      const ended = new Promise<void>((done) => child.once("exit", () => done()));
+      child.once("error", (e) => resolve({ ok: false, message: cannotStartUpdater(e.message) }));
+      child.once("spawn", () => {
+        if (quits) child.unref();
+        resolve({ ok: true, ended });
+      });
+    });
+  // startCheckout calls `start` before its first wait or not at all, so main's start runs here, in this call, and a throw from it is main's own.
+  let go = false;
+  const end = startCheckout({
+    look: (tried) => {
+      try {
+        return decideCheckoutStart(checkoutStartFacts(host.root, { env: process.env, tried }));
+      } catch (e) {
+        // The test guard's refusal is the test's to see.
+        if (e instanceof UpdateGuardError) throw e;
+        // Not knowing whether an update is in flight is not a reason to start on one.
+        return { kind: "say", lines: [DID_NOT_START, `This copy's update state could not be read (${(e as Error).message}).`] };
+      }
+    },
+    claim: () => {
+      if (!app.requestSingleInstanceLock({ background: host.background })) {
+        // A second launch reaches the first through the lock; it says whether it was itself a background launch.
+        app.quit();
+        return false;
+      }
+      try {
+        writeRunning(host.dataDir, process.pid, Date.now());
+      } catch (e) {
+        log(`could not write the pid file: ${(e as Error).message}`);
+      }
+      return true;
+    },
+    unclaim: () => {
+      clearRunning(host.dataDir, process.pid);
+      app.releaseSingleInstanceLock();
+    },
+    start: () => {
+      go = true;
+    },
+    pagesOnly: () => ownProfile("update-pages"),
+    show: (words) => put(words),
+    say: (lines) => {
+      put({ text: lines[0] ?? DID_NOT_START }, lines.slice(1));
+      if (host.background) app.exit(1);
+    },
+    finish: async () => {
+      const started = await finisher(false);
+      if (!started.ok) return started;
+      await started.ended;
+      return { ok: true };
+    },
+    handOver: async () => {
+      const started = await finisher(true);
+      if (!started.ok) return started;
+      log(`updater started to finish the update of ${host.root}; quitting so it can replace files`);
+      setTimeout(() => app.exit(0), 200);
+      return { ok: true };
+    },
+    again: () => {
+      app.relaunch({ args: process.argv.slice(1).filter((a) => a !== FINISH_TRIED_FLAG) });
+      app.exit(0);
+    },
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  }, { tried: process.argv.includes(FINISH_TRIED_FLAG), quitsToFinish: process.platform === "win32" });
+  void end.then(
+    (how) => {
+      if (how !== "started") log(`checkout start: ${how}`);
+    },
+    (error: unknown) => {
+      log(`checkout start failed: ${(error as Error).message}`);
+      app.exit(1);
+    },
+  );
+  if (go) start();
 }
 
 /**

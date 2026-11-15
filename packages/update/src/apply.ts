@@ -17,6 +17,7 @@
 import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { brokenForTest } from "./break-for-test.ts";
 import { type Blocked, type Channel, type ChannelChoice, type Commit, type Git, type Inspection, changedFiles, gitIn, inspect, isBlocked, labelOf } from "./check.ts";
 import { createProcessRecorder, treeGone, type ProcessRecord } from "./identity.ts";
 import { acquireLock, lockHolder, stateDir } from "./lock.ts";
@@ -69,6 +70,8 @@ export type Refusal =
 
 export type UpdateRun =
   | { readonly outcome: "refused"; readonly refusal: Refusal }
+  /** Finishing only: nothing of a cut-off update is left, and nothing new was looked for. */
+  | { readonly outcome: "settled" }
   | { readonly outcome: "up-to-date"; readonly inspection: Extract<Inspection, { state: "up-to-date" }> }
   | { readonly outcome: "available"; readonly inspection: Extract<Inspection, { state: "available" }> }
   | { readonly outcome: "updated" | "awaiting-start"; readonly channel: Channel; readonly from: Commit; readonly to: Commit; readonly changes: number }
@@ -94,6 +97,12 @@ export interface UpdateOptions {
   readonly appRunning: () => { readonly pid: number; readonly file: string } | null;
   /** Report only: change nothing. */
   readonly checkOnly: boolean;
+  /**
+   * Only finish or take back what a cut-off update left; look for nothing
+   * new. The app's start asks for this (checkout-start.ts), so a start never
+   * installs a version nobody approved.
+   */
+  readonly finishOnly?: boolean;
   /** Plain-language progress, one line each. */
   readonly say: (line: string) => void;
   /** Every command and its output, for the log file. */
@@ -169,7 +178,8 @@ interface Context {
 async function changing(c: Context, t: Transaction, run: (onStart: (pid: number) => void) => Promise<RunResult>, persistAfter = true): Promise<RunResult> {
   const { root } = c.o;
   const cannotSave = (e: unknown, pid: number | null) => new CannotSave({ reason: "cannot-save", target: t.to.label, detail: (e as Error).message, pid });
-  if (c.ours()) {
+  const first = !brokenForTest("update-saved-after-the-change");
+  if (first && c.ours()) {
     try {
       saveTransaction(root, t);
     } catch (e) {
@@ -178,7 +188,7 @@ async function changing(c: Context, t: Transaction, run: (onStart: (pid: number)
   }
   let unsaved: { readonly error: unknown; readonly pid: number } | undefined;
   const result = await run((pid) => {
-    if (!c.ours()) return;
+    if (!first || !c.ours()) return;
     try {
       saveTransaction(root, { ...t, running: c.recordProcess(pid) });
     } catch (error) {
@@ -250,6 +260,7 @@ async function transact(o: UpdateOptions, ours: () => boolean): Promise<UpdateRu
     // On Windows a running app holds electron.exe and the install would stop half way.
     const running = o.appRunning();
     if (running !== null) return refused({ reason: "app-running", ...running });
+    if (o.finishOnly === true && readTransaction(o.root) === null) return { outcome: "settled" };
     if (!ok(await pnpm(["--version"], 60_000))) return refused({ reason: "no-pnpm" });
     const unfinished = readTransaction(o.root);
     if (unfinished !== null) {
@@ -257,6 +268,8 @@ async function transact(o: UpdateOptions, ours: () => boolean): Promise<UpdateRu
       const recovered = await recover(c, unfinished);
       if (recovered !== null) return recovered;
     }
+    // What the cut-off run left is dealt with. One that could not be read (git is not usable) stays, and the check below says so.
+    if (o.finishOnly === true && readTransaction(o.root) === null) return { outcome: "settled" };
   }
 
   o.say("Checking for updates…");
@@ -326,8 +339,11 @@ async function recover(c: Context, t: Transaction): Promise<UpdateRun | null> {
   if (isBlocked(left)) return refused(left);
   // A merge moves the commit last, so on the new commit going forward the files are all there and any difference is the person's.
   const mergeFinished = onNew && t.phase === "forward";
-  if (left.gitLock !== null || left.merging || (left.files.length > 0 && !mergeFinished)) return partial(t.to, left);
-  if (left.files.length > 0) return refused({ reason: "local-changes", files: left.files });
+  const partWay = left.gitLock !== null || left.merging || (left.files.length > 0 && !mergeFinished);
+  if (partWay && !brokenForTest("part-way-copy-not-refused")) return partial(t.to, left);
+  // The switch is done, so these are the person's edits. An update asked for by hand stops for them. A start
+  // finishing the update goes on: the install and builds change no tracked file, and going back checks again.
+  if (left.files.length > 0 && o.finishOnly !== true) return refused({ reason: "local-changes", files: left.files });
   if (!c.ours()) return lostLock();
   if (repair) {
     const here = { commit: head, label: await labelOf(git, head) };
@@ -413,7 +429,7 @@ async function changedByHand(c: Context, f: Failed): Promise<Refusal | "unknown"
   if (head !== f.to.commit && head !== f.from.commit) return { ...by, changed: "commit", files: [] };
   const files = await changedFiles(c.git);
   if (isBlocked(files)) return "unknown";
-  return files.length > 0 ? { ...by, changed: "files", files } : null;
+  return files.length > 0 && !brokenForTest("go-back-over-edits") ? { ...by, changed: "files", files } : null;
 }
 
 async function goBack(c: Context, f: Failed): Promise<UpdateRun> {
@@ -437,7 +453,7 @@ async function goBack(c: Context, f: Failed): Promise<UpdateRun> {
     : `The update to ${f.to.label} stopped at ${STEP_WORDS[f.step]}. Going back to ${f.from.label}…`);
   const back: Transaction = { channel: f.channel, branch: f.branch, from: f.from, to: f.to, changes: f.changes, phase: "back", step: f.step, reason: f.reason };
   // --keep is safe here: the copy was just found to be exactly as this run left it.
-  const reset = await changing(c, back, (onStart) => git(["reset", "--keep", f.from.commit], undefined, onStart));
+  const reset = await changing(c, back, (onStart) => git(["reset", brokenForTest("go-back-over-edits") ? "--hard" : "--keep", f.from.commit], undefined, onStart));
   if (reset.treeStillRunning === true) return stillRunning(c, f.to);
   if (!ok(reset)) return failedBack();
   for (const [args, ms] of [[INSTALL_ARGS, INSTALL_MS], [BUILD_WEB_ARGS, BUILD_MS], [BUILD_DESKTOP_ARGS, BUILD_MS]] as const) {

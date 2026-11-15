@@ -5,6 +5,7 @@
 // rename counts. The ack is a request, not a decision: the watcher decides.
 import { closeSync, fsyncSync, openSync, readFileSync, renameSync, writeSync } from "node:fs";
 import path from "node:path";
+import { brokenForTest } from "@gates-local/update/break-for-test";
 import type { ProcessRecord } from "@gates-local/update/identity";
 import { UPDATES_FOLDER } from "@gates-local/update/installed/transaction";
 import type { Ack } from "./watch.ts";
@@ -38,7 +39,7 @@ export function writeAck(dataDir: string, token: string): void {
 export function readAck(dataDir: string, token: string): boolean {
   try {
     const value: unknown = JSON.parse(readFileSync(ackFile(dataDir), "utf8"));
-    return typeof value === "object" && value !== null && "token" in value && value.token === token && "state" in value && value.state === "ready";
+    return typeof value === "object" && value !== null && "token" in value && (value.token === token || brokenForTest("any-ready-note-counts")) && "state" in value && value.state === "ready";
   } catch {
     return false;
   }

@@ -25,7 +25,7 @@ function click(over: Partial<InstalledClick> = {}) {
     verify: async (version) => { verifiedVersions.push(version); return verified(); },
     begin: (a): Begin => { began.push(a); return { kind: "begun", transaction: {} as never }; },
     record: (pid) => ({ pid, start: `s${pid}`, uptime: 1 }),
-    uptime: () => 1000,
+    askedAt: 1000,
     bootId: () => "boot-1",
     quit: () => { quits++; },
     ...over,

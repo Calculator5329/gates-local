@@ -7,6 +7,7 @@
 // `.<name>.previous-<id>` keeps the old one. The program file keeps the
 // person's name (owner decision D4).
 import path from "node:path";
+import { brokenForTest } from "@gates-local/update/break-for-test";
 import { exists, identify, ioCode, removeIfPresent, sameIdentity, type FileOps, type Identity } from "@gates-local/update/installed/files";
 
 export interface ProgramPaths {
@@ -88,7 +89,8 @@ export function keepPrevious(p: ProgramPaths, old: Identity, ops: FileOps): void
 }
 
 /** S3's replacing rename alone. The watcher checks what it did before the flush, because an error it returns may not mean it failed. */
-export const renameIntoPlace = (p: ProgramPaths, ops: FileOps): void => ops.rename(p.incoming, p.program);
+export const renameIntoPlace = (p: ProgramPaths, ops: FileOps): void =>
+  brokenForTest("program-written-in-place") ? ops.copyFile(p.incoming, p.program) : ops.rename(p.incoming, p.program);
 
 /** S3's flush alone, for a rename already seen to have taken effect. */
 export const flushProgramFolder = (p: ProgramPaths, ops: FileOps): void => ops.fsyncDir(p.dir);

@@ -87,6 +87,11 @@ export interface Approval {
  * How long after the approval W1 may still start the update: the old app's
  * close, the watcher's own start from the AppImage and its first reads all
  * fall inside it. The clone updater keeps its own 5 s grace (admission.ts).
+ *
+ * The server reads this same number: after main lets go it keeps new work out
+ * for this long (apps/server/src/update/installed/module.ts), and main counts
+ * the deadline from before the server committed, so the server never takes
+ * work again while W1 may still start.
  */
 export const INSTALLED_APPROVAL_MS = 30_000;
 

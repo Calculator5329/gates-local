@@ -15,9 +15,12 @@ export interface UpdatePage {
   /** The release page, for words that send the person there. */
   readonly releasePage: string | null;
   readonly actions: readonly PageAction[];
+  /** More lines under the words, one paragraph each: what a source checkout's start says about an update left unfinished. */
+  readonly lines?: readonly string[];
 }
 
 export function renderUpdatePage(p: UpdatePage): string {
+  const lines = (p.lines ?? []).map(line => `<p>${escapeHtml(line)}</p>`).join("\n");
   const link = p.words.link === true && p.releasePage !== null ? `<p><a href="${escapeHtml(p.releasePage)}">Release page</a></p>` : "";
   const actions = p.actions.map(a => `<p><a class="action" href="${ACTION_SCHEME}${a}">${LABELS[a]}</a></p>`).join("\n");
   return `<!doctype html>
@@ -37,6 +40,7 @@ main{padding:24px;max-width:720px}
 <main>
 <p>${escapeHtml(p.words.text)}</p>
 ${p.words.detail === undefined ? "" : `<p>${escapeHtml(p.words.detail)}</p>`}
+${lines}
 ${link}
 ${actions}
 </main>

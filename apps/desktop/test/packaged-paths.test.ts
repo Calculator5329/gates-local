@@ -15,6 +15,11 @@ vi.mock("electron", () => ({
   },
   protocol: { registerSchemesAsPrivileged: vi.fn() },
 }));
+// No update of this checkout is in flight (src/main-checkout-start.test.ts covers the starts where one is).
+vi.mock("@gates-local/update/checkout-start", async (original) => ({
+  ...(await original<typeof import("@gates-local/update/checkout-start")>()),
+  checkoutStartFacts: () => ({ updating: false, transaction: null, token: undefined, tried: false, left: null }),
+}));
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 async function profile(packaged: boolean, override?: string): Promise<string> {

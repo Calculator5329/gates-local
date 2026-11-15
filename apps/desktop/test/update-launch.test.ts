@@ -8,7 +8,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { launchMode } from "../src/launch.ts";
 import { createUpdateAdmission } from "@gates-local/update/admission";
 import { RUNNING_FILE, clearRunning, readRunning, writeRunning } from "../src/running.ts";
-import { APPROVAL_DEADLINE_ENV, approvedHandoffEnv, cannotUpdate, launchApprovedUpdate, nodeCommand, onceUntilFailed, relaunchEnv, targetKind, updaterLaunch, validUpdateRequest, type UpdateControl } from "../src/update-launch.ts";
+import { FINISH_TRIED_FLAG } from "@gates-local/update/checkout-start";
+import { APPROVAL_DEADLINE_ENV, approvedHandoffEnv, cannotUpdate, finisherEnv, finisherLaunch, launchApprovedUpdate, nodeCommand, onceUntilFailed, relaunchEnv, targetKind, updaterLaunch, validUpdateRequest, type UpdateControl } from "../src/update-launch.ts";
 
 const REPO = path.resolve("/srv/gates-local");
 const DATA = path.resolve("/srv/data");
@@ -34,8 +35,21 @@ describe("the updater launch", () => {
     expect(cancel).toHaveBeenCalledTimes(4);
     expect(cancel.mock.calls[2]?.[0]).toBe(control.commit.mock.calls[1]?.[0].release);
     expect(await launchApprovedUpdate(request, control, start)).toEqual({ ok: true });
-    expect(start).toHaveBeenCalledWith(request.target);
+    expect(start).toHaveBeenCalledWith(request.target, expect.any(Number));
     expect(cancel).toHaveBeenCalledTimes(4);
+  });
+  it("the approval's clock is read before the server is asked to commit, however long the answer takes", async () => {
+    // The server counts its own wait from the moment main lets go, which is after it committed. A deadline
+    // counted from a reading taken before that, with the same length, is always the earlier of the two.
+    let uptime = 100;
+    const request = { reservation: "lease", target: "a".repeat(40) };
+    const control: UpdateControl = {
+      commit: async (input) => { uptime = 103; return { accepted: true, release: input.release }; },
+      cancel: async () => undefined,
+    };
+    const start = vi.fn(async () => { uptime = 104; return { ok: true as const }; });
+    expect(await launchApprovedUpdate(request, control, start, () => uptime)).toEqual({ ok: true });
+    expect(start).toHaveBeenCalledWith(request.target, 100);
   });
   it("AU-01 a lost commit acknowledgement cannot strand the server pause", async () => {
     const admission = createUpdateAdmission();
@@ -105,6 +119,36 @@ describe("the updater launch", () => {
     const given = { GATES_LOCAL_BACKGROUND: "1" };
     relaunchEnv(given);
     expect(given).toEqual({ GATES_LOCAL_BACKGROUND: "1" });
+  });
+});
+
+describe("the updater a start runs to finish a cut-off update", () => {
+  it("only finishes, and leaves the waiting start to open the app", () => {
+    const plan = finisherLaunch({ ...base, argv: ["/x/electron", ".", "--disable-gpu"], quits: false });
+    expect(plan).toEqual({
+      command: "node",
+      args: [path.join(REPO, "scripts", "update.ts"), "--finish", "--data-dir", DATA, "--relaunch-cwd", base.cwd, "--relaunch-arg=.", "--relaunch-arg=--disable-gpu"],
+      cwd: REPO,
+    });
+    for (const never of ["--wait-pid", "--restart", "--target-commit", "--channel"]) expect(plan.args).not.toContain(never);
+  });
+
+  it("where the start must quit first, waits for it and opens the app marked as having tried", () => {
+    const plan = finisherLaunch({ ...base, argv: ["/x/electron", "."], quits: true });
+    expect(plan.args).toEqual([path.join(REPO, "scripts", "update.ts"), "--finish", "--wait-pid", "4242", "--restart", "--data-dir", DATA, "--relaunch-cwd", base.cwd, "--relaunch-arg=.", `--relaunch-arg=${FINISH_TRIED_FLAG}`]);
+  });
+
+  it("the mark is carried once: a start that has it does not pass it on twice, and Restart to update drops it", () => {
+    const argv = ["/x/electron", ".", FINISH_TRIED_FLAG];
+    expect(finisherLaunch({ ...base, argv, quits: true }).args.filter((a) => a.includes(FINISH_TRIED_FLAG))).toHaveLength(1);
+    expect(finisherLaunch({ ...base, argv, quits: false }).args.join(" ")).not.toContain(FINISH_TRIED_FLAG);
+    expect(updaterLaunch({ ...base, argv }).args.join(" ")).not.toContain(FINISH_TRIED_FLAG);
+  });
+
+  it("runs with no approval deadline and no token of an earlier update", () => {
+    const given = { PATH: "/bin", [APPROVAL_DEADLINE_ENV]: "105", GATES_LOCAL_UPDATE_STARTUP_TOKEN: "old" };
+    expect(finisherEnv(given)).toEqual({ PATH: "/bin" });
+    expect(Object.keys(given)).toHaveLength(3);
   });
 });
 
