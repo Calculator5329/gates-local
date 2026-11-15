@@ -33,7 +33,7 @@ has a path.
 | **Stop** | Ends a running reply; the words so far stay, marked Stopped, with Retry. The Send button while a reply runs, or the stop square. | web: `composer/Composer.tsx`, `composer/composer-press.ts`, `thread/Thread.tsx`<br>server: `chat/reply.ts`, `chat/replies.ts`, `app/handlers.ts` | `stop-retry`, `streaming`, `reply-ended` |
 | **Earlier turns**<br>also: long thread, history window | A long thread opens at its end and loads earlier turns as you scroll up. The top of a long thread. | web: `thread/Thread.tsx`, `app/App.tsx`<br>server: `threads` | `long-thread` |
 | **Model change** | A line in the thread where its model changed, so each reply says who wrote it. Between turns, where the model changed. | web: `thread/ModelChange.tsx`, `thread/model-change.ts` | `mem-show` |
-| **Stop the other reply?**<br>also: stop warning, blocking turn | When a send needs memory another chat holds, the app asks before it stops that chat. A pop-up on Send. | web: `composer/Composer.tsx`, `composer/chat.ts`<br>server: `app/admit.ts`, `gpu` | `stop-others` |
+| **Stop the other reply?**<br>also: stop warning, blocking turn | When a send needs memory another chat holds, the app asks before it stops that chat. A pop-up on Send. | web: `composer/Composer.tsx`, `composer/chat.ts`<br>server: `app/admit.ts`, `gpu` | `stop-others`, `threads-concurrent` |
 | **Replies in other threads**<br>also: background turns, concurrent threads | Replies keep running in threads you left; coming back shows them as they are. Any thread with a reply running. | web: `thread/Thread.tsx`, `composer/chat.ts`<br>server: `app/run-turn.ts`, `gpu` | `threads-concurrent`, `sidebar-running` |
 
 ## Composer

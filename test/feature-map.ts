@@ -260,7 +260,7 @@ export const FEATURES: readonly Feature[] = [
     server: ["app/admit.ts", "gpu"],
     calls: ["turns.blocking"],
     pushes: [],
-    specs: ["stop-others.spec.ts"],
+    specs: ["stop-others.spec.ts", "threads-concurrent.spec.ts"],
     testIds: ["chat.stop-warning.dialog", "chat.stop-warning.confirm", "chat.stop-warning.cancel", "chat.stop-warning.never"],
   },
   {

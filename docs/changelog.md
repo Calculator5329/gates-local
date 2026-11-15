@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-15: three browser tests guard what the app does with two chats
+
+- Internal: nothing changed for the person using the app. Three tests in
+  `threads-concurrent` still expected a second chat on a different model
+  to reply beside a running one with no warning; the app asks to stop the
+  other reply first (one thing in memory). One test now guards that
+  warning when both models would fit: Cancel sends nothing and leaves the
+  other reply running, Stop and send swaps them. The other two (a reply
+  that finishes in a chat you left, a failed reply that keeps its words)
+  now run their chats on one model, as the app allows.
+
 ## 2026-11-15: the server keeps one record for each message, always in one stage
 
 - A Stop pressed while a waiting message is being started puts it back
