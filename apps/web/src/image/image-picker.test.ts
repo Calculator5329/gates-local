@@ -13,7 +13,7 @@ vi.mock("../lib/store/store.ts", async (original) => {
   const actual = await original<typeof import("../lib/store/store.ts")>();
   return { ...actual, useStore: <T>(selector: (s: State) => T) => selector(actual.getState()) };
 });
-vi.mock("../lib/session/index.ts", async (original) => ({ ...(await original<object>()), loadImagePresets: vi.fn(async () => undefined), updateSettings: vi.fn(async () => undefined) }));
+vi.mock("../lib/session/index.ts", async (original) => ({ ...(await original<object>()), updateSettings: vi.fn(async () => undefined) }));
 import { setState } from "../lib/store/store.ts";
 
 const GIB = 1024 ** 3;

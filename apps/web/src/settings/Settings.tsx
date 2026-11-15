@@ -14,7 +14,7 @@ import { Icon, type IconId } from "../lib/ui/icons.tsx";
 import LibraryImports from "./LibraryImports.tsx";
 import { ModelsPage } from "../models/Models.tsx";
 import { sizeText } from "../models/models-rules.ts";
-import { addSource, canOpenFolder, checkImageStatus, checkShell, folderDialog, loadImageSetup, openDataFolder, openSettings, recheckRuntime, refreshSource, removeSource, resetSettings, saveImageFolder, startImageSetup, updateSettings } from "../lib/session/index.ts";
+import { addSource, canOpenFolder, checkImageStatus, checkShell, folderDialog, openDataFolder, openSettings, recheckRuntime, refreshSource, removeSource, resetSettings, saveImageFolder, startImageSetup, updateSettings } from "../lib/session/index.ts";
 import { NA, setState, useStore } from "../lib/store/store.ts";
 import { CopyButton, PathText, Status } from "../lib/ui/settings-controls.tsx";
 import { type LibraryTool, libraryToolCanUse } from "../lib/words/settings-rules.ts";
@@ -511,11 +511,6 @@ function Images() {
   const [genErr, runGen] = useAct();
   const [urlErr, runUrl] = useAct();
   const none = useStore(noImageEngine);
-  // The setup's own state decides whether its row shows (setupHeld), so it is read on opening and
-  // again after each reconnect: a "done" or "error" pushed while the socket was down leaves no
-  // "Setting up…" behind, and a page opened mid-setup finds its row.
-  const linked = useStore((s) => s.conn.kind === "open");
-  useEffect(() => { if (linked) void loadImageSetup(); }, [linked]);
   // true only where a picture's fit asks the chat model to leave: this computer's card, never the processor or a ComfyUI elsewhere
   const unloads = useStore((s) => s.imagePresets !== undefined && s.imagePresets !== NA && s.imagePresets.unloadsChat === true);
   // The list asks ComfyUI first, so it can answer after this section paints. On a card the server

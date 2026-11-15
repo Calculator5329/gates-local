@@ -11,7 +11,7 @@
 // Start ComfyUI or Check again: nothing starts on open.
 import "../picker/picker.css";
 import "./image-picker.css";
-import { type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import type { ImageChoice, ImageDownload, ImagePreset } from "@gates-local/contracts";
 import { cardGb, gb, noGpu, timeLeft } from "../lib/words/format.ts";
 import { Icon } from "../lib/ui/icons.tsx";
@@ -19,7 +19,7 @@ import { chosenImage, imageCard, sizeLabel } from "./image-choice.ts";
 import { ImageMark } from "./ImageMark.tsx";
 import { memoryRuler } from "../picker/picker-models.ts";
 import { focusComposer } from "../composer/focus.ts";
-import { downloadImageSetup, folderDialog, loadImagePresets, pickImage, saveImageFolder, startImage, stopImageDownload } from "../lib/session/index.ts";
+import { downloadImageSetup, folderDialog, pickImage, saveImageFolder, startImage, stopImageDownload } from "../lib/session/index.ts";
 import { NA, useStore } from "../lib/store/store.ts";
 import { PHONE, closePop, closeTip, isTouch, tabStops, useMedia } from "../lib/ui/ui.tsx";
 import { requestFocus } from "../lib/ui/kit/focus.ts";
@@ -181,9 +181,8 @@ export function ImagePicker() {
   // a number the same at every size is said once, in the head
   const same = active !== undefined && active.sizes.length > 1 && active.sizes.every((z) => z.bytes === active.sizes[0]!.bytes) ? active.sizes[0]!.bytes : undefined;
 
-  // the list is ComfyUI's: read it again each time the picker opens; a closed picker forgets its menu
-  // oxlint-disable-next-line gates/effect-needs-reason -- the picker opens from the composer's button, which is not this folder's; the read follows the store's pop whoever opened it
-  useEffect(() => { if (pop !== null) void loadImagePresets(); else setMenu(null); }, [pop !== null]);
+  // the server sends the list whenever it changes, so opening reads nothing; a closed picker forgets its menu
+  if (pop === null && menu !== null) setMenu(null);
   // oxlint-disable-next-line gates/effect-needs-reason -- moves focus into the picker on the commit that first draws it
   useLayoutEffect(() => {
     if (pop === null) return;

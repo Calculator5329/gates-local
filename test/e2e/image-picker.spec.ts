@@ -257,6 +257,26 @@ test("a setup's download is one bar for all its files: on the last of three it i
   await expect(klein).not.toHaveClass(/\boff\b/, { timeout: 20_000 });
 });
 
+test("a download one window finishes turns the row ready in a picker another window already has open, never reopened", async ({ page, open, context }, info) => {
+  const { picker, klein } = await downloadable(page, open);
+  const other = await context.newPage();
+  await other.goto(page.url()); await waitReady(other);
+  await other.getByTestId("chat.composer.image").click();
+  await other.locator("#modelBtn").click();
+  const theirs = other.locator("#imagePicker");
+  await theirs.getByTestId("image.picker.other").click();
+  const theirKlein = theirs.locator('.pk-r[data-preset="flux2-klein-4b"]');
+  await expect(theirKlein).toHaveClass(/\boff\b/);
+  await klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" }).click();
+  await expect(klein).not.toHaveClass(/\boff\b/, { timeout: 20_000 });
+  // the other window's picker stayed open the whole time: the server sent it the new list
+  await expect(theirKlein).not.toHaveClass(/\boff\b/, { timeout: 20_000 });
+  await expect(theirs).toBeVisible();
+  await expect(picker).toBeVisible();
+  await shot(other, "image-picker-other-window-ready.png", info);
+  await other.close();
+});
+
 test.describe("across a server restart", () => {
   // the browser logs each refused WebSocket attempt while the server is down
   test.use({ allowedErrors: [/WebSocket connection to .* failed/] });

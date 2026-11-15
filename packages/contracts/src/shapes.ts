@@ -95,6 +95,8 @@ export const ImageEvent = S.Struct({
   stage: S.optional(S.Literals(["queued", "loading", "encoding", "sampling", "decoding"])),
   /** Sampling: the step ComfyUI reported and of how many. */
   steps: S.optional(S.Struct({ done: S.Int, total: S.Int })),
+  /** The job has reached sampling (or decoding) once: a "loading" after it is not the first run's cold load. */
+  sampled: S.optional(S.Literal(true)),
   progress: S.optional(S.Finite),
   imagePath: S.optional(S.String),
   message: S.optional(S.String),

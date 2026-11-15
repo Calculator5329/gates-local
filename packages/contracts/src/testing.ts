@@ -395,6 +395,7 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
   "sources.changed": [[source], []],
   "sources.imports": [{ samples: [], jobs: [] }],
   "image.status": [imageReady, { state: "off", owner: "none" }],
+  "image.presets": [methodSamples["image.presets"].result, methodSamples["image.start"].result],
   "image.event": [
     { jobId: "j1", threadId: "t1", state: "running", progress: 0.4 },
     { jobId: "j1", state: "done", imagePath: "images/j1.png" },

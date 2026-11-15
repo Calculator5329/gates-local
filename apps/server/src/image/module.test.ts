@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { FitReport, GpuStatus, ImageChoice, ImageDownload, ImageEvent, ModelLoad, Params } from "@gates-local/contracts";
+import type { FitReport, GpuStatus, ImageChoice, ImageDownload, ImageEvent, ImagePresets, ModelLoad, Params } from "@gates-local/contracts";
 import { imageFitEdges } from "@gates-local/contracts/testing";
 import { startFakeOllama } from "../../../../test/fake-ollama/fake-ollama.ts";
 import { createModelLoader } from "../runtime/load.ts";
@@ -78,6 +78,9 @@ async function fixture(options: Partial<ImageDeps> & OwnerOptions = {}, realOlla
   const downloads: ImageDownload[] = [];
   /** threads.changed pushes, by thread id. */
   const changed: string[] = [];
+  /** image.presets pushes, and what waits for the next one. */
+  const presets: ImagePresets[] = [];
+  const presetsWaiting: Array<() => void> = [];
   const calls: string[] = [];
   let enabled = true, answering = true, present = true, pid = 42, freeBytes = 20_000;
   let hold = false, missingModel = false, die = false;
@@ -207,12 +210,16 @@ async function fixture(options: Partial<ImageDeps> & OwnerOptions = {}, realOlla
       if (channel === "image.event") events.push(payload as ImageEvent);
       if (channel === "image.download") downloads.push(payload as ImageDownload);
       if (channel === "threads.changed") changed.push((payload as { threadId: string }).threadId);
+      if (channel === "image.presets") { presets.push(payload as ImagePresets); for (const sent of presetsWaiting.splice(0)) sent(); }
     },
     ...imageOptions,
   });
   instances.push(module);
   const handlers = createImageHandlers({ image: module });
-  return { module, handlers, lease, store, memory, events, downloads, changed, calls, dataDir, ollamaPosts, graphs, ps: () => fakeFetch("http://fake-ollama/api/ps"), measurements: () => measurements,
+  return { module, handlers, lease, store, memory, events, downloads, changed, presets, 
+    /** Resolves once `count` image.presets pushes have gone out in all. */
+    presetsSent: async (count: number) => { while (presets.length < count) await new Promise<void>((sent) => { presetsWaiting.push(sent); }); },
+    calls, dataDir, ollamaPosts, graphs, ps: () => fakeFetch("http://fake-ollama/api/ps"), measurements: () => measurements,
     choose: (next: ImageChoice | undefined) => { choice = next; },
     files: (v: { noMoss?: boolean; flux?: boolean; loras?: string[]; bare?: boolean }) => { noMoss = v.noMoss ?? noMoss; flux = v.flux ?? flux; moreLoras = v.loras ?? moreLoras; bare = v.bare ?? bare; },
     pickFolder: (folder: string | undefined) => { imageFolder = folder; },
@@ -1068,7 +1075,10 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
       stop: async () => { f.calls.push("stop"); up = false; f.configure({ answering: false }); },
     } });
     f.configure({ answering: false });
+    // ComfyUI coming up, and the unset choice settling to the files it lists, each send every window
+    // the presets: those reads are done before the reclaim's calls are counted
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+    await f.presetsSent(2);
     expect(f.module.current().owner).toBe("app");
     const before = f.calls.length;
     cancel = new AbortController();
@@ -1339,6 +1349,73 @@ describe("image presets (fake ComfyUI file lists)", () => {
     const plain = await fixture();
     const second = await plain.module.generate({ prompt: "a tree", choice: { preset: "z-image-int8", width: 1024, height: 1024 } }); await plain.module.wait(second.jobId);
     expect(plain.events.filter((e) => e.state === "running" && e.stage !== undefined).map((e) => e.stage)).toEqual(["queued", "sampling"]);
+  });
+
+  it("a render's events say sampled from its first sampling on, so a loading after it is not read as the cold first load", async () => {
+    const f = await fixture();
+    f.sendFrames((graph) => {
+      const node = (pattern: RegExp) => Object.entries(graph).find(([, n]) => pattern.test(n.class_type))?.[0];
+      return [
+        frame("execution_start"), frame("executing", { node: node(/^UNETLoader/) }), frame("executing", { node: node(/Sampler/) }),
+        frame("progress", { value: 1, max: 2 }), frame("executing", { node: node(/^VAELoader/) }), frame("executing", { node: node(/^VAEDecode/) }),
+        frame("executing", { node: null }),
+      ];
+    });
+    const job = await f.module.generate({ prompt: "a tree", choice: { preset: "z-image-int8", width: 1024, height: 1024 } }); await f.module.wait(job.jobId);
+    const said = f.events.filter((e) => e.stage !== undefined).map((e) => `${e.stage}${e.sampled === true ? " sampled" : ""}`);
+    expect(said.filter((s, i) => s !== said[i - 1])).toEqual(["queued", "loading", "sampling sampled", "loading sampled", "decoding sampled"]);
+    expect(f.events.at(-1)).toMatchObject({ state: "done", sampled: true });
+  });
+
+  it("every presets read goes to every window, and one begun earlier that ends later is not sent over a newer one", async () => {
+    let gate: Promise<void> | undefined, open: () => void = noop, entered: () => void = noop;
+    const card = { vendor: "nvidia", name: "Test card", totalBytes: 16 * 1024 ** 3, occupants: [], systemMemoryAvailableBytes: 0, measuredAt: 0 } as const;
+    const f = await fixture({ gpuStatus: async () => { if (gate) { entered(); await gate; } return card; } });
+    gate = new Promise<void>((resolve) => { open = resolve; });
+    const reached = new Promise<void>((resolve) => { entered = resolve; });
+    // the older read stops in its room read, after its file list
+    const older = f.module.presets();
+    await reached;
+    gate = undefined;
+    f.files({ flux: true });
+    const newer = await f.module.presets();
+    expect(newer.presets.map((p) => p.id)).toContain("flux2-klein-4b");
+    expect(f.presets).toEqual([newer]);
+    open();
+    await older;
+    // the older read answers its own asker, and no window is sent it
+    expect(f.presets).toEqual([newer]);
+    // a read begun after both is sent
+    const third = await f.module.presets();
+    expect(f.presets).toEqual([newer, third]);
+  });
+
+  it("a settings change from any window: generation or its address asks ComfyUI again and sends the status and presets; the folder and the pick send the presets; others send nothing", async () => {
+    type Listener = Parameters<NonNullable<ImageDeps["onSettings"]>>[0];
+    type Shown = Parameters<Listener>[0];
+    let listener: Listener | undefined;
+    const f = await fixture({ onSettings: (l) => { listener = l; } });
+    if (listener === undefined) throw new Error("the module did not listen for settings");
+    const status = vi.spyOn(f.module, "status"), read = vi.spyOn(f.module, "presets");
+    const base: Shown = { imageGen: true };
+    // generation or the address: ComfyUI is asked again (its status push), then the presets go out
+    for (const [next, previous] of [[base, { imageGen: false }], [{ ...base, comfyUrl: "http://127.0.0.1:8189" }, base]] as const) {
+      const asked = status.mock.calls.length, sent = f.presets.length;
+      listener(next, previous);
+      expect(status).toHaveBeenCalledTimes(asked + 1);
+      await f.presetsSent(sent + 1);
+    }
+    // the folder (its free space) and the pick: the presets alone, read at once
+    status.mockClear(); read.mockClear();
+    listener({ ...base, imageFolder: "/models" }, base);
+    expect(read).toHaveBeenCalledTimes(1);
+    listener({ ...base, imageChoice: { preset: "moss-image", width: 768, height: 1024 } }, base);
+    expect(read).toHaveBeenCalledTimes(2);
+    // anything else: nothing is read
+    listener({ ...base, imageChoice: { preset: "moss-image", width: 768, height: 1024 } }, { ...base, imageChoice: { preset: "moss-image", width: 768, height: 1024 } });
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(status).not.toHaveBeenCalled();
+    await f.presetsSent(f.presets.length + 1);
   });
 
   it("Start ComfyUI says why when there is nothing to start", async () => {

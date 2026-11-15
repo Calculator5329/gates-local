@@ -9,7 +9,7 @@ export type SyncDomain = typeof SyncDomain.Type;
 
 /** The things that have one number each, and the families (`thread:<id>`) that have one per member. */
 const FIXED_SCOPES = ["settings", "runtime", "models", "catalog", "threads", "gpu", "fit-inputs", "active-turns", "sources", "source-imports", "image-status", "update",
-  "suggested", "fit-table", "pulls", "loads", "memory", "speeds", "measures"] as const;
+  "suggested", "fit-table", "pulls", "loads", "memory", "speeds", "measures", "image-presets", "image-download", "image-setup", "image-jobs"] as const;
 export type FixedScope = typeof FIXED_SCOPES[number];
 
 const Revision = S.Int.check(S.isGreaterThanOrEqualTo(0), S.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER));
@@ -50,10 +50,10 @@ export const scopesOf = (row: SyncRow): readonly FixedScope[] => [row.scope, ...
  * so a higher number is never an older value. A part (one download's progress) takes the number of
  * the whole it belongs to (every download), so a read of the whole is ordered against its parts.
  */
-export const SENT_IN_ORDER: readonly SyncDomain[] = ["models"];
+export const SENT_IN_ORDER: readonly SyncDomain[] = ["models", "images"];
 
 /** Only domains whose every writer is numbered; the socket server and the client enforce the rows of these. */
-export const ORDERED_DOMAINS: readonly SyncDomain[] = ["settings", "models", "sources", "updates"];
+export const ORDERED_DOMAINS: readonly SyncDomain[] = ["settings", "models", "sources", "updates", "images"];
 
 /** The one snapshot number `sync` gives `scope` in this epoch; undefined when it gives none, several, or another epoch's. */
 export function revisionOf(sync: SyncMetadata | undefined, epoch: string, scope: FixedScope): number | undefined {

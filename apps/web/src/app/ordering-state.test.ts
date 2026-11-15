@@ -150,7 +150,8 @@ function imageStatus(kind: "check" | "post-save"): ReplayScenario<World> {
   return {
     name: `image status (${kind}): a late probe cannot erase busy`, dispose,
     create: async () => {
-      const w = await World.create();
+      // the server numbers the images kind, as the real one does: the read takes its number as it starts
+      const w = new World(await OrderingWorld.create(true, undefined, ["images"]));
       if (kind === "check") {
         // A job and a ready discovery both require image generation enabled.
         w.wire.server.settings = { ...w.wire.server.settings, imageGen: true };
@@ -159,7 +160,8 @@ function imageStatus(kind: "check" | "post-save"): ReplayScenario<World> {
         await w.capture("image.old", "image.status", () => { void w.wire.a.session.checkImageStatus(); }, old);
       }
       else {
-        void w.wire.a.session.updateSettings({ imageGen: true }); await drain();
+        // the not-set-up card's own engine: a save, then Check (the server pushes the status itself too)
+        void w.wire.a.session.updateSettings({ imageGen: true }).then(() => w.wire.a.session.checkImageStatus()); await drain();
         await w.capture("image.old", "image.status", () => {
           w.wire.server.settingsPush("A-theme", w.wire.a.socket);
           w.wire.server.settingsPush("A-theme", w.wire.b.socket);

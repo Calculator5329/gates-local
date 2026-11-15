@@ -4,7 +4,7 @@
 // and Set up images starts it; where it cannot, one sentence says why. Settings and Check again
 // stay for a ComfyUI the person runs. An address set in Settings that does not answer is said as
 // that: not running, the address, Check again, and the app's own engine only as a choice pressed.
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { usePopover } from "../lib/ui/kit/popover.ts";
 import type { ImageSetup, ImageSetupProgress } from "@gates-local/contracts";
 import { gb } from "../lib/words/format.ts";
@@ -64,8 +64,6 @@ export function ImageUnset() {
   const ref = useRef<HTMLDivElement>(null);
   const progress = setup?.progress;
   const running = progress !== undefined && progress.step !== "done" && progress.step !== "error";
-  // oxlint-disable-next-line gates/effect-needs-reason -- the card opens from the composer's button, which is not this folder's; the read follows the store's pop whoever opened it
-  useEffect(() => { if (open) void loadImageSetup(); }, [open]);
   // a closed card keeps no note
   if (!open && note !== null) setNote(null);
   usePopover(ref, open, (el) => {
@@ -73,11 +71,7 @@ export function ImageUnset() {
     if (anchor) place(el, anchor, "start");
     if (kb) el.querySelector<HTMLElement>("button.btn")?.focus();
   }, [kb, setup?.why, setup?.model?.preset]);
-  // the setup's end turns Image on, as Check again does once a ComfyUI answers
-  // oxlint-disable-next-line gates/effect-needs-reason -- the setup's end arrives as a pushed status while the card is open; closing here is the reaction to that push
-  useEffect(() => {
-    if (open && progress?.step === "done" && !imagesUnset(getState())) { closePop(); setState({ image: true }); }
-  });
+  // the setup's end closes this card and turns Image on where its push lands (the session's setupSaid)
   const check = async () => {
     setChecking(true);
     setNote(null);

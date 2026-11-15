@@ -1389,8 +1389,9 @@ describe("one thing in memory: a send asks the rest to leave, then measures", ()
     // The first free: what the engine holds is unknown when the app starts, so the first handoff asks
     // it once; the image after it finds it empty, and the chat after the image frees what it loaded.
     expect(order).toEqual(["free", `chat ${MODEL}`, `unload ${MODEL}`, "prompt", "free", `chat ${MODEL}`]);
-    // Neither runtime was stopped, restarted or reconfigured: the only requests were these.
-    expect(comfy.calls.filter((c) => !["/system_stats", "/queue", "/object_info", "/free", "/prompt", "/view"].includes(c) && !c.startsWith("/history/"))).toEqual([]);
+    // Neither runtime was stopped, restarted or reconfigured: the only requests were these, and the
+    // file list read for the presets every window is sent when ComfyUI comes up.
+    expect(comfy.calls.filter((c) => !["/system_stats", "/queue", "/object_info", "/free", "/prompt", "/view", "/internal/folder_paths", "/templates/index.json", "/userdata"].includes(c) && !c.startsWith("/history/"))).toEqual([]);
   });
 
   it("an external ComfyUI with a job of its own queued is not asked to free; the send measures and decides", async () => {

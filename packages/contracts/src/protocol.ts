@@ -160,6 +160,15 @@ const LOADS: SyncRow = { domain: "models", scope: "loads" };
 const MEMORY: SyncRow = { domain: "models", scope: "memory" };
 const SPEEDS: SyncRow = { domain: "models", scope: "speeds" };
 const MEASURES: SyncRow = { domain: "models", scope: "measures" };
+// The images kind, numbered by the socket server in the order it gives each out (SENT_IN_ORDER).
+const IMAGE_STATUS: SyncRow = { domain: "images", scope: "image-status" };
+/** The presets with the download running now: a read answers both, each with its own number. */
+const IMAGE_PRESETS_READ: SyncRow = { domain: "images", scope: "image-presets", also: ["image-download"] };
+const IMAGE_PRESETS: SyncRow = { domain: "images", scope: "image-presets" };
+const IMAGE_DOWNLOAD: SyncRow = { domain: "images", scope: "image-download" };
+/** Set up images' step; the rest of image.setupInfo is read from the machine at each ask and has no number. */
+const IMAGE_SETUP: SyncRow = { domain: "images", scope: "image-setup" };
+const IMAGE_JOBS: SyncRow = { domain: "images", scope: "image-jobs" };
 
 /** One definition for both ends: each method's params and result Schema, and whether the phone may call it. */
 export const methods = {
@@ -439,11 +448,11 @@ export const methods = {
   "sources.downloadSample": { params: SourceRef, result: SourceImport, phone: "deny" },
   "sources.clone": { params: S.Struct({ url: S.String }), result: SourceImport, phone: "deny" },
   "sources.cancelImport": { params: SourceRef, result: S.Struct({ cancelled: S.Boolean }), phone: "deny" },
-  "image.status": { params: NoParams, result: ImageStatus, phone: "allow" },
+  "image.status": { params: NoParams, result: ImageStatus, phone: "allow", sync: IMAGE_STATUS },
   /** Whether Run commands can run here: the sandbox probe, asked again when it last failed (Settings › Tools). */
   "tools.shell": { params: NoParams, result: ShellStatus, phone: "allow" },
   /** The presets ComfyUI has every file for, read from ComfyUI (or its last answer when it is not running). */
-  "image.presets": { params: NoParams, result: ImagePresets, phone: "allow" },
+  "image.presets": { params: NoParams, result: ImagePresets, phone: "allow", sync: IMAGE_PRESETS_READ },
   "image.generate": {
     /** `choice` omitted: Settings' imageChoice. A retry runs its failed job's choice. */
     params: S.Struct({
@@ -462,9 +471,9 @@ export const methods = {
   /** Stop that setup's download; the part already fetched is kept, and the next image.download resumes it. */
   "image.stopDownload": { params: S.Struct({ preset: S.String }), result: S.Struct({ stopped: S.Boolean }), phone: "deny" },
   /** Start ComfyUI with no job (the picker's Start ComfyUI) and answer what it has; the idle stop still applies. */
-  "image.start": { params: NoParams, result: ImagePresets, phone: "deny" },
+  "image.start": { params: NoParams, result: ImagePresets, phone: "deny", sync: IMAGE_PRESETS_READ },
   /** What Set up images would fetch here (the app's own ComfyUI and this card's setup), or why it cannot run. */
-  "image.setupInfo": { params: NoParams, result: ImageSetup, phone: "allow" },
+  "image.setupInfo": { params: NoParams, result: ImageSetup, phone: "allow", sync: IMAGE_SETUP },
   /** Set up images: fetch and start the app's own ComfyUI, then download the setup; progress on the image.setup push. */
   "image.setup": { params: NoParams, result: S.Struct({ started: S.Boolean }), phone: "deny" },
   /** The Pictures screen: finished pictures, newest first, a page at a time. */
@@ -516,12 +525,14 @@ export const pushes = {
   "models.measuring": { payload: MeasureRun, sync: MEASURES },
   "sources.changed": { payload: S.Array(Source), sync: SOURCES },
   "sources.imports": { payload: SourceImports, sync: SOURCE_IMPORTS },
-  "image.status": { payload: ImageStatus },
-  "image.event": { payload: ImageEvent },
+  "image.status": { payload: ImageStatus, sync: IMAGE_STATUS },
+  /** The whole list again each time the server reads it: ComfyUI coming up or going off, a download's end, a job that settled to other files, an image setting changing. */
+  "image.presets": { payload: ImagePresets, sync: IMAGE_PRESETS },
+  "image.event": { payload: ImageEvent, sync: IMAGE_JOBS },
   /** A model file image.download is fetching: its setup, its place in the list, its progress. */
-  "image.download": { payload: ImageDownload },
+  "image.download": { payload: ImageDownload, sync: IMAGE_DOWNLOAD },
   /** Set up images' progress: each step, then done or error. */
-  "image.setup": { payload: ImageSetupProgress },
+  "image.setup": { payload: ImageSetupProgress, sync: IMAGE_SETUP },
   /** A model request finished and was counted; usage.read has the new numbers. */
   "usage.changed": { payload: S.Struct({}) },
 } as const satisfies Record<string, PushRow>;

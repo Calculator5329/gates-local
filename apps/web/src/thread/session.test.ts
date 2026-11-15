@@ -1027,45 +1027,39 @@ describe("action failures come back to the caller (W-07)", () => {
     expect(r).toBe("Couldn't remove gemma3:4b because Gates Local isn't connected; try again once it reconnects.");
   });
 
-  it("turning image generation on reads ComfyUI's status again, so Settings shows what it found (W-12)", async () => {
+  // The server asks ComfyUI again on the save and pushes what it found (apps/server image module's
+  // onSettings): the window shows the push and reads neither the status nor the presets itself.
+  it("turning image generation on: Settings shows the status the server pushes, and the window reads nothing again (W-12)", async () => {
     await boot();
-    b.server.answer("image.status", () => ({ state: "missing", owner: "none", baseUrl: "http://127.0.0.1:9", detail: "ComfyUI did not answer." }));
     // the server keeps what it is sent, as the real one does
     let saved = methodSamples["settings.get"].result;
     b.server.answer("settings.update", ({ imageGen, theme }) => (saved = { ...saved, ...(imageGen === undefined ? {} : { imageGen }), ...(theme === undefined ? {} : { theme }) }));
-    const before = b.server.calls("image.status").length;
+    const status = b.server.calls("image.status").length, presets = b.server.calls("image.presets").length;
     expect(await session.updateSettings({ imageGen: true })).toBeNull();
+    b.server.push("image.status", { state: "missing", owner: "none", baseUrl: "http://127.0.0.1:9", detail: "ComfyUI did not answer." });
     await until(() => {
       const s = store.getState().imageStatus;
       return s !== undefined && s !== store.NA && s.state === "missing";
-    }, 1000, "the new image status");
-    expect(b.server.calls("image.status").length).toBe(before + 1);
-    // a save that touches neither imageGen nor comfyUrl does not ask again
-    expect(await session.updateSettings({ theme: "light" })).toBeNull();
+    }, 1000, "the pushed image status");
     await tick();
-    expect(b.server.calls("image.status").length).toBe(before + 1);
+    expect(b.server.calls("image.status").length).toBe(status);
+    expect(b.server.calls("image.presets").length).toBe(presets);
   });
 
-  it("another window turning image generation on: this window reads ComfyUI's status again and shows it (T05)", async () => {
+  it("another window turning image generation on: this window shows the server's status and presets pushes, and reads neither (T05)", async () => {
     await boot();
-    const off = { state: "off", owner: "none" } as const;
-    b.server.answer("image.status", () => off);
-    await session.checkImageStatus();
-    expect(store.getState().imageStatus).toEqual(off);
-    const before = b.server.calls("image.status").length;
-    const ready = { state: "ready", owner: "external", baseUrl: "http://127.0.0.1:9" } as const;
-    b.server.answer("image.status", () => ready);
+    const status = b.server.calls("image.status").length, presets = b.server.calls("image.presets").length;
     b.server.push("settings.changed", { ...methodSamples["settings.get"].result, imageGen: true });
+    b.server.push("image.status", { state: "ready", owner: "external", baseUrl: "http://127.0.0.1:9" });
+    b.server.push("image.presets", methodSamples["image.presets"].result);
     await until(() => {
-      const s = store.getState().imageStatus;
-      return s !== undefined && s !== store.NA && s.state === "ready";
+      const s = store.getState();
+      return s.imageStatus !== undefined && s.imageStatus !== store.NA && s.imageStatus.state === "ready";
     }, 1000, "the status after another window's save");
-    expect(b.server.calls("image.status").length).toBe(before + 1);
-    // a push that leaves image generation and the address as they were does not ask again
-    b.server.push("settings.changed", { ...methodSamples["settings.get"].result, imageGen: true, theme: "light" });
-    await until(() => { const s = store.getState().settings; return s !== undefined && s !== store.NA && s.theme === "light"; }, 1000, "the theme push");
     await tick();
-    expect(b.server.calls("image.status").length).toBe(before + 1);
+    expect(store.getState().imagePresets).toEqual(methodSamples["image.presets"].result);
+    expect(b.server.calls("image.status").length).toBe(status);
+    expect(b.server.calls("image.presets").length).toBe(presets);
   });
 
   it("success returns null", async () => {

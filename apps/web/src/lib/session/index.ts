@@ -7,6 +7,7 @@ import {
   type Client,
   type BlockingTurn,
   type ImageChoice,
+  type ImageSetupProgress,
   type ModelMeasure,
   type Payload,
   type SyncMetadata,
@@ -15,7 +16,8 @@ import {
   pushSync,
 } from "@gates-local/contracts";
 import { runPages } from "../../measure/measure-pages.ts";
-import { newestOnly } from "../../models/pick.ts";
+import { imagesUnset } from "../../image/image-choice.ts";
+import { closePop } from "../ui/ui.tsx";
 import { NA, type State, getState, overChat, setState } from "../store/store.ts";
 import { createChat } from "../../composer/chat.ts";
 import { KEEP_EVERY_MS, keepHeldFiles, setFileCalls } from "../../composer/file-holds.ts";
@@ -98,6 +100,10 @@ const GPU = rowOf(methodSync("gpu.status"));
 const FIT_TABLE = rowOf(methodSync("fit.table"));
 const SPEEDS = rowOf(methodSync("models.speed"));
 const MEASURES = rowOf(methodSync("models.measures"));
+const IMAGE_STATUS = rowOf(methodSync("image.status"));
+const IMAGE_PRESETS = rowOf(pushSync("image.presets"));
+const IMAGE_DOWNLOAD = rowOf(pushSync("image.download"));
+const IMAGE_SETUP = rowOf(pushSync("image.setup"));
 
 /** The samples and imports Library shows. Its pushes keep them current; this read is the hydrate's one. */
 const readImports = () => probe("sources.imports", {}, { onResult: (sourceImports, sync) => { if (newer(IMPORTS, sync)) applyServerEvent({ sourceImports }); } })
@@ -142,9 +148,7 @@ export const { refreshModels, pickModel, typedInComposer, pull, cancelPull, remo
 /** A typed name's size and fit before its download; undefined when the server cannot say. */
 export const estimateModel = (name: string, numCtx: number) => call("models.estimate", { name, numCtx }).catch(() => undefined);
 
-// Image generation turning on (or a new address) reads the file list too: Make images left unset is
-// on once a setup there can run, and the server learns that from the same read.
-const settingsSession = createSettings({ applyServerEvent, authority: applyServerEvent.settings, sync: () => connection.sync, act, applyTheme, applyAccent, refreshImageStatus: () => { probeImageStatus(); void loadImagePresets(); } });
+const settingsSession = createSettings({ applyServerEvent, authority: applyServerEvent.settings, sync: () => connection.sync, act, applyTheme, applyAccent });
 export const { setContext, updateSettings, updateModelSettings, resetSettings } = settingsSession;
 const { settingsPatch } = settingsSession;
 
@@ -190,7 +194,14 @@ async function hydrate(c: Client): Promise<void> {
   numbered("models.changed", modelsSession.modelsChanged);
   // A newer chat list arrived with the update check: its makers and names, then the catalog it changes.
   numbered("models.suggested", (suggested) => { applyServerEvent({ suggested }); void modelsSession.refreshCatalog(); });
-  numbered("gpu.changed", (gpu) => applyServerEvent({ gpu }));
+  numbered("gpu.changed", (gpu) => {
+    const was = getState().gpu;
+    const before = was === undefined || was === NA ? undefined : was.vendor;
+    applyServerEvent({ gpu });
+    // What Set up images would fetch depends on the card, and nothing pushes it: a card put in or
+    // taken out is read once, when the server first sees it.
+    if (before !== undefined && before !== gpu.vendor) void loadImageSetup();
+  });
   numbered("fit.changed", (fitTable) => applyServerEvent({ fitTable }));
   numbered("models.pull", modelsSession.pullChanged);
   numbered("models.load", modelsSession.loadChanged);
@@ -202,15 +213,16 @@ async function hydrate(c: Client): Promise<void> {
   });
   numbered("models.measuring", (run) => applyServerEvent((s) => measuringChanged(s, run)));
   c.subscribe("settings.changed", (payload, metadata) => applyServerEvent(() => settingsSession.receiveSettings(payload, (run) => dispatch("settings.changed", run), metadata)));
-  c.subscribe("image.status", (imageStatus) => applyServerEvent(() => {
-    imageOrder.next(); // Receipt supersedes probes even while hydration buffers application.
-    dispatch("image.status", () => applyServerEvent({ imageStatus }));
-    // ComfyUI coming up, or image generation turning off, changes which presets it has the files for; a job's busy and ready again does not
-    if ((imageStatus.state === "ready" || imageStatus.state === "off") && imageStatus.state !== presetsAt) {
-      presetsAt = imageStatus.state;
-      void loadImagePresets();
-    }
-  }));
+  // The server sends the presets to every window whenever they change (ComfyUI's state, a job
+  // settling to other files, a download, image settings), so no window reads them again for that.
+  numbered("image.status", (imageStatus) => applyServerEvent({ imageStatus }));
+  numbered("image.presets", (imagePresets) => applyServerEvent({ imagePresets }));
+  numbered("image.event", (e) => {
+    if (e.threadId !== undefined) imageSaved(e.threadId);
+    if (e.state === "done") void pictures.finished();
+  });
+  numbered("image.download", (imageDownload) => applyServerEvent({ imageDownload }));
+  numbered("image.setup", setupSaid);
   settingsReads.begin();
   // the bridge answers without the server, so the folder is in even when the hydrate never reaches its reads
   void readFolder();
@@ -235,22 +247,6 @@ async function hydrateWith(
   on("queue.changed", (list) => queueChanged(list));
   on("threads.changed", ({ threadId }) => threadSession.threadsChanged(threadId));
   on("usage.changed", () => usageSession.usageChanged());
-  on("image.event", (e) => {
-    if (e.threadId !== undefined) imageSaved(e.threadId);
-    if (e.state === "done") void pictures.finished();
-    // the job settled to other files than the button names: the server read ComfyUI's list again
-    if (e.sent !== undefined && !settledJobs.has(e.jobId)) { settledJobs.add(e.jobId); void loadImagePresets(); }
-  });
-  // a setup's download: its last word reads the list again, so a row whose files are all in turns ready
-  on("image.download", (imageDownload) => {
-    applyServerEvent({ imageDownload });
-    if (imageDownload.ended === true) void loadImagePresets();
-  });
-  // Set up images: each step's push; at the end the status and the list are read again, so Image turns on
-  on("image.setup", (progress) => {
-    applyServerEvent((s) => ({ imageSetup: { ...s.imageSetup, progress } }));
-    if (progress.step === "done") { void checkImageStatus(); void loadImagePresets(); }
-  });
   // Install every receipt handler first. Ordered domains stay disabled until
   // their full migration lands; unsupported servers continue in legacy mode.
   const negotiated = await negotiate();
@@ -324,14 +320,15 @@ async function hydrateWith(
   // Measured speeds are a saved-reply read the model list's first frame never waits on.
   // The image reads wait for nothing and nothing waits for them: both ask ComfyUI first (and the
   // status asks systemctl), which may be a minute away or never answer, and the page is ready
-  // without them. A push that lands first takes the status's ticket, so the older read drops.
+  // without them. Each read takes its numbers as it starts, so a push that lands first is newer and
+  // the read's older value is dropped.
   probeImageStatus();
-  const presetsTicket = presetsOrder.next();
-  void probe("image.presets", {}).then((imagePresets) => {
-    if (imagePresets === undefined || !presetsOrder.current(presetsTicket)) return;
-    // A download push from before the reconnect may be stale (its server restarted, or its end missed): the list says what runs now.
-    applyServerEvent({ imagePresets, ...imagePresets === NA ? {} : { imageDownload: imagePresets.download } });
-  });
+  // The list carries the download running now: a download push from before the reconnect may be
+  // stale (its server restarted, or its end was missed), and the read's number says whether it is.
+  void probe("image.presets", {}, { onResult: (imagePresets, sync) => applyServerEvent(() => {
+    if (newer(IMAGE_PRESETS, sync)) applyServerEvent({ imagePresets });
+    if (newer(IMAGE_DOWNLOAD, sync)) applyServerEvent({ imageDownload: imagePresets.download });
+  }) }).then((imagePresets) => { if (imagePresets === NA) applyServerEvent({ imagePresets }); });
   const [gpu, catalog, sources, update, speeds, measures] = await Promise.all([
     probe("gpu.status", {}, { onResult: (read, sync) => onArrival(GPU, () => applyServerEvent({ gpu: read }))(sync) }),
     probe("models.catalog", {}, { onResult: (read, sync) => onArrival(CATALOG, () => applyServerEvent({ catalog: read }))(sync) }),
@@ -362,19 +359,16 @@ async function hydrateWith(
   usageSession.usageChanged();
 }
 
-const imageOrder = newestOnly();
-const presetsOrder = newestOnly();
-/** The ComfyUI state the presets were last read again for. */
-let presetsAt: string | undefined;
-/** Image jobs that settled to another choice than they were sent with; each reads the presets again once. */
-const settledJobs = new Set<string>();
-
-/** Read the image models ComfyUI has every file for again: the picker opening, Image turning on, ComfyUI's state changing. */
-export function loadImagePresets(): Promise<void> {
-  const ticket = presetsOrder.next();
-  return probe("image.presets", {}).then((imagePresets) => {
-    if (imagePresets !== undefined && presetsOrder.current(ticket)) applyServerEvent({ imagePresets });
-  });
+/**
+ * A Set up images step. At its end the server has started the engine it set up and pushed the status
+ * and the list; an open "not set up" card closes and Image turns on, as its Check again does. What the
+ * setup would fetch changed with it (the engine is in), and nothing pushes that, so it is read once.
+ */
+function setupSaid(progress: ImageSetupProgress): void {
+  applyServerEvent((s) => ({ imageSetup: { ...s.imageSetup, progress } }));
+  if (progress.step !== "done" && progress.step !== "error") return;
+  if (progress.step === "done" && getState().pop?.id === "unset" && !imagesUnset(getState())) { closePop(); setState({ image: true }); }
+  void loadImageSetup();
 }
 
 /** The Pictures screen's list and selection (session/pictures.ts). */
@@ -414,12 +408,10 @@ async function blockingFor(model: string, numCtx: number): Promise<readonly Bloc
   return call("turns.blocking", { model, numCtx }).catch(() => []);
 }
 
-/** A settings save rechecks image status with the same receipt guard as explicit probes. */
+/** The hydrate's engine status: it applies only while no newer push came. */
 function probeImageStatus(): void {
-  const ticket = imageOrder.next();
-  void probe("image.status", {}).then((imageStatus) => {
-    if (imageStatus !== undefined && imageOrder.current(ticket)) applyServerEvent({ imageStatus });
-  });
+  void probe("image.status", {}, { onResult: (imageStatus, sync) => { if (newer(IMAGE_STATUS, sync)) applyServerEvent({ imageStatus }); } })
+    .then((imageStatus) => { if (imageStatus === NA) applyServerEvent({ imageStatus }); });
 }
 
 /** Settings › Tools: Run commands says Ready only after the server's sandbox probe ran a command. */
@@ -431,11 +423,8 @@ export function checkShell(): void {
 
 /** Ask ComfyUI again, so Settings says what it finds now. */
 export async function checkImageStatus(): Promise<ActionResult> {
-  const ticket = imageOrder.next();
-  const r = await act("image.status", {}, "check ComfyUI");
-  if (!r.ok) return r.message;
-  if (imageOrder.current(ticket)) applyServerEvent({ imageStatus: r.value });
-  return null;
+  const r = await act("image.status", {}, "check ComfyUI", undefined, { onResult: (imageStatus, sync) => { if (newer(IMAGE_STATUS, sync)) applyServerEvent({ imageStatus }); } });
+  return r.ok ? null : r.message;
 }
 
 export async function retryImage(threadId: string, prompt: string, retryOf: string): Promise<{ jobId: string } | string> {
@@ -503,10 +492,13 @@ async function imageAct<T>(what: string, run: () => Promise<T>): Promise<{ ok: t
 
 /** What Set up images would fetch on this computer, or why it cannot run here. */
 export async function loadImageSetup(): Promise<ActionResult> {
-  const r = await imageAct("read the image setup", () => call("image.setupInfo", {}));
-  if (!r.ok) return r.message;
-  applyServerEvent({ imageSetup: r.value });
-  return null;
+  // What it would fetch is a look at this computer and always applies; its step is numbered, and a
+  // newer step pushed while the read was out stays.
+  const r = await imageAct("read the image setup", () => call("image.setupInfo", {}, { onResult: (info, sync) => {
+    const { progress: _read, ...look } = info;
+    applyServerEvent((s) => ({ imageSetup: newer(IMAGE_SETUP, sync) ? info : { ...look, ...s.imageSetup?.progress === undefined ? {} : { progress: s.imageSetup.progress } } }));
+  } }));
+  return r.ok ? null : r.message;
 }
 
 /** Set up images: the engine, then the recommended setup, as one download; image.setup pushes say how it goes. */
@@ -522,39 +514,27 @@ export async function downloadImageSetup(preset: string): Promise<ActionResult> 
   const r = await imageAct("download the image setup", () => call("image.download", { preset }));
   // a push since has the say; the placeholder alone goes when the download did not start
   if (!r.ok || r.value.files.length === 0) applyServerEvent((s) => s.imageDownload === placeholder ? { imageDownload: undefined } : {});
-  if (!r.ok) return r.message;
-  if (r.value.files.length === 0) void loadImagePresets();
-  return null;
+  return r.ok ? null : r.message;
 }
 
 /**
- * Settings' folder for image downloads (null clears it), then the list again for that folder's
- * free space. Later downloads go there; nothing already downloaded moves.
+ * Settings' folder for image downloads (null clears it); the server sends the list again with that
+ * folder's free space. Later downloads go there; nothing already downloaded moves.
  */
-export async function saveImageFolder(folder: string | null): Promise<ActionResult> {
-  const failed = await updateSettings({ imageFolder: folder });
-  if (failed === null) void loadImagePresets();
-  return failed;
-}
+export const saveImageFolder = (folder: string | null): Promise<ActionResult> => updateSettings({ imageFolder: folder });
 
 export async function stopImageDownload(preset: string): Promise<ActionResult> {
   const r = await imageAct("stop the download", () => call("image.stopDownload", { preset }));
   if (!r.ok) return r.message;
-  // nothing of this setup's runs (it ended, or the server restarted): its bar goes and the list says what is there
-  if (!r.value.stopped) {
-    applyServerEvent((s) => s.imageDownload?.preset === preset ? { imageDownload: undefined } : {});
-    void loadImagePresets();
-  }
+  // nothing of this setup's runs (it ended, or the server restarted): its bar goes
+  if (!r.value.stopped) applyServerEvent((s) => s.imageDownload?.preset === preset ? { imageDownload: undefined } : {});
   return null;
 }
 
 /** The empty picker's Start ComfyUI (or Check again): starts the app's ComfyUI if it has one, then reads its list. */
 export async function startImage(): Promise<ActionResult> {
-  const ticket = presetsOrder.next();
-  const r = await imageAct("start ComfyUI", () => call("image.start", {}));
-  if (!r.ok) return r.message;
-  if (presetsOrder.current(ticket)) applyServerEvent({ imagePresets: r.value });
-  return null;
+  const r = await imageAct("start ComfyUI", () => call("image.start", {}, { onResult: (imagePresets, sync) => { if (newer(IMAGE_PRESETS, sync)) applyServerEvent({ imagePresets }); } }));
+  return r.ok ? null : r.message;
 }
 
 const SOURCE_WORDS = { folder: "folder", file: "file", sqlite: "database" } as const;

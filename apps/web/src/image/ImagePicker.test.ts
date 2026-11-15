@@ -16,7 +16,7 @@ vi.mock("react", async (original) => ({
 }));
 vi.mock("../lib/store/store.ts", () => ({ NA: "na", useStore: (fn: (s: unknown) => unknown) => fn(probe.state) }));
 vi.mock("../lib/session/index.ts", () => ({
-  ...Object.fromEntries(["downloadImageSetup", "loadImagePresets", "pickImage", "saveImageFolder", "startImage", "stopImageDownload"]
+  ...Object.fromEntries(["downloadImageSetup", "pickImage", "saveImageFolder", "startImage", "stopImageDownload"]
     .map((name) => [name, async () => { probe.calls.push(name); return null; }])),
   folderDialog: () => undefined,
 }));
@@ -147,15 +147,15 @@ it("a listener that refuses downloads (the phone's) shows no Download, Stop or d
 
 const blankButton = () => tree().find((n) => n.type === "button" && (n.props["className"] as string | undefined)?.includes("btn"));
 
-it("the empty picker reads the list when it opens and never starts ComfyUI; its button says Start ComfyUI when the app's is stopped", async () => {
+it("the empty picker reads nothing when it opens (the server sends the list) and never starts ComfyUI; its button says Start ComfyUI when the app's is stopped", async () => {
   picker({ imagePresets: { presets: [], readAt: 1 }, imageStatus: { state: "stopped" } });
   const button = blankButton();
-  expect(probe.calls).toEqual(["loadImagePresets"]);
+  expect(probe.calls).toEqual([]);
   expect(button && text(button)).toBe("Start ComfyUI");
   if (!button) throw new Error("no button");
   (button.props["onClick"] as () => void)();
   await Promise.resolve();
-  expect(probe.calls).toEqual(["loadImagePresets", "startImage"]);
+  expect(probe.calls).toEqual(["startImage"]);
   picker({ imagePresets: { presets: [], readAt: 1 }, imageStatus: { state: "missing" } });
   expect(text(blankButton()!)).toBe("Check again");
 });

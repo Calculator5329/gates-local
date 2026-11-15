@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-15: every window's image picker stays current without reopening
+
+- When a download of an image setup ends, or ComfyUI comes up, or a
+  picture settles on other files, or an image setting changes in any
+  window, the server sends the new list to every window. An image
+  picker already open in another window shows the setup as ready
+  without being closed and opened again.
+- An answer about images that left the server before a newer change
+  can no longer undo that change on screen: a download whose end was
+  shown does not come back, the engine's status does not step back
+  from busy, and a Set up images step does not go back to an earlier
+  one.
+- The picker, the "not set up" card and Settings no longer ask the
+  server again each time they open. A graphics card put in or taken
+  out is noticed when the server first sees it, so Settings offers
+  the card's build without being reopened.
+
 ## 2026-11-15: Stop and Send now are each one step on the server
 
 - Stop stops the reply and puts what waits behind it on hold in one

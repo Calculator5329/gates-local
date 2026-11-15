@@ -300,6 +300,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     ...engineTest ? { service: NO_UNIT } : {},
     thumbnail: (jobId, png) => makeThumbnail(dataDir, jobId, png),
     settings: () => services.settings.get(),
+    onSettings: (listener) => { services.settings.onChange(listener); },
     // One thing in memory: an image job hands off through the same owner every chat load does.
     memory: services.memory,
     // The default and the picker's tiers read the GPU as the picker does.

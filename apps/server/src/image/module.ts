@@ -43,6 +43,7 @@ const Workflow = S.Struct({ id: S.String, name: S.String, group: S.String, graph
 // folders: its model folders by kind (/internal/folder_paths), so a download needs no running ComfyUI
 const KnownFiles = S.Struct({ baseUrl: S.String, readAt: S.Finite, files: S.Record(S.String, S.Array(S.String)), classes: S.optional(S.Array(S.String)), workflows: S.optional(S.Array(Workflow)), folders: S.optional(S.Record(S.String, S.Array(S.String))) });
 type KnownFiles = typeof KnownFiles.Type;
+type ImageSettings = { imageGen: boolean; comfyUrl?: string; imageChoice?: ImageChoice; imageFolder?: string };
 
 export interface ImageDeps extends ComfyClientDeps {
   admit?(): void;
@@ -52,7 +53,9 @@ export interface ImageDeps extends ComfyClientDeps {
   push: Push;
   /** The finished picture's thumbnail (pictures/thumbs.ts), made before done; a failure is logged and the picture kept. */
   thumbnail?(jobId: string, png: Buffer): Promise<void>;
-  settings(): { imageGen: boolean; comfyUrl?: string; imageChoice?: ImageChoice; imageFolder?: string };
+  settings(): ImageSettings;
+  /** Every saved settings change, from any window: the image ones change the status or the presets every window shows. */
+  onSettings?(listener: (next: ImageSettings, previous: ImageSettings) => void): void;
   /**
    * The one owner of memory (gpu/memory.ts): a job's fit runs its handoff in its gate, so every chat
    * model leaves and the engine frees a setup it holds before the job measures. Absent (tests, the
@@ -353,7 +356,16 @@ export function createImageModule(deps: ImageDeps): ImageModule {
    */
   const stuck = new Map<string, { promptId: string; pid?: number }>();
   const emit: Push = (channel, payload) => { try { deps.push(channel, payload); } catch { /* a disconnected client cannot strand a GPU job */ } };
-  const update = (next: ImageStatus): ImageStatus => { status = next; emit("image.status", status); return status; };
+  /** The engine state the presets were last read again for: ComfyUI coming up or turning off changes the list, a job's busy and ready again does not. */
+  let presetsFor: ImageStatus["state"] | undefined;
+  const update = (next: ImageStatus): ImageStatus => {
+    status = next;
+    emit("image.status", status);
+    if ((next.state === "ready" || next.state === "off") && next.state !== presetsFor) { presetsFor = next.state; republish(); }
+    return status;
+  };
+  /** Read the presets again for every window: presets() pushes what it read. */
+  const republish = () => { void module.presets().catch((error: unknown) => log(`presets not read again: ${detail(error)}`)); };
   const config = () => {
     const settings = deps.settings();
     const own = settings.comfyUrl === undefined && deps.own?.installed() === true ? deps.own.address() : undefined;
@@ -703,6 +715,39 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     deps.memory?.engineGone();
     if (jobs.size === 0) update({ state: "stopped", owner: "none", baseUrl, ...ownMark(baseUrl), detail: "ComfyUI stopped on its own. It starts again when you make an image; its log says why." });
   });
+  /** presets() reads begun, and the last one whose list went out. */
+  let presetsBegun = 0, presetsSent = 0;
+  const readPresets = async (): Promise<ImagePresets> => {
+    const cfg = config();
+    if (!cfg.enabled) return { presets: [], current: currentChoice() };
+    const comfy = client(cfg.baseUrl);
+    if (await comfy.healthy()) {
+      try {
+        const [{ lists, ...read }, folders] = await Promise.all([comfy.catalog(), comfy.folders()]);
+        remember(cfg.baseUrl, lists, { ...read, ...folders === undefined ? {} : { folders } });
+      } catch (error) { log(`ComfyUI file list not read: ${detail(error)}`); }
+    }
+    const room = await readRoom();
+    const last = knownFiles();
+    const disk = await diskRow(cfg);
+    const onDisk = disk === undefined ? {} : { disk };
+    if (last === undefined) return { presets: [], current: currentChoice(), ...roomWords(room), ...onDisk };
+    const { ready, others } = listPresets(last, extras(), room, lastRam);
+    const tiers = tiersFor(room);
+    const tag = <T extends { id: string }>(p: T): T => { const t = tiers.find((x) => sameRow(x.preset, p.id)); return t === undefined ? p : { ...p, tier: t.tier }; };
+    const counted = await Promise.all(others.map(async (p) => {
+      if (p.needs?.download !== true) return p;
+      const left = await leftToFetch(p.id, p.needs.files, cfg);
+      return left === undefined ? p : { ...p, needs: { ...p.needs, leftBytes: left } };
+    }));
+    // read after the last wait, so the list carries the download as its last push said
+    const download = lastDownload?.ended === true ? undefined : lastDownload;
+    // a pick of the Klein setup this card does not list runs as the one it lists: Klein is one row
+    const chosen = currentChoice();
+    const row = ready.find((p) => p.id !== chosen.preset.id && sameRow(p.id, chosen.preset.id) && p.sizes.some((z) => z.width === chosen.width && z.height === chosen.height));
+    const current = row === undefined ? chosen : { ...chosen, preset: row };
+    return { presets: ready.map(tag), ...counted.length > 0 ? { others: counted.map(tag) } : {}, readAt: last.readAt, current,...roomWords(room), ...download === undefined ? {} : { download }, ...onDisk };
+  };
   const module: ImageModule = {
     current: () => status,
     engine: () => {
@@ -728,35 +773,13 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       const files = knownFiles();
       return files !== undefined && roomWords(lastRoom).noGpu === undefined && listPresets(files, extras(), lastRoom, lastRam).ready.length > 0;
     },
+    // Every read goes to every window too, so no window reads again to learn what another window's
+    // action changed; a read begun earlier that ends later answers its asker but is not pushed.
     async presets() {
-      const cfg = config();
-      if (!cfg.enabled) return { presets: [], current: currentChoice() };
-      const comfy = client(cfg.baseUrl);
-      if (await comfy.healthy()) {
-        try {
-          const [{ lists, ...read }, folders] = await Promise.all([comfy.catalog(), comfy.folders()]);
-          remember(cfg.baseUrl, lists, { ...read, ...folders === undefined ? {} : { folders } });
-        } catch (error) { log(`ComfyUI file list not read: ${detail(error)}`); }
-      }
-      const room = await readRoom();
-      const last = knownFiles();
-      const disk = await diskRow(cfg);
-      const onDisk = disk === undefined ? {} : { disk };
-      if (last === undefined) return { presets: [], current: currentChoice(), ...roomWords(room), ...onDisk };
-      const { ready, others } = listPresets(last, extras(), room, lastRam);
-      const tiers = tiersFor(room);
-      const tag = <T extends { id: string }>(p: T): T => { const t = tiers.find((x) => sameRow(x.preset, p.id)); return t === undefined ? p : { ...p, tier: t.tier }; };
-      const download = lastDownload?.ended === true ? undefined : lastDownload;
-      const counted = await Promise.all(others.map(async (p) => {
-        if (p.needs?.download !== true) return p;
-        const left = await leftToFetch(p.id, p.needs.files, cfg);
-        return left === undefined ? p : { ...p, needs: { ...p.needs, leftBytes: left } };
-      }));
-      // a pick of the Klein setup this card does not list runs as the one it lists: Klein is one row
-      const chosen = currentChoice();
-      const row = ready.find((p) => p.id !== chosen.preset.id && sameRow(p.id, chosen.preset.id) && p.sizes.some((z) => z.width === chosen.width && z.height === chosen.height));
-      const current = row === undefined ? chosen : { ...chosen, preset: row };
-      return { presets: ready.map(tag), ...counted.length > 0 ? { others: counted.map(tag) } : {}, readAt: last.readAt, current,...roomWords(room), ...download === undefined ? {} : { download }, ...onDisk };
+      const begun = ++presetsBegun;
+      const value = await readPresets();
+      if (begun > presetsSent) { presetsSent = begun; emit("image.presets", value); }
+      return value;
     },
     async start() {
       if (closed) throw imageError("shutting-down", "Image generation is shutting down.");
@@ -829,8 +852,11 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       let stage = "image-config";
       /** The setup this job handed memory to, while it loads: settled at done, ended on a failure. */
       let staged: Want | undefined;
+      // reached sampling once: every window, and one opened later, can tell a later "loading" is not the cold first load
+      let sampled = false;
       const event = (state: ImageEvent["state"], rest: Partial<ImageEvent> = {}, picture?: PictureFacts) => {
-        const payload: ImageEvent = { jobId, ...params.threadId ? { threadId: params.threadId } : {}, state, choice, ...same(choice, sent) ? {} : { sent }, ...group ? { group } : {}, ...rest };
+        if (rest.stage === "sampling" || rest.stage === "decoding") sampled = true;
+        const payload: ImageEvent = { jobId, ...params.threadId ? { threadId: params.threadId } : {}, state, choice, ...same(choice, sent) ? {} : { sent }, ...group ? { group } : {}, ...sampled ? { sampled: true } : {}, ...rest };
         deps.store.saveImageJob(payload, prompt, picture);
         emit("image.event", payload);
       };
@@ -865,6 +891,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
               if (settled === undefined) throw Object.assign(imageError("wont-fit", NO_GPU), { said: NO_GPU });
               if (same(settled, choice)) return;
               choice = settled;
+              // the job read ComfyUI's files and settled to others than the button names: every window's list
+              republish();
               ({ size } = resolveChoice(choice, extras()));
               event("running", { progress: 0 });
             };
@@ -1084,6 +1112,14 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       await module.stopIdle();
     },
   };
+  // A settings change from any window: generation or its address asks ComfyUI again (the status
+  // push), and the presets go to every window; the folder (its free space) and the pick change only the presets.
+  deps.onSettings?.((next, previous) => {
+    if (closed) return;
+    if (next.imageGen !== previous.imageGen || next.comfyUrl !== previous.comfyUrl) {
+      void module.status().catch((error: unknown) => log(`ComfyUI not asked again: ${detail(error)}`)).then(republish);
+    } else if (next.imageFolder !== previous.imageFolder || JSON.stringify(next.imageChoice) !== JSON.stringify(previous.imageChoice)) republish();
+  });
   /** Plans the files to fetch, then fetches them in the background (module.download). */
   async function startDownload(id: string, cfg: Cfg, controller: AbortController): Promise<{ files: string[] }> {
     // Never needs ComfyUI running, and never starts it: its list and folders are read only when it

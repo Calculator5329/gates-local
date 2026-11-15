@@ -14,7 +14,7 @@
       "apps/web/src/composer/Composer.tsx": 14,
       "apps/web/src/composer/file-drop.tsx": 1,
       "apps/web/src/settings/LibraryImports.tsx": 2,
-      "apps/web/src/settings/Settings.tsx": 4,
+      "apps/web/src/settings/Settings.tsx": 3,
       "apps/web/src/thread/Thread.tsx": 6,
       "apps/web/src/thread/markdown.tsx": 1,
       "apps/web/src/thread/paced.ts": 2
