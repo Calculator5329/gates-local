@@ -31,6 +31,7 @@ import { defaultSettings, SETTINGS_FILE_NAME, SETTINGS_FILE_VERSION } from "../.
 import { encodeManifest, signManifest } from "../../server/src/update/release-manifest.ts";
 import type { GatesLocalBridge } from "../src/bridge.ts";
 import { artifactFor, cleanEnv, dataFolderIn, launchCopy, ownPlatform, watchGit, workFolder } from "./packaged-copy.ts";
+import { downloadedLine } from "./update-words.ts";
 
 const [testBuild] = process.argv.slice(2);
 if (!testBuild) throw new Error("Pass the test build.");
@@ -194,8 +195,8 @@ async function open(artifact: string, name: string, feed: Feed, automatic: boole
 
 const automaticSwitch = (copy: Copy) => copy.group.getByRole("switch", { name: "Check for updates automatically" });
 const downloadButton = (copy: Copy) => copy.group.getByRole("button", { name: "Download", exact: true });
-/** A checked download this copy cannot install: its folder, to run it from there (decision 24). */
-const openFolder = (copy: Copy) => copy.group.getByRole("button", { name: "Open folder", exact: true });
+/** A checked download's one next step: Restart to update, or Open folder for a copy that keeps the file (decision 24). */
+const nextStep = (copy: Copy) => copy.group.getByRole("button", { name: /^(Restart to update|Open folder)$/ });
 
 const shots: string[] = [];
 async function shoot(copy: Copy, name: string): Promise<void> {
@@ -211,7 +212,8 @@ async function checkNow(copy: Copy): Promise<void> {
 const updates = (copy: Copy) => path.join(copy.dataFolder, "updates");
 const folders = (copy: Copy) => existsSync(updates(copy)) ? readdirSync(updates(copy)).toSorted() : [];
 const artifactReads = (feed: Feed, version: string) => feed.reads.filter((r) => r.version === version);
-const downloaded = (v: string) => `Update ${v} is downloaded and checked. ${process.platform === "win32" ? "Run this installer to update." : "Put it in place of this file."}`;
+// The checked download's first sentence, the same on every copy; what follows depends on whether this copy can put it in place.
+const downloaded = (v: string) => downloadedLine(v);
 const bad = (v: string) => `The download of version ${v} did not match the signed release list, so it was deleted.`;
 const downloadingLine = (v: string) => new RegExp(`Downloading version ${v.replaceAll(".", "\\.")} \\([1-9]\\.\\d of 3\\.0 MB\\)\\. You can keep chatting\\.`);
 
@@ -257,8 +259,8 @@ try {
   const midway = readdirSync(path.join(updates(probe), v(1))).toSorted();
   expect(midway).toEqual([`${fileFor(v(1))}.part`, "release.json", "release.json.sig"].toSorted());
   firstGate.open();
-  await expect(probe.group).toContainText(downloaded(v(1)), { timeout: 30_000 });
-  await expect(openFolder(probe)).toBeVisible();
+  await expect(probe.group).toContainText(downloaded(v(1)), { timeout: 30_000, useInnerText: true });
+  await expect(nextStep(probe)).toBeEnabled();
   await shoot(probe, "1-downloaded");
   const firstRequest = fixture.requests[0];
   if (firstRequest === undefined) throw new Error("Settings showed a download the feed never served.");
@@ -317,7 +319,8 @@ try {
   expect(folders(probe)).toEqual([]);
   await shoot(probe, "4-offered");
   await downloadButton(probe).click();
-  await expect(probe.group).toContainText(downloaded(v(4)), { timeout: 30_000 });
+  await expect(probe.group).toContainText(downloaded(v(4)), { timeout: 30_000, useInnerText: true });
+  await expect(nextStep(probe)).toBeEnabled();
   await expect(downloadButton(probe)).toHaveCount(0);
   await shoot(probe, "4-downloaded-after-click");
   expect(artifactReads(fixture, v(4)).map((r) => r.written)).toEqual([SIZE]);

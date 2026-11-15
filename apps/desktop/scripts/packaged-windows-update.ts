@@ -30,6 +30,7 @@ import path from "node:path";
 import type { GatesLocalBridge } from "../src/bridge.ts";
 import { PENDING_FILE, UNINSTALLER } from "../src/installed-update/windows.ts";
 import { artifactFor, cleanEnv, watchGit } from "./packaged-copy.ts";
+import { downloadedLine } from "./update-words.ts";
 import { Checks, freePort, message, openUpdates, pause, publicKeyBase64, restartButton, rpc, seedData, shoot, startFeed, threadTitles, until, waitDownloaded } from "./installed-update-probe.ts";
 
 type Round = "IU-W1" | "IU-W2" | "IU-W3";
@@ -279,7 +280,8 @@ try {
   phase("opening Settings › Updates in N");
   const group = await c.step("Settings › Updates in N", () => openUpdates(page, notes));
   phase("waiting for N+1 to download");
-  const box = await c.step("N+1 downloaded and checked", () => waitDownloaded(group));
+  // Settled: Restart turns on only once the go-back installer has been looked for, and the go-back line is there with it.
+  const box = await c.step("N+1 downloaded and checked", () => waitDownloaded(group, downloadedLine(newerVersion, "windows"), "restart"));
   report["beforeClick"] = box;
   // The row's further lines are its tooltip; the server's lines are the words.
   const lines = await rpc(page, "update.status", {}).then(s => (s.lastCheck?.state === "newer" ? s.lastCheck.lines : []));

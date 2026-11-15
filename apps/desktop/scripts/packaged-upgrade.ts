@@ -37,8 +37,9 @@ import { WATCH_FLAG } from "../src/installed-update/launch-kinds.ts";
 import { rowOf, STOP_POINTS, type Row, type StopPoint } from "../src/installed-update/stop-points.ts";
 import { approve, INSTALLED_APPROVAL_MS, transactionFile, UPDATES_FOLDER, writeIntent } from "../src/installed-update/transaction.ts";
 import { writeResult } from "../src/installed-update/results.ts";
-import { cannotReplace, earlierFailure, otherCopy, rolledBack, secondLaunch, startedTooLate, stuck, updated, watcherDied, type CannotReplace } from "../src/installed-update/words.ts";
+import { earlierFailure, otherCopy, rolledBack, secondLaunch, startedTooLate, stuck, updated, watcherDied, type CannotReplace } from "../src/installed-update/words.ts";
 import { fuseProblem, thisMachine } from "./appimage-fuse.ts";
+import { downloadedLine, footerName } from "./update-words.ts";
 import { Checks, freePort, message, openUpdates, pause, personClick, publicKeyBase64, restartButton, rpc, seedData, sha512Of, shoot, shootNote, startFeed, until, waitDownloaded, type IuFeed, type PageDocument } from "./installed-update-probe.ts";
 
 function digest(file: string): string {
@@ -546,7 +547,7 @@ async function startAndRestart(rig: Rig, c: Checks, shots?: string): Promise<{ f
   const first = rig.launch({ port: rig.ports.first, stop: true });
   const page = await c.step("N's window", () => rig.connect(rig.ports.first));
   const group = await c.step("Settings › Updates in N", () => openUpdates(page, rig.notes));
-  await c.step("N+1 downloaded and checked", () => waitDownloaded(group));
+  await c.step("N+1 downloaded and checked", () => waitDownloaded(group, downloadedLine(rig.run.newerVersion), "restart"));
   const files = shots === undefined ? [] : await shoot(page, group, rig.run.output, shots);
   const footer = await page.locator(".ibtn.upd").first().getAttribute("aria-label", { timeout: 2_000 }).catch(() => null);
   await c.step("Restart to update in Settings", () => expect(restartButton(group)).toBeVisible({ timeout: 5_000 }));
@@ -908,7 +909,7 @@ function earlierFailureRow(run: Run): Promise<Outcome> {
     await c.step("the earlier failure page", () => expect(page.locator("main")).toContainText(earlierFailure().text, { timeout: 60_000 }));
     await personClick(page.getByRole("link", { name: "Start Gates Local", exact: true }), rig.notes);
     const group = await c.step("Settings › Updates", () => openUpdates(page, rig.notes));
-    await c.step("N+1 downloaded and checked", () => expect(group.locator(".box")).toContainText(/An earlier update did not finish|is downloaded and checked/, { timeout: 180_000 }));
+    await c.step("N+1 downloaded and checked", () => expect(group.locator(".box")).toContainText(earlierFailure().text, { timeout: 180_000 }));
     const text = await group.locator(".box").innerText();
     c.that(text.split(earlierFailure().text).length - 1 === 1, `the Updates row says: ${text.split("\n").join(" / ")}`);
     c.that(await restartButton(group).count() === 0, "Restart to update is offered while the earlier failure is undismissed");
@@ -950,12 +951,15 @@ async function refusalSeen(rig: Rig, c: Checks, details: Record<string, unknown>
   rig.launch({ port: rig.ports.first, ...(command === undefined ? {} : { command }), env });
   const page = await c.step("the window", () => rig.connect(rig.ports.first));
   const group = await c.step("Settings › Updates", () => openUpdates(page, rig.notes));
-  const text = await c.step("N+1 downloaded or offered", () => waitDownloaded(group));
-  const words = cannotReplace(reason, rig.run.newerVersion).text;
-  c.that(text.includes(words), `the Updates group says: ${text.split("\n").join(" / ")}`);
+  // The download is kept for the person; its line says why this copy does not put it in place (the server names the running AppImage, if any).
+  const words = downloadedLine(rig.run.newerVersion, reason, reason === "not-appimage" ? null : realpathSync(rig.program), "linux");
+  const text = await c.step("N+1 downloaded and kept", () => waitDownloaded(group, words, "folder"));
+  c.that(text.split(words).length - 1 === 1, `the Updates group says: ${text.split("\n").join(" / ")}`);
   c.that(await restartButton(group).count() === 0, "Restart to update is offered");
-  c.that(await group.getByRole("link", { name: "Open the release page" }).count() === 1, "no release page link: no next step");
-  details["footer"] = await page.locator(".ibtn.upd").first().getAttribute("aria-label", { timeout: 2_000 }).catch(() => null);
+  const footer = await page.locator(".ibtn.upd").first().getAttribute("aria-label", { timeout: 2_000 }).catch(() => null);
+  const name = footerName(await rpc(page, "update.status", {}));
+  c.that(footer === name, `the footer is named ${JSON.stringify(footer)}, not ${JSON.stringify(name)}`);
+  details["footer"] = footer;
   details["words"] = words;
 }
 

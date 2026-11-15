@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-14: A package can no longer carry an older page than its source
+
+- `pnpm --filter @gates-local/desktop package:linux` (and `package:win`)
+  packs `apps/web/dist` as it is, without building it. It now stops with
+  the command to run instead when the built page is missing or older than
+  any file it is built from. The root `pnpm package:linux` and
+  `pnpm package:win` build the page first and are unchanged.
+
 ## 2026-11-14: The composer says the missing model once
 
 - With the first model offered above the composer, the message box keeps

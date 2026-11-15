@@ -17,6 +17,7 @@ import { encodeManifest, signManifest } from "../../server/src/update/release-ma
 import type { GatesLocalBridge } from "../src/bridge.ts";
 import { findFreePort } from "../src/supervisor.ts";
 import { artifactFor } from "./packaged-copy.ts";
+import { settledDownload } from "./update-words.ts";
 
 // Ports the runtime and ComfyUI own on a real machine; nothing here uses them.
 export const FORBIDDEN_PORTS = new Set([8188, ...Array.from({ length: 11 }, (_, i) => 11434 + i)]);
@@ -207,11 +208,10 @@ export async function openUpdates(page: Page, notes: string[], timeoutMs = 90_00
   return group;
 }
 
-/** The download of the newer version is checked: either Restart to update, or the words for a copy that cannot use it. */
-export async function waitDownloaded(group: Locator): Promise<string> {
+/** The download of the newer version is checked and settled: its line (update-words.ts) and its next step, Restart to update or Open folder. */
+export async function waitDownloaded(group: Locator, line: string, next: "restart" | "folder"): Promise<string> {
   // The state is row 2 (its label and its control) and the block under it.
-  await expect(group.locator(".box")).toContainText(/Restart to update|cannot install it by itself|cannot replace its own file|cannot update itself/, { timeout: 180_000 });
-  return await group.locator(".box").innerText();
+  return await settledDownload(group.locator(".box"), line, next);
 }
 
 export const restartButton = (group: Locator) => group.getByRole("button", { name: "Restart to update", exact: true });

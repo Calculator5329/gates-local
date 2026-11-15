@@ -1,5 +1,6 @@
 // Build an offline-installable AppImage or NSIS installer. Staging stays in the user's cache;
 // only the distributable and builder reports go to the ignored dist folder.
+import "./web-dist-check.ts";
 import "./build.ts";
 import { build as bundle } from "esbuild";
 import { build as packageApp, Platform } from "electron-builder";
