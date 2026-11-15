@@ -86,6 +86,8 @@ export interface MemoryOwnerDeps {
   /** The pause between reads; a test passes one that moves its fake clock. */
   readonly sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   readonly log?: (line: string) => void;
+  /** Tests only (gpu/rules.test.ts): turns one guard off, so the test that needs it is seen failing. */
+  readonly faultForTest?: "ask-replying-models";
 }
 
 /**
@@ -109,8 +111,25 @@ export interface LoadedRecord {
   left(model: string): number | undefined;
   /** A new /api/ps of the current runtime; returns the app's models it no longer lists, with their num_ctx. */
   observe(listed: readonly Pick<LoadedModel, "name">[]): readonly (readonly [string, number])[];
-  /** A runtime switch: nothing is known about what the new runtime holds. */
-  clear(): void;
+  /**
+   * A runtime switch began: nothing is known about what the new runtime holds. Returns what the
+   * record held, for a switch that is then refused (restore).
+   */
+  clear(): LoadedSnapshot;
+  /** The switch was refused and the old runtime stays: what `clear` took is the record again. */
+  restore(kept: LoadedSnapshot): void;
+}
+
+/** What a LoadedRecord held when a switch cleared it: the listed tags, and the app's with their num_ctx. */
+export interface LoadedSnapshot {
+  readonly listed: readonly string[];
+  readonly ours: readonly (readonly [string, number])[];
+}
+
+/** `kept` without `model`: it left while the switch was deciding. */
+export function snapshotWithout(kept: LoadedSnapshot, model: string): LoadedSnapshot {
+  const tag = canonicalTag(model);
+  return { listed: kept.listed.filter((t) => t !== tag), ours: kept.ours.filter(([t]) => t !== tag) };
 }
 
 /** `holdsOne`: the Ollama it records holds one model at a time, so a load replaces whatever was listed. */
@@ -148,8 +167,15 @@ export function createLoadedRecord(holdsOne: () => boolean = () => false): Loade
       return gone;
     },
     clear() {
+      const kept: LoadedSnapshot = { listed: [...listed], ours: [...ours] };
       listed = new Set();
       ours.clear();
+      return kept;
+    },
+    restore(kept) {
+      listed = new Set(kept.listed);
+      ours.clear();
+      for (const [tag, numCtx] of kept.ours) ours.set(tag, numCtx);
     },
   };
 }
@@ -259,7 +285,7 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
       log(`reading /api/ps before a handoff failed: ${(e as Error).message}`);
       return { left: [], stayed: undefined };
     }
-    const replying = new Set(deps.replying().map(canonicalTag));
+    const replying = new Set(deps.faultForTest === "ask-replying-models" ? [] : deps.replying().map(canonicalTag));
     // The model wanted stays, at any context: at another one Ollama replaces it itself, and the fit
     // counts the memory its copy holds (the context asked for may not be the one it runs at).
     const kept = (m: LoadedModel) => want.kind === "chat" && canonicalTag(m.name) === canonicalTag(want.model);
@@ -289,7 +315,11 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
       await sleep(pollMs, signal);
     }
     const left = asked.filter((m) => !still.has(canonicalTag(m)));
-    for (const model of left) deps.onUnloaded?.(model);
+    // The wait above can outlast a switch of runtime: what left the old one says nothing about
+    // the one in use now, which may list a model of the same name. No address (a switch is still
+    // deciding): the record is told, so a refused switch does not put the model back.
+    const url = deps.ollamaUrl();
+    if (url === undefined || url === baseUrl) for (const model of left) deps.onUnloaded?.(model);
     return { left, stayed: [...busy, ...asked.filter((m) => still.has(canonicalTag(m)))], ...target };
   };
 

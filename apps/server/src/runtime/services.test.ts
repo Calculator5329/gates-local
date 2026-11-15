@@ -550,6 +550,37 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
     await r.done();
   });
 
+  it("a refused switch forgets nothing: the model the app loaded is still the app's, and a load at another context reloads it", async () => {
+    // The old runtime lists what it was asked to load, at the context asked for.
+    const loaded = new Map<string, number>();
+    const r = await rig({
+      "GET /api/ps": (_b, res) => json(res, 200, { models: [...loaded].map(([name, ctx]) => ({ name, size: 7_000_000_000, size_vram: 7_000_000_000, context_length: ctx })) }),
+      "POST /api/generate": (b, res) => {
+        const { model, keep_alive, options } = b as { model: string; keep_alive?: unknown; options?: { num_ctx?: number } };
+        if (keep_alive === 0) loaded.delete(model);
+        else loaded.set(model, options?.num_ctx ?? 0);
+        json(res, 200, { model, response: "", done: true });
+      },
+    }, { turnDrainMs: 200 });
+    expect(await r.s.loader.load(MODEL, 16384)).toMatchObject({ state: "ready" });
+    expect(r.s.loader.appLoadedModels()).toEqual([MODEL]);
+    // A turn the switch cannot end within the drain bound.
+    const stuck = r.s.loader.reserve(MODEL);
+    const failed = await settled(r.s.runtime.setMode("app"), "runtime switch");
+    expect(failed).toMatchObject({ rejected: expect.objectContaining({ message: expect.stringMatching(/still running/) }) });
+    expect(r.s.runtime.mode()).toBe("system");
+    stuck.end();
+    // The old runtime stayed, and so did the model in it: the record still says the app loaded it.
+    expect(loaded.has(MODEL)).toBe(true);
+    expect(r.s.loader.appLoadedModels(), "the record after a refused switch").toEqual([MODEL]);
+    expect(r.s.memory.loaded.oursAt(MODEL)).toBe(16384);
+    const again = await r.s.loader.load(MODEL, 8192);
+    expect(again.message ?? "", "never taken for another program's model").not.toMatch(/another program/);
+    expect(again).toMatchObject({ state: "ready", numCtx: 8192 });
+    expect(loaded.get(MODEL), "the load at the new context reached the runtime").toBe(8192);
+    await r.done();
+  });
+
   it("R4-07: after a failed switch Settings names the runtime still serving, and choosing the new mode again retries", async () => {
     const r = await rig({}, { turnDrainMs: 200 });
     const stuck = r.s.loader.reserve(MODEL);

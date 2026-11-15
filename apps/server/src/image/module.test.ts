@@ -16,7 +16,7 @@ import { comfyInfo, KLEIN_COMPACT_FILES, KLEIN_FILES, MOSS_FILES, SDXL_FILES, ZI
 import { createGpuLease } from "../gpu/lease.ts";
 import { openThreadStore } from "../threads/store.ts";
 import { startWsServer } from "../ws/server.ts";
-import { createImageModule, IMAGES_UNSET, imageFitError, imageRoom, isLocalHost, ranLong, RUN_LIMIT_MS, waitedLong, type ImageDeps, type ImageModule } from "./module.ts";
+import { createImageModule, fitSentence, IMAGES_UNSET, imageFitError, imageRoom, isLocalHost, ranLong, RUN_LIMIT_MS, STUCK_HOLD_MS, STUCK_HOLD_NOTE, waitedLong, type ImageDeps, type ImageModule } from "./module.ts";
 import { createMemoryOwner } from "../gpu/memory.ts";
 import { createImageHandlers } from "./handlers.ts";
 import { createComfyService } from "./service.ts";
@@ -147,7 +147,8 @@ async function fixture(options: Partial<ImageDeps> & OwnerOptions = {}, realOlla
     service: {
       inspect: async () => { calls.push("inspect"); return { present, active: activeOverride ?? answering, activeState: activeState ?? ((activeOverride ?? answering) ? "active" : "inactive"), pid }; },
       start: async () => { calls.push("start"); answering = true; activeState = "active"; if (freeAfterStart !== undefined) freeBytes = freeAfterStart; },
-      stop: async () => { calls.push("stop"); answering = false; activeState = "inactive"; },
+      // a stopped engine's queue goes with its process
+      stop: async () => { calls.push("stop"); answering = false; activeState = "inactive"; running.delete("127.0.0.1:8188"); },
     },
     socket: () => {
       socket = new EventTarget();
@@ -888,20 +889,103 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     await f.module.stopIdle(); expect(f.calls).not.toContain("start"); expect(f.calls).not.toContain("stop");
   });
 
-  it("bounds cancellation at 30 seconds, releases the lease and warns about the running prompt", async () => {
+  it("a stopped picture the engine on this card has not let go of keeps the card: a chat gets it only once the prompt has left the engine's queue", async () => {
+    // The engine may still be loading the picture's files: a chat that got the card now would
+    // measure and load beside it.
     const f = await fixture(); f.configure({ hold: true, stuck: true }); vi.useFakeTimers();
     const { jobId } = await f.module.generate({ prompt: "a tree" });
     await vi.waitFor(() => expect(f.events.some((e) => e.progress === 0.5)).toBe(true));
     f.module.cancel(jobId);
+    let chat: (() => void) | undefined;
+    const claimed = f.lease.acquire("chat").then((release) => { chat = release; });
     await vi.advanceTimersByTimeAsync(29_999);
     expect(f.lease.status().holder).toBe("image");
-    await vi.advanceTimersByTimeAsync(1);
-    const holder = f.lease.status().holder, status = f.module.current();
-    // Also let the unfixed implementation finish so a failed probe cannot hang cleanup.
-    f.configure({ stuck: false }); await vi.advanceTimersByTimeAsync(200); await f.module.wait(jobId);
-    expect(holder).toBeNull();
-    expect(status).toMatchObject({ state: "error", detail: expect.stringMatching(/ComfyUI did not release the image job within 30 s.*may still be running/) });
-    expect(f.events.at(-1)?.state).toBe("cancelled");
+    // past the 30 s a Stop waits, and well past it
+    await vi.advanceTimersByTimeAsync(60_001);
+    const then = { holder: f.lease.status().holder, chat: chat !== undefined, status: f.module.current(), last: f.events.at(-1), stops: f.calls.filter((c) => c === "stop").length };
+    // the engine lets go (a failed case ends here too, so nothing is left running)
+    f.configure({ stuck: false }); await vi.advanceTimersByTimeAsync(12_000); await f.module.wait(jobId); await claimed;
+    expect(then.holder, "who holds the card while the prompt is still in the engine's queue").toBe("image");
+    expect(then.chat, "a chat was given the card beside the stuck picture").toBe(false);
+    expect(then.status).toMatchObject({ state: "busy", detail: expect.stringMatching(/has not stopped the picture yet/) });
+    expect(then.last).toMatchObject({ jobId, state: "running", phase: "stopping" });
+    expect(then.stops, "nothing is stopped while it waits").toBe(0);
+    // once the prompt has left: the picture is cancelled, the engine is ready, and the chat has the card
+    expect(f.events.at(-1)).toMatchObject({ jobId, state: "cancelled" });
+    expect(f.module.current()).toMatchObject({ state: "ready" });
+    expect(f.module.current().detail).toBeUndefined();
+    expect(f.lease.status()).toMatchObject({ holder: "chat", holders: 1 });
+    chat?.();
+  });
+
+  it("a stuck picture on an engine the app started: after the hold limit the app stops that engine, and the card is free", async () => {
+    const f = await fixture(); f.configure({ answering: false, hold: true, stuck: true }); vi.useFakeTimers();
+    const { jobId } = await f.module.generate({ prompt: "a tree" });
+    await vi.waitFor(() => expect(f.events.some((e) => e.progress === 0.5)).toBe(true));
+    expect(f.calls).toContain("start");
+    f.module.cancel(jobId);
+    await vi.advanceTimersByTimeAsync(30_000 + STUCK_HOLD_MS - 1_000);
+    expect(f.lease.status().holder).toBe("image");
+    expect(f.calls).not.toContain("stop");
+    await vi.advanceTimersByTimeAsync(2_000); await f.module.wait(jobId);
+    expect(f.calls.filter((c) => c === "stop")).toHaveLength(1);
+    expect(f.lease.status().holder).toBeNull();
+    expect(f.events.at(-1)).toMatchObject({ jobId, state: "cancelled" });
+    expect(f.module.current()).toMatchObject({ state: "stopped", owner: "none" });
+    // the next picture starts the engine again and runs
+    f.configure({ hold: false, stuck: false });
+    const next = await f.module.generate({ prompt: "a tree" });
+    await vi.advanceTimersByTimeAsync(1_000); await f.module.wait(next.jobId);
+    expect(f.events.at(-1), f.events.at(-1)?.message).toMatchObject({ jobId: next.jobId, state: "done" });
+    expect(f.calls.filter((c) => c === "start")).toHaveLength(2);
+  });
+
+  it("a stuck picture on an engine the app did not start: that engine is never stopped, and after the hold limit the card is given back with the warning", async () => {
+    const f = await fixture(); f.configure({ hold: true, stuck: true }); vi.useFakeTimers();
+    const { jobId } = await f.module.generate({ prompt: "a tree" });
+    await vi.waitFor(() => expect(f.events.some((e) => e.progress === 0.5)).toBe(true));
+    f.module.cancel(jobId);
+    await vi.advanceTimersByTimeAsync(30_000 + STUCK_HOLD_MS - 1_000);
+    expect(f.lease.status().holder).toBe("image");
+    await vi.advanceTimersByTimeAsync(2_000); await f.module.wait(jobId);
+    expect(f.lease.status().holder).toBeNull();
+    expect(f.calls).not.toContain("stop"); expect(f.calls).not.toContain("start");
+    expect(f.module.current()).toMatchObject({ state: "error", owner: "external", detail: expect.stringMatching(/may still be running/) });
+    expect(f.events.at(-1)).toMatchObject({ jobId, state: "cancelled" });
+    // the next picture is refused in its own words while that prompt is still there
+    const next = await f.module.generate({ prompt: "a tree" }); await f.module.wait(next.jobId);
+    expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "image-busy" });
+    expect(f.module.current().detail).toContain("earlier image from this app");
+    expect(f.calls).not.toContain("stop");
+  });
+
+  it("a stuck picture whose engine goes away gives the card back then, before the hold limit", async () => {
+    const f = await fixture(); f.configure({ hold: true, stuck: true }); vi.useFakeTimers();
+    const { jobId } = await f.module.generate({ prompt: "a tree" });
+    await vi.waitFor(() => expect(f.events.some((e) => e.progress === 0.5)).toBe(true));
+    f.module.cancel(jobId);
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(f.lease.status().holder).toBe("image");
+    // the person closes that ComfyUI
+    f.configure({ answering: false, activeState: "inactive" });
+    await vi.advanceTimersByTimeAsync(5_000); await f.module.wait(jobId);
+    expect(f.lease.status().holder).toBeNull();
+    expect(f.events.at(-1)).toMatchObject({ jobId, state: "cancelled" });
+    expect(f.module.current()).toMatchObject({ state: "stopped" });
+    expect(f.calls).not.toContain("stop");
+  });
+
+  it("closing the app does not wait out a stuck picture: the hold ends at once and an engine the app started is stopped", async () => {
+    const f = await fixture(); f.configure({ answering: false, hold: true, stuck: true }); vi.useFakeTimers();
+    const { jobId } = await f.module.generate({ prompt: "a tree" });
+    await vi.waitFor(() => expect(f.events.some((e) => e.progress === 0.5)).toBe(true));
+    f.module.cancel(jobId);
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(f.lease.status().holder).toBe("image");
+    const closed = f.module.close();
+    await vi.advanceTimersByTimeAsync(100); await closed;
+    expect(f.lease.status().holder).toBeNull();
+    expect(f.calls.filter((c) => c === "stop")).toHaveLength(1);
   });
 
   it("a test's address (GATES_LOCAL_COMFY_URL) with none in Settings: used, and comfyui.service is never inspected or started", async () => {
@@ -1030,7 +1114,8 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
   });
 
   it("remembers its own prompt stuck past the cancel deadline: refuses in its own words, and idle stop still stops the app's ComfyUI", async () => {
-    const f = await fixture(); f.configure({ answering: false, hold: true, stuck: true }); vi.useFakeTimers();
+    // an engine that draws on the processor holds nothing on the card: its claim is not kept for a stuck prompt
+    const f = await fixture(); f.configure({ answering: false, hold: true, stuck: true, cpu: true }); vi.useFakeTimers();
     const { jobId } = await f.module.generate({ prompt: "a tree" });
     await vi.waitFor(() => expect(f.events.some((e) => e.progress === 0.5)).toBe(true));
     f.module.cancel(jobId);
@@ -1044,7 +1129,8 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
   });
 
   it("keeps the app's own stuck prompt when another address's prompt also gets stuck, so idle stop still stops the app's ComfyUI", async () => {
-    const f = await fixture(); f.configure({ answering: false, hold: true, stuck: true }); vi.useFakeTimers();
+    // both engines hold nothing on this card (one draws on the processor, one is another computer's)
+    const f = await fixture(); f.configure({ answering: false, hold: true, stuck: true, cpu: true }); vi.useFakeTimers();
     const first = await f.module.generate({ prompt: "a tree" });
     await vi.waitFor(() => expect(f.events.some((e) => e.progress === 0.5)).toBe(true));
     f.module.cancel(first.jobId); await vi.advanceTimersByTimeAsync(30_000); await f.module.wait(first.jobId);
@@ -2172,20 +2258,25 @@ describe("the card Image mode is judged by: each tier's row by its memory, no de
     expect(f.module.current().state).toBe("ready");
   });
 
-  it("a Stop on a card still gives up after 30 s, as before", async () => {
+  it("a Stop on a card past 30 s: the card still says it is stopping and the engine reads busy, until the engine lets go", async () => {
     const f = await fixture({ gpuStatus: async () => nvidia(16 * gib), idleMs: 3_600_000 }); f.files({ flux: true });
     f.configure({ hold: true, stuck: true }); vi.useFakeTimers();
     const { jobId } = await f.module.generate({ prompt: "a tree" });
     await vi.advanceTimersByTimeAsync(0);
     await vi.waitFor(() => expect(f.events.some((e) => e.progress === 0.5)).toBe(true));
     f.module.cancel(jobId);
-    await vi.advanceTimersByTimeAsync(30_200); await f.module.wait(jobId);
-    expect(f.module.current()).toMatchObject({ state: "error", detail: expect.stringMatching(/within 30 s/) });
-    f.configure({ stuck: false }); await vi.advanceTimersByTimeAsync(200);
+    await vi.advanceTimersByTimeAsync(30_200);
+    expect(f.module.current()).toMatchObject({ state: "busy", detail: STUCK_HOLD_NOTE });
+    expect(f.events.at(-1)).toMatchObject({ jobId, state: "running", phase: "stopping", progress: 0.5 });
+    expect(f.module.cancel(jobId)).toEqual({ cancelled: true });
+    f.configure({ stuck: false }); await vi.advanceTimersByTimeAsync(12_000); await f.module.wait(jobId);
+    expect(f.events.at(-1)).toMatchObject({ jobId, state: "cancelled" });
+    expect(f.module.current().state).toBe("ready");
   });
 
   it.each([
-    ["on a card", false, RUN_LIMIT_MS.card, 30_000],
+    // on a card the engine (one the app did not start) is given the hold after the 30 s as well
+    ["on a card", false, RUN_LIMIT_MS.card, 30_000 + STUCK_HOLD_MS],
     ["on the processor", true, RUN_LIMIT_MS.cpu, RUN_LIMIT_MS.cpu],
   ])("a picture past its limit %s whose engine has not let go says it is still stopping, never that it stopped", async (_, cpu, limit, wait) => {
     const f = await fixture({ gpuStatus: async () => cpu ? none : nvidia(16 * gib), idleMs: 3_600_000 }); f.files({ flux: true });
@@ -2405,5 +2496,18 @@ describe("one thing in memory: the image engine (WIN-MEM-03)", () => {
     expect(e.order.slice(mark)).toEqual(["measure"]);
     expect(end).toMatchObject({ state: "error", errorKind: "wont-fit" });
     expect(end.message).toMatch(/ComfyUI is running another job/);
+  });
+});
+
+describe("what an image refusal names", () => {
+  const whisper = { pid: 7, usedBytes: 2 * GIB, label: "whisper-server", role: "whisper" };
+
+  it("never tells a person to close whisper: alone on the card it names nothing", () => {
+    expect(fitSentence(15 * GIB, 14 * GIB, [whisper], [])).toBe("The image needs 15.0 GiB and 14.0 GiB is free.");
+  });
+
+  it("names the next program down when whisper holds the most", () => {
+    const smaller = { pid: 9, usedBytes: GIB, label: "Discord" };
+    expect(fitSentence(15 * GIB, 13 * GIB, [whisper, smaller], [])).toBe("The image needs 15.0 GiB and 13.0 GiB is free; Discord holds 1.0 GiB, close it.");
   });
 });

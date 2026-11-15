@@ -14,6 +14,12 @@ const text = (...lines: string[]) => `${lines.join("\n")}\n`;
 const PORT = { "apps/server/src/port.ts": text("export const port = 4310;") };
 const TYPES = { "apps/server/src/types.ts": text("export type Port = number;") };
 
+/** A factory with a guard and the test-only switch that leaves the guard out. */
+const DOOR = [
+  'type DoorOptions = { faultForTest?: "left-open" };',
+  'const createDoor = (options: DoorOptions = {}) => ({ shut: () => options.faultForTest !== "left-open" });',
+];
+
 const CASES: Case[] = [
   {
     rule: "gates/no-relative-import-across-packages",
@@ -90,6 +96,24 @@ const CASES: Case[] = [
         '  await holds(page, 800, () => page.locator("#tip.open").count(), 0);',
         "});",
       ),
+    },
+  },
+  {
+    rule: "gates/test-switch-stays-in-tests",
+    planted: {
+      "apps/server/src/door.ts": text(
+        ...DOOR,
+        'export const door = createDoor({ faultForTest: "left-open" });',
+      ),
+      "apps/server/src/latch.ts": text(
+        ...DOOR,
+        "// oxlint-disable-next-line gates/test-switch-stays-in-tests -- only while this is tried out",
+        'export const door = createDoor({ faultForTest: "left-open" });',
+      ),
+    },
+    fixed: {
+      "apps/server/src/door.ts": text(...DOOR, "export const door = createDoor();"),
+      "apps/server/src/latch.ts": text(...DOOR, "export const door = createDoor();"),
     },
   },
   {
@@ -182,6 +206,9 @@ const UNTOUCHED: Files = {
   // The closed package's tests may use the test runner; other desktop files may use Node.
   "packages/contracts/src/closed.test.ts": text('import { expect, it } from "vitest";', 'it("holds", () => { expect(1).toBe(1); });'),
   "apps/desktop/src/main.ts": text('import { join } from "node:path";', "export const joined = join;"),
+  // A test sets a guard's test-only switch, and so does the one world the GPU rules run in.
+  "apps/server/src/door.test.ts": text(...DOOR, 'export const door = createDoor({ faultForTest: "left-open" });'),
+  "apps/server/src/gpu/rules-harness.ts": text(...DOOR, 'export const door = createDoor({ faultForTest: "left-open" });'),
   // The one helper that may wait on the clock, because it checks its claim through the span.
   "test/e2e/waits.ts": text(
     'import type { Page } from "@playwright/test";',

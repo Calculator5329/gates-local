@@ -22,7 +22,12 @@ export const isSharedKind = (kind: GpuJobKind): boolean => kind === "chat";
  * exclusive one never gets the GPU.
  * A process crash discards the queue with the process; this is not a cross-app lock.
  */
-export function createGpuLease(): GpuLease {
+export interface GpuLeaseOptions {
+  /** Tests only (gpu/rules.test.ts): turns one guard off, so the test that needs it is seen failing. */
+  readonly faultForTest?: "shared-claims-jump-the-queue";
+}
+
+export function createGpuLease(options: GpuLeaseOptions = {}): GpuLease {
   type Waiter = { kind: GpuJobKind; grant: () => void };
   const queue: Waiter[] = [];
   let holder: GpuJobKind | null = null;
@@ -54,7 +59,9 @@ export function createGpuLease(): GpuLease {
         drain();
       });
     } };
-    if (queue.length === 0 && fits(kind)) waiter.grant();
+    // First come: a claim that fits still waits behind one that is waiting.
+    const behind = queue.length > 0 && !(options.faultForTest === "shared-claims-jump-the-queue" && isSharedKind(kind));
+    if (!behind && fits(kind)) waiter.grant();
     else { queue.push(waiter); signal?.addEventListener("abort", abort, { once: true }); }
   });
   return {

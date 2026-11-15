@@ -145,9 +145,12 @@ and is the next one to get a check.
 | A reply's stage and running state come from the server as one typed value; the window only draws it. | type `ReplyStage` in `packages/contracts/src/shapes.ts` |
 | A statement about fit carries what it was measured against. | type `FitBasis` in `apps/server/src/fit/fit.ts` |
 | A chat request never sets `num_gpu`. | tests `apps/server/test/app.test.ts`, `test/e2e/paste.spec.ts` |
-| Heavy GPU work goes through the one lease, one job at a time, and never touches whisper. | test `apps/server/src/gpu/lease.test.ts` |
-| Free VRAM is measured before a real load and never exceeded; a check unloads what it loaded. | prose |
-| The app stops only processes it started. | prose |
+| Heavy GPU work goes through the one lease, one job at a time, and never touches whisper. | tests `apps/server/src/gpu/lease.test.ts`, `apps/server/src/gpu/rules.test.ts` |
+| Never two things loading into GPU memory at once; a running reply's model is never asked to leave; a waiting picture is not passed by later chats. | test `apps/server/src/gpu/rules.test.ts`: the real lease, gate, memory owner, loader, runtime switch and picture job with only the edges faked, each rule seen failing with its guard off |
+| A switch of runtime, refused or not, leaves the record of what the app loaded true. | test `apps/server/src/gpu/rules.test.ts` |
+| Free VRAM is measured before a real load and never exceeded; a check unloads what it loaded. | test `apps/server/src/gpu/rules.test.ts` for the measurement (taken after everything asked has left) and for what a refusal names; prose for a check unloading what it loaded |
+| The app stops only processes it started. | test `apps/server/src/gpu/rules.test.ts` for Ollama and ComfyUI; prose elsewhere |
+| A GPU guard's test-only switch (the `faultForTest` option) is set by tests, never by the product. | lint `gates/test-switch-stays-in-tests`, no disable comments |
 | A start reads the update's lock and saved state before it starts anything; no server starts beside an update that is running or was cut off. | tests `apps/desktop/src/main-checkout-start.test.ts`, `apps/desktop/src/checkout-start.test.ts` (a source checkout); `apps/desktop/src/installed-update/launch-kinds.test.ts` (an installed copy); with the update cut off at every step, `test/update-crash-matrix.test.ts` and `apps/desktop/src/installed-update/start-matrix.test.ts` |
 | From "Restart to update" on, no new work is let in while the update can still go ahead; once work is let back in, the update does not go ahead. | test `test/update-handoff-rules.test.ts` (both kinds of copy, over the real modules) |
 | An update never writes over, or deletes, a file of the person's: their edits, their untracked and ignored files, a version folder that could be in use, the thread store. | tests `test/update-crash-matrix.test.ts`, `apps/desktop/src/installed-update/start-matrix.test.ts` |

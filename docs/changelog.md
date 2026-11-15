@@ -1,5 +1,47 @@
 # Changelog
 
+## 2026-11-15: what is on the graphics card stays true when a switch is refused or a picture will not stop
+
+- If you switched between the app's Ollama and the system's while a
+  reply would not end, the switch was refused and the app stayed on the
+  old one, but it had already forgotten which models it had loaded
+  there. The next message at a different context length was then
+  answered with "loaded by another program" for a model the app itself
+  had loaded, and the model kept its old context. A refused switch now
+  leaves the app knowing exactly what it knew before, less anything that
+  left the card in the meantime.
+- If you pressed Stop on a picture and ComfyUI had not stopped it after
+  30 seconds, the app gave the graphics card to whatever was waiting,
+  so a chat model could start loading while ComfyUI was still loading
+  the picture's files, and the two together could overfill the card.
+  The picture now keeps the card until ComfyUI has let go of it: its
+  card goes on saying it is stopping, and chat and new pictures wait.
+  If ComfyUI is closed in the meantime the card is free at once. After
+  five more minutes the app stops a ComfyUI it started itself, which
+  frees its memory; a ComfyUI you run yourself is never stopped, and
+  after those five minutes the app gives the card back with the same
+  warning as before, that ComfyUI may still be running the picture. A
+  picture drawn on the processor, or by a ComfyUI on another computer,
+  holds nothing on this card and is given up after its wait as before.
+- When a picture did not fit and the voice typing program was the
+  biggest thing on the graphics card, the refusal said "whisper-server
+  holds 2.0 GiB, close it." The app never asks for whisper to be closed:
+  the sentence now names the next program down, or nothing when whisper
+  is the only other thing there.
+- If you switched between the app's Ollama and the system's while a
+  model was still on its way out of the old one, and the new one had a
+  model of the same name in memory, the app dropped that model from its
+  list when the old copy finally left. Until the next check a few
+  seconds later, the list of what is on the graphics card could show
+  that model with a lock, as memory the app cannot free. What leaves the
+  Ollama you switched away from no longer changes what the app lists for
+  the one in use.
+- Internal: the rules for what is on the graphics card (one load at a
+  time, a replying model stays, whisper is left alone, nothing the app
+  did not start is stopped) now run as tests on the real code, in
+  `apps/server/src/gpu/rules.test.ts`. Each is also run with its guard
+  switched off, and must fail there.
+
 ## 2026-11-15: typed words stay put, and a kept older file is named
 
 - Words typed in a chat but not sent stay in its box when a list of

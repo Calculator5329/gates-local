@@ -38,7 +38,32 @@ export const MODELS_REFRESH_MIN_MS = 2000;
 /** whisper-server's MainPID changes only on a restart; re-read it this often. */
 const WHISPER_PID_TTL_MS = 60_000;
 /** How long a switch waits for the old runtime's turns to end before it fails and keeps that runtime. */
-const TURN_DRAIN_MS = 10_000;
+export const TURN_DRAIN_MS = 10_000;
+
+/**
+ * The loader's part of a switch, before the old runtime stops. What the app owned in the old
+ * runtime is set aside, and loads and turns are refused until the new runtime's ensure settles
+ * (afterSwitch). Every turn reserved against the old runtime is told to end, and a turn ends at
+ * once (app.ts drops whatever it waits on); the switch waits for them, so none sends another
+ * request to a runtime being stopped. Bounded: a turn still running after `drainMs` refuses the
+ * switch (this throws), which keeps the old runtime (never stops it under a running turn), and
+ * what was set aside is the record again, since the models are still in that runtime.
+ */
+export async function endTurnsForSwitch(loader: Pick<ModelLoader, "runtimeChanged" | "turnsEnded" | "runtimeKept"> | undefined, drainMs: number): Promise<void> {
+  if (loader === undefined) return;
+  loader.runtimeChanged();
+  const drained = loader.turnsEnded();
+  const ended = await new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => resolve(false), drainMs);
+    void drained.then(() => {
+      clearTimeout(timer);
+      resolve(true);
+    });
+  });
+  if (ended) return;
+  loader.runtimeKept();
+  throw new Error(`turns on the old runtime still running after ${drainMs} ms`);
+}
 
 export interface ModelServices {
   readonly settings: SettingsStore;
@@ -106,24 +131,7 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     make: (mode: RuntimeMode) => createOllamaRuntime({ appDataDir: options.dataDir, ...options.runtime, mode, stateDir: options.dataDir }),
     beforeSwitch: async () => {
       pulls?.stop();
-      // Before the old runtime stops: what the app owned in it is not its own any more, and
-      // loads and turns are refused until the new runtime's ensure settles (afterSwitch).
-      loader?.runtimeChanged();
-      // Every turn reserved against the old runtime was told to end, and a turn ends at once
-      // (app.ts drops whatever it waits on); wait for them, so none sends another request to a
-      // runtime being stopped. Bounded: a turn still running after the bound fails the switch,
-      // which keeps the old runtime (never stops it under a running turn).
-      if (loader === undefined) return;
-      const drained = loader.turnsEnded();
-      const drainMs = options.turnDrainMs ?? TURN_DRAIN_MS;
-      const ended = await new Promise<boolean>((resolve) => {
-        const timer = setTimeout(() => resolve(false), drainMs);
-        void drained.then(() => {
-          clearTimeout(timer);
-          resolve(true);
-        });
-      });
-      if (!ended) throw new Error(`turns on the old runtime still running after ${drainMs} ms`);
+      await endTurnsForSwitch(loader, options.turnDrainMs ?? TURN_DRAIN_MS);
     },
     afterSwitch: () => loader?.runtimeSettled(),
     log,

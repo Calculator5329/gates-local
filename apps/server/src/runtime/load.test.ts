@@ -647,6 +647,37 @@ describe("runtime generation", () => {
     expect(pushes.map((p) => p.state)).toEqual(["loading", "error"]);
     expect(loader.appLoadedModels()).toEqual([]);
   });
+
+  it("a refused switch puts the record back, less a model that left while it was being decided", async () => {
+    const a = await fakeOllama([]);
+    const pushes: ModelLoad[] = [];
+    const loader = createModelLoader({ baseUrl: () => a.baseUrl, push: (l) => pushes.push(l), listLoaded: (u) => listLoaded(u), fit: async () => report("fits") });
+    await loader.load("m", 16384);
+    await loader.load("n", 8192);
+    expect(loader.appLoadedModels()).toEqual(["m:latest", "n:latest"]);
+
+    loader.runtimeChanged();
+    expect(loader.appLoadedModels()).toEqual([]);
+    // Something else asked n to leave while the switch waited for replies to end.
+    loader.unloaded("n");
+    loader.runtimeKept();
+    loader.runtimeSettled();
+    expect(loader.appLoadedModels()).toEqual(["m:latest"]);
+  });
+
+  it("a switch that went ahead keeps nothing of the old runtime's record, whatever is said later", async () => {
+    const a = await fakeOllama([]);
+    const b = await fakeOllama([]);
+    let url = a.baseUrl;
+    const pushes: ModelLoad[] = [];
+    const loader = createModelLoader({ baseUrl: () => url, push: (l) => pushes.push(l), listLoaded: (u) => listLoaded(u), fit: async () => report("fits") });
+    await loader.load("m", 16384);
+    loader.runtimeChanged();
+    url = b.baseUrl;
+    loader.runtimeSettled();
+    loader.runtimeKept();
+    expect(loader.appLoadedModels()).toEqual([]);
+  });
 });
 
 describe("chat turn reservation", () => {

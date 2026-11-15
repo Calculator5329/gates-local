@@ -92,6 +92,10 @@ export interface ImageDeps extends ComfyClientDeps {
   startupTimeoutMs?: number;
   jobTimeoutMs?: number;
   queueTimeoutMs?: number;
+  /** How long a picture the engine will not let go of keeps its claim (STUCK_HOLD_MS); tests shorten it. */
+  stuckHoldMs?: number;
+  /** Tests only (gpu/rules.test.ts): turns one guard off, so the test that needs it is seen failing. */
+  faultForTest?: "stuck-picture-gives-the-card-back" | "stop-an-engine-the-app-did-not-start" | "picture-without-lease";
   /** This machine's own interface addresses; tests inject them. */
   localAddresses?(): readonly string[];
   /** Every address a host name resolves to; tests inject it. */
@@ -278,6 +282,14 @@ export const ranLong = (min: number, stopped = true) => stopped
  * step outlasts.
  */
 export const CANCEL_WAIT = { card: CANCEL_WAIT_MS, cpu: RUN_LIMIT_MS.cpu } as const;
+/**
+ * How long a stopped picture the engine has not let go of keeps the card after the cancel wait.
+ * The engine reads a stop between steps, and loading a setup's files is one step: the largest
+ * setup read from a slow disk loads in under this.
+ */
+export const STUCK_HOLD_MS = 300_000;
+/** The status while that picture keeps the card. */
+export const STUCK_HOLD_NOTE = "ComfyUI has not stopped the picture yet. Chat and new pictures wait until it has.";
 /** A picture that never got its turn (chat held the memory): nothing ran, nothing is wrong with the engine. */
 export const waitedLong = (min: number) => `The picture waited ${min} minutes for its turn and did not start. Try again when you are ready.`;
 
@@ -290,12 +302,13 @@ export interface GpuHolder { pid: number; usedBytes?: number; label?: string; ro
  * are the chat models the app's Ollama still lists after the handoff and its wait (a running reply's,
  * or slow to leave): an Ollama runner is then the app's, and the sentence never says to close
  * another app. Undefined when Ollama's list could not be read; the sentence then names Ollama and
- * claims nothing about whose model it is.
+ * claims nothing about whose model it is. Whisper is never the one named: nothing the app says
+ * asks for it to be closed.
  */
 export function fitSentence(needBytes: number, freeBytes: number, holders: readonly GpuHolder[], ours: readonly string[] | undefined, smaller?: string): string {
   const base = `The image needs ${gib(needBytes)} and ${gib(freeBytes)} is free`;
   const out = smaller === undefined ? "" : `; ${smaller} would fit`;
-  const top = holders.filter((h) => (h.usedBytes ?? 0) > 0 && h.system !== true && h.unnamed !== true).toSorted((a, b) => (b.usedBytes ?? 0) - (a.usedBytes ?? 0))[0];
+  const top = holders.filter((h) => (h.usedBytes ?? 0) > 0 && h.system !== true && h.unnamed !== true && h.role !== "whisper").toSorted((a, b) => (b.usedBytes ?? 0) - (a.usedBytes ?? 0))[0];
   if (top === undefined) return `${base}${out}.`;
   const held = gib(top.usedBytes ?? 0);
   if (top.role === "ollama") {
@@ -701,6 +714,67 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   };
   /** How long a stop waits for the engine to let go, on the room last read. */
   const cancelWaitMs = () => lastRoom === 0 ? CANCEL_WAIT.cpu : CANCEL_WAIT.card;
+  /** Ends the wait below when the app closes. */
+  const closing = new AbortController();
+  /**
+   * A picture's claim on the card: its job, and after it the wait for a picture the engine will
+   * not let go of. A prompt that outlived the cancel wait on an engine on this card (`onCard`)
+   * keeps the claim: the engine may still be loading, and whoever claimed next would measure and
+   * load beside it. The claim is given back when the prompt has left the engine's queue (the
+   * picture then ends like any stopped one), when the engine no longer answers, when the app
+   * closes, or after STUCK_HOLD_MS. At that limit an engine the app started is stopped, so its
+   * memory is free. One the app did not start is never stopped: the card is given back with the
+   * warning, and the next load is decided by a reading of the card.
+   */
+  const heldWhileStuck = async (onCard: () => boolean, at: () => string, job: () => Promise<void>): Promise<void> => {
+    try { await job(); }
+    catch (error) {
+      const promptId = error instanceof Error && "stuckPromptId" in error && typeof error.stuckPromptId === "string" ? error.stuckPromptId : undefined;
+      if (promptId === undefined || !onCard() || deps.faultForTest === "stuck-picture-gives-the-card-back") throw error;
+      const baseUrl = at(), comfy = client(baseUrl);
+      update({ state: "busy", owner: owned?.baseUrl === baseUrl ? "app" : "external", baseUrl, detail: STUCK_HOLD_NOTE });
+      const until = Date.now() + (deps.stuckHoldMs ?? STUCK_HOLD_MS);
+      let ended: "left" | "gone" | "limit" | "closing" | undefined;
+      let unanswered = 0;
+      while (ended === undefined) {
+        // keeps asking it to stop, as the cancel did
+        try { await comfy.cancelPrompt(promptId, Math.max(0, until - Date.now()), closing.signal); ended = "left"; }
+        catch {
+          if (closing.signal.aborted) ended = "closing";
+          else if (Date.now() >= until) ended = "limit";
+          // one missed answer is not an engine that is gone
+          else if (await comfy.healthy()) unanswered = 0;
+          else if (++unanswered >= 2) ended = "gone";
+          if (ended === undefined) await new Promise<void>((resolve) => {
+            const done = () => { clearTimeout(timer); closing.signal.removeEventListener("abort", done); resolve(); };
+            const timer = setTimeout(done, 1_000);
+            closing.signal.addEventListener("abort", done, { once: true });
+          });
+        }
+      }
+      if (ended === "limit") {
+        const service = serviceAt(baseUrl);
+        const unit = await service.inspect().catch(() => undefined);
+        // only the engine this app started, still the same process
+        if (unit?.active === true && ((owned?.baseUrl === baseUrl && unit.pid === owned.pid) || deps.faultForTest === "stop-an-engine-the-app-did-not-start")) {
+          await service.stop();
+          forgetGpuReadings();
+          owned = undefined;
+          deps.memory?.engineGone();
+          log(`ComfyUI kept a stopped picture for ${minutes(deps.stuckHoldMs ?? STUCK_HOLD_MS)} more minutes; the app started it, so the app stopped it`);
+          ended = "gone";
+        }
+      }
+      // still there: the record and the warning, as for an engine that holds nothing on this card
+      if (ended === "limit" || ended === "closing") throw error;
+      const stopped = error as { stuckPromptId?: string; cancelDetail?: string };
+      delete stopped.stuckPromptId; delete stopped.cancelDetail;
+      throw error;
+    }
+  };
+  /** A picture runs alone on the card: its whole job, the wait above included, is inside one claim. */
+  const claimed = (signal: AbortSignal, job: () => Promise<void>): Promise<void> =>
+    deps.faultForTest === "picture-without-lease" ? job() : deps.lease.run("image", signal, job);
   /** The default for the files and room last read; DEFAULT_CHOICE stands in where there is none, and the job refuses it (settle). */
   const chooseDefault = () => defaultChoice(knownFiles(), extras(), lastRoom, lastRam) ?? DEFAULT_CHOICE;
   /** What a send runs now: the saved choice, or the default for the files last read. */
@@ -867,7 +941,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       // Begin after registering the promise; generate returns before any running event.
       const ended = Promise.resolve().then(async () => {
         try {
-          await deps.lease.run("image", signal, async () => {
+          await claimed(signal, () => heldWhileStuck(() => staged !== undefined, () => cfg.baseUrl, async () => {
             runFrom = Date.now();
             armRun(runLimitMs());
             const latest = config();
@@ -962,7 +1036,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             event("done", { progress: 1, imagePath, runMs }, { width: made.width, height: made.height, seed, ...steps === undefined ? {} : { steps }, runMs, bytes: bytes.length });
             if (params.threadId) emit("threads.changed", { threadId: params.threadId });
             update({ state: "ready", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
-          });
+          }));
         } catch (error) {
           // a load that did not finish: what the engine holds is unknown, and the next handoff asks it to free
           if (staged !== undefined) deps.memory?.ended();
@@ -1104,6 +1178,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     },
     async close() {
       closed = true; clearIdle();
+      closing.abort(new Error("Image generation is shutting down."));
       downloads?.abort(new Error("Image generation is shutting down."));
       await downloading;
       const pending = [...jobs.values()];

@@ -8,6 +8,7 @@
     "gates/no-relative-import-across-packages": "error",
     "gates/no-wait-for-timeout": "error",
     "gates/disable-needs-reason": "error",
+    "gates/test-switch-stays-in-tests": "error",
     "import/no-cycle": ["error", { "ignoreTypes": true }],
     "import/extensions": ["error", "always", { "ignorePackages": true }],
     "typescript/no-import-type-side-effects": "error",

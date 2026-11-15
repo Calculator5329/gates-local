@@ -44,6 +44,8 @@
 // work, clears the owned list without pushes (models left in an external
 // Ollama are not the app's any more), aborts the old runtime's preloads and
 // waiting admissions, and ends every open "loading" notice with an error.
+// A switch that is then refused (runtimeKept) puts the owned list back: the
+// old runtime stays, and so does what the app loaded in it.
 // The owned list is the memory owner's one record of what is loaded
 // (gpu/memory.ts LoadedRecord): this module writes it, the GPU status reads it.
 // close() refuses new work and aborts and drains every preload, so a
@@ -51,7 +53,7 @@
 import type { FitOffer, FitReport, ModelLoad } from "@gates-local/contracts";
 import { createFifoGate, type LoadGate } from "../gpu/gate.ts";
 import type { GpuLease } from "../gpu/lease.ts";
-import { ENGINE_BUSY_NOTE, createLoadedRecord, type Handoff, type MemoryOwner, type Want } from "../gpu/memory.ts";
+import { ENGINE_BUSY_NOTE, createLoadedRecord, snapshotWithout, type Handoff, type LoadedSnapshot, type MemoryOwner, type Want } from "../gpu/memory.ts";
 import { canonicalTag } from "./recommended.ts";
 import { sendMark, sendSpan } from "../chat/send-times.ts";
 import { GenerateResponse, decode, parseJson } from "./schemas.ts";
@@ -158,6 +160,12 @@ export interface ModelLoader {
    */
   runtimeChanged(): void;
   /**
+   * The switch was refused and the old runtime stays (after runtimeChanged, before
+   * runtimeSettled): what the app loaded in it is the app's again, less what left meanwhile.
+   * The turns and loads runtimeChanged ended stay ended.
+   */
+  runtimeKept(): void;
+  /**
    * Resolves once every turn whose runtime is gone (aborted by
    * runtimeChanged() or close()) has called end(). A switch waits on this
    * before it stops the old runtime.
@@ -205,6 +213,8 @@ export interface ModelLoaderDeps {
   /** After a load the app caused, so the GPU status refreshes (gpu watcher poke). */
   readonly onLoaded?: () => void;
   readonly log?: (line: string) => void;
+  /** Tests only (gpu/rules.test.ts): turns one guard off, so the test that needs it is seen failing. */
+  readonly faultForTest?: "gate-before-lease" | "gate-let-go-at-send" | "record-without-generation-check" | "fit-from-the-first-reading" | "refusal-names-nothing" | "forget-on-refused-switch";
 }
 
 const removingMessage = (model: string) => `${model} is being removed right now, so it cannot be used. Wait for the removal to finish or pick another model.`;
@@ -258,6 +268,8 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
   const gate = memory?.gate ?? deps.gate ?? createFifoGate();
   /** What is loaded and which of it is the app's: the memory owner's one record (a loader with no owner keeps its own). */
   const record = memory?.loaded ?? createLoadedRecord();
+  /** A refusal says what was not asked to leave. */
+  const noted: typeof withBusyNote = deps.faultForTest === "refusal-names-nothing" ? (report) => report : withBusyNote;
   /** Tag -> reservations (turns and preloads) on it. */
   const reservations = new Map<string, number>();
   /** Tag -> admitted turns on it that have not ended: their replies keep the model in memory. */
@@ -268,6 +280,8 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
   /** Tag -> the load running for it: a request at the same context and runtime joins it and gets its answer. */
   const running = new Map<string, { readonly numCtx: number; readonly gen: number; readonly run: Promise<ModelLoad> }>();
   let generation = 0;
+  /** What the record held when a switch began, until the switch settles: a refused switch restores it. */
+  let forgotten: LoadedSnapshot | undefined;
   let switching = false;
   let closed = false;
   /** Aborted when the current generation ends (switch) or the loader closes. */
@@ -381,7 +395,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
         // The owner still asks it to leave for the next thing (gpu/memory.ts), so the answer promises nothing more.
         return finish({ model, numCtx, state: "ready", message: `${model} is already in memory, loaded by another program.` });
       }
-      const report = withBusyNote(await deps.fit(model, numCtx, baseUrl, signal), handoff);
+      const report = noted(await deps.fit(model, numCtx, baseUrl, signal), handoff);
       const afterFit = stopped();
       if (afterFit) return finish(afterFit);
       numCtx = report.numCtx;
@@ -420,8 +434,10 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
         throw e;
       }
     };
+    /** The claim on the card first, the gate inside it: a picture that holds the claim finds the gate free. */
+    const claimed = <T>(job: () => Promise<T>) => (deps.lease ? deps.lease.run("chat", signal, job) : job());
     try {
-      return await (deps.lease ? deps.lease.run("chat", signal, () => gate(owning)) : gate(owning));
+      return await (deps.faultForTest === "gate-before-lease" ? gate(() => claimed(owning)) : claimed(() => gate(owning)));
     } catch (e) {
       // Refused behind a running reply: the caller hears it, no client is told of a load.
       if (e instanceof ModelActionError && e.code === "model-in-use") throw e;
@@ -543,12 +559,14 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
                 // One thing in memory: everything else is asked to leave before this turn measures.
                 if (memory !== undefined) handing = true;
                 sendMark("gate");
+                // The fit is decided from a reading taken after the handoff, never one from before it.
+                const early = deps.faultForTest === "fit-from-the-first-reading" ? await fit(reads, { handoff: undefined, leave: async () => undefined }) : undefined;
                 let handoff = await memory?.handoff(wanted(), reads);
                 if (gone) return handed(false);
                 const here = await sendSpan("residency", () => residency(baseUrl, gen, reads));
                 if (gone) return handed(false);
                 const leave = async () => (memory === undefined ? undefined : (handoff = await memory.handoff(wanted(), reads)));
-                const report = withBusyNote(await fit(reads, { get handoff() { return handoff; }, leave }), handoff);
+                const report = noted(early ?? await fit(reads, { get handoff() { return handoff; }, leave }), handoff);
                 if (gone) return handed(false);
                 done();
                 if (ended) {
@@ -579,7 +597,8 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
                 if (here.ok && entry === undefined) notice = openNotice(model, report.numCtx);
                 const held = new Promise<void>((r) => (releaseGate = r));
                 resolve(report);
-                await held;
+                // The gate is this turn's until its first token or its end: the next load measures what this one took.
+                if (deps.faultForTest !== "gate-let-go-at-send") await held;
               } catch (e) {
                 handed(false);
                 done();
@@ -603,7 +622,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
           answered = true;
           handed(true);
           letGo();
-          if (notice !== undefined && gen === generation) loaded(model, numCtx, notice);
+          if (notice !== undefined && (gen === generation || deps.faultForTest === "record-without-generation-check")) loaded(model, numCtx, notice);
         },
         end() {
           if (ended) return;
@@ -643,7 +662,8 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
 
     runtimeChanged() {
       generation++;
-      record.clear();
+      // Kept until the switch is known to happen: a refused one puts it back (runtimeKept).
+      forgotten = record.clear();
       // Whatever the old runtime held is not in this app's memory any more.
       memory?.observe([]);
       switching = true;
@@ -658,8 +678,16 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       await Promise.all([...turns].filter((t) => t.gone.signal.aborted).map((t) => t.ended));
     },
 
+    runtimeKept() {
+      if (forgotten === undefined || deps.faultForTest === "forget-on-refused-switch") return;
+      record.restore(forgotten);
+      forgotten = undefined;
+    },
+
     runtimeSettled() {
       switching = false;
+      // The switch happened (or its refusal already put the record back): nothing to put back now.
+      forgotten = undefined;
     },
 
     async close() {
@@ -672,6 +700,8 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
     appLoadedModels: () => record.ours(),
     replying: () => [...replying.keys()],
     unloaded(model) {
+      // Left while a switch decides: a refused switch does not put it back.
+      if (forgotten !== undefined) forgotten = snapshotWithout(forgotten, model);
       const numCtx = record.left(model);
       if (numCtx !== undefined) send({ model: canonicalTag(model), numCtx, state: "unloaded" });
     },

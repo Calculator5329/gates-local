@@ -34,6 +34,8 @@ export interface RuntimeSwitchOptions {
   /** Once the new runtime's ensure settled, however it went (always paired with beforeSwitch). */
   readonly afterSwitch?: () => void;
   readonly log?: (line: string) => void;
+  /** Tests only (gpu/rules.test.ts): turns one guard off, so the test that needs it is seen failing. */
+  readonly faultForTest?: "stop-any-runtime";
 }
 
 export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitch {
@@ -80,7 +82,7 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
   };
 
   const stopIfStartedHere = async (rt: OllamaRuntime) => {
-    if (!rt.startedByThisProcess()) return;
+    if (!rt.startedByThisProcess() && options.faultForTest !== "stop-any-runtime") return;
     const r = await rt.stop();
     if (!r.stopped) options.log?.(`stopping the app's own Ollama: ${r.reason}`);
   };
