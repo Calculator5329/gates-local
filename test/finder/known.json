@@ -14,5 +14,17 @@
   {
     "screen": "desktop", "kind": "twice", "element": "fix the backup cron", "real": false, "area": "finder",
     "wrong": "Not a bug: the open thread's row in the sidebar and its title over the chat, as T3 Code shows them; the desktop screen watches the whole window, so both are in view."
+  },
+  {
+    "screen": "picker", "kind": "twice", "element": "qwen 3 5 9b", "real": false, "area": "finder",
+    "wrong": "Not a bug: the model's row and the heading over the context sizes, which says whose numbers the column shows while another row is pointed at (a tester read one model's numbers as another's without it)."
+  },
+  {
+    "screen": "picker", "kind": "twice", "element": "gemma 4 12b", "real": false, "area": "finder",
+    "wrong": "Not a bug: the model's row and the heading over the context sizes, which says whose numbers the column shows while another row is pointed at (a tester read one model's numbers as another's without it)."
+  },
+  {
+    "screen": "reply", "step": "the first reply streams in", "kind": "moves", "element": ".think.run", "real": false, "area": "finder",
+    "wrong": "Not a bug: the live line is a dot until the work clock starts, then gains its seconds and its word once and keeps that width for the rest of the reply (the owner's layout pick)."
   }
 ]
