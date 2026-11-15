@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-15: a Stop during a file save holds the message, and one bad saved row no longer empties the queue
+
+- A queued message with a photo or a file could still be asked when Stop
+  landed while its file was being saved. Stop now holds it in the queue,
+  and nothing of it is saved to the chat.
+- A queue saved by an older version with one row the app could not read
+  made the app drop the whole saved queue, the words in the composer and
+  every chat's draft. The row it cannot read is now skipped and the rest
+  is kept.
+
 ## 2026-11-14: Ollama failures name their cause, and the fit reads every card
 
 - A download of Ollama that is not the pinned file now says "The Ollama

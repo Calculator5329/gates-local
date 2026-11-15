@@ -21,7 +21,7 @@ const until = async (ok: () => boolean, what: string) => {
   if (!ok()) throw new Error(`timed out waiting for ${what}`);
 };
 
-function rig() {
+function rig(hooks: { fileOwnersRead?: () => void } = {}) {
   const root = path.join(os.homedir(), ".cache", "gates-local-tests");
   mkdirSync(root, { recursive: true });
   const dir = mkdtempSync(path.join(root, "queue-send-"));
@@ -63,8 +63,10 @@ function rig() {
   const signal = new AbortController().signal;
   const pushes: Array<{ channel: Channel; payload: unknown }> = [];
   const model = { name: MODEL, digest: "d", sizeBytes: 6_600_000_000, modifiedAt: "2026-11-01T00:00:00Z", capabilities: ["completion" as const] };
+  // a test can act at the moment the server reads who owns the attached files (inside the save)
+  const store = new Proxy(db, { get: (target, key) => key === "fileOwnersRead" ? undefined : key === "fileOwners" ? () => { hooks.fileOwnersRead?.(); return target.fileOwners(); } : Reflect.get(target, key, target) });
   const app = createApp({
-    store: db,
+    store,
     dataDir: dir,
     runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
     catalog: { current: () => [model], refresh: async () => ({ models: [model], changed: false }), onChange: () => () => {}, stop: () => {} },
@@ -146,6 +148,29 @@ it.each(["the hold first, as a window sends them", "the Stop first"])("a Stop th
   await settle();
   expect(r.starts(), "nothing behind a stopped reply goes on its own").toEqual(["first"]);
   expect(r.queued().map((q) => [q.id, q.held, q.sending, q.why])).toEqual([["q1", true, undefined, undefined], ["q2", true, undefined, undefined]]);
+  expect(r.db.getMessage("m-q1"), "the pulled-back message was never saved").toBeUndefined();
+});
+
+it("a Stop that lands while a queued message's file is being saved still holds it, and nothing of it is saved", async () => {
+  let stop: (() => void) | undefined;
+  let readsWhileSending = 0;
+  const r = rig({ fileOwnersRead: () => {
+    if (r.queued()[0]?.sending === undefined) return;
+    // the first read is the check when the send is taken; the second is inside the save
+    if (++readsWhileSending === 2) stop?.();
+  } });
+  const { turnId } = await r.h["chat.send"]({ threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+  const file = await r.h["files.attach"]({ name: "notes.txt", type: "text/plain", data: "aGVsbG8=" }, { clientId: 1 });
+  await r.h["queue.add"]({ ...r.entry("q1", "second"), files: [file] }, { clientId: 1 });
+  r.openOne();
+  await until(() => r.queued()[0]?.sending !== undefined, "the queued message on its way");
+  let stopped = false;
+  stop = () => { stopped = true; void r.h["chat.cancel"]({ turnId }, { clientId: 1 }); };
+  r.open();
+  await until(() => stopped, "the Stop during the save");
+  await settle();
+  expect(r.starts(), "a message the Stop pulled back is not asked").toEqual(["first"]);
+  expect(r.queued().map((q) => [q.id, q.held, q.sending])).toEqual([["q1", true, undefined]]);
   expect(r.db.getMessage("m-q1"), "the pulled-back message was never saved").toBeUndefined();
 });
 

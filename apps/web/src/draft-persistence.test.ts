@@ -139,7 +139,16 @@ it("restores image drafts and queued attachments on hold without losing their mo
 });
 
 it("ignores invalid persisted values instead of starting a broken queue", () => {
-  for (const value of [undefined, null, {}, { draft: "", images: [42], queued: [] }, { draft: "", images: [], queued: [{ text: "bad" }] }]) expect(recoverDraft(value)).toBeUndefined();
+  for (const value of [undefined, null, {}, { draft: "", images: [42], queued: [] }]) expect(recoverDraft(value)).toBeUndefined();
+});
+
+it("skips one queued row it cannot read and keeps the words, the other rows and every chat's draft", () => {
+  const good = { id: "q-good", threadId: "t", text: "still here", images: [], at: 2 };
+  const slots = [{ key: "t", draft: { text: "another chat's words", images: [], sendId: null } }];
+  expect(recoverDraft({ draft: "typed words", images: [], queued: [{ text: "a row from an older version" }, good], slots })).toEqual({
+    draft: "typed words", images: [], editing: null, slots,
+    queued: [{ ...good, waitFor: "reply", held: true }],
+  });
 });
 
 it("CI-01: ten edits retain one in-flight write and submit unchanged attachments only once", async () => {

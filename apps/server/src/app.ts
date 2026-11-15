@@ -1328,10 +1328,15 @@ export function createApp(deps: AppDeps): App {
         if (savedImages.length) windowed.messages[windowed.messages.length - 1] = { ...windowed.messages.at(-1)!, images: savedImages };
         const modelHistory = vision && deps.dataDir ? await visionHistory(deps.dataDir, windowed.messages).catch(imageError) : windowed.messages;
         if (turnSignal.aborted) throw stoppedEarly();
-        const append = () => store.appendMessage({ ...(messageId === undefined ? {} : { id: messageId }), threadId, role: "user", content, ...(savedImages.length ? { images: savedImages } : {}), ...(files.length ? { files } : {}) }, replaced);
-        const withImages = () => imageFiles ? imageFiles.save(savedImages, append).catch(imageError) : append();
+        // The saves below wait their turn, so a Stop can land before the row goes in: the row is the point of no return.
+        const append = () => {
+          if (turnSignal.aborted) throw stoppedEarly();
+          return store.appendMessage({ ...(messageId === undefined ? {} : { id: messageId }), threadId, role: "user", content, ...(savedImages.length ? { images: savedImages } : {}), ...(files.length ? { files } : {}) }, replaced);
+        };
+        const stopFirst = (wrap: (error: unknown) => never) => (error: unknown): never => { if (turnSignal.aborted) throw stoppedEarly(); return wrap(error); };
+        const withImages = () => imageFiles ? imageFiles.save(savedImages, append).catch(stopFirst(imageError)) : append();
         // A file removed since the check above (its day ran out) is said, not saved as a dead reference.
-        const userMessage = attachedFiles && files.length ? await attachedFiles.save(files, withImages, threadId).catch(attachError) : await withImages();
+        const userMessage = attachedFiles && files.length ? await attachedFiles.save(files, withImages, threadId).catch(stopFirst(attachError)) : await withImages();
         sendMark("saved");
         push("threads.changed", { threadId });
         started = userMessage;

@@ -29,7 +29,7 @@ export function recoverDraft(value: unknown): Saved | undefined {
   const queued: Queued[] = [];
   for (const item of saved["queued"]) {
     const q = record(item);
-    if (!q || typeof q["id"] !== "string" || typeof q["threadId"] !== "string" || typeof q["text"] !== "string" || typeof q["at"] !== "number" || !Number.isFinite(q["at"]) || (q["images"] !== undefined && !strings(q["images"]))) return;
+    if (!q || typeof q["id"] !== "string" || typeof q["threadId"] !== "string" || typeof q["text"] !== "string" || typeof q["at"] !== "number" || !Number.isFinite(q["at"]) || (q["images"] !== undefined && !strings(q["images"]))) continue;
     queued.push({ id: q["id"], threadId: q["threadId"], text: q["text"], at: q["at"], images: q["images"] ?? [], ...withFiles(q["files"]), waitFor: "reply", held: true, ...(typeof q["messageId"] === "string" ? { messageId: q["messageId"] } : {}), ...(typeof q["model"] === "string" ? { model: q["model"] } : {}) });
   }
   // the queue is the server's: an edit open at the reload names its row, which this save need not hold
