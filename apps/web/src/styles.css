@@ -391,6 +391,7 @@ div.think.fold:hover{color:var(--muted-foreground);background:none}
 .stop-mark{display:inline-flex;align-items:center;gap:2px;height:24px;font-size:12px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top}
 .stop-mark>[role=img]{width:16px;height:24px;display:flex;align-items:center;justify-content:center;flex:none}
 .stop-mark>[role=img]:before{content:"";width:8px;height:8px;background:currentColor}
+.stop-mark>.w+.s{margin-left:4px}
 .stop-note .stop-mark{margin-left:-4px}.stop-note .stop-mark{margin-right:4px}
 /* the square stays in view; the seconds and the actions show on hover, like a finished reply's facts */
 .a-act.stop{opacity:1}

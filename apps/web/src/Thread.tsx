@@ -72,12 +72,12 @@ function CopyButton({ text, handle }: { text: string; handle: "reply" | "user-me
  * `stop`: a stopped reply's mark leads the row, its square always in view; a number is Stop's seconds, null no seconds
  * (a stop this session did not see, or one the thought's pill already timed). `regenOff`: Regenerate waits for the server to end the turn.
  */
-function ActRow({ text, meta, wait, regen, regenOff = false, stop }: { text: string; meta: string; wait?: string | undefined; regen: boolean; regenOff?: boolean | undefined; stop?: number | null | undefined }) {
+function ActRow({ text, meta, wait, regen, regenOff = false, stop, empty = false }: { text: string; meta: string; wait?: string | undefined; regen: boolean; regenOff?: boolean | undefined; stop?: number | null | undefined; empty?: boolean }) {
   // no hover on touch: the model and speed wait behind a tap so the row stays one line of icons
   const [details, setDetails] = useState(false);
   return (
     <div className={`a-act${stop === undefined ? "" : " stop"}${details ? " det" : ""}`}>
-      {stop === undefined ? null : <StopMark secs={stop ?? undefined} />}
+      {stop === undefined ? null : <StopMark secs={stop ?? undefined} said={empty} />}
       <CopyButton text={text} handle="reply" />
       {regen ? (
         <button
@@ -155,9 +155,10 @@ const workSecs = (ms: number | undefined) => (ms === undefined ? undefined : Mat
  * The one live line of a running reply (decisions 1, 2, 33; layout B, owner 2026-11-14): the
  * breathing dot the sidebar shows, the work seconds, then what the server's record says the reply
  * is doing. Nothing follows the words, so a long tool summary ends in "…" at the line's edge.
- * The seconds sit in a slot of fixed width that appears, at "0 s", once the work clock has
- * started (the model is ready) and stays for the rest of the reply, so the words' left edge moves
- * only when the clock starts. Waiting and loading have no clock: the words follow the dot.
+ * The seconds time thinking and tool work, so they sit in a slot of fixed width that appears, at
+ * "0 s", once the reply has work to time (it thinks or calls a tool) and stays for the rest of the
+ * reply: the words' left edge moves at most once. Waiting, loading and a reply that goes straight
+ * to writing have no clock, since a "0 s" that never moves reads as a stuck clock: the words follow the dot.
  */
 function LiveLine({ turn, tools }: { turn: LiveTurn; tools: readonly ToolStep[] }) {
   const stage = turn.reply?.stage ?? "waiting";
@@ -166,7 +167,9 @@ function LiveLine({ turn, tools }: { turn: LiveTurn; tools: readonly ToolStep[] 
   // the send is answered at once, so the turn has its id while it waits behind a picture
   const imageBusy = useStore((s) => turn.pendingUser != null && s.imageStatus !== NA && s.imageStatus?.state === "busy");
   const t = Math.max(now, Date.now());
-  const clocked = turn.reply?.readyAt !== undefined || !(stage === "waiting" || stage === "loading");
+  const r = turn.reply;
+  const clocked = stage === "thinking" || stage === "tool" || tools.length > 0 || turn.thinking !== ""
+    || (r !== undefined && (r.workMs > 0 || r.spans.length > 0 || Object.keys(r.callsAt).length > 0));
   const secs = clocked ? Math.floor((workMsAt(turn, t) ?? 0) / 1000) : 0;
   const words = stage === "loading" ? (cpu ? "Loading into memory…" : "Loading into GPU memory…")
     : stage === "thinking" ? "Thinking"
@@ -622,12 +625,17 @@ const UserTurn = memo(function UserTurn({ msg, noted }: { msg: Message; noted: b
 /** The model never sees a stopped reply again; the stop square's tooltip and name are the one place that says so. */
 const UNSEEN = "Stopped. The model won't see this reply.";
 
-/** A stopped reply's mark: the stop square, then the seconds when the person pressed Stop. */
-function StopMark({ secs }: { secs?: number | undefined }) {
+/**
+ * A stopped reply's mark: the stop square, then the seconds when the person pressed Stop. `said`: a
+ * reply stopped before its first word has nothing else on screen, so the square says "Stopped" beside
+ * it, at rest; the square's name already says it to a screen reader.
+ */
+function StopMark({ secs, said = false }: { secs?: number | undefined; said?: boolean }) {
   return (
     <span className="stop-mark">
       {/* focusable, so the keyboard reaches the one place that says the model won't see this reply */}
       <span role="img" data-testid="chat.reply.unseen-mark" tabIndex={0} aria-label={UNSEEN} data-tip={esc(UNSEEN)} />
+      {said ? <span className="w" aria-hidden="true">Stopped</span> : null}
       {secs === undefined ? null : <span className="s">{secs} s</span>}
     </span>
   );
@@ -716,7 +724,7 @@ function Reply({ msg, live, text, paced, thinking, tools, rounds, secs, allowedL
       ) : note?.kind === "failed" ? <FailLine words="The reply didn't finish." why={note.why} retryable={regen} /> : null}
       {!streaming && !pending && !msg?.imageJob && !(text === "" && msg?.tools?.every(t => t.name === "image")) ? (
         // a stopped turn draws the row its saved reply will draw; Regenerate is off until the server has ended the turn (W-02)
-        <ActRow text={text} meta={meta} wait={wait} regen={regen} regenOff={live?.ending === true} stop={stop} />
+        <ActRow text={text} meta={meta} wait={wait} regen={regen} regenOff={live?.ending === true} stop={stop} empty={text === "" && !folded && notes.length === 0 && !msg?.images?.length} />
       ) : null}
     </div>
   );

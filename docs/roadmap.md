@@ -77,6 +77,7 @@ from "The speed check measures long threads the way each release opens them".
       *Accept:* a reconnect reads the load states again, shown by a test that drops the ready message.
 - [ ] <!-- workspace:id=work:86339694-3177-51df-8f04-7808d922bef8 --> The model used last is kept in the page only, so a reload or a restart starts new chats on the default again.
       *Accept:* the server keeps one app-wide last-used model; a new chat after a restart starts on it, and a second window agrees.
+      *2026-11-14:* a new chat now starts on the model in memory (`newChatWant` in `session/models.ts`); only with nothing in memory does it fall back to the page's last pick, then the saved default or the server's pick, so a restart with nothing loaded still forgets the last one. A new reading must restart with nothing in memory and no saved default, open two windows, and check that a new chat in each and the Default chip name the same model.
 - [ ] <!-- workspace:id=work:15d9fb0b-e9fa-5869-ab20-abd8734989da --> The page throws away the answer to its own `models.load` and waits for the pushed state, and it keys a load by model only, so two context sizes of one model share one loading mark.
       *Accept:* a failed load shows its reason on the composer that asked, and a load at 16k does not mark the 32k row as loading.
 - [ ] <!-- workspace:id=work:6a2527cb-d90e-58ff-a765-2a74a27da126 --> A first message to a model that a preload is already loading starts its own wait behind that load.
@@ -86,8 +87,9 @@ from "The speed check measures long threads the way each release opens them".
       *Part done 2026-11-14:* "Settings and Models: fewer controls, no explaining tooltips" took the card out (the Default chip marks the default, a row's menu changes it), and "The screen says what is in memory" starts a new chat on the model in memory; left: with nothing in memory and no saved default, the chip and a new chat can still name different models.
 - [x] <!-- workspace:id=work:eee4b8c7-1d1d-5fa8-af4d-274277beda34 --> Thinking and tool calls in a reply are one control. Today each tool call is its own row, a second round of thinking grows inside the first thought above those rows and pushes them down, its label says "Thought for" while the model thinks again, and the bottom row says "Writing" during it.
       *Done 2026-11-11:* "A reply's thinking and tool calls fold into one chip"; follow-ups under "Work chip, review follow-ups".
-- [ ] <!-- workspace:id=work:7d4370b7-afe9-5e0f-b438-8ea1d02fca00 --> A reply stopped while the model was thinking reads "Show thinking" and its pill can change width at Stop.
+- [x] <!-- workspace:id=work:7d4370b7-afe9-5e0f-b438-8ea1d02fca00 --> A reply stopped while the model was thinking reads "Show thinking" and its pill can change width at Stop.
       *Accept:* the stopped thought keeps its seconds and its box.
+      *Done 2026-11-14, met before 0.2.4:* "A reply's thinking and tool calls fold into one chip"; no "Show thinking" is left, a stopped thought keeps "Thought for N s" on its 24 px fold line (`Reply` in `Thread.tsx`), held by `work-fold.test.ts` "stopped while thinking, with no calls and no words" and `thread-identity.test.ts` "a reply stopped while thinking keeps Stop's seconds on the thought's pill", live and saved.
 - [ ] <!-- workspace:id=work:6a3a902b-86b2-59ec-b753-dda94ddcd3a8 --> Live thoughts are checked with the test model only. Try a real thinking model, the desktop window and the phone width.
 
 *Measured 2026-11-09:* Native launch now includes Electron and the supervised
@@ -127,8 +129,10 @@ probe. Legacy migration and the bounded metadata-only single-tab path remain.
 - [ ] <!-- workspace:id=work:69f9ff9e-cbc0-5a39-8474-2714f488329e --> Settings › General: the Update button still asks with the browser's dialog (`update-install.ts`). Use the footer's ask, or its lines in our own dialog. The sentence under it ("Falls back to … if a step fails.") can be shortened at the same time.
 - [ ] <!-- workspace:id=work:1c1f4645-fb03-5c2a-8da8-60dd55b65f5a --> Footer update ask: Go dismisses the shown result before the install's outcome is known. Keep it until the outcome arrives.
 - [ ] Settings › Updates on a clone whose remote has no release tags, with Get every change off: every check comes back as the main channel and the row drops it, so it says "Not checked yet" again and never offers the update. Fix on the server: drop the last check and send `update.changed` when the switch changes, and stop comparing channels in `SettingsUpdates.tsx`. That also stops the footer offering the other choice's commit after the switch flips (nothing installs it: the install checks again first).
-- [ ] Settings › Updates on a phone that only listens: the release page link grows the second row from 73 to 110 px at 390 px, because it is drawn outside `.upd-acts`. Reserve the line or keep the link in the tip, and add a 390 px listener step to the spec.
-- [ ] Settings › Updates: a failed Download stays shown over a newer check (`outdated()` covers only a failed check).
+- [x] Settings › Updates on a phone that only listens: the release page link grows the second row from 73 to 110 px at 390 px, because it is drawn outside `.upd-acts`. Reserve the line or keep the link in the tip, and add a 390 px listener step to the spec.
+      *Done 2026-11-14:* "Updates take one click and say each thing once"; the release page link is drawn inside `.upd-acts` and only for a window that can install (`SettingsUpdates.tsx`), held by `test/e2e/updates.spec.ts` "at 390px a listener's row keeps its height and offers no control".
+- [x] Settings › Updates: a failed Download stays shown over a newer check (`outdated()` covers only a failed check).
+      *Done 2026-11-14, met before 0.2.4:* "Updates found on a clone without releases show again"; `outdated()` in `update-state.ts` judges a failed Download and a failed check the same way, held by `apps/web/test/updates.test.ts` "a failed Download gives way to a newer check".
 - [ ] Settings: an accent name this version does not know (a file written by a newer version) fails the whole settings decode, so every setting goes back to its default. Drop the unknown value and keep the rest; the same holds for any later choice list.
 - [ ] The desktop app keeps no server log: the server's output is thrown away, so a reply that failed cannot be looked into afterwards. Keep a small rolling log in the app's data folder.
 - [ ] Pictures: the thumbnail encoder (WebAssembly) is proved in the packaged Linux build only. Run the packaged Windows build once and ask for a thumbnail before the Pictures screen ships.
@@ -138,7 +142,8 @@ probe. Legacy migration and the bounded metadata-only single-tab path remain.
 - [ ] Image defaults: the style bench should report winners for Icons, Text and logos, and Painterly and concept art. Until then the Defaults menu has no row for those three.
 - [x] The shell tool description could show a quoted dot command, such as `sqlite3 db ".schema elements"`. A model that writes `sqlite3 db .schema elements` passes "elements" as a separate SQL argument and the call fails.
       *Done 2026-11-14:* "Tools on can run a command with an empty Library, and the running line stops saying Loading once the model is in"; the shell description in `packages/harness/src/prompt.ts` shows `".schema elements"` in quotes.
-- [ ] Settings row 6: Models is its own pop-up (done 2026-11-13). Usage, wider and shorter, and Settings as a pop-up in the same style are next.
+- [x] Settings row 6: Models is its own pop-up (done 2026-11-13). Usage, wider and shorter, and Settings as a pop-up in the same style are next.
+      *Done 2026-11-14, met before 0.2.4:* "Usage and Settings are pop-ups like Models"; Models, Usage and Settings are each a `Dialog` in `App.tsx` on a wide screen, held by `test/e2e/popups.spec.ts`.
 - [ ] Settings › Advanced at 360 px: a fit table that arrives late can push the rows below it. Give the table its room from the first frame.
 - [ ] The suggested chat models are a data file now, but a new list still needs an app update. Fetching a signed list between updates needs a key and the owner's go.
 - [ ] <!-- workspace:id=work:ac0688c8-5c8a-5e45-9db3-ff28388854c2 --> A tooltip that kept its left edge while its anchor's words changed can end up no longer over its anchor when the anchor moved a long way. Keep the old edge only while it still overlaps the anchor.
@@ -156,11 +161,13 @@ probe. Legacy migration and the bounded metadata-only single-tab path remain.
 
 - [ ] <!-- workspace:id=work:835820d7-09e1-5ef8-ae5d-e027a7d3613e --> Phone drawer: the New thread button's centre sits about 8 px left of the close button above it and about 4 px left of the thread rows' menu buttons. Line the three up.
 
-- [ ] <!-- workspace:id=work:d6f9ccae-85c3-5fbb-8144-9701313e3fcf --> Show each model's measured speed on the installed-model rows in Settings › Models and on the model picker's rows (the data and the small component landed 2026-11-11; nothing renders it yet). The browser spec should then read the number from the row, with a fixture that sets its own token count.
+- [x] <!-- workspace:id=work:d6f9ccae-85c3-5fbb-8144-9701313e3fcf --> Show each model's measured speed on the installed-model rows in Settings › Models and on the model picker's rows (the data and the small component landed 2026-11-11; nothing renders it yet). The browser spec should then read the number from the row, with a fixture that sets its own token count.
+      *Done 2026-11-14, met before 0.2.4:* "Each model shows how fast it runs here"; `ModelSpeed` renders on the rows in `Models.tsx` and `Picker.tsx`, and `test/e2e/model-speed.spec.ts` "a model that has replied shows its TPS in the picker and in Models, the others show none" reads the number from both rows after a reply whose stats the fixture sets.
 - [ ] <!-- workspace:id=work:b7c16486-811b-5ff4-b102-bbbcae47de41 --> A model's measured speed can stay on a page left open past the 14-day window with no chat in between; it corrects on the next finished reply or reload. Drop it on time without a polling timer (for example when the window is shown again).
 
 - [ ] <!-- workspace:id=work:ac143e6e-95f6-5116-a351-159edf9b6db9 --> Send a non-image file by path (owner decision 2026-11-11): the app keeps a copy of an attached file with the thread, the model is told the file's name and reads it in pieces with its read tool, and the message shows a file chip. Today a non-image file becomes a "not sent" chip that blocks Send.
-- [ ] A queued message waiting on a reply in another chat shows no reason in its tray row; say which chat it waits on.
+- [x] A queued message waiting on a reply in another chat shows no reason in its tray row; say which chat it waits on.
+      *Done 2026-11-14:* the row says "Sends when another chat's reply ends" while a reply runs in another chat and none in its own (`replyElsewhere` and `queueWords` in `Composer.tsx`), held by `queue-words.test.ts` "a message that waits only for a reply in another chat". It names no chat: the reply that ends first sends it, whichever chat that is. On hold it says "On hold", and Send now waits only for its own chat, so neither says it.
 - [x] Queued messages are kept in the page only, so a reload or restart drops them. Save them with the thread's draft.
       *Done 2026-11-14:* "A question gets its answer in the chat"; the queue is kept by the server, held by `apps/server/src/chat/queue.test.ts` "is kept on disk; one a closed app left comes back on hold".
 - [ ] Dictation that is running when Dictate becomes held (a reply starts) is discarded with no word. Keep the words, or say they were dropped.
@@ -314,10 +321,11 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       process numbers, which Windows does not clear, so it can end an
       unrelated program (review of the Windows pass, 2026-11-11). *Accept:* on a Windows machine with a model loaded, stopping the app-owned
       Ollama leaves no `ollama*.exe` process.
-- [ ] <!-- workspace:id=work:559de703-5cf5-5bec-948c-b3ebdfb333ba --> Thinking pill follows the model: add `ModelInfo.capabilities` from
+- [x] <!-- workspace:id=work:559de703-5cf5-5bec-948c-b3ebdfb333ba --> Thinking pill follows the model: add `ModelInfo.capabilities` from
       `/api/show` and grey the pill out for a model without "thinking"
       (the server already drops `think` for those, 24877a4).
       *Accept:* picking gemma3 greys the pill; picking qwen3.5 lights it.
+      *Done 2026-11-14, met before 0.2.4:* "Pick the chat model on the server from capabilities, and say why pills are off"; `canThink` in `pick.ts` reads the capabilities and `thinkUnavailable` in `Composer.tsx` greys the pill with "Thinking: not on this model", held by `test/e2e/model-pick.spec.ts` "the Thinking pill is on for a model that thinks and greyed with a reason for one that does not" (Qwen 3.5 9B lit, gemma4 12B greyed).
 - [ ] <!-- workspace:id=work:c958fcf0-2eab-5488-8b83-32a071fe311e --> Tools default reaches the turn (439a230): an E2E that sets Tools off
       in Settings and sees a turn with no tool definitions in the request.
 - [x] <!-- workspace:id=work:920bf6fb-58cb-5846-9c98-f204d89a3fef --> `think` on a model without thinking: run 2026-11-07 on the real
@@ -376,8 +384,10 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Accept:* hold the read, type, release it, then reload without another edit and recover the words.
 - [ ] <!-- workspace:id=work:9910392e-7d4f-5cba-8d20-4cc4ca593217 --> Draft recovery: one malformed queued row makes `recoverDraft` reject the record, including its saved chat drafts.
       *Accept:* a bad queue row leaves valid queued rows and draft slots recoverable.
+      *2026-11-14:* the queue is kept by the server now, and a saved queue is read only when the save says the server still owes it (`queueOnServer` and `owed` in `draft-persistence.ts`); `recoverDraft` still drops the whole record, draft slots included, on one bad row of that saved queue. A new reading must hold an owed save with one bad row and check that the slots and the other rows come back.
 - [ ] <!-- workspace:id=work:6a743bca-bfda-5ee9-97cd-6649910d248c --> Retrying `watchDraft` can replace an unchanged in-memory queue with the saved queue in `draft-persistence.ts`.
       *Accept:* retry persistence with an existing queue and retain its current rows, order and held state.
+      *2026-11-14:* the queue in memory is the server's now; `watchDraft` puts a saved queue in its place only when the save says the server still owes it and the queue did not change during the read (`draft-persistence.ts`). A new reading must retry with an owed save while the server's queue holds rows, and check those rows survive.
 - [ ] <!-- workspace:id=work:65a5597f-86b6-5c56-9b4e-f676b095e755 --> Edit on a sent message replaces the current draft without a backup in `Thread.tsx`'s `UserBubble`.
       *Accept:* editing and then cancelling or sending preserves the earlier unsent draft.
 - [ ] <!-- workspace:id=work:35f11948-721a-5afd-8730-2671bebfd1a9 --> Two overlapping first sends can leave a stray draft in the first created chat (`session/threads.ts`, `session/chat.ts`).
@@ -392,8 +402,9 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Accept:* measure abrupt-close recovery; evaluate a synchronous text mirror without copying large attachments into it.
 - [ ] <!-- workspace:id=work:91fb9dbf-7ca0-5d18-be0b-47ef2b68f1a3 --> Repeat the prepared-bundle attachment benchmark after the per-chat draft change; the earlier 90 MiB result predates its slot layout.
       *Accept:* retain submitted bytes and recovered text/images for text edits and chat switches using the current bundle.
-- [ ] <!-- workspace:id=work:118b8438-49e8-5f79-b8fb-848f9ac88ef7 --> A late confirmation of a queued message being edited ends the edit without giving the draft a new identity (`confirmCopy` in `session/chat.ts`), so a dictation or paste still arriving lands in the now-standalone draft.
+- [x] <!-- workspace:id=work:118b8438-49e8-5f79-b8fb-848f9ac88ef7 --> A late confirmation of a queued message being edited ends the edit without giving the draft a new identity (`confirmCopy` in `session/chat.ts`), so a dictation or paste still arriving lands in the now-standalone draft.
       *Accept:* late-confirm an edited queued row while a dictation or paste is held, and the late words are dropped or kept by a recorded rule, with a test.
+      *Done 2026-11-14:* the rule is drop. A reworded edit whose message sends anyway keeps the new words with a new identity (`renewDraft` in `confirmCopy`), so a paste or dictation meant for the edit no longer lands, as when Edit meets a message already sending. Held by `draft-confirm.test.ts` "late confirmation of a reworded queued edit".
 - [ ] <!-- workspace:id=work:a4f6ff07-e57c-5c71-9c16-1063e2008ae7 --> Erasing the box and retyping identical words while a first send's chat is being created clears the retyped copy when the send settles (`send` in `session/chat.ts`, queued and ready paths).
       *Accept:* hold the create, retype the same words, settle it, and keep the retyped draft.
 - [ ] <!-- workspace:id=work:f30c4c8a-8cad-5d2f-ad96-d65c7fa0cda5 --> New thread pressed on the new-chat screen drops an image paste still being read; before per-chat drafts an image read had no such guard.
@@ -436,6 +447,7 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Done 2026-11-09:* “Mount a long thread's older turns in a third of the time”; one job compared first-screen and `-mounted` rows: whole mount 3,012 to 953 ms CPU task time, first screen unchanged within noise, no row slower.
 - [ ] <!-- workspace:id=work:e10ac9e4-a55f-592f-aa2b-39d37d3e76e2 --> Whole-thread mount of a 2,000-turn thread still costs about 950 ms of tasks, above the 643 ms recorded before long threads opened at their last turns; one trace reading puts most of the rest in React rendering turns above the view.
       *Accept:* attribute the remainder in the perf comparison, then compare mounting on demand (scroll, Find) against always mounting before choosing.
+      *2026-11-14:* a chat now opens on a window of its newest 200 turns and mounts only those (`WINDOW_TURNS` in `Thread.tsx`); a 2,000-turn thread is never mounted whole unless the reader presses for the earlier turns. A new reading must time mounting the 200-turn window after open, and one press that adds 200 more.
 - [ ] <!-- workspace:id=work:d2b26db4-2611-5eba-bf16-66baa081190e --> The history-load error line sits one turn's gap below the last turn since turns carry their own gap (it was flush); derived from the rules in `styles.css`, not looked at in a browser.
       *Accept:* view it on wide, narrow and touch screens and either keep the gap or restore the flush position without a rule that reads the previous turn.
 - [ ] <!-- workspace:id=work:e5acc555-615d-5f42-8267-a8d279b29ad3 --> Older turns mounted above the view no longer fade in; a turn mounted just above the top edge can be partly visible when it appears.
@@ -507,8 +519,9 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Done 2026-11-11:* "One memory answer for every screen"; the server's next fit table replaces the verdict in place.
 - [ ] <!-- workspace:id=work:c4453c4f-2bef-50b9-a034-74d567ecdce9 --> Decide whether a Recommended row that now spills into system memory stays under Recommended; today only "does not fit" moves it out.
       *Accept:* one rule, written in `docs/design.md`, and a test for the spilling case.
-- [ ] <!-- workspace:id=work:fc39d851-10b1-5cc4-a49f-9e580f32a5c2 --> The "uses system memory" group title drops its suffix while a recheck runs (`ModelDownloads.tsx`).
+- [x] <!-- workspace:id=work:fc39d851-10b1-5cc4-a49f-9e580f32a5c2 --> The "uses system memory" group title drops its suffix while a recheck runs (`ModelDownloads.tsx`).
       *Accept:* the title keeps its last words until the new verdict is in.
+      *Closed 2026-11-14, no longer applies:* "Models › Download recommends for your computer and says each thing once" took that group out; `ModelDownloads.tsx` now groups rows as Recommended, Also available, Something else and Too big for this computer, with no suffix to drop.
 - [ ] <!-- workspace:id=work:516a18cf-d146-532f-9076-42131a5c09b1 --> "Connecting…" has no way forward when the server never answers: no Retry and no "still connecting" line (`FirstRun.tsx`, `Banner.tsx`).
       *Accept:* after a stated bound the screen offers one action or names what to check, and says nothing untrue before it.
 
@@ -576,12 +589,15 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Accept:* a dynamic combo is read from `/object_info`, and `image_z_image` converts and fills.
 - [ ] <!-- workspace:id=work:0be787cf-d31d-5d32-a131-8aa42b7098ef --> The converter's expected graphs are hand-written; none was compared with ComfyUI's own "Export (API)".
       *Accept:* the Klein, SDXL and Z-Image fixtures each match a graph exported from a real ComfyUI.
-- [ ] <!-- workspace:id=work:16582237-693e-56c3-a76c-241912f0bb6f --> The default ignores fit: a 6 GiB card with Klein installed defaults to Klein, which every send refuses.
+- [x] <!-- workspace:id=work:16582237-693e-56c3-a76c-241912f0bb6f --> The default ignores fit: a 6 GiB card with Klein installed defaults to Klein, which every send refuses.
       *Accept:* the default is the best setup that fits this machine's free memory.
-- [ ] <!-- workspace:id=work:db9ff7d6-f6c4-56dd-83f2-a7cdab53bcf1 --> Setup memory estimates are padded guesses (Klein 10 GiB, SDXL 9 GiB) while the overnight GPU matrix ran Klein under an 8 GiB cap and SDXL Lightning at 4 GiB with offload.
+      *Done 2026-11-14, met before 0.2.4:* "Image mode's new setups, picked by the card's memory"; `defaultChoice` in `apps/server/src/image/presets.ts` keeps only setups that fit the free memory, held by `presets.test.ts`.
+- [x] <!-- workspace:id=work:db9ff7d6-f6c4-56dd-83f2-a7cdab53bcf1 --> Setup memory estimates are padded guesses (Klein 10 GiB, SDXL 9 GiB) while the overnight GPU matrix ran Klein under an 8 GiB cap and SDXL Lightning at 4 GiB with offload.
       *Accept:* each estimate comes from the matrix, and cards with 6 to 10 GiB free get a setup.
-- [ ] <!-- workspace:id=work:aec90311-7093-5141-8b0f-fef677d0950d --> No setup for cards under 8 GiB: Klein needs the FP4 text encoder there, and the app has no SD 1.5 fallback.
+      *Done 2026-11-14, met before 0.2.4:* "Image mode's new setups, picked by the card's memory"; each setup's need in `presets.ts` is the matrix cap it ran under (Klein 8, Z-Image 6, the compact setup and MOSS 4 GiB), held by `presets.test.ts`.
+- [x] <!-- workspace:id=work:aec90311-7093-5141-8b0f-fef677d0950d --> No setup for cards under 8 GiB: Klein needs the FP4 text encoder there, and the app has no SD 1.5 fallback.
       *Accept:* a 4 GiB and a 6 GiB fake card each get a runnable default.
+      *Done 2026-11-14, met before 0.2.4:* "Image mode's new setups, picked by the card's memory"; 4 GiB and 6 GiB cards each default to a compact Klein cell, with Z-Image offered from 6 GiB (`presets.ts`, `MIN_ROOM` 4 GiB), held by `presets.test.ts` "the default is the General style's cell for the card's level".
 - [ ] <!-- workspace:id=work:0090fa59-7645-50b8-82e0-8a5089cda0f2 --> MOSS-Image (Apache-2.0) is the only new model whose licence allows it as a default; it is not offered.
       *Accept:* the owner picks in the GPU-matrix gallery, and the pick is a setup.
 - [ ] <!-- workspace:id=work:cf59726c-1d1e-5e17-83e6-a0dcb56d5316 --> A final file that already exists is downloaded again, and any ComfyUI folder kind is accepted as a download directory (IR3-05).
@@ -632,8 +648,9 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
 
 - [x] <!-- workspace:id=work:d686ec35-610b-5fa8-b37a-de1789e93542 --> A tool call cut short by Stop shows "stopped" while the reply is live and is saved as failed, so after a reload its chip is red.
       *Done 2026-11-11:* "Stop follow-ups, and browser tests that wait for the app's data"; one fix with the trim follow-up above.
-- [ ] <!-- workspace:id=work:cc76f951-d121-550c-9cfe-2adc58fabbcd --> A reload loses the order of thinking and calls inside the chip and the thinking seconds, because neither is saved with the message.
+- [x] <!-- workspace:id=work:cc76f951-d121-550c-9cfe-2adc58fabbcd --> A reload loses the order of thinking and calls inside the chip and the thinking seconds, because neither is saved with the message.
       *Accept:* the saved message carries the times; a reloaded reply opens to the same list and the same number.
+      *Done 2026-11-14, met before 0.2.4:* "The server says how a reply ended, and Send answers at once"; the saved reply carries `times` (`ReplyTimes` in `packages/contracts/src/shapes.ts`, written by `turnClock` in `apps/server/src/chat/times.ts`) with each thinking span and call start, and `Fold` in `Thread.tsx` orders the list from them; `test/e2e/reply-ended.spec.ts` checks the same seconds after a reload.
 - [ ] <!-- workspace:id=work:5e30a5dc-d7fb-53f6-a7b2-1372ab0384d2 --> A finished image step counts as a call in the chip; before the chip it was hidden once the image card showed.
       *Accept:* decide whether an image is a call in the count, and say it once.
 - [x] <!-- workspace:id=work:a3401491-dd13-54bc-b25e-fefa10f035b1 --> A reply this window joined part-way shows no thinking time at all, although the server knows when the turn began.
@@ -751,6 +768,7 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       Fake lifecycle coverage passes;
       all four image browser journeys pass, including retries across clients.
       Real-runtime acceptance remains open.
+      2026-11-14: the fresh-install run on Linux reached the app's own image engine and found it would not start ("The app's own image engine starts on a fresh install" fixed it); no real picture with progress, cancel and chat restored is recorded in `docs/releasing.md`.
 - [ ] <!-- workspace:id=work:efd92470-9e03-54a8-97a0-00dd3401270c --> Image presets measured in the room left beside whisper; a smaller
       preset or a refusal when the room is short.
 - [x] <!-- workspace:id=work:6cb56f29-0648-5699-ac90-926de5dd53a7 --> A chat model that was already loaded when this app first used it is not counted as the app's own (`runtime/load.ts`), so an image never unloads it and is refused while that model holds the memory. Reported by the owner after a restart with a warm model.
@@ -1040,7 +1058,8 @@ RS-03 remains dropped.
 
 ## Later: slices 5 to 7
 
-- [ ] <!-- workspace:id=work:c0cb50be-fb59-52f0-b9e6-bb7c914b700e --> Models and Usage open as pop-up panels over the chat; Settings stays its own screen (owner, 2026-11-11). Usage is built that way first; Models moves out of Settings into the same panel after.
+- [x] <!-- workspace:id=work:c0cb50be-fb59-52f0-b9e6-bb7c914b700e --> Models and Usage open as pop-up panels over the chat; Settings stays its own screen (owner, 2026-11-11). Usage is built that way first; Models moves out of Settings into the same panel after.
+      *Closed 2026-11-14, no longer applies:* "Usage and Settings are pop-ups like Models" made Settings a pop-up too (a `Dialog` in `App.tsx` beside Models and Usage; on a phone it is a screen), so there is no separate Settings screen on a wide window to keep.
 - [ ] <!-- workspace:id=work:d17c769b-d526-568a-ba63-91a8c1b35a6b --> Usage file: any open error moves the file aside and starts empty. Only a corrupt file should move; a read-only file or a newer schema should run in memory and leave the file alone. The one-time fill compares raw clock times, so a clock moved back after a failed fill can count a reply twice and a reply stamped after the first open is never filled.
       *Accept:* a test per case (read-only, newer schema, clock moved back) with the file left as it was.
 - [ ] <!-- workspace:id=work:16277434-f91e-59c9-b8a4-b894c9c36559 --> Usage counts nothing for a stopped reply or a benchmark, and the screen does not say so (owner decides whether a stopped reply's tokens count).
@@ -1070,6 +1089,7 @@ RS-03 remains dropped.
       Ethan. Packaging does not authorize a release or publication.
       *Status 2026-11-09:* a Linux AppImage reaches first run against an
       isolated stopped-runtime setup. Real Ollama/ComfyUI handoff remains open.
+      *2026-11-14:* a fresh-install run on Linux found two faults on this path, fixed in "First run offers the download once Ollama is in" and "The app's own image engine starts on a fresh install"; `docs/releasing.md` records the AppImage opening on a stock Ubuntu 24.04, but no run with a real model and a real picture.
       Build-to-build replacement preserves the measured settings, thread,
       completed-message fixture, profile marker and model-file fixture in
       per-user XDG storage. Ordinary execution in the test environment fails

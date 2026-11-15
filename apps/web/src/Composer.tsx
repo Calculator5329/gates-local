@@ -523,8 +523,12 @@ export function enterAnswer(s: { readonly sendDisabled: boolean; readonly memRef
   return s.showStop ? "note" : "tip";
 }
 
-/** A queued message's state in a word or two, only where being in the queue does not already say it: null while it waits for the reply, and while it is edited here (the pressed pencil says that). */
-export function queueWords(q: Queued, editing: boolean, first: string | undefined, model: string | undefined, installing: boolean): string | null {
+/**
+ * A queued message's state in a word or two, only where being in the queue does not already say it: null while it waits
+ * for this chat's reply, and while it is edited here (the pressed pencil says that). `elsewhere`: no reply runs in this
+ * chat but one runs in another, and the queue sends one reply at a time, so that one is what it waits for.
+ */
+export function queueWords(q: Queued, editing: boolean, first: string | undefined, model: string | undefined, installing: boolean, elsewhere = false): string | null {
   if (editing) return null;
   // open in another window's composer, it does not go until that edit ends or that window closes
   if (q.editing === true) return EDITED_ELSEWHERE;
@@ -533,10 +537,21 @@ export function queueWords(q: Queued, editing: boolean, first: string | undefine
   if (q.waitFor === "setup") return installing ? AFTER_SETUP : first !== undefined ? AFTER_DOWNLOAD : null;
   if (q.retry === "running") return RETRYING;
   if (q.retry === "failed") return RETRY_FAILED;
-  return q.held ? "On hold" : null;
+  if (q.held) return "On hold";
+  // Send now waits only for its own chat (server chat/queue.ts next)
+  return elsewhere && q.waitFor === "reply" && q.now !== true ? AFTER_OTHER_REPLY : null;
 }
 
+/** A chat reply runs in another chat and none in this one (a picture is not a reply). */
+export const replyElsewhere = (s: State): boolean => {
+  // a turn here that only another window started counts too: the row then waits behind its own chat
+  const here = s.threadId === null ? undefined : s.turns[s.threadId];
+  return (here === undefined || here.end !== undefined) && Object.entries(s.turns).some(([id, t]) => id !== s.threadId && t.end === undefined && t.image !== true);
+};
+
 export const EDITED_ELSEWHERE = "Being edited in another window";
+/** In Send's words for another chat's reply ("Another chat's reply stops first"). */
+const AFTER_OTHER_REPLY = "Sends when another chat's reply ends";
 /** The owner's words for a queue behind a failed reply the server runs once more (chat row 23, decision 7). */
 const RETRYING = "Retrying the reply before it";
 const RETRY_FAILED = "On hold: the reply before it didn't finish";
@@ -615,6 +630,7 @@ function QueueTray() {
   const downloadAt = useStore(downloadNumbers);
   const setupAt = useStore(setupNumbers);
   const installing = useStore((s) => s.runtime?.state === "installing" || s.runtime?.state === "starting");
+  const elsewhere = useStore(replyElsewhere);
   const mine = queued.filter((q) => q.threadId === threadId);
   if (mine.length === 0) return null;
   const n = mine.length;
@@ -627,7 +643,7 @@ function QueueTray() {
       {mine.map((q, i) => {
         if (!shown(i, q.id)) return null;
         const editing = q.id === editingId;
-        const words = queueWords(q, editing, first, model, installing);
+        const words = queueWords(q, editing, first, model, installing, elsewhere);
         return (
           <li key={q.id} className="qt-r" aria-label={`Queued ${q.draw === undefined ? "message" : "image"} ${i + 1} of ${n}`}>
             {/* a chat is the default, so only a picture marks its kind (chat row 19) */}

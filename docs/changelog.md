@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-14: The running line times only work, an empty stopped reply says Stopped, and a queued message says what it waits for
+
+- A queued message waiting behind a reply in another chat gave no
+  reason in its row. It now reads "Sends when another chat's reply
+  ends".
+- When a queued message you were rewording sent anyway, a paste or
+  dictation still arriving for that edit could land in the leftover
+  words. It is now dropped, and the new words stay as they are.
+
+- A reply stopped before its first word showed only a small square.
+  Its row now reads "Stopped" beside the square, and keeps Stop's
+  seconds and Regenerate on hover, as any stopped reply's row does.
+- A reply's running line shows its seconds only once the reply thinks
+  or calls a tool, since that is what they time. A model that goes
+  straight to writing shows the dot and "Writing", where it showed
+  "0 s Writing" for the whole reply and read as a stuck clock. The
+  words move right at most once, when the seconds first appear.
+
 ## 2026-11-14: Measure fails a model only for what it wrote
 
 - A Measure no longer fails page checks because the window was in the

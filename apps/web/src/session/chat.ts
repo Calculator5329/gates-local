@@ -6,7 +6,7 @@ import { type LiveTurn, NA, type NoticeOffer, type Queued, type State, type Stop
 import { imageReason } from "../paste.ts";
 import { drawChoice, imageMode } from "../image-choice.ts";
 import { releaseFiles } from "../file-holds.ts";
-import { type Draft, beginQueuedDraft, cancelQueuedDraft, clearDraft, currentDraftKey, getDraft, moveDraft, replaceDraft } from "../drafts.ts";
+import { type Draft, beginQueuedDraft, cancelQueuedDraft, clearDraft, currentDraftKey, getDraft, moveDraft, renewDraft, replaceDraft } from "../drafts.ts";
 import type { ServerEvent } from "./server-state.ts";
 import { type ChatEvent, type TurnEvent, reduceTurn, unfinished, withTurn, workMsAt } from "./turn.ts";
 import { stopReason as stopWords } from "./times.ts";
@@ -408,6 +408,10 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     if (matchedDraft) {
       if (getDraft(message.threadId).beforeEdit) cancelQueuedDraft(message.threadId);
       else clearDraft(message.threadId);
+    } else {
+      // reworded while it sent: the new words stay, and a paste or dictation meant for the edit is dropped
+      const { queued, editingQueued } = getState();
+      if (queued.some(q => q.messageId === message.id && q.id === editingQueued)) renewDraft(message.threadId);
     }
     applyServerEvent(s => {
       const queued = s.queued.find(q => q.messageId === message.id);

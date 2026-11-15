@@ -51,6 +51,8 @@ const says = (html: string) => lineOf(html).replace(/<[^>]+>/g, " ").replace(/\s
 const bulb = (html: string) => /data-think="(\d+)"/.exec(html)?.[1];
 /** The stop square's seconds; undefined when it shows none. */
 const square = (html: string) => /class="stop-mark">.*?<span class="s">(\d+) s<\/span>/s.exec(html)?.[1];
+/** The words on screen, tags and attributes out. */
+const visible = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 const chipName = (html: string) => /class="think fold"[^>]*aria-label="([^"]*)"/.exec(html)?.[1];
 
 describe("the server's note", () => {
@@ -95,6 +97,26 @@ describe("the live line says the server's record (decisions 1, 2, 33)", () => {
     const writing = play(calling, [[9000, { type: "tool", step: step("a", "done", 3000) }], push(9000, { stage: "thinking", readyAt: 4000, workMs: 5000 }), push(10_000, { stage: "writing", readyAt: 4000, workMs: 6000, firstTokenAt: 10_000 }), [10_000, { type: "delta", text: "The" }]]);
     expect(says(await live(10_000, writing))).toBe("6 s Writing");
     expect(says(await live(40_000, writing)), "the writing is not work").toBe("6 s Writing");
+  });
+
+  it("a reply that goes straight to writing has no work to time: the dot and Writing, no seconds, for the whole reply", async () => {
+    // a model that does not think, warm: ready at once, words from 1 s; "0 s" beside Writing read as a stuck clock
+    const writing = play(sent(), [push(0, { stage: "waiting", readyAt: 0 }), push(1000, { stage: "writing", readyAt: 0, firstTokenAt: 1000 }), [1000, { type: "delta", text: "The" }]]);
+    expect(says(await live(1200, writing))).toBe("Writing");
+    expect(lineOf(await live(1200, writing))).not.toContain('class="lv-t"');
+    expect(says(await live(30_000, writing)), "still no clock at the end").toBe("Writing");
+    // a cold one: the load's words and Writing sit at the same left edge, after the dot
+    const cold = play(sent(), [push(0, { stage: "loading" }), push(6000, { stage: "writing", readyAt: 6000, firstTokenAt: 6000 }), [6000, { type: "delta", text: "The" }]]);
+    expect(says(await live(7000, cold))).toBe("Writing");
+  });
+
+  it("a reply that writes, then calls a tool, gains its seconds once, at the call, and keeps them", async () => {
+    const wrote = play(sent(), [push(0, { stage: "writing", readyAt: 0, firstTokenAt: 0 }), [0, { type: "delta", text: "Let me look." }]]);
+    expect(says(await live(2000, wrote))).toBe("Writing");
+    const calling = play(wrote, [push(2000, { stage: "tool", readyAt: 0, firstTokenAt: 0 }), [2000, { type: "tool", step: step("a", "running") }]]);
+    expect(says(await live(3000, calling))).toBe("1 s Searching your library");
+    const after = play(calling, [[4000, { type: "tool", step: step("a", "done", 2000) }], push(4000, { stage: "writing", readyAt: 0, firstTokenAt: 0, workMs: 2000, toolMs: 2000, callsAt: { a: 2000 } }), [4000, { type: "delta", text: " Found it." }]]);
+    expect(says(await live(9000, after))).toBe("2 s Writing");
   });
 
   it("a window that opened mid-reply has the same number as the one that sent it", async () => {
@@ -167,6 +189,20 @@ describe("a stopped reply's time", () => {
     expect(shown).toContain('class="stop-mark"');
     expect(square(shown)).toBeUndefined();
     expect(chipName(shown)).toBe("Thought for 3 s");
+  });
+
+  it("stopped before its first word, the row says Stopped once beside the square and keeps Regenerate, live and saved", async () => {
+    const stopped = play(sent(), [push(0, { stage: "waiting", readyAt: 0 }), [2000, { type: "stop" }]]);
+    const shown = await live(2500, stopped);
+    expect(visible(shown)).toMatch(/^Check my notes \d+:\d+ [AP]M Stopped 2 s$/);
+    expect(shown.match(/>Stopped</g), "once on screen").toHaveLength(1);
+    expect(shown).toContain('data-testid="chat.reply.regenerate"');
+    const after = await saved({ id: "s", threadId: T, role: "assistant", createdAt: 2, content: "", interrupted: true, times: stamped("stopped", 2) });
+    expect(after.match(/>Stopped</g)).toHaveLength(1);
+    expect(after).toContain('data-testid="chat.reply.regenerate"');
+    // one the server stopped says why in its own note, and a stopped reply with words says nothing more than the square
+    const words = await saved({ id: "s", threadId: T, role: "assistant", createdAt: 2, content: "Half", interrupted: true, times: stamped("stopped", 2) });
+    expect(words).not.toContain(">Stopped<");
   });
 });
 

@@ -25,6 +25,6 @@
   },
   {
     "screen": "reply", "step": "the first reply streams in", "kind": "moves", "element": ".think.run", "real": false, "area": "finder",
-    "wrong": "Not a bug: the live line is a dot until the work clock starts, then gains its seconds and its word once and keeps that width for the rest of the reply (the owner's layout pick)."
+    "wrong": "Not a bug: the live line is a dot and its word until the reply thinks or calls a tool, then gains its seconds once and keeps that width for the rest of the reply; a reply that only writes never gains them (the owner's layout pick)."
   }
 ]
