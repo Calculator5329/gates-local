@@ -7,14 +7,42 @@ never shows a whisper stop, start or restart.
 
 ## Now: slice 1, desktop chat and models
 
+*2026-11-14, owed from the landings since 0.2.4:*
+
+- [ ] The update changes since 0.2.4 (a copy that cannot replace its own file says why, a copy run from its download folder, "Checking…" on Windows while the go-back installer is checked) have run against fakes only.
+      *Accept:* one packaged AppImage run and one installed Windows run, with screenshots.
+- [ ] On Windows, the retry that moves the unpacked chat engine into place has not run on a real Windows computer with a virus scanner holding a file.
+      *Accept:* one Windows run with a file held during the move that shows the retry, and Retry moving the kept copy without a second download.
+- [ ] The gemma4 E2B and E4B estimates were changed from the model files' own tables; no reading on a real card has been compared with them.
+      *Accept:* one load of each on a card, the need read from the runner, within the margin the fit table uses.
+- [ ] The fit check for a model that would spill into system memory does not add the table the runtime keeps off the card, and the reading taken from the runner's own list of loaded models has not been checked on a real card.
+      *Accept:* a spilling model's check counts that table, and one load on a card shows the runner's list agreeing with the card's own reading.
+- [ ] "Stopping the picture" (Stop on a picture made on the processor) has no browser test: the test picture engine cannot hold a picture after an interrupt or say that it runs on the processor.
+      *Accept:* the test engine can do both, and one browser test shows the card from Stop until the next picture runs.
+- [ ] A page made in chat: what its link hints can still look up has not been measured, and the lockdown has been probed in Chromium only. Safari and Firefox are unprobed.
+      *Accept:* a measured list of what a link hint reaches, and the probes in `docs/design/pages.md` run in Firefox and Safari.
+- [ ] The message box's bottom row on a touch screen with a page open has not been checked with the Image pill and the context meter showing.
+      *Accept:* a screenshot at 1200 by 800 on a screen with no hover, a page open, Image on and the context meter showing, with Send inside the box and the model's name readable.
+- [ ] Sizes are written "x of y GB" by more than one helper (the model download rows, the picture download, the first window).
+      *Accept:* one helper in the shared package writes them all, and the time-left text keeps its number and unit on one line.
+- [ ] Making pictures on the processor has not run on Windows.
+      *Accept:* one picture made on the processor on a Windows computer, with its time.
+- [ ] On a computer with no supported card the downloaded Ollama still carries its CUDA libraries. The whole pinned archive is unpacked (1.5 GB to download; 2.5 GB on disk on Linux, 2.3 GB on Windows), CUDA 12 and 13 libraries included; their share of that is not measured.
+      *Accept:* the share measured, then a decision from it: such a computer keeps only what the processor needs, or the whole archive stays with the reason written down.
+- [ ] A link or text dragged onto the desktop window is refused by the web page only. The desktop shell has no guard of its own, so a drop the page missed would still open the link in the system browser.
+      *Accept:* the desktop shell refuses a dropped link by itself, shown by a test with the page's guard taken out.
+- [ ] In Automatic mode the app's own Ollama uses the models folder of an Ollama the person installed. This is how it is built and documented; whether it should is an open product decision.
+      *Accept:* the owner decides, and the rule is written in `docs/design.md`.
+
 *2026-11-13, owed from the Windows low-memory fixes (0.2.4):*
 
 - [ ] A real load on a 6 GB card with 16 GB of system memory has not been measured for the Windows low-memory fixes (WIN-MEM-01 to WIN-MEM-07); every check so far ran against fakes.
       *Accept:* one measured send that spills, one image after a chat and one chat after an image on that machine, with the readings.
 - [ ] The refusal's offer tries only the fit table's context sizes, so 4k is never offered even when it is the one that runs.
       *Accept:* a model that runs only at 4k is offered at 4k.
-- [ ] A download folder picked with the person's own ComfyUI: nothing tells that ComfyUI to look there, so the files are on disk and the engine does not see them.
+- [x] A download folder picked with the person's own ComfyUI: nothing tells that ComfyUI to look there, so the files are on disk and the engine does not see them.
       *Accept:* the row says so, or the folder is offered to that ComfyUI's model paths.
+      *Done 2026-11-14:* "Images are judged by your card, and set up from Settings"; Settings shows the "Add to extra_model_paths.yaml" row with the line to copy (`extraModelPathsLine` in `apps/server/src/image/own.ts`).
 - [ ] Disk planning before a download, the folder dialog and the image live line have not been run on Windows.
       *Accept:* one Windows run of each, with screenshots.
 - [ ] "A version that cannot start is put back" (IU-W2) has not been observed on Windows: its run stopped before the click.
@@ -39,6 +67,9 @@ that leaves without opening costs one warm (5 checks).
 Broad thread-open rows end at the first screen and retain full-fill `-mounted`
 twins; old release reports used the full fill for the plain rows and are labeled
 accordingly.
+*2026-11-14:* a long thread now opens on its newest 200 messages, so the
+thread-open rows time that window and name it (`thread-2000-cold-click-mounted-200`),
+from "The speed check measures long threads the way each release opens them".
 
 - [ ] <!-- workspace:id=work:bd43faf2-3ad7-5ce0-a367-796c4579aea1 --> A click on the model button with no hover first still waits about 293 ms for its fit checks. Each check reads the GPU again on the server.
       *Accept:* the checks for one opening share one GPU reading, the first view waits for current answers, and the scripted-click row is measured faster.
@@ -52,6 +83,7 @@ accordingly.
       *Accept:* the turn joins the running preload, shown by one residency read and one generate for the pair.
 - [ ] <!-- workspace:id=work:44254433-4354-58d3-ba51-04fdcd40fd17 --> The Default card in Settings shows the app's pick before anyone picks, while New thread starts on the model used last; the two can name different models with no saved default.
       *Accept:* decide which one the card means and say it once on the card.
+      *Part done 2026-11-14:* "Settings and Models: fewer controls, no explaining tooltips" took the card out (the Default chip marks the default, a row's menu changes it), and "The screen says what is in memory" starts a new chat on the model in memory; left: with nothing in memory and no saved default, the chip and a new chat can still name different models.
 - [x] <!-- workspace:id=work:eee4b8c7-1d1d-5fa8-af4d-274277beda34 --> Thinking and tool calls in a reply are one control. Today each tool call is its own row, a second round of thinking grows inside the first thought above those rows and pushes them down, its label says "Thought for" while the model thinks again, and the bottom row says "Writing" during it.
       *Done 2026-11-11:* "A reply's thinking and tool calls fold into one chip"; follow-ups under "Work chip, review follow-ups".
 - [ ] <!-- workspace:id=work:7d4370b7-afe9-5e0f-b438-8ea1d02fca00 --> A reply stopped while the model was thinking reads "Show thinking" and its pill can change width at Stop.
@@ -104,7 +136,8 @@ probe. Legacy migration and the bounded metadata-only single-tab path remain.
 - [ ] Pictures: backfill time on a large library is not measured, and the phone listener's thumbnail route has no test.
 - [ ] Pictures round 3: Compare, Save all, Delete; timing journeys with 5,000 pictures.
 - [ ] Image defaults: the style bench should report winners for Icons, Text and logos, and Painterly and concept art. Until then the Defaults menu has no row for those three.
-- [ ] The shell tool description could show a quoted dot command, such as `sqlite3 db ".schema elements"`. A model that writes `sqlite3 db .schema elements` passes "elements" as a separate SQL argument and the call fails.
+- [x] The shell tool description could show a quoted dot command, such as `sqlite3 db ".schema elements"`. A model that writes `sqlite3 db .schema elements` passes "elements" as a separate SQL argument and the call fails.
+      *Done 2026-11-14:* "Tools on can run a command with an empty Library, and the running line stops saying Loading once the model is in"; the shell description in `packages/harness/src/prompt.ts` shows `".schema elements"` in quotes.
 - [ ] Settings row 6: Models is its own pop-up (done 2026-11-13). Usage, wider and shorter, and Settings as a pop-up in the same style are next.
 - [ ] Settings › Advanced at 360 px: a fit table that arrives late can push the rows below it. Give the table its room from the first frame.
 - [ ] The suggested chat models are a data file now, but a new list still needs an app update. Fetching a signed list between updates needs a key and the owner's go.
@@ -128,7 +161,8 @@ probe. Legacy migration and the bounded metadata-only single-tab path remain.
 
 - [ ] <!-- workspace:id=work:ac143e6e-95f6-5116-a351-159edf9b6db9 --> Send a non-image file by path (owner decision 2026-11-11): the app keeps a copy of an attached file with the thread, the model is told the file's name and reads it in pieces with its read tool, and the message shows a file chip. Today a non-image file becomes a "not sent" chip that blocks Send.
 - [ ] A queued message waiting on a reply in another chat shows no reason in its tray row; say which chat it waits on.
-- [ ] Queued messages are kept in the page only, so a reload or restart drops them. Save them with the thread's draft.
+- [x] Queued messages are kept in the page only, so a reload or restart drops them. Save them with the thread's draft.
+      *Done 2026-11-14:* "A question gets its answer in the chat"; the queue is kept by the server, held by `apps/server/src/chat/queue.test.ts` "is kept on disk; one a closed app left comes back on hold".
 - [ ] Dictation that is running when Dictate becomes held (a reply starts) is discarded with no word. Keep the words, or say they were dropped.
 - [ ] `Voice.tsx` records when Dictate came back in a `useEffect`, so a click in the same frame can slip past the double-click guard. Use `useLayoutEffect`.
 
@@ -137,7 +171,8 @@ probe. Legacy migration and the bounded metadata-only single-tab path remain.
 - [ ] <!-- workspace:id=work:429d2e26-ea6a-5741-a4f3-a493e0274206 --> No browser spec covers the "this model cannot see images" message for an image picked with "Attach a file", the 8-image limit reached through a drop, or the file chooser at phone width.
 - [ ] <!-- workspace:id=work:e2c7100d-e7e6-59b0-87d1-f31241b341db --> Dropping files is proven with synthetic drag events only. Try a real drag from the desktop into the desktop window, and a dropped folder end to end (unit test only today).
 - [ ] <!-- workspace:id=work:148c4e5e-87c5-5429-8cf7-709ba730f126 --> Under reduced motion only Dictate's spinner holds still; the shared `.spin` rule still turns in seven other places (update checks, tool rows and status, two banners, the maker mark). Fix the shared rule.
-- [ ] <!-- workspace:id=work:981392c1-7213-5ef6-9031-9cd0c746d284 --> While a reply runs, Stop's tooltip says "Enter queues your message" even when a "not sent" chip will block the queue.
+- [x] <!-- workspace:id=work:981392c1-7213-5ef6-9031-9cd0c746d284 --> While a reply runs, Stop's tooltip says "Enter queues your message" even when a "not sent" chip will block the queue.
+      *Done 2026-11-14:* "Chat: fewer lines, fewer words"; Stop's tip is "Stop", or "Cancel image" while a picture is made (`stopTip` in `apps/web/src/Composer.tsx`).
 
 Known limit: reloading in the seconds while a send is being accepted can lose
 that message. Keep the message recoverable across that reload in a future pass.
@@ -147,6 +182,9 @@ that message. Keep the message recoverable across that reload in a future pass.
 - [x] <!-- workspace:id=work:6d2c35d9-1890-5227-9084-041c804362af --> Remove a confirmed retry from background replies so it no longer looks active.
       *Done 2026-11-09:* “Hold every running reply in one turn map with one reducer” replaces the source chat's turn in the map.
 Follow-up (TC-02): Add a server-side size limit or eligibility check before hover-preloading very large thread histories.
+*2026-11-14:* a hover preload now asks the server for the newest 200 messages
+only, as opening the thread does (`fetchThread` in `apps/web/src/session/threads.ts`),
+from "A question gets its answer in the chat".
 
 *In progress 2026-11-08:* Clipboard buttons share a fallback, truthful feedback
 and focus/selection restoration. Browser coverage is in `test/e2e/copy.spec.ts`;
@@ -183,6 +221,7 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Accept:* with Ollama off PATH, first launch installs and runs it; a bad
       hash refuses with a usable message and leaves nothing half-installed.
       *Status 2026-11-07:* install path built and hash re-read in 4eb5af2; the off-PATH first-launch install has not run for real (1.5 GB download).
+      *Part done 2026-11-14:* "First run offers the download once Ollama is in"; on a computer with no Ollama, first launch installed and ran the app's own copy; left: a bad hash refused on a real download, leaving nothing half-installed.
 - [ ] <!-- workspace:id=work:0bc2794e-815d-528b-b157-120dd656a6a4 --> Model list from the runtime, refreshed on focus; no settings step
       before the first chat.
       *Accept:* a model pulled in a terminal appears in the picker without a
@@ -254,6 +293,7 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
 - [ ] <!-- workspace:id=work:e5f54fe9-4806-5e9f-b84f-c11253a2ddb3 --> Fit with two loaded models: `/api/ps` reported 5.92 GB where the
       runner held 6926 MiB (e54cafc). Measure the two-model case before the
       fit check trusts `/api/ps` for more than one runner.
+      *Part done 2026-11-14:* "The app's own Ollama holds one model, and gemma4's small files fit in what they really take"; the app's own Ollama never holds two; left: the two-model reading with an Ollama the person runs.
 - [x] <!-- workspace:id=work:e0b86596-5c8e-5d82-909d-68f5160dd088 --> Fit gate when the GPU is unreadable: refuse a load with the shared reading's reason, also shown on a refused send.
       *Done 2026-11-09:* “One truth about the GPU: a failed reading is not "no GPU"” distinguishes confirmed absence from an unreadable device.
 - [ ] <!-- workspace:id=work:8d55a4c7-87fa-5e11-8871-8e74319b3a25 --> Owned Ollama port: 11435 is fixed; take it from an environment knob
@@ -596,8 +636,9 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Accept:* the saved message carries the times; a reloaded reply opens to the same list and the same number.
 - [ ] <!-- workspace:id=work:5e30a5dc-d7fb-53f6-a7b2-1372ab0384d2 --> A finished image step counts as a call in the chip; before the chip it was hidden once the image card showed.
       *Accept:* decide whether an image is a call in the count, and say it once.
-- [ ] <!-- workspace:id=work:a3401491-dd13-54bc-b25e-fefa10f035b1 --> A reply this window joined part-way shows no thinking time at all, although the server knows when the turn began.
+- [x] <!-- workspace:id=work:a3401491-dd13-54bc-b25e-fefa10f035b1 --> A reply this window joined part-way shows no thinking time at all, although the server knows when the turn began.
       *Accept:* the replayed start carries the thinking time so far, or the chip says the time is unknown in its tip.
+      *Done 2026-11-14:* "A running reply shows one mark and the server's time"; `turns.active` and each push carry the server's reply record with its work time so far (`ReplyRecord` in `packages/contracts/src/shapes.ts`, replayed in `apps/web/test/reconnect-live.test.ts`).
 - [ ] <!-- workspace:id=work:948a47ed-3fce-57f8-ae44-185d5dfa0ab4 --> The line beside an opened call's `$` hides `source`, `limit`, `offset` and `timeoutMs`.
       *Accept:* the opened call shows every argument the model sent.
 - [ ] <!-- workspace:id=work:8c16196b-90a8-5d77-b7ca-bff62c209798 --> A round of thinking that finishes while it is being read closes under the reader.
@@ -632,6 +673,7 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Accept:* one such run recorded in `docs/releasing.md`, with what the person saw at each step, the SmartScreen warning included.
 - [ ] <!-- workspace:id=work:bb8d45d4-fad9-50a9-835b-6ed3c478940d --> A normal launch of the AppImage (mounted through FUSE) has not been observed on the Linux test machine, which has no FUSE 2 library; the packaged checks run it another way.
       *Accept:* one double-click or plain command-line launch recorded on a machine with FUSE 2.
+      *Part done 2026-11-14:* "The Linux app opens on a stock Ubuntu 24.04"; the AppImage now carries its own FUSE code, and a plain launch on a stock Ubuntu 24.04 with no FUSE 2 package opened its window (`docs/releasing.md`); left: a double-click on a real desktop session.
 - [ ] <!-- workspace:id=work:1b35f6d5-6547-5d51-bf5b-46a164b89c94 --> The plain-build update check cannot check the release page link while nothing is published, so that check was taken out.
       *Accept:* after the first release, the plain-build check requires the link to be the real release page.
 
@@ -666,6 +708,7 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
 
 - [ ] <!-- workspace:id=work:60838ab3-b463-5a24-8fd5-e6d32db812b0 --> `test/e2e/paste-desktop.spec.ts` reads the clipboard right after the native Copy without waiting: red once in a full suite, 15 of 15 alone.
       *Accept:* the read is polled, and the spec is green in three full suites.
+      *Part done 2026-11-14:* "Browser tests that were red for the wrong reason"; the read now waits for the clipboard; left: three full suites green.
 - [ ] <!-- workspace:id=work:7bf0f0fa-c356-5f6c-93ef-ece6c0a692d3 --> `apps/server/test/app.test.ts` (Retry) failed once in a full verify and passed 3 of 3 alone.
       *Accept:* what it races is named and fixed, or the test is shown not to guard anything and removed.
 - [ ] <!-- workspace:id=work:cf50e6fa-95e5-5a0d-bce7-6fcbc8d96df4 --> A turn ended by another load that needed the GPU marks its running call stopped through the same path as a runtime switch, but no test drives that case itself.
@@ -1032,6 +1075,10 @@ RS-03 remains dropped.
       per-user XDG storage. Ordinary execution in the test environment fails
       before Electron because `libfuse.so.2` is missing; tested workaround
       still needs extraction mode and `--no-sandbox`.
+      *2026-11-14:* the AppImage now carries its own FUSE code and opens on a
+      stock Ubuntu 24.04 with no FUSE 2 package; on Ubuntu 23.10 and later its
+      launcher turns Chromium's sandbox off by itself ("The Linux app opens on
+      a stock Ubuntu 24.04", `docs/releasing.md`).
 - [ ] <!-- workspace:id=work:958fd54b-6524-5aa6-a943-fcffaf4153bb --> Release gate: after a step exits normally, stop its owned process group
       and keep the scratch directory if shutdown stays unconfirmed.
       *Accept:* a step that leaves a same-group process behind gets it stopped.
@@ -1044,6 +1091,11 @@ RS-03 remains dropped.
       Linux AppImage self-update is included; Windows self-installing
       updates and the real-runtime/interactive launch checks remain open.
       See the current release and its measured limits in `docs/releasing.md`.
+      *2026-11-14:* a Windows installed copy restarts into a checked update
+      (0.2.4), with one click when nothing would stop, and a copy that cannot
+      keeps the checked installer and offers its folder ("Updates take one
+      click and say each thing once"). The real-runtime and interactive launch
+      checks are still open.
       *Startup diagnostics 2026-11-09:* failed launches now keep the child exit,
       stderr and a token-redacted report after quit. The smoke retains those
       details on failure. Offline candidates were recorded before the one
