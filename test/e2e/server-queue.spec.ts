@@ -161,6 +161,60 @@ test("an update with three messages saved in this browser hands them to the serv
   await expect(page.locator(".turn.u"), "nothing sent by itself").toHaveCount(1);
 });
 
+test.describe("a restart", () => {
+  // the browser logs each refused WebSocket attempt while the server is down
+  test.use({ allowedErrors: [/WebSocket connection to .* failed/] });
+
+  // Guards one record per message: a message that left the queue and was asked is not also left waiting by a restart.
+  test("a restart while a queued message's reply is being written shows the question once, its words stopped, and no waiting row", async ({ page, open }) => {
+    test.setTimeout(60_000);
+    await open();
+    await waitReady(page);
+    await stack.scenario("slow-drip", { holdAfterTokens: 46 });
+    await sendMessage(page, "How do I check disk space before a download?");
+    await expect(page.locator(".turn.a .md ul li")).toHaveCount(3, { timeout: 15_000 });
+    await sendMessage(page, "Asked from the queue, then the app restarts");
+    await expect(rows(page)).toHaveCount(1);
+
+    // the first reply ends, the queued message goes, and its own reply is part written
+    await fetch(`${FAKE_URL}/__fake/release`, { method: "POST", body: "{}" });
+    await expect(rows(page)).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.locator(".turn.u")).toHaveCount(2);
+    await expect(page.locator(".turn.a").last().locator(".md ul li")).toHaveCount(3, { timeout: 15_000 });
+    await shot(page, "before-the-restart");
+
+    await stack.restart();
+    await waitReady(page);
+
+    const asked = page.locator(".turn.u").filter({ hasText: "Asked from the queue, then the app restarts" });
+    await expect(asked, "the question once").toHaveCount(1);
+    await expect(page.locator(".turn.u")).toHaveCount(2);
+    const cut = page.locator(".turn.a.interrupted");
+    await expect(cut, "the words that had arrived, marked as cut short").toHaveCount(1);
+    await expect(cut.locator(".md ul li")).toHaveCount(3);
+    await expect(stop(page), "nothing is running").toHaveCount(0);
+    await expect(rows(page), "no waiting row for a message already asked").toHaveCount(0);
+    await shot(page, "after-the-restart");
+
+    // the server's own account: nothing waits and nothing runs, so nothing more is asked without a press
+    const address = new URL(page.url()).searchParams.get("server");
+    if (!address) throw new Error("No test server");
+    const rpc = createClient(new WebSocket(address));
+    try {
+      expect(await rpc.call("queue.list", {})).toEqual([]);
+      expect(await rpc.call("turns.active", {})).toEqual([]);
+      const threadId = new URLSearchParams(new URL(page.url()).hash.slice(1)).get("thread") ?? "";
+      const { messages } = await rpc.call("threads.get", { threadId });
+      expect(messages.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["How do I check disk space before a download?", "Asked from the queue, then the app restarts"]);
+      expect(messages.filter((m) => m.role === "assistant").map((m) => m.interrupted === true)).toEqual([false, true]);
+    } finally {
+      rpc.close();
+    }
+    await expect(rows(page)).toHaveCount(0);
+    await expect(page.locator(".turn.u")).toHaveCount(2);
+  });
+});
+
 test("a reload while a message is queued keeps it waiting, and it sends itself when the reply ends", async ({ page, open }) => {
   await open();
   await waitReady(page);

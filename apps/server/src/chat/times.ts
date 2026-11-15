@@ -1,7 +1,8 @@
 // A turn's reply record: what the reply is doing and its times, kept by the server
 // as it sends the turn's events, pushed to every window at each change, and saved on the reply's
 // row when it ends. Every window and every reload shows the same stage and seconds;
-// no window keeps a clock of its own.
+// no window keeps a clock of its own. The clock only times: which stage a reply is in is its
+// record's to say (chat/reply.ts), and each call here is told the stage the record shows.
 import type { ReplyRecord, ReplyStage, ReplyTimes, TurnEnded } from "@gates-local/contracts";
 
 /** An event the turn sends before its end. */
@@ -14,12 +15,16 @@ export interface TurnClock {
   loading(): boolean;
   /** The model is in memory for this reply: called at the start of a turn whose model was resident or whose load it waited behind has finished. The stage is waiting (never still loading) until the runtime's first event. */
   ready(now: number): void;
-  /** `event` was sent at `now`; `thought` is the thinking sent before it. True when the record changed. Nothing after a Stop counts. */
-  see(event: TurnStep, now: number, thought: string): boolean;
+  /**
+   * `event` was sent at `now`; `thought` is the thinking sent before it; `stage` is what the reply's
+   * record shows after it (chat/reply.ts decides that, never this clock). True when the record
+   * changed. Nothing after a Stop counts.
+   */
+  see(event: TurnStep, now: number, thought: string, stage: ReplyStage): boolean;
   /** A Stop was taken at `now`: the times end there, whatever words were already on their way, and the stage is stopping until the end. */
   stop(now: number, thought: string): void;
-  /** The attempt failed and runs again from `now`: its rounds and first word start over; the work done so far stays counted. */
-  retry(now: number): void;
+  /** The attempt failed and runs again from `now`, at the `stage` its record shows: its rounds and first word start over; the work done so far stays counted. */
+  retry(now: number, stage: ReplyStage): void;
   /** The record as of `now`, for a push, a replay or turns.active. */
   record(now: number): ReplyRecord;
   /** The times once the turn ended; `thought` is all the thinking it sent; `why` the error of a turn that did not finish. */
@@ -50,7 +55,6 @@ export function turnClock(startedAt: number): TurnClock {
   let open: { readonly since: number; readonly from: number } | undefined;
   let spans: { from: number; ms: number }[] = [];
   let callsAt: Record<string, number> = {};
-  const running = new Set<string>();
   let workMs = 0;
   let toolMs = 0;
   let workSince: number | undefined;
@@ -71,10 +75,6 @@ export function turnClock(startedAt: number): TurnClock {
     if (open === undefined) return;
     spans.push({ from: open.from, ms: Math.max(0, now - open.since) });
     open = undefined;
-  };
-  const readyNow = (now: number) => {
-    readyAt ??= now;
-    if (stage === "waiting" || stage === "loading") moveTo("thinking", now);
   };
   const thoughtUntil = (now: number) => Math.max(0, now - (readyAt ?? startedAt));
   /** The times stop at `now`: an open round closes, and a reply that thought and never answered thought until then. */
@@ -103,7 +103,7 @@ export function turnClock(startedAt: number): TurnClock {
       finish(now, thought, "stopping");
       stoppedAt = now;
     },
-    retry(now) {
+    retry(now, to) {
       if (stoppedAt !== undefined || ended !== undefined) return;
       attempt += 1;
       spans = [];
@@ -111,34 +111,27 @@ export function turnClock(startedAt: number): TurnClock {
       open = undefined;
       firstTokenAt = undefined;
       thoughtMs = undefined;
-      running.clear();
-      // a model that was ready works on the reply again at once; one still loading keeps loading
-      moveTo(readyAt === undefined ? stage : "thinking", now);
+      moveTo(to, now);
     },
-    see(event, now, thought) {
+    see(event, now, thought, to) {
       if (stoppedAt !== undefined) return false;
       const before = shape();
       if (event.type === "tool") {
-        readyNow(now);
+        readyAt ??= now;
         close(now);
         callsAt[event.step.callId] ??= thought.length;
-        if (event.step.state === "running") running.add(event.step.callId);
-        else running.delete(event.step.callId);
-        // after a call the model reads its result: that is thinking until its next word
-        moveTo(running.size > 0 ? "tool" : "thinking", now);
+        moveTo(to, now);
         return shape() !== before;
       }
       if (event.text === "") return false;
-      readyNow(now);
-      if (event.type === "thinking") {
-        open ??= { since: now, from: thought.length };
-        if (running.size === 0) moveTo("thinking", now);
-        return shape() !== before;
+      readyAt ??= now;
+      if (event.type === "thinking") open ??= { since: now, from: thought.length };
+      else {
+        close(now);
+        firstTokenAt ??= now;
+        if (thought !== "" && thoughtMs === undefined) thoughtMs = thoughtUntil(now);
       }
-      close(now);
-      firstTokenAt ??= now;
-      if (thought !== "" && thoughtMs === undefined) thoughtMs = thoughtUntil(now);
-      if (running.size === 0) moveTo("writing", now);
+      moveTo(to, now);
       return shape() !== before;
     },
     record(now) {

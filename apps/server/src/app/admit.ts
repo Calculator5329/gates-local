@@ -16,7 +16,7 @@ import type { FitReport } from "../fit/types.ts";
 import { catalogModels } from "../runtime/catalog.ts";
 import { AdmitCancelled, ModelActionError, type AdmitContext, type TurnReservation } from "../runtime/load.ts";
 import type { turnSettings } from "../settings/turn.ts";
-import { AppError, attachError, cancelledBeforeStart, imageError, preemptedBy, runtimeChangedTurn } from "./errors.ts";
+import { AppError, attachError, cancelledBeforeStart, imageError, preemptedBy, refusalOf, runtimeChangedTurn } from "./errors.ts";
 import type { RunTurn, TurnOptions } from "./run-turn.ts";
 import { endedOf, type AppContext, type Turn, type TurnFailure } from "./turn.ts";
 
@@ -38,17 +38,17 @@ export interface Admission {
     params: Params<"chat.send"> & { images: readonly string[] },
     context: { replaced: readonly string[]; prior: readonly Message[]; settings: ReturnType<typeof turnSettings> },
   ): Promise<Message>;
-  /** A turn that ended before its start: its one error event (below). */
-  refused(turn: Turn, e: unknown): void;
+  /** A turn that ended before its start: its one error event (below). `stoppedAt`: when a Stop cut it, read before its work left. */
+  refused(turn: Turn, e: unknown, stoppedAt: number | undefined): void;
   /** runtime-not-ready, with the runtime's state. */
   notReady(): AppError;
 }
 
-export interface AdmissionDeps extends Pick<AppContext, "deps" | "store" | "runtime" | "catalog" | "log" | "push" | "turns" | "imageReady" | "imageFiles" | "attachedFiles" | "pushReply" | "waitsOnLoad" | "fitTable"> {
+export interface AdmissionDeps extends Pick<AppContext, "deps" | "store" | "runtime" | "catalog" | "log" | "push" | "turns" | "imageReady" | "imageFiles" | "attachedFiles" | "pushReply" | "answered" | "replies" | "fitTable"> {
   readonly runTurn: RunTurn;
 }
 
-export function createAdmission({ deps, store, runtime, catalog, log, push, turns, imageReady, imageFiles, attachedFiles, pushReply, waitsOnLoad, fitTable, runTurn }: AdmissionDeps): Admission {
+export function createAdmission({ deps, store, runtime, catalog, log, push, turns, imageReady, imageFiles, attachedFiles, pushReply, answered, replies, fitTable, runTurn }: AdmissionDeps): Admission {
   /**
    * A load of `model` at `numCtx` as the fit plans it (fit/planLoad) beside the admitted turns on
    * other models (a halted one too, until it ends), and the turns it would push out of the GPU.
@@ -62,7 +62,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
     numCtx: number,
     options: { signal?: AbortSignal; measured?: boolean } = {},
   ): Promise<{ report: FitReport; stop: Turn[] }> => {
-    const running = [...turns.values()].filter((t) => t.started && !sameModel(t.model, model));
+    const running = [...turns.values()].filter((t) => t.inMemory && !sameModel(t.model, model));
     const plan = await planLoad({
       ...deps.fit,
       baseUrl,
@@ -83,7 +83,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
       baseUrl,
       models: installed,
       defaultNumCtx: deps.settings?.get().defaultNumCtx ?? report.numCtx,
-      busy: [...turns.values()].filter((t) => t.started && !sameModel(t.model, report.model)).map((t) => t.model),
+      busy: [...turns.values()].filter((t) => t.inMemory && !sameModel(t.model, report.model)).map((t) => t.model),
     }, report);
   };
 
@@ -124,7 +124,10 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
     let releaseGpu: (() => void) | undefined;
     let started: Message | undefined;
     let failure: unknown;
+    let stoppedAt: number | undefined;
     let admissionImages: string[] = [];
+    /** The one check before anything of this start is written: its record is still starting, for this start. */
+    const still = () => replies.starting(turn.turnId, turn.attempt);
     const ending = () => {
       releaseGpu?.();
       end();
@@ -135,8 +138,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
         // waiting for its files, the GPU and the load gate is the record's first stage: turns.active has it, and
         // no event of the turn reaches a socket before chat.send's answer. From here a load of its model that it
         // waits behind (the preload its first key started) is said as loading, also before its start.
-        turn.answered = true;
-        waitsOnLoad(turn);
+        answered(turn);
         await imageReady;
         sendMark("answered");
         const files = deps.dataDir ? await checkFiles(deps.dataDir, attaching, { threadId, owners: store.fileOwners() }).catch(attachError) : [];
@@ -209,7 +211,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
         // claim, unless the image engine may hold memory the handoff frees (no plan counts that).
         // The plan inside the gate decides again, from its own reading.
         const engineMayHold = deps.image !== undefined && deps.image.current().state !== "off";
-        if (stopOthers === true || (askFirst === true && [...turns.values()].some((t) => t.started))) {
+        if (stopOthers === true || (askFirst === true && [...turns.values()].some((t) => t.inMemory))) {
           // askFirst: before the claim and the gate, where this send would otherwise wait behind that reply.
           const ahead = await planned();
           if (ahead.report.verdict === "refuse" && !engineMayHold) throw await refusal(ahead.report);
@@ -224,7 +226,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
         // Inside the gate, after the handoff: a passing fit admits the turn, so the next load plans around it.
         const admitted = async (signal: AbortSignal, context?: AdmitContext) => {
           const r = (await fit(signal, context)).report;
-          if (r.verdict !== "refuse") turn.started = true;
+          if (r.verdict !== "refuse") turn.inMemory = true;
           return r;
         };
         sendMark("admit");
@@ -238,7 +240,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
         }
         sendMark("admitted");
         if (report.verdict === "refuse") throw await refusal(report);
-        if (turnSignal.aborted) throw stoppedEarly();
+        if (!still()) throw stoppedEarly();
         // a model is sent only the newest page's code in full (chat/pages.ts); the thread keeps every version
         const history = [...condensePages(prior).map((m): TurnMessage => {
           const priorContent = m.imageJob ? `Image job ${m.imageJob.state}${m.imageJob.message ? `: ${m.imageJob.message}` : ""}` : withFiles(m.content, m.files);
@@ -253,37 +255,46 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
         const accounted = vision && deps.dataDir ? await accountImages(deps.dataDir, firstWindow.messages, show?.model_info).catch(imageError) : { messages: firstWindow.messages, omitted: false };
         const windowed = imageContext ? fitToWindow(accounted.messages, report.numCtx) : { ok: true as const, messages: accounted.messages };
         if (!windowed.ok) throw new AppError("image-input", windowed.message);
+        // the pasted images' copies are the first thing this start writes
+        if (!still()) throw stoppedEarly();
         const savedImages = images.length && deps.dataDir ? await saveAttachments(deps.dataDir, images) : [];
         admissionImages = savedImages.filter(attachment => !images.includes(attachment));
         if (savedImages.length) windowed.messages[windowed.messages.length - 1] = { ...windowed.messages.at(-1)!, images: savedImages };
         const modelHistory = vision && deps.dataDir ? await visionHistory(deps.dataDir, windowed.messages).catch(imageError) : windowed.messages;
-        if (turnSignal.aborted) throw stoppedEarly();
-        // The saves below wait their turn, so a Stop can land before the row goes in: the row is the point of no return.
+        if (!still()) throw stoppedEarly();
+        // The saves below wait their turn, so a Stop can land before the row goes in. The row is the
+        // point of no return, and it goes in only while the record is still starting for this start:
+        // the row and the record's move to a reply are one step, with nothing awaited between them.
         const append = () => {
-          if (turnSignal.aborted) throw stoppedEarly();
-          return store.appendMessage({ ...(messageId === undefined ? {} : { id: messageId }), threadId, role: "user", content, ...(savedImages.length ? { images: savedImages } : {}), ...(files.length ? { files } : {}) }, replaced);
+          if (!still()) throw stoppedEarly();
+          const question = store.appendMessage({ ...(messageId === undefined ? {} : { id: messageId }), threadId, role: "user", content, ...(savedImages.length ? { images: savedImages } : {}), ...(files.length ? { files } : {}) }, replaced);
+          replies.started(turn.turnId, turn.attempt, question, model, { cold: load?.cold === true, drawing: false });
+          return question;
         };
-        const stopFirst = (wrap: (error: unknown) => never) => (error: unknown): never => { if (turnSignal.aborted) throw stoppedEarly(); return wrap(error); };
+        const stopFirst = (wrap: (error: unknown) => never) => (error: unknown): never => { if (!still() && replies.question(turn.turnId) === undefined) throw stoppedEarly(); return wrap(error); };
         const withImages = () => imageFiles ? imageFiles.save(savedImages, append).catch(stopFirst(imageError)) : append();
         // A file removed since the check above (its day ran out) is said, not saved as a dead reference.
         const userMessage = attachedFiles && files.length ? await attachedFiles.save(files, withImages, threadId).catch(stopFirst(attachError)) : await withImages();
         sendMark("saved");
         push("threads.changed", { threadId });
         started = userMessage;
-        turn.started = true;
-        // Every client (also one that did not send this) learns of the question here.
-        turn.start = { type: "start", model, userMessage };
+        turn.inMemory = true;
         // a model it loads is ready at its first token; one already in memory, now
         if (load?.cold === true) turn.clock.loading();
         else turn.clock.ready(Date.now());
-        push("chat.event", { turnId: turn.turnId, threadId, event: turn.start });
+        // Every client (also one that did not send this) learns of the question here.
+        push("chat.event", { turnId: turn.turnId, threadId, event: { type: "start", model, userMessage } });
         pushReply(turn);
+        // after the start: the list every window shows no longer has this message
+        replies.notify();
         // the plan read the GPU a moment ago: the table takes that reading
         fitTable.changed({ afterPlan: true });
         void runTurn(turn, ending, baseUrl, model, report.numCtx, modelHistory, load, { tools, think, settings, files: [...fileEntries.values()] });
       } catch (e) {
         failure = e;
-        turn.terminal = true;
+        // its record hears why before the work leaves; one a Stop or a halt already moved stays as it is
+        replies.refused(turn.turnId, turn.attempt, refusalOf(e));
+        stoppedAt = replies.stoppedAt(turn.turnId);
       } finally {
         try {
           if (!started) await imageFiles?.collect(admissionImages);
@@ -294,7 +305,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
     }
     // said once the turn let go of everything it held: a client that hears it finds no claim and no file left
     if (started === undefined) {
-      refused(turn, failure);
+      refused(turn, failure, stoppedAt);
       throw failure;
     }
     return started;
@@ -305,7 +316,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
    * in the way for would-stop, and how it ended (a Stop, a halt, or a refusal). Nothing of it was
    * saved, so the sender's words go back to its composer.
    */
-  function refused(turn: Turn, e: unknown): void {
+  function refused(turn: Turn, e: unknown, stoppedAt: number | undefined): void {
     const { code, message, blocking, neededBy, report, offer } = typeof e === "object" && e !== null ? (e as { code?: unknown; message?: unknown; blocking?: readonly BlockingTurn[]; neededBy?: string; report?: FitReport; offer?: FitOffer }) : {};
     const failure: TurnFailure = {
       type: "error",
@@ -318,8 +329,9 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
       ...(offer === undefined ? {} : { offer }),
     };
     if (failure.code === "internal") log(`turn ${turn.turnId} refused: ${failure.message}`);
-    turn.terminal = true;
-    push("chat.event", { turnId: turn.turnId, threadId: turn.threadId, event: { ...failure, ended: endedOf(turn, failure, Date.now()) } });
+    push("chat.event", { turnId: turn.turnId, threadId: turn.threadId, event: { ...failure, ended: endedOf(turn, failure, Date.now(), stoppedAt) } });
+    // after the error: the list every window shows has the message back, on hold
+    replies.notify();
   }
 
   function notReady(): AppError {

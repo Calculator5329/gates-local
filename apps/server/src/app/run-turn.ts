@@ -1,7 +1,7 @@
 // Running a reply: an admitted turn's stream from its first word to its one terminal event,
 // the reply kept on disk while it streams, one more attempt after a failure of its own, and
 // what is saved however it ends.
-import type { TurnEnded } from "@gates-local/contracts";
+import type { Message, TurnEnded } from "@gates-local/contracts";
 import type { LibraryEntry } from "@gates-local/harness";
 import { PAGE_RULE } from "../chat/pages.ts";
 import { sendTimesLine } from "../chat/send-times.ts";
@@ -13,7 +13,7 @@ import type { TurnLoad } from "../runtime/load.ts";
 import type { TurnSettings } from "../settings/turn.ts";
 import type { NewMessage } from "../threads/types.ts";
 import type { ThreadImages } from "./drawing.ts";
-import { ENDED_EARLY, HALTED, endedOf, haltedEnd, runsAgain, type AppContext, type StreamDone, type Turn, type TurnEnd, type TurnFailure, type WireEvent } from "./turn.ts";
+import { ENDED_EARLY, HALTED, endOf, endedOf, haltedEnd, runsAgain, type AppContext, type StreamDone, type Turn, type TurnEnd, type TurnFailure, type WireEvent } from "./turn.ts";
 
 /**
  * The think flag a turn sends: none when /api/show lists the model's
@@ -36,23 +36,27 @@ async function thinkFlag(baseUrl: string, model: string, requested: boolean | un
 export type TurnOptions = { tools?: boolean; think?: boolean; settings?: TurnSettings; files?: readonly LibraryEntry[] };
 export type RunTurn = (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad, options?: TurnOptions) => Promise<void>;
 
-export interface TurnRunnerDeps extends Pick<AppContext, "deps" | "store" | "log" | "push" | "pushReply" | "draftEveryMs" | "queue" | "pushSpeeds"> {
+export interface TurnRunnerDeps extends Pick<AppContext, "deps" | "store" | "log" | "push" | "pushReply" | "draftEveryMs" | "replies" | "pushSpeeds"> {
   readonly queueImageFor: ThreadImages["queueImageFor"];
 }
 
-export function createTurnRunner({ deps, store, log, push, pushReply, draftEveryMs, queue, pushSpeeds, queueImageFor }: TurnRunnerDeps): RunTurn {
+export function createTurnRunner({ deps, store, log, push, pushReply, draftEveryMs, replies, pushSpeeds, queueImageFor }: TurnRunnerDeps): RunTurn {
   const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad, options: TurnOptions = {}) => {
     const { turnId, threadId, controller } = turn;
     let counted = false;
-    const emit = (event: Exclude<WireEvent, TurnEnd | { type: "reply" }>) => {
-      if (turn.terminal) return;
+    /** The saved question this work answers, while its record says the reply has not ended. */
+    const question = () => replies.question(turnId);
+    const emit = (event: Exclude<WireEvent, TurnEnd | { type: "reply" | "start" }>) => {
+      if (question() === undefined) return;
       // Only text means the model answered; an error, cancel or end goes through end() below.
       if (event.type === "delta" || event.type === "thinking") {
         load?.firstToken();
         const line = sendTimesLine(turnId);
         if (line !== undefined) log(line);
       }
-      const changed = event.type !== "start" && turn.clock.see(event, Date.now(), turn.thinking);
+      // the record takes the event first; the clock is told the stage the record now shows
+      const stage = replies.heard(turnId, event);
+      const changed = stage !== undefined && turn.clock.see(event, Date.now(), turn.thinking, stage);
       if (event.type === "delta") turn.text += event.text;
       if (event.type === "thinking") turn.thinking += event.text;
       if (event.type === "tool") turn.steps.set(event.step.callId, event.step);
@@ -77,7 +81,7 @@ export function createTurnRunner({ deps, store, log, push, pushReply, draftEvery
     /** The reply so far on disk, marked interrupted, so a crash needs no recovery pass. Each write and the final save replace this one row. */
     const writeDraft = () => {
       draftTimer = undefined;
-      if (turn.terminal || turn.dropReply) return;
+      if (question() === undefined || turn.dropReply) return;
       try {
         turn.draftId = store.appendMessage(unfinishedRow(), replacingDraft()).id;
       } catch (e) {
@@ -98,7 +102,7 @@ export function createTurnRunner({ deps, store, log, push, pushReply, draftEvery
      * yet saves no row: its question keeps how the turn ended. Nothing is written for a thread or
      * question being deleted.
      */
-    const saveUnfinished = (failure: TurnFailure, ended: TurnEnded): TurnFailure => {
+    const saveUnfinished = (failure: TurnFailure, ended: TurnEnded, asked: Message): TurnFailure => {
       const why = { code: failure.code, message: failure.message, ...(failure.neededBy === undefined ? {} : { neededBy: failure.neededBy }) };
       const times = turn.clock.end(ended, turn.thinking, why);
       try {
@@ -107,9 +111,8 @@ export function createTurnRunner({ deps, store, log, push, pushReply, draftEvery
           return failure;
         }
         if (nothingYet()) {
-          if (turn.start === undefined) return failure;
-          store.stampTimes(threadId, turn.start.userMessage.id, times);
-          return { ...failure, question: { ...turn.start.userMessage, times } };
+          store.stampTimes(threadId, asked.id, times);
+          return { ...failure, question: { ...asked, times } };
         }
         return { ...failure, partial: store.appendMessage({ ...unfinishedRow(turn.halted !== undefined), times }, replacingDraft()) };
       } catch (e) {
@@ -118,27 +121,37 @@ export function createTurnRunner({ deps, store, log, push, pushReply, draftEvery
       }
     };
     /** The finished reply, saved complete. A store that refuses it keeps the words as an unfinished reply and ends the turn with that error. */
-    const saveFinished = (done: StreamDone, now: number): TurnEnd => {
+    const saveFinished = (done: StreamDone, now: number, asked: Message): TurnEnd => {
       try {
         return { ...done, message: store.appendMessage({ ...done.message, times: turn.clock.end({ reason: "done", at: now }, turn.thinking) }, replacingDraft()) };
       } catch (e) {
         const code = (e as { code?: unknown }).code;
-        return saveUnfinished({ type: "error", code: typeof code === "string" ? code : "internal", message: `the final save failed: ${(e as Error).message}` }, { reason: "failed", at: now });
+        return saveUnfinished({ type: "error", code: typeof code === "string" ? code : "internal", message: `the final save failed: ${(e as Error).message}` }, { reason: "failed", at: now }, asked);
       }
     };
-    /** Every way a turn ends comes here, once: it decides what is saved and sends the one terminal event. */
+    /**
+     * Every way a turn ends comes here: it decides what is saved, sends the one terminal event and
+     * ends the record. Once only: the record says whether the reply has ended, and nothing is
+     * awaited between that question and the record's end.
+     */
     const finish = (outcome: StreamDone | TurnFailure) => {
-      if (turn.terminal) return;
-      turn.terminal = true;
+      const asked = question();
+      if (asked === undefined) return;
       clearTimeout(draftTimer);
       // Done wins over a Stop, never over deleting the thread or the question.
       const dropped = outcome.type === "done" && turn.dropReply ? { type: "error" as const, code: "cancelled" as const, message: "cancelled: its question was deleted" } : outcome;
       const now = Date.now();
-      const saved = dropped.type === "done" ? saveFinished(dropped, now) : saveUnfinished(dropped, endedOf(turn, dropped, now));
-      const event: TurnEnd = { ...saved, ended: endedOf(turn, saved, now) };
+      const stoppedAt = replies.stoppedAt(turnId);
+      const saved = dropped.type === "done" ? saveFinished(dropped, now, asked) : saveUnfinished(dropped, endedOf(turn, dropped, now, stoppedAt), asked);
+      const ended = endedOf(turn, saved, now, stoppedAt);
+      const event: TurnEnd = { ...saved, ended };
+      // The record ends with its last event: a window that reads now is told of no reply on its way.
+      replies.ended(turnId, endOf(turn, event, ended), now);
       push("chat.event", { turnId, threadId, event });
       if (event.type === "done" || event.partial !== undefined) push("threads.changed", { threadId });
       if (event.type === "done") pushSpeeds();
+      // after its last event: the windows hear what became of the messages that waited behind it
+      replies.notify();
     };
     /** `work`, or HALTED as soon as halt() runs; the dropped work finishes in the background. */
     const untilHalted = <T>(work: Promise<T>): Promise<T | typeof HALTED> => {
@@ -230,7 +243,7 @@ export function createTurnRunner({ deps, store, log, push, pushReply, draftEvery
           if (!dropped) await cleanup;
         }
         // the loop above leaves only by a failure; `?? ENDED_EARLY` is for the type checker
-        if (failed === undefined || attempt > 1 || !runsAgain(turn, failed)) {
+        if (failed === undefined || attempt > 1 || !runsAgain(turn, failed, replies.stoppedAt(turnId))) {
           finish(failed ?? ENDED_EARLY);
           return;
         }
@@ -249,9 +262,13 @@ export function createTurnRunner({ deps, store, log, push, pushReply, draftEvery
         }
         turn.text = "";
         turn.thinking = "";
-        turn.clock.retry(Date.now());
-        // what waits behind it holds until the second attempt ends
-        queue.retrying(threadId);
+        // the record runs it again, and what waits behind it holds until the second attempt ends
+        const stage = replies.retrying(turnId);
+        if (stage === undefined) {
+          finish(failed);
+          return;
+        }
+        turn.clock.retry(Date.now(), stage);
         pushReply(turn);
       }
     } catch (e) {

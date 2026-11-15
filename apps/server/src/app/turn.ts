@@ -1,10 +1,10 @@
-// A turn as the app holds it from chat.send's reserve to its end, how it ended, and the
+// The work of one start as the app holds it from reserve to its end, how it ended, and the
 // state the app's jobs share (app.ts builds it once and hands it to each).
-import type { Message, Params, Payload, ToolStep, TurnEnded } from "@gates-local/contracts";
+import type { Message, Payload, ToolStep, TurnEnded } from "@gates-local/contracts";
 import type { fileLifecycle } from "../chat/files.ts";
 import type { imageLifecycle } from "../chat/image-lifecycle.ts";
-import type { Queue } from "../chat/queue.ts";
 import type { Replies } from "../chat/replies.ts";
+import type { End } from "../chat/reply.ts";
 import type { TurnClock } from "../chat/times.ts";
 import type { ChatEvent } from "../chat/types.ts";
 import type { FitTableSource } from "../fit/table.ts";
@@ -38,19 +38,43 @@ const NO_SECOND_TRY = new Set(["num-ctx-invalid", "context-too-small", "cancelle
  * halt ended or a delete dropped, and never one whose calls already ran, since a second attempt
  * would run them again (a shell command, a queued picture).
  */
-export const runsAgain = (turn: Turn, failed: TurnFailure): boolean =>
-  !NO_SECOND_TRY.has(failed.code) && turn.halted === undefined && turn.stoppedAt === undefined && !turn.dropReply
+export const runsAgain = (turn: Turn, failed: TurnFailure, stoppedAt: number | undefined): boolean =>
+  !NO_SECOND_TRY.has(failed.code) && turn.halted === undefined && stoppedAt === undefined && !turn.dropReply
   && !turn.controller.signal.aborted && turn.steps.size === 0;
 
-export const endedOf = (turn: Turn, event: TurnEnd, now: number): TurnEnded => {
+/** `stoppedAt`: when a Stop cut this work, from its record (replies.stoppedAt). */
+export const endedOf = (turn: Turn, event: TurnEnd, now: number, stoppedAt: number | undefined): TurnEnded => {
   if (event.type === "done") return { reason: "done", at: now };
   if (turn.halted !== undefined) return { reason: "preempted", at: now };
-  if (event.code === "cancelled" && (turn.dropReply || turn.stoppedAt !== undefined)) return { reason: "stopped", at: turn.stoppedAt ?? now };
+  if (event.code === "cancelled" && (turn.dropReply || stoppedAt !== undefined)) return { reason: "stopped", at: stoppedAt ?? now };
   return { reason: "failed", at: now };
 };
 
+/** The same end, as the reply's record takes it: who stopped it, or why it failed. */
+export const endOf = (turn: Turn, event: TurnEnd, ended: TurnEnded): End => {
+  if (event.type === "done") return { how: "done", replyId: event.message.id };
+  if (ended.reason === "stopped") return { how: "stopped", by: { who: "person" } };
+  if (ended.reason !== "preempted") return { how: "failed", code: event.code, message: event.message };
+  const halted = turn.halted;
+  if (halted?.code === "preempted") return { how: "stopped", by: { who: "preempted", ...(halted.neededBy === undefined ? {} : { neededBy: halted.neededBy }) } };
+  return { how: "stopped", by: { who: halted?.code === "runtime-changed" ? "runtime" : "closing" } };
+};
+
+/** The start the picker took a waiting message for: its turn, and which start of the message it is. */
+export interface Taken {
+  readonly turnId: string;
+  readonly attempt: number;
+}
+
+/**
+ * The work of one start, from the moment it is taken until it has given back everything it took:
+ * what it holds (its abort, its model's memory, its words so far), never which stage its reply
+ * is in. The stage is its record's (chat/reply.ts), and this work asks the record before it writes.
+ */
 export interface Turn {
   readonly turnId: string;
+  /** Which start of its message this is: the record checks it before this work may save. */
+  readonly attempt: number;
   readonly threadId: string;
   readonly model: string;
   readonly controller: AbortController;
@@ -65,26 +89,18 @@ export interface Turn {
   readonly onHalt: Promise<typeof HALTED>;
   halt(reason: AppError): void;
   /**
-   * Admitted: its model holds (or is loading into) GPU memory, so a later load plans around it.
+   * Its model holds (or is loading into) GPU memory, so a later load plans around it.
    * Set inside the load gate when its fit passes, before the user message is saved.
    */
-  started: boolean;
+  inMemory: boolean;
   /** Its saved question once it starts; rejects with its refusal (App.admission). */
   admission?: Promise<Message>;
-  terminal: boolean;
-  /** What chat.send asked: a Stop before its question is saved is answered with these words, on hold. */
-  asked?: Pick<Params<"chat.send">, "content" | "messageId" | "images" | "files" | "think"> & { readonly numCtx?: number };
-  start?: Extract<WireEvent, { type: "start" }>;
   /** The reply's row on disk while it streams. threads.get hides it: this reply reaches clients as its live turn. */
   draftId: string | undefined;
   /** Its thread or the question it answers is being deleted: the reply is dropped, not saved. */
   dropReply: boolean;
-  /** When chat.cancel first came for it: a Stop's end is then, not when the stream wound down. */
-  stoppedAt?: number;
   /** Its times from reserve(), saved on the reply. */
   readonly clock: TurnClock;
-  /** chat.send has answered for it: its record may be pushed before its start. */
-  answered?: boolean;
   text: string;
   thinking: string;
   readonly steps: Map<string, ToolStep>;
@@ -114,18 +130,17 @@ export interface AppContext {
   /** Attached files' copies (chat/files.ts), with a data folder. */
   readonly attachedFiles: ReturnType<typeof fileLifecycle> | undefined;
   readonly draftEveryMs: number;
-  readonly queue: Queue;
-  /** Each waiting message as one record, and the answer to every call that names one. */
+  /** Every message's record, and the one place its stage changes. */
   readonly replies: Replies;
   readonly fitTable: FitTableSource;
   /** The turn's reply record as it is now, to every window. */
   readonly pushReply: (turn: Turn) => void;
-  /** A turn that waits while its own model loads says "loading", not "waiting". */
-  readonly waitsOnLoad: (turn: Turn) => void;
+  /** chat.send's answer has gone out for this turn: from here a load of its own model that it waits behind is said as "loading". */
+  readonly answered: (turn: Turn) => void;
   /** The measured speeds, after a finished reply is saved or replies are deleted. */
   readonly pushSpeeds: () => void;
-  /** Claims the thread synchronously so a second send cannot slip in during the fit check. */
-  readonly reserve: (threadId: string, model: string) => { turn: Turn; end: () => void };
+  /** Claims the thread synchronously so a second send cannot slip in during the fit check. `taken`: the start the picker took. */
+  readonly reserve: (threadId: string, model: string, taken?: Taken) => { turn: Turn; end: () => void };
   /** Look at the queue once the current work settles. */
   readonly pump: () => void;
 }

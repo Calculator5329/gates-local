@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-11-15: the server keeps one record for each message, always in one stage
+
+- A Stop pressed while a waiting message is being started puts it back
+  on hold at once, and nothing of it is saved. Before, the server found
+  out when the start ended, and a file or a question could be saved in
+  between.
+- A waiting message that cannot go yet (no chat model, or its chat is
+  still busy) no longer holds up a message in another chat that can go.
+  Before, the first message in the list blocked every one behind it.
+- After the app closes at the wrong moment, a message whose question was
+  already saved is not listed as waiting again beside its own question.
+- A reply whose work ends without saying how now ends as failed, and
+  what waited behind it goes on hold. Before, the reply could stay
+  marked as running.
+- A waiting message refused before it started is back on hold with its
+  reason in every case. Before, a refusal of a message a window sent
+  itself left the messages waiting behind it to go on.
+- Internal: the server's queue and the stage flags on a running reply
+  are replaced by one record per message that only one function moves
+  (`apps/server/src/chat/reply.ts`); the lists and events the window
+  receives are made from it and did not change.
+
 ## 2026-11-15: browser tests filed by feature
 
 - Internal: the 23 browser tests that lived in files named after a review

@@ -1,11 +1,37 @@
 import { describe, expect, it } from "vitest";
+import type { Message } from "@gates-local/contracts";
+import { heardAs, isLive, move, shownStage, type Heard, type Live, type Rec } from "./reply.ts";
 import { turnClock } from "./times.ts";
 
 const call = (callId: string, state: "running" | "done") => ({ type: "tool" as const, step: { callId, state } });
 
+/**
+ * A clock beside the record that tells it its stage, moved together the way a running reply
+ * moves them: the record takes each event first, and the clock is told the stage it then shows.
+ */
+function reply(startedAt: number) {
+  const clock = turnClock(startedAt);
+  const question: Message = { id: "q", threadId: "t", role: "user", content: "hi", createdAt: 1 };
+  let rec: Live = { id: "m", threadId: "t", rev: 0, turnId: "turn", question, model: "model", try: 1, stage: "thinking", calls: [], heard: false };
+  const step = (next: Rec | undefined) => {
+    if (isLive(next)) rec = next;
+    return shownStage(rec);
+  };
+  return {
+    ...clock,
+    see(event: Heard, now: number, thought: string): boolean {
+      const e = heardAs("turn", event);
+      return clock.see(event, now, thought, e === undefined ? shownStage(rec) : step(move(rec, e).next));
+    },
+    retry(now: number): void {
+      clock.retry(now, step(move(rec, { event: "retry", turnId: "turn" }).next));
+    },
+  };
+}
+
 describe("turnClock (chat row 32, decision 33)", () => {
   it("times a warm reply's thought from ready to its first answer word, and each round", () => {
-    const c = turnClock(1_000);
+    const c = reply(1_000);
     c.ready(1_200);
     c.see({ type: "thinking", text: "Hmm" }, 1_300, "");
     c.see(call("c1", "running"), 2_300, "Hmm");
@@ -20,7 +46,7 @@ describe("turnClock (chat row 32, decision 33)", () => {
   });
 
   it("words that come after a Stop change no time: the thought runs to the Stop, and there is no first word", () => {
-    const c = turnClock(1_000);
+    const c = reply(1_000);
     c.ready(1_000);
     c.see({ type: "thinking", text: "Hmm" }, 1_500, "");
     c.stop(4_000, "Hmm");
@@ -39,7 +65,7 @@ describe("turnClock (chat row 32, decision 33)", () => {
   // thinks 0-3 s, writes at 3 s, a call 3.5-8.5 s, thinks from 8.5 s; then answers at 10 s and ends
   // at 12 s, or keeps thinking until another device's Stop at 30 s: what every window shows after
   it.each([["done", 5, 9_500], ["stopped", 25, 29_500]] as const)("rounds of thinking either side of a call add up, %s", (end, secs, work) => {
-    const c = turnClock(0);
+    const c = reply(0);
     c.ready(0);
     c.see({ type: "thinking", text: "Hm." }, 0, "");
     c.see({ type: "delta", text: "Let me check." }, 3_000, "Hm.");
@@ -62,7 +88,7 @@ describe("turnClock (chat row 32, decision 33)", () => {
   });
 
   it("a model in memory leaves the reply waiting until the runtime's first event: it may be queued behind another reply", () => {
-    const c = turnClock(0);
+    const c = reply(0);
     c.ready(0);
     expect(c.record(3_000)).toMatchObject({ stage: "waiting", readyAt: 0, workMs: 0 });
     expect(c.see({ type: "thinking", text: "x" }, 3_000, "")).toBe(true);
@@ -70,7 +96,7 @@ describe("turnClock (chat row 32, decision 33)", () => {
   });
 
   it("a turn that waited behind a load and starts once it finished is waiting, never still loading", () => {
-    const c = turnClock(0);
+    const c = reply(0);
     expect(c.loading()).toBe(true);
     c.ready(2_000);
     expect(c.record(3_000)).toMatchObject({ stage: "waiting", readyAt: 2_000, workMs: 0 });
@@ -80,7 +106,7 @@ describe("turnClock (chat row 32, decision 33)", () => {
 
   it("keeps when the model was ready, so a saved reply can say how long it waited for a cold load", () => {
     // a first answer on a new card: 52.8 s to its first thought, 58.1 s to its first word, done at 73.3 s
-    const c = turnClock(0);
+    const c = reply(0);
     c.loading();
     c.see({ type: "thinking", text: "x" }, 52_800, "");
     c.see({ type: "delta", text: "Water" }, 58_100, "x");
@@ -91,7 +117,7 @@ describe("turnClock (chat row 32, decision 33)", () => {
   });
 
   it("goes waiting, loading, thinking, tool, writing; the work clock never counts the load or the writing", () => {
-    const c = turnClock(0);
+    const c = reply(0);
     expect(c.record(0)).toMatchObject({ stage: "waiting", workMs: 0, toolMs: 0, attempt: 1 });
     expect(c.loading(), "the first notice moves it: a push").toBe(true);
     expect(c.loading(), "a second notice changes nothing: no push").toBe(false);
@@ -114,7 +140,7 @@ describe("turnClock (chat row 32, decision 33)", () => {
   });
 
   it("a second attempt starts its rounds and first word over and keeps the work done", () => {
-    const c = turnClock(0);
+    const c = reply(0);
     c.ready(0);
     c.see({ type: "thinking", text: "Hm" }, 0, "");
     c.see({ type: "delta", text: "Par" }, 1_000, "Hm");

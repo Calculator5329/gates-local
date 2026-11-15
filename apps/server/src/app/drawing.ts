@@ -3,8 +3,8 @@
 import { randomUUID } from "node:crypto";
 import type { ImageChoice, Message, Params } from "@gates-local/contracts";
 import { IMAGES_UNSET, notRunning, type ImageModule } from "../image/module.ts";
-import { AppError, cancelledBeforeStart, threadGoing } from "./errors.ts";
-import type { AppContext, Turn, TurnEnd } from "./turn.ts";
+import { AppError, cancelledBeforeStart, refusalOf, threadGoing } from "./errors.ts";
+import type { AppContext, Taken, Turn, TurnEnd } from "./turn.ts";
 
 export interface ThreadImages {
   /** Queues the job and, with a threadId, keeps it for threads.delete. Refuses a thread being deleted. */
@@ -67,17 +67,18 @@ export function createThreadImages({ deps, deleting }: Pick<AppContext, "deps" |
   return { queueImage, queueImageFor, cancelThreadImages };
 }
 
-export interface DrawTurnDeps extends Pick<AppContext, "deps" | "store" | "log" | "push" | "reserve"> {
+export interface DrawTurnDeps extends Pick<AppContext, "deps" | "store" | "log" | "push" | "reserve" | "replies"> {
   readonly queueImage: ThreadImages["queueImage"];
   /** Keeps the admission on the turn (admit.ts). */
   readonly admitting: (turn: Turn, admission: Promise<Message>, replacedFiles?: readonly string[]) => void;
   /** The one error event of a turn that ended before its start (admit.ts). */
-  readonly refused: (turn: Turn, e: unknown) => void;
+  readonly refused: (turn: Turn, e: unknown, stoppedAt: number | undefined) => void;
 }
 
-export type DrawTurn = (threadId: string, content: string, choice: ImageChoice, count: { now: number; saved: number }, messageId: string | undefined, replaced: readonly string[], attached: boolean, replacedFiles: readonly string[]) => { turnId: string };
+/** `taken`: the start the picker took for a waiting message. `direct`: gives a window's own send its record, once its work is reserved. */
+export type DrawTurn = (threadId: string, content: string, choice: ImageChoice, count: { now: number; saved: number }, messageId: string | undefined, replaced: readonly string[], attached: boolean, replacedFiles: readonly string[], taken: Taken | undefined, direct: (turn: Turn) => void) => { turnId: string };
 
-export function createDrawTurn({ deps, store, log, push, reserve, queueImage, admitting, refused }: DrawTurnDeps): DrawTurn {
+export function createDrawTurn({ deps, store, log, push, reserve, replies, queueImage, admitting, refused }: DrawTurnDeps): DrawTurn {
   /**
    * Image mode (chat.send draw): the words go to the image module as its prompt and no chat model
    * runs, so there is no fit, no load and no chat claim; the job claims the GPU alone. The turn
@@ -89,13 +90,13 @@ export function createDrawTurn({ deps, store, log, push, reserve, queueImage, ad
    * apart, in one group the client shows as tiles of one card. The turn lasts until the last one
    * settles; Stop cancels those not done and keeps the finished ones.
    */
-  const drawTurn = (threadId: string, content: string, choice: ImageChoice, count: { now: number; saved: number }, messageId: string | undefined, replaced: readonly string[], attached: boolean, replacedFiles: readonly string[]) => {
+  const drawTurn: DrawTurn = (threadId, content, choice, count, messageId, replaced, attached, replacedFiles, taken, direct) => {
     const image = deps.image;
     if (attached) throw new AppError("image-input", "Image mode makes a picture from words alone. Remove the attachments, or turn Image off to ask a chat model about them.");
     if (image === undefined) throw new AppError("image-input", "Image generation is not available in this build.");
     // An Image mode turn never counts as a chat model in GPU memory: the job's own GPU claim covers it.
-    const { turn, end } = reserve(threadId, choice.preset);
-    turn.asked = { content, messageId };
+    const { turn, end } = reserve(threadId, choice.preset, taken);
+    direct(turn);
     admitting(turn, queueDrawing(image, turn, end, { threadId, content, choice, count, messageId, replaced }), replacedFiles);
     return { turnId: turn.turnId };
   };
@@ -109,6 +110,9 @@ export function createDrawTurn({ deps, store, log, push, reserve, queueImage, ad
   ): Promise<Message> => {
     const jobIds: string[] = [];
     let userMessage: Message;
+    /** The one check before anything of this start is written: its record is still starting, for this start. */
+    const still = () => replies.starting(turn.turnId, turn.attempt);
+    const stoppedEarly = () => turn.halted ?? cancelledBeforeStart();
     try {
       // after the answer has gone out
       await new Promise((resolve) => setImmediate(resolve));
@@ -116,15 +120,19 @@ export function createDrawTurn({ deps, store, log, push, reserve, queueImage, ad
       // any card or question is kept, so the words go back to the composer with one line of why.
       const missing = image.current().state === "missing" ? await image.status() : undefined;
       if (missing?.state === "missing") throw new AppError("image-input", missing.addressSet === true && missing.baseUrl !== undefined ? notRunning(missing.baseUrl) : IMAGES_UNSET);
-      if (turn.controller.signal.aborted) throw turn.halted ?? cancelledBeforeStart();
+      if (!still()) throw stoppedEarly();
       userMessage = store.appendMessage({ ...(messageId === undefined ? {} : { id: messageId }), threadId, role: "user", content }, replaced);
       try {
         const group = count.now > 1 ? randomUUID() : undefined;
         const seed = Math.floor(Math.random() * 2 ** 32);
         for (let index = 0; index < count.now; index++) {
+          // the question is in, but not kept until every picture is queued: a start cut here undoes it below
+          if (!still()) throw stoppedEarly();
           const tile = group === undefined ? {} : { group: { id: group, index, of: count.now }, seed: (seed + index) % 2 ** 32 };
           jobIds.push((await queueImage(image, { prompt: content, threadId, choice, ...tile })).jobId);
         }
+        // The start is kept from here: its record becomes a reply, or (it moved on meanwhile) the start is undone.
+        if (!replies.started(turn.turnId, turn.attempt, userMessage, choice.preset, { cold: false, drawing: true })) throw stoppedEarly();
       } catch (e) {
         // Nothing was made: the question goes too, with any of its pictures already queued, so the words return to the composer as unsent.
         for (const id of jobIds) image.cancel(id);
@@ -135,8 +143,11 @@ export function createDrawTurn({ deps, store, log, push, reserve, queueImage, ad
         throw e;
       }
     } catch (e) {
+      // its record hears why before the work leaves; one a Stop or a halt already moved stays as it is
+      replies.refused(turn.turnId, turn.attempt, refusalOf(e));
+      const stoppedAt = replies.stoppedAt(turn.turnId);
       end();
-      refused(turn, e);
+      refused(turn, e, stoppedAt);
       throw e;
     }
     // The thread makes this many from now on, as it keeps the choice it sent.
@@ -144,13 +155,13 @@ export function createDrawTurn({ deps, store, log, push, reserve, queueImage, ad
       try { store.setImageCount(threadId, count.now); } catch (e) { log(`turn ${turn.turnId}: image count not kept: ${(e as Error).message}`); }
     }
     push("threads.changed", { threadId });
-    turn.start = { type: "start", model: choice.preset, userMessage, image: true };
-    push("chat.event", { turnId: turn.turnId, threadId, event: turn.start });
+    push("chat.event", { turnId: turn.turnId, threadId, event: { type: "start", model: choice.preset, userMessage, image: true } });
+    // after the start: the list every window shows no longer has this message
+    replies.notify();
     const stop = () => { for (const id of jobIds) image.cancel(id); };
     if (turn.controller.signal.aborted) stop();
     else turn.controller.signal.addEventListener("abort", stop, { once: true });
     void Promise.all(jobIds.map((id) => image.wait(id).catch(() => undefined))).then(() => {
-      turn.terminal = true;
       turn.controller.signal.removeEventListener("abort", stop);
       const [first] = jobIds as [string, ...string[]];
       const card = store.getMessage(first);
@@ -165,9 +176,13 @@ export function createDrawTurn({ deps, store, log, push, reserve, queueImage, ad
         ? { type: "error", code: "cancelled", message: "cancelled: its question was deleted" }
         : { type: "done", message: card, stopReason: "stop" };
       // the card says how each picture went; the turn ended as its last one settled
-      const event: TurnEnd = { ...last, ended: last.type === "done" ? { reason: "done", at: Date.now() } : { reason: "stopped", at: turn.stoppedAt ?? Date.now() } };
+      const now = Date.now();
+      const event: TurnEnd = { ...last, ended: last.type === "done" ? { reason: "done", at: now } : { reason: "stopped", at: replies.stoppedAt(turn.turnId) ?? now } };
+      // The record ends with its last event; the windows hear what became of the messages behind it after that event.
+      replies.ended(turn.turnId, last.type === "done" ? { how: "done", replyId: last.message.id } : { how: "stopped", by: { who: "person" } }, now);
       push("chat.event", { turnId: turn.turnId, threadId, event });
       push("threads.changed", { threadId });
+      replies.notify();
     }).finally(end);
     return userMessage;
   };

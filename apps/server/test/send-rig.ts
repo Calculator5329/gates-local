@@ -6,6 +6,7 @@ import path from "node:path";
 import type { Channel, Payload, QueuedMessage, ReplyRecord } from "@gates-local/contracts";
 import { afterEach, vi } from "vitest";
 import { createApp } from "../src/app.ts";
+import type { Rules } from "../src/chat/reply.ts";
 import { openThreadStore } from "../src/threads/store.ts";
 
 export const MODEL = "qwen3.5:9b";
@@ -29,6 +30,8 @@ export interface RigHooks {
   readonly fileOwnersRead?: () => void;
   /** Each reply writes its first words and then waits for `finish` (or a Stop). */
   readonly drip?: true;
+  /** One rule of the reply table turned off, to see the test that guards it fail (src/chat/reply-rules.test.ts). */
+  readonly rules?: Rules;
 }
 
 export function rig(hooks: RigHooks = {}) {
@@ -109,7 +112,7 @@ export function rig(hooks: RigHooks = {}) {
         return options.fit(signal, { handoff: undefined, leave: async () => undefined });
       },
     }) } },
-  });
+  }, hooks.rules);
   cleanups.push(async () => { open(); finish(); await app.shutdown(); db.close(); });
   /** Every chat event pushed for this turn, in order. */
   const events = (turnId: string) => pushes.flatMap((p) => p.channel === "chat.event" && (p.payload as Payload<"chat.event">).turnId === turnId ? [(p.payload as Payload<"chat.event">).event] : []);

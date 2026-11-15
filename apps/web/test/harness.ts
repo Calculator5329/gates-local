@@ -6,8 +6,8 @@
 import { vi } from "vitest";
 import type { Channel, Message, MethodName, Params, Payload, QueuedMessage, ReplyAnswer, ReplyRecord, ResultOf, SyncMetadata } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
-import { createQueue } from "@gates-local/server/chat/queue.ts";
-import { createReplies } from "@gates-local/server/chat/replies.ts";
+import { createReplies, type QueuePatch } from "@gates-local/server/chat/replies.ts";
+import type { End } from "@gates-local/server/chat/reply.ts";
 
 type Listener = (event: { data?: unknown }) => void;
 
@@ -130,13 +130,20 @@ export class FakeServer {
   handle(socket: FakeSocket, req: Request): void {
     this.log.push(req);
     this.caller = this.sockets.indexOf(socket) + 1;
-    if (req.method === "chat.cancel") this.answered.stop({ id: (req.params as Params<"chat.cancel">).turnId });
+    if (req.method === "chat.cancel") this.store.stop({ id: (req.params as Params<"chat.cancel">).turnId });
     const answer = (result: unknown) => socket.frame({ type: "response", id: req.id, ok: true, result });
     const send = req.params as Params<"chat.send">;
     const start = (payload: Payload<"chat.event">) => { socket.frame({ type: "push", channel: "chat.event", payload }); this.heard(payload); };
     // the server takes a send's turn before it answers: until then the send is in its chat's way
     if (req.method === "chat.send") this.asked.set(req.id, send.threadId);
-    const ok = req.method === "chat.send" ? (result: unknown) => { this.asked.delete(req.id); this.running(send.threadId, result); sendAnswer(start, send, result, answer); this.pump(); } : answer;
+    const ok = req.method === "chat.send" ? (result: unknown) => {
+      this.asked.delete(req.id);
+      const turnId = this.running(send.threadId, result);
+      // a window's own send: its record starts at once, and the window keeps the words
+      if (turnId !== undefined) this.direct(turnId, send);
+      sendAnswer(start, send, result, answer);
+      this.pump();
+    } : answer;
     const err = (code: string, message = code, blocking?: unknown) => {
       if (this.asked.delete(req.id)) this.pump();
       socket.frame({ type: "response", id: req.id, ok: false, error: { code, message, ...(blocking === undefined ? {} : { blocking }) } });
@@ -173,18 +180,26 @@ export class FakeServer {
     this.pushed(channel, payload);
   }
 
-  // The server's queue: its real rules (server chat/queue.ts) and, in small, the server's pump
-  // (app.ts sendQueued and heard). A queued message goes out as a chat.send the server makes
-  // itself, logged with the windows' calls and answered by the same holds and answers.
-  readonly queue = createQueue({ changed: (list) => { this.answered.changed(list); this.broadcast("queue.changed", list); }, log: () => undefined });
-  private readonly answered = createReplies({
-    queue: this.queue,
+  // The server's record of every message: its real rules (server chat/replies.ts) and, in small,
+  // the server's pump (app/queue-pump.ts) and what a turn's work says to its record. A waiting
+  // message goes out as a chat.send the server makes itself, logged with the windows' calls and
+  // answered by the same holds and answers.
+  private readonly store = createReplies({
+    log: () => undefined,
+    changed: (list) => this.broadcast("queue.changed", list),
     saved: () => undefined,
-    flight: () => undefined,
-    inChat: (threadId) => [...this.replies].find(([, t]) => t === threadId)?.[0],
-    stop: (turnId) => this.stop(turnId),
-    unsaved: () => undefined,
+    deleting: () => false,
+    closing: () => false,
+    cut: (turnId, at) => this.cut(turnId, at),
+    clock: (turnId, now) => this.clock(turnId, now),
   });
+  /** The waiting messages, for a test that changes them as another window would. */
+  readonly queue = {
+    add: (entry: QueuedMessage) => this.store.add(entry),
+    change: (id: string, patch: QueuePatch) => this.store.update(id, patch, 0),
+    remove: (id: string) => this.store.remove({ id }).answer === "done",
+    list: () => this.store.list(),
+  };
   /** Which connection has each message open in its composer, and which one is calling now. */
   private readonly editing = new Map<string, number>();
   private caller = 0;
@@ -192,9 +207,7 @@ export class FakeServer {
   private readonly replies = new Map<string, string>();
   /** Windows' chat.send calls not answered yet, by request id: their chats. */
   private readonly asked = new Map<string, string>();
-  private readonly started = new Set<string>();
   private readonly over = new Set<string>();
-  private readonly stopped = new Set<string>();
   private readonly attempts = new Map<string, number>();
   /** Each turn's last pushed record, and when the turn began for one with no push yet. */
   private readonly records = new Map<string, ReplyRecord>();
@@ -205,29 +218,35 @@ export class FakeServer {
   private pumping = false;
   private serverCalls = 0;
 
-  private running(threadId: string, result: unknown): void {
+  /** The turn a chat.send was answered with, now in its chat's way; none for a replayed answer or a turn already over. */
+  private running(threadId: string, result: unknown): string | undefined {
     const r = result as { turnId?: string; replayed?: boolean } | null;
     // a test may push a turn's end before its chat.send is answered
-    if (r !== null && typeof r === "object" && r.replayed !== true && typeof r.turnId === "string" && !this.over.has(r.turnId)) {
-      this.replies.set(r.turnId, threadId);
-      if (!this.begun.has(r.turnId)) this.begun.set(r.turnId, Date.now());
-    }
+    if (r === null || typeof r !== "object" || r.replayed === true || typeof r.turnId !== "string" || this.over.has(r.turnId)) return undefined;
+    this.replies.set(r.turnId, threadId);
+    if (!this.begun.has(r.turnId)) this.begun.set(r.turnId, Date.now());
+    return r.turnId;
+  }
+
+  /** The record of a send that waited in no list: taken at once for its turn (server app/handlers.ts). */
+  private direct(turnId: string, send: Pick<Params<"chat.send">, "threadId" | "content" | "messageId" | "retryOf">): void {
+    const at = this.begun.get(turnId) ?? Date.now();
+    this.store.direct(turnId, send.threadId, { messageId: send.messageId ?? turnId, text: send.content, at }, send.retryOf !== undefined, at);
+  }
+
+  /** The times of a turn's reply: its last pushed record, or one that has only begun. */
+  private clock(turnId: string, now: number): ReplyRecord {
+    return this.records.get(turnId) ?? { stage: "waiting", startedAt: this.begun.get(turnId) ?? now, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {} };
   }
 
   /**
-   * The Stop itself as the server takes it: the reply's record, now stopping, goes to every window
-   * before the answer. Its chat, or none for a turn that is not running. What waits behind it is
-   * held by the server's own rules, in the same call (server chat/replies.ts).
+   * A Stop cut this turn's work: the reply's record, now stopping, goes to every window. What
+   * waits behind it was held by the server's own rules in the same call (server chat/replies.ts).
    */
-  private stop(turnId: string): string | undefined {
+  private cut(turnId: string, at: number): void {
     const threadId = this.replies.get(turnId);
-    const again = this.stopped.has(turnId);
-    this.stopped.add(turnId);
-    if (threadId === undefined || again) return threadId;
-    const now = Date.now();
-    const last: ReplyRecord = this.records.get(turnId) ?? { stage: "waiting", startedAt: this.begun.get(turnId) ?? now, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {} };
-    this.broadcast("chat.event", { turnId, threadId, event: { type: "reply", reply: { ...last, stage: "stopping", stoppedAt: now } } });
-    return threadId;
+    if (threadId === undefined) return;
+    this.broadcast("chat.event", { turnId, threadId, event: { type: "reply", reply: { ...this.clock(turnId, at), stage: "stopping", stoppedAt: at } } });
   }
 
   private queueCall(req: Request): readonly QueuedMessage[] | ReplyAnswer {
@@ -242,25 +261,25 @@ export class FakeServer {
       this.pump();
       return answer;
     }
-    if (req.method === "queue.add") this.queue.add(req.params as QueuedMessage);
+    if (req.method === "queue.add") this.store.add(req.params as QueuedMessage);
     if (req.method === "queue.update") {
       const { id, ...patch } = req.params as Params<"queue.update">;
-      if (this.queue.change(id, patch) === "sending") throw Object.assign(new Error("This message is already being sent."), { code: "queue-sending" });
+      if (this.store.update(id, patch, by) === "sending") throw Object.assign(new Error("This message is already being sent."), { code: "queue-sending" });
     }
-    if (req.method === "queue.remove") this.queue.remove(p.id);
+    if (req.method === "queue.remove") this.store.remove({ id: p.id });
     this.pump();
-    return this.queue.list();
+    return this.store.list();
   }
 
   /** A call on one waiting message, answered by the server's own rules (server chat/replies.ts). */
   private replyCall(req: Request, by: number): ReplyAnswer | undefined {
     switch (req.method) {
-      case "reply.change": return this.answered.change(req.params as Params<"reply.change">, by);
-      case "reply.edit": return this.answered.edit(req.params as Params<"reply.edit">, by);
-      case "reply.remove": return this.answered.remove(req.params as Params<"reply.remove">);
-      case "reply.now": return this.answered.now(req.params as Params<"reply.now">);
-      case "reply.hold": return this.answered.hold(req.params as Params<"reply.hold">);
-      case "reply.stop": return this.answered.stop(req.params as Params<"reply.stop">);
+      case "reply.change": return this.store.change(req.params as Params<"reply.change">, by);
+      case "reply.edit": return this.store.edit(req.params as Params<"reply.edit">, by);
+      case "reply.remove": return this.store.remove(req.params as Params<"reply.remove">);
+      case "reply.now": return this.store.now(req.params as Params<"reply.now">);
+      case "reply.hold": return this.store.hold(req.params as Params<"reply.hold">);
+      case "reply.stop": return this.store.stop(req.params as Params<"reply.stop">);
       default: return undefined;
     }
   }
@@ -271,7 +290,7 @@ export class FakeServer {
     for (const [id, who] of this.editing) {
       if (who !== by) continue;
       this.editing.delete(id);
-      this.answered.release(id, by);
+      this.store.release(id, by);
     }
     this.pump();
   }
@@ -293,32 +312,45 @@ export class FakeServer {
       const before = this.attempts.get(turnId) ?? 1;
       this.attempts.set(turnId, event.reply.attempt);
       this.records.set(turnId, event.reply);
-      if (event.reply.attempt > before) this.queue.retrying(threadId);
+      if (event.reply.attempt > before) this.store.retrying(turnId);
       return;
     }
     if (event.type === "start") {
       if (this.over.has(turnId)) return;
       if (!this.begun.has(turnId)) this.begun.set(turnId, Date.now());
-      this.started.add(turnId);
       this.replies.set(turnId, threadId);
-      this.queue.started(event.userMessage.id);
+      this.questionSaved(turnId, threadId, event.userMessage, event.model, event.image === true);
+      this.store.notify();
       return;
     }
     if (event.type !== "done" && event.type !== "error") return;
     this.over.add(turnId);
     this.replies.delete(turnId);
-    this.answered.settled(turnId, threadId, undefined);
     // its chat.send may not be answered yet: the server's own turn has ended all the same
     for (const [id, t] of this.asked) if (t === threadId) this.asked.delete(id);
-    const stopped = this.stopped.delete(turnId);
-    if (!this.started.delete(turnId)) {
-      if (event.type === "error") {
-        const why = { code: event.code, message: event.message, ...(event.blocking === undefined ? {} : { blocking: event.blocking }) };
-        if (!this.queue.refused(turnId, why) && (event.ended?.reason === "stopped" || stopped)) this.queue.ended(threadId, "stopped");
-      }
-    } else if (event.type === "done") this.queue.ended(threadId, stopped ? "stopped" : "done");
-    else this.queue.ended(threadId, event.ended?.reason === "failed" && (this.attempts.get(turnId) ?? 1) > 1 ? "failed-again" : "stopped");
+    const rec = this.store.of(turnId);
+    if (rec?.stage === "starting" && event.type === "error") {
+      // refused, or cut, before its question was saved
+      this.store.refused(turnId, rec.attempt, { code: event.code, message: event.message, ...(event.blocking === undefined ? {} : { blocking: event.blocking }) });
+    } else if (rec !== undefined) {
+      // a test may push a turn's end with no start: its question was saved all the same
+      if (rec.stage === "starting") this.questionSaved(turnId, threadId, { id: rec.words.messageId, threadId, role: "user", content: rec.words.text, createdAt: rec.words.at }, rec.words.model ?? "", rec.words.draw !== undefined);
+      const end: End = event.type === "done" ? { how: "done", replyId: event.message.id }
+        : event.ended?.reason === "failed" ? { how: "failed", code: event.code, message: event.message }
+        : { how: "stopped", by: event.ended?.reason === "preempted" ? { who: "preempted" } : { who: "person" } };
+      this.store.ended(turnId, end, Date.now());
+    }
+    // its work has given back what it took
+    this.store.left(turnId);
+    this.store.notify();
     this.pump();
+  }
+
+  /** A turn's question was saved: its record becomes a reply. A turn the server made no record for (a test pushed its start) gets one first. */
+  private questionSaved(turnId: string, threadId: string, question: Message, model: string, drawing: boolean): void {
+    if (this.store.of(turnId) === undefined) this.direct(turnId, { threadId, content: question.content, messageId: question.id });
+    const rec = this.store.of(turnId);
+    if (rec?.stage === "starting") this.store.started(turnId, rec.attempt, question, model, { cold: false, drawing });
   }
 
   private pump(): void {
@@ -329,28 +361,41 @@ export class FakeServer {
 
   private sendQueued(): void {
     if (this.pumping) return;
+    this.store.notify();
     const busy = new Set([...this.replies.values(), ...this.asked.values()]);
-    const q = this.queue.next({ chat: this.runtimeReady && this.hasModels, anyTurn: busy.size > 0, busy });
+    const q = this.store.pick({ chat: this.runtimeReady && this.hasModels, anyWork: busy.size > 0, busy: (threadId) => busy.has(threadId) });
     if (q === undefined) return;
     this.pumping = true;
+    const { words } = q;
     const params: Params<"chat.send"> = {
-      threadId: q.threadId, content: q.text, messageId: q.messageId, model: q.model ?? "", numCtx: q.numCtx ?? 4096,
-      ...(q.images?.length ? { images: q.images } : {}),
-      ...(q.files?.length ? { files: q.files } : {}),
-      ...(q.think === undefined ? {} : { think: q.think }),
-      ...(q.draw === undefined ? {} : { draw: q.draw, ...(q.drawCount === undefined ? {} : { drawCount: q.drawCount }) }),
-      ...(q.now === true ? (q.stopOthers === true ? { stopOthers: true, ...(q.stopTurns === undefined ? {} : { stopTurns: [...q.stopTurns] }) } : { askFirst: true }) : {}),
+      threadId: q.threadId, content: words.text, messageId: words.messageId, model: words.model ?? "", numCtx: words.numCtx ?? 4096,
+      ...(words.images?.length ? { images: words.images } : {}),
+      ...(words.files?.length ? { files: words.files } : {}),
+      ...(words.think === undefined ? {} : { think: words.think }),
+      ...(words.draw === undefined ? {} : { draw: words.draw, ...(words.drawCount === undefined ? {} : { drawCount: words.drawCount }) }),
+      ...(q.now ? (q.consent !== undefined ? { stopOthers: true, ...(q.consent.kind === "named" ? { stopTurns: [...q.consent.replies] } : {}) } : { askFirst: true }) : {}),
     };
-    const done = () => { this.pumping = false; this.pump(); };
+    const done = () => { this.store.notify(); this.pumping = false; this.pump(); };
     const ok = (result: unknown) => {
       const r = result as { turnId?: string; replayed?: boolean };
-      if (r.replayed === true) this.queue.started(q.messageId);
-      else if (typeof r.turnId === "string") { this.running(q.threadId, result); this.queue.sending(q.id, r.turnId); }
+      // its question turned out to be in the chat already: it was asked
+      if (r.replayed === true) this.store.sent(words.messageId);
+      else if (typeof r.turnId === "string") {
+        const { turnId } = r;
+        this.running(q.threadId, result);
+        // The test names the turn in its answer, so the message is taken here, not before the call
+        // as the server takes it. One that changed meanwhile is not taken: its turn runs as a send of its own.
+        if (this.store.take(q.id, turnId, Date.now()) === undefined) this.direct(turnId, params);
+        else this.store.begun(turnId);
+      }
       sendAnswer((payload) => this.broadcast("chat.event", payload), params, result, () => undefined);
       done();
     };
     const err = (code: string, message = code, blocking?: unknown) => {
-      this.queue.turnless(q.id, { code, message, ...(blocking === undefined ? {} : { blocking: blocking as never }) });
+      // refused before any work began: taken and refused in one step, as the server's pump does
+      const turnId = `server-refused-${this.serverCalls}`;
+      const attempt = this.store.take(q.id, turnId, Date.now());
+      if (attempt !== undefined) this.store.refused(turnId, attempt, { code, message, ...(blocking === undefined ? {} : { blocking: blocking as never }) });
       done();
     };
     const req: Request = { id: `server-${++this.serverCalls}`, method: "chat.send", params };

@@ -1,7 +1,7 @@
 // The request handlers: every contracts method the app answers, on the thread store, the
 // runtime, the catalog, the fit table and the queue. chat.send takes a turn here and hands it
 // to admit.ts (a chat model) or drawing.ts (Image mode).
-import type { Params, ReplyAnswer } from "@gates-local/contracts";
+import type { Params, ReplyAnswer, ResultOf } from "@gates-local/contracts";
 import { checkAttachments } from "../chat/attachments.ts";
 import { saveFile } from "../chat/files.ts";
 import { withSendTimes } from "../chat/send-times.ts";
@@ -15,8 +15,8 @@ import { createUpdateHandlers } from "../update/module.ts";
 import type { HandlerContext } from "../ws/server.ts";
 import type { Admission } from "./admit.ts";
 import type { DrawTurn, ThreadImages } from "./drawing.ts";
-import { AppError, threadGoing } from "./errors.ts";
-import type { AppContext } from "./turn.ts";
+import { AppError, refusalOf, threadGoing } from "./errors.ts";
+import type { AppContext, Taken, Turn } from "./turn.ts";
 import type { AppHandlers } from "./types.ts";
 
 /** What a Retry of `questionId` replaces: that question and the unfinished rows after it. None once something else was asked or a finished reply followed: then it is a new question. */
@@ -29,7 +29,7 @@ function retriedRows(messages: readonly { readonly id: string; readonly role: st
 
 export interface HandlersDeps extends Pick<AppContext,
   "deps" | "store" | "runtime" | "catalog" | "log" | "push" | "turns" | "byThread" | "deleting" | "closing"
-  | "imageReady" | "imageFiles" | "attachedFiles" | "queue" | "replies" | "fitTable" | "reserve" | "pump" | "pushSpeeds"> {
+  | "imageReady" | "imageFiles" | "attachedFiles" | "replies" | "fitTable" | "reserve" | "pump" | "pushSpeeds"> {
   readonly measure: Pick<ReturnType<typeof createMeasure>, "handlers"> | undefined;
   readonly threadImages: ThreadImages;
   readonly drawTurn: DrawTurn;
@@ -38,7 +38,7 @@ export interface HandlersDeps extends Pick<AppContext,
 
 export function createHandlers({
   deps, store, runtime, catalog, log, push, turns, byThread, deleting, closing, imageReady, imageFiles, attachedFiles,
-  queue, replies, fitTable, reserve, pump, pushSpeeds, measure, threadImages, drawTurn, admission,
+  replies, fitTable, reserve, pump, pushSpeeds, measure, threadImages, drawTurn, admission,
 }: HandlersDeps) {
   const { queueImage, cancelThreadImages } = threadImages;
   const { admitTurn, admitting, blockingTurns, planBeside, notReady } = admission;
@@ -62,6 +62,67 @@ export function createHandlers({
     turn.controller.abort();
     await turn.ended;
   };
+
+  /**
+   * The start of one message: chat.send from a window, or a waiting message the picker took
+   * (`taken`: its record is starting already, for that turn). Everything checked here is checked
+   * before any work is reserved; the work itself runs after the answer (admit.ts, drawing.ts).
+   */
+  const begin = (params: Params<"chat.send">, taken?: Taken): Promise<ResultOf<"chat.send">> => withSendTimes(async () => {
+    const { threadId, content, model, numCtx, messageId, retryOf, images = [], files: attaching = [], tools, think, draw, drawCount, stopOthers, stopTurns, askFirst } = params;
+    if (closing()) throw new AppError("shutting-down", "the server is stopping; no new turns");
+    deps.admit?.();
+    // The thread is going: its delete has already listed what it takes back.
+    if (deleting.has(threadId)) throw threadGoing(threadId);
+    // Keep unfinished text for the person, but never present it to a model as a completed answer.
+    const loaded = store.getThread(threadId);
+    const stored = loaded.messages;
+    const replaced = retryOf === undefined ? [] : retriedRows(stored, retryOf);
+    const prior = stored.filter(m => !replaced.includes(m.id) && (m.role !== "assistant" || m.interrupted !== true));
+    const replacedFiles = stored.filter(m => replaced.includes(m.id)).flatMap(m => (m.files ?? []).map(file => file.path));
+    const saved = messageId === undefined ? undefined : store.getMessage(messageId);
+    if (saved) {
+      if (saved.threadId !== threadId || saved.role !== "user" || saved.content !== content) throw new AppError("image-input", "This send identity belongs to a different message. Your words were not sent; edit them and try again.");
+      return { turnId: `saved-${saved.id}`, userMessage: saved, replayed: true };
+    }
+    const active = byThread.get(threadId);
+    if (active !== undefined) throw new AppError("turn-active", `thread ${threadId} already has turn ${active.turnId} streaming; cancel it or wait`);
+    /** A window's own send has no waiting record: it gets one here, starting at once, for the work just reserved. */
+    const direct = (turn: Turn) => {
+      if (taken !== undefined) return;
+      const at = Date.now();
+      replies.direct(turn.turnId, threadId, {
+        messageId: messageId ?? turn.turnId, text: content, at,
+        ...(images.length ? { images } : {}),
+        ...(attaching.length ? { files: attaching } : {}),
+        ...(model === "" ? {} : { model }),
+        ...(draw === undefined ? { numCtx } : { draw, ...(drawCount === undefined ? {} : { drawCount }) }),
+        ...(think === undefined ? {} : { think }),
+      }, retryOf !== undefined, at);
+    };
+    if (draw !== undefined) {
+      const kept = loaded.thread.imageCount ?? 1;
+      return drawTurn(threadId, content, draw, { now: drawCount ?? kept, saved: kept }, messageId, replaced, images.length > 0 || attaching.length > 0, replacedFiles, taken, direct);
+    }
+    try { checkAttachments(images); }
+    catch (e) { throw new AppError("image-input", e instanceof Error ? e.message : "Could not attach these images."); }
+    if (attaching.length && deps.dataDir === undefined) throw new AppError("image-input", "File storage is not available.");
+    const settings = turnSettings(deps.settings?.get(), model);
+    const { turn, end } = reserve(threadId, model, taken);
+    direct(turn);
+    let load: TurnReservation | undefined;
+    try {
+      // Before the answer, so models.remove sees this turn at once (throws while a removal runs).
+      load = deps.models?.loader?.reserve(model);
+    } catch (e) {
+      // its record hears why before the work leaves
+      replies.refused(turn.turnId, turn.attempt, refusalOf(e));
+      end();
+      throw e;
+    }
+    admitting(turn, admitTurn(turn, end, load, { threadId, content, model, numCtx, messageId, images, files: attaching, tools, think, stopOthers, stopTurns, askFirst }, { replaced, prior, settings }), replacedFiles, attaching.map(file => file.path));
+    return { turnId: turn.turnId };
+  });
 
   const handlers = {
     ...deps.models?.handlers,
@@ -120,7 +181,7 @@ export function createHandlers({
         const files = messages.flatMap(message => message.images ?? []);
         const attached = messages.flatMap(message => message.files ?? []).map(file => file.path);
         store.deleteThread(threadId);
-        queue.dropThread(threadId);
+        replies.dropThread(threadId);
         await imageFiles?.collect(files).catch((error: unknown) => log(`image cleanup after thread deletion failed: ${String(error)}`));
         await attachedFiles?.collect(attached).catch((error: unknown) => log(`attached-file cleanup after thread deletion failed: ${String(error)}`));
       } finally {
@@ -135,7 +196,8 @@ export function createHandlers({
       deleting.add(threadId);
       try {
         // Deleting any other message stops the reply and keeps its words.
-        await cancelThreadTurn(threadId, byThread.get(threadId)?.start?.userMessage.id === messageId);
+        const turn = byThread.get(threadId);
+        await cancelThreadTurn(threadId, turn !== undefined && replies.question(turn.turnId)?.id === messageId);
         await imageReady;
         const message = store.getThread(threadId).messages.find(m => m.id === messageId);
         const files = message?.images ?? [];
@@ -180,82 +242,39 @@ export function createHandlers({
 
     // From the moment chat.send took each turn, also while it waits for the GPU or a load.
     "turns.active": () => [...turns.values()]
-      .filter((turn) => !turn.terminal && !turn.controller.signal.aborted)
+      .filter((turn) => replies.of(turn.turnId) !== undefined && !turn.controller.signal.aborted)
       .map(({ turnId, threadId, clock }) => ({ turnId, threadId, reply: clock.record(Date.now()) })),
     "turns.blocking": async ({ model, numCtx }) => {
-      if (![...turns.values()].some((t) => t.started)) return [];
+      if (![...turns.values()].some((t) => t.inMemory)) return [];
       const baseUrl = runtime.baseUrl();
       if (baseUrl === undefined) throw notReady();
       return blockingTurns((await planBeside(baseUrl, model, numCtx)).stop);
     },
 
     // `image` is an older client's Image button: accepted and ignored (Tools › Make images decides now).
-    "chat.send": (params) => withSendTimes(async () => {
-      const { threadId, content, model, numCtx, messageId, retryOf, images = [], files: attaching = [], tools, think, draw, drawCount, stopOthers, stopTurns, askFirst } = params;
-      if (closing()) throw new AppError("shutting-down", "the server is stopping; no new turns");
-      deps.admit?.();
-      // The thread is going: its delete has already listed what it takes back.
-      if (deleting.has(threadId)) throw threadGoing(threadId);
-      // Keep unfinished text for the person, but never present it to a model as a completed answer.
-      const loaded = store.getThread(threadId);
-      const stored = loaded.messages;
-      const replaced = retryOf === undefined ? [] : retriedRows(stored, retryOf);
-      const prior = stored.filter(m => !replaced.includes(m.id) && (m.role !== "assistant" || m.interrupted !== true));
-      const replacedFiles = stored.filter(m => replaced.includes(m.id)).flatMap(m => (m.files ?? []).map(file => file.path));
-      const saved = messageId === undefined ? undefined : store.getMessage(messageId);
-      if (saved) {
-        if (saved.threadId !== threadId || saved.role !== "user" || saved.content !== content) throw new AppError("image-input", "This send identity belongs to a different message. Your words were not sent; edit them and try again.");
-        return { turnId: `saved-${saved.id}`, userMessage: saved, replayed: true };
-      }
-      const active = byThread.get(threadId);
-      if (active !== undefined) throw new AppError("turn-active", `thread ${threadId} already has turn ${active.turnId} streaming; cancel it or wait`);
-      if (draw !== undefined) {
-        const kept = loaded.thread.imageCount ?? 1;
-        return drawTurn(threadId, content, draw, { now: drawCount ?? kept, saved: kept }, messageId, replaced, images.length > 0 || attaching.length > 0, replacedFiles);
-      }
-      try { checkAttachments(images); }
-      catch (e) { throw new AppError("image-input", e instanceof Error ? e.message : "Could not attach these images."); }
-      if (attaching.length && deps.dataDir === undefined) throw new AppError("image-input", "File storage is not available.");
-      const settings = turnSettings(deps.settings?.get(), model);
-      const { turn, end } = reserve(threadId, model);
-      turn.asked = { content, messageId, images, files: attaching, numCtx, think };
-      let load: TurnReservation | undefined;
-      try {
-        // Before the answer, so models.remove sees this turn at once (throws while a removal runs).
-        load = deps.models?.loader?.reserve(model);
-      } catch (e) {
-        end();
-        throw e;
-      }
-      admitting(turn, admitTurn(turn, end, load, { threadId, content, model, numCtx, messageId, images, files: attaching, tools, think, stopOthers, stopTurns, askFirst }, { replaced, prior, settings }), replacedFiles, attaching.map(file => file.path));
-      return { turnId: turn.turnId };
-    }),
+    "chat.send": (params) => begin(params),
 
-    "queue.list": () => queue.list(),
+    "queue.list": () => replies.list(),
     "queue.add": (entry) => {
       // already saved (a window's copy of a message that went out), or its chat is going: nothing to queue
       if (store.getMessage(entry.messageId) === undefined && !deleting.has(entry.threadId)) {
         store.getThread(entry.threadId);
-        if (queue.add(entry) === "removed") throw new AppError("queue-removed", "This message was removed from the queue.");
+        if (replies.add(entry) === "removed") throw new AppError("queue-removed", "This message was removed from the queue.");
         pump();
       }
-      return queue.list();
+      return replies.list();
     },
     // queue.update and queue.remove are the older calls, for a page from before reply.*: the same
-    // queue and the same edit locks, answered with the whole list whatever happened
+    // records and the same edit locks, answered with the whole list whatever happened
     "queue.update": ({ id, ...patch }, ctx) => {
-      if (queue.change(id, patch) === "sending") throw new AppError("queue-sending", "This message is already being sent.");
-      if (patch.editing === false) replies.release(id);
-      if (patch.editing === true) {
-        replies.lock(id, ctx.clientId);
-        leftOpen(id, ctx);
-      }
+      if (replies.update(id, patch, ctx.clientId) === "sending") throw new AppError("queue-sending", "This message is already being sent.");
+      if (patch.editing === true) leftOpen(id, ctx);
       pump();
-      return queue.list();
+      return replies.list();
     },
     "queue.remove": ({ id }) => {
-      queue.remove(id);
-      return queue.list();
+      replies.remove({ id });
+      return replies.list();
     },
 
     "reply.change": (params, ctx) => moved(replies.change(params, ctx.clientId)),
@@ -272,10 +291,10 @@ export function createHandlers({
     // the older Stop, for a page from before reply.stop: the same one step, answered yes or no
     "chat.cancel": ({ turnId }) => {
       const turn = turns.get(turnId);
-      const cancelled = turn !== undefined && !turn.terminal && !turn.controller.signal.aborted;
+      const cancelled = turn !== undefined && replies.of(turnId) !== undefined && !turn.controller.signal.aborted;
       moved(replies.stop({ id: turnId }));
       return { cancelled };
     },
   } satisfies AppHandlers;
-  return handlers;
+  return { handlers, begin };
 }

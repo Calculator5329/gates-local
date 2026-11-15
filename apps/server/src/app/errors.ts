@@ -1,5 +1,6 @@
 // The errors the app's handlers throw, and the ones a turn ends with.
 import type { BlockingTurn, FitOffer } from "@gates-local/contracts";
+import type { Refusal } from "../chat/reply.ts";
 import type { FitReport } from "../fit/types.ts";
 
 /**
@@ -57,3 +58,14 @@ export const preemptedBy = (model: string, numCtx: number, held: string): AppErr
   new AppError("preempted", `${model} at num_ctx ${numCtx} needed the GPU memory ${held} was using, so this reply stopped. Send the message again.`, undefined, model);
 export const threadGoing = (threadId: string) => new AppError("thread-not-found", `thread ${threadId} is being deleted`);
 export const cancelledBeforeStart = () => new AppError("cancelled", "the turn was cancelled before it started");
+
+/** Why a start was refused, as its message keeps it while on hold: the error's code and words, the replies in the way, what runs instead. */
+export function refusalOf(e: unknown): Refusal {
+  const { code, message, blocking, offer } = typeof e === "object" && e !== null ? (e as { code?: unknown; message?: unknown; blocking?: readonly BlockingTurn[]; offer?: FitOffer }) : {};
+  return {
+    code: typeof code === "string" && code !== "" ? code : "internal",
+    message: typeof message === "string" ? message : String(e),
+    ...(blocking === undefined ? {} : { blocking }),
+    ...(offer === undefined ? {} : { offer }),
+  };
+}
