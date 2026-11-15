@@ -125,3 +125,40 @@ test("in a browser tab the footer is Settings, Models, Usage and Pictures, no up
   await expect(page.locator(".sb-foot button.ibtn")).toHaveCount(4);
   await expect(page.locator(".sb-foot .upd")).toHaveCount(0);
 });
+
+test.describe("the Settings icon and the runtime", () => {
+  // no image engine answers here
+  test.use({ comfyUrl: "http://127.0.0.1:9" });
+
+  // Guards the footer's Settings icon showing runtime state only when it is true (healthy half).
+  test("no runtime dot or words on the sidebar's Settings icon while the runtime is healthy", async ({ page, open }) => {
+    await open();
+    await waitReady(page);
+    await expect(page.locator(".sb-foot")).toBeVisible();
+    const gear = page.getByTestId("sidebar.foot.settings");
+    await expect(gear).toHaveAttribute("data-tip", "Settings · Ctrl ,");
+    await expect(gear.locator(".fdot")).toHaveCount(0);
+    await expect(page.locator(".sb-foot")).not.toContainText("Ollama 0.40.4");
+    await expect(gear).not.toHaveAttribute("data-tip", /0\.40\.4/);
+    // Settings > Runtime carries the state, and no version number anywhere (test/e2e/no-ollama-version.spec.ts)
+    await page.keyboard.press("Control+Comma");
+    await page.getByTestId("settings.nav.open-runtime").click();
+    await expect(page.locator(".set")).toContainText("Running");
+    await expect(page.locator(".set")).not.toContainText("0.40.4");
+  });
+
+  test.describe("runtime down", () => {
+    test.use({ scenario: "wrong-service", runtimeMode: "system" });
+
+    // Guards the footer's Settings icon showing runtime state only when it is true (down half).
+    test("the Settings icon shows a dot and the runtime's words when the runtime needs the user, and opens Settings > Runtime", async ({ page, open }) => {
+      await open();
+      const gear = page.getByTestId("sidebar.foot.settings");
+      await expect(gear.locator(".fdot.red")).toBeVisible();
+      await expect(gear).toHaveAccessibleName("Settings · Port 5288 · busy");
+      await expect(gear).toHaveAttribute("data-tip", /^<b>Port 5288 · busy<\/b>/);
+      await gear.click();
+      await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
+    });
+  });
+});

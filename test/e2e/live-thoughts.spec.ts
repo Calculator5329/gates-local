@@ -68,3 +68,45 @@ test("while the model thinks, the Thinking pill opens on a click and its text gr
   await expect(pill).toHaveAttribute("aria-expanded", "true");
   await expect(body).toBeVisible();
 });
+
+test.describe("a finished thought", () => {
+  // no image engine answers here
+  test.use({ comfyUrl: "http://127.0.0.1:9" });
+
+  // Guards the finished thinking row: at rest the bulb and a chevron, its seconds in words on hover
+  // and on keyboard focus without moving the reply, and a click opens it.
+  test("a finished thinking row rests as its icon and says its seconds on hover and focus", async ({ page, open }) => {
+    await open();
+    await waitReady(page);
+    await sendMessage(page, "Tell me about cron");
+    const reply = page.locator(".turn.a").last();
+    await expect(reply).toHaveClass(/\bdone\b/, { timeout: 15_000 });
+    const think = reply.locator("button.think");
+    const label = think.getByText(/^Thought for \d+ s$/);
+    await expect(think.locator(".lv-i")).toBeVisible();
+    await expect(think.locator(".th-x")).toBeVisible();
+    await expect(label).toHaveCount(1);
+    await expect(label).toBeHidden();
+    // the words are hidden at rest, so the button's name carries them
+    await expect(think).toHaveAttribute("aria-label", /^Thought for \d+ s$/);
+    const before = await reply.locator(".md").boundingBox();
+
+    await think.hover();
+    await expect(label).toBeVisible();
+    expect(await reply.locator(".md").boundingBox()).toEqual(before);
+
+    await page.mouse.move(5, 5);
+    await expect(label).toBeHidden();
+    await page.keyboard.press("Tab");
+    await think.focus();
+    await expect(label).toBeVisible();
+    expect(await reply.locator(".md").boundingBox()).toEqual(before);
+
+    // click opens the reasoning, and it stays open after the pointer leaves
+    await think.click();
+    await page.mouse.move(5, 5);
+    await expect(think).toHaveAttribute("aria-expanded", "true");
+    await expect(reply.locator(".think-body")).toBeVisible();
+    await expect(reply.locator(".think-body")).toContainText("Answer it plainly");
+  });
+});

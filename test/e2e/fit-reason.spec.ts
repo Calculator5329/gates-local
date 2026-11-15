@@ -4,6 +4,7 @@
 // size, in the words of the GPU memory panel: the short form on the row, the sentence one step
 // away (a tip, or Details). The verdict stays the card's. Nothing offers to stop another program.
 import type { Page, TestInfo } from "@playwright/test";
+import { decodeRequest } from "@gates-local/contracts";
 import { expect, listButton, openModels, stack, test, waitReady } from "./fixtures.ts";
 
 // An 11 GiB card: Whisper (2.1 GB) and a vision runtime (1.8 GB) stay on it (test/fake-ollama/nvidia-smi.ts),
@@ -116,5 +117,51 @@ test.describe("on a phone", () => {
     await expect(chip).toBeVisible();
     await expect(chip).toHaveAttribute("aria-label", /; Fits; slower now\. Fits this card with Whisper/);
     await shots(page, info, "picker-phone");
+  });
+});
+
+test.describe("a send refused for memory", () => {
+  // no image engine answers here
+  test.use({ comfyUrl: "http://127.0.0.1:9" });
+
+  // Guards a refused send saying why and leading to the fix.
+  test("a send refused for memory says why and its click opens Settings > Advanced", async ({ page, open }) => {
+    // The fake's 500-request history rolls over during a full suite. Observe
+    // this client's sends directly, including requests the server would reject.
+    let sends = 0;
+    page.on("websocket", socket => socket.on("framesent", frame => {
+      const request = decodeRequest(frame.payload);
+      if (request.ok && request.value.method === "chat.send") sends++;
+    }));
+    // An 8 GB computer: 5 GiB of spill, and Gemma 4 12B at 64k needs about 18.6 GiB by the server's
+    // estimate. Beside the whole card (15.4 GiB) it spills; beside what the card has free now (11.5,
+    // after the fake's resident programs) it won't fit. On the fixture's 32 GB both run.
+    await stack.computer(8);
+    await open();
+    await waitReady(page);
+    await page.locator("#modelBtn").click();
+    await page.locator("#pkSearch").fill("gemma");
+    await page.locator('#picker .pk-r[data-m="gemma4:12b"]').click();
+    await expect(page.locator("#modelBtn")).toContainText("Gemma 4 12B");
+    // context is chosen in the picker only (decision 13)
+    await page.locator("#modelBtn").click();
+    await page.locator('#picker [data-ctx="65536"]').click();
+    await expect(page.locator("#picker")).toBeHidden();
+    await page.keyboard.press("Control+Comma");
+    await page.getByTestId("settings.nav.open-advanced").click();
+    // Settings judges the card's own memory, where it spills; Send judges right now, where it won't fit
+    await expect(page.locator(".set .fp-v")).toContainText("Should run slower");
+    await page.keyboard.press("Escape");
+    await page.locator("#ta").fill("Too big?");
+    const sendBtn = page.getByTestId("chat.composer.send");
+    await expect(sendBtn).toHaveAttribute("data-tip", "Not enough memory at 64k");
+    await sendBtn.hover();
+    await expect(page.locator("#tip")).toContainText("Not enough memory at 64k");
+    const before = sends;
+    await sendBtn.dispatchEvent("click");
+    await expect(page.locator(".set").getByRole("heading", { name: "Advanced" })).toBeVisible();
+    await expect(page.locator("#gpuMemory")).toContainText("Gemma 4 12B");
+    // the click opened the why; nothing was sent
+    expect(sends).toBe(before);
   });
 });

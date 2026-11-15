@@ -3,6 +3,7 @@
 // offers the embedding model, and the Thinking pill follows the model's
 // capabilities. The picker is a combobox a screen reader can follow.
 import type { Page } from "@playwright/test";
+import { createClient } from "@gates-local/contracts";
 import { expect, openModels, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 /**
@@ -179,4 +180,44 @@ test("Settings lists the embedding model as not for chat, with Remove and no def
   const big = page.locator('.mp-row.cant[data-dm="qwen3.8-abliterated:27b"]');
   await big.getByTestId("models.row-menu.open").click();
   await expect(page.getByRole("menu").getByTestId("models.row-menu.make-default")).toHaveCount(0);
+});
+
+test.describe("the composer's Thinking pill", () => {
+  // no image engine answers here
+  test.use({ scenario: "models", comfyUrl: "http://127.0.0.1:9" });
+
+  // Guards the owner's ruling: the Thinking pill never changes size, so nothing beside it moves.
+  test("composer Thinking keeps its size on hover and focus, so its neighbours never move", async ({ page, open }) => {
+    await open();
+    await waitReady(page);
+    // no image engine answers here, so Settings offers Set up images and no switch: turn generation on directly
+    const server = new URL(page.url()).searchParams.get("server");
+    if (!server) throw new Error("No test server URL");
+    const client = createClient(new WebSocket(server));
+    try { await client.call("settings.update", { imageGen: true }); } finally { client.close(); }
+    const pill = page.locator('.cf-l button[aria-label="Thinking"]');
+    const label = pill.locator(".plbl");
+    await expect(label).toBeHidden();
+    const model = await page.locator("#modelBtn").boundingBox();
+    const image = await page.locator('.cf-l button[aria-label="Image"]').boundingBox();
+    const send = await page.getByTestId("chat.composer.send").boundingBox();
+    const rest = await pill.boundingBox();
+    await pill.hover();
+    await expect(page.locator("#tip")).toHaveClass(/\bopen\b/);
+    await expect(page.locator("#tip")).toContainText("Thinking");
+    await expect(label).toBeHidden();
+    expect(await pill.boundingBox()).toEqual(rest);
+    expect(await page.locator("#modelBtn").boundingBox()).toEqual(model);
+    expect(await page.locator('.cf-l button[aria-label="Image"]').boundingBox()).toEqual(image);
+    expect(await page.getByTestId("chat.composer.send").boundingBox()).toEqual(send);
+    await page.mouse.move(5, 5);
+    await pill.focus();
+    await expect(label).toBeHidden();
+    expect(await pill.boundingBox()).toEqual(rest);
+    const on = await pill.evaluate((el) => ({ color: getComputedStyle(el).color, background: getComputedStyle(el).backgroundColor }));
+    await pill.click();
+    await expect(pill).toHaveAttribute("aria-pressed", "false");
+    expect(await pill.evaluate((el) => ({ color: getComputedStyle(el).color, background: getComputedStyle(el).backgroundColor }))).not.toEqual(on);
+    await expect(pill, "the tip names the pill; aria-pressed holds on or off").toHaveAttribute("data-tip", "Thinking");
+  });
 });

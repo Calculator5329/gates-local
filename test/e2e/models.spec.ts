@@ -86,3 +86,19 @@ test("the model name field has one focus ring and takes a pasted ollama command"
   await page.getByTestId("models.download.start").last().click();
   await expect(page.locator('.dlrow[data-cat="qwen3.5:4b"] .dl-done')).toHaveText("Installed", { timeout: 20_000 });
 });
+
+test.describe("the desktop's model rows", () => {
+  // Thu 2026-11-12 14:00 in Chicago, as in the screenshot rig
+  test.use({ seed: "design", seedAt: Date.UTC(2026, 10, 12, 20, 0), timezoneId: "America/Chicago", locale: "en-US", viewport: { width: 1440, height: 900 } });
+  // Guards the owner's ruling: Remove lives in a model row's ⋯ menu.
+  test("Remove is in the row's ⋯ menu and nowhere under the row", async ({ page, open }) => {
+    await open();
+    await waitReady(page);
+    await openModels(page);
+    const row = page.locator('.mp-row[data-dm="gemma4:12b"]');
+    await expect(row).toBeVisible();
+    await expect(page.locator(".mp")).not.toContainText("Remove");
+    await row.getByTestId("models.row-menu.open").click();
+    await expect(row.getByTestId("models.row-menu.remove")).toBeVisible();
+  });
+});

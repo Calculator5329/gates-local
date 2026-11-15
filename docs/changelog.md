@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-15: browser tests filed by feature
+
+- Internal: the 23 browser tests that lived in files named after a review
+  round (`chat-feel`, `chat-feel-2`, `chat-feel-3`, `ux-trim`,
+  `model-selector-polish`, `composer-polish`) moved, unchanged, into the spec
+  of the feature they drive, such as `streaming`, `copy`, `picker-layout` and
+  `thread-menu`. Files that shared a setup are one spec: `sb-top` joins
+  `sidebar-top`, the three first-run engine journeys are `first-run-engine`,
+  and `mobile-detail` joins `mobile` and `models`. That is ten fewer spec
+  files and no test removed. The suite runs one worker, so this makes the
+  suite easier to find things in, not faster.
+
 ## 2026-11-15: what is on the graphics card stays true when a switch is refused or a picture will not stop
 
 - If you switched between the app's Ollama and the system's while a

@@ -93,7 +93,7 @@ export const FEATURES: readonly Feature[] = [
     server: [],
     calls: [],
     pushes: [],
-    specs: ["sidebar-top.spec.ts", "sb-top.spec.ts"],
+    specs: ["sidebar-top.spec.ts"],
     testIds: ["sidebar.search.input", "sidebar.search.clear"],
   },
   {
@@ -121,7 +121,7 @@ export const FEATURES: readonly Feature[] = [
     server: ["app/handlers.ts", "threads"],
     calls: ["threads.rename", "threads.delete"],
     pushes: [],
-    specs: ["thread-menu.spec.ts", "chat-feel-2.spec.ts", "chat-feel-3.spec.ts"],
+    specs: ["thread-menu.spec.ts"],
     testIds: ["sidebar.thread.menu", "sidebar.thread-menu.rename", "sidebar.thread-menu.export", "sidebar.thread-menu.delete"],
   },
   {
@@ -152,7 +152,7 @@ export const FEATURES: readonly Feature[] = [
     packages: ["harness"],
     calls: ["turns.active"],
     pushes: ["chat.event"],
-    specs: ["streaming.spec.ts", "chat-feel.spec.ts", "writing-label.spec.ts", "streaming-integrity.spec.ts", "threads-resume.spec.ts", "two-clients.spec.ts", "text-mode-stream.spec.ts"],
+    specs: ["streaming.spec.ts", "writing-label.spec.ts", "streaming-integrity.spec.ts", "threads-resume.spec.ts", "two-clients.spec.ts", "text-mode-stream.spec.ts"],
     testIds: ["chat.reply.turn", "chat.markdown.copy-code"],
   },
   {
@@ -165,7 +165,7 @@ export const FEATURES: readonly Feature[] = [
     server: ["chat/stream.ts"],
     calls: [],
     pushes: [],
-    specs: ["live-thoughts.spec.ts", "thought-load.spec.ts", "chat-feel.spec.ts"],
+    specs: ["live-thoughts.spec.ts", "thought-load.spec.ts"],
     testIds: ["chat.fold.thinking"],
   },
   {
@@ -207,7 +207,7 @@ export const FEATURES: readonly Feature[] = [
     server: ["app/handlers.ts"],
     calls: [],
     pushes: [],
-    specs: ["copy.spec.ts", "copy-desktop.spec.ts", "ux-trim.spec.ts", "stop-retry.spec.ts"],
+    specs: ["copy.spec.ts", "copy-desktop.spec.ts", "stop-retry.spec.ts"],
     testIds: ["chat.copy.*", "chat.user-message.edit", "chat.reply.regenerate"],
   },
   {
@@ -220,7 +220,7 @@ export const FEATURES: readonly Feature[] = [
     server: ["app/flight.ts", "app/handlers.ts"],
     calls: ["chat.cancel", "reply.stop"],
     pushes: [],
-    specs: ["stop-retry.spec.ts", "streaming.spec.ts", "reply-ended.spec.ts", "chat-feel-3.spec.ts"],
+    specs: ["stop-retry.spec.ts", "streaming.spec.ts", "reply-ended.spec.ts"],
     testIds: ["chat.composer.stop-square", "chat.reply.retry"],
   },
   {
@@ -330,7 +330,7 @@ export const FEATURES: readonly Feature[] = [
     server: ["chat/attachments.ts", "chat/files.ts", "app/handlers.ts"],
     calls: ["files.attach", "files.keep", "files.release"],
     pushes: [],
-    specs: ["composer-polish.spec.ts", "attach-files.spec.ts"],
+    specs: ["attach-files.spec.ts"],
     testIds: ["chat.composer.add", "chat.plus-menu.attach", "chat.attachment.file", "chat.attachment.remove-file"],
   },
   {
@@ -356,7 +356,7 @@ export const FEATURES: readonly Feature[] = [
     server: ["runtime/models.ts", "runtime/chat-list.ts"],
     calls: ["models.list"],
     pushes: ["models.changed"],
-    specs: ["picker-layout.spec.ts", "model-selector-polish.spec.ts", "model-pick.spec.ts", "chat-feel-2.spec.ts", "model-words.spec.ts", "flicker.spec.ts", "fit-still.spec.ts", "ux-trim.spec.ts", "mem-show.spec.ts", "refusal-offer.spec.ts"],
+    specs: ["picker-layout.spec.ts", "model-pick.spec.ts", "model-words.spec.ts", "flicker.spec.ts", "fit-still.spec.ts", "mem-show.spec.ts", "refusal-offer.spec.ts"],
     testIds: ["chat.composer.model", "models.picker.dialog", "models.picker.search", "models.picker.context-*", "models.picker.favorites"],
   },
   {
@@ -369,7 +369,7 @@ export const FEATURES: readonly Feature[] = [
     server: ["settings/turn.ts"],
     calls: [],
     pushes: [],
-    specs: ["model-pick.spec.ts", "chat-feel.spec.ts"],
+    specs: ["model-pick.spec.ts"],
     testIds: ["chat.composer.thinking", "chat.options-menu.thinking"],
   },
   {
@@ -526,7 +526,7 @@ export const FEATURES: readonly Feature[] = [
     server: ["runtime/handlers.ts", "runtime/models.ts"],
     calls: ["models.list", "models.refresh", "models.remove"],
     pushes: ["models.changed"],
-    specs: ["models.spec.ts", "mobile-detail.spec.ts"],
+    specs: ["models.spec.ts", "mobile.spec.ts"],
     testIds: ["models.tabs.installed", "models.installed.filter", "models.row-menu.make-default", "models.row-menu.remove", "models.remove.confirm"],
   },
   {
@@ -695,7 +695,7 @@ export const FEATURES: readonly Feature[] = [
     packages: ["runtime-files"],
     calls: ["runtime.status", "runtime.retry", "runtime.discover"],
     pushes: ["runtime.changed"],
-    specs: ["runtime-wrong.spec.ts", "mobile-detail.spec.ts", "no-ollama-version.spec.ts"],
+    specs: ["runtime-wrong.spec.ts", "mobile.spec.ts", "no-ollama-version.spec.ts", "sidebar-footer.spec.ts"],
     testIds: ["settings.runtime.switch", "settings.runtime.switch-confirm", "settings.runtime.open-models-folder"],
   },
   {
@@ -708,7 +708,7 @@ export const FEATURES: readonly Feature[] = [
     server: ["settings/handlers.ts", "fit/gpu-status.ts"],
     calls: [],
     pushes: [],
-    specs: ["settings-s2.spec.ts"],
+    specs: ["settings-s2.spec.ts", "fit-reason.spec.ts"],
     testIds: ["settings.advanced.reset", "settings.advanced.reset-confirm", "settings.advanced.open-data-folder"],
   },
   {
@@ -767,7 +767,7 @@ export const FEATURES: readonly Feature[] = [
     packages: ["runtime-files"],
     calls: ["runtime.status", "models.suggested", "models.pull"],
     pushes: ["runtime.changed", "models.pull"],
-    specs: ["first-run.spec.ts", "first-run-early.spec.ts", "first-run-failures.spec.ts", "first-run-stall.spec.ts", "first-run-still.spec.ts", "model-pick.spec.ts", "no-models.spec.ts"],
+    specs: ["first-run.spec.ts", "first-run-engine.spec.ts", "first-run-failures.spec.ts", "model-pick.spec.ts", "no-models.spec.ts"],
     testIds: ["first-run.cta.go", "first-run.cta.link", "first-run.model.details", "first-run.cancelled.open-models"],
   },
   {
@@ -780,7 +780,7 @@ export const FEATURES: readonly Feature[] = [
     server: ["runtime/handlers.ts"],
     calls: ["runtime.retry"],
     pushes: ["runtime.changed"],
-    specs: ["first-run-stall.spec.ts", "runtime-wrong.spec.ts"],
+    specs: ["first-run-engine.spec.ts", "runtime-wrong.spec.ts"],
     testIds: ["chat.banner.retry"],
   },
   {
@@ -906,7 +906,7 @@ export const FEATURES: readonly Feature[] = [
     server: [],
     calls: [],
     pushes: [],
-    specs: ["mobile.spec.ts", "mobile-detail.spec.ts"],
+    specs: ["mobile.spec.ts"],
   },
 
   // ---------------------------------------------------------------- Desktop app
@@ -985,7 +985,7 @@ export const FEATURES: readonly Feature[] = [
     server: ["runtime/load.ts", "gpu/memory.ts", "gpu/gate.ts"],
     calls: ["models.load"],
     pushes: ["models.load"],
-    specs: ["load-follow.spec.ts", "thought-load.spec.ts", "chat-feel-2.spec.ts"],
+    specs: ["load-follow.spec.ts", "thought-load.spec.ts"],
   },
   {
     id: "fit",

@@ -1,6 +1,7 @@
 /// <reference lib="dom" />
 // One primary node through Send, Stop, Queue and Update. Interaction journeys
-// complement the real-composer render matrix in Composer.test.ts.
+// complement the real-composer render matrix in Composer.test.ts. No "Reply
+// running" line, and the composer holds still as a reply starts and ends.
 import { expect, stack, test, waitReady } from "./fixtures.ts";
 
 test.use({ seed: 2, video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off" });
@@ -127,5 +128,44 @@ test.describe("a touch keyboard", () => {
     await expect(page.locator(".qt-r")).toContainText("Updated on touch");
     await expect(action).toHaveAccessibleName("Queue message");
     await expect(stop).toBeVisible();
+  });
+});
+
+test.describe("the reply-running line", () => {
+  // Guards the owner's ruling (N05): no "Reply running" line, and the composer does not move as a reply starts and ends.
+  test("is gone; the composer does not move as a reply starts and ends, and Stop stays one click away while editing", async ({ page, open, seededThread }) => {
+    await open(`#thread=${seededThread ?? ""}`); await waitReady(page);
+    const top = () => page.locator(".composer").evaluate(el => el.getBoundingClientRect().top);
+    const bottom = () => page.locator(".composer").evaluate(el => el.getBoundingClientRect().bottom);
+    const before = await top(), under = await bottom();
+    await stack.scenario("slow-drip", { holdAfterTokens: 46 });
+    await page.locator("#ta").fill("Keep this reply running");
+    const primary = page.locator(".composer button.send");
+    await primary.click();
+    await expect(primary).toHaveAccessibleName("Stop");
+    await expect(page.locator(".turn.a").last().locator(".md ul li")).toHaveCount(3);
+    expect(await top(), "a reply starting leaves the composer where it was").toBe(before);
+    const inBox = await page.locator("#ta").evaluate(el => el.getBoundingClientRect().bottom - el.closest(".composer")!.getBoundingClientRect().bottom);
+    await expect(page.getByText("Reply running", { exact: true })).toHaveCount(0);
+    await expect(page.locator("[data-running-status]")).toHaveCount(0);
+    await expect(page.locator(".composer .stop-sq"), "the main button is Stop").toHaveCount(0);
+    // A desktop draft keeps Stop as the main button (Enter queues); editing a queued message is where Stop moves aside, into Dictate's square.
+    await page.locator("#ta").fill("Keep this queued draft");
+    await page.locator("#ta").press("Enter");
+    const v = await page.locator(".composer .voice").boundingBox();
+    await page.locator(".qt-r [data-edit-queued]").click();
+    await expect(primary).toHaveAccessibleName("Update queued message");
+    const stop = page.getByRole("button", { name: "Stop", exact: true });
+    await expect(stop).toBeVisible();
+    await expect(stop).toHaveAttribute("data-tip", "Stop");
+    expect(await stop.boundingBox(), "Dictate's square").toEqual(v);
+    await expect(page.locator(".composer .voice"), "Dictate gives its square to Stop while the edit lasts").toHaveCount(0);
+    await stop.click();
+    await expect(primary).toHaveAccessibleName("Update queued message");
+    await expect(page.locator("#ta")).toHaveValue("Keep this queued draft");
+    await expect(stop).toHaveCount(0);
+    // the queued message is still on its shelf, which the composer grew upward to hold (chat row 36): its foot is what holds still
+    expect(await bottom(), "the reply ending leaves the composer's foot where it was").toBe(under);
+    expect(await page.locator("#ta").evaluate(el => el.getBoundingClientRect().bottom - el.closest(".composer")!.getBoundingClientRect().bottom), "and the box in it").toBe(inBox);
   });
 });
