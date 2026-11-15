@@ -66,6 +66,9 @@ decision.
 
 ## Layout (who owns what)
 
+Before working on a feature, read `docs/feature-map.md`: it names each
+feature as the screen does, with its folders, wire calls and browser specs.
+
 - `packages/contracts/`: the wire. One WebSocket, typed RPC and push
   channels, Effect Schema decode at both ends. Changes to a shipped channel
   come from the coordinating session.
@@ -166,6 +169,7 @@ and is the next one to get a check.
 | Bundle size targets warn and never block; a target is never raised to pass. | `test/bundle-size.ts`, run by `pnpm build` |
 | `pnpm verify` runs on fakes only; checks against a real runtime are separate commands. | prose |
 | Tests guard what was decided; the bug finder covers the rest before a larger suite does. | prose |
+| Every browser spec, window and server folder and wire call belongs to a named feature, and the map names nothing that is gone. | test `test/feature-map.test.ts` (`test/feature-map.ts`, page `docs/feature-map.md`) |
 | Work lands on `dev`; review happens at the release check; no release, tag or deploy without the maintainer's go. | prose |
 
 A lint rule's own message says what to write instead. Each has a planted

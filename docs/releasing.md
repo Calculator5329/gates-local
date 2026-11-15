@@ -743,7 +743,7 @@ exists, the report states base `a369f0a3b7280f33802d6f816287546814da99eb`;
 `performance` field records the exact commits, base selection, exit code,
 signal, timeout and retained artifact paths. Slower results remain informational;
 a tool failure or invalid/missing output means measurements unavailable.
-Neither changes the verdict or tag eligibility. See [testing](testing.md) for
+Neither changes the verdict or tag eligibility. See [testing](testing.md#how-perfcompare-scores) for
 the sampling and noise model. The enclosing runner reserves exclusive access;
 the check does not request a second reservation inside that job. Lightweight
 tags and tags outside the candidate's history do not qualify as releases;

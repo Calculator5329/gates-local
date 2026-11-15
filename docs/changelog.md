@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-15: a map of every feature, checked against the code
+
+- Internal: `docs/feature-map.md` names each feature as the screen does, with
+  its code, wire calls and browser specs, written from `test/feature-map.ts`
+  by `pnpm feature-map`. A test fails when a spec, folder or wire call is in
+  no feature, or the map names something that is gone. `docs/testing.md` is
+  now how to run the tests only. The unread `apps/web/testid-registry.json`
+  moved to `_archive/`; the map's test ids are checked against the source.
+
 ## 2026-11-15: starting the app during or after a cut-off update
 
 - If an update of a copy run from source was cut off (a crash, a power
