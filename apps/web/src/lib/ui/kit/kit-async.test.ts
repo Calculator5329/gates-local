@@ -1,7 +1,7 @@
 // The kit's plain helpers: a wait with a limit, a debounce, idle work, a saved file.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { DOWNLOAD_KEEP_MS, debounce, downloadBlob, withTimeout } from "./async.ts";
-import { scheduleIdle } from "./idle.ts";
+import { NO_IDLE_WAIT_MS, scheduleIdle, whenIdle } from "./idle.ts";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -53,6 +53,35 @@ it("idle work waits two frames and the idle time, and a cancel stops it at any p
   cancel();
   for (const f of frames.splice(0)) f(0);
   for (const f of idle.splice(0)) f();
+  expect(other).not.toHaveBeenCalled();
+});
+
+it("an idle slice runs in idle time with the time left, or after its limit; a cancel stops it", () => {
+  const idle: { f: IdleRequestCallback; timeout: number }[] = [];
+  vi.stubGlobal("requestIdleCallback", (f: IdleRequestCallback, o: { timeout: number }) => idle.push({ f, timeout: o.timeout }));
+  vi.stubGlobal("cancelIdleCallback", (id: number) => { idle[id - 1]!.f = () => undefined; });
+  const left: number[] = [];
+  whenIdle((timeLeft) => left.push(timeLeft()), 100);
+  expect(idle.map((i) => i.timeout)).toEqual([100]);
+  idle[0]!.f({ didTimeout: false, timeRemaining: () => 12 });
+  expect(left).toEqual([12]);
+  const other = vi.fn();
+  whenIdle(other, 100)();
+  idle[1]!.f({ didTimeout: false, timeRemaining: () => 12 });
+  expect(other).not.toHaveBeenCalled();
+});
+
+it("with no idle callback, a slice waits a short pause and has no idle time to spend", () => {
+  vi.stubGlobal("requestIdleCallback", undefined);
+  const left: number[] = [];
+  whenIdle((timeLeft) => left.push(timeLeft()), 100);
+  vi.advanceTimersByTime(NO_IDLE_WAIT_MS - 1);
+  expect(left).toEqual([]);
+  vi.advanceTimersByTime(1);
+  expect(left).toEqual([0]);
+  const other = vi.fn();
+  whenIdle(other, 100)();
+  vi.advanceTimersByTime(1000);
   expect(other).not.toHaveBeenCalled();
 });
 

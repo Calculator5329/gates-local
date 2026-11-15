@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MEASURE_VERSION, type MeasureCheck, type ModelMeasure } from "@gates-local/contracts";
 
 vi.mock("../lib/session/index.ts", () => ({ measureModel: () => undefined }));
-const { MeasureChecks, MeasureNotes, isEarlier, samplingText, shortWords } = await import("./MeasureDetail.tsx");
+const { MeasureChecks, MeasureNotes, earlierWords, isEarlier, samplingText, shortWords } = await import("./MeasureDetail.tsx");
 const { ScoreMarks } = await import("./ModelMeasure.tsx");
 const marks = (m: ModelMeasure) => renderToStaticMarkup(createElement(ScoreMarks, { m }));
 const { SANDBOX_OFF_SKIP } = await import("./measure-pages.ts");
@@ -99,5 +99,15 @@ describe("two scores side by side", () => {
     expect(marks(full)).not.toContain("Earlier");
     // its other marks stay beside it
     expect(marks({ ...short, version: 2 })).toContain('data-tip="Without Database · Tools 2 of 3"');
+  });
+
+  it("says what an earlier measure did differently, by the version that made it", () => {
+    // version 3 had this build's tasks and grades; it only skipped a check the model cut short itself
+    const three = earlierWords({ ...full, version: 3 });
+    expect(three).not.toContain("fewer tasks");
+    expect(three).toContain("skipped");
+    expect(three).toContain("fails now");
+    expect(earlierWords({ ...full, version: 2 })).toContain("fewer tasks");
+    expect(earlierWords(full)).toBe("");
   });
 });

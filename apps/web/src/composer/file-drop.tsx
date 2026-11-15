@@ -71,6 +71,7 @@ function over(e: DragEvent): void {
   if (!ok) { hide(); return; }
   mark?.(where());
   clearTimeout(stale);
+  // oxlint-disable-next-line gates/timer-needs-reason -- the next dragover, which a drag still over the window sends within 550 ms
   stale = setTimeout(hide, 3000);
 }
 
@@ -105,6 +106,7 @@ if (typeof window !== "undefined" && typeof window.addEventListener === "functio
 /** The composer's drop target: while it is mounted, file drops attach to its draft. */
 export function DropMarker() {
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  // oxlint-disable-next-line gates/effect-needs-reason -- the window's drag listeners, kept in step with which composer is mounted to take a drop
   useEffect(() => {
     const show = (next: { x: number; y: number } | null) => setAt(prev => prev && next && prev.x === next.x && prev.y === next.y ? prev : next);
     mark = show;

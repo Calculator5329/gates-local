@@ -28,11 +28,14 @@ function join(ms: number, reader: (now: number) => void): () => void {
   };
 }
 
-/** The time now, read again every `ms` milliseconds. */
-export function useNow(ms: number): number {
+/**
+ * The time now, read again every `ms` milliseconds while `when` holds. Off, the reader leaves the
+ * clock and keeps the last time it read (a clock that stops shows where it stopped).
+ */
+export function useNow(ms: number, when = true): number {
   const [now, setNow] = useState(Date.now);
-  // oxlint-disable-next-line gates/effect-needs-reason -- keeps this reader on the shared clock while it is mounted
-  useEffect(() => join(ms, setNow), [ms]);
+  // oxlint-disable-next-line gates/effect-needs-reason -- keeps this reader on the shared clock while it is mounted and on
+  useEffect(() => (when ? join(ms, setNow) : undefined), [ms, when]);
   return now;
 }
 

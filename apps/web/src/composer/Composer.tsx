@@ -23,6 +23,9 @@ import { canThink, chatBlockedReason, chatModels, sendableModel } from "../model
 import { focusComposer } from "./focus.ts";
 import { AttachedFiles, AttachmentImages, RefusedFiles } from "./attachment-images.tsx";
 import { DropMarker } from "./file-drop.tsx";
+import { useChange, usePopover } from "../lib/ui/kit/popover.ts";
+import { useDocumentEvent } from "../lib/ui/kit/events.ts";
+import { withTimeout } from "../lib/ui/kit/async.ts";
 import { attachFiles, imageReason, paste } from "./paste.ts";
 import { useRefused } from "./refused-files.ts";
 import {
@@ -157,21 +160,25 @@ export function Composer() {
   const primary = useRef<HTMLButtonElement>(null);
   // Preparing a reply is user intent, not an idle startup download. The
   // renderer can arrive while the person types, before the first Send.
+  // oxlint-disable-next-line gates/effect-needs-reason -- the thread screen's code, loaded once the draft holds anything (typed, pasted, dropped, dictated or restored)
   useEffect(() => {
     if (hasText || images.length || files.length) void threadScreen.load();
   }, [hasText, images.length, files.length]);
+  // oxlint-disable-next-line gates/effect-needs-reason -- focus on Send carried from the composer that unmounts to the one that mounts in its place (a first send opens the thread)
   useLayoutEffect(() => {
     const button = primary.current;
     if (primaryFocus) button?.focus();
     primaryFocus = false;
     return () => {
       primaryFocus = document.activeElement === button;
+      // oxlint-disable-next-line gates/timer-needs-reason -- the hand-off lasts only until the new composer's commit, never into a later mount
       queueMicrotask(() => { primaryFocus = false; });
     };
   }, []);
 
   const ready = rt === "ready";
   const blocked = !ready;
+  // oxlint-disable-next-line gates/effect-needs-reason -- the message box takes the focus nobody holds once the runtime the server reports is ready
   useEffect(() => {
     if (!blocked && !isTouch() && document.activeElement === document.body) ta.current?.focus({ preventScroll: true });
   }, [blocked]);
@@ -260,6 +267,7 @@ export function Composer() {
   const stopForVoice = isStreaming && editing && !touch;
   // The note that said why Dictate waited is untrue once Dictate is back. Cleared here, not in Voice: Voice remounts when an edit is cancelled.
   const wasStopForVoice = useRef(stopForVoice);
+  // oxlint-disable-next-line gates/effect-needs-reason -- the store's notice, cleared once Dictate is back, whichever of the reply's end or the edit's end brought it back
   useEffect(() => {
     if (wasStopForVoice.current && !stopForVoice && getState().notice === VOICE_HELD) setState({ notice: null });
     wasStopForVoice.current = stopForVoice;
@@ -280,6 +288,7 @@ export function Composer() {
   };
   // talk mode sends after the transcript is drawn, with Send's latest judgement of the draft
   const latestSubmit = useRef(submit);
+  // oxlint-disable-next-line gates/effect-needs-reason -- the committed draft's Send, kept in step for Dictate, which sends after the draft is drawn; a write during render could hold a render React drops
   useLayoutEffect(() => { latestSubmit.current = submit; });
   const talkSend = useCallback(() => latestSubmit.current(), []);
   const talk = useTalk().on;
@@ -288,6 +297,7 @@ export function Composer() {
     if (runningTurn(s, s.threadId)?.gen === running) stop();
   };
   const action = showStop ? `stop:${running}` : editing ? `edit:${editingId}` : memRefused ? `memory:${model}:${numCtx}` : isStreaming ? `queue:${running}` : "send";
+  // oxlint-disable-next-line gates/effect-needs-reason -- the shared tooltip, drawn outside React, closed before paint once the button it describes does something else
   useLayoutEffect(() => closeTip(), [action]);
   const primaryPress = useActionPress(!showStop && sendDisabled && !memRefused ? `off:${action}` : action, () => {
     if (showStop) stopThisReply();
@@ -486,17 +496,19 @@ function DraftTextarea({ textarea, placeholder, submit }: { textarea: RefObject<
   const newlineOnEnter = useMedia(PHONE_TOUCH);
   const draft = useDraft(d => d.text);
   const version = useDraft(d => d.version);
-  useLayoutEffect(() => {
-    const el = textarea.current;
-    if (el) el.setSelectionRange(el.value.length, el.value.length);
+  // a restored draft opens with the caret at its end
+  const attach = useCallback((el: HTMLTextAreaElement | null) => {
+    textarea.current = el;
+    el?.setSelectionRange(el.value.length, el.value.length);
   }, [textarea]);
+  // oxlint-disable-next-line gates/effect-needs-reason -- the box's height measured from its text, where the browser cannot size it itself
   useLayoutEffect(() => {
     const el = textarea.current;
     if (!el || sizesItself) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
   }, [draft, placeholder, textarea]);
-  return <textarea ref={textarea} id="ta" data-testid="chat.composer.message" data-draft-version={version} className="ta" rows={1} placeholder={placeholder} aria-label="Message" value={draft} onPaste={paste}
+  return <textarea ref={attach} id="ta" data-testid="chat.composer.message" data-draft-version={version} className="ta" rows={1} placeholder={placeholder} aria-label="Message" value={draft} onPaste={paste}
     onChange={e => {
       editDraft(e.target.value);
       // the first key starts the thread's model loading while the person writes
@@ -695,7 +707,8 @@ function StopWarning() {
   const matches = useDraft(d => ask === null || ask.keepDraft || d.text.trim() === ask.content && d.images === ask.images);
   const catalog = useStore(catalogOf);
   const [never, setNever] = useState(false);
-  useEffect(() => setNever(false), [ask]);
+  // a new ask starts unticked
+  useChange(ask, () => setNever(false));
   if (ask === null || !matches) return null;
   const names = stopNames(ask.blocking, catalog);
   const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
@@ -768,7 +781,7 @@ function CountButton({ open }: { open: boolean }) {
       const choice = { preset: pictured.preset.id, width: pictured.width, height: pictured.height };
       const key = runKey(choice);
       // never longer than a moment: without an answer the rows show no times
-      const ms = await Promise.race([lastImageRunMs(choice), new Promise<undefined>((done) => setTimeout(done, READ_WAIT_MS))]);
+      const ms = await withTimeout(lastImageRunMs(choice), READ_WAIT_MS, () => undefined);
       lastRun = { key, ms: ms ?? (lastRun?.key === key ? lastRun.ms : undefined) };
     }
     togglePop("count", kb);
@@ -800,24 +813,20 @@ export function CountMenu() {
   const drawing = useStore(imageMode);
   const ref = useRef<HTMLDivElement>(null);
   // Image off takes the button away, and its menu with it
+  // oxlint-disable-next-line gates/effect-needs-reason -- the store's open menu, closed once Image goes off, from whichever control turned it off
   useEffect(() => { if (open && !drawing) closePop(); }, [open, drawing]);
   const ms = pictured !== undefined && lastRun?.key === runKey({ preset: pictured.preset.id, width: pictured.width, height: pictured.height }) ? lastRun.ms : undefined;
-  useLayoutEffect(() => {
+  usePopover(ref, open, (el) => {
     const anchor = document.getElementById("countBtn");
-    if (open && ref.current && anchor) place(ref.current, anchor, "start");
-    if (open && kb) ref.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
-  }, [open, kb]);
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      const n = Number(e.key);
-      if (e.ctrlKey || e.metaKey || e.altKey || !Number.isInteger(n) || n < 1 || n > IMAGE_COUNT_MAX) return;
-      e.preventDefault();
-      pickCount(n);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open]);
+    if (anchor) place(el, anchor, "start");
+    if (kb) el.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
+  }, [kb]);
+  useDocumentEvent("keydown", (e) => {
+    const n = Number(e.key);
+    if (e.ctrlKey || e.metaKey || e.altKey || !Number.isInteger(n) || n < 1 || n > IMAGE_COUNT_MAX) return;
+    e.preventDefault();
+    pickCount(n);
+  }, { when: open });
   return (
     <div className={`pop menu count-menu${open ? " open" : ""}`} id="countMenu" data-testid="chat.count-menu.menu" role="menu" aria-label="Pictures per send" ref={ref} onKeyDown={countArrows}>
       {Array.from({ length: IMAGE_COUNT_MAX }, (_, i) => i + 1).map((n) => (
@@ -844,10 +853,10 @@ export function PlusMenu() {
   const imageGen = useStore(imageGenOf);
   const image = useStore((s) => s.image);
   const ref = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
+  usePopover(ref, open, (el) => {
     const anchor = document.getElementById("plusBtn");
-    if (open && ref.current && anchor) place(ref.current, anchor, "start");
-  }, [open]);
+    if (anchor) place(el, anchor, "start");
+  }, []);
   return (
     <div className={`pop menu${open ? " open" : ""}`} id="plusMenu" role="menu" ref={ref}>
       <SheetHead title="Add" />
@@ -942,10 +951,10 @@ export function OptsMenu() {
   const first = useStore(firstPull);
   const ready = useStore(rtOf) === "ready";
   const ref = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
+  usePopover(ref, open, (el) => {
     const anchor = document.getElementById("optBtn");
-    if (open && ref.current && anchor) place(ref.current, anchor, "end");
-  }, [open]);
+    if (anchor) place(el, anchor, "end");
+  }, []);
   const ctx = ctxFor(numCtx, models, model); // what the model runs at, which a small one holds below what was asked for
   const pct = Math.min(1, used / ctx);
   const tag = first ?? model;

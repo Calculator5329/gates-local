@@ -26,6 +26,7 @@ export function draftDatabase() {
           get(key: unknown) {
             reads.push({ key, mode });
             const request = Object.assign(new EventTarget(), { result: undefined as unknown });
+            // oxlint-disable-next-line gates/timer-needs-reason -- the fake answers a read later, as IndexedDB does, never inside the call
             queueMicrotask(() => {
               request.result = structuredClone(records.get(JSON.stringify(key)));
               request.dispatchEvent(new Event("success"));
@@ -44,6 +45,7 @@ export function draftDatabase() {
           commit,
           finish() {
             // Requests already queued in this transaction finish before commit.
+            // oxlint-disable-next-line gates/timer-needs-reason -- the fake commits after the requests already queued, as IndexedDB does
             queueMicrotask(() => {
               pending.splice(pending.indexOf(item), 1);
               for (const change of changes) records.set(change.key, change.value);
@@ -67,6 +69,7 @@ export function draftDatabase() {
   vi.stubGlobal("window", window);
   vi.stubGlobal("indexedDB", { open() {
     const request = Object.assign(new EventTarget(), { result: db });
+    // oxlint-disable-next-line gates/timer-needs-reason -- the fake opens later, as IndexedDB does, after the caller has added its listener
     queueMicrotask(() => request.dispatchEvent(new Event("success")));
     return request;
   } });

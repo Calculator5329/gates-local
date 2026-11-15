@@ -23,6 +23,7 @@ import { Updates } from "../updates/SettingsUpdates.tsx";
 import Instructions from "./Instructions.tsx";
 import { VoiceSettings } from "../voice/VoiceSettings.tsx";
 import { closeTip } from "../lib/ui/ui.tsx";
+import { focusFirstOf, focusOnDraw, requestFocus } from "../lib/ui/kit/focus.ts";
 
 // Voice to text and Instructions ship in the Settings chunk: a section that
 // suspends shows its fallback and then the real cards ~300 ms later (docs/design.md).
@@ -283,6 +284,7 @@ function Tools() {
   const windows = /\bWindows\b/.test(navigator.userAgent);
   const shell = useStore((s) => s.shellStatus);
   // Asked each time Tools opens: the server keeps a passed probe and asks a failed one again.
+  // oxlint-disable-next-line gates/effect-needs-reason -- the server's shell probe, asked again each time Tools is drawn
   useEffect(() => { if (!windows) checkShell(); }, [windows]);
   const [imageErr, runImage] = useAct();
   // The chat model's image tool: app-wide, offered only with the master switch on. Unset is on once a
@@ -628,6 +630,9 @@ const KIND_ICON: Record<SourceKind, IconId> = { folder: "folder", file: "file", 
 export const copiedFrom = (key: string, at: number) =>
   `Copied from ${key.replace(/^https:\/\/github\.com\//i, "").replace(/\.git\/?$|\/$/g, "")} on ${new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
 
+/** A source's menu, as it opens: its first item takes focus. */
+const focusFirstItem = focusFirstOf("[role=menuitem]");
+
 function SourceRow({ src }: { src: Source }) {
   const locked = useStore((s) => s.unavailable["sources.remove"] === true);
   const [open, setOpen] = useState(false);
@@ -640,9 +645,6 @@ function SourceRow({ src }: { src: Source }) {
     if (refocus) btn.current?.focus();
   };
   useOutside(box, open, () => close(false));
-  useEffect(() => {
-    if (open) box.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
-  }, [open]);
   const broken = src.state === "error";
   const detail = broken ? "Unavailable" : sourceDetail(src);
   return (
@@ -662,7 +664,7 @@ function SourceRow({ src }: { src: Source }) {
               <Icon id="more" />
             </button>
             {open ? (
-              <div className="mp-menu src-menu" role="menu">
+              <div className="mp-menu src-menu" role="menu" ref={focusFirstItem}>
                 {src.kind === "sqlite" || broken ? (
                   <button
                     type="button"
@@ -702,13 +704,11 @@ function SourceRow({ src }: { src: Source }) {
 function AddRow({ kind, close }: { kind: SourceKind; close: () => void }) {
   const [path, setPath] = useState("");
   const [err, run] = useAct();
-  const input = useRef<HTMLInputElement>(null);
   const { noun, hint } = ADD_WORDS[kind];
-  useEffect(() => input.current?.focus(), []);
   return (
     <Row label={`Add a ${noun}`} desc={<span className={err ? "src-help act-err" : "src-help"} role={err ? "alert" : undefined}>{err ?? "Choose a local path to share."}</span>}>
       <input
-        ref={input}
+        ref={focusOnDraw}
         className="inp"
         data-testid={`settings.add-source.path-${kind}`}
         aria-label={`Add a ${noun} path`}
@@ -748,7 +748,7 @@ function SourceGroup({ title, kinds, items }: { title: string; kinds: readonly S
     const kind = adding;
     closeTip();
     setAdding(null);
-    requestAnimationFrame(() => entry.current?.querySelector<HTMLButtonElement>(`[data-add="${kind}"]`)?.focus({ preventScroll: true }));
+    requestFocus(() => entry.current?.querySelector<HTMLButtonElement>(`[data-add="${kind}"]`), { preventScroll: true });
   };
   const action = kinds.map((kind) => (
     <button key={kind} type="button" className="btn outline" data-add={kind} data-testid={`settings.library.add-${kind}`} onClick={() => setAdding(kind)}>
@@ -780,7 +780,7 @@ function AddDatabase() {
   const close = () => {
     closeTip();
     setAdding(false);
-    requestAnimationFrame(() => entry.current?.querySelector<HTMLButtonElement>('[data-add="sqlite"]')?.focus({ preventScroll: true }));
+    requestFocus(() => entry.current?.querySelector<HTMLButtonElement>('[data-add="sqlite"]'), { preventScroll: true });
   };
   return (
     <div className="src-entry" ref={entry}>

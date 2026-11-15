@@ -5,6 +5,7 @@ import { choosable, newestOnly } from "../models/pick.ts";
 import { type LiveTurn, NA, type State, getState, setState } from "../lib/store/store.ts";
 import { getDraft } from "../lib/store/drafts.ts";
 import { withTurn } from "./turn.ts";
+import { debounce } from "../lib/ui/kit/async.ts";
 
 interface ThreadEffects {
   readonly applyServerEvent: typeof setState;
@@ -21,6 +22,8 @@ const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
 
 /** How many messages a thread opens on, and how many each ask for earlier ones brings. */
 export const PAGE_MESSAGES = 200;
+/** How long a pointer rests on a thread's row before its messages are read ahead. */
+const HOVER_INTENT_MS = 160;
 
 export function sortThreads<T extends { updatedAt: number }>(threads: readonly T[]): T[] {
   return threads.toSorted((a, b) => b.updatedAt - a.updatedAt);
@@ -127,7 +130,13 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     completion: Promise<void>;
   }
   let preloading: Preload | null = null;
-  let intent: ReturnType<typeof setTimeout> | undefined;
+  // a pointer that rests on a row this long means to open it: the read starts then
+  const intent = debounce((threadId: string, ready: () => boolean) => {
+    if (!ready() || preloading !== null) return;
+    const p: Preload = { threadId, cancelled: false, used: false, completion: Promise.resolve() };
+    preloading = p;
+    p.completion = fetchThread(threadId, p);
+  }, HOVER_INTENT_MS);
 
   function invalidatePreload(threadId: string): void {
     previews.delete(threadId);
@@ -151,7 +160,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
   /** Leaving cancels intent and discards an unused result. A sent RPC drains
    * in its single slot: the wire has no cancellation method for reads. */
   function preloadThread(threadId: string | null): void {
-    clearTimeout(intent);
+    intent.cancel();
     if (preloading !== null && !preloading.used && preloading.threadId !== threadId) preloading.cancelled = true;
     if (threadId === null) return;
     const ready = () => {
@@ -160,12 +169,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
         !(s.messages[threadId] !== undefined && !stale.has(threadId)) && !previews.has(threadId);
     };
     if (!ready()) return;
-    intent = setTimeout(() => {
-      if (!ready() || preloading !== null) return;
-      const p: Preload = { threadId, cancelled: false, used: false, completion: Promise.resolve() };
-      preloading = p;
-      p.completion = fetchThread(threadId, p);
-    }, 160);
+    intent(threadId, ready);
   }
 
   function installHistory(threadId: string, messages: readonly Message[], earlier: number): void {

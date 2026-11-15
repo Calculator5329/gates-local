@@ -67,6 +67,26 @@ it("two readers of the same interval share one timer, and it stops when the last
   expect(vi.getTimerCount()).toBe(0);
 });
 
+it("a reader that is off leaves the clock and keeps the last time it read; on again, it rejoins", () => {
+  const seen: number[] = [];
+  const Reader = ({ on }: { on: boolean }) => { seen.push(kit.now.useNow(250, on)); return null; };
+  act(() => root.render(createElement(Reader, { on: true })));
+  act(() => vi.advanceTimersByTime(250));
+  const last = seen.at(-1)!;
+  act(() => root.render(createElement(Reader, { on: false })));
+  expect(kit.now.clockCount()).toBe(0);
+  expect(vi.getTimerCount()).toBe(0);
+  seen.length = 0;
+  act(() => vi.advanceTimersByTime(1000));
+  expect(seen).toEqual([]);
+  act(() => root.render(createElement(Reader, { on: false })));
+  expect(seen).toEqual([last]);
+  act(() => root.render(createElement(Reader, { on: true })));
+  expect(kit.now.clockCount()).toBe(1);
+  act(() => vi.advanceTimersByTime(250));
+  expect(seen.at(-1)).toBe(last + 1250);
+});
+
 it("a flash clears itself, a value that stays does not, and an unmounted flash never fires", () => {
   let set: ((v: string | null) => void) | undefined;
   const shown: (string | null)[] = [];

@@ -26,18 +26,4 @@ export function deferred<T>(importScreen: () => Promise<T>) {
 }
 
 /** Two frames leave the first paint alone; the idle timeout also warms a busy page. */
-export function afterFirstPaint(work: () => void): () => void {
-  let idle: number | undefined;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let frame = requestAnimationFrame(() => {
-    frame = requestAnimationFrame(() => {
-      if (typeof requestIdleCallback === "function") idle = requestIdleCallback(work, { timeout: 1500 });
-      else timer = setTimeout(work, 0);
-    });
-  });
-  return () => {
-    cancelAnimationFrame(frame);
-    if (idle !== undefined) cancelIdleCallback(idle);
-    clearTimeout(timer);
-  };
-}
+export { scheduleIdle as afterFirstPaint } from "../ui/kit/idle.ts";

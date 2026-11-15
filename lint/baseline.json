@@ -10,15 +10,7 @@
       "test/finder/page.ts": 1,
       "test/finder/walk.spec.ts": 1
     },
-    "gates/effect-needs-reason": {
-      "apps/web/src/composer/Composer.tsx": 14,
-      "apps/web/src/composer/file-drop.tsx": 1,
-      "apps/web/src/settings/LibraryImports.tsx": 2,
-      "apps/web/src/settings/Settings.tsx": 3,
-      "apps/web/src/thread/Thread.tsx": 6,
-      "apps/web/src/thread/markdown.tsx": 1,
-      "apps/web/src/thread/paced.ts": 2
-    },
+    "gates/effect-needs-reason": {},
     "gates/no-relative-import-across-packages": {},
     "gates/no-wait-for-timeout": {
       "test/e2e/library-imports-push.spec.ts": 1,
@@ -27,19 +19,7 @@
       "test/e2e/threads-queue.spec.ts": 1
     },
     "gates/timer-needs-reason": {
-      "apps/web/src/composer/Composer.tsx": 2,
-      "apps/web/src/composer/chat.ts": 1,
-      "apps/web/src/composer/draft-persistence-testing.ts": 3,
-      "apps/web/src/composer/file-drop.tsx": 1,
-      "apps/web/src/composer/focus.ts": 1,
-      "apps/web/src/lib/session/connection.ts": 2,
-      "apps/web/src/lib/session/deferred.ts": 4,
-      "apps/web/src/lib/session/index.ts": 1,
-      "apps/web/src/settings/LibraryImports.tsx": 2,
-      "apps/web/src/settings/Settings.tsx": 2,
-      "apps/web/src/thread/Thread.tsx": 5,
-      "apps/web/src/thread/paced.ts": 2,
-      "apps/web/src/thread/threads.ts": 1
+      "apps/web/src/lib/session/index.ts": 1
     },
     "import/extensions": {},
     "import/no-cycle": {},

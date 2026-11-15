@@ -176,6 +176,7 @@ export function inline(text: string, partial = false, allowedLinks?: ReadonlySet
 /** Marks which sides of a sideways-scrolling block have more to show (`data-more`), for the edge fade on small screens. */
 function useEdges<T extends HTMLElement>(content: unknown) {
   const ref = useRef<T>(null);
+  // oxlint-disable-next-line gates/effect-needs-reason -- the block's sideways scroll and size, kept in step with its edge marks
   useEffect(() => {
     const el = ref.current;
     // only below 1024 px, and measured from the observer: a read here would lay out every block of a long thread at once

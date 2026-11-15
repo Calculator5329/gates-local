@@ -1023,6 +1023,7 @@ export function createChat({ applyServerEvent, call, reply: askOne, codeOf, crea
     let w = waiting.get(turn.threadId);
     if (w === undefined || w.gen !== turn.gen) waiting.set(turn.threadId, (w = { gen: turn.gen, text: "", thinking: "" }));
     w[kind] += t;
+    // oxlint-disable-next-line gates/timer-needs-reason -- the next frame: the stream's words since the last one go into the store in one write
     if (getState().threadId === turn.threadId && raf === 0) raf = requestAnimationFrame(frame);
   }
 

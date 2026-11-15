@@ -36,6 +36,16 @@ export const isOlder = (m: ModelMeasure) => m.version === undefined;
 export const isEarlier = (m: ModelMeasure) => m.version !== undefined && m.version !== MEASURE_VERSION;
 /** What an earlier measure's mark says, in a few words. */
 export const EARLIER_WORDS = "Earlier checks";
+/**
+ * The detail's line on an earlier measure: what its checks did that this build's do not. Version 3
+ * ran this build's checks but skipped one the model cut short itself (refused calls, the turn
+ * limit, a filled window), which fails now; version 2 had fewer tasks and other grades.
+ */
+export const earlierWords = (m: ModelMeasure): string => {
+  if (!isEarlier(m)) return "";
+  const what = m.version === 3 ? "a check the model cut short was skipped; it fails now" : "fewer tasks, and some replies graded differently";
+  return `${EARLIER_WORDS}: ${what}. Measure again to set it beside newer scores.`;
+};
 
 export function MeasureDetail({ name, label, onClose }: { name: string; label: string; onClose: () => void }) {
   const m = useStore((s) => measureOf(s, name));
@@ -75,7 +85,7 @@ export function MeasureDetail({ name, label, onClose }: { name: string; label: s
         </div>
         {m.slow ? <p className="md-slow" data-testid="models.measure.slow"><Icon id="snail" cls="s14" />{SLOW_WORDS[m.slow]}</p> : null}
         {older ? <p className="md-old" data-testid="models.measure.older">Older measure: eight checks of tools and a database, before Files, Instructions and Pages. Measure again for the five parts.</p> : null}
-        {isEarlier(m) ? <p className="md-old" data-testid="models.measure.earlier"><Icon id="clock" cls="s14" />{EARLIER_WORDS}: fewer tasks, and some replies graded differently. Measure again to set it beside newer scores.</p> : null}
+        {isEarlier(m) ? <p className="md-old" data-testid="models.measure.earlier"><Icon id="clock" cls="s14" />{earlierWords(m)}</p> : null}
         {older ? null : <Parts m={m} />}
         <MeasureNotes m={m} />
         <MeasureChecks m={m} />

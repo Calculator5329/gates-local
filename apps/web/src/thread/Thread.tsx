@@ -24,6 +24,8 @@ import { currentDraftKey, replaceDraft } from "../lib/store/drafts.ts";
 import { TurnSkel, closeTip, esc } from "../lib/ui/ui.tsx";
 import { type Answerer, LIVE_QUESTION, modelChanges } from "./model-change.ts";
 import { ModelChange } from "./ModelChange.tsx";
+import { useNow } from "../lib/ui/kit/now.ts";
+import { whenIdle } from "../lib/ui/kit/idle.ts";
 
 const EMPTY: readonly Message[] = [];
 const NO_TOOLS: readonly ToolStep[] = [];
@@ -43,16 +45,6 @@ declare global {
 function countRender(id: string): void {
   const rows = window.glRows;
   if (rows !== undefined) rows.renders[id] = (rows.renders[id] ?? 0) + 1;
-}
-
-function useTicker(ms: number, on: boolean): number {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    if (!on) return;
-    const t = setInterval(() => setNow(Date.now()), ms);
-    return () => clearInterval(t);
-  }, [ms, on]);
-  return now;
 }
 
 /** Copy, with the check-mark flash (F60): the icon and tip read "Copied" for 1.2 s. */
@@ -162,7 +154,7 @@ const workSecs = (ms: number | undefined) => (ms === undefined ? undefined : Mat
  */
 function LiveLine({ turn, tools }: { turn: LiveTurn; tools: readonly ToolStep[] }) {
   const stage = turn.reply?.stage ?? "waiting";
-  const now = useTicker(250, stage === "waiting" || stage === "thinking" || stage === "tool");
+  const now = useNow(250, stage === "waiting" || stage === "thinking" || stage === "tool");
   const cpu = useStore((s) => noGpu(s.gpu));
   // the send is answered at once, so the turn has its id while it waits behind a picture
   const imageBusy = useStore((s) => turn.pendingUser != null && s.imageStatus !== NA && s.imageStatus?.state === "busy");
@@ -554,9 +546,10 @@ export function stageWords(job: ImageEvent, sampled: boolean): string {
 
 /** A pending card's live line, in a chat reply's form: a lit dot, the stage, the running time. Only words and digits change. */
 function JobLine({ job, since }: { job: ImageEvent; since: number }) {
-  const now = useTicker(1000, true);
+  const now = useNow(1000);
+  // once the job has sampled, a later load is not the first run's
   const [sampled, setSampled] = useState(false);
-  useEffect(() => { if (job.stage === "sampling" || job.stage === "decoding") setSampled(true); }, [job.stage]);
+  if (!sampled && (job.stage === "sampling" || job.stage === "decoding")) setSampled(true);
   const secs = Math.max(0, Math.floor((now - since) / 1000));
   return <p className="image-job-live" aria-hidden="true"><i className="lv-dot" /><span className="lv-w">{stageWords(job, sampled)}</span><span className="lv-t">{` · ${secs} s`}</span></p>;
 }
@@ -834,30 +827,18 @@ function turnKeyAt(messages: readonly Message[], i: number): string | undefined 
   return `reply:${m.id}`;
 }
 
-/** The longest a slice waits for an idle moment before it mounts anyway. */
+/**
+ * The longest a slice waits for an idle moment before it mounts anyway (whenIdle; with no idle
+ * callback, as in Safari, a short timer with no idle time left). On an idle page a callback mounts
+ * slices while the deadline has room. On a page that is never idle (a reply streaming), each slice
+ * waits the full 100 ms: 2,000 turns are 17 slices, so the thread is fully mounted about 1.7 s
+ * after it opens, plus the time the slices take. A hidden tab runs neither idle callbacks nor
+ * timers on time, so nothing more mounts until the tab is seen again; nobody is reading it
+ * meanwhile.
+ */
 const IDLE_WAIT_MS = 100;
 /** Idle time a further slice in the same callback needs: about what mounting FILL_TURNS turns takes. */
 const SLICE_MS = 20;
-
-/**
- * Runs `fn` once the browser is idle, or after IDLE_WAIT_MS at most, with how
- * much of the idle period is left; a 50 ms timer with none left where there is
- * no requestIdleCallback (Safari). On an idle page a callback mounts slices
- * while the deadline has room. On a page that is never idle (a reply
- * streaming), each slice waits the full 100 ms: 2,000 turns are 17 slices, so
- * the thread is fully mounted about 1.7 s after it opens, plus the time the
- * slices take. A hidden tab runs neither idle callbacks nor these timers on
- * time, so nothing more mounts until the tab is seen again; nobody is reading
- * it meanwhile.
- */
-function whenIdle(fn: (timeLeft: () => number) => void): () => void {
-  if (typeof requestIdleCallback === "function") {
-    const id = requestIdleCallback((deadline) => fn(() => deadline.timeRemaining()), { timeout: IDLE_WAIT_MS });
-    return () => cancelIdleCallback(id);
-  }
-  const id = setTimeout(() => fn(() => 0), 50);
-  return () => clearTimeout(id);
-}
 
 /** modelChanges with the live turn, given as "kind\nmodel\nquestion id" (the Timeline's selector answer). */
 function liveChanges(messages: readonly Message[], liveBy: string | null) {
@@ -963,6 +944,7 @@ export function Timeline({ threadId }: { threadId: string }) {
   }, [note]);
 
   // Turns went in above the one that was first: put it back where it was, then note the new first.
+  // oxlint-disable-next-line gates/effect-needs-reason -- the view's scroll position against the turns just drawn, read and set before paint so the turn in view does not move
   useLayoutEffect(() => {
     const el = tl.current;
     const a = anchor.current;
@@ -984,9 +966,10 @@ export function Timeline({ threadId }: { threadId: string }) {
   });
 
   // the rest of the window mounts in idle time, so find-in-page and select-all see all of it
+  // oxlint-disable-next-line gates/effect-needs-reason -- each committed slice schedules the next in the browser's idle time until the window is mounted
   useEffect(() => (first === null || skip <= floorAt ? undefined : whenIdle((timeLeft) => {
     do grow(turnsNow.current.length - skipNow.current <= FIRST_TURNS ? SLICE_TURNS : FILL_TURNS); while (skipNow.current > floorNow.current && timeLeft() > SLICE_MS);
-  })), [first, skip, floorAt, grow]);
+  }, IDLE_WAIT_MS)), [first, skip, floorAt, grow]);
 
   // Saved messages before the loaded ones, still on the server: the button counts them with the held-back turns.
   const unloadedOf = () => earlierOf(threadId);
@@ -1027,6 +1010,7 @@ export function Timeline({ threadId }: { threadId: string }) {
   };
 
   // a newly opened thread starts at its end
+  // oxlint-disable-next-line gates/effect-needs-reason -- the view's scroll position, set to the end before the opened thread first paints
   useLayoutEffect(() => {
     const el = tl.current;
     if (el) {
@@ -1037,6 +1021,7 @@ export function Timeline({ threadId }: { threadId: string }) {
     toggled.current = false;
   }, [threadId]);
 
+  // oxlint-disable-next-line gates/effect-needs-reason -- the view's scroll, its size and the reader's disclosures, kept in step with following the end
   useEffect(() => {
     const el = tl.current;
     const c = col.current;
@@ -1062,6 +1047,7 @@ export function Timeline({ threadId }: { threadId: string }) {
       if (performance.now() > held.until || !held.at.isConnected) { held = null; stick.current = atEnd(); return; }
       el.scrollTop += held.at.getBoundingClientRect().top - held.top;
       own.current = el.scrollTop;
+      // oxlint-disable-next-line gates/timer-needs-reason -- every frame of the disclosure's ease, so the page under it does not shift
       requestAnimationFrame(keep);
     };
     const onToggle = (e: Event) => {
@@ -1074,6 +1060,7 @@ export function Timeline({ threadId }: { threadId: string }) {
       stick.current = atEnd();
       own.current = el.scrollTop;
       held = { at: disclosure, top: disclosure.getBoundingClientRect().top, until: performance.now() + 400 };
+      // oxlint-disable-next-line gates/timer-needs-reason -- the first frame of the disclosure's ease
       if (start) requestAnimationFrame(keep);
     };
     const ro = new ResizeObserver(() => {

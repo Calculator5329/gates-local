@@ -82,6 +82,7 @@ export function usePacedText(text: string, streaming: boolean): string {
   const latest = useRef({ text, streaming });
   latest.current = { text, streaming };
   const raf = useRef(0);
+  // oxlint-disable-next-line gates/effect-needs-reason -- the reveal's frame loop, kept in step with the words received and the reduced-motion setting
   useEffect(() => {
     if (reduced) {
       cancelAnimationFrame(raf.current);
@@ -95,13 +96,16 @@ export function usePacedText(text: string, streaming: boolean): string {
       const value = latest.current;
       const cut = graphemeCut(value.text, advancePace(state, value.text.length, value.streaming, now));
       setShown(value.text.slice(0, cut));
+      // oxlint-disable-next-line gates/timer-needs-reason -- the next frame of the reveal, while words are still held back
       if (cut < value.text.length) raf.current = requestAnimationFrame(tick);
     };
     if (raf.current === 0 && state.shown !== text.length) {
       state.at = performance.now();
+      // oxlint-disable-next-line gates/timer-needs-reason -- the reveal starts on the next frame once new words wait
       raf.current = requestAnimationFrame(tick);
     }
   }, [text, streaming, reduced]);
+  // oxlint-disable-next-line gates/effect-needs-reason -- stops the reveal's frame loop when the reply unmounts
   useEffect(() => () => { cancelAnimationFrame(raf.current); raf.current = 0; }, []);
   return reduced ? text : text.startsWith(shown) ? shown : "";
 }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-15: an earlier Measure score says what was different
+
+- A score from the build before this one says that a check the model cut
+  short itself was skipped then and fails now. Before, it said "fewer
+  tasks", which was true only of older scores.
+- Internal: the composer, the thread and Settings use the shared helpers
+  for focus, menus, clocks and idle work; nothing changes on screen.
 ## 2026-11-15: every window's image picker stays current without reopening
 
 - When a download of an image setup ends, or ComfyUI comes up, or a

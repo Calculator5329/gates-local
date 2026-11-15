@@ -49,6 +49,7 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
   function nextChance(ms: number): Promise<void> {
     return new Promise((resolve) => {
       const bridge = desktopBridge();
+      // oxlint-disable-next-line gates/timer-needs-reason -- the longest a retry waits for the desktop app to say its server is ready
       const timer = setTimeout(done, ms);
       const off = bridge?.onState((s) => {
         if (s.status === "ready") done();
@@ -68,6 +69,7 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
   function connect(): () => void {
     stopped = false;
     // Booting holds placeholders for at most two seconds (runtime/words.tsx booting).
+    // oxlint-disable-next-line gates/timer-needs-reason -- the two seconds the window shows placeholders before it says it is connecting
     const boot = setTimeout(() => applyServerEvent({ bootWaited: true }), 2000);
     if (!desktopBridge() && webServerUrl() === null) applyServerEvent({ conn: { kind: "no-server" } });
     else void loop();

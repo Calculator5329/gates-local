@@ -104,9 +104,11 @@ function FillButton({ name, handle, real, since, running, done, idle, blocked, o
   const drawnFull = useRef(false);
   const full = done && !behind;
   const finished = full && drawnFull.current;
+  // oxlint-disable-next-line gates/effect-needs-reason -- notes after each commit whether the fill was drawn full, and draws the sweep's next frame
   useEffect(() => {
     drawnFull.current = full;
     if (!behind && finished === full) return;
+    // oxlint-disable-next-line gates/timer-needs-reason -- the sweep's next frame, until the fill catches up and a full fill has been drawn
     const id = requestAnimationFrame(() => frame(n => n + 1));
     return () => cancelAnimationFrame(id);
   });
@@ -189,6 +191,7 @@ export default function LibraryImports({ add, clone, clones = [] }: { add: React
     else if (!started.current.has(r.sample.id)) started.current.set(r.sample.id, performance.now());
   }
   const landed = rows.flatMap(r => r.sample && r.source && ran.current.has(r.sample.id) ? [r.sample.id] : []).join(" ");
+  // oxlint-disable-next-line gates/effect-needs-reason -- a download the server reports as a source now starts its finishing check, once per landing
   useEffect(() => {
     if (landed === "") return;
     const ids = landed.split(" ");
@@ -197,6 +200,7 @@ export default function LibraryImports({ add, clone, clones = [] }: { add: React
     setFinishing(f => [...f, ...ids]);
     // The check shows for FINISH_MS once the fill is full, and a quick download's fill is still sweeping.
     const sweep = Math.max(0, ...ids.map(id => MIN_FILL_MS - (performance.now() - (started.current.get(id) ?? -Infinity))));
+    // oxlint-disable-next-line gates/timer-needs-reason -- the check's time on screen, after the fill's sweep ends
     const t = setTimeout(() => { timers.current.delete(t); setFinishing(f => f.filter(id => !ids.includes(id))); }, FINISH_MS + sweep);
     timers.current.add(t);
   }, [landed]);
