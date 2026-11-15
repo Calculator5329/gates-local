@@ -434,6 +434,39 @@ function ImageSetUp() {
 }
 
 /**
+ * The processor's build on a computer that has a card for pictures now (the server's toCard): one
+ * line and one button, the same setup with its download said before it starts. Pictures keep
+ * running on the processor until it is done, and the processor's build stays on disk.
+ */
+function CardBuild() {
+  const setup = useStore((s) => s.imageSetup);
+  const [err, run] = useAct();
+  const progress = setup?.progress?.toCard === true ? setup.progress : undefined;
+  const running = progress !== undefined && progress.step !== "done" && progress.step !== "error";
+  if (setup === undefined || progress?.step === "done" || (setup.toCard !== true && !running)) return null;
+  const total = running ? progress.totalBytes : (setup.engine !== undefined && !setup.engine.installed ? setup.engine.bytes : 0) + (setup.model?.bytes ?? 0);
+  const short = setup.freeBytes !== undefined && setup.needBytes !== undefined && setup.freeBytes < setup.needBytes;
+  const desc = progress !== undefined ? SETUP_STEP[progress.step]
+    : short ? `Needs ${gb(setup.needBytes!)} free; ${gb(setup.freeBytes!)} is free.`
+    : "This computer has a graphics card now.";
+  const size = (
+    <span className="mono setup-size" data-testid="settings.images.card-size">
+      {running ? `${gb(progress.completedBytes)} of ${gb(total)}` : setupSize(total, setup.needBytes)}
+    </span>
+  );
+  return (
+    <Row label="Pictures run on the processor" desc={<>{desc}{size}</>} err={err ?? (progress?.step === "error" ? progress.message ?? null : null)}>
+      <button type="button" className="btn" data-testid="settings.images.use-card" disabled={running || short} onClick={() => void run(startImageSetup())}>
+        <span className="steady">
+          <span aria-hidden={running}>{progress?.step === "error" ? "Try again" : "Use the card"}</span>
+          <span aria-hidden={!running}>Setting up…</span>
+        </span>
+      </button>
+    </Row>
+  );
+}
+
+/**
  * ComfyUI's state in words, for this page's status row and the Tools row. Three cases the
  * person can tell apart (WIN-MEM-04): no engine known (Not connected), an address they set that
  * does not answer (Not running), and the engine the app started (Running) beside one it found.
@@ -554,6 +587,7 @@ function Images() {
           <Row label="Generate images" desc={locked ? `${on ? "On" : "Off"}. ${COMPUTER_ONLY}` : unloads ? UNLOADS : room ? <span className="held" aria-hidden="true">{UNLOADS}</span> : undefined} err={genErr}>
             {locked ? null : <button type="button" className="switch" role="switch" data-testid="settings.images.enable" aria-checked={on} aria-label="Generate images" onClick={() => void runGen(updateSettings({ imageGen: !on }))} />}
           </Row>
+          {locked ? null : <CardBuild />}
         </Grp>
       )}
       {on ? (

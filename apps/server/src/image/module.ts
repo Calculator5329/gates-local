@@ -148,6 +148,13 @@ export interface ImageModule extends MemoryEngine {
    * with the files it will fetch once each has an address and a folder; refuses while another runs.
    */
   download(preset: string): Promise<{ files: string[] }>;
+  /**
+   * What Set up images' download of `preset` fetches: the size of each of its files not already
+   * whole where that download puts them (a picked folder, else the app's own engine's models,
+   * built or not), by the check download() skips them with (haveFile). Undefined where that place
+   * or a missing file's size is not known.
+   */
+  setupLeft(preset: string): Promise<number | undefined>;
   /** Stop `preset`'s download if it is the one running; its part file stays for the next download to resume. */
   stopDownload(preset: string): { stopped: boolean };
   /** Start ComfyUI with no job (the picker's Start ComfyUI) and answer presets(); no job runs, so the idle stop applies. */
@@ -605,6 +612,20 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     const left = await leftOf(files, files.map(knownSize));
     return left.every((b) => b !== undefined) ? left.reduce((a, b) => a + b, 0) : undefined;
   };
+  /** ImageModule.setupLeft: the files not whole in the picked folder, else the app's own engine's models folder (built or not). */
+  const setupLeft = async (id: string): Promise<number | undefined> => {
+    const preset = appPreset(id);
+    const root = deps.settings().imageFolder ?? deps.own?.modelsDir?.();
+    if (preset === undefined || root === undefined) return undefined;
+    const left = await Promise.all([...new Set(presetFiles(preset))].map(async (name) => {
+      const source = preset.sources?.[name];
+      if (source?.url === undefined || source.directory === undefined) return undefined;
+      const file: Planned = { name: path.basename(name), url: source.url, dir: path.join(root, source.directory, "gates-local"), ...source.bytes === undefined ? {} : { bytes: source.bytes } };
+      if (await haveFile(file.dir, file.name, knownSize(file))) return 0;
+      return knownSize(file);
+    }));
+    return left.every((b) => b !== undefined) ? left.reduce((a, b) => a + b, 0) : undefined;
+  };
   /**
    * The room check before any byte and again before each file: on each volume the files go to, what
    * is left to fetch of them against what is free there. Files of unknown size are checked by
@@ -1029,6 +1050,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       try { return await startDownload(id, cfg, controller); }
       catch (error) { if (downloading === undefined) { downloads = undefined; downloadOf = undefined; } throw error; }
     },
+    setupLeft,
     stopDownload(id) {
       if (downloads === undefined || downloadOf !== id || downloads.signal.aborted) return { stopped: false };
       downloads.abort(new Error("Download stopped.")); return { stopped: true };

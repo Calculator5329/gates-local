@@ -16,6 +16,9 @@ const FAKE_UV = `#!/bin/sh
 echo "$*" >> "$FAKE_UV_LOG"
 # as uv does: what it fetched stays in its cache
 mkdir -p "$UV_CACHE_DIR" && echo wheel > "$UV_CACHE_DIR/$1.whl" && echo "$UV_CACHE_DIR" >> "$FAKE_UV_LOG.cache"
+# as uv does: it locks its credentials file before it fetches, in this folder or the person's home
+echo "\${UV_CREDENTIALS_DIR:-unset}" >> "$FAKE_UV_LOG.credentials"
+if [ -n "$UV_CREDENTIALS_DIR" ]; then mkdir -p "$UV_CREDENTIALS_DIR" && : > "$UV_CREDENTIALS_DIR/credentials.toml.lock"; fi
 case "$1" in
   venv) for a; do last=$a; done; mkdir -p "$last/bin"; printf '#!/bin/sh\\n' > "$last/bin/python"; chmod +x "$last/bin/python" ;;
   pip) if [ -n "$FAKE_UV_FAIL" ]; then echo "error: no matching hash for torch" >&2; exit 1; fi
@@ -114,6 +117,15 @@ describe.skipIf(process.platform === "win32")("linuxBuild", () => {
     expect(existsSync(caches[0]!)).toBe(false);
     expect(existsSync(path.join(appDataDir, "runtime", "uv-cache"))).toBe(false);
     expect(readdirSync(engineDir(appDataDir, "0.0.0"))).not.toContain("uv-cache");
+    expect(leftovers()).toEqual([]);
+  });
+
+  it("uv's credentials lock goes in the build's own folder, never the person's home, and is gone with it", async () => {
+    await linuxBuild({ appDataDir, pins }).run(() => {}, new AbortController().signal);
+    const dirs = [...new Set(readFileSync(`${uvLog}.credentials`, "utf8").trim().split("\n"))];
+    expect(dirs).toHaveLength(1);
+    expect(dirs[0]!.startsWith(engineRoot(appDataDir) + path.sep)).toBe(true);
+    expect(existsSync(dirs[0]!)).toBe(false);
     expect(leftovers()).toEqual([]);
   });
 

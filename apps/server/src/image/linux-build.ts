@@ -207,6 +207,9 @@ function buildWith(appDataDir: string, pins: LinuxPins, received: () => number |
         const env: NodeJS.ProcessEnv = {
           ...process.env,
           UV_CACHE_DIR: cache,
+          // uv locks a credentials file before it fetches, by default under the person's home
+          // (~/.local/share/uv/credentials); kept in the cache folder, it goes when the build does
+          UV_CREDENTIALS_DIR: path.join(cache, "credentials"),
           UV_PYTHON_INSTALL_DIR: path.join(runtimeDir(appDataDir), "uv-python"),
           UV_PYTHON_PREFERENCE: "only-managed",
           UV_NO_CONFIG: "1",

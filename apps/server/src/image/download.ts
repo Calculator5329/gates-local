@@ -15,7 +15,7 @@
 // have (the app's record, or the pin from its first download) and the bytes differ, the file is
 // not put in place: the bytes stay in the part and the download fails, saying so. The note goes,
 // so the next download fetches the file again from the start.
-import type { PullProgress } from "@gates-local/contracts";
+import { gb, type PullProgress } from "@gates-local/contracts";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, open, readFile, rename, rm, stat, statfs, writeFile } from "node:fs/promises";
@@ -60,7 +60,6 @@ export interface DownloadOptions {
 
 export interface Downloaded { readonly file: string; readonly bytes: number; readonly sha256: string }
 
-const GB = (n: number) => n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${(n / 1e6).toFixed(1)} MB`;
 const fail = (message: string) => Object.assign(new Error(message), { code: "image-download" });
 const diskFree = async (dir: string) => { const s = await statfs(dir); return s.bavail * s.bsize; };
 
@@ -171,7 +170,7 @@ export async function downloadFile(options: DownloadOptions): Promise<Downloaded
   const same = upload.etag !== "" && kept?.url === upload.url && kept.etag === upload.etag && kept.size === total;
   if (!same || have > total || (have < total && ifRange === undefined)) have = 0;
   const free = await (options.freeBytes ?? diskFree)(dir);
-  if (free < total - have) throw fail(`Not enough disk space for ${name}: it needs ${GB(total - have)} more, and ${GB(free)} is free.`);
+  if (free < total - have) throw fail(`Not enough disk space for ${name}: it needs ${gb(total - have)} more, and ${gb(free)} is free.`);
 
   report({ state: "downloading", completedBytes: have, totalBytes: total });
   let hash: ReturnType<typeof createHash>, done = have;
@@ -209,9 +208,9 @@ export async function downloadFile(options: DownloadOptions): Promise<Downloaded
     } finally { await handle.close(); }
     if (over) {
       await rm(part, { force: true }); await rm(sidecar, { force: true });
-      throw fail(`${name}: the download sent more than the ${GB(total)} it said it was, so it was stopped and its part removed.`);
+      throw fail(`${name}: the download sent more than the ${gb(total)} it said it was, so it was stopped and its part removed.`);
     }
-    if (done !== total) throw fail(`${name}: the download stopped at ${GB(done)} of ${GB(total)}. Download it again to carry on.`);
+    if (done !== total) throw fail(`${name}: the download stopped at ${gb(done)} of ${gb(total)}. Download it again to carry on.`);
   }
 
   report({ state: "verifying", completedBytes: done, totalBytes: total });

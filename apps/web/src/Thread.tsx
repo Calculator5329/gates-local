@@ -544,7 +544,9 @@ export function stageWords(job: ImageEvent, sampled: boolean): string {
     case "queued": return "In the queue";
     case "loading": return sampled ? "Loading the model" : "First run: loading the model";
     case "encoding": return "Reading the prompt";
-    case "sampling": return job.steps === undefined ? "Sampling" : `Sampling ${job.steps.done}/${job.steps.total}`;
+    // the sampler node runs well before its first step (on the processor, over a minute moving
+    // the models in), and ComfyUI's socket names no load meanwhile: "Sampling" waits for a step
+    case "sampling": return job.steps === undefined ? "Starting" : `Sampling ${job.steps.done}/${job.steps.total}`;
     case "decoding": return "Decoding";
     default: return "Working";
   }
@@ -610,7 +612,8 @@ function ImageJob({ msg, thread, origin, token, tile = false }: { msg: Message; 
     {ran === undefined || pending || line || tile ? null : <span className="image-job-model">{model} · {sizeLabel(ran.width, ran.height)}</span>}
     {job.state === "done" && job.imagePath ? <ImageOut path={job.imagePath} origin={origin} token={token} /> : <div className="image-job-state" role="status" aria-label={pending ? jobWords(job) : undefined}>
       {pending ? <JobLine job={job} since={since} /> : <><Icon id="alert" /><p>{job.message ?? "The image did not finish; try again."}</p></>}
-      {stopCovers ? null : <button type="button" className="qa" data-testid="chat.image-job.action" disabled={busy} onClick={() => void action()}>{pending ? "Cancel image" : "Try again"}</button>}
+      {/* a picture already stopping has been cancelled: nothing more to press until it settles */}
+      {stopCovers || job.phase === "stopping" ? null : <button type="button" className="qa" data-testid="chat.image-job.action" disabled={busy} onClick={() => void action()}>{pending ? "Cancel image" : "Try again"}</button>}
       {error ? <p>{error}</p> : null}
     </div>}
   </div>;

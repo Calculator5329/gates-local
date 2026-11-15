@@ -10,6 +10,8 @@
 // lists what a download put in their gates-local/ folders. It also serves every Hugging Face
 // path the app downloads from (the e2e stack points GATES_LOCAL_IMAGE_DOWNLOAD_ORIGIN here):
 // a few MiB per file, with Range, trickled and never finished while slowDownloads(true).
+// slowStop(ms): an interrupted picture keeps running for ms before it ends, as the engine on the
+// processor finishes the step it is in, so the card's "Stopping the picture" can be seen.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -79,6 +81,14 @@ export async function fakeComfy() {
   }));
   let n = 0;
   const active = new Set<string>();
+  /**
+   * slowStop(ms): an interrupt leaves the running prompts running for ms, as a processor ends the
+   * step it is in first; each held one's timer, by id (a second interrupt does not restart it).
+   */
+  let stopHoldMs = 0;
+  const stopping = new Map<string, ReturnType<typeof setTimeout>>();
+  let interrupts = 0;
+  const endStopping = (id: string) => { clearTimeout(stopping.get(id)); stopping.delete(id); active.delete(id); };
   const completed = new Set<string>();
   const runs: { id: string; startedAt: number; endedAt?: number }[] = [];
   /** Each /prompt body as sent: the graph the server built for a job. */
@@ -112,7 +122,11 @@ export async function fakeComfy() {
         body = { prompt_id: id }; break;
       }
       case "/queue": body = { queue_running: [...active].map(id => [1, id]), queue_pending: [] }; break;
-      case "/interrupt": active.clear(); break;
+      case "/interrupt":
+        interrupts += 1;
+        if (stopHoldMs <= 0) { active.clear(); break; }
+        for (const id of active) if (!stopping.has(id)) stopping.set(id, setTimeout(() => endStopping(id), stopHoldMs));
+        break;
       case "/view":
         res.writeHead(200, { "content-type": "image/png" });
         res.end(viewPng); return;
@@ -157,6 +171,14 @@ export async function fakeComfy() {
     bare: () => { listed = []; },
     /** Report a CUDA device: the image fit then measures the (fake) GPU. */
     gpu: () => { cuda = true; },
+    /**
+     * After an interrupt, hold the running picture for `ms` before it ends (as the engine on the
+     * processor finishes the step it is in); 0 ends any held one now and every later one at once.
+     */
+    // a Map's iteration skips what is deleted from it on the way
+    slowStop: (ms: number) => { stopHoldMs = ms; if (ms <= 0) for (const id of stopping.keys()) endStopping(id); },
+    /** How many /interrupt requests came, and how many prompts an interrupt is holding now. */
+    stops: () => ({ interrupts, holding: stopping.size }),
     /** Send a progress frame for the newest running prompt to every open socket. */
     progress: (value: number, max: number) => {
       const id = [...active].at(-1);
@@ -199,7 +221,7 @@ export async function fakeComfy() {
      * (stack.reset's engine). Its "python" answers for this fake while it runs: up when started,
      * down when stopped. Pass the result to stack.reset; nothing is fetched from anywhere else.
      */
-    engine: (opts: { build?: boolean } = {}): FakeEngine => {
+    engine: (opts: { build?: boolean; cpu?: boolean } = {}): FakeEngine => {
       const root = path.join(homedir(), ".cache", "gates-local-e2e");
       mkdirSync(root, { recursive: true });
       engineDir = mkdtempSync(path.join(root, "comfy-engine-"));
@@ -253,6 +275,8 @@ export async function fakeComfy() {
         uv: part("uv", { "uv-fake/uv": { text: uv, mode: 0o755 } }), uvDir: "uv-fake",
         source: part("source", { [`${sourceDir}/main.py`]: { text: "# the fake engine runs engine.mjs, not this\n" }, [`${sourceDir}/engine.mjs`]: { text: FAKE_ENGINE_SCRIPT } }),
         sourceDir, lock: "torch==0.0.0\n", wheelBytes: 3 * 1024 ** 3,
+        // engine({ build: true, cpu: true }): the processor build too, built the same way into <version>-cpu
+        ...opts.cpu === true ? { cpu: { lock: "torch==0.0.0+cpu\n", wheelBytes: 1024 ** 3 } } : {},
       };
       return { manifest, layout: "uv-venv", address: url, build };
     },
@@ -266,6 +290,7 @@ export async function fakeComfy() {
     missing: () => { missingModel = true; },
     restore: (finish = true) => { missingModel = false; complete = finish; },
     close: () => new Promise<void>((resolve, reject) => {
+      for (const id of stopping.keys()) endStopping(id);
       for (const socket of sockets) socket.destroy();
       if (made !== undefined) rmSync(made, { recursive: true, force: true }); // its own, never the app's models folder
       if (engineDir !== undefined) rmSync(engineDir, { recursive: true, force: true });

@@ -2,7 +2,7 @@
 // once to its "CDN" on localhost, which serves the bytes with HEAD, Range and If-Range like the
 // real one. Like Hugging Face, the redirect names the upload (x-linked-etag, x-linked-size) and
 // the CDN gives an ETag of its own.
-import type { PullProgress } from "@gates-local/contracts";
+import { gb, type PullProgress } from "@gates-local/contracts";
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -70,7 +70,9 @@ async function cutOff(bytes = 100_000): Promise<number> {
   cutAt = undefined; seen.length = 0;
   return (await readFile(partFile())).length;
 }
-const gets = () => seen.filter((s) => s.method === "GET" && s.url.includes("/cdn/"));
+/** A server that says a file is 8.26 billion bytes, for the size words. */
+const bigHead: typeof fetch = async () => new Response(null, { status: 200, headers: { "content-length": "8260000000", etag: '"e"' } });
+const gets = () =>seen.filter((s) => s.method === "GET" && s.url.includes("/cdn/"));
 
 /** The fake's two hosts stand in for Hugging Face (127.0.0.1) and its CDN (localhost). */
 const allow = (url: URL, redirected: boolean) => url.port === String(port) && url.hostname === (redirected ? "localhost" : "127.0.0.1");
@@ -127,8 +129,14 @@ describe("downloadFile", () => {
   });
 
   it("checks the free space before writing a byte", async () => {
-    await expect(downloadFile(options({ freeBytes: async () => 200_000 }))).rejects.toThrow("Not enough disk space for model.safetensors: it needs 0.3 MB more, and 0.2 MB is free.");
+    await expect(downloadFile(options({ freeBytes: async () => 200_000 }))).rejects.toThrow(`Not enough disk space for model.safetensors: it needs ${gb(300_000)} more, and ${gb(200_000)} is free.`);
     expect(seen.filter((s) => s.method === "GET")).toEqual([]);
+  });
+
+  it("says sizes as the model download rows do: GB of 1024³ bytes, one decimal, a no-break space", async () => {
+    // Klein's compact encoder as served: 8.26 billion bytes, which the rows call 7.7 GB
+    await expect(downloadFile(options({ fetch: bigHead,freeBytes: async () => 2_254_857_830 }))).rejects.toThrow(`Not enough disk space for model.safetensors: it needs ${gb(8_260_000_000)} more, and ${gb(2_254_857_830)} is free.`);
+    expect(gb(8_260_000_000)).toBe("7.7 GB");
   });
 
   it("a download cut off keeps its part, and the next one asks for the rest on a fresh link, If-Range the CDN's ETag", async () => {
@@ -193,13 +201,13 @@ describe("downloadFile", () => {
 
   it("a download that ends short of its size fails and keeps its part", async () => {
     short = true;
-    await expect(downloadFile(options())).rejects.toThrow("model.safetensors: the download stopped at 0.1 MB of 0.3 MB. Download it again to carry on.");
+    await expect(downloadFile(options())).rejects.toThrow(`model.safetensors: the download stopped at ${gb(150_000)} of ${gb(300_000)}. Download it again to carry on.`);
     expect((await readFile(partFile())).length).toBe(150_000);
   });
 
   it("a download that sends more than its size is stopped there and its part removed", async () => {
     extra = 70_000;
-    await expect(downloadFile(options())).rejects.toThrow("model.safetensors: the download sent more than the 0.3 MB it said it was, so it was stopped and its part removed.");
+    await expect(downloadFile(options())).rejects.toThrow(`model.safetensors: the download sent more than the ${gb(300_000)} it said it was, so it was stopped and its part removed.`);
     expect(await readdir(options().dir)).toEqual([]);
   });
 

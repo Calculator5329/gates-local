@@ -1038,6 +1038,8 @@ export const ImageSetupProgress = S.Struct({
   totalBytes: Count,
   /** The error's own words. */
   message: S.optional(S.String),
+  /** The run builds the card's engine beside the processor's (ImageSetup.toCard): pictures keep running on the processor meanwhile, so Image mode is not held. */
+  toCard: S.optional(S.Literal(true)),
 });
 export type ImageSetupProgress = typeof ImageSetupProgress.Type;
 
@@ -1055,6 +1057,12 @@ export const ImageSetup = S.Struct({
   /** Free space on the app's drive, and what the setup needs there (the engine unpacked, plus the model). */
   freeBytes: S.optional(Count),
   needBytes: S.optional(Count),
+  /**
+   * The processor's build is the one installed, and this computer has a card that runs pictures
+   * now: the setup builds the card's (`engine`) beside it, and pictures run on the processor until
+   * that is done. The processor's build stays on disk.
+   */
+  toCard: S.optional(S.Literal(true)),
   /** The running setup's step, or the last one's end. */
   progress: S.optional(ImageSetupProgress),
 });

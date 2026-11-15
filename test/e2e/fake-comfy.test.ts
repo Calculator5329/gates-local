@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { expect, it } from "vitest";
+import { createComfyClient } from "../../apps/server/src/image/client.ts";
 import { fakeComfy } from "./fake-comfy.ts";
 
 it.each([false, true])("an upgraded fake peer reset is expected, but unrelated socket errors still fail (unexpected=%s)", async unexpected => {
@@ -46,6 +47,27 @@ it.each([false, true])("an upgraded fake peer reset is expected, but unrelated s
   expect(result.code, result.stderr).toBe(unexpected ? 1 : 0);
   if (unexpected) expect(result.stderr).toContain("EIO");
   else expect(result.stdout).toContain("still answers");
+});
+
+it("slowStop() keeps an interrupted picture running for the set time, as the processor ends its step", async () => {
+  const fake = await fakeComfy();
+  try {
+    const comfy = createComfyClient(fake.url);
+    const run = async () => {
+      const { prompt_id: id } = await (await fetch(`${fake.url}/prompt`, { method: "POST", body: JSON.stringify({ prompt: {} }) })).json() as { prompt_id: string };
+      const from = performance.now();
+      await comfy.cancelPrompt(id, 5_000);
+      return performance.now() - from;
+    };
+    // today's engine ends it at the interrupt
+    expect(await run()).toBeLessThan(400);
+    fake.slowStop(800);
+    const held = run();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(fake.stops()).toMatchObject({ holding: 1 });
+    expect(await held).toBeGreaterThanOrEqual(750);
+    expect(fake.stops()).toEqual({ interrupts: 2, holding: 0 });
+  } finally { await fake.close(); }
 });
 
 it("gpu() names a CUDA device and progress() reaches an open socket as ComfyUI's frame", async () => {

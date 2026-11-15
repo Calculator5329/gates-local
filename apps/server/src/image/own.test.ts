@@ -171,4 +171,21 @@ describe.skipIf(process.platform === "win32")("createOwnComfy", () => {
     await vi.waitFor(async () => expect(await answers(own!.address())).toBe(true), { timeout: 5000 });
     expect(JSON.parse(readFileSync(path.join(work, "args.json"), "utf8"))).not.toContain("--cpu");
   });
+
+  it("with the processor build and the card build both whole, it starts the one for what the computer has", async () => {
+    installFake("1.0.0-cpu");
+    installFake("1.0.0");
+    own = createOwnComfy({ appDataDir, port: await freePort(), platform: "linux" });
+    // no device recorded: the card build, as a setup on a card writes
+    expect(own.build?.()).toEqual({ version: "1.0.0", cpu: false });
+    writeDevice(appDataDir, "cpu");
+    expect(own.build?.()).toEqual({ version: "1.0.0-cpu", cpu: true });
+    writeDevice(appDataDir, "gpu");
+    expect(own.build?.()).toEqual({ version: "1.0.0", cpu: false });
+    await own.start();
+    await vi.waitFor(async () => expect(await answers(own!.address())).toBe(true), { timeout: 5000 });
+    const args = JSON.parse(readFileSync(path.join(work, "args.json"), "utf8")) as string[];
+    expect(args[0]).toBe(engineFiles(engineDir(appDataDir, "1.0.0"), "uv-venv").main);
+    expect(args).not.toContain("--cpu");
+  });
 });

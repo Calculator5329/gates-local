@@ -5,9 +5,9 @@
 // sentence and offers nothing.
 import { statfs } from "node:fs/promises";
 import path from "node:path";
-import type { GpuStatus, ImageSetup, ImageSetupProgress } from "@gates-local/contracts";
+import { cardBytes, type GpuStatus, type ImageSetup, type ImageSetupProgress } from "@gates-local/contracts";
 import type { InstallProgress } from "../runtime/types.ts";
-import { installEngine, type EngineLayout } from "./engine.ts";
+import { installEngine, isProcessorBuild, type EngineLayout } from "./engine.ts";
 import type { ImageModule } from "./module.ts";
 import type { OwnComfy } from "./own.ts";
 import { MIN_ROOM, PRESETS, presetFiles } from "./presets.ts";
@@ -74,8 +74,12 @@ export const planFor = (plan: EnginePlan, cpu: boolean): EnginePlan => cpu && pl
 
 export interface ImageSetupDeps {
   appDataDir: string;
-  own: Pick<OwnComfy, "installed">;
-  image: Pick<ImageModule, "status" | "engine" | "start" | "download">;
+  own: Pick<OwnComfy, "installed" | "build">;
+  /**
+   * stopIdle: before a setup that built the card's engine starts it, the processor's ends if it is
+   * idle. setupLeft: the model's files not already whole where its download goes.
+   */
+  image: Pick<ImageModule, "status" | "engine" | "start" | "download"> & Partial<Pick<ImageModule, "stopIdle" | "setupLeft">>;
   /** Records the device the engine runs on (own.ts reads it at start): "cpu" when the card cannot. */
   setDevice(device: "gpu" | "cpu"): void;
   /** The engine this machine would fetch (engineFor, or the e2e knob's); "later" where this release does not offer one on a system the app sets images up on; undefined where there is none. */
@@ -117,18 +121,41 @@ function modelBytes(presetId: string): number {
   return presetFiles(preset).reduce((sum, file) => sum + (preset.sources?.[file]?.bytes ?? 0), 0);
 }
 
+/** nvidia-smi names a card pictures run on (MIN_ROOM or more, to the nearest GB as imageRoom reads it). */
+const runsPictures = (gpu: GpuStatus | undefined) => gpu?.vendor === "nvidia" && gpu.totalBytes !== undefined && cardBytes(gpu.totalBytes) >= MIN_ROOM;
+
 export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
   const log = deps.log ?? (() => {});
   let last: ImageSetupProgress | undefined;
+  /** The run in progress builds the card's engine beside the processor's: each of its steps says so. */
+  let toCardRun = false;
+  /**
+   * What was built against what the computer has now, at the app's start and each time the setup is
+   * read: the device follows the card, so a card build whose card is gone runs on the processor
+   * (started without --cpu it would not start at all), and on the card again once one is back. With
+   * both builds whole it picks which one starts (own.ts). A card too small, or one nvidia-smi
+   * cannot read, changes nothing.
+   */
+  const follow = (gpu: GpuStatus | undefined) => {
+    if (!deps.own.installed()) return;
+    if (gpu?.vendor === "none") deps.setDevice("cpu");
+    else if (runsPictures(gpu)) deps.setDevice("gpu");
+  };
   /** The setup in progress, from the click until its build and model end (or its checks refuse). */
   let running: Promise<{ started: true }> | undefined;
   /** The model step, while it runs: its setup, the bytes before it, and the whole run's. */
   let model: { preset: string; before: number; bytes: number; total: number; end(ended: { ok: boolean; message?: string }): void } | undefined;
-  const say = (p: ImageSetupProgress) => { last = p; deps.push("image.setup", p); };
+  const say = (p: ImageSetupProgress) => {
+    const said: ImageSetupProgress = toCardRun ? { ...p, toCard: true } : p;
+    last = said;
+    deps.push("image.setup", said);
+  };
 
-  const read = async (): Promise<{ info: ImageSetup; plan?: EnginePlan; cpu?: boolean }> => {
-    // The card's name only, for the build the engine needs (engineFor: older cards take cu126).
+  const read = async (): Promise<{ info: ImageSetup; plan?: EnginePlan; cpu?: boolean; toCard?: boolean }> => {
+    // The card's name, for the build the engine needs (engineFor: older cards take cu126), and
+    // whether it runs pictures, against the build on disk.
     const gpu = await deps.gpuStatus().catch(() => undefined);
+    try { follow(gpu); } catch (error) { log(`device not recorded: ${error instanceof Error ? error.message : String(error)}`); }
     const found = deps.engine(gpu?.name);
     const progress = last === undefined ? {} : { progress: last };
     const set = deps.settingsAddress();
@@ -140,18 +167,27 @@ export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
     const { room } = deps.image.engine();
     if (room === undefined) return { info: { why: GPU_UNREAD, ...progress } };
     if (room > 0 && room < MIN_ROOM) return { info: { why: smallCard(room), ...progress } };
-    const cpu = room === 0;
+    // The image module says the processor (room 0) for the processor build whatever card is there,
+    // so nvidia-smi says whether one is: with one, the card's build goes beside it (Linux, whose
+    // build has both), and pictures run on the processor's until it is done.
+    const built = deps.own.build?.();
+    const toCard = built !== undefined && isProcessorBuild(built.version) && runsPictures(gpu) && found.kind === "build" && found.cpu !== undefined;
+    const cpu = room === 0 && !toCard;
     // no card that runs pictures: the processor build, with no CUDA libraries to fetch
     const plan = planFor(found, cpu);
     const preset = PRESETS.find((p) => p.id === SETUP_PRESET)!;
-    const installed = deps.own.installed();
+    const installed = !toCard && deps.own.installed();
     const engineBytes = planBytes(plan);
-    const bytes = modelBytes(preset.id);
+    // what the download fetches: a file already whole where it goes is skipped there, so it is not
+    // said here, put on the drive or counted to; unknown, the whole model as the records give it
+    const bytes = await deps.image.setupLeft?.(preset.id).catch(() => undefined) ?? modelBytes(preset.id);
     const freeBytes = await (deps.freeBytes ?? diskFree)(deps.appDataDir).catch(() => undefined);
     return {
-      plan, cpu,
+      plan, cpu, toCard,
       info: {
-        engine: { version: planVersion(plan), bytes: engineBytes, installed },
+        // installed, the build that is there (a card build the device runs on the processor stays the card's)
+        engine: { version: installed && built !== undefined ? built.version : planVersion(plan), bytes: engineBytes, installed },
+        ...toCard ? { toCard: true as const } : {},
         model: { preset: preset.id, name: preset.name, bytes },
         ...cpu ? { cpu: CPU_SECONDS } : {},
         ...freeBytes === undefined ? {} : { freeBytes },
@@ -160,6 +196,9 @@ export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
       },
     };
   };
+
+  // at the app's start, before a picture starts the engine
+  void deps.gpuStatus().then(follow).catch((error: unknown) => log(`device not checked: ${error instanceof Error ? error.message : String(error)}`));
 
   return {
     info: async () => (await read()).info,
@@ -192,17 +231,19 @@ export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
 
   /** The run behind run(): its checks, then the build and the model in the background; `running` holds it until that ends. */
   async function begin(): Promise<{ started: true }> {
-    const { info, plan, cpu } = await read();
+    const { info, plan, cpu, toCard } = await read();
     const preset = SETUP_PRESET;
     if (info.why !== undefined || plan === undefined) throw Object.assign(new Error(info.why ?? NO_ENGINE), { code: "image-setup" });
     if (info.freeBytes !== undefined && info.needBytes !== undefined && info.freeBytes < info.needBytes) throw Object.assign(new Error(shortDisk(info.needBytes, info.freeBytes)), { code: "image-setup" });
     const engineBytes = info.engine!.installed ? 0 : info.engine!.bytes;
     const total = engineBytes + info.model!.bytes;
     const controller = new AbortController();
+    toCardRun = toCard === true;
     say({ step: "engine", completedBytes: 0, totalBytes: total });
     const mine = running;
     void (async () => {
-      if (!deps.own.installed()) {
+      // the processor's build is installed: the card's is built beside it, under its own name
+      if (toCard === true || !deps.own.installed()) {
         const onProgress = (p: InstallProgress) => say({ step: "engine", completedBytes: Math.min(p.receivedBytes, engineBytes), totalBytes: total });
         if (plan.kind === "archive") await installEngine({ appDataDir: deps.appDataDir, manifest: plan.manifest, layout: plan.layout, onProgress, signal: controller.signal });
         else await plan.run(onProgress, controller.signal);
@@ -219,6 +260,9 @@ export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
       model = undefined;
       if (!result.ok) throw new Error(result.message ?? "The model download stopped.");
       say({ step: "starting", completedBytes: total, totalBytes: total });
+      // The processor's engine, idle, ends first, so this start is the card build's; one making a
+      // picture keeps going, and its idle stop ends it (the next start is the card build's).
+      if (toCard === true) await deps.image.stopIdle?.().catch((error: unknown) => log(`the processor engine was not stopped: ${error instanceof Error ? error.message : String(error)}`));
       await deps.image.start();
       say({ step: "done", completedBytes: total, totalBytes: total });
     })().catch((error: unknown) => {
@@ -226,7 +270,7 @@ export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
       const message = error instanceof Error ? error.message : String(error);
       log(`setup failed: ${message}`);
       say({ step: "error", completedBytes: last?.completedBytes ?? 0, totalBytes: total, message });
-    }).finally(() => { if (running === mine) running = undefined; });
+    }).finally(() => { toCardRun = false; if (running === mine) running = undefined; });
     return { started: true };
   }
 }

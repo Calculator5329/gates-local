@@ -28,6 +28,8 @@ export const imageMode = (s: State): boolean => s.image && s.settings !== NA && 
 export const setupHeld = (s: Pick<State, "imageSetup" | "imageStatus">): boolean => {
   const step = s.imageSetup?.progress?.step;
   if (step === undefined || step === "done") return false;
+  // the card's engine built beside the processor's, which keeps making pictures until it is in
+  if (s.imageSetup?.progress?.toCard === true) return false;
   const st = s.imageStatus;
   return st === undefined || st === NA || st.addressSet !== true;
 };

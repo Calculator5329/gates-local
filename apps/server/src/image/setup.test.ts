@@ -1,14 +1,14 @@
 // Which Linux build Set up images fetches: a computer whose card runs pictures gets the card build as
 // before, one with none the processor build. Fake plans and a fake image module; nothing is downloaded.
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { removeDir, tmpDir } from "../runtime/test-fakes.ts";
 import type { InstallProgress } from "../runtime/types.ts";
 import { engineDir, engineFiles } from "./engine.ts";
 import { LINUX_ENGINE, linuxBuild } from "./linux-build.ts";
 import { createOwnComfy, writeDevice } from "./own.ts";
-import { BUILD_MARGIN, createImageSetup, type BuildPlan, type EnginePlan, type ImageSetupDeps } from "./setup.ts";
+import { BUILD_MARGIN, CPU_SECONDS, createImageSetup, type BuildPlan, type EnginePlan, type ImageSetupDeps } from "./setup.ts";
 
 const GIB = 1024 ** 3;
 
@@ -137,5 +137,148 @@ describe("Set up images on Linux: the build follows the card", () => {
     expect(refused.map((r) => r.status)).toEqual(["rejected", "rejected"]);
     expect((refused[0] as PromiseRejectedResult).reason).toBe((refused[1] as PromiseRejectedResult).reason);
     await expect(full.setup.run()).rejects.toThrow(/free/);
+  });
+});
+
+describe("the setup's download leaves out what is already on disk", () => {
+  it("model files already whole: the figure said first and the total the counter runs to are the engine's alone, and the counter never jumps", async () => {
+    // a real run: "8.7 GB download" with the model in place, 1.16 GB fetched, the counter 0.9 then 8.7
+    const ran: string[] = [];
+    const pushed: { step: string; completedBytes: number; totalBytes: number }[] = [];
+    let left = 0;
+    const at = fixture(16 * GIB, fakeBuild("1.0.0", 3000, ran), {
+      image: {
+        status: async () => ({ state: "stopped", owner: "none" }) as never,
+        engine: () => ({ owner: "none", state: "stopped", room: 16 * GIB }) as never,
+        start: async () => ({}) as never,
+        download: async () => ({ files: [] }),
+        setupLeft: async () => left,
+      },
+      push: (_c, p) => { pushed.push(p); },
+    });
+    const info = await at.setup.info();
+    expect(info.model).toMatchObject({ preset: "flux2-klein-4b-compact", bytes: 0 });
+    // nothing of the model to put on the drive either
+    expect(info.needBytes).toBe(3000 * 4);
+    await at.setup.run();
+    expect(await settled(at.setup)).toMatchObject({ progress: { step: "done", completedBytes: 3000, totalBytes: 3000 } });
+    expect(new Set(pushed.map((p) => p.totalBytes))).toEqual(new Set([3000]));
+    // one file of three still to fetch: that one counts
+    left = 336_211_292;
+    expect((await at.setup.info()).model?.bytes).toBe(left);
+  });
+
+  it("where what is left is not known (a size not read yet), the whole model is said, as before", async () => {
+    const at = fixture(16 * GIB, fakeBuild("1.0.0", 3000, []), {
+      image: {
+        status: async () => ({ state: "stopped", owner: "none" }) as never,
+        engine: () => ({ owner: "none", state: "stopped", room: 16 * GIB }) as never,
+        start: async () => ({}) as never,
+        download: async () => ({ files: [] }),
+        setupLeft: async () => undefined,
+      },
+    });
+    expect((await at.setup.info()).model?.bytes).toBe(4_070_624_520 + 3_848_213_998 + 336_211_292);
+  });
+});
+
+/** What nvidia-smi says: a card of `gib`, or no NVIDIA card at all. */
+const card = (gib: number | "none") => async () => (gib === "none"
+  ? { vendor: "none", occupants: [], systemMemoryAvailableBytes: 0, measuredAt: 0 }
+  : { vendor: "nvidia", name: "NVIDIA GeForce RTX 4060", totalBytes: gib * GIB, occupants: [], systemMemoryAvailableBytes: 0, measuredAt: 0 }) as never;
+
+describe("what was built against what the computer has now", () => {
+  it("the processor build on a computer that has a card now: the setup offers the card build, builds it beside the old one, and pictures run on the processor until it is in", async () => {
+    const appDataDir = tmpDir("setup-card-later");
+    try {
+      // set up with no card: the processor build, on the processor
+      writeTree(appDataDir, "1.0.0-cpu");
+      writeDevice(appDataDir, "cpu");
+      const own = createOwnComfy({ appDataDir, port: 1, platform: "linux" });
+      const ran: string[] = [];
+      let finish!: () => void;
+      const held = new Promise<void>((resolve) => { finish = resolve; });
+      const plan: EnginePlan = {
+        ...fakeBuild("1.0.0", 3000, ran),
+        run: async (onProgress) => { ran.push("1.0.0"); onProgress({ phase: "download", version: "1.0.0", receivedBytes: 1000, totalBytes: 3000 }); await held; writeTree(appDataDir, "1.0.0"); },
+        cpu: fakeBuild("1.0.0-cpu", 1000, ran),
+      };
+      const pushed: { toCard?: boolean; step: string }[] = [];
+      // the image module says the processor (room 0): the processor build is what it runs
+      const at = fixture(0, plan, {
+        appDataDir, own, setDevice: (d) => writeDevice(appDataDir, d), gpuStatus: card(8),
+        push: (_c, p) => { pushed.push(p); },
+      });
+      const offer = await at.setup.info();
+      expect(offer.toCard).toBe(true);
+      expect(offer.engine).toEqual({ version: "1.0.0", bytes: 3000, installed: false });
+      expect(offer.cpu).toBeUndefined();
+      await at.setup.run();
+      await vi.waitFor(() => expect(pushed.at(-1)?.step).toBe("engine"));
+      // while the card build runs, the engine starts the processor build, on the processor
+      expect(own.build?.()).toEqual({ version: "1.0.0-cpu", cpu: true });
+      expect(pushed.every((p) => p.toCard === true)).toBe(true);
+      finish();
+      expect(await settled(at.setup)).toMatchObject({ progress: { step: "done", toCard: true } });
+      expect(ran).toEqual(["1.0.0"]);
+      expect(own.build?.()).toEqual({ version: "1.0.0", cpu: false });
+      // the old build is left where it was
+      expect(existsSync(engineFiles(engineDir(appDataDir, "1.0.0-cpu"), "uv-venv").main)).toBe(true);
+      expect((await at.setup.info()).toCard).toBeUndefined();
+    } finally { removeDir(appDataDir); }
+  });
+
+  it("a processor engine left idle is stopped before the setup's start, so the card build is the one that starts", async () => {
+    const appDataDir = tmpDir("setup-card-restart");
+    try {
+      writeTree(appDataDir, "1.0.0-cpu");
+      writeDevice(appDataDir, "cpu");
+      const own = createOwnComfy({ appDataDir, port: 1, platform: "linux" });
+      const ran: string[] = [];
+      const calls: string[] = [];
+      const plan: EnginePlan = { ...fakeBuild("1.0.0", 3000, ran), run: async () => { ran.push("1.0.0"); writeTree(appDataDir, "1.0.0"); }, cpu: fakeBuild("1.0.0-cpu", 1000, ran) };
+      const deps ={ status: async () => ({ state: "ready", owner: "app" }) as never, engine: () => ({ owner: "app", state: "ready", room: 0 }) as never, start: async () => { calls.push(`start ${own.build?.()?.version}`); return {} as never; }, download: async () => ({ files: [] }), stopIdle: async () => { calls.push("stopIdle"); } };
+      const setup = createImageSetup({ appDataDir, own, image: deps, setDevice: (d) => writeDevice(appDataDir, d), engine: () => plan, gpuStatus: card(16), settingsAddress: () => undefined, push: () => {}, freeBytes: async () => 500 * GIB });
+      await setup.run();
+      expect(await settled(setup)).toMatchObject({ progress: { step: "done" } });
+      expect(calls).toEqual(["stopIdle", "start 1.0.0"]);
+    } finally { removeDir(appDataDir); }
+  });
+
+  it("offers nothing where the processor build is right: no card, a card too small for pictures, or the card build already beside it", async () => {
+    const appDataDir = tmpDir("setup-card-none");
+    try {
+      writeTree(appDataDir, "1.0.0-cpu");
+      writeDevice(appDataDir, "cpu");
+      const own = createOwnComfy({ appDataDir, port: 1, platform: "linux" });
+      const plan: EnginePlan = { ...fakeBuild("1.0.0", 3000, []), cpu: fakeBuild("1.0.0-cpu", 1000, []) };
+      const at = (gpuStatus: ImageSetupDeps["gpuStatus"]) => fixture(0, plan, { appDataDir, own, setDevice: (d) => writeDevice(appDataDir, d), gpuStatus }).setup;
+      expect((await at(card("none")).info())).toMatchObject({ engine: { version: "1.0.0-cpu", installed: true }, cpu: CPU_SECONDS });
+      expect((await at(card("none")).info()).toCard).toBeUndefined();
+      expect((await at(card(2)).info()).toCard).toBeUndefined();
+      // both builds whole: the card's is the one the engine runs, nothing to set up
+      writeTree(appDataDir, "1.0.0");
+      expect((await at(card(8)).info()).toCard).toBeUndefined();
+      expect(own.build?.()).toEqual({ version: "1.0.0", cpu: false });
+    } finally { removeDir(appDataDir); }
+  });
+
+  it("a card build whose card is gone runs on the processor from the start, with nothing to download, and on the card again once it is back", async () => {
+    const appDataDir = tmpDir("setup-card-gone");
+    try {
+      writeTree(appDataDir, "1.0.0");
+      writeDevice(appDataDir, "gpu");
+      const own = createOwnComfy({ appDataDir, port: 1, platform: "linux" });
+      const plan: EnginePlan = { ...fakeBuild("1.0.0", 3000, []), cpu: fakeBuild("1.0.0-cpu", 1000, []) };
+      let now: number | "none" = "none";
+      // created at the app's start: the check runs then, before any picture asks the engine to start
+      const setup = fixture(0, plan, { appDataDir, own, setDevice: (d) => writeDevice(appDataDir, d), gpuStatus: async () => card(now)() }).setup;
+      await vi.waitFor(() => expect(own.build?.()).toEqual({ version: "1.0.0", cpu: true }));
+      expect(await setup.info()).toMatchObject({ engine: { version: "1.0.0", installed: true } });
+      expect((await setup.info()).toCard).toBeUndefined();
+      now = 8;
+      await setup.info();
+      expect(own.build?.()).toEqual({ version: "1.0.0", cpu: false });
+    } finally { removeDir(appDataDir); }
   });
 });

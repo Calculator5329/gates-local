@@ -88,6 +88,8 @@ describe("a retry takes over its failed card's box", () => {
     [{ state: "running", progress: 0, phase: "freeing" }, "Freeing memory", '<span class="lv-w">Freeing memory</span>'],
     [{ state: "running", progress: 0.5, phase: "stopping", stage: "sampling", steps: { done: 2, total: 4 } }, "Stopping the picture", '<span class="lv-w">Stopping the picture</span>'],
     [{ state: "running", progress: 0.4 }, "Making image", '<span class="lv-w">Working</span>'],
+    // the sampler has begun and counted no step: on the processor that is over a minute of model load
+    [{ state: "running", progress: 0, stage: "sampling" }, "Making image", '<span class="lv-w">Starting</span>'],
     [{ state: "running", progress: 0.4, stage: "sampling", steps: { done: 2, total: 4 } }, "Making image", '<span class="lv-w">Sampling 2/4</span>'],
   ] as const)("while the retry is %o the one box says %s, not the old reason", async (retry, words, shown) => {
     const { html, boxes } = await render(retry);
@@ -95,8 +97,9 @@ describe("a retry takes over its failed card's box", () => {
     expect(boxes[0]).toContain(size);
     expect(html).toContain(`aria-label="${words}"`);
     expect(html).toContain(shown);
-    // a retry has no turn, so no Stop: its Cancel stays on the card
-    expect(html).toContain(">Cancel image</button>");
+    // a retry has no turn, so no Stop: its Cancel stays on the card, until it is stopping (cancelled already)
+    if (retry.state === "running" && "phase" in retry && retry.phase === "stopping") expect(html).not.toContain(">Cancel image</button>");
+    else expect(html).toContain(">Cancel image</button>");
     expect(html).not.toContain(refused);
   });
 

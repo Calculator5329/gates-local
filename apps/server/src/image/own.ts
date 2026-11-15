@@ -101,8 +101,10 @@ export function engineLogFile(appDataDir: string): string {
 
 const pidFile = (appDataDir: string) => path.join(runtimeDir(appDataDir), "comfyui.pid");
 /**
- * What the setup chose a card build runs on: "cpu" where the card cannot run pictures. Outside the
- * pinned tree, so its checksum stays whole. The processor build never reads it (own.build).
+ * What the computer has for pictures, as the setup last saw it (setup.ts, at its run, at the app's
+ * start and each time it is read): "cpu" where no card runs them. A card build runs on it, and with
+ * both builds whole it picks which one starts (find). Outside the pinned tree, so its checksum
+ * stays whole. The processor build always runs with --cpu, whatever it says (own.build).
  */
 const deviceFile = (appDataDir: string) => path.join(runtimeDir(appDataDir), "comfyui-device");
 
@@ -119,12 +121,18 @@ export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
   const platform = opts.platform ?? process.platform;
   const layout: EngineLayout = platform === "win32" ? "windows-portable" : "uv-venv";
   const whole = (dir: string) => { const f = engineFiles(dir, layout); return existsSync(f.python) && existsSync(f.main); };
-  /** The newest whole version under runtime/comfyui/. */
+  /**
+   * The newest whole version under runtime/comfyui/ for what the computer has (the device file):
+   * the card's build where it has a card for pictures, the processor's where it has none; the other
+   * where only that one is whole. A build made for one stays when the other is made beside it.
+   */
   const find = (): string | undefined => {
     let entries: string[];
     try { entries = readdirSync(engineRoot(opts.appDataDir)); } catch { return undefined; }
-    return entries.filter((e) => !e.startsWith(".")).toSorted((a, b) => b.localeCompare(a, undefined, { numeric: true }))
-      .map((v) => engineDir(opts.appDataDir, v)).find(whole);
+    const dirs = entries.filter((e) => !e.startsWith(".")).toSorted((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+      .map((v) => engineDir(opts.appDataDir, v)).filter(whole);
+    const card = !onCpu(opts.appDataDir);
+    return dirs.find((dir) => isProcessorBuild(path.basename(dir)) !== card) ?? dirs[0];
   };
   let child: ChildProcess | undefined;
   let exited: Promise<void> = Promise.resolve();

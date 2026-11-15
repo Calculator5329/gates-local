@@ -16,6 +16,43 @@
   is refused where it stands, and Measure listens to its own page frame
   while a page check runs.
 
+## 2026-11-14: A graphics card added after setup gets used
+
+- A computer that set up pictures with no graphics card got the
+  processor's build of the image engine, and kept making pictures on the
+  processor after a card was put in. Settings › Image generation now says
+  "Pictures run on the processor" with one button, Use the card, and the
+  download it takes. Pictures keep working on the processor while the
+  card's build is set up beside the old one, which stays on disk.
+- The other way round, a card build whose card is gone now starts on the
+  processor instead of failing to start, with nothing to download, and
+  goes back to the card when one is there again.
+- Set up images no longer counts model files that are already on disk.
+  With the model in place it said "8.7 GB download", fetched about 1 GB,
+  and its counter jumped from 0.9 to 8.7 GB at the end. The size it says
+  first, the disk it asks for, and the total the counter runs to are now
+  only what it will fetch.
+- Building the image engine on Linux left a lock file for uv's saved
+  sign-ins in your home folder (.local/share/uv/credentials). The build
+  now keeps it in its own working folder, which goes when the build is
+  done. A file an earlier build left there stays where it is.
+- A picture's card said "Sampling" with no step count for over a
+  minute on the processor while the models were still moving in. It
+  now says "Starting" until the image engine counts its first step,
+  then "Sampling 1/4" and on.
+
+## 2026-11-14: A stopping picture offers nothing more to press
+
+- When you stop a picture made on the processor, its card says
+  "Stopping the picture" until the image engine ends the step it is in.
+  That card no longer shows a Cancel button: the picture is already
+  cancelled, and pressing it again did nothing. The card keeps its size
+  and settles to the stopped card with Try again.
+- A picture model download that stops short, or a drive too full for
+  one, now says its sizes the way the model download rows do: an 8.26
+  billion byte file reads 7.7 GB where it read 8.3 GB, and sizes under a
+  gigabyte read as 0.x GB instead of MB.
+
 ## 2026-11-14: The running line times only work, an empty stopped reply says Stopped, and a queued message says what it waits for
 
 - A queued message waiting behind a reply in another chat gave no

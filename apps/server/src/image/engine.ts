@@ -129,6 +129,8 @@ export type EngineInstallOptions = {
 const BuildKnob = Schema.Struct({
   version: Schema.String, python: Schema.String, uv: InstallManifest, uvDir: Schema.String,
   source: InstallManifest, sourceDir: Schema.String, lock: Schema.String, wheelBytes: Schema.Number,
+  /** The processor build beside it (linux-build.ts's `cpu`), for a test whose computer has no card. */
+  cpu: Schema.optional(Schema.Struct({ lock: Schema.String, wheelBytes: Schema.Number })),
 });
 const EngineKnob = Schema.Struct({ manifest: InstallManifest, layout: Schema.Literals(["windows-portable", "uv-venv"]), address: Schema.String, build: Schema.optional(BuildKnob) });
 export type EngineKnob = typeof EngineKnob.Type;

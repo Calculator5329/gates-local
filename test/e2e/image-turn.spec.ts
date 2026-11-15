@@ -168,6 +168,12 @@ test("a restart cannot strand an unfinished image", async ({ page, open }, info)
   }).toMatch(/^First run: loading the model · \d+ s$/);
   await page.screenshot({ path: info.outputPath("image-turn-loading.png"), animations: "disabled" });
   await still();
+  // the sampler has begun with no step counted yet (on the processor, a minute and more): Starting,
+  // never a bare Sampling
+  try { comfy.executing("SamplerCustomAdvanced"); } catch { comfy.executing("KSampler"); }
+  await expect(live).toHaveText(/^Starting · \d+ s$/);
+  await page.screenshot({ path: info.outputPath("image-turn-starting.png"), animations: "disabled" });
+  await still();
   comfy.progress(2, 4);
   await expect(live).toHaveText(/^Sampling 2\/4 · \d+ s$/);
   await still();

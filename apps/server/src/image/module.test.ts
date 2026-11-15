@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, symlink, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, open as openFile, readFile, readdir, rm, symlink, writeFile, mkdir } from "node:fs/promises";
 import * as files from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1466,6 +1466,42 @@ describe("image presets (fake ComfyUI file lists)", () => {
         expect(await readdir(path.join(engine, "text_encoders", "gates-local"))).toEqual(["qwen_3_4b_fp4_flux2.safetensors"]);
         expect(started).toEqual([]);
         expect(appEngine.calls).not.toContain("start");
+      });
+
+      it("the setup's download leaves out the files already whole where it goes, as the download skips them; a part or a file of another size still counts", async () => {
+        // Klein compact's three files, at the app's record sizes; a sparse file is whole at its size and holds no disk
+        const sizes = { "diffusion_models/flux-2-klein-4b-fp8.safetensors": 4_070_624_520, "text_encoders/qwen_3_4b_fp4_flux2.safetensors": 3_848_213_998, "vae/flux2-vae.safetensors": 336_211_292 };
+        const all = Object.values(sizes).reduce((a, b) => a + b, 0);
+        const place = async (root: string, file: keyof typeof sizes, bytes = sizes[file]) => {
+          const at = path.join(root, path.dirname(file), "gates-local", path.basename(file));
+          await mkdir(path.dirname(at), { recursive: true });
+          const handle = await openFile(at, "w");
+          try { await handle.truncate(bytes); } finally { await handle.close(); }
+        };
+        // the app's own engine not built yet: the setup's model goes to its models folder once it is
+        const engine = await mkdtemp(path.join(tmpdir(), "gates-image-engine-")); dirs.push(engine);
+        let built = false;
+        const f = await fixture({ download, own: {
+          installed: () => built, address: () => "http://127.0.0.1:41234", modelsDir: () => engine,
+          inspect: async () => ({ present: false, active: false, activeState: "inactive", pid: 0 }),
+          start: async () => {}, stop: async () => {}, onExit: () => {},
+        } });
+        f.configure({ answering: false });
+        expect(await f.module.setupLeft("flux2-klein-4b-compact")).toBe(all);
+        await place(engine, "vae/flux2-vae.safetensors");
+        await place(engine, "text_encoders/qwen_3_4b_fp4_flux2.safetensors");
+        // a file cut short is fetched whole again: it counts at its size
+        await place(engine, "diffusion_models/flux-2-klein-4b-fp8.safetensors", 1000);
+        expect(await f.module.setupLeft("flux2-klein-4b-compact")).toBe(sizes["diffusion_models/flux-2-klein-4b-fp8.safetensors"]);
+        await place(engine, "diffusion_models/flux-2-klein-4b-fp8.safetensors");
+        expect(await f.module.setupLeft("flux2-klein-4b-compact")).toBe(0);
+        // the download, run once the engine is built (as the setup runs it), agrees: nothing to fetch
+        built = true;
+        expect(await f.module.download("flux2-klein-4b-compact")).toEqual({ files: [] });
+        // a picked folder is where the setup's download goes: its files are the ones counted
+        const picked = await mkdtemp(path.join(tmpdir(), "gates-image-picked-")); dirs.push(picked);
+        f.pickFolder(picked);
+        expect(await f.module.setupLeft("flux2-klein-4b-compact")).toBe(all);
       });
 
       it("a file that is not the one the app's record names is not put with ComfyUI's models, and the download stops there", async () => {
