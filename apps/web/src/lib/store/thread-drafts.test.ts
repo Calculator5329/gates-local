@@ -84,6 +84,33 @@ it("deleting A discards its draft without touching B", async () => {
   expect(drafts.getDraft().text).toBe("");
 });
 
+const row = (id: string) => ({ id, title: id, createdAt: 1, updatedAt: 1 });
+
+it("a pushed thread list that does not name a chat keeps that chat's draft", async () => {
+  session.openThread("B");
+  drafts.editDraft("B half written");
+  session.openThread("A");
+  // a list read while B was still being made, or before it reached this server's list
+  browser.server.answer("threads.list", () => [row("A")]);
+  browser.server.push("threads.changed", { threadId: "A" });
+  await until(() => store.getState().threads.length === 1, 2000, "list applied");
+  browser.server.answer("threads.list", () => [row("A"), row("B")]);
+  browser.server.push("threads.changed", { threadId: "B" });
+  await until(() => store.getState().threads.length === 2, 2000, "B listed again");
+  session.openThread("B");
+  expect(drafts.getDraft().text).toBe("B half written");
+});
+
+it("a chat deleted in another window ends its draft here", async () => {
+  session.openThread("B");
+  drafts.editDraft("B half written");
+  session.openThread("A");
+  browser.server.answer("threads.list", () => [row("A")]);
+  browser.server.push("threads.changed", { threadId: "B" });
+  await until(() => store.getState().threads.length === 1, 2000, "list applied");
+  expect(drafts.savedDrafts().map(slot => slot.key)).not.toContain("B");
+});
+
 it("a new chat's first send consumes its draft slot", async () => {
   session.newThread();
   drafts.editDraft("first send");

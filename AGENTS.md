@@ -133,6 +133,7 @@ and is the next one to get a check.
 | No TODO, FIXME, XXX or HACK comment: finish it, or put it in `docs/roadmap.md`. | lint `eslint/no-warning-comments` |
 | An effect in the window's code keeps something outside React in step, and says what. | lint `gates/effect-needs-reason` |
 | A timer in the window's code is there because time is the point, and says what it waits for. | lint `gates/timer-needs-reason` |
+| A test name (`data-testid`) is written in one place in the window's source, so it names one control. | test `apps/web/src/app/test-ids.test.ts` |
 | A browser test waits for a condition, never for a length of time. | lint `gates/no-wait-for-timeout`; the clock only in `holds` (`test/e2e/waits.ts`), no disable comments |
 | No focused or skipped test is committed. | lint `vitest/no-focused-tests`, `vitest/no-disabled-tests` |
 | The window draws its own lists and menus; no native `<select>`. | lint `react/forbid-elements` |

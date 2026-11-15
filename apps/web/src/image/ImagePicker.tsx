@@ -337,6 +337,10 @@ export function ImagePicker() {
         <span className="pk-disk-n" data-testid="image.picker.download-amount">{run.state === "queued" ? "Starting" : total ? `${gb(done)} of ${gb(total)}${time}` : gb(done)}</span>
         {downloading && canStop ? <button type="button" className="pk-act" data-testid="image.picker.stop-download" aria-label={`Stop downloading ${name}`} data-tip="Stop" onClick={() => void stopImageDownload(run.preset).then((failed) => { if (failed !== null) setRowError({ id: run.preset, message: failed }); })}><Icon id="x" /></button> : null}
       </>;
+    } else if (download?.ended === true && download.state === "done" && download.message !== undefined && left === undefined) {
+      // the download's last word, where its bar was: a file already under its name was moved aside, and to where.
+      // A highlighted setup with files left to fetch shows those numbers instead.
+      numbers = <span className="pk-disk-n pk-disk-note" role="status" data-testid="image.picker.download-note">{download.message}</span>;
     } else {
       // the dot only between two parts, never after the last
       numbers = <span className="pk-disk-n">

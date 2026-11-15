@@ -137,7 +137,7 @@ export function Picker() {
     const r = anchor.getBoundingClientRect(), pw = root.offsetWidth, ph = root.offsetHeight;
     // The note over the box (a refusal and what runs instead) stays in view: opening up, the picker
     // starts above it (WIN-MEM-07).
-    const note = document.querySelector('[data-testid="chat.composer.notice"]');
+    const note = document.querySelector('[data-testid="chat.composer.offer"], [data-testid="chat.composer.notice"]');
     const top = Math.min(r.top, note?.getBoundingClientRect().top ?? r.top);
     const above = top - 6 - 8, below = window.innerHeight - r.bottom - 6 - 8;
     const up = ph <= above || above >= CRAMPED || above >= below;

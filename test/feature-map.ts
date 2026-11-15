@@ -289,7 +289,7 @@ export const FEATURES: readonly Feature[] = [
     server: [],
     calls: [],
     pushes: [],
-    specs: ["draft.spec.ts", "thread-drafts.spec.ts"],
+    specs: ["draft.spec.ts", "thread-drafts.spec.ts", "window-follow-ups.spec.ts"],
     testIds: ["chat.composer.message", "chat.composer.form"],
   },
   {
@@ -454,7 +454,7 @@ export const FEATURES: readonly Feature[] = [
     server: ["image/presets.ts", "image/download.ts", "image/handlers.ts", "image/setups"],
     calls: ["image.presets", "image.download", "image.stopDownload", "image.start", "threads.setImageChoice"],
     pushes: ["image.presets", "image.download"],
-    specs: ["image-picker.spec.ts", "image-picker-menus.spec.ts", "image-levels.spec.ts", "image-look.spec.ts", "image-two-threads.spec.ts"],
+    specs: ["image-picker.spec.ts", "image-picker-menus.spec.ts", "image-levels.spec.ts", "image-look.spec.ts", "image-two-threads.spec.ts", "window-follow-ups.spec.ts"],
     testIds: ["image.picker.dialog", "image.picker.defaults", "image.picker.other", "image.picker.size-*", "image.picker.download"],
   },
   {

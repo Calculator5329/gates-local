@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-15: typed words stay put, and a kept older file is named
+
+- Words typed in a chat but not sent stay in its box when a list of
+  chats read for a moment leaves that chat out. Before, they were lost.
+  They go only when the chat is deleted, or a list read after a change
+  to that chat no longer has it.
+- A download that found its file already there and kept the older one
+  under a new name says so where its bar was. Before, nothing said
+  where the older file went.
+- A picture card that failed before a restart still says why after it.
+- The picture-count menu shows how long the last picture took for each
+  setup and size as soon as it opens, from what the server sends when a
+  picture finishes, in every window.
+- Internal: the drop marker, the Tools probe in Settings and the
+  "sampled" note on a picture no longer copy state through React
+  effects; one timer says why it runs.
+
 ## 2026-11-15: a map of every feature, checked against the code
 
 - Internal: `docs/feature-map.md` names each feature as the screen does, with

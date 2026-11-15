@@ -547,11 +547,9 @@ export function stageWords(job: ImageEvent, sampled: boolean): string {
 /** A pending card's live line, in a chat reply's form: a lit dot, the stage, the running time. Only words and digits change. */
 function JobLine({ job, since }: { job: ImageEvent; since: number }) {
   const now = useNow(1000);
-  // once the job has sampled, a later load is not the first run's
-  const [sampled, setSampled] = useState(false);
-  if (!sampled && (job.stage === "sampling" || job.stage === "decoding")) setSampled(true);
   const secs = Math.max(0, Math.floor((now - since) / 1000));
-  return <p className="image-job-live" aria-hidden="true"><i className="lv-dot" /><span className="lv-w">{stageWords(job, sampled)}</span><span className="lv-t">{` · ${secs} s`}</span></p>;
+  // the server says once the job has sampled: a later load is not the first run's
+  return <p className="image-job-live" aria-hidden="true"><i className="lv-dot" /><span className="lv-w">{stageWords(job, job.sampled === true)}</span><span className="lv-t">{` · ${secs} s`}</span></p>;
 }
 
 /** The first card after the user message an Image turn sent: the card that turn's Stop cancels. */

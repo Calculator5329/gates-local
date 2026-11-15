@@ -3,7 +3,7 @@ import type { Message, MethodName, Params, ResultOf } from "@gates-local/contrac
 import { describeModel, titleFrom } from "../lib/words/format.ts";
 import { choosable, newestOnly } from "../models/pick.ts";
 import { type LiveTurn, NA, type State, getState, setState } from "../lib/store/store.ts";
-import { getDraft } from "../lib/store/drafts.ts";
+import { dropDraft, getDraft } from "../lib/store/drafts.ts";
 import { withTurn } from "./turn.ts";
 import { debounce } from "../lib/ui/kit/async.ts";
 
@@ -184,10 +184,22 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     setLoadError(threadId, null);
   }
 
+  /**
+   * Chats the server said changed since the last list applied. A list read after such a push that
+   * does not have the chat says it was deleted, and only then does its draft end here; a list that
+   * merely leaves a chat out (one still being made, or one read before it) never ends a draft.
+   */
+  const named = new Set<string>();
+
   async function refreshThreads(): Promise<void> {
     const ticket = threadsOrder.next();
+    const judged = [...named];
     const threads = await call("threads.list", {}).catch(() => undefined);
     if (threads === undefined || !threadsOrder.current(ticket)) return;
+    for (const id of judged) {
+      named.delete(id);
+      if (!threads.some(t => t.id === id)) dropDraft(id);
+    }
     for (const id of previews.keys()) if (!threads.some(t => t.id === id)) invalidatePreload(id);
     applyServerEvent((s) => {
       const open = s.threadId !== null && threads.some((t) => t.id === s.threadId);
@@ -362,6 +374,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
   async function performDelete(threadId: string): Promise<void> {
     if (!await threadAction("delete", threadId, () => call("threads.delete", { threadId }))) return;
     invalidatePreload(threadId);
+    dropDraft(threadId);
     // A snapshot sent before this confirmed deletion cannot resurrect it.
     landed.set(threadId, ++loadSeq);
     setEarlier(threadId, 0);
@@ -429,7 +442,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
       earlierListeners.add(listener);
       return () => { earlierListeners.delete(listener); };
     },
-    threadsChanged(threadId: string) { invalidatePreload(threadId); void refreshThreads(); },
+    threadsChanged(threadId: string) { invalidatePreload(threadId); named.add(threadId); void refreshThreads(); },
     renameThread, deleteThread, waitForThreadDeletion, createThread, untrackedDone, imageSaved,
     creatingDraft: (version: number) => creatingDrafts.has(version),
     listOrder: threadsOrder,

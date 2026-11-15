@@ -43,7 +43,7 @@ async function shot(page: Page, path: string, ...outlined: string[]): Promise<vo
   await style.evaluate((el) => el.parentNode?.removeChild(el));
 }
 
-const NOTE = '[data-testid="chat.composer.notice"]';
+const NOTE = '[data-testid="chat.composer.offer"]';
 
 test.beforeEach(async ({ page, open }) => {
   await smallMachine();
@@ -54,7 +54,7 @@ test.beforeEach(async ({ page, open }) => {
 test("WIN-MEM-02: no context of the picked model fits: the note offers the installed model that does, and one click sends", async ({ page }, info) => {
   await page.locator("#ta").fill("What is a context window?");
   await pick(page, "gemma4:12b");
-  const note = page.getByTestId("chat.composer.notice");
+  const note = page.getByTestId("chat.composer.offer");
   await expect(note).toContainText("Gemma 4 12B");
   await shot(page, info.outputPath("note-other-model.png"), NOTE);
   const other = note.getByTestId("chat.composer.offer-model");
@@ -73,7 +73,7 @@ test("WIN-MEM-02: no context of the picked model fits: the note offers the insta
 test("WIN-MEM-02: a smaller context runs, partly in system memory: the note offers it, says slower once, and the send runs", async ({ page }, info) => {
   await page.locator("#ta").fill("Summarise this thread");
   await pick(page, "qwen3.5:9b");
-  const note = page.getByTestId("chat.composer.notice");
+  const note = page.getByTestId("chat.composer.offer");
   await expect(note).toContainText("Qwen 3.5 9B");
   await shot(page, info.outputPath("note-smaller-context.png"), NOTE);
   const smaller = note.getByTestId("chat.composer.offer-context");
@@ -93,7 +93,7 @@ test("WIN-MEM-02: a smaller context runs, partly in system memory: the note offe
 test("WIN-MEM-07: the picker names whose numbers it shows, tells the selected row from the highlighted one, marks what cannot run now, and leaves the note in view", async ({ page }, info) => {
   await page.locator("#ta").fill("Hello");
   await pick(page, "gemma4:12b");
-  const note = page.getByTestId("chat.composer.notice");
+  const note = page.getByTestId("chat.composer.offer");
   await expect(note).toBeVisible();
   await page.locator("#modelBtn").click();
   const picker = page.locator("#picker");

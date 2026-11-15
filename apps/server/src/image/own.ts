@@ -36,6 +36,8 @@ export interface OwnComfy extends ComfyService {
   holdCard?(version: string): void;
   /** The held card build that is whole on disk beside the processor's, waiting to be tried. */
   heldCard?(): string | undefined;
+  /** The held card build that was passed over because it was not there after its start; kept across the app's starts. */
+  failedCard?(): string | undefined;
   /** The next start is the held card build's, to see it start. */
   tryCard?(): void;
   /** The engine start() ran answered: a card build is held no longer. */
@@ -145,15 +147,23 @@ const onCpu = (appDataDir: string) => {
  * pinned tree. Unreadable, nothing is held.
  */
 const heldFile = (appDataDir: string) => path.join(runtimeDir(appDataDir), "comfyui-card-held");
+/**
+ * Of the held builds, those held because they were not there after their start (failed()), not
+ * because they are being made: the setup's row says why after the app starts again. A line goes
+ * when its build answers. Unreadable, none is.
+ */
+const failedFile = (appDataDir: string) => path.join(runtimeDir(appDataDir), "comfyui-card-failed");
 
-const readHeld = (appDataDir: string): string[] => {
-  try { return readFileSync(heldFile(appDataDir), "utf8").split("\n").map((line) => line.trim()).filter((line) => line !== ""); } catch { return []; }
+const readLines = (file: string): string[] => {
+  try { return readFileSync(file, "utf8").split("\n").map((line) => line.trim()).filter((line) => line !== ""); } catch { return []; }
 };
+const readHeld = (appDataDir: string): string[] => readLines(heldFile(appDataDir));
 
-function writeHeld(appDataDir: string, versions: readonly string[]): void {
+function writeLines(appDataDir: string, file: string, versions: readonly string[]): void {
   mkdirSync(runtimeDir(appDataDir), { recursive: true });
-  writeFileSync(heldFile(appDataDir), versions.join("\n"));
+  writeFileSync(file, versions.join("\n"));
 }
+const writeHeld = (appDataDir: string, versions: readonly string[]) => writeLines(appDataDir, heldFile(appDataDir), versions);
 
 export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
   const platform = opts.platform ?? process.platform;
@@ -194,8 +204,22 @@ export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
     if (onDisk.includes(version)) return;
     try { writeHeld(opts.appDataDir, [...onDisk, version]); } catch { /* held for this run of the app */ }
   };
+  /** Failed in this run of the app: what the file says, and what could not be written to it. */
+  const failedHere = new Set<string>();
+  const failedNow = () => [...readLines(failedFile(opts.appDataDir)), ...failedHere];
+  const markFailed = (version: string) => {
+    failedHere.add(version);
+    const onDisk = readLines(failedFile(opts.appDataDir));
+    if (onDisk.includes(version)) return;
+    try { writeLines(opts.appDataDir, failedFile(opts.appDataDir), [...onDisk, version]); } catch { /* said for this run of the app */ }
+  };
   const release = (version: string) => {
     heldHere.delete(version);
+    failedHere.delete(version);
+    const failed = readLines(failedFile(opts.appDataDir));
+    if (failed.includes(version)) {
+      try { writeLines(opts.appDataDir, failedFile(opts.appDataDir), failed.filter((v) => v !== version)); } catch { /* the build answers again at the app's next start */ }
+    }
     const onDisk = readHeld(opts.appDataDir);
     if (!onDisk.includes(version)) return;
     try { writeHeld(opts.appDataDir, onDisk.filter((v) => v !== version)); } catch { /* offered again at the app's next start */ }
@@ -232,6 +256,10 @@ export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
       const held = heldNow();
       return versions.find((v) => !isProcessorBuild(v) && held.includes(v));
     },
+    failedCard() {
+      const held = own.heldCard?.();
+      return held !== undefined && failedNow().includes(held) ? held : undefined;
+    },
     tryCard: () => { trying = true; },
     answered() {
       trying = false;
@@ -243,6 +271,7 @@ export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
       trying = false;
       if (version === undefined || isProcessorBuild(version) || !builds().some(isProcessorBuild)) return undefined;
       hold(version);
+      markFailed(version);
       for (const listener of heldListeners) listener(version);
       return version;
     },

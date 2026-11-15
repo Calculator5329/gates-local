@@ -121,7 +121,7 @@ export function ImageUnset() {
       <div className="unset-acts">
         {offer ? <button type="button" className="btn" data-testid="image.unset.set-up" disabled={running} onClick={() => void go()}>{running ? "Setting up…" : progress?.step === "error" ? "Try again" : "Set up images"}</button> : null}
         <button type="button" className={offer ? "btn outline" : "btn"} data-testid="image.unset.settings" onClick={() => { closePop(); openSettings("images"); }}>{offer ? "Settings" : "Open Settings"}</button>
-        {offer ? null : <button type="button" className="btn outline" data-testid="image.unset.check-again" disabled={checking} onClick={() => void check()}>{checking ? "Checking…" : "Check again"}</button>}
+        {offer ? null : <button type="button" className="btn outline" data-testid="image.unset.check-again-missing" disabled={checking} onClick={() => void check()}>{checking ? "Checking…" : "Check again"}</button>}
       </div>
     </div>
   );

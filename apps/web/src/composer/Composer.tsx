@@ -16,7 +16,7 @@ import { MakerMark } from "../models/MakerMark.tsx";
 import { RefusalNote } from "./RefusalNote.tsx";
 import { pickerLabels } from "../picker/picker-models.ts";
 import { imagePickerScreen, pickerScreen, threadScreen } from "../app/screen-loaders.ts";
-import { chosenImage, imageCount, imageMode, imagesUnset, sizeLabel } from "../image/image-choice.ts";
+import { chosenImage, imageCount, imageMode, imagesUnset, runKey, sizeLabel } from "../image/image-choice.ts";
 import { ImageMark } from "../image/ImageMark.tsx";
 import { Icon, SendArrow } from "../lib/ui/icons.tsx";
 import { canThink, chatBlockedReason, chatModels, sendableModel } from "../models/pick.ts";
@@ -34,7 +34,7 @@ import {
   confirmStopAsk,
   editQueued,
   firstPull,
-  lastImageRunMs,
+  readImageRun,
   openSettings,
   pickImageCount,
   queueReason,
@@ -753,10 +753,14 @@ function about(ms: number, n: number): string {
   return secs < 90 ? `~${Math.max(1, Math.round(secs))} s` : `~${Math.round(secs / 60)} min`;
 }
 
-/** This computer's last time for the setup the menu was opened on: read before it opens, so its rows never change under the pointer. */
-let lastRun: { key: string; ms: number | undefined } | undefined;
-const runKey = (c: { preset: string; width: number; height: number }) => `${c.preset}:${c.width}x${c.height}`;
+/** How long the menu waits for a setup's first time (readImageRun) before it opens without one. */
 const READ_WAIT_MS = 400;
+
+/** This computer's time for the setup and size Send uses, as the store keeps it (State.imageRuns). */
+function runOf(s: State): number | undefined {
+  const p = chosenImage(s);
+  return p === undefined ? undefined : s.imageRuns[runKey({ preset: p.preset.id, width: p.width, height: p.height })];
+}
 
 function pickCount(n: number): void {
   closePop(true);
@@ -777,13 +781,9 @@ function CountButton({ open }: { open: boolean }) {
   const count = useStore(imageCount);
   const pictured = useStore(chosenImage);
   const toggle = async (kb: boolean) => {
-    if (!open && pictured !== undefined) {
-      const choice = { preset: pictured.preset.id, width: pictured.width, height: pictured.height };
-      const key = runKey(choice);
-      // never longer than a moment: without an answer the rows show no times
-      const ms = await withTimeout(lastImageRunMs(choice), READ_WAIT_MS, () => undefined);
-      lastRun = { key, ms: ms ?? (lastRun?.key === key ? lastRun.ms : undefined) };
-    }
+    // a setup with no time in the store yet is read before the menu opens, so its rows never change
+    // under the pointer; never longer than a moment: without an answer the rows show no times
+    if (!open && pictured !== undefined) await withTimeout(readImageRun({ preset: pictured.preset.id, width: pictured.width, height: pictured.height }), READ_WAIT_MS, () => undefined);
     togglePop("count", kb);
   };
   return (
@@ -809,13 +809,12 @@ export function CountMenu() {
   const open = useStore((s) => s.pop?.id === "count");
   const kb = useStore((s) => s.pop?.id === "count" && s.pop.kb);
   const count = useStore(imageCount);
-  const pictured = useStore(chosenImage);
+  const ms = useStore(runOf);
   const drawing = useStore(imageMode);
   const ref = useRef<HTMLDivElement>(null);
   // Image off takes the button away, and its menu with it
   // oxlint-disable-next-line gates/effect-needs-reason -- the store's open menu, closed once Image goes off, from whichever control turned it off
   useEffect(() => { if (open && !drawing) closePop(); }, [open, drawing]);
-  const ms = pictured !== undefined && lastRun?.key === runKey({ preset: pictured.preset.id, width: pictured.width, height: pictured.height }) ? lastRun.ms : undefined;
   usePopover(ref, open, (el) => {
     const anchor = document.getElementById("countBtn");
     if (anchor) place(el, anchor, "start");

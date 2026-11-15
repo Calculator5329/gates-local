@@ -212,10 +212,11 @@ describe.skipIf(process.platform === "win32")("createOwnComfy", () => {
     expect(args).toContain("--cpu");
     await own.stop();
 
-    // the app's next start remembers: the build that works is the one that runs
+    // the app's next start remembers: the build that works is the one that runs, and why
     own = createOwnComfy({ appDataDir, port, platform: "linux" });
     expect(own.build?.()).toEqual({ version: "1.0.0-cpu", cpu: true });
     expect(own.heldCard?.()).toBe("1.0.0");
+    expect(own.failedCard?.()).toBe("1.0.0");
     // tried again once it can run (a driver put right), it answers, and is the one that runs from then on
     writeFileSync(cardPython, working);
     own.tryCard?.();
@@ -227,6 +228,7 @@ describe.skipIf(process.platform === "win32")("createOwnComfy", () => {
     own = createOwnComfy({ appDataDir, port, platform: "linux" });
     expect(own.build?.()).toEqual({ version: "1.0.0", cpu: false });
     expect(own.heldCard?.()).toBeUndefined();
+    expect(own.failedCard?.()).toBeUndefined();
   });
 
   it("nothing is passed over where there is nothing else to start, or the engine is still there", async () => {

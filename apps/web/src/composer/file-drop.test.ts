@@ -49,6 +49,33 @@ it("a drag that began in this window is left alone", () => {
   handlers.get("dragend")!({});
 });
 
+/** Files from outside the window, dragged over a spot that takes no typing. */
+const files = () => drag(["Files"], el(false));
+
+it("files over the window put the marker above a usable composer, and leaving the window takes it down", async () => {
+  const { getState, setState } = await import("../lib/store/store.ts");
+  const composer = { getBoundingClientRect: () => ({ left: 100, width: 400, top: 600 }), closest: () => null };
+  vi.stubGlobal("document", { querySelector: (s: string) => (s === ".composer" ? composer : null) });
+  handlers.get("dragover")!(files());
+  expect(getState().dropAt).toEqual({ x: 300, y: 300 });
+  const published = getState();
+  handlers.get("dragover")!(files());
+  expect(getState(), "the same place again changes nothing").toBe(published);
+  handlers.get("dragleave")!(files());
+  expect(getState().dropAt).toBeNull();
+  // an open popover owns the window: no marker, and the drop is refused
+  setState({ pop: { id: "plus", kb: false } });
+  const over = files();
+  handlers.get("dragover")!(over);
+  expect(getState().dropAt).toBeNull();
+  expect(over.dataTransfer.dropEffect).toBe("none");
+  setState({ pop: null });
+  // no composer on screen: the same
+  vi.stubGlobal("document", { querySelector: () => null });
+  handlers.get("dragover")!(files());
+  expect(getState().dropAt).toBeNull();
+});
+
 it("a target with no element under it is refused", () => {
   expect(refusesDrop(null)).toBe(true);
   expect(refusesDrop({} as EventTarget)).toBe(true);

@@ -91,7 +91,7 @@ function Installing({ install }: { install: InstallSize | undefined }) {
       </div>
       {stalled ? (
         <div className="ba">
-          <button type="button" className="btn primary" data-testid="chat.banner.retry" onClick={retry}>
+          <button type="button" className="btn primary" data-testid="chat.banner.retry-install" onClick={retry}>
             Retry
           </button>
         </div>

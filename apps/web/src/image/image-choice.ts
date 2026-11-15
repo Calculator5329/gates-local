@@ -83,6 +83,9 @@ export function imageCount(s: State): number {
 
 export const sizeLabel = (width: number, height: number): string => `${width}×${height}`;
 
+/** A setup and size as one key: what the store's picture times (State.imageRuns) are kept under. */
+export const runKey = (c: ImageChoice): string => `${c.preset}:${c.width}x${c.height}`;
+
 /** A setup's full name as the server last listed it, else its id (a setup ComfyUI no longer has). */
 export function presetName(s: State, id: string): string {
   return presetOf(s, id)?.name ?? id;

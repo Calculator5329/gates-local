@@ -77,9 +77,10 @@ export interface ImageSetupDeps {
   appDataDir: string;
   /**
    * holdCard, heldCard, tryCard, onHeld: the card's build made beside the processor's is held until
-   * it has started once (own.ts), so pictures keep running on the build that works.
+   * it has started once (own.ts), so pictures keep running on the build that works. failedCard: one
+   * held because it did not start, so the row says why after the app starts again.
    */
-  own: Pick<OwnComfy, "installed" | "build" | "holdCard" | "heldCard" | "tryCard" | "onHeld">;
+  own: Pick<OwnComfy, "installed" | "build" | "holdCard" | "heldCard" | "failedCard" | "tryCard" | "onHeld">;
   /**
    * stopIdle: before a setup that built the card's engine starts it, the processor's ends if it is
    * idle. setupLeft: the model's files not already whole where its download goes.
@@ -162,7 +163,9 @@ export function createImageSetup(deps: ImageSetupDeps): ImageSetupModule {
     const gpu = await deps.gpuStatus().catch(() => undefined);
     try { follow(gpu); } catch (error) { log(`device not recorded: ${error instanceof Error ? error.message : String(error)}`); }
     const found = deps.engine(gpu?.name);
-    const progress = last === undefined ? {} : { progress: last };
+    // before anything is said in this run of the app, a card build passed over at an earlier start still says why
+    const said = last ?? (deps.own.failedCard?.() === undefined ? undefined : { step: "error" as const, completedBytes: 0, totalBytes: 0, message: CARD_NOT_STARTED, toCard: true as const });
+    const progress = said === undefined ? {} : { progress: said };
     const set = deps.settingsAddress();
     if (set !== undefined) return { info: { why: addressSet(set), ...progress } };
     if (found === "later") return { info: { why: NOT_YET, ...progress } };

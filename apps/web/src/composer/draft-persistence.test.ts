@@ -58,8 +58,8 @@ it("reload keeps both threads' words and deletion removes the saved draft", asyn
   expect(b.getDraft().text).toBe("A words");
   b.setState({ threadId: "B" });
   expect(b.getDraft().text).toBe("B words");
-  b.setState({ threads: [{ id: "A", title: "A", createdAt: 1, updatedAt: 1 }, { id: "B", title: "B", createdAt: 1, updatedAt: 1 }] });
-  b.setState({ threads: [{ id: "B", title: "B", createdAt: 1, updatedAt: 1 }] });
+  // what a confirmed deletion of A does to its slot (thread/threads.ts)
+  b.dropDraft("A");
   while (fixture.pending.length) { fixture.pending[0]!.finish(); await settled(); }
   resume();
   const c = await freshWatcher();

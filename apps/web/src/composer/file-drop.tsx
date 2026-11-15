@@ -2,10 +2,9 @@
 // c55db3e9c7 (MIT, LICENSES/T3-Code-MIT.txt): only a drag that carries files is
 // claimed; enter, over, leave and drop are all prevented so the window never
 // opens the file; one plain status marker shows while files are over the window.
-import { useEffect, useState } from "react";
 import { Icon } from "../lib/ui/icons.tsx";
 import { attachFiles, splitDropped } from "./paste.ts";
-import { getState } from "../lib/store/store.ts";
+import { getState, setState, useStore } from "../lib/store/store.ts";
 
 // Chromium lists "Files" when an image already in the page is dragged (a
 // reply's image, a draft chip). Such a drag starts with a dragstart in this
@@ -36,13 +35,17 @@ function refuse(e: DragEvent): boolean {
   return true;
 }
 
-/** Set while a composer is mounted; when it cannot be used a drop is still claimed, and nothing is attached. */
-let mark: ((at: { x: number; y: number } | null) => void) | null = null;
+/** The marker's place in the store (State.dropAt), or null to take it down; the same place again changes nothing. */
+function mark(at: { x: number; y: number } | null): void {
+  const was = getState().dropAt;
+  if (was === at || (was !== null && at !== null && was.x === at.x && was.y === at.y)) return;
+  setState({ dropAt: at });
+}
 // A drag that ends outside the window without a leave event (Esc, a lost
 // pointer) must not leave the marker up. Browsers repeat dragover at least
 // every 550 ms while files are over the window, so 3 s of silence means gone.
 let stale: ReturnType<typeof setTimeout> | undefined;
-const hide = () => { clearTimeout(stale); mark?.(null); };
+const hide = () => { clearTimeout(stale); mark(null); };
 
 function where(): { x: number; y: number } {
   const composer = document.querySelector(".composer")?.getBoundingClientRect();
@@ -55,9 +58,10 @@ function where(): { x: number; y: number } {
  * no inert ancestor (the first-run cover, the thread drawer, a phone sheet)
  * and no popover open. T3 Code drops onto the chat canvas and never closes a
  * popover for it; here an open popover owns the window, so the drop waits.
+ * With no composer a drop is still claimed, and nothing is attached.
  */
 function usable(): boolean {
-  if (!mark || getState().pop !== null) return false;
+  if (getState().pop !== null) return false;
   const composer = document.querySelector(".composer");
   return composer !== null && composer.closest("[inert]") === null;
 }
@@ -69,7 +73,7 @@ function over(e: DragEvent): void {
   const ok = usable();
   if (e.dataTransfer) e.dataTransfer.dropEffect = ok ? "copy" : "none";
   if (!ok) { hide(); return; }
-  mark?.(where());
+  mark(where());
   clearTimeout(stale);
   // oxlint-disable-next-line gates/timer-needs-reason -- the next dragover, which a drag still over the window sends within 550 ms
   stale = setTimeout(hide, 3000);
@@ -103,15 +107,9 @@ if (typeof window !== "undefined" && typeof window.addEventListener === "functio
   window.addEventListener("dragend", () => { inPage = false; hide(); }, true);
 }
 
-/** The composer's drop target: while it is mounted, file drops attach to its draft. */
+/** The composer's drop marker: shown while files are over the window and a drop would attach to its draft. */
 export function DropMarker() {
-  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
-  // oxlint-disable-next-line gates/effect-needs-reason -- the window's drag listeners, kept in step with which composer is mounted to take a drop
-  useEffect(() => {
-    const show = (next: { x: number; y: number } | null) => setAt(prev => prev && next && prev.x === next.x && prev.y === next.y ? prev : next);
-    mark = show;
-    return () => { if (mark === show) { mark = null; clearTimeout(stale); } };
-  }, []);
+  const at = useStore((s) => s.dropAt);
   if (!at) return null;
   return <div className="drop-mark" role="status" style={{ left: at.x, top: at.y }}><Icon id="clip" />Drop files to attach</div>;
 }

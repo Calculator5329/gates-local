@@ -3,7 +3,7 @@
 // control idioms only: a secondary button, a right-aligned value, and a ⋯ menu
 // for what is rare or destructive. A control the server cannot back is left
 // out instead of being shown switched off.
-import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { type CSSProperties, useRef, useState } from "react";
 import { type Accent, type ImageSetupProgress, type ImageStatus, type ShellStatus, type Source, type Theme, cardBytes } from "@gates-local/contracts";
 import { STALLED, failWords, installStep, portOf, rtInfo, rtOf, searching, underTitle, useInstallStall } from "../runtime/words.tsx";
 import { GpuMemory } from "../fit/FitPanel.tsx";
@@ -14,7 +14,7 @@ import { Icon, type IconId } from "../lib/ui/icons.tsx";
 import LibraryImports from "./LibraryImports.tsx";
 import { ModelsPage } from "../models/Models.tsx";
 import { sizeText } from "../models/models-rules.ts";
-import { addSource, canOpenFolder, checkImageStatus, checkShell, folderDialog, openDataFolder, openSettings, recheckRuntime, refreshSource, removeSource, resetSettings, saveImageFolder, startImageSetup, updateSettings } from "../lib/session/index.ts";
+import { addSource, canOpenFolder, checkImageStatus, folderDialog, openDataFolder, openSettings, recheckRuntime, refreshSource, removeSource, resetSettings, saveImageFolder, startImageSetup, updateSettings } from "../lib/session/index.ts";
 import { NA, setState, useStore } from "../lib/store/store.ts";
 import { CopyButton, PathText, Status } from "../lib/ui/settings-controls.tsx";
 import { type LibraryTool, libraryToolCanUse } from "../lib/words/settings-rules.ts";
@@ -282,10 +282,8 @@ function Tools() {
   const [err, run] = useAct();
   const on = settings === NA || settings?.tools === true;
   const windows = /\bWindows\b/.test(navigator.userAgent);
+  // asked again each time Tools is opened (the session's sectionShown)
   const shell = useStore((s) => s.shellStatus);
-  // Asked each time Tools opens: the server keeps a passed probe and asks a failed one again.
-  // oxlint-disable-next-line gates/effect-needs-reason -- the server's shell probe, asked again each time Tools is drawn
-  useEffect(() => { if (!windows) checkShell(); }, [windows]);
   const [imageErr, runImage] = useAct();
   // The chat model's image tool: app-wide, offered only with the master switch on. Unset is on once a
   // setup can run (ComfyUI listed every file for one, and the card has room), as the server reads it.

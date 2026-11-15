@@ -655,6 +655,60 @@ function imageDone(): void {
   b.server.push("image.event", { jobId: "j1", threadId: "t1", state: "done", progress: 1, imagePath: "images/j1.png" });
 }
 
+it("Settings › Tools asks the sandbox probe again each time it is opened, and no other section does", async () => {
+  await bootSettingsReady();
+  // the connection asks once, so Tools opens with its word
+  await until(() => b.server.calls("tools.shell").length === 1, 1000, "the probe at connect");
+  session.openSettings("general");
+  await until(() => store.getState().view === "settings", 1000, "Settings");
+  expect(b.server.calls("tools.shell")).toHaveLength(1);
+  session.openSettings("tools");
+  await until(() => b.server.calls("tools.shell").length === 2, 1000, "the probe when Tools opens");
+  session.leaveSettings();
+  // the gear reopens Settings where it was: on Tools, asked again
+  session.toggleSettings();
+  await until(() => b.server.calls("tools.shell").length === 3, 1000, "the probe when Settings reopens on Tools");
+  expect(store.getState().section).toBe("tools");
+});
+
+/** A picture of the klein setup at 1024² that took `runMs`, as pictures.list lists one. */
+const kleinPicture = (runMs: number) => ({ ...methodSamples["pictures.list"].result.pictures[0]!, preset: "klein", width: 1024, height: 1024, runMs });
+
+describe("the count menu's picture times come from the numbered image pushes", () => {
+  const klein = { preset: "klein", width: 1024, height: 1024 };
+  const key = "klein:1024x1024";
+  const picture = kleinPicture;
+
+  it("a finished picture's push keeps its time for its setup and size, and nothing is read for it", async () => {
+    await boot();
+    b.server.push("image.event", { jobId: "j1", state: "done", progress: 1, choice: klein, runMs: 4200 });
+    await until(() => store.getState().imageRuns[key] === 4200, 1000, "the time from the push");
+    await session.readImageRun(klein);
+    expect(b.server.calls("pictures.list")).toHaveLength(0);
+    // a newer picture of the same setup: the newer time
+    b.server.push("image.event", { jobId: "j2", state: "done", progress: 1, choice: klein, runMs: 3900 });
+    await until(() => store.getState().imageRuns[key] === 3900, 1000, "the newer time");
+  });
+
+  it("a setup no push has named is read once, and a push that lands meanwhile is newer and stays", async () => {
+    await boot();
+    b.server.answer("pictures.list", () => ({ ...methodSamples["pictures.list"].result, pictures: [picture(9000)] }));
+    await session.readImageRun(klein);
+    expect(store.getState().imageRuns[key]).toBe(9000);
+    await session.readImageRun(klein);
+    expect(b.server.calls("pictures.list")).toHaveLength(1);
+    const held = b.server.hold("pictures.list");
+    const other = { ...klein, width: 768 };
+    const read = session.readImageRun(other);
+    const request = await held;
+    b.server.push("image.event", { jobId: "j3", state: "done", progress: 1, choice: other, runMs: 2500 });
+    await until(() => store.getState().imageRuns["klein:768x1024"] === 2500, 1000, "the push");
+    request.respond({ ...methodSamples["pictures.list"].result, pictures: [{ ...picture(8000), width: 768 }] });
+    await read;
+    expect(store.getState().imageRuns["klein:768x1024"]).toBe(2500);
+  });
+});
+
 describe("an image saved into a thread outside chat events (WF3-01)", () => {
   it("names the failed job when retrying and returns the accepted job id", async () => {
     await boot();

@@ -49,6 +49,8 @@
 .image-picker .pk-disk .prog{flex:1 1 auto;min-width:48px;height:4px;margin:0}
 /* the disk's numbers stay by its folder; the GPU figure keeps the row's far end */
 .image-picker .pk-disk-n{flex:0 1 auto;min-width:0;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* a download's last word (where an older file was kept): the rest of the row, two lines at most inside its 44px */
+.image-picker .pk-disk-n.pk-disk-note{flex:1 1 auto;max-width:none;white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow-wrap:anywhere}
 .image-picker .pk-bottom>.pk-gpu{flex:none}
 .image-picker .pk-disk .short{color:var(--red-fg)}
 /* nothing to list: one row across the whole picker, what it is waiting for and the one thing to do */

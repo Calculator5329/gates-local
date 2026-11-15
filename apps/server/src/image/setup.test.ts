@@ -310,6 +310,39 @@ describe("what was built against what the computer has now", () => {
     } finally { removeDir(appDataDir); }
   });
 
+  it("after the app restarts, the row still says why the card's engine was passed over, until it is tried again", async () => {
+    const appDataDir = tmpDir("setup-card-no-start-restart");
+    try {
+      writeTree(appDataDir, "1.0.0-cpu");
+      writeDevice(appDataDir, "cpu");
+      const plan: EnginePlan = { ...fakeBuild("1.0.0", 3000, []), run: async () => { writeTree(appDataDir, "1.0.0"); }, cpu: fakeBuild("1.0.0-cpu", 1000, []) };
+      const started = (own: ReturnType<typeof createOwnComfy>, pushed: unknown[] = []) => {
+        const image = {
+          status: async () => ({ state: "stopped", owner: "none" }) as never, engine: () => ({ owner: "none", state: "stopped", room: 0 }) as never,
+          start: async () => { await own.start().catch(() => undefined); own.failed?.(); return {} as never; },
+          download: async () => ({ files: [] }),
+        };
+        return createImageSetup({ appDataDir, own, image, setDevice: (d) => writeDevice(appDataDir, d), engine: () => plan, gpuStatus: card(16), settingsAddress: () => undefined, push: (_c, p) => { pushed.push(p); }, freeBytes: async () => 500 * GIB });
+      };
+      const pushed: unknown[] = [];
+      const first = started(createOwnComfy({ appDataDir, port: 1, platform: "linux" }), pushed);
+      await first.run();
+      await vi.waitFor(() => expect(pushed.at(-1)).toMatchObject({ step: "error", toCard: true, message: CARD_NOT_STARTED }));
+      // the app's next start: a new server over the same folder
+      const own = createOwnComfy({ appDataDir, port: 1, platform: "linux" });
+      const again = started(own);
+      expect(await again.info()).toMatchObject({ toCard: true, progress: { step: "error", toCard: true, message: CARD_NOT_STARTED } });
+      // a card build held only while it is made (never started) says nothing after a restart
+      const fresh = tmpDir("setup-card-held-restart");
+      try {
+        writeTree(fresh, "1.0.0-cpu"); writeTree(fresh, "1.0.0");
+        const making = createOwnComfy({ appDataDir: fresh, port: 1, platform: "linux" });
+        making.holdCard?.("1.0.0");
+        expect(createOwnComfy({ appDataDir: fresh, port: 1, platform: "linux" }).failedCard?.()).toBeUndefined();
+      } finally { removeDir(fresh); }
+    } finally { removeDir(appDataDir); }
+  });
+
   it("offers nothing where the processor build is right: no card, a card too small for pictures, or the card build already beside it", async () => {
     const appDataDir = tmpDir("setup-card-none");
     try {

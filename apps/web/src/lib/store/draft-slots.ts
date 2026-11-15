@@ -1,5 +1,5 @@
-// The draft slots, one per chat, and their change signal. The store drops a chat's
-// slot when the chat leaves the thread list; drafts.ts does everything else with them.
+// The draft slots, one per chat, and their change signal. A chat's slot ends when the chat is
+// deleted (thread/threads.ts), never because a thread list left it out; drafts.ts does the rest.
 import type { AttachedFile } from "@gates-local/contracts";
 
 export type DraftKey = string | null;

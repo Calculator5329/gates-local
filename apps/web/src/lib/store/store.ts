@@ -2,7 +2,6 @@
 // read slices with useStore(selector); a slice that did not change keeps its
 // identity, so a token arriving re-renders the live turn and nothing else.
 import { useSyncExternalStore } from "react";
-import { dropDraft } from "./draft-slots.ts";
 import { readLoadTimes } from "./load-times.ts";
 import type {
   ReplyRecord,
@@ -185,6 +184,8 @@ export interface State {
     | null;
   /** The pop-up over the chat area (the footer's Usage); the chat stays mounted under it. */
   readonly panel: "usage" | null;
+  /** Where the "Drop files to attach" marker sits while files are dragged over a usable composer (composer/file-drop.tsx); null otherwise. */
+  readonly dropAt: { readonly x: number; readonly y: number } | null;
   /** Below 1024 px the sidebar is a drawer over the page; this is whether it is open. */
   readonly drawer: boolean;
   /** On a phone, Settings shows its section list as its own screen instead of a section. */
@@ -257,6 +258,11 @@ export interface State {
   readonly imagePick: ImageChoice | undefined;
   /** A new thread's picture count (the count menu before its first send), which that send carries; then back to 1. */
   readonly imageCountNew: number;
+  /**
+   * ComfyUI's time for this computer's newest picture of a setup and size, under runKey (image-choice.ts):
+   * from the numbered image.event done pushes, and for a setup no push has named yet, one pictures.list read.
+   */
+  readonly imageRuns: Readonly<Record<string, number>>;
   /** Settings › Updates: the version, the last check and the last update's result. Read at hydrate; no git runs for it. */
   readonly update: Maybe<UpdateStatus>;
   /** A "Check for updates" click waiting for its answer. */
@@ -300,6 +306,7 @@ const initial: State = {
   fitPanel: { model: null },
   pop: null,
   panel: null,
+  dropAt: null,
   drawer: false,
   setList: false,
   pasting: 0,
@@ -337,6 +344,7 @@ const initial: State = {
   imageSetup: undefined,
   imagePick: undefined,
   imageCountNew: 1,
+  imageRuns: {},
   update: undefined,
   updateChecking: false,
   updateInstalling: false,
@@ -357,7 +365,6 @@ export function getState(): State {
 /** Merge a patch (or the result of a function of the current state) and notify readers. */
 export function setState(patch: Partial<State> | ((s: State) => Partial<State>)): void {
   const p = typeof patch === "function" ? patch(state) : patch;
-  if (p.threads !== undefined) for (const thread of state.threads) if (!p.threads.some(t => t.id === thread.id)) dropDraft(thread.id);
   publish(p);
 }
 

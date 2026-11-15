@@ -55,7 +55,7 @@ export function RefusalNote({ o }: { o: NoticeOffer }) {
   const name = (tag: string) => describeModel(tag, catalog).name;
   const { context, model, short } = o.offer;
   return (
-    <p className="na c-note no c-offer" data-testid="chat.composer.notice" role="status">
+    <p className="na c-note no c-offer" data-testid="chat.composer.offer" role="status">
       <Icon id="alert" cls="s12" />
       <span className="co-what">{name(o.model)} · {k(o.numCtx)}</span>
       {context === undefined && model === undefined ? (

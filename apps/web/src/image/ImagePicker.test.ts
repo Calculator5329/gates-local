@@ -135,6 +135,18 @@ it("a stopped download keeps its part: the bar stays there, no Stop, and the row
   expect(text(row("flux2-klein-4b").node)).toContain("Needs 3 files");
 });
 
+it("a finished download that moved an older file aside says where it was kept, once, where its bar was", () => {
+  const word = "A file named flux2-vae.safetensors was already there. It was kept as flux2-vae.safetensors.replaced-1.";
+  const done: ImageDownload = { ...running, name: "flux2-vae.safetensors", file: 3, state: "done", completedBytes: 10, setupCompletedBytes: 120, ended: true, message: word };
+  picker({ imagePresets: { presets: [ready], others, readAt: 1, disk: { folder: "F:\\models", freeBytes: 876 * GIB, picked: false } }, imageDownload: done });
+  expect(disk().all.find((n) => n.props["data-testid"] === "image.picker.download-note")?.props["role"]).toBe("status");
+  expect(text(disk().node)).toContain(word);
+  expect(tree().map(text).filter((t) => t === word)).toHaveLength(1);
+  // a download that ended with nothing moved says nothing more
+  picker({ imagePresets: { presets: [ready], others, readAt: 1, disk: { folder: "F:\\models", freeBytes: 876 * GIB, picked: false } }, imageDownload: { ...done, message: undefined } });
+  expect(disk().all.some((n) => n.props["data-testid"] === "image.picker.download-note")).toBe(false);
+});
+
 it("a listener that refuses downloads (the phone's) shows no Download, Stop or disk row: the rows keep their reasons", () => {
   picker({ unavailable: { "image.download": true, "image.stopDownload": true, "image.start": true } });
   for (const id of ["flux2-klein-4b", "other"]) expect(labels(row(id).all).filter((l) => /^(Download|Stop)/.test(l))).toEqual([]);

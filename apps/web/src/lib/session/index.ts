@@ -16,7 +16,7 @@ import {
   pushSync,
 } from "@gates-local/contracts";
 import { runPages } from "../../measure/measure-pages.ts";
-import { imagesUnset } from "../../image/image-choice.ts";
+import { imagesUnset, runKey } from "../../image/image-choice.ts";
 import { closePop } from "../ui/ui.tsx";
 import { NA, type State, getState, overChat, setState } from "../store/store.ts";
 import { createChat } from "../../composer/chat.ts";
@@ -219,7 +219,13 @@ async function hydrate(c: Client): Promise<void> {
   numbered("image.presets", (imagePresets) => applyServerEvent({ imagePresets }));
   numbered("image.event", (e) => {
     if (e.threadId !== undefined) imageSaved(e.threadId);
-    if (e.state === "done") void pictures.finished();
+    if (e.state !== "done") return;
+    void pictures.finished();
+    // the newest picture of its setup and size: its time is the count menu's from here on
+    if (e.runMs !== undefined && e.choice !== undefined) {
+      const key = runKey(e.choice), ms = e.runMs;
+      applyServerEvent((s) => ({ imageRuns: { ...s.imageRuns, [key]: ms } }));
+    }
   });
   numbered("image.download", (imageDownload) => applyServerEvent({ imageDownload }));
   numbered("image.setup", setupSaid);
@@ -235,6 +241,7 @@ async function hydrate(c: Client): Promise<void> {
   }
   // Chat row 35: the files this window's drafts and queue name stay on the server past a day.
   void keepHeldFiles();
+  // oxlint-disable-next-line gates/timer-needs-reason -- the server forgets an unsent file after a day; every six hours this window says again which ones its drafts and queue still hold
   keeping ??= setInterval(() => void keepHeldFiles(), KEEP_EVERY_MS);
 }
 
@@ -315,7 +322,7 @@ async function hydrateWith(
   void probe("fit.table", {}, { onResult: (fitTable, sync) => { if (newer(FIT_TABLE, sync)) applyServerEvent({ fitTable }); } });
   // Settings › Tools opens with Run commands' own word: the sandbox probe runs now, not on the first
   // visit, so the row never says Checking and then changes its words (nothing arrives late).
-  if (!/\bWindows\b/.test(globalThis.navigator?.userAgent ?? "")) checkShell();
+  checkShell();
   // update.status reads local files; the desktop server owns automatic checks.
   // Measured speeds are a saved-reply read the model list's first frame never waits on.
   // The image reads wait for nothing and nothing waits for them: both ask ComfyUI first (and the
@@ -381,6 +388,8 @@ const navigation = createNavigation({
   // usageSession is made below; this runs only on a navigation, long after
   dropPendingPanel: () => usageSession.dropPendingOpen(),
   newChatModel,
+  // Tools asks the sandbox probe each time it shows: the server keeps a passed probe and asks a failed one again
+  sectionShown: (section) => { if (section === "tools") checkShell(); },
 });
 export const { openThread, newThread, openSettings, leaveSettings, closeSettings, toggleSettings, toggleModels, cancelPendingSettings, initialView, finishFirstRun, leavePictures, togglePictures } = navigation;
 export { spareScreenEntry } from "../../app/navigation.ts";
@@ -414,8 +423,9 @@ function probeImageStatus(): void {
     .then((imageStatus) => { if (imageStatus === NA) applyServerEvent({ imageStatus }); });
 }
 
-/** Settings › Tools: Run commands says Ready only after the server's sandbox probe ran a command. */
+/** Settings › Tools: Run commands says Ready only after the server's sandbox probe ran a command. Windows has no such sandbox, and Tools says so itself. */
 export function checkShell(): void {
+  if (/\bWindows\b/.test(globalThis.navigator?.userAgent ?? "")) return;
   void probe("tools.shell", {}).then((shellStatus) => {
     if (shellStatus !== undefined) applyServerEvent({ shellStatus });
   });
@@ -473,12 +483,19 @@ export async function pickImageCount(count: number): Promise<ActionResult> {
   return null;
 }
 
-/** ComfyUI's time for this computer's newest picture of this setup and size, or undefined when it has made none (or kept no time). */
-export async function lastImageRunMs(choice: ImageChoice): Promise<number | undefined> {
+/**
+ * A setup and size no done push has named yet: ComfyUI's time for this computer's newest picture of
+ * it, read once into the store (State.imageRuns). Nothing to read when the store has one; a push
+ * that lands while this reads is newer and stays. No picture (or no kept time) leaves it unset.
+ */
+export async function readImageRun(choice: ImageChoice): Promise<void> {
+  const key = runKey(choice);
+  if (getState().imageRuns[key] !== undefined) return;
   try {
     const { pictures: list } = await call("pictures.list", { setup: choice.preset, limit: 20 });
-    return list.find((p) => p.runMs !== undefined && p.width === choice.width && p.height === choice.height)?.runMs;
-  } catch { return undefined; }
+    const ms = list.find((p) => p.runMs !== undefined && p.width === choice.width && p.height === choice.height)?.runMs;
+    if (ms !== undefined && getState().imageRuns[key] === undefined) setState((s) => ({ imageRuns: { ...s.imageRuns, [key]: ms } }));
+  } catch { /* no answer: the menu's rows show no times, as with no picture */ }
 }
 
 /** The picker's image actions say the server's own words (they are written to be shown), the connection's when it failed. */

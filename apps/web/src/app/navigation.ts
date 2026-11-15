@@ -65,6 +65,8 @@ interface NavigationEffects {
   readonly dropPendingPanel: () => void;
   /** Pictures' first page: resolves once it is in hand, or at a bound. */
   readonly picturesData?: () => Promise<void>;
+  /** A Settings section is on screen now (opened, or switched to): what it asks the server each time it shows. */
+  readonly sectionShown?: (section: Section) => void;
 }
 
 /** What belongs to the chat being left: its notice, its warning, and a queued message open for editing. */
@@ -74,7 +76,7 @@ function leavingChat(s: State): Partial<State> {
 }
 
 /** Navigation keeps its own intent; chat and history operations are wired by session.ts. */
-export function createNavigation({ editEnded, catchUp, chooseModel, newChatModel, loadThread, loading, settingsData = () => null, dropPendingPanel, picturesData = () => Promise.resolve() }: NavigationEffects) {
+export function createNavigation({ editEnded, catchUp, chooseModel, newChatModel, loadThread, loading, settingsData = () => null, dropPendingPanel, picturesData = () => Promise.resolve(), sectionShown = () => {} }: NavigationEffects) {
   /** Bumped by each navigation, Settings in and out included: a thread load's failure moves the view only if none happened since it was sent (WF-03). */
   let navGen = 0;
   let pendingSettings: number | null = null;
@@ -136,6 +138,7 @@ export function createNavigation({ editEnded, catchUp, chooseModel, newChatModel
       // Settings on its own (the gear, Ctrl+,) never reopens on Models, which is its own pop-up
       setState((s) => ({ view: "settings", section: section ?? (s.section === "models" ? "general" : s.section), addPage, ownerConfirm: false, panel: null }));
       enterScreen();
+      sectionShown(getState().section);
     };
     // The visible composer must still send into its visible thread while a chunk
     // loads. Commit the navigation only when the screen (or its error) can render,
