@@ -4,7 +4,7 @@
 // went wrong, and on a click what the model wrote and which tools it called.
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { MeasureCheck, MeasurePart, ModelMeasure } from "@gates-local/contracts";
+import { MEASURE_VERSION, type MeasureCheck, type MeasurePart, type ModelMeasure } from "@gates-local/contracts";
 import { k } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { tpsText } from "./model-speed.tsx";
@@ -24,8 +24,17 @@ export const SLOW_WORDS: Readonly<Record<NonNullable<ModelMeasure["slow"]>, stri
 };
 
 const seconds = (ms: number) => `${ms < 10_000 ? (ms / 1000).toFixed(1) : Math.round(ms / 1000)} s`;
+/** How the run sampled, in one line: Measure's own settings, or an earlier build's, which used the chat's. */
+export const samplingText = (m: ModelMeasure) => m.sampling ? `Temperature ${m.sampling.temperature}, seed ${m.sampling.seed}, model defaults` : "Your chat's sampling settings";
 /** A measure from before the five parts: eight checks, kept as they were. */
 export const isOlder = (m: ModelMeasure) => m.version === undefined;
+/**
+ * A five-part measure made with earlier checks and grades than this build's: a score out of 100
+ * still, but not made as a new one is, so it is marked wherever it shows.
+ */
+export const isEarlier = (m: ModelMeasure) => m.version !== undefined && m.version !== MEASURE_VERSION;
+/** What an earlier measure's mark says, in a few words. */
+export const EARLIER_WORDS = "Earlier checks";
 
 export function MeasureDetail({ name, label, onClose }: { name: string; label: string; onClose: () => void }) {
   const m = useStore((s) => measureOf(s, name));
@@ -66,9 +75,11 @@ export function MeasureDetail({ name, label, onClose }: { name: string; label: s
           {older ? null : <span><Icon id="bulb" cls="s14" />{m.think === undefined ? "No thinking" : m.think ? "Thinking on" : "Thinking off"}</span>}
           <span><Icon id="speed" cls="s14" />{tpsText(m.tokensPerSecond) ?? "–"}</span>
           {m.firstTokenMs === undefined ? null : <span><Icon id="clock" cls="s14" />{seconds(m.firstTokenMs)} to first word</span>}
+          {older ? null : <span data-testid="models.measure.sampling"><Icon id="sliders" cls="s14" />{samplingText(m)}</span>}
         </div>
         {m.slow ? <p className="md-slow" data-testid="models.measure.slow"><Icon id="snail" cls="s14" />{SLOW_WORDS[m.slow]}</p> : null}
         {older ? <p className="md-old" data-testid="models.measure.older">Older measure: eight checks of tools and a database, before Files, Instructions and Pages. Measure again for the five parts.</p> : null}
+        {isEarlier(m) ? <p className="md-old" data-testid="models.measure.earlier"><Icon id="clock" cls="s14" />{EARLIER_WORDS}: fewer tasks, and some replies graded differently. Measure again to set it beside newer scores.</p> : null}
         {older ? null : <Parts m={m} />}
         <MeasureNotes m={m} />
         <MeasureChecks m={m} />
@@ -84,40 +95,81 @@ export function MeasureDetail({ name, label, onClose }: { name: string; label: s
   );
 }
 
-/** What the score leaves out: pages still waiting for a window, and parts whose every check was skipped. */
+/** A part the score is short of: `counted` of its `total` checks went into it (none: left out whole). */
+export interface ShortPart { part: MeasurePart; counted: number; total: number; waiting: boolean }
+
+/** Each part the score counts fewer checks of than the part has: skipped, or a page still waiting. */
+export function shortParts(m: ModelMeasure): ShortPart[] {
+  if (isOlder(m)) return [];
+  return ORDER.flatMap((part) => {
+    const mine = m.checks.filter((c) => partOf(c) === part);
+    const counted = mine.filter((c) => c.state === undefined).length;
+    return counted < mine.length ? [{ part, counted, total: mine.length, waiting: mine.some((c) => c.state === "pending") }] : [];
+  });
+}
+
+const and = (words: readonly string[]) => words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`;
+
+/** The row's few words on what its score left out, for the mark's tooltip: "Without Database · Tools 3 of 4". */
+export function shortWords(m: ModelMeasure): string | undefined {
+  const short = shortParts(m);
+  if (short.length === 0) return undefined;
+  const whole = short.filter((p) => p.counted === 0).map((p) => PART[p.part]);
+  return [...(whole.length ? [`Without ${and(whole)}`] : []), ...short.filter((p) => p.counted > 0).map((p) => `${PART[p.part]} ${p.counted} of ${p.total}`)].join(" · ");
+}
+
+/** What the score leaves out: pages still waiting for a window, parts left out, and parts it counts short. */
 export function MeasureNotes({ m }: { m: ModelMeasure }) {
   const pending = m.checks.filter((c) => c.state === "pending").length;
-  // Parts whose every check was skipped: the score is over the others, so it says which it left out.
-  const left = isOlder(m) ? [] : ORDER.filter((part) => {
-    const mine = m.checks.filter((c) => partOf(c) === part);
-    return mine.length > 0 && mine.every((c) => c.state === "skipped");
-  });
+  // The waiting pages say so in their own line; every other part the score is short of is named.
+  const short = shortParts(m).filter((p) => !(p.waiting && p.counted === 0));
+  const left = short.filter((p) => p.counted === 0).map((p) => PART[p.part]);
+  const fewer = short.filter((p) => p.counted > 0).map((p) => `${PART[p.part]} over ${p.counted} of its ${p.total} checks`);
+  const { across } = skipsSaid(m.checks);
   return (
     <>
       {pending ? <p className="md-old" data-testid="models.measure.pending">{pending === 1 ? "1 page waits" : `${pending} pages wait`} for this app's window to run {pending === 1 ? "it" : "them"}; the score leaves Pages out until then.</p> : null}
-      {left.length ? <p className="md-old" data-testid="models.measure.left-out">The score leaves {left.map((p) => PART[p]).join(" and ")} out.</p> : null}
+      {across.map((why) => <p key={why} className="md-old" data-testid="models.measure.skipped">Skipped: {why}</p>)}
+      {left.length || fewer.length ? (
+        <p className="md-old" data-testid="models.measure.left-out">
+          The score {left.length ? `leaves ${and(left)} out` : ""}{left.length && fewer.length ? ", and counts " : fewer.length ? "counts " : ""}{and(fewer)}.
+        </p>
+      ) : null}
     </>
   );
 }
 
-/** The one reason every check of a part was skipped for (Run commands off, the sandbox off), if one. */
-const skippedFor = (mine: readonly MeasureCheck[]): string | undefined => {
-  const why = mine[0]?.why;
-  return why !== undefined && mine.every((c) => c.state === "skipped" && c.why === why) ? why : undefined;
-};
+/**
+ * Where each reason checks were skipped for is said, once: a reason checks of more than one part
+ * share (the window left the turn without tools) above the parts; one that several checks of a
+ * part share (Run commands off, the window in the background) under that part's name; a reason
+ * one check has, on the check.
+ */
+export function skipsSaid(checks: readonly MeasureCheck[]) {
+  const by = new Map<string, MeasureCheck[]>();
+  for (const c of checks) if (c.state === "skipped" && c.why) by.set(c.why, [...by.get(c.why) ?? [], c]);
+  const across: string[] = [];
+  const under = new Map<MeasurePart, string[]>();
+  for (const [why, mine] of by) {
+    const parts = new Set(mine.map(partOf));
+    if (parts.size > 1) across.push(why);
+    else if (mine.length > 1) under.set(partOf(mine[0]!), [...under.get(partOf(mine[0]!)) ?? [], why]);
+  }
+  return { across, under, said: (c: MeasureCheck) => c.state === "skipped" && c.why !== undefined && by.get(c.why)!.length > 1 };
+}
 
-/** Each part's checks under its name; a part skipped for one reason says it once, under the name. */
+/** Each part's checks under its name; a reason said for many checks is not said again on each. */
 export function MeasureChecks({ m }: { m: ModelMeasure }) {
+  const { under, said } = skipsSaid(m.checks);
   return (
     <div className="md-checks">
       {ORDER.map((part) => {
         const mine = m.checks.filter((c) => partOf(c) === part);
-        const why = skippedFor(mine);
         return mine.length === 0 ? null : (
           <section key={part} aria-label={PART[part]}>
             <h4>{PART[part]}</h4>
-            {why ? <div className="md-why" data-testid={`models.measure.skipped-${part}`}>{why}</div> : null}
-            {mine.map((c) => <Check key={c.id} c={c} quiet={why !== undefined} />)}
+            {under.get(part)?.map((why) => <div key={why} className="md-why" data-testid={`models.measure.skipped-${part}`}>{why}</div>)}
+            {mine.map((c) => <Check key={c.id} c={c} quiet={said(c)} />)}
           </section>
         );
       })}
@@ -148,12 +200,13 @@ function Parts({ m }: { m: ModelMeasure }) {
   );
 }
 
-/** `quiet`: its part already said why it was skipped. */
+/** `quiet`: why it was skipped is already said, for it and the others skipped for the same. */
 function Check({ c, quiet = false }: { c: MeasureCheck; quiet?: boolean }) {
   const [open, setOpen] = useState(false);
   const evidence = c.reply !== undefined || c.calls !== undefined || c.result !== undefined || c.tokens !== undefined;
-  const mark = c.state === "pending" ? "clock" : c.state === "skipped" ? "lock" : c.ok ? "check" : "x";
-  const word = c.state === "pending" ? "Waiting" : c.state === "skipped" ? "Skipped" : c.ok ? "Passed" : "Failed";
+  // Cut while still thinking is its own mark, apart from a wrong answer.
+  const mark = c.state === "pending" ? "clock" : c.state === "skipped" ? "lock" : c.ok ? "check" : c.cutThinking ? "bulb" : "x";
+  const word = c.state === "pending" ? "Waiting" : c.state === "skipped" ? "Skipped" : c.ok ? "Passed" : c.cutThinking ? "Cut while thinking" : "Failed";
   return (
     <div className={`md-check ${c.state ?? (c.ok ? "ok" : "no")}`} data-testid={`models.measure.check-${c.id}`}>
       <button type="button" className="md-cl" aria-expanded={evidence ? open : undefined} disabled={!evidence} onClick={() => setOpen((o) => !o)}>

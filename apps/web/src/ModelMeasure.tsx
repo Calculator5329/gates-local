@@ -5,13 +5,14 @@
 import { useState } from "react";
 import type { ModelMeasure } from "@gates-local/contracts";
 import { handleKey } from "./handles.ts";
-import { MeasureDetail, SLOW_WORDS, isOlder } from "./MeasureDetail.tsx";
+import { EARLIER_WORDS, MeasureDetail, SLOW_WORDS, isEarlier, isOlder, shortWords } from "./MeasureDetail.tsx";
 import { Icon } from "./icons.tsx";
 import { tpsText } from "./model-speed.tsx";
 import { measureModel } from "./session.ts";
 import { measureOf, measuringNow } from "./session/measures.ts";
 import { Fail } from "./settings-ui.tsx";
 import { NA, type State, useStore } from "./store.ts";
+import { esc } from "./ui.tsx";
 
 /** The Speed and Score columns show unless the server has no Measure (an older server). */
 export const canMeasure = (s: State): boolean => s.measures !== NA && s.unavailable["models.measure"] !== true;
@@ -23,7 +24,28 @@ const running = (s: State, name: string) => {
 
 /** The score as the row shows it: out of 100, or an older measure's checks passed out of eight. */
 const scoreText = (m: ModelMeasure) => (isOlder(m) ? `${m.checks.filter((c) => c.ok).length}/${m.checks.length}` : String(m.score));
-const scoreWords = (m: ModelMeasure) => `${isOlder(m) ? `Older score, ${scoreText(m)} checks` : `Score ${m.score} of 100`}${m.slow ? `, ${SLOW_WORDS[m.slow]}` : ""}`;
+const scoreWords = (m: ModelMeasure) => {
+  const short = shortWords(m);
+  return `${isOlder(m) ? `Older score, ${scoreText(m)} checks` : `Score ${m.score} of 100`}${isEarlier(m) ? `, ${EARLIER_WORDS}` : ""}${short ? `, ${short}` : ""}${m.think ? ", Thinking on" : ""}${m.slow ? `, ${SLOW_WORDS[m.slow]}` : ""}`;
+};
+
+/**
+ * Beside a score, how it differs from one made in full with Thinking off by this build's checks, so
+ * two rows are not read as measured alike: a clock when earlier checks made it, a bar mark when it
+ * left checks out (its tooltip names them), a bulb with Thinking on. Nothing beside a full score
+ * made now without thinking.
+ */
+export function ScoreMarks({ m }: { m: ModelMeasure }) {
+  const short = shortWords(m);
+  return (
+    <>
+      {/* data-tip: an icon has no label to cut, and data-tipt shows only over a cut one */}
+      {isEarlier(m) ? <span data-tip={EARLIER_WORDS} data-testid="settings.models.score-earlier"><Icon id="clock" cls="s14" /></span> : null}
+      {short ? <span className="mp-slow" data-tip={esc(short)} data-testid="settings.models.score-short"><Icon id="bars" cls="s14" /></span> : null}
+      {m.think ? <span data-tip="Thinking on" data-testid="settings.models.score-think"><Icon id="bulb" cls="s14" /></span> : null}
+    </>
+  );
+}
 
 /** The phone's words for a measured model, a grey line of their own under the size and mark; it opens the detail. */
 export function MeasureMeta({ name, label }: { name: string; label: string }) {
@@ -34,6 +56,7 @@ export function MeasureMeta({ name, label }: { name: string; label: string }) {
     <>
       <button type="button" className="mp-mline" data-testid={`settings.models.measure-line-${handleKey(name)}`} aria-label={`${scoreWords(m)}, ${label}: details`} onClick={() => setOpen(true)}>
         {tpsText(m.tokensPerSecond) ?? "–"} · score {scoreText(m)}
+        <ScoreMarks m={m} />
         {m.slow ? <Icon id="snail" cls="s14 mp-slow" /> : null}
       </button>
       {open ? <MeasureDetail name={name} label={label} onClose={() => setOpen(false)} /> : null}
@@ -62,13 +85,14 @@ export function MeasureCells({ name, label }: { name: string; label: string }) {
         <span className="mp-spd">{tpsText(m.tokensPerSecond) ?? "–"}</span>
         <button
           type="button"
-          className={`mp-score${isOlder(m) ? " old" : ""}`}
+          className={`mp-score${isOlder(m) || isEarlier(m) ? " old" : ""}`}
           data-testid={`settings.models.score-${handleKey(name)}`}
           aria-label={`${scoreWords(m)}, ${label}: details`}
           aria-haspopup="dialog"
           onClick={() => setOpen(true)}
         >
           {m.slow ? <Icon id="snail" cls="s14 mp-slow" /> : null}
+          <ScoreMarks m={m} />
           {scoreText(m)}
         </button>
         {open ? <MeasureDetail name={name} label={label} onClose={() => setOpen(false)} /> : null}
@@ -79,7 +103,8 @@ export function MeasureCells({ name, label }: { name: string; label: string }) {
 }
 
 function MeasureButton({ name, label, run, other }: { name: string; label: string; run: ReturnType<typeof running>; other: boolean }) {
-  const text = run === undefined ? "Measure" : run.state === "running" ? `Measuring ${run.done} of ${run.total}` : "Starting";
+  // The last step is the pages, which the window runs only while it is shown (measure-pages.ts).
+  const text = run === undefined ? "Measure" : run.state !== "running" ? "Starting" : run.done === run.total - 1 ? "Pages wait for the window" : `Measuring ${run.done} of ${run.total}`;
   return (
     <span className="mp-meas">
       <button

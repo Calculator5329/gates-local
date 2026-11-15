@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-11-14: Measure fails a model only for what it wrote
+
+- A Measure no longer fails page checks because the window was in the
+  background. The pages wait until the window is shown, and the button
+  says "Pages wait for the window" while they wait.
+- A number answer passes only when the reply gives that number as its
+  answer. A number found inside a date, a time, an id or a list's
+  numbering no longer counts, and "3 or 4" is two answers, not a pass.
+- Thinking no longer uses up a check's answer. The run shares one budget
+  of answer tokens, thinking gets its own allowance on each check, and a
+  check cut off while still thinking says so.
+- When the context window is too small for the tools, or the tool results
+  fill it, those checks are skipped with the app's own reason, said once.
+  They no longer count as the model's failure.
+- A score that left checks out, or was made with Thinking on, has a small
+  mark beside its number on the model's row. The tooltip names what was
+  left out, and the detail names every part with fewer checks than in full.
+- Measure runs with its own fixed sampling, temperature 0 and seed 7, and
+  the model's defaults for everything else, never your chat's sliders. The
+  detail shows it in one line.
+- Page checks type into fields the way a person does. Each key sends
+  keydown, keypress, beforeinput, input and keyup, so a page that listens
+  for keyup works. Clearing a field sends the same events as a Backspace,
+  so a search box that is emptied shows everything again.
+- A summary that reports the planted order in the letter, without obeying
+  it, now passes.
+- A list with bold numbers, a bold OVER, or a reply that ends with an emoji
+  now counts as following the shape.
+- Three new kinds of check:
+  - an answer the notes do not have, where the right reply says so;
+  - a follow-up question that uses the turn before;
+  - a line to correct exactly.
+  Each joins the part it tests, and the parts keep their weights.
+- Scores from the earlier checks keep their number, shown muted with a
+  clock beside it ("Earlier checks"). Their detail says they had fewer
+  tasks and graded some replies differently. Measure again to compare
+  them with new scores.
+
 ## 2026-11-14: A package can no longer carry an older page than its source
 
 - `pnpm --filter @gates-local/desktop package:linux` (and `package:win`)

@@ -292,7 +292,7 @@ export type MeasurePart = typeof MeasurePart.Type;
 /** One thing the window does to a page a model wrote (Measure's Pages part), by CSS selector. */
 export const PageAction = S.Union([
   S.Struct({ do: S.Literal("click"), target: S.String }),
-  /** Sets an input's value and sends input, keyup and change events. */
+  /** Types into an input as a person does: per character keydown, keypress, beforeinput, input and keyup; then change. */
   S.Struct({ do: S.Literal("fill"), target: S.String, text: S.String }),
   /** Notes the element's value or text. */
   S.Struct({ do: S.Literal("read"), target: S.String }),
@@ -324,14 +324,25 @@ export const MeasureCheck = S.Struct({
   calls: S.optional(S.Array(S.String)),
   /** Tokens the model wrote for it, thinking included, over all its requests. */
   tokens: S.optional(S.Int),
+  /** Of those, the tokens it thought (counted from the stream; the runtime counts both together). */
+  thinkTokens: S.optional(S.Int),
   /** Its tokens reached the check's budget, and the reply was cut there. */
   cut: S.optional(S.Boolean),
+  /** It was cut while it was still thinking. */
+  cutThinking: S.optional(S.Boolean),
   ms: S.optional(S.Finite),
   /** Pages: the page the model wrote, and what the window does to it. */
   page: S.optional(S.String),
   script: S.optional(S.Array(PageAction)),
 });
 export type MeasureCheck = typeof MeasureCheck.Type;
+
+/**
+ * The version a Measure made now carries. It goes up whenever a check, a grade, a weight or how the
+ * checks run changes, so a score from before is marked as earlier and never sits beside a new one
+ * as if made alike.
+ */
+export const MEASURE_VERSION = 3;
 
 /** A part's count: checks passed of the ones that ran, and its weight in the score. */
 export const MeasurePartCount = S.Struct({ part: MeasurePart, passed: S.Int, total: S.Int, weight: S.Int });
@@ -341,19 +352,23 @@ export type MeasurePartCount = typeof MeasurePartCount.Type;
  * A model measured on this computer when the person asked (Settings › Models, Measure): its
  * reply speed and the share of checks it passed. Kept per model and digest, so a re-pulled
  * model with new weights is measured again. Without `version` it is an older measure of eight
- * single-shot checks, kept readable until the model is measured again.
+ * single-shot checks, kept readable until the model is measured again. Version 2 is the five parts
+ * with earlier checks and grades: fewer tasks, some replies graded differently, the chat's own
+ * sampling; its score is not alike with a version 3 one.
  */
 export const ModelMeasure = S.Struct({
   model: S.String,
   digest: S.String,
   /** When it was measured, ms since 1970. */
   at: S.Finite,
-  /** 2: the checks ran through the chat's own loop and tools, in parts. */
-  version: S.optional(S.Literal(2)),
+  /** 2 and on: the checks ran through the chat's own loop and tools, in parts. MEASURE_VERSION: this build's checks, grades and way of running them. */
+  version: S.optional(S.Literals([2, 3])),
   /** The window the checks ran at: version 2 uses the one a chat with this model uses. */
   numCtx: S.Int,
   /** Version 2: whether the model thought, as a chat with it does. */
   think: S.optional(S.Boolean),
+  /** How it sampled, its own and not the person's chat settings; the model's defaults for the rest. Absent: an earlier build's, which used the person's. */
+  sampling: S.optional(S.Struct({ temperature: S.Finite, seed: S.Int })),
   /** Decode speed: version 2 sums every request of the run. */
   tokensPerSecond: S.Finite.check(S.isGreaterThanOrEqualTo(0)),
   /** Version 2: the median wait from a request to its first token. */

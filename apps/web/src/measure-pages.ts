@@ -5,11 +5,13 @@
 // The page runs in an invisible frame built the way a chat's pages are (pages/page-doc.ts): the
 // server's one-time page address, which holds no token, sandboxed with scripts only and no
 // referrer, with the server's content policy as a header. The frame is laid out but never seen or
-// clicked, and takes no focus from the app. A page that does not finish in time, loads a second
-// document, or is too big for the server to serve, fails. A desktop app started with Chromium's
+// clicked, and takes no focus from the app. Pages run only while the window is shown (see
+// `shown`). A page that does not finish in time, loads a second document, or is too big for the
+// server to serve, fails. A desktop app started with Chromium's
 // sandbox off runs no pages here (pages/sandbox.ts): each goes back skipped, with that reason, and
 // the score leaves Pages out rather than counting them failed.
 import type { PageAction, PageSeen } from "@gates-local/contracts";
+import { framed } from "./measure-harness.ts";
 import { type PageServer, lockFrame, pageAddress, pageMb } from "./pages/page-doc.ts";
 import { sandboxOff } from "./pages/sandbox.ts";
 import { getState } from "./store.ts";
@@ -26,53 +28,28 @@ export const SANDBOX_WAIT_MS = 10_000;
 /** The server as this window knows it. */
 const server = (): PageServer => ({ origin: getState().serverOrigin, token: getState().fileToken });
 
-/** How long one page may take from load to its last action. */
+/** How long one page may take from load to its last action, while the window is shown. */
 export const PAGE_MS = 5000;
-const STEP_MS = 40;
 
-/** Runs in the frame after the page's own scripts: does each action, then posts what it saw. */
-function harness(token: string, script: readonly PageAction[], stepMs: number) {
-  const seen: string[] = [];
-  const wait = () => new Promise((resolve) => setTimeout(resolve, stepMs));
-  // The frame runs this function from its source text, so every helper it uses lives inside it.
-  // oxlint-disable-next-line unicorn/consistent-function-scoping
-  const text = (el: Element) => (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement ? el.value : el.textContent ?? "").trim();
-  // oxlint-disable-next-line unicorn/consistent-function-scoping
-  const shown = (el: Element) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
-  const run = async () => {
-    for (const a of script) {
-      if (a.do === "visible") {
-        seen.push([...document.querySelectorAll(a.target)].filter(shown).map(text).join("|"));
-        continue;
-      }
-      const el = document.querySelector(a.target);
-      if (!el) {
-        if (a.do === "read") seen.push("");
-        continue;
-      }
-      if (a.do === "read") seen.push(text(el));
-      else if (a.do === "click") (el as HTMLElement).click();
-      else if (a.do === "fill" && "value" in el) {
-        (el as HTMLInputElement).value = a.text;
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-      await wait();
-    }
-  };
-  addEventListener("load", () => {
-    setTimeout(() => {
-      run().then(
-        () => parent.postMessage({ token, seen }, "*"),
-        (e: unknown) => parent.postMessage({ token, seen, error: `The check could not use the page: ${String(e)}` }, "*"),
-      );
-    }, stepMs);
+/**
+ * Pages run only while this window is shown. A hidden window gets about one timer a second and no
+ * animation frames, so a page that is right would time out or never paint: that is where the window
+ * was, not what the model wrote. A page waits for the window to be shown, and one the window hid
+ * while it ran starts again from a fresh load once it is shown, with its whole time.
+ */
+const shown = () => typeof document === "undefined" || document.visibilityState !== "hidden";
+
+/** Resolves once this window is shown. */
+function whenShown(): Promise<void> {
+  if (shown()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const on = () => {
+      if (!shown()) return;
+      document.removeEventListener("visibilitychange", on);
+      resolve();
+    };
+    document.addEventListener("visibilitychange", on);
   });
-}
-
-/** The page with the harness last; the frame builder puts its policy first. */
-export function framed(page: string, token: string, script: readonly PageAction[], stepMs = STEP_MS): string {
-  return `${page}<script>(${harness.toString()})(${JSON.stringify(token)}, ${JSON.stringify(script)}, ${stepMs});</script>`;
 }
 
 /** What has the app's focus now, for a page frame to give it back to. */
@@ -83,12 +60,24 @@ const focused = (): HTMLElement | undefined => (typeof document !== "undefined" 
  * `before` is what keeps the app's focus (by default what has it now).
  */
 export async function runPage(id: string, page: string, script: readonly PageAction[], timeoutMs = PAGE_MS, at: PageServer = server(), before = focused()): Promise<PageSeen> {
+  for (;;) {
+    await whenShown();
+    const seen = await runShown(id, page, script, timeoutMs, at, before);
+    if (seen !== HIDDEN) return seen;
+  }
+}
+
+/** The window hid while the page ran: what it saw does not count, and the page runs again. */
+const HIDDEN = Symbol("hidden");
+
+async function runShown(id: string, page: string, script: readonly PageAction[], timeoutMs: number, at: PageServer, before: HTMLElement | undefined): Promise<PageSeen | typeof HIDDEN> {
   const token = crypto.randomUUID();
   const address = await pageAddress(framed(page, token, script), at);
   // Too big is the model's page; a refusal or a dropped connection is not, so it counts for nothing.
   if ("error" in address) {
     return address.error === "too-big" ? { id, seen: [], error: `The page is too big to run here (${pageMb(page)} MB).` } : { id, seen: [], skipped: SERVER_REFUSED_SKIP };
   }
+  if (!shown()) return HIDDEN;
   return new Promise((resolve) => {
     const frame = document.createElement("iframe");
     frame.setAttribute("aria-hidden", "true");
@@ -97,12 +86,17 @@ export async function runPage(id: string, page: string, script: readonly PageAct
     frame.style.cssText = "position:fixed;left:0;top:0;width:400px;height:300px;border:0;opacity:0;pointer-events:none;z-index:-1";
     let loads = 0;
     let timer = 0;
-    const finish = (seen: PageSeen) => {
+    const finish = (seen: PageSeen | typeof HIDDEN) => {
       clearTimeout(timer);
       removeEventListener("message", onMessage);
+      document.removeEventListener("visibilitychange", onHidden);
       frame.remove();
       resolve(seen);
     };
+    const onHidden = () => {
+      if (!shown()) finish(HIDDEN);
+    };
+    document.addEventListener("visibilitychange", onHidden);
     const onMessage = (e: MessageEvent) => {
       const data = e.data as { token?: unknown; seen?: unknown; error?: unknown } | null;
       if (e.source !== frame.contentWindow || data?.token !== token) return;

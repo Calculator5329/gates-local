@@ -6,7 +6,7 @@ import { CASES, toolCallOf } from "../../apps/server/src/measure/cases.ts";
 import { MOVING, probePage } from "./page-replies.ts";
 
 /** Checks this fake gets wrong, and what it writes instead. */
-const WRONG: Readonly<Record<string, string>> = {
+export const WRONG: Readonly<Record<string, string>> = {
   "instr-caps": "Jupiter is the largest planet.",
   // The total without two decimals: 37.5, not 37.50.
   "page-total": "```html\n<!doctype html><html><body><input id=\"price\" type=\"number\"> <input id=\"qty\" type=\"number\"> <button id=\"calc\">Total</button> <span id=\"total\"></span>\n<script>document.getElementById('calc').onclick = () => { document.getElementById('total').textContent = String(Number(document.getElementById('price').value) * Number(document.getElementById('qty').value)); };</script></body></html>\n```",

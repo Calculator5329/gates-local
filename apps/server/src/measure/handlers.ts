@@ -11,8 +11,9 @@
 // the run as an error: nothing is saved and the model's earlier measure stays.
 //
 // The page checks end with a page each, saved as pending. One window runs them, in a sandboxed
-// frame, and sends back what it saw (models.measurePages) while the run waits up to PAGE_WAIT_MS
-// for that, with the GPU lease already given back. Which window: the one that claims them first
+// frame, and sends back what it saw (models.measurePages) while the run waits, with the GPU lease
+// already given back: up to PAGE_WAIT_MS for a window to ask, then up to PAGE_HELD_MS on the window
+// that holds them, which runs them only while it is shown. Which window: the one that claims them first
 // (models.measurePagesClaim), the window that started the run coming first while it is connected.
 // The claim is the connection's: a window that reloads or closes lets it go, the list is pushed
 // again, and the next window to ask runs them. A second window is refused while one holds them,
@@ -35,10 +36,18 @@ import { measureStore } from "./store.ts";
 
 /** The chat's default window when the settings have none (settings/store.ts). */
 const DEFAULT_CTX = 16384;
-/** How long a run waits for a window to run its pages. */
+/** How long a run waits for a window to ask for its pages. */
 export const PAGE_WAIT_MS = 30_000;
+/**
+ * How long a run waits on the window holding its pages. A window runs them only while it is shown
+ * (web measure-pages.ts), so a run that ended with the app in the background waits for the person
+ * to come back; past this the pages are skipped and another model can be measured.
+ */
+export const PAGE_HELD_MS = 10 * 60_000;
 /** Why a page check counts for nothing: no window ran it in time. */
 export const PAGES_UNRUN = "Pages were not run: no window ran them while Measure waited.";
+/** Why a page check counts for nothing: the window holding the pages stayed out of sight. */
+export const PAGES_HIDDEN = "Pages were not run: the app's window stayed in the background while Measure waited.";
 export const RUNTIME_CHANGED_MEASURE = "The Ollama runtime changed while Measure ran, so it stopped.";
 
 export class MeasureError extends Error {
@@ -69,6 +78,7 @@ export interface MeasureDeps {
   readonly platform?: NodeJS.Platform;
   readonly fetch?: typeof fetch;
   readonly pageWaitMs?: number;
+  readonly pageHeldMs?: number;
 }
 
 /** The connection a call came on (ws HandlerContext): its id, and a signal that aborts when it closes. */
@@ -83,8 +93,8 @@ export function createMeasure(deps: MeasureDeps) {
   let running: string | undefined;
   /** The server's record of the last run: its last step, kept until the next run starts. */
   let last: MeasureRun | undefined;
-  /** The run waiting for its pages, by model and measure time. */
-  let waiting: { model: string; at: number; resolve: () => void } | undefined;
+  /** The run waiting for its pages, by model and measure time; `held` restarts its wait for a window that holds them, or for one to ask. */
+  let waiting: { model: string; at: number; resolve: () => void; held: (on: boolean) => void } | undefined;
   /** The connection that started the running measure. */
   let starter: Caller | undefined;
   /** The connection running the waiting run's pages now. */
@@ -155,9 +165,11 @@ export function createMeasure(deps: MeasureDeps) {
           let result: Awaited<ReturnType<typeof measureModel>>;
           try {
             const shell = await deps.shellStatus?.();
-            const { systemPrompt: _theirs, ...sampling } = turnSettings(settings, model);
+            // The person's sampling settings stay out (Measure samples its own way, suite.ts); how
+            // long the model stays in memory is theirs, as for a chat.
+            const { keep_alive: keepAlive } = turnSettings(settings, model);
             result = await measureModel({
-              baseUrl, model, signal, numCtx, sources: ensureFixtures(deps.dataDir), settings: sampling,
+              baseUrl, model, signal, numCtx, sources: ensureFixtures(deps.dataDir), ...(keepAlive === undefined ? {} : { keepAlive }),
               ...(settings?.thinking === undefined ? {} : { think: settings.thinking }),
               ...(shell ? { shell } : {}), ...(deps.platform ? { platform: deps.platform } : {}), ...(deps.fetch ? { fetch: deps.fetch } : {}),
               onStep: (done) => step({ model, state: "running", done, total }),
@@ -169,7 +181,7 @@ export function createMeasure(deps: MeasureDeps) {
           memory?.settled(want);
           saved = { model, digest, ...result };
           // Waiting from here: the push that carries its pages to the window keeps them pending.
-          if (pendingPages(saved) > 0) waiting = { model, at: saved.at, resolve: () => undefined };
+          if (pendingPages(saved) > 0) waiting = { model, at: saved.at, resolve: () => undefined, held: () => undefined };
           deps.push("models.measures", store.put(saved).map(settled));
         } finally {
           release?.();
@@ -180,8 +192,11 @@ export function createMeasure(deps: MeasureDeps) {
       }
       if (pendingPages(saved) > 0) {
         const at = saved.at;
+        // No window asked in time: PAGES_UNRUN. A window held them and did not send them in
+        // its time (its pages wait while it is out of sight): PAGES_HIDDEN.
+        let why = PAGES_UNRUN;
         await new Promise<void>((resolve) => {
-          const timer = setTimeout(done, deps.pageWaitMs ?? PAGE_WAIT_MS);
+          let timer = setTimeout(done, deps.pageWaitMs ?? PAGE_WAIT_MS);
           stop.signal.addEventListener("abort", done, { once: true });
           function done() {
             clearTimeout(timer);
@@ -190,11 +205,16 @@ export function createMeasure(deps: MeasureDeps) {
             holder = undefined;
             resolve();
           }
-          waiting = { model, at, resolve: done };
+          const held = (on: boolean) => {
+            clearTimeout(timer);
+            why = on ? PAGES_HIDDEN : PAGES_UNRUN;
+            timer = setTimeout(done, on ? deps.pageHeldMs ?? PAGE_HELD_MS : deps.pageWaitMs ?? PAGE_WAIT_MS);
+          };
+          waiting = { model, at, resolve: done, held };
         });
         saved = store.list().find((m) => m.model === model && m.at === at) ?? saved;
         if (pendingPages(saved) > 0) {
-          saved = skipPages(saved, PAGES_UNRUN);
+          saved = skipPages(saved, why);
           deps.push("models.measures", store.put(saved).map(settled));
         }
       }
@@ -223,10 +243,13 @@ export function createMeasure(deps: MeasureDeps) {
     if (starterHere && starter?.clientId !== id) return { claimed: false };
     const held = { model, at, clientId: id };
     holder = held;
+    waiting?.held(true);
     caller?.signal?.addEventListener("abort", () => {
       if (holder !== held) return;
       holder = undefined;
-      if (waitsFor(model, at)) deps.push("models.measures", store.list().map(settled));
+      if (!waitsFor(model, at)) return;
+      waiting?.held(false);
+      deps.push("models.measures", store.list().map(settled));
     }, { once: true });
     return { claimed: true };
   };
