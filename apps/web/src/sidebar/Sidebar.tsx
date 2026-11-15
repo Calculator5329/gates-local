@@ -2,7 +2,9 @@
 // The sidebar (shell.md F05, F33): thread list grouped by day with search, or
 // the Settings section nav, and the footer's row of icons (Settings, Models, Usage, the update icon).
 import type { PullProgress } from "@gates-local/contracts";
-import { Fragment, type KeyboardEvent, type MouseEvent, type ReactNode, isValidElement, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, type KeyboardEvent, type MouseEvent, type ReactNode, isValidElement, useEffect, useLayoutEffect, useRef } from "react";
+import { requestFocus } from "../lib/ui/kit/focus.ts";
+import { useNow } from "../lib/ui/kit/now.ts";
 import { booting, rtInfo, rtOf, unread } from "../runtime/words.tsx";
 import { finishedInBurst, modelsIcon, settingsIcon } from "./footer-state.ts";
 import { describeModel, shortAge, when } from "../lib/words/format.ts";
@@ -24,16 +26,6 @@ export const SECTIONS: readonly (readonly [Section, string, IconId])[] = [
   ["advanced", "Advanced", "sliders"],
   ["shortcuts", "Shortcuts", "keyboard"],
 ];
-
-/** Re-render every interval so "5m" ages without a store change. */
-function useNow(ms: number): number {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), ms);
-    return () => clearInterval(t);
-  }, [ms]);
-  return now;
-}
 
 export function goNew(): void {
   closeDrawer(() => {
@@ -62,16 +54,12 @@ export function openDrawer(): void {
   else if (!onDrawerEntry()) history.pushState({ [DRAWER_ENTRY]: true }, "");
   // the first thing in the drawer, as the row's Search button was: the Search field, or in Settings Back to chat.
   // On touch focus takes New thread beside the field instead, so the keyboard stays down, as in the phone picker.
-  requestAnimationFrame(() => document.querySelector<HTMLElement>(isTouch() ? ".sb .sb-tools button, .sb .snav .sb-act" : ".sb #searchIn, .sb .snav .sb-act")?.focus());
+  requestFocus(() => document.querySelector<HTMLElement>(isTouch() ? ".sb .sb-tools button, .sb .snav .sb-act" : ".sb #searchIn, .sb .snav .sb-act"));
 }
 
 /** After the drawer closes, focus goes to the top bar's first visible control: never a row sliding off screen. */
 function focusShell(): void {
-  requestAnimationFrame(() => {
-    for (const el of document.querySelectorAll<HTMLElement>(".hdr .bk, #menuBtn, .set-bar .set-done")) {
-      if (el.getClientRects().length > 0) return el.focus();
-    }
-  });
+  requestFocus(() => [...document.querySelectorAll<HTMLElement>(".hdr .bk, #menuBtn, .set-bar .set-done")].find((el) => el.getClientRects().length > 0));
 }
 
 function drawerClosed(refocus: boolean): void {
@@ -95,7 +83,7 @@ export function closeDrawer(then?: () => void, refocus = then === undefined): vo
     then?.();
   };
   history.back();
-  // a browser that never answers the back (none seen) still closes
+  // oxlint-disable-next-line gates/timer-needs-reason -- a limit on the back's answer: a browser that never sends popstate (none seen) still closes the drawer
   closeTimer = setTimeout(() => drawerClosed(false), 400);
 }
 
@@ -119,7 +107,7 @@ export function openSearch(): void {
   else if (s.view === "settings") leaveSettings();
   else if (s.view === "pictures") leavePictures();
   if (narrow) openDrawer();
-  requestAnimationFrame(() => document.querySelector<HTMLInputElement>("#searchIn")?.focus());
+  requestFocus("#searchIn");
 }
 
 const clearSearch = () => setState({ search: "" });
@@ -222,6 +210,7 @@ function fadeEdges(el: HTMLElement | null): (() => void) | undefined {
 function ThreadList() {
   const list = useRef<HTMLElement | null>(null);
   // threads arriving, leaving or filtered change how far the list runs without a scroll or a resize
+  // oxlint-disable-next-line gates/effect-needs-reason -- keeps the list's edge fades in step with its laid-out height after each commit
   useLayoutEffect(() => {
     if (list.current) measureFade(list.current);
   });
@@ -230,6 +219,7 @@ function ThreadList() {
     list.current = el;
     return fadeEdges(el);
   }).current;
+  // oxlint-disable-next-line gates/effect-needs-reason -- drops the hover preload, which lives in the session, when the list unmounts
   useEffect(() => () => preloadThread(null), []);
   const threads = useStore((s) => s.threads);
   const q = useStore((s) => s.search.trim().toLowerCase());
@@ -451,14 +441,9 @@ function ModelsButton() {
   const pulls = useStore((s) => s.pulls);
   const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
   const inModels = useStore((s) => s.view === "settings" && s.section === "models");
-  const [, seen] = useState(0);
-  useEffect(() => {
-    if (!inModels) return;
-    const fresh = Object.values(pulls).filter((p) => p.state === "error" && !seenFailures.has(p));
-    for (const p of fresh) seenFailures.add(p);
-    if (fresh.length > 0) seen((n) => n + 1);
-  }, [inModels, pulls]);
   const all = Object.values(pulls);
+  // a failure on show in Settings › Models is seen: the icon draws it seen in the same render
+  if (inModels) for (const p of all) if (p.state === "error") seenFailures.add(p);
   // downloads that finished in this burst stay in the ring's total, so it never goes backwards
   const burst = useRef<readonly PullProgress[]>([]);
   burst.current = finishedInBurst(burst.current, all);

@@ -2,6 +2,7 @@
 // selection, and a picture that finishes while the screen is open. Its own small store,
 // so the chat's store never holds thousands of pictures.
 import type { Picture, PictureList, PictureListParams } from "@gates-local/contracts";
+import { debounce, withTimeout } from "../lib/ui/kit/async.ts";
 
 export interface PicturesView {
   readonly pictures: readonly Picture[];
@@ -34,7 +35,8 @@ export function createPictures({ list }: { list: (params: PictureListParams) => 
   let ticket = 0;
   let paging = false;
   let shown = false;
-  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The first page for what was typed, once typing pauses. */
+  const searchLater = debounce((q: string) => void firstPage(q), SEARCH_WAIT_MS);
 
   function set(patch: Partial<PicturesView>): void {
     view = { ...view, ...patch };
@@ -65,22 +67,20 @@ export function createPictures({ list }: { list: (params: PictureListParams) => 
 
     /** Opening the screen: a fresh first page, the search cleared. Resolves when it is in, or at the bound. */
     enter(): Promise<void> {
-      clearTimeout(searchTimer);
+      searchLater.cancel();
       set({ q: "", large: false, ...(view.status === "error" ? { status: "loading" as const } : {}) });
-      const loaded = firstPage("");
-      return Promise.race([loaded, new Promise<void>((resolve) => setTimeout(resolve, OPEN_BOUND_MS))]);
+      return withTimeout(firstPage(""), OPEN_BOUND_MS, () => undefined);
     },
 
     /** The screen is on show; a picture finishing meanwhile joins the top. */
     shown(on: boolean): void {
       shown = on;
-      if (!on) { clearTimeout(searchTimer); if (view.large) set({ large: false }); }
+      if (!on) { searchLater.cancel(); if (view.large) set({ large: false }); }
     },
 
     search(q: string): void {
       set({ q });
-      clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => void firstPage(q), SEARCH_WAIT_MS);
+      searchLater(q);
     },
 
     /** The next page, once at a time. */

@@ -2,7 +2,8 @@
 // score on its row (the phone's measure line on a phone). The run's window, thinking, speed and
 // first word; the five parts with their weights; and each check with what a pass needs, what
 // went wrong, and on a click what the model wrote and which tools it called.
-import { type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useRef, useState } from "react";
+import { focusOnDraw } from "../lib/ui/kit/focus.ts";
 import { createPortal } from "react-dom";
 import { MEASURE_VERSION, type MeasureCheck, type MeasurePart, type ModelMeasure } from "@gates-local/contracts";
 import { k } from "../lib/words/format.ts";
@@ -40,12 +41,7 @@ export function MeasureDetail({ name, label, onClose }: { name: string; label: s
   const m = useStore((s) => measureOf(s, name));
   const busy = useStore((s) => measuringNow(s) !== undefined);
   const box = useRef<HTMLDivElement>(null);
-  const close = useRef<HTMLButtonElement>(null);
-  useEffect(() => close.current?.focus(), []);
-  // The measure went away (the model's weights changed): nothing is left to show.
-  useEffect(() => {
-    if (m === undefined) onClose();
-  }, [m, onClose]);
+  // The measure went away (the model's weights changed): nothing is left to show, and the parent closes it (ModelMeasure.tsx).
   if (m === undefined) return null;
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") {
@@ -87,7 +83,7 @@ export function MeasureDetail({ name, label, onClose }: { name: string; label: s
           <button type="button" className="btn outline" data-testid="models.measure.again" disabled={busy} onClick={() => { void measureModel(name); onClose(); }}>
             <Icon id="speed" cls="s14" />Measure again
           </button>
-          <button ref={close} type="button" className="btn" data-testid="models.measure.close" onClick={onClose}>Close</button>
+          <button ref={focusOnDraw} type="button" className="btn" data-testid="models.measure.close" onClick={onClose}>Close</button>
         </div>
       </div>
     </div>,

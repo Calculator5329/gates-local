@@ -15,6 +15,7 @@ import { framed } from "./measure-harness.ts";
 import { type PageServer, lockFrame, pageAddress, pageMb } from "../pages/page-doc.ts";
 import { sandboxOff } from "../pages/sandbox.ts";
 import { getState } from "../lib/store/store.ts";
+import { withTimeout } from "../lib/ui/kit/async.ts";
 
 /** Why Measure ran no page, in a desktop app started with the sandbox off. */
 export const SANDBOX_OFF_SKIP = "Pages were not run: Chromium's sandbox is off in this copy.";
@@ -110,6 +111,7 @@ async function runShown(id: string, page: string, script: readonly PageAction[],
     });
     // The page may not take the app's focus.
     frame.addEventListener("focus", () => before?.focus({ preventScroll: true }));
+    // oxlint-disable-next-line gates/timer-needs-reason -- a written page may never post back; finish clears this with the frame's listeners
     timer = window.setTimeout(() => finish({ id, seen: [], error: `The page did not finish within ${Math.round(timeoutMs / 1000)} seconds.` }), timeoutMs);
     lockFrame(frame, address.url, "Measure page");
     document.body.append(frame);
@@ -127,10 +129,7 @@ export async function runPages(
   off: () => Promise<boolean> = sandboxOff,
   waitMs = SANDBOX_WAIT_MS,
 ): Promise<PageSeen[]> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<string>((resolve) => { timer = setTimeout(() => resolve(SANDBOX_UNKNOWN_SKIP), waitMs); });
-  const skip = await Promise.race([off().then((o) => (o ? SANDBOX_OFF_SKIP : undefined), () => SANDBOX_UNKNOWN_SKIP), late]);
-  clearTimeout(timer);
+  const skip = await withTimeout(off().then((o) => (o ? SANDBOX_OFF_SKIP : undefined), () => SANDBOX_UNKNOWN_SKIP), waitMs, () => SANDBOX_UNKNOWN_SKIP);
   const before = focused();
   return Promise.all(checks.filter((c) => c.state === "pending").map((c): PageSeen | Promise<PageSeen> =>
     skip !== undefined ? { id: c.id, seen: [], skipped: skip }

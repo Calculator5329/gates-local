@@ -5,6 +5,8 @@
 import type { UsageRead } from "./usage-data.ts";
 import { usageScreen } from "../app/screen-loaders.ts";
 import { getState, setState } from "../lib/store/store.ts";
+import { withTimeout } from "../lib/ui/kit/async.ts";
+import { requestFocus } from "../lib/ui/kit/focus.ts";
 
 export interface UsageData {
   readonly read: UsageRead | null;
@@ -63,7 +65,7 @@ export function createUsage({ read, beforeOpen, asked, enter, exit }: UsageEffec
     const mine = ++gen;
     asked();
     const first = refresh();
-    await Promise.all([usageScreen.load(), Promise.race([first, new Promise((r) => setTimeout(r, FIRST_READ_WAIT_MS))])]);
+    await Promise.all([usageScreen.load(), withTimeout(first, FIRST_READ_WAIT_MS, () => undefined)]);
     if (mine !== gen) return;
     beforeOpen();
     setState({ panel: "usage", pop: null });
@@ -77,9 +79,9 @@ export function createUsage({ read, beforeOpen, asked, enter, exit }: UsageEffec
     setState({ panel: null });
     if (!keepEntry) exit();
     if (!refocus) return;
-    requestAnimationFrame(() => {
+    requestFocus(() => {
       const icon = document.querySelector<HTMLElement>(".sb-foot .usage");
-      if (icon !== null && icon.getClientRects().length > 0) icon.focus();
+      return icon !== null && icon.getClientRects().length > 0 ? icon : null;
     });
   }
 

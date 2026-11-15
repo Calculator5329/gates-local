@@ -98,5 +98,5 @@ table is in, since a restarted server may see different memory.
 No gradients, no glass, no rounded-everything, no orphan rows. No footnotes,
 and no explanations in tooltips (see Settings text). Check hover states.
 
-A pop-up blurs what is behind it by 8 px only when a GPU draws the page; a
-software renderer only dims it, since a blur there costs every frame.
+A pop-up dims what is behind it and never blurs it: a blur is glass, and it
+costs every frame on a computer that draws without a GPU.

@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-15: pop-ups dim the window without blurring it
+
+- Settings, Models and Usage still dim the window behind them, but no
+  longer blur it on a computer whose graphics card draws the page.
+- A model's measure detail no longer opens again by itself after the
+  model is measured again.
+- A note from an image setup that finished after its pop-up closed no
+  longer shows when the pop-up opens next time.
+- Internal: focus after a redraw, pop-up placement, shared clocks, short
+  flashes, waits with a limit and file downloads each come from one helper
+  in `apps/web/src/lib/ui/kit`, and the effects and timers left in those
+  folders say why they are there.
+
 ## 2026-11-15: the Library and Settings stop asking again for what they have
 
 - Your Library list could go back to an older version for a moment: when

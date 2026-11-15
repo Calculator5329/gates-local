@@ -10,6 +10,8 @@ import { answers, canPick, cardFit, cardLine, fitFor, refusedNow, stopsChat } fr
 import { MakerMark } from "../models/MakerMark.tsx";
 import { ModelSpeed, speedWords } from "../models/model-speed.tsx";
 import { Icon } from "../lib/ui/icons.tsx";
+import { afterCommit, requestFocus } from "../lib/ui/kit/focus.ts";
+import { usePopover } from "../lib/ui/kit/popover.ts";
 import { activeEntry, contextRuler, makerGroups, makerOf, pickerEntries, suggestedOf, type Maker } from "./picker-models.ts";
 import { focusComposer } from "../composer/focus.ts";
 import { openSettings, pickModel, setContext, updateSettings } from "../lib/session/index.ts";
@@ -111,17 +113,19 @@ export function Picker() {
   const present = new Set([...rows.map(r => makerOf(r.tag, makers)), ...(catalog ?? []).map(c => makerOf(c.name, makers))]);
   // The first view waits for the model list only; fit values before the first table are skeletons.
   const prepared = !readyForFits || models !== undefined || settled;
+  // oxlint-disable-next-line gates/effect-needs-reason -- opens the picker in the store once its first view's data is in; the store's pop is what App and the scrim read
   useLayoutEffect(() => {
     if (pop && !pop.ready && prepared && getState().pop === pop) setState({ pop: { ...pop, ready: true } });
   }, [pop, prepared]);
+  // oxlint-disable-next-line gates/effect-needs-reason -- moves focus into the picker on the commit that first draws it, which waits for the model list
   useLayoutEffect(() => {
     if (!pop?.ready) return;
     if (isTouch() && !pop.kb) ref.current?.querySelector<HTMLButtonElement>(".pk-close")?.focus({ preventScroll: true });
     else input.current?.focus({ preventScroll: true });
   }, [pop]);
-  useLayoutEffect(() => {
-    const root = ref.current, anchor = document.getElementById("modelBtn");
-    if (!pop || !root || !anchor) return;
+  usePopover(ref, pop !== null, (root) => {
+    const anchor = document.getElementById("modelBtn");
+    if (!anchor) return;
     root.style.maxHeight = "";
     if (phone) { root.style.left = `${Math.max(8, (window.innerWidth - root.offsetWidth) / 2)}px`; root.style.top = ""; return; }
     // A popover over the conversation: its right edge on the button's right
@@ -160,13 +164,13 @@ export function Picker() {
   function choose(row: Row) {
     setHighlight(row.tag);
     if (row.downloading !== undefined) return;
-    if (phone) { setStep("context"); requestAnimationFrame(() => ref.current?.querySelector<HTMLButtonElement>(".pk-back")?.focus({ preventScroll: true })); }
+    if (phone) { setStep("context"); requestFocus(() => ref.current?.querySelector<HTMLButtonElement>(".pk-back"), { preventScroll: true }); }
     else finish(row);
   }
   function backToModels(search: boolean) {
     setStep("models");
-    const focus = () => search ? input.current?.focus({ preventScroll: true }) : ref.current?.querySelector<HTMLButtonElement>(".pk-close")?.focus({ preventScroll: true });
-    if (phone) requestAnimationFrame(focus); else focus();
+    const target = () => search ? input.current : ref.current?.querySelector<HTMLButtonElement>(".pk-close");
+    if (phone) requestFocus(target, { preventScroll: true }); else target()?.focus({ preventScroll: true });
   }
   function toggleFavorite(tag: string) {
     const next = favorites.includes(tag) ? favorites.filter(x => x !== tag) : [...favorites, tag];
@@ -182,7 +186,7 @@ export function Picker() {
       const next = visible[index];
       if (next) {
         setHighlight(next.tag);
-        requestAnimationFrame(() => {
+        afterCommit(() => {
           const row = ref.current?.querySelector(`[data-m="${CSS.escape(next.tag)}"]`);
           row?.scrollIntoView({ block: "nearest" });
           // focus stays in the search field: the highlighted row's cut name opens its tip as focus would
@@ -192,18 +196,15 @@ export function Picker() {
     } else if (e.key === "Enter" && active) { e.preventDefault(); choose(active); }
     else if (e.key === "ArrowRight" && active && e.currentTarget.selectionStart === query.length) {
       e.preventDefault();
-      const focusContext = () => {
-        const chosen = ref.current?.querySelector<HTMLButtonElement>(`[data-ctx="${actual}"]:not(:disabled)`);
-        (chosen ?? ref.current?.querySelector<HTMLButtonElement>(".pk-ctx-row:not(:disabled)"))?.focus({ preventScroll: true });
-      };
-      if (phone) { setStep("context"); requestAnimationFrame(focusContext); }
-      else focusContext();
+      const context = () => ref.current?.querySelector<HTMLButtonElement>(`[data-ctx="${actual}"]:not(:disabled)`) ?? ref.current?.querySelector<HTMLButtonElement>(".pk-ctx-row:not(:disabled)");
+      if (phone) { setStep("context"); requestFocus(context, { preventScroll: true }); }
+      else context()?.focus({ preventScroll: true });
     }
   }
   function keys(e: KeyboardEvent<HTMLDivElement>) {
     if (e.key === "Escape") {
       e.preventDefault(); e.stopPropagation(); closePop();
-      requestAnimationFrame(() => document.getElementById("modelBtn")?.focus({ preventScroll: true }));
+      requestFocus("#modelBtn", { preventScroll: true });
     }
     if (e.key !== "Tab") return;
     const nodes = tabStops(ref.current);

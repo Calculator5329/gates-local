@@ -273,7 +273,12 @@ export interface State {
   readonly noticeOffer: NoticeOffer | null;
   /** Per thread, why its newest load failed; the timeline shows it with Retry while that thread is open (WF-03). */
   readonly loadErrors: Readonly<Record<string, string>>;
+  /** Work waiting for the next commit, such as a focus move to a node that commit draws (lib/ui/kit/focus.ts runs it). */
+  readonly afterCommit: readonly CommitJob[];
 }
+
+/** One piece of after-commit work; false means its node is not drawn yet, so it runs once more a frame later. */
+export type CommitJob = () => boolean | void;
 
 const initial: State = {
   conn: { kind: "connecting" },
@@ -342,6 +347,7 @@ const initial: State = {
   notice: null,
   noticeOffer: null,
   loadErrors: {},
+  afterCommit: [],
 };
 
 let state: State = initial;

@@ -77,6 +77,7 @@ export function usePages(threadId: string | null): { versions: PageVersion[]; wr
   const olderNow = () => (threadId === null ? undefined : older.get(threadId));
   const before = useSyncExternalStore(subscribeOlder, olderNow, olderNow);
   const first = messages?.[0]?.id;
+  // oxlint-disable-next-line gates/effect-needs-reason -- asks the server for the pages above the loaded messages once a commit shows there are some
   useEffect(() => {
     if (threadId !== null && first !== undefined && earlier > 0) askOlder(threadId, first);
   }, [threadId, first, earlier]);

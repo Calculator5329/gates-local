@@ -28,6 +28,9 @@ import { keepSheetFocus } from "./sheet-focus.ts";
 import { useReadAloud } from "../voice/talk.ts";
 import { useCovering } from "../pages/cover.ts";
 import { PHONE, POP_EL, SheetHead, Tip, TurnSkel, anchorOf, closePop, isPhone, isTouch, menuKeys, place, tabStops, useMedia } from "../lib/ui/ui.tsx";
+import { downloadBlob, withTimeout } from "../lib/ui/kit/async.ts";
+import { CommitJobs } from "../lib/ui/kit/focus.ts";
+import { usePopover } from "../lib/ui/kit/popover.ts";
 
 /** Which setup icons show under the start screen's bar: library search's and image generation's, each only while it is not set up. */
 interface Unset { readonly lib: boolean; readonly img: boolean }
@@ -69,6 +72,7 @@ function SetupIcons() {
   const lib = useStore((s) => unsetNow(s, saved).lib);
   const img = useStore((s) => unsetNow(s, saved).img);
   const known = useStore((s) => unsetNow(s, saved).known);
+  // oxlint-disable-next-line gates/effect-needs-reason -- keeps the last known shape in storage for the next start, whichever read changed it
   useEffect(() => {
     if (!known) return;
     try {
@@ -227,6 +231,7 @@ function Header({ isNew }: { isNew: boolean }) {
   const title = useStore((s) => s.threads.find((t) => t.id === s.threadId)?.title ?? "");
   const renaming = useStore((s) => s.renaming);
   const input = useRef<HTMLInputElement>(null);
+  // oxlint-disable-next-line gates/effect-needs-reason -- the window's title is outside React, and the rename field's text is selected on the commit that draws it
   useLayoutEffect(() => {
     syncWindowTitle(isNew ? null : title);
     if (renaming) input.current?.select();
@@ -268,12 +273,7 @@ function Header({ isNew }: { isNew: boolean }) {
 function exportThread(threadId: string, messages: readonly Message[]): void {
   const s = getState();
   const title = s.threads.find((t) => t.id === threadId)?.title ?? "thread";
-  const url = URL.createObjectURL(new Blob([threadMarkdown(threadId, messages)], { type: "text/markdown" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${title.replace(/[^\w\- ]+/g, "").trim() || "thread"}.md`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadBlob(new Blob([threadMarkdown(threadId, messages)], { type: "text/markdown" }), `${title.replace(/[^\w\- ]+/g, "").trim() || "thread"}.md`);
 }
 
 /** Close a thread menu, then act on the row it opened from. */
@@ -302,14 +302,8 @@ const EXPORT_WAIT_MS = 8000;
 async function exportFromMenu(id: string): Promise<void> {
   preloadThread(null);
   const title = getState().threads.find((t) => t.id === id)?.title ?? "this thread";
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<"late">((done) => {
-    timer = setTimeout(() => done("late"), EXPORT_WAIT_MS);
-  });
   const read = call("threads.get", { threadId: id }).finally(() => waitForThreadDeletion(id));
-  const got = await Promise.race([read, late])
-    .catch(() => "failed" as const)
-    .finally(() => clearTimeout(timer));
+  const got = await withTimeout(read, EXPORT_WAIT_MS, () => "late" as const).catch(() => "failed" as const);
   const fail = (why: string) => setState({ notice: `Couldn't export “${title}”: ${why}` });
   if (!getState().threads.some((t) => t.id === id)) return fail("it was deleted.");
   if (got === "late") return fail("it took too long to load. Try again.");
@@ -331,9 +325,8 @@ function ThreadMenu() {
   const canDelete = useStore((s) => s.unavailable["threads.delete"] !== true);
   const open = pop !== null;
   const ref = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el || pop === null) return;
+  usePopover(ref, pop !== null, (el) => {
+    if (pop === null) return;
     const anchor = anchorOf("thread");
     if (pop.at) placeAt(el, pop.at);
     else if (anchor) place(el, anchor, "end", "below");
@@ -506,14 +499,17 @@ export function App() {
   const pics = useScreen(picturesScreen, view === "pictures");
   const panel = useStore((s) => s.panel);
   const usage = useScreen(usageScreen, panel === "usage");
+  // oxlint-disable-next-line gates/effect-needs-reason -- fetches the other screens' code once the first paint is out of the way
   useEffect(preloadScreens, []);
   const phone = useMedia(PHONE);
   // A phone's sheet stays modal through live updates; Ctrl+M's search focuses itself after opening.
+  // oxlint-disable-next-line gates/effect-needs-reason -- a focus trap on the open sheet's node, held for as long as the sheet is drawn
   useEffect(() => {
     if (popId === null || !isPhone()) return;
     const sheet = document.getElementById(POP_EL[popId]);
     if (sheet !== null) return keepSheetFocus(sheet);
   }, [popId, popOpen]);
+  // oxlint-disable-next-line gates/effect-needs-reason -- the app's keyboard, touch, resize and history listeners, attached for the app's whole life
   useEffect(() => {
     document.addEventListener("keydown", onKey);
     document.addEventListener("touchstart", onTouchStart, { passive: true });
@@ -542,6 +538,7 @@ export function App() {
   const isPics = view === "pictures";
   const under = isSet || isPics;
   // the section list is a phone's Settings home; leaving Settings forgets it
+  // oxlint-disable-next-line gates/effect-needs-reason -- Settings is left by several paths in lib/session (back, Escape, a link); the reset follows the view whichever ran
   useEffect(() => {
     if (view !== "settings" && getState().setList) setState({ setList: false });
   }, [view]);
@@ -640,6 +637,8 @@ export function App() {
       <OptsMenu />
       <ThreadMenu />
       <Tip />
+      {/* last, so a focus move asked for in a handler runs after the rest of that commit is drawn */}
+      <CommitJobs />
     </>
   );
 }

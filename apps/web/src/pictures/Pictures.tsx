@@ -18,6 +18,10 @@ import { focusComposer } from "../composer/focus.ts";
 import { openDrawer } from "../sidebar/Sidebar.tsx";
 import { NA, getState, setState, useStore } from "../lib/store/store.ts";
 import { PHONE, useMedia } from "../lib/ui/ui.tsx";
+import { downloadBlob } from "../lib/ui/kit/async.ts";
+import { useDocumentEvent } from "../lib/ui/kit/events.ts";
+import { useFlash } from "../lib/ui/kit/flash.ts";
+import { requestFocus } from "../lib/ui/kit/focus.ts";
 
 const GAP = 6;
 const ROW_H = 180;
@@ -92,23 +96,13 @@ function fileName(p: Picture): string {
 }
 
 async function savePicture(url: string, name: string): Promise<void> {
-  const blob = await pictureBlob(url);
-  const href = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = href;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(href), 10_000);
+  downloadBlob(await pictureBlob(url), name);
 }
 
 /** An icon button that does a thing once: a check when it worked, the alert when it did not, then its icon again. Same size throughout. */
 function DoButton({ icon, label, act }: { icon: IconId; label: string; act: () => Promise<void> }) {
-  const [state, show] = useState<"idle" | "ok" | "failed">("idle");
-  useEffect(() => {
-    if (state === "idle") return;
-    const t = setTimeout(() => show("idle"), 1500);
-    return () => clearTimeout(t);
-  }, [state]);
+  const [flash, show] = useFlash<"ok" | "failed">(1500);
+  const state = flash ?? "idle";
   const tip = state === "failed" ? `Couldn't ${label.toLowerCase()}` : label;
   return (
     <button type="button" className={`ibtn${state === "failed" ? " red" : ""}`} data-testid={`pictures.actions.${icon}`} aria-label={tip} data-tip={tip} onClick={() => void act().then(() => show("ok"), () => show("failed"))}>
@@ -313,6 +307,7 @@ function SheetView({ list, sel, phone, q, next }: { list: readonly Picture[]; se
   const anchor = useRef<string | null>(null);
   const [width, setWidth] = useState(0);
   const [win, setWin] = useState({ top: 0, h: 0 });
+  // oxlint-disable-next-line gates/effect-needs-reason -- measures the drawn sheet and follows its size with an observer for as long as it is mounted
   useLayoutEffect(() => {
     const el = scroller.current;
     const box = rowsBox.current;
@@ -334,6 +329,7 @@ function SheetView({ list, sel, phone, q, next }: { list: readonly Picture[]; se
 
   // A picture joining the top keeps the rows on screen where they were (no reflow above the window).
   const prev = useRef<{ list: readonly Picture[]; sheet: Sheet; q: string } | null>(null);
+  // oxlint-disable-next-line gates/effect-needs-reason -- corrects the scroll offset against the new layout before the browser paints it
   useLayoutEffect(() => {
     const el = scroller.current;
     const before = prev.current;
@@ -353,12 +349,14 @@ function SheetView({ list, sel, phone, q, next }: { list: readonly Picture[]; se
   }, [list, sheet, q]);
 
   // the next page, once the window nears the end (or the first page does not fill it)
+  // oxlint-disable-next-line gates/effect-needs-reason -- the window's place comes from scrolling and resizing as well as from new pages; asks once per change
   useEffect(() => {
     if (next !== undefined && win.h > 0 && win.top + win.h > sheet.height - MORE_AT) void pictures.more();
   }, [next, win, sheet.height]);
 
   // the arrow keys keep the picked picture in view
   const last = sel.at(-1);
+  // oxlint-disable-next-line gates/effect-needs-reason -- scrolls the drawn sheet to the pick, which moves from keys, clicks and a page landing alike
   useEffect(() => {
     const el = scroller.current;
     if (el === null || last === undefined) return;
@@ -464,30 +462,27 @@ export function Pictures() {
   const picked = useMemo(() => sel.map((id) => byId.get(id)).filter((p) => p !== undefined), [sel, byId]);
   const one = picked.length === 1 ? picked[0] : undefined;
 
+  // oxlint-disable-next-line gates/effect-needs-reason -- tells the pictures list the screen is on show for exactly as long as it is mounted
   useEffect(() => {
     pictures.shown(true);
     return () => pictures.shown(false);
   }, []);
 
   // Enter shows the picked picture large; the arrows move the pick (and the large view with it)
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      const t = e.target instanceof HTMLElement ? e.target : null;
-      if (e.ctrlKey || e.metaKey || e.altKey || t?.closest("input,textarea,[contenteditable]")) return;
-      if (getState().pop !== null || getState().panel !== null || getState().drawer) return;
-      const onButton = t?.closest("button") ?? null;
-      if (e.key === "Enter" && (onButton === null || onButton.classList.contains("pics-tile"))) {
-        e.preventDefault();
-        pictures.setLarge(true);
-      } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
-        e.preventDefault();
-        const id = step(pictures.get().pictures, e.key === "ArrowRight" ? 1 : -1);
-        if (id !== undefined && !pictures.get().large) requestAnimationFrame(() => document.querySelector<HTMLElement>(`.pics-tile[data-job="${CSS.escape(id)}"]`)?.focus({ preventScroll: true }));
-      }
-    };
-    document.addEventListener("keydown", key);
-    return () => document.removeEventListener("keydown", key);
-  }, []);
+  useDocumentEvent("keydown", (e) => {
+    const t = e.target instanceof HTMLElement ? e.target : null;
+    if (e.ctrlKey || e.metaKey || e.altKey || t?.closest("input,textarea,[contenteditable]")) return;
+    if (getState().pop !== null || getState().panel !== null || getState().drawer) return;
+    const onButton = t?.closest("button") ?? null;
+    if (e.key === "Enter" && (onButton === null || onButton.classList.contains("pics-tile"))) {
+      e.preventDefault();
+      pictures.setLarge(true);
+    } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+      e.preventDefault();
+      const id = step(pictures.get().pictures, e.key === "ArrowRight" ? 1 : -1);
+      if (id !== undefined && !pictures.get().large) requestFocus(`.pics-tile[data-job="${CSS.escape(id)}"]`, { preventScroll: true });
+    }
+  });
 
   return (
     <div className="pics">

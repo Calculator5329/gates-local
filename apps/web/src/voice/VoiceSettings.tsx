@@ -20,6 +20,7 @@ export function VoiceSettings() {
   const attempt = useRef(0);
   const locked = useStore((s) => s.unavailable["settings.update"] === true);
   const talk = useTalk().on;
+  // oxlint-disable-next-line gates/effect-needs-reason -- on unmount a connect still on its way must not write into a card that is gone
   useEffect(() => () => { attempt.current++; }, []);
   if (settings === NA) return null;
   // Settings arrive before Settings can open on a healthy start; the card keeps its shape when they do not.

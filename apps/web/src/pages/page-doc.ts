@@ -6,6 +6,7 @@
 // carries no token, sandboxed to scripts only, with no referrer; the app's own
 // policy (index.html) lets a frame load nothing but that route. Measure's page
 // checks (measure-pages.ts) take the same way to their frame.
+import { downloadBlob } from "../lib/ui/kit/async.ts";
 
 /** The frame's whole permission: its scripts run, and nothing else (no same origin, popups, forms, downloads or top navigation). */
 export const PAGE_SANDBOX = "allow-scripts";
@@ -71,13 +72,7 @@ export function pageFileName(title: string): string {
 
 /** Save the page as the model wrote it, as an .html file. */
 export function savePage(code: string, title: string): void {
-  const url = URL.createObjectURL(new Blob([code], { type: "text/html" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = pageFileName(title);
-  a.rel = "noopener";
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  downloadBlob(new Blob([code], { type: "text/html" }), pageFileName(title));
 }
 
 /**

@@ -4,6 +4,7 @@
 // sources, image and update status) is in, and what Set up images would fetch;
 // Settings waits for that, up to a bound, so a slow server shows placeholders
 // instead of a dead key.
+import { withTimeout } from "../lib/ui/kit/async.ts";
 
 interface Reads {
   /** The samples and imports, put in the store by the read itself; their pushes keep them current. */
@@ -57,7 +58,7 @@ export function createSettingsReads({ readImports, readFolder, readSetup }: Read
     ready(ms = 1000): Promise<void> | null {
       if (waiting === null || late) return null;
       const current = waiting;
-      return Promise.race([current, new Promise<void>((resolve) => setTimeout(() => { if (waiting === current) late = true; resolve(); }, ms))]);
+      return withTimeout(current, ms, () => { if (waiting === current) late = true; });
     },
   };
 }

@@ -1,6 +1,7 @@
 // The building blocks every Settings section uses: the section head, a
 // group, a row with its failure line, and the keyboard rules of a popover.
-import { type KeyboardEvent, type ReactNode, type RefObject, useCallback, useEffect, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useCallback, useState } from "react";
+import { useDismiss } from "./kit/events.ts";
 import { handleKey } from "./handles.ts";
 import type { ActionResult } from "../session/index.ts";
 
@@ -81,16 +82,7 @@ export const Na = ({ children }: { children: ReactNode }) => <span className="na
 export const COMPUTER_ONLY = "Available on the computer.";
 
 /** Close a popover on a press outside it. */
-export function useOutside(ref: RefObject<HTMLElement | null>, open: boolean, close: () => void): void {
-  useEffect(() => {
-    if (!open) return;
-    const down = (e: PointerEvent) => {
-      if (!ref.current?.contains(e.target as Node)) close();
-    };
-    document.addEventListener("pointerdown", down);
-    return () => document.removeEventListener("pointerdown", down);
-  }, [ref, open, close]);
-}
+export const useOutside = useDismiss;
 
 /** Two choices side by side; the app's control for a short fixed set, never a native select. */
 export function Seg2<T extends string | number>({ value, options, onPick, label, handle, disabled = false }: { value: T | undefined; options: readonly (readonly [T, string])[]; onPick: (v: T) => void; label: string; handle: string; disabled?: boolean }) {

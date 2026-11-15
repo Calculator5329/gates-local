@@ -8,6 +8,7 @@ import { applyServerEvent, call, updateModelSettings, updateSettings } from "../
 import { NA, useStore } from "../lib/store/store.ts";
 import { Grp, Head, Row, Seg2, useOutside, walk } from "../lib/ui/settings-ui.tsx";
 import { closeTip } from "../lib/ui/ui.tsx";
+import { focusFirstOf } from "../lib/ui/kit/focus.ts";
 import { controlPatch, controlValues, editControl, type ControlDraft, type ControlKey } from "./instruction-draft.ts";
 
 /** A fixed-height status slot and constant button labels keep save/error states from moving controls. */
@@ -58,15 +59,15 @@ const CONTROLS = [
 ] as const;
 const MODES = [["default", "Default"], ["custom", "Custom"]] as const;
 
+/** The open list's chosen model takes focus, else its first. */
+const focusChosen = focusFirstOf("[role=option][aria-selected=true]", "[role=option]");
+
 /** The app's own listbox (as Models' default card): arrows, letters to find, Enter, Escape back to the button. */
 function ModelMenu({ models, value, onPick }: { models: readonly { name: string; text: string }[]; value: string | undefined; onPick: (name: string) => void }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null), btn = useRef<HTMLButtonElement>(null);
   const close = (refocus = true) => { setOpen(false); if (refocus) btn.current?.focus(); };
   useOutside(box, open, () => close(false));
-  useEffect(() => {
-    if (open) (box.current?.querySelector<HTMLElement>("[role=option][aria-selected=true]") ?? box.current?.querySelector<HTMLElement>("[role=option]"))?.focus();
-  }, [open]);
   const current = models.find(m => m.name === value);
   const choose = (name: string) => { onPick(name); close(); };
   return <div className="inst-pick" data-testid="settings.instructions.model-menu" ref={box} onKeyDown={e => open && walk(e, box.current, "[role=option]", close)}>
@@ -74,7 +75,7 @@ function ModelMenu({ models, value, onPick }: { models: readonly { name: string;
       <span className="mp-sv"><span className="mp-nmn">{current?.text ?? "No installed chat models"}</span></span>
       <Icon id="down" cls="s14" />
     </button>
-    {open ? <div className="mp-dd" role="listbox" aria-label="Installed chat models">
+    {open ? <div ref={focusChosen} className="mp-dd" role="listbox" aria-label="Installed chat models">
       {models.map(m => <div key={m.name} role="option" data-testid={`settings.instructions.model-${handleKey(m.name)}`} tabIndex={-1} aria-selected={m.name === value} aria-label={m.text} className="mp-opt" onClick={() => choose(m.name)}
         onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(m.name); } }}>
         {m.name === value ? <Icon id="check" cls="s14 mp-ck" /> : <span />}
@@ -126,6 +127,7 @@ function ReplyControls({ model, saved, defaults, locked }: { model: string; save
 function ModelEditors({ model, name, saved, shared, locked }: { model: string; name: string; saved: ModelSettings; shared: string | undefined; locked: boolean }) {
   const [read, setRead] = useState<{ value?: ModelDefaults; error?: string }>({});
   const [retry, setRetry] = useState(0);
+  // oxlint-disable-next-line gates/effect-needs-reason -- reads the model's shipped defaults for the model on show, and drops an answer for one no longer shown
   useEffect(() => {
     let current = true;
     void call("settings.modelDefaults", { model }).then(value => { applyServerEvent(() => { if (current) setRead({ value }); }); }, (error: unknown) => { applyServerEvent(() => { if (current) setRead({ error: error instanceof Error ? error.message : "Could not read model defaults." }); }); });

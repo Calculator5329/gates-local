@@ -38,6 +38,10 @@ import { leaveSettings, pull } from "../lib/session/index.ts";
 import { COMPUTER_ONLY, Fail, useAct, useOutside, walk } from "../lib/ui/settings-ui.tsx";
 import { NA, type State, setState, useStore } from "../lib/store/store.ts";
 import { FitSkel, PHONE, closeTip, useMedia } from "../lib/ui/ui.tsx";
+import { focusFirstOf } from "../lib/ui/kit/focus.ts";
+
+/** A row's menu, as it opens: its first item takes focus. */
+const focusFirstItem = focusFirstOf("[role=menuitem]");
 
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
 const cannotSaveDefault = (s: State) => s.settings === NA || s.unavailable["settings.update"] === true;
@@ -305,9 +309,6 @@ function RowMenu({ r, saved, onRemove }: { r: InstalledRow; saved: string | unde
     if (refocus) btn.current?.focus();
   };
   useOutside(box, open, () => close(false));
-  useEffect(() => {
-    if (open) box.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
-  }, [open]);
   const [head, tail] = splitTail(shortTag(r.name));
   return (
     <div className="mp-acts" ref={box} data-testid="models.row-menu.actions" onKeyDown={(e) => open && walk(e, box.current, "[role=menuitem]", close)}>
@@ -328,7 +329,7 @@ function RowMenu({ r, saved, onRemove }: { r: InstalledRow; saved: string | unde
         <Icon id="more" />
       </button>
       {open ? (
-        <div className="mp-menu" role="menu" aria-label={r.label.text}>
+        <div ref={focusFirstItem} className="mp-menu" role="menu" aria-label={r.label.text}>
           {!settingsNA && canBeDefault(r, saved) ? (
             <button
               type="button"
@@ -407,6 +408,7 @@ function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: Inst
   const cancel = useRef<HTMLButtonElement>(null);
   const box = useRef<HTMLDivElement>(null);
   // On open, and after a removal that failed. While one runs both buttons are disabled and the dialog holds focus.
+  // oxlint-disable-next-line gates/effect-needs-reason -- Cancel takes focus back when a removal's answer re-enables it, which lands after an await
   useEffect(() => {
     if (!busy) cancel.current?.focus();
   }, [busy]);

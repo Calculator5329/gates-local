@@ -2,6 +2,7 @@
 import { type Section, type State, chatReady, getState, overChat, setState } from "../lib/store/store.ts";
 import { picturesScreen, settingsScreen } from "./screen-loaders.ts";
 import { cancelQueuedDraft, renewDraft } from "../lib/store/drafts.ts";
+import { afterCommit } from "../lib/ui/kit/focus.ts";
 
 /** The open thread lives in the URL hash: #thread=<id>. */
 export function threadFromHash(): string | null {
@@ -26,16 +27,19 @@ export const spareScreenEntry = () => onScreenEntry() && !overChat(getState().vi
 /**
  * Settings has closed onto the chat kept under it: the composer takes the caret back, where
  * it was, on the terms its mount used to (chat not blocked, not touch, nothing else holding
- * the focus; the button that closed Settings does not count). A frame later, so the chat is
- * no longer inert and a pop-up opened in the same step (Usage) keeps the focus it moves.
+ * the focus; the button that closed Settings does not count). After the commit that closes it,
+ * so the chat is no longer inert and a pop-up opened in the same step (Usage) keeps the focus
+ * it moves; a frame later again when the composer is not drawn yet.
  */
 function caretBack(): void {
-  requestAnimationFrame(() => {
+  afterCommit(() => {
     const s = getState();
     if (overChat(s.view) || s.panel !== null || s.drawer || !chatReady(s) || matchMedia("(hover: none)").matches) return;
     const el = document.activeElement;
     if (el === null || el === document.body || (el.tagName === "BUTTON" && el.closest('[role="dialog"]') === null)) {
-      document.querySelector<HTMLTextAreaElement>("#ta")?.focus({ preventScroll: true });
+      const ta = document.querySelector<HTMLTextAreaElement>("#ta");
+      if (ta === null) return false;
+      ta.focus({ preventScroll: true });
     }
   });
 }

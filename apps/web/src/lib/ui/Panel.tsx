@@ -1,10 +1,9 @@
 // Pop-ups over the app: Settings, Models and Usage. Dialog is T3 Code's Settings dialog: one
 // box of one size for all three, centred on the window, over a backdrop that dims the whole
-// window and blurs it when a GPU draws the page (gpu-draw.ts); its content brings the header row
+// window (no blur, panel.css); its content brings the header row
 // (DialogHead) and a body that scrolls (.dlg-body). A click on the dim layer closes it (press and
 // release both on it, as a click is); App's Escape and Tab rules close it and hold focus inside.
-import { type ReactNode, useLayoutEffect, useRef } from "react";
-import { gpuDraws } from "./gpu-draw.ts";
+import type { ReactNode } from "react";
 import { Icon } from "./icons.tsx";
 import "./panel.css";
 
@@ -21,14 +20,16 @@ function footIconAt(x: number, y: number): HTMLElement | null {
   return null;
 }
 
+/** Focus moves in as the box is drawn, so a key pressed next lands here. */
+function focusBox(el: HTMLDivElement | null): void {
+  el?.focus({ preventScroll: true });
+}
+
 export function Dialog({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode }) {
-  const box = useRef<HTMLDivElement>(null);
-  // focus moves in with the first paint, so a key pressed next lands here
-  useLayoutEffect(() => box.current?.focus({ preventScroll: true }), []);
   return (
     <>
-      <div className={gpuDraws() ? "dlg-dim blur" : "dlg-dim"} data-testid="ui.dialog.scrim" aria-hidden="true" onClick={(e) => { const icon = footIconAt(e.clientX, e.clientY); if (icon === null) onClose(); else icon.click(); }} />
-      <div ref={box} className="dlg" role="dialog" aria-modal="true" aria-label={label} data-testid="ui.dialog.panel" tabIndex={-1}>
+      <div className="dlg-dim" data-testid="ui.dialog.scrim" aria-hidden="true" onClick={(e) => { const icon = footIconAt(e.clientX, e.clientY); if (icon === null) onClose(); else icon.click(); }} />
+      <div ref={focusBox} className="dlg" role="dialog" aria-modal="true" aria-label={label} data-testid="ui.dialog.panel" tabIndex={-1}>
         {children}
       </div>
     </>

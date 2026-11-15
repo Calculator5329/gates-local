@@ -83,6 +83,7 @@ export function localVoice(): SpeechSynthesisVoice | null {
 /** The device's local voice, followed as the browser loads its list. */
 export function useLocalVoice(): SpeechSynthesisVoice | null {
   const [voice, setVoice] = useState(localVoice);
+  // oxlint-disable-next-line gates/effect-needs-reason -- the browser's voices change event, followed while mounted
   useEffect(() => {
     if (typeof speechSynthesis === "undefined") return;
     const changed = () => setVoice(localVoice());
@@ -178,5 +179,6 @@ function deviceVoice(synth: SpeechSynthesis): Speaker {
 /** Reads replies aloud while talk mode and its speaker are on. */
 export function useReadAloud(): void {
   const { on, speak } = useTalk();
+  // oxlint-disable-next-line gates/effect-needs-reason -- the reader subscribes to replies and the device's speech for as long as talk mode and the speaker are on
   useEffect(() => (on && speak && typeof speechSynthesis !== "undefined" ? startReading(deviceVoice(speechSynthesis)) : undefined), [on, speak]);
 }

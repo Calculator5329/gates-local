@@ -51,6 +51,8 @@ export function ScoreMarks({ m }: { m: ModelMeasure }) {
 export function MeasureMeta({ name, label }: { name: string; label: string }) {
   const m = useStore((s) => measureOf(s, name));
   const [open, setOpen] = useState(false);
+  // the measure went away (the model's weights changed): its detail closes, and a new measure does not open it
+  if (m === undefined && open) setOpen(false);
   if (m === undefined) return null;
   return (
     <>
@@ -79,6 +81,8 @@ export function MeasureCells({ name, label }: { name: string; label: string }) {
     return now !== undefined && now !== name;
   });
   const [open, setOpen] = useState(false);
+  // as MeasureMeta: a measure that went away closes its detail
+  if (m === undefined && open) setOpen(false);
   if (m !== undefined && run === undefined) {
     return (
       <>

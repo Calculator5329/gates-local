@@ -5,6 +5,8 @@ import { Icon, type IconId } from "../lib/ui/icons.tsx";
 import { canUpdateHere, checkForUpdates, dismissUpdateResult, downloadUpdate, openSettings, readUpdateStatus, updateAndRestart } from "../lib/session/index.ts";
 import { NA, getState, useStore } from "../lib/store/store.ts";
 import { closeTip, esc } from "../lib/ui/ui.tsx";
+import { useDocumentEvent } from "../lib/ui/kit/events.ts";
+import { useChange } from "../lib/ui/kit/popover.ts";
 import { RESTART, restartable, type UpdateClick, type UpdateIcon, type UpdateInput, outdated, updateIcon, ver } from "./update-state.ts";
 import { updateWork, workLines } from "./update-work.ts";
 
@@ -109,18 +111,22 @@ function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStat
     setWork(next);
     setSettle((n) => n + 1);
   };
+  // oxlint-disable-next-line gates/effect-needs-reason -- the ask opens from several places; on its mount Cancel takes focus and the status is read once
   useEffect(() => {
     cancel.current?.focus();
     void readUpdateStatus().then(setRead);
   }, []);
+  // oxlint-disable-next-line gates/effect-needs-reason -- a new approval arrives pushed from the server while the ask is open; changed() also moves focus off Go, which a render cannot do
   useEffect(() => {
     if (status.approval === seen.current) return;
     seen.current = status.approval;
     changed(lines());
   }, [status.approval]);
+  // oxlint-disable-next-line gates/effect-needs-reason -- holds Go off for a moment after the list changed, and drops the timer on the next change or unmount
   useEffect(() => {
     if (settle === 0) return;
     setWait(true);
+    // oxlint-disable-next-line gates/timer-needs-reason -- the pause that lets a changed list be read before Go works again
     const t = window.setTimeout(() => setWait(false), SETTLE_MS);
     return () => window.clearTimeout(t);
   }, [settle]);
@@ -185,38 +191,23 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
   const u = updateIcon({ status: known, desktop, checking, installing, error, clickError, downloading, canRestart: restartable(known, desktop) });
   const click = u?.click ?? null;
   // The ask belongs to an Update or Restart click: it closes when the click stops being one, and with the drawer.
-  useEffect(() => {
-    if (click !== "update" && click !== "restart") setAsking(false);
-  }, [click]);
-  useEffect(() => {
-    if (!drawer) setAsking(false);
-  }, [drawer]);
+  useChange(click, (now) => { if (now !== "update" && now !== "restart") setAsking(false); });
+  useChange(drawer, (now) => { if (!now) setAsking(false); });
   // once good news has arrived the error is gone for good, so a later state it does not cover cannot bring it back
   const lastCheck = known?.lastCheck;
-  useEffect(() => {
-    if (clickError != null && outdated(clickError, lastCheck)) setClickError(null);
-  }, [clickError, lastCheck]);
-  useEffect(() => {
-    if (!asking) return;
-    const outside = (e: PointerEvent) => {
-      if (!(e.target instanceof Element && e.target.closest(".sb-foot .cfm, .sb-foot .upd"))) setAsking(false);
-    };
-    // Escape closes the top layer only: an open menu or picker (App's onKey), then a tooltip, then the ask, then the drawer
-    const escape = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || getState().pop !== null) return;
-      e.stopPropagation();
-      if (document.getElementById("tip")?.classList.contains("open")) return closeTip();
-      const inside = document.activeElement?.closest(".sb-foot .cfm") != null;
-      setAsking(false);
-      if (inside) button.current?.querySelector("button")?.focus();
-    };
-    document.addEventListener("pointerdown", outside, true);
-    document.addEventListener("keydown", escape, true);
-    return () => {
-      document.removeEventListener("pointerdown", outside, true);
-      document.removeEventListener("keydown", escape, true);
-    };
-  }, [asking]);
+  if (clickError != null && outdated(clickError, lastCheck)) setClickError(null);
+  useDocumentEvent("pointerdown", (e) => {
+    if (!(e.target instanceof Element && e.target.closest(".sb-foot .cfm, .sb-foot .upd"))) setAsking(false);
+  }, { capture: true, when: asking });
+  // Escape closes the top layer only: an open menu or picker (App's onKey), then a tooltip, then the ask, then the drawer
+  useDocumentEvent("keydown", (e) => {
+    if (e.key !== "Escape" || getState().pop !== null) return;
+    e.stopPropagation();
+    if (document.getElementById("tip")?.classList.contains("open")) return closeTip();
+    const inside = document.activeElement?.closest(".sb-foot .cfm") != null;
+    setAsking(false);
+    if (inside) button.current?.querySelector("button")?.focus();
+  }, { capture: true, when: asking });
   if (u === null) return null;
   const check = known?.lastCheck;
   const approval = known?.approval;

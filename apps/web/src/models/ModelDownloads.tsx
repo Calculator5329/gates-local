@@ -223,6 +223,7 @@ export function CustomPull({ actions, numCtx }: { actions: DownloadActions; numC
   const box = useRef<HTMLDivElement>(null);
   useOutside(box, menu, () => setMenu(false));
   // the row menu keys as the Installed menu's do: focus goes in, Escape closes the menu and not the pop-up
+  // oxlint-disable-next-line gates/effect-needs-reason -- focus goes in when the menu opens, not each time a new lookup draws it again
   useEffect(() => {
     if (menu) box.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
   }, [menu]);
@@ -377,6 +378,7 @@ export function DownloadTab() {
       (attempt.start && Object.entries(s.pulls).some(([name, p]) => downloadKey(name) === key && attempt.pulls[name] !== p &&
         (p.state === "downloading" || p.state === "verifying" || p.state === "done")));
   };
+  // oxlint-disable-next-line gates/effect-needs-reason -- an attempt retires on pushed installs and progress from the server; the push handlers are lib/session's
   useEffect(() => {
     setAttempts(previous => {
       const next = Object.fromEntries(Object.entries(previous).filter(([key, attempt]) => !retired(key, attempt)));
@@ -419,8 +421,10 @@ export function DownloadTab() {
   const [savedGroups, setGroups] = useState<ReturnType<typeof group>>();
   const [waited, setWaited] = useState<number>();
   const settled = list.every(c => answer(c) !== undefined);
+  // oxlint-disable-next-line gates/effect-needs-reason -- the bound on waiting for every fit answer before the rows group, restarted per context size
   useEffect(() => {
     if (settled || list.length === 0) return;
+    // oxlint-disable-next-line gates/timer-needs-reason -- design.md: rows group once every answer is in or a second has passed
     const t = setTimeout(() => setWaited(numCtx), 1000);
     return () => clearTimeout(t);
   }, [settled, numCtx, list.length]);

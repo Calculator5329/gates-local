@@ -10,8 +10,9 @@ export function harness(token: string, script: readonly PageAction[], stepMs: nu
   const seen: string[] = [];
   // Between actions: the step's time, then two animation frames, so a page that draws in
   // requestAnimationFrame has drawn before the next action or read.
-  // oxlint-disable-next-line unicorn/consistent-function-scoping
+  // oxlint-disable-next-line unicorn/consistent-function-scoping, gates/timer-needs-reason -- runs in the page's frame, which has none of the app's helpers; two frames let the page draw
   const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  // oxlint-disable-next-line gates/timer-needs-reason -- runs in the page's frame: the step's time between a person's actions
   const wait = () => new Promise((resolve) => setTimeout(resolve, stepMs)).then(frame);
   // The frame runs this function from its source text, so every helper it uses lives inside it.
   // oxlint-disable-next-line unicorn/consistent-function-scoping

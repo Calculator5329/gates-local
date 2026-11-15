@@ -55,6 +55,7 @@ export function wakeAtStall(): void {
   if (i === undefined || i.receivedBytes >= i.totalBytes) return;
   const left = figuresMoved(i.receivedBytes, Date.now()) + INSTALL_STALL_MS - Date.now();
   if (left <= 0) return;
+  // oxlint-disable-next-line gates/timer-needs-reason -- a hung download sends nothing, so the stall's moment comes from the clock
   wake = setTimeout(() => {
     wake = undefined;
     setState((s) => (s.runtime?.install === i ? { runtime: { ...s.runtime, install: { ...i } } } : {}));

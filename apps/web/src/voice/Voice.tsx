@@ -44,6 +44,7 @@ export function Voice({ textarea, held = null, send }: { textarea: RefObject<HTM
     if (current && phaseRef.current === "transcribing") void call("voice.cancel", { id: current.id }).catch(() => {});
     state("idle");
   };
+  // oxlint-disable-next-line gates/effect-needs-reason -- a recording holds the microphone: page hide, a new draft or connection, and unmount all end it
   useEffect(() => {
     const leave = () => cancel();
     window.addEventListener("pagehide", leave);
@@ -51,18 +52,22 @@ export function Voice({ textarea, held = null, send }: { textarea: RefObject<HTM
   }, [enabled, conn, draftVersion]);
   // Settings or a pop-up over the chat keeps the composer mounted but hidden: a dictation
   // running into it would type where nobody sees and take Esc from the screen on top.
+  // oxlint-disable-next-line gates/effect-needs-reason -- the cover comes from screens this folder does not own; stopping releases the microphone, which a render must not do
   useEffect(() => { if (covered) cancel(); }, [covered]);
   // The square was Stop's a moment ago: the rest of a double-click on Stop must not land here (useActionPress guards Send the same way).
   const shownAt = useRef(-Infinity);
   const wasHeld = useRef(held !== null);
+  // oxlint-disable-next-line gates/effect-needs-reason -- Stop showing ends a recording (the microphone) and stamps when the square came back, both outside render
   useEffect(() => {
     if (held !== null) cancel();
     else if (wasHeld.current) shownAt.current = performance.now();
     wasHeld.current = held !== null;
   }, [held]);
+  // oxlint-disable-next-line gates/effect-needs-reason -- the clock of a recording, running only while listening and cleared when it ends
   useEffect(() => {
     if (phase !== "listening") return;
     const started = performance.now();
+    // oxlint-disable-next-line gates/timer-needs-reason -- counts the recording's seconds and stops it at the 60-second cap
     const timer = setInterval(() => {
       const elapsed = Math.floor((performance.now() - started) / 1000);
       time(elapsed);
@@ -91,6 +96,7 @@ export function Voice({ textarea, held = null, send }: { textarea: RefObject<HTM
       // plain text, visible when the drawer closes, instead of discarding them.
       setState({ notice: inserted ? null : `Transcript kept. Copy it into your draft: ${text}` });
       // sent once the composer has drawn the words, so Send judges the draft as it is now
+      // oxlint-disable-next-line gates/timer-needs-reason -- one task later, so the composer has drawn the inserted words before Send reads the draft
       if (inserted && then === "send") setTimeout(() => send?.(), 0);
     } catch (e) {
       if (valid(current)) setState({ notice: e instanceof Error ? e.message : "Transcription failed. Try again." });
@@ -157,6 +163,7 @@ export function Voice({ textarea, held = null, send }: { textarea: RefObject<HTM
     const at = document.activeElement;
     return getDraft().text === "" && (at === textarea.current || at === document.body) && !overChat(s.view) && s.panel === null;
   };
+  // oxlint-disable-next-line gates/effect-needs-reason -- window key listeners for hold-to-talk, put back after each render so they stay last in the capture order, as they always have
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       const plain = !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey;

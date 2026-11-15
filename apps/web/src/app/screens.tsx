@@ -13,6 +13,7 @@ const unwatched = () => () => {};
  */
 export function useScreen<T>(screen: ReturnType<typeof deferred<T>>, needed: boolean) {
   const state = useSyncExternalStore(needed ? screen.subscribe : unwatched, screen.get, screen.get);
+  // oxlint-disable-next-line gates/effect-needs-reason -- starts a screen's code fetch once a commit needs it; the store change that needs it has many senders
   useEffect(() => {
     if (needed) void screen.load();
   }, [screen, needed]);

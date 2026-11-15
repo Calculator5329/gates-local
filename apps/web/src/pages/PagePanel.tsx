@@ -43,10 +43,12 @@ export function PagePanel({ threadId }: { threadId: string }) {
   const sandboxOff = useSandboxOff();
   // with the sandbox off, the one version the person asked to run
   const [ran, setRan] = useState<string | null>(null);
+  // oxlint-disable-next-line gates/effect-needs-reason -- a new version arrives by the reply stream, not a handler here; the panel's own store follows it
   useEffect(() => { if (loaded) follow(threadId, versions, !cover); }, [threadId, versions, cover, loaded]);
   const shown = shownOf(view, versions);
   const visible = loaded && view?.open === true && shown !== undefined;
   // over the chat, the chat under it takes no keys (App reads this)
+  // oxlint-disable-next-line gates/effect-needs-reason -- tells App the panel covers the chat for exactly as long as it is drawn over it, and clears it on unmount
   useEffect(() => {
     setCovering(cover && visible);
     return () => setCovering(false);
@@ -58,6 +60,7 @@ export function PagePanel({ threadId }: { threadId: string }) {
   // the frame's address: the server's one-time page address for the version on show
   const [address, setAddress] = useState<{ readonly code: string; readonly a: PageAddress } | null>(null);
   const shownCode = shown?.code;
+  // oxlint-disable-next-line gates/effect-needs-reason -- fetches a one-time address for the version on show, and drops an answer that lands after it changed
   useEffect(() => {
     if (!runs || shownCode === undefined) return;
     let live = true;

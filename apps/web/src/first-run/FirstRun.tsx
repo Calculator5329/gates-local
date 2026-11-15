@@ -368,8 +368,10 @@ export function FirstRun() {
   if (known && (ready || waited) && !shown) setShown(true);
   const placeholders = !left && (boot || (known && !shown && !ready && !waited));
   if (!placeholders && !left) setLeft(true);
+  // oxlint-disable-next-line gates/effect-needs-reason -- the bound on waiting for the screen's words, started when the runtime is known and dropped once they are in
   useEffect(() => {
     if (!known || ready) return;
+    // oxlint-disable-next-line gates/timer-needs-reason -- after this long the screen shows without the slow read
     const t = setTimeout(() => setWaited(true), WHOLE_WAIT_MS);
     return () => clearTimeout(t);
   }, [known, ready]);

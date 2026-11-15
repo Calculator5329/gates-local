@@ -22,6 +22,8 @@ import { focusComposer } from "../composer/focus.ts";
 import { downloadImageSetup, folderDialog, loadImagePresets, pickImage, saveImageFolder, startImage, stopImageDownload } from "../lib/session/index.ts";
 import { NA, useStore } from "../lib/store/store.ts";
 import { PHONE, closePop, closeTip, isTouch, tabStops, useMedia } from "../lib/ui/ui.tsx";
+import { requestFocus } from "../lib/ui/kit/focus.ts";
+import { usePopover } from "../lib/ui/kit/popover.ts";
 
 /** Below this height the list and the sizes stop being usable. */
 const CRAMPED = 280;
@@ -180,15 +182,17 @@ export function ImagePicker() {
   const same = active !== undefined && active.sizes.length > 1 && active.sizes.every((z) => z.bytes === active.sizes[0]!.bytes) ? active.sizes[0]!.bytes : undefined;
 
   // the list is ComfyUI's: read it again each time the picker opens; a closed picker forgets its menu
+  // oxlint-disable-next-line gates/effect-needs-reason -- the picker opens from the composer's button, which is not this folder's; the read follows the store's pop whoever opened it
   useEffect(() => { if (pop !== null) void loadImagePresets(); else setMenu(null); }, [pop !== null]);
+  // oxlint-disable-next-line gates/effect-needs-reason -- moves focus into the picker on the commit that first draws it
   useLayoutEffect(() => {
     if (pop === null) return;
     if (isTouch() && !pop.kb) ref.current?.querySelector<HTMLButtonElement>(".pk-close")?.focus({ preventScroll: true });
     else (ref.current?.querySelector<HTMLButtonElement>(".pk-menu:not([inert]) .pk-r.sel .pk-select") ?? ref.current?.querySelector<HTMLButtonElement>(".pk-menu:not([inert]) .pk-select, .pk-blank button"))?.focus({ preventScroll: true });
   }, [pop]);
-  useLayoutEffect(() => {
-    const root = ref.current, anchor = document.getElementById("modelBtn");
-    if (pop === null || !root || !anchor) return;
+  usePopover(ref, pop !== null, (root) => {
+    const anchor = document.getElementById("modelBtn");
+    if (!anchor) return;
     root.style.maxHeight = "";
     if (phone) { root.style.left = `${Math.max(8, (window.innerWidth - root.offsetWidth) / 2)}px`; root.style.top = ""; return; }
     // Placed as the chat picker is: right edge on the button's, above it unless that is cramped.
@@ -214,7 +218,7 @@ export function ImagePicker() {
   }
   function choose(preset: Row) {
     setHighlight(preset.id);
-    if (phone) { setStep("sizes"); requestAnimationFrame(() => ref.current?.querySelector<HTMLButtonElement>(".pk-back")?.focus({ preventScroll: true })); return; }
+    if (phone) { setStep("sizes"); requestFocus(() => ref.current?.querySelector<HTMLButtonElement>(".pk-back"), { preventScroll: true }); return; }
     // a greyed row shows its sizes and picks nothing
     if (!preset.ready) return;
     const size = sizeFor(preset, width, height);
@@ -247,7 +251,7 @@ export function ImagePicker() {
   }
   function back() {
     setStep("models");
-    requestAnimationFrame(() => ref.current?.querySelector<HTMLButtonElement>(".pk-menu:not([inert]) .pk-r.hl .pk-select, .pk-menu:not([inert]) .pk-select")?.focus({ preventScroll: true }));
+    requestFocus(() => ref.current?.querySelector<HTMLButtonElement>(".pk-menu:not([inert]) .pk-r.hl .pk-select, .pk-menu:not([inert]) .pk-select"), { preventScroll: true });
   }
   function listKeys(e: KeyboardEvent<HTMLDivElement>) {
     const buttons = [...e.currentTarget.querySelectorAll<HTMLButtonElement>(".pk-select")];
@@ -260,13 +264,13 @@ export function ImagePicker() {
     } else if (e.key === "ArrowRight") {
       e.preventDefault();
       if (phone) setStep("sizes");
-      requestAnimationFrame(() => (ref.current?.querySelector<HTMLButtonElement>(".pk-ctx-row[aria-checked=true]") ?? ref.current?.querySelector<HTMLButtonElement>(".pk-ctx-row"))?.focus({ preventScroll: true }));
+      requestFocus(() => ref.current?.querySelector<HTMLButtonElement>(".pk-ctx-row[aria-checked=true]") ?? ref.current?.querySelector<HTMLButtonElement>(".pk-ctx-row"), { preventScroll: true });
     }
   }
   function keys(e: KeyboardEvent<HTMLDivElement>) {
     if (e.key === "Escape") {
       e.preventDefault(); e.stopPropagation(); closePop();
-      requestAnimationFrame(() => document.getElementById("modelBtn")?.focus({ preventScroll: true }));
+      requestFocus("#modelBtn", { preventScroll: true });
     }
     if (e.key !== "Tab") return;
     const nodes = tabStops(ref.current);

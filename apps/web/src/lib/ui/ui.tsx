@@ -6,6 +6,7 @@ import { type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useRe
 import type { Verdict } from "../words/format.ts";
 import { Icon } from "./icons.tsx";
 import { type State, getState, setState } from "../store/store.ts";
+import { requestFocus } from "./kit/focus.ts";
 
 type PopId = NonNullable<State["pop"]>["id"];
 type FixedPopId = Exclude<PopId, "thread">;
@@ -68,9 +69,9 @@ export function closePop(refocus: boolean | "if-inside" = false): void {
     document.getElementById("menuBtn");
   if (sheet !== null) {
     // the app stays inert until this close has rendered, and focus must not stay in a hidden sheet
-    requestAnimationFrame(() => {
+    requestFocus(() => {
       const a = document.activeElement;
-      if (a === null || a === document.body || sheet.contains(a)) target()?.focus();
+      return a === null || a === document.body || sheet.contains(a) ? target() : null;
     });
     return;
   }
@@ -168,6 +169,7 @@ export function openTip(anchor: Element | null | undefined): void {
 /** The one tooltip element and its document listeners. Mount once. */
 export function Tip() {
   const ref = useRef<HTMLDivElement>(null);
+  // oxlint-disable-next-line gates/effect-needs-reason -- the one tooltip's document listeners and the observer that follows its anchor while React rewrites it
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -210,6 +212,7 @@ export function Tip() {
       else {
         waitingFor = t;
         remember(t);
+        // oxlint-disable-next-line gates/timer-needs-reason -- a tooltip opens after the pointer rests on its anchor for the hover delay
         timer = window.setTimeout(() => show(t), TIP_DELAY_MS);
       }
     };
