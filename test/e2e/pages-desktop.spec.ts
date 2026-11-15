@@ -16,6 +16,7 @@ import { openThreadStore } from "../../apps/server/src/threads/store.ts";
 import { LEFT_PATH, MOVING, loanPage } from "../fake-ollama/page-replies.ts";
 import { FAKE_URL, ROOT } from "./env.ts";
 import { expect, test, waitReady } from "./fixtures.ts";
+import { holds } from "./waits.ts";
 
 // The window is X11 on Linux; with no display this spec says so as a skip, not as a failure.
 test.skip(process.platform === "linux" && !process.env["DISPLAY"], "no display: the desktop app needs an X server on Linux");
@@ -136,7 +137,8 @@ test("desktop with the sandbox off: a page shows its code and runs only on Run, 
       await chip(page, i + 1).click();
       await page.getByTestId("pages.run").click();
       await expect(page.getByTestId("pages.frame")).toBeAttached();
-      await page.waitForTimeout(1500);
+      // the window stays on the app and the fake server hears nothing, all through the page's move
+      await holds(page, 1500, async () => [page.url().includes("gates-local://app/index.html"), await leftRequests()], [true, before], { message: `${label}: the window on the app, and what reached the fake server` });
       const urls = page.frames().filter((f) => f !== page.mainFrame()).map((f) => f.url());
       info.annotations.push({ type: "frames", description: `${label}: ${urls.join(" ")}` });
       expect(urls.length, label).toBeGreaterThan(0);

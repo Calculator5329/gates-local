@@ -67,7 +67,9 @@ test("Thought for and a stopped reply's seconds are the same in a second window 
   // the running line says "Writing" from then on, and "Thought for" only once the reply has ended
   await expect(live.locator(".think.run .lv-w > span").first()).toHaveText("Writing", { timeout: 20_000 });
   await expect(live.locator(".md")).not.toBeEmpty();
-  await page.waitForTimeout(1000);
+  // the second window is watching it live before Stop: its own second reply has words
+  await expect(other.locator(".turn.a")).toHaveCount(2);
+  await expect(other.locator(".turn.a").last().locator(".md")).not.toBeEmpty();
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   await expect(stopSecs(page)).toHaveText(/^\d+ s$/);
   await expect(page.locator(".think.run")).toHaveCount(0);

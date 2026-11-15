@@ -68,12 +68,26 @@ const CASES: Case[] = [
         "  await page.waitForTimeout(500);",
         "});",
       ),
+      "test/e2e/quiet.spec.ts": text(
+        'import { test } from "@playwright/test";',
+        'test("no tooltip comes up", async ({ page }) => {',
+        "  // oxlint-disable-next-line gates/no-wait-for-timeout -- longer than the tooltip's delay",
+        "  await page.waitForTimeout(800);",
+        "});",
+      ),
     },
     fixed: {
       "test/e2e/wait.spec.ts": text(
         'import { expect, test } from "@playwright/test";',
         'test("the reply shows", async ({ page }) => {',
         '  await expect(page.getByTestId("reply")).toBeVisible();',
+        "});",
+      ),
+      "test/e2e/quiet.spec.ts": text(
+        'import { test } from "@playwright/test";',
+        'import { holds } from "./waits.ts";',
+        'test("no tooltip comes up", async ({ page }) => {',
+        '  await holds(page, 800, () => page.locator("#tip.open").count(), 0);',
         "});",
       ),
     },
@@ -168,6 +182,11 @@ const UNTOUCHED: Files = {
   // The closed package's tests may use the test runner; other desktop files may use Node.
   "packages/contracts/src/closed.test.ts": text('import { expect, it } from "vitest";', 'it("holds", () => { expect(1).toBe(1); });'),
   "apps/desktop/src/main.ts": text('import { join } from "node:path";', "export const joined = join;"),
+  // The one helper that may wait on the clock, because it checks its claim through the span.
+  "test/e2e/waits.ts": text(
+    'import type { Page } from "@playwright/test";',
+    "export const pause = (page: Page, ms: number) => page.waitForTimeout(ms);",
+  ),
 };
 
 /** Writes the files as a small repo of their own and lints it with the project's real rules. */

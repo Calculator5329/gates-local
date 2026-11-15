@@ -1,5 +1,6 @@
 /// <reference lib="dom" />
 import { test, expect, sendMessage, waitReady } from "./fixtures.ts";
+import { holds } from "./waits.ts";
 
 test.use({ seed: "design" });
 
@@ -25,8 +26,7 @@ test("hover intent fetches history once before selection; sweeping and the activ
   await page.mouse.move(1000, 200);
   await target.hover();
   // Observe beyond the intent delay: revisiting the active row sends nothing.
-  await page.waitForTimeout(350);
-  expect(requests.slice(before)).toEqual([id]);
+  await holds(page, 350, async () => requests.slice(before), [id], { message: "history asked for" });
 });
 
 // Guards a shipped bug fix: a preloaded thread showed stale history after another window added a message.

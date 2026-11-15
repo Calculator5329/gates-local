@@ -7,6 +7,7 @@
 // the Ctrl K hint (pointer on a wide screen only) and the clear button.
 import type { Page, TestInfo } from "@playwright/test";
 import { expect, test, waitReady } from "./fixtures.ts";
+import { holds } from "./waits.ts";
 
 /** Thu 2026-11-12 14:00 in Chicago, as in the screenshot rig. */
 const NOW = Date.UTC(2026, 10, 12, 20, 0);
@@ -121,8 +122,9 @@ for (const overlay of [false, true]) {
     await search.hover();
     await expect(search.locator(".sb-kbd")).toBeVisible();
     await expect(search.locator(".sb-kbd")).toHaveText("Ctrl K");
-    await page.waitForTimeout(700);
+    // New thread's tip goes, and none comes up for the field through the tooltip's delay and past it
     await expect(page.locator(".tip.open")).toHaveCount(0);
+    await holds(page, 700, () => page.locator(".tip.open").count(), 0, { message: "a tooltip on the search field" });
     await page.mouse.move(900, 600);
     await expect(search.locator(".sb-kbd")).toBeHidden();
     await input.focus();

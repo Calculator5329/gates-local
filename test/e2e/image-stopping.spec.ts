@@ -8,6 +8,7 @@ import type { Page } from "@playwright/test";
 import { createClient } from "@gates-local/contracts";
 import { fakeComfy } from "./fake-comfy.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { painted } from "./waits.ts";
 
 test.use({ video: "off", allowedErrors: [/WebSocket connection to .* failed/] });
 let comfy: Awaited<ReturnType<typeof fakeComfy>>;
@@ -51,7 +52,8 @@ async function shot(page: Page, path: string) {
   await card.evaluate((el) => { (el as HTMLElement).style.outline = ""; (el as HTMLElement).style.outlineOffset = ""; });
 }
 
-/** Desktop then phone width, back to desktop: the same card in both. */
+/** Desktop then phone width, back to desktop: the same card in both. Resolves once the desktop
+ * width is drawn again: the timeline goes back to its end in that frame, not at the resize. */
 async function shots(page: Page, name: string, path: (name: string) => string) {
   const desktop = page.viewportSize();
   if (!desktop) throw new Error("no viewport");
@@ -59,6 +61,13 @@ async function shots(page: Page, name: string, path: (name: string) => string) {
   await page.setViewportSize(PHONE);
   await shot(page, path(`${name}-phone.png`));
   await page.setViewportSize(desktop);
+  await painted(page);
+}
+
+/** The card's box as drawn: read after a frame, so a change of its words has been laid out and the timeline kept at its end. */
+async function drawnBox(page: Page, card: ReturnType<Page["locator"]>) {
+  await painted(page);
+  return card.boundingBox();
 }
 
 test("Stop on a processor picture: the card says it is stopping in its own box, then settles; nothing more to press meanwhile", async ({ page, open }, info) => {
@@ -66,15 +75,15 @@ test("Stop on a processor picture: the card says it is stopping in its own box, 
   try {
     // the engine holds the picture after the interrupt, as the processor ends the step it is in
     comfy.slowStop(120_000);
-    const box = await card.boundingBox();
+    const box = await drawnBox(page, card);
     const job = await card.getAttribute("data-job");
     await page.getByRole("button", { name: "Stop" }).click();
     await expect(card.getByRole("status", { name: STOPPING })).toBeVisible();
     await expect(card.locator(".image-job-live")).toHaveText(new RegExp(`^${STOPPING} · \\d+ s$`));
     await expect.poll(() => comfy.stops().holding, { message: "the engine is still ending its step" }).toBe(1);
-    expect(await card.boundingBox(), "the stopping card keeps the running card's box").toEqual(box);
+    expect(await drawnBox(page, card), "the stopping card keeps the running card's box").toEqual(box);
     await shots(page, "image-stopping", (n) => info.outputPath(n));
-    expect(await card.boundingBox()).toEqual(box);
+    expect(await card.boundingBox(), "back at the desktop width, the same box").toEqual(box);
 
     // a second Stop: the composer has none (the turn ended here at the first), the card has no Cancel,
     // and asking the server again changes nothing: one card, the same job, still stopping
@@ -99,7 +108,7 @@ test("Stop on a processor picture: the card says it is stopping in its own box, 
     await expect(card).toHaveAttribute("data-image-job", "cancelled");
     await expect(card).toContainText(STOPPED);
     await expect(card.getByRole("button", { name: "Try again" })).toBeVisible();
-    expect(await card.boundingBox(), "the settled card keeps the box").toEqual(box);
+    expect(await drawnBox(page, card), "the settled card keeps the box").toEqual(box);
     await shots(page, "image-stopped", (n) => info.outputPath(n));
   } finally { client.close(); }
 });

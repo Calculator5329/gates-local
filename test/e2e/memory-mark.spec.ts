@@ -4,6 +4,7 @@
 // number ("6.6 / 16 GB"). What other programs hold is said once under the list, never per row.
 import type { Locator, Page } from "@playwright/test";
 import { expect, openModels, stack, test, waitReady } from "./fixtures.ts";
+import { holds } from "./waits.ts";
 
 const BLENDER_MIB = Math.round(9.7 * 1024);
 /** One decimal under 10 GB, whole from 10 up, as the picture reads ("6.6 / 16 GB", "17 / 16 GB"). */
@@ -66,8 +67,8 @@ test("one memory mark in Models and Download, against the card, with other progr
   const tip = page.locator("#tip");
   await row.locator(".sl").hover();
   await row.locator(".mm").hover();
-  // longer than the tooltip's delay, so a tip that would show has shown
-  await page.waitForTimeout(1000);
+  // longer than the tooltip's delay, and no tip shows at any point of it
+  await holds(page, 1000, () => tip.isVisible(), false, { message: "a tooltip over the mark" });
   await page.screenshot({ path: info.outputPath("mark-download-hover.png"), animations: "disabled" });
   await expect(tip).toBeHidden();
   await expect(row.locator(".mm")).toHaveAttribute("aria-label", /^Runs on the GPU: (\d\.\d|\d{2,}) of 16 GB$/);

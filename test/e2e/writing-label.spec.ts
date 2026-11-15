@@ -6,6 +6,7 @@
 // stays above the text at one place while the text grows under it, and the text does not move
 // when the label leaves. The run is recorded for the before and after.
 import { expect, sendMessage, test, waitReady } from "./fixtures.ts";
+import { holds } from "./waits.ts";
 import { INSTALLED, configure, pick } from "./threads-support.ts";
 
 test.use({ installed: INSTALLED, video: { mode: "on", size: { width: 1440, height: 900 } } });
@@ -36,7 +37,17 @@ test("Writing sits above the streaming reply and holds still, and the text stays
   const reply = page.locator(".turn.a").last();
   await expect(reply.locator(".think.run")).toBeVisible();
   await expect(reply).toHaveClass(/\bdone\b/, { timeout: 30_000 });
-  await page.waitForTimeout(600);
+  // after the reply is saved, the text's first line stays where it streamed in, watched for a while
+  const firstTop = await page.evaluate(() => {
+    const first = (window as unknown as { wrFrames: Frame[] }).wrFrames.find((f) => f.text !== null);
+    return first === undefined ? null : Math.round(first.text ?? 0);
+  });
+  const textTop = () => page.evaluate(() => {
+    const top = document.querySelector(".col")?.getBoundingClientRect().top ?? 0;
+    const text = [...document.querySelectorAll(".turn.a")].at(-1)?.querySelector(".md")?.getBoundingClientRect();
+    return text === undefined ? null : Math.round(text.top - top);
+  });
+  await holds(page, 600, textTop, firstTop, { message: "the text's first line after the reply is saved" });
   const frames = await page.evaluate(() => (window as unknown as { wrFrames: Frame[] }).wrFrames);
   const writing = frames.filter((f) => f.label !== null && f.text !== null);
   expect(writing.length, "frames with Writing and text both on screen").toBeGreaterThan(20);

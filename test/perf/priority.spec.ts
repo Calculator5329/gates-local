@@ -5,6 +5,7 @@ import path from "node:path";
 import { test, expect, type Page, type CDPSession } from "@playwright/test";
 import { createClient } from "@gates-local/contracts";
 import { CONTROL_URL, FAKE_URL, appUrl } from "../e2e/env.ts";
+import { holds } from "../e2e/waits.ts";
 import { install, measure, type LaterEnd, type Observation } from "./probe.ts";
 import { metric, quantile, type Run } from "./stats.ts";
 import { selectJourneys, type Journey } from "./selection.ts";
@@ -132,7 +133,8 @@ test("focused priority production journeys", async ({ browser }) => {
               for (const warmth of ["cold", "warm"]) {
                 await openShort(page, seed.short);
                 const button = await row(page, id);
-                if (pathName === "hover") { await button.hover(); await page.waitForTimeout(hoverDwellMs); }
+                // the dwell is part of what is measured (hover intent's warm-up), so the claim is read only at its two ends
+                if (pathName === "hover") { await button.hover(); await holds(page, hoverDwellMs, () => page.locator(`.sb-row.on[data-thread="${id}"]`).count(), 0, { message: "hovering a thread does not open it", every: hoverDwellMs }); }
                 const action = `thread-${count}-${warmth}-${pathName}`;
                 const requestsBeforeClick = historyRequests;
                 const beforeClick = await page.evaluate(() => ({ motion: window.threadMotionQueries, height: window.threadHeightReads }));

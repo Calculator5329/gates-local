@@ -15,6 +15,7 @@ import path from "node:path";
 import type { Page } from "@playwright/test";
 import { ROOT, appUrl } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { holds } from "./waits.ts";
 import { bundleSizeWarnings, bundleSize } from "../bundle-size.ts";
 
 // p95 handler time per keydown/input event while streaming: the app's own
@@ -436,12 +437,16 @@ test.describe("a 400-message thread", () => {
     await open(`#thread=${seededThread ?? ""}`);
     await waitReady(page);
     const tl = page.locator(".tl");
+    // each scroll is watched for a set time, part of what is measured: the long tasks it sets off land in it.
+    // The claim is read only at the span's two ends, so the reading adds no work of its own to the window.
+    const shown = async () => (await tl.locator(".turn").count()) > 0;
+    const watch = (ms: number) => holds(page, ms, shown, true, { message: "the thread stays on screen", every: ms });
     await tl.evaluate((el) => el.scrollTo({ top: 0 }));
-    await page.waitForTimeout(200);
+    await watch(200);
     await tl.evaluate((el) => el.scrollTo({ top: el.scrollHeight / 2 }));
-    await page.waitForTimeout(200);
+    await watch(200);
     await tl.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
-    await page.waitForTimeout(300);
+    await watch(300);
     const long = await page.evaluate(readLong);
     report("longest task", Math.max(0, ...long), "ms");
     report("long tasks", long.length, "count");

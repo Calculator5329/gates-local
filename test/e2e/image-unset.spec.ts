@@ -7,6 +7,7 @@ import type { Page } from "@playwright/test";
 import { createClient } from "@gates-local/contracts";
 import { fakeComfy } from "./fake-comfy.ts";
 import { expect, stack, test, waitReady } from "./fixtures.ts";
+import { settled } from "./waits.ts";
 
 test.use({ video: "off", allowedErrors: [/WebSocket connection to .* failed/, /Failed to load resource.*503/] });
 let comfy: Awaited<ReturnType<typeof fakeComfy>>;
@@ -49,7 +50,8 @@ test("an address set in Settings that does not answer: Image opens a pop-up sayi
     await shot(page, "[data-image-job]", "[data-image-job]", info.outputPath("unset-card.png"));
     const imageBtn = page.getByTestId("chat.composer.image");
     await imageBtn.click();
-    await page.waitForTimeout(300);
+    await expect(page.locator("#imageUnset.open")).toBeVisible();
+    await settled(page);
     await shot(page, ".composer, #imageUnset.open", "#imageUnset.open, .composer .pill.gate[aria-label=Image]", info.outputPath("unset-composer.png"));
 
     // the card says it in one line, not in a 1024 box: not running at that address, not "not set up"

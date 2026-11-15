@@ -8,6 +8,7 @@ import type { Locator, Page, TestInfo } from "@playwright/test";
 import { createClient } from "@gates-local/contracts";
 import { fakeComfy } from "./fake-comfy.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { holds } from "./waits.ts";
 
 test.use({ video: "off" });
 let comfy: Awaited<ReturnType<typeof fakeComfy>>;
@@ -111,8 +112,8 @@ test("(b) a Defaults row is the style's name alone, its setup in the size pane o
   await general.hover();
   // the sizes head names the model only (decision 16): the row already says the style
   await expect(picker.getByTestId("image.picker.model")).toHaveText("FLUX.2 Klein 4B");
-  // the pointer stays on General past the tooltip delay: the shot shows whether one comes up
-  await page.waitForTimeout(900);
+  // the pointer stays on General past the tooltip delay, and no tooltip comes up at any point of it
+  await holds(page, 900, () => page.locator("#tip").isVisible(), false, { message: "a tooltip over General" });
   await page.screenshot({ path: info.outputPath("finding-15.png"), animations: "disabled" });
   await expect(defaults.locator("[data-tip]"), "no Defaults row has a tooltip").toHaveCount(0);
   await expect(page.locator("#tip")).not.toBeVisible();

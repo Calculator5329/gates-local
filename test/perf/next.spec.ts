@@ -11,6 +11,7 @@ import path from "node:path";
 import { test, expect, type Browser, type CDPSession, type Locator, type Page } from "@playwright/test";
 import { decodeRequest } from "@gates-local/contracts";
 import { CONTROL_URL, FAKE_URL, appUrl } from "../e2e/env.ts";
+import { holds } from "../e2e/waits.ts";
 import { browserReactHook, costRows, counterRows, emptyNetwork, frameBytes, hotSpots, snapshot, type HotSpot, type MetricSnapshot, type NetworkCounts, type ReactCounts, type Row } from "./counters.ts";
 import type { FixtureIds } from "./fixture.ts";
 import { EARLIER_BUTTON, install, measure, REPLY_TEXT_SELECTOR, type LaterEnd, type Observation } from "./probe.ts";
@@ -83,6 +84,10 @@ const ready = (page: Page) => expect(page.locator(".composer:not(.blocked) #ta")
 async function row(page: Page, id: string) {
   const button = page.locator(`.sb-row[data-thread="${id}"] .sb-thread`); await button.scrollIntoViewIfNeeded(); return button;
 }
+/** A set dwell, part of what is measured (it is the warm-up a person's pause gives), read only at its two ends so the reading adds no work inside it. */
+const dwell = <T>(page: Page, ms: number, read: () => Promise<T>, expected: T, message: string) => holds(page, ms, read, expected, { message, every: ms });
+const noPicker = (page: Page) => page.locator("#picker").count();
+const rowOpen = (page: Page, id: string) => page.locator(`.sb-row.on[data-thread="${id}"]`).count();
 async function openShort(page: Page, id: string) { await (await row(page, id)).click(); await expect(page.locator(".bubble")).toContainText("Short marker"); }
 async function newThread(page: Page) { await page.keyboard.press("Control+n"); await expect(page.locator(".turn")).toHaveCount(0); await ready(page); }
 async function send(page: Page, text: string) { await page.locator("#ta").fill(text); await page.locator("#ta").press("Enter"); await expect(page.locator(".turn.a:not(.done) .md")).toBeVisible(); }
@@ -120,10 +125,10 @@ export async function pickerReplyCase(browser: Browser, kind: RepetitionKind, mo
     await quiet(page);
     const button = page.locator("#modelBtn"), name = `picker-open-${mode}`;
     if (mode === "hover-away") {
-      await button.hover(); await page.waitForTimeout(hoverDwellMs);
+      await button.hover(); await dwell(page, hoverDwellMs, () => noPicker(page), 0, "hovering does not open the picker");
       const away = await point(page.locator("#ta")); await page.mouse.move(away.x, away.y);
       // Let every warm-up answer arrive before counting.
-      await page.waitForTimeout(hoverDwellMs); await quiet(page);
+      await dwell(page, hoverDwellMs, () => noPicker(page), 0, "moving away does not open the picker"); await quiet(page);
       expect(await page.locator("#picker").count(), "hovering must not mount the picker").toBe(0);
       if (kind === "counters") add(counted, { action: `${name}.session-fit-checks`, unit: "count", value: checks });
       return;
@@ -131,13 +136,13 @@ export async function pickerReplyCase(browser: Browser, kind: RepetitionKind, mo
     let observation: Observation;
     if (mode === "hand") {
       const { x, y } = await point(button);
-      await page.mouse.move(x, y); await page.waitForTimeout(handDwellMs);
+      await page.mouse.move(x, y); await dwell(page, handDwellMs, () => noPicker(page), 0, "the pointer on the button does not open the picker");
       observation = await measure(page, () => page.mouse.click(x, y), "click", "#picker.open");
     } else {
       await button.focus();
       // Only focus with a focus ring warms; without one this row would be a cold open.
       expect(await button.evaluate(b => b.matches(":focus-visible")), "script focus after typing counts as keyboard focus").toBe(true);
-      await page.waitForTimeout(handDwellMs);
+      await dwell(page, handDwellMs, () => noPicker(page), 0, "focus does not open the picker");
       observation = await measure(page, () => page.keyboard.press("Enter"), "keydown", "#picker.open");
     }
     recordWindow(name, kind, repeat, observation);
@@ -164,7 +169,7 @@ export async function pickerReadyCase(browser: Browser, kind: RepetitionKind, mo
     });
     await page.goto(appUrl()); await page.evaluate(() => window.perfJourney.result); await ready(page);
     const button = page.locator("#modelBtn");
-    if (mode === "hover") { await button.hover(); await page.waitForTimeout(350); }
+    if (mode === "hover") { await button.hover(); await dwell(page, 350, () => noPicker(page), 0, "hovering does not open the picker"); }
     const location = await point(button);
     const name = `picker-open-${mode}`;
     const observation = await measure(page, () => page.mouse.click(location.x, location.y), "click", "#picker.open");
@@ -299,7 +304,7 @@ test("priority journeys with costs", async ({ browser }) => {
               for (const warmth of ["cold", "warm"]) {
                 await openShort(page, seed.short);
                 const button = await row(page, id);
-                if (pathName === "hover") { await button.hover(); await page.waitForTimeout(hoverDwellMs); }
+                if (pathName === "hover") { await button.hover(); await dwell(page, hoverDwellMs, () => rowOpen(page, id), 0, "hovering a thread does not open it"); }
                 const name = `thread-${count}-${warmth}-${pathName}`;
                 const mountedRow = async () => `${name}-mounted${held(mountedLast = await mountedTurns(), count)}`;
                 await timing(name, await clicking(button), "click", ".tl .turn:last-child .md", title, "text", { name: mountedRow, selector: "turn", text: String(count), mode: "window-count" });
@@ -456,13 +461,14 @@ test("priority journeys with costs", async ({ browser }) => {
           };
           /** No key in the window: what the streamed chunks alone render. Its time row is the window's fixed length. */
           const chunkWindow = async (name: string) => {
-            if (kind === "profile") { await profiled(name, () => page.waitForTimeout(CHUNK_WINDOW_MS)); return; }
+            const streaming = () => dwell(page, CHUNK_WINDOW_MS, () => page.locator(".md.live").count(), 1, "the reply streams through the window");
+            if (kind === "profile") { await profiled(name, streaming); return; }
             await quiet(page);
             const before = await begin();
             const placed = kind === "counters" ? await regions() : undefined;
             const from = await flushes();
             const epochStart = process.env["GL_PERF_ACCOUNTING"] ? await page.evaluate(() => performance.timeOrigin + performance.now()) : undefined;
-            await page.waitForTimeout(CHUNK_WINDOW_MS);
+            await streaming();
             const epochEnd = process.env["GL_PERF_ACCOUNTING"] ? await page.evaluate(() => performance.timeOrigin + performance.now()) : undefined;
             const flushed = await flushes() - from;
             if (placed) regionRows(name, placed, await regions());
@@ -507,11 +513,12 @@ test("priority journeys with costs", async ({ browser }) => {
             let count = -1;
             await expect.poll(async () => { const previous = count; count = await turns.count(); return count === previous; }, { intervals: [300] }).toBe(true);
           };
+          const shown = async () => (await turns.count()) > 0;
           const scrollLong = async () => {
             const tl = page.locator(".tl");
-            await tl.evaluate(el => el.scrollTo({ top: 0 })); await page.waitForTimeout(200);
-            await tl.evaluate(el => el.scrollTo({ top: el.scrollHeight / 2 })); await page.waitForTimeout(200);
-            await tl.evaluate(el => el.scrollTo({ top: el.scrollHeight })); await page.waitForTimeout(300);
+            await tl.evaluate(el => el.scrollTo({ top: 0 })); await dwell(page, 200, shown, true, "the thread stays on screen");
+            await tl.evaluate(el => el.scrollTo({ top: el.scrollHeight / 2 })); await dwell(page, 200, shown, true, "the thread stays on screen");
+            await tl.evaluate(el => el.scrollTo({ top: el.scrollHeight })); await dwell(page, 300, shown, true, "the thread stays on screen");
           };
           const longTasks = () => page.evaluate(() => window.perfLong ?? []);
           if (kind === "profile") { await profiled("open-400", openLong); await profiled("scroll-400", scrollLong); }

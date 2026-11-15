@@ -9,6 +9,7 @@ import { createClient } from "@gates-local/contracts";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 import { release } from "./threads-support.ts";
+import { painted, settled } from "./waits.ts";
 
 test.use({ screenshot: "only-on-failure", seed: "work-fold", viewport: { width: 390, height: 844 } });
 
@@ -34,7 +35,7 @@ async function untilCalls(chip: Locator, n: number): Promise<void> {
 }
 
 /** Every element under the hidden chat that the browser would still paint, by class and first words. */
-const painted = (page: Page) => page.locator(".stage").evaluate((stage) =>
+const paintsThrough = (page: Page) => page.locator(".stage").evaluate((stage) =>
   [stage, ...stage.querySelectorAll("*")]
     .filter((n) => n.checkVisibility({ visibilityProperty: true, opacityProperty: true }))
     .map((n) => `${n.tagName.toLowerCase()}.${[...n.classList].join(".")} ${(n.textContent ?? "").trim().slice(0, 40)}`));
@@ -54,15 +55,27 @@ test("a live thought and an opened one stay under Settings, and come back with t
   await expect(items.nth(2).locator(".think-body")).toBeVisible();
   await items.nth(0).locator(".th-line").click();
   await expect(items.nth(0).locator(".think-body")).toBeVisible();
-  const live = await items.nth(2).locator(".think-body").boundingBox();
+  // round 1 has finished opening, which pushes round 2 down; bring the live thought on screen and read its place as drawn
+  await settled(page, items.nth(0).locator(".think-body"));
+  const liveBody = items.nth(2).locator(".think-body");
+  await liveBody.scrollIntoViewIfNeeded();
+  await painted(page);
+  const live = await liveBody.boundingBox();
   if (live === null) throw new Error("No live thought on screen");
+  const point = { x: live.x + live.width / 2, y: live.y + live.height / 2 };
+  expect(point.y, "the live thought's middle is on screen").toBeGreaterThan(0);
+  expect(point.y, "the live thought's middle is on screen").toBeLessThan(page.viewportSize()?.height ?? 0);
 
   await page.keyboard.press("Control+Comma");
   await expect(page.locator(".set")).toBeVisible();
-  expect(await painted(page), "nothing of the chat paints through Settings").toEqual([]);
-  // what is under the pointer where the live thought was is Settings, not the thought
-  const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest(".stage") !== null, { x: live.x + live.width / 2, y: live.y + live.height / 2 });
-  expect(hit, "the live thought's place belongs to Settings").toBe(false);
+  expect(await paintsThrough(page), "nothing of the chat paints through Settings").toEqual([]);
+  // what is under the pointer where the live thought was is Settings, not the thought; a point off
+  // the page names nothing, so the three answers are kept apart
+  const under = await page.evaluate(({ x, y }) => {
+    const el = document.elementFromPoint(x, y);
+    return el === null ? "nothing" : el.closest(".stage") !== null ? "chat" : el.closest(".set") !== null ? "settings" : `other: ${el.tagName.toLowerCase()}.${[...el.classList].join(".")}`;
+  }, point);
+  expect(under, "the live thought's place belongs to Settings").toBe("settings");
 
   await page.keyboard.press("Escape");
   await expect(page.locator(".set")).toHaveCount(0);

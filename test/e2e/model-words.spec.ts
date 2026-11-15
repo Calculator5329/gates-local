@@ -5,6 +5,7 @@
 import type { Page } from "@playwright/test";
 import { decodeResult, type FitTable } from "@gates-local/contracts";
 import { expect, openGpuMemory, sendMessage, test, waitReady } from "./fixtures.ts";
+import { holds } from "./waits.ts";
 
 /** Prepare normally, then push a newer fit table while the picker is open. */
 async function pickerReports(page: Page) {
@@ -56,10 +57,13 @@ async function rowsOpenNoTip(page: Page): Promise<void> {
   for (let i = 0; i < n; i++) {
     const nm = rows.nth(i).locator(".pk-nm");
     await rows.nth(i).locator(".pk-n").hover();
-    await page.waitForTimeout(PAST_TIP_DELAY_MS);
     const cut = await nm.evaluate((el) => el.scrollWidth > el.clientWidth);
     if (cut) await expect(page.locator("#tip.open"), `row ${i}, its name cut`).toHaveText((await nm.textContent()) ?? "");
-    else await expect(page.locator("#tip.open"), `row ${i}`).toHaveCount(0);
+    else {
+      // the last row's tip has gone, and none comes up through the tooltip's delay and past it
+      await expect(page.locator("#tip.open"), `row ${i}`).toHaveCount(0);
+      await holds(page, PAST_TIP_DELAY_MS, () => page.locator("#tip.open").count(), 0, { message: `a tooltip over row ${i}` });
+    }
   }
 }
 

@@ -6,6 +6,7 @@
 // (holdThinkingAfterTokens) so each check looks at a thought still arriving.
 import { FAKE_URL } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { holds, settled } from "./waits.ts";
 
 test.use({ screenshot: "only-on-failure" });
 
@@ -31,9 +32,7 @@ test("while the model thinks, the Thinking pill opens on a click and its text gr
   await expect(pill).toHaveAccessibleName("Thinking");
   await expect(body).not.toHaveAttribute("aria-live");
   // it never opens by itself
-  await page.waitForTimeout(400);
-  await expect(pill).toHaveAttribute("aria-expanded", "false");
-  await expect(body).toBeHidden();
+  await holds(page, 400, async () => [await pill.getAttribute("aria-expanded"), await body.isVisible()], ["false", false], { message: "the thought stays shut" });
 
   await pill.click();
   await expect(pill).toHaveAttribute("aria-expanded", "true");
@@ -41,7 +40,7 @@ test("while the model thinks, the Thinking pill opens on a click and its text gr
   await expect(body).toContainText("The question is short");
   await expect(body).not.toContainText("without a tool");
   // the open ease (180 ms) is over; from here arriving text only adds words
-  await page.waitForTimeout(300);
+  await settled(page, body);
   await body.evaluate((el) => {
     const w = window as unknown as { glNode: Node | null; glEases: string[] };
     w.glNode = el.firstChild;

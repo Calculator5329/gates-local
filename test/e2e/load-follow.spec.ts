@@ -8,6 +8,7 @@ import type { Page } from "@playwright/test";
 import { decodeRequest, decodeResult, decodeServerMessage } from "@gates-local/contracts";
 import { FAKE_URL } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { holds } from "./waits.ts";
 
 const GEMMA = "gemma4:12b";
 /** The fake cannot hold a load open until released, so the load is long enough for two picks on a slow machine; a precondition says so if not. */
@@ -133,11 +134,9 @@ test("opening the app loads nothing, and the first key typed starts the thread's
   await open();
   await waitReady(page);
   await expect(page.locator("#modelBtn")).toContainText("Qwen 3.5 9B");
-  await page.waitForTimeout(500);
-  expect(loadsAsked, "opening the app asks for no load").toEqual([]);
+  await holds(page, 500, async () => [...loadsAsked], [], { message: "opening the app asks for no load" });
   await page.locator("#ta").pressSequentially("Wh");
   await expect.poll(() => loadsAsked, { timeout: 5000 }).toEqual(["qwen3.5:9b"]);
   await page.locator("#ta").pressSequentially("y is the sky blue");
-  await page.waitForTimeout(300);
-  expect(loadsAsked, "more keys ask nothing more").toEqual(["qwen3.5:9b"]);
+  await holds(page, 300, async () => [...loadsAsked], ["qwen3.5:9b"], { message: "more keys ask nothing more" });
 });

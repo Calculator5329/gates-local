@@ -10,6 +10,7 @@ import path from "node:path";
 import type { Page } from "@playwright/test";
 import { ROOT } from "./env.ts";
 import { expect, navButton, test, waitReady } from "./fixtures.ts";
+import { settled } from "./waits.ts";
 
 /** Thu 2026-11-12 14:00 in Chicago (CST, UTC-6), as in shots.spec.ts. */
 const NOW = Date.UTC(2026, 10, 12, 20, 0);
@@ -71,8 +72,7 @@ for (const shot of SHOTS) {
       // the app is dark by default; a light shot asks for the light tokens
       if (shot.theme === "light") await page.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
       await shot.act?.(page);
-      await page.evaluate(() => document.fonts.ready.then(() => undefined));
-      await page.waitForTimeout(400);
+      await settled(page);
       await page.screenshot({ path: path.join(OUT, `${shot.name}.png`), animations: "disabled", caret: "hide" });
     });
   });

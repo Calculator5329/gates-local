@@ -10,6 +10,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { expect, test, waitReady } from "./fixtures.ts";
+import { painted } from "./waits.ts";
 
 const NOW = Date.UTC(2026, 10, 12, 20, 0);
 // seven threads in three date groups; a short window makes them run past the list's end
@@ -50,6 +51,16 @@ const listState = (page: Page) => page.locator(".sb .sb-list").evaluate((el: HTM
   };
 });
 
+/** The list once its scroll and its fades have come to rest: the same reading either side of a drawn frame. */
+async function restingList(page: Page) {
+  await expect.poll(async () => {
+    const was = JSON.stringify(await listState(page));
+    await painted(page);
+    return JSON.stringify(await listState(page)) === was;
+  }, { message: "the list's scroll and fades came to rest" }).toBe(true);
+  return listState(page);
+}
+
 // Guards the owner's ruling (chat row 15): the sidebar top as T3 Code has it.
 test("row 15: Search rests with no box in line with the threads, New thread alone at the right, and the list fades instead of showing a bar", async ({ page, open }) => {
   await page.setViewportSize(SHORT);
@@ -80,12 +91,10 @@ test("row 15: Search rests with no box in line with the threads, New thread alon
   // less than the overflow, so the list stops between its ends
   await page.mouse.wheel(0, 40);
   await expect.poll(async () => (await listState(page)).top).toBeGreaterThan(0);
-  await page.waitForTimeout(200);
-  const middle = await listState(page);
+  const middle = await restingList(page);
   await shoot(page, "list-middle-dark", marks);
   await list.evaluate((el) => { el.scrollTop = el.scrollHeight; });
-  await page.waitForTimeout(200);
-  const atEnd = await listState(page);
+  const atEnd = await restingList(page);
   await shoot(page, "list-end-dark", marks);
   await theme(page, "light");
   await shoot(page, "list-end-light", marks);

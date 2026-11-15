@@ -9,6 +9,7 @@ import { expect, test } from "@playwright/test";
 import { createClient, decodePayload, decodeServerMessage, type Client, type Payload } from "@gates-local/contracts";
 import { DATA_ROOT, ROOT, WEB_ORIGIN } from "./env.ts";
 import { assertContextCopied, assertInterruptedCancellation, randomContextWord, requireRealSmokeUrl } from "./real-smoke-checks.ts";
+import { holds } from "./waits.ts";
 
 type Arrival = { at: number; payload: Payload<"chat.event"> };
 
@@ -124,9 +125,7 @@ test("real model streams, stops, recalls the thread and survives a server restar
     const cancelMs = Date.now() - stopAt;
     const stoppedCount = arrivals.length;
     // A bounded observation window is intentional: cancellation must prevent later deltas.
-    await page.waitForTimeout(500);
-    expect(arrivals).toHaveLength(stoppedCount);
-    expect(await firstReply.locator(".md").innerText()).toBe(partial);
+    await holds(page, 500, async () => [arrivals.length, await firstReply.locator(".md").innerText()], [stoppedCount, partial], { message: "messages that arrived and the reply's words after Stop" });
     evidence["stop"] = { ms: Date.now() - stopAt, cancelMs, quietWindowMs: 500, message: cancellation.message, partial };
     console.log(`[real-smoke] Stop ${Date.now() - stopAt} ms; partial retained ${JSON.stringify(partial)}`);
 

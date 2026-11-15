@@ -7,6 +7,7 @@ import type { Page } from "@playwright/test";
 import { createClient } from "@gates-local/contracts";
 import { fakeComfy } from "./fake-comfy.ts";
 import { expect, stack, test, waitReady } from "./fixtures.ts";
+import { settled } from "./waits.ts";
 
 // a list of two is passed as [value, options], so the value is wrapped (a bare pair reads as one pattern and its options)
 test.use({ video: "off", allowedErrors: [[/WebSocket connection to .* failed/, /Failed to load resource.*503/], { scope: "test" }] });
@@ -53,7 +54,7 @@ test("one click sets up images: the pop-up shows the one download, Set up images
   await expect(plan).toContainText("With the image engine (ComfyUI 0.0.0-test)");
   const setUp = pop.getByTestId("image.unset.set-up");
   await expect(setUp).toBeVisible();
-  await page.waitForTimeout(300);
+  await settled(page);
   await shot(page, "#imageUnset.open", "#imageSetupPlan, #imageUnset .unset-acts .btn:first-child", info.outputPath("setup-offer.png"));
 
   // the model download held part way, to see the progress the click starts
@@ -108,7 +109,7 @@ test("where pictures cannot run, the pop-up says why in plain words and offers n
   await expect(pop.locator("#imageSetupWhy")).toHaveText("This graphics card has 3 GB; Image mode needs 4 GB. A ComfyUI on another computer works too: set its address in Settings.");
   await expect(pop.getByRole("button", { name: "Set up images" })).toHaveCount(0);
   await expect(pop.locator("#imageSetupPlan")).toHaveCount(0);
-  await page.waitForTimeout(300);
+  await settled(page);
   await shot(page, "#imageUnset.open", "#imageSetupWhy", info.outputPath("setup-cannot.png"));
   await expect(imageBtn).toHaveAttribute("aria-pressed", "false");
   expect(comfy.engineArgs(), "no engine started").toBeUndefined();

@@ -8,6 +8,7 @@
 // frame after it, and asks for no other frames, so the backfill runs at the
 // browser's own pace.
 import { expect, test, waitReady } from "./fixtures.ts";
+import { holds } from "./waits.ts";
 
 const TURNS = 2000;
 test.use({ seed: TURNS });
@@ -154,8 +155,7 @@ test("a 2,000-message thread opens at its end as a window, keeps the turn in vie
   // the page holds only the window: nothing more mounts by itself, idle or scrolled to the top
   const tl = page.locator(".tl");
   await tl.evaluate((n) => { n.scrollTop = 0; });
-  await page.waitForTimeout(1000);
-  await expect(turns).toHaveCount(WINDOW);
+  await holds(page, 1000, () => turns.count(), WINDOW, { message: "turns on the page" });
   await expect(turns.first()).toContainText(`Question ${(TURNS - WINDOW) / 2 + 1}:`);
 
   // Load earlier: the window before it goes in at once, and the turn that was first stays where it is

@@ -13,6 +13,7 @@ import { BIG_PROMPT, LEFT_PATH, LOAN_PROMPTS, MOVING, NAVIGATE_PROMPT, PROBE_PRO
 import { FAKE_URL, SERVER_PORT, TOKEN, WEB_ORIGIN } from "./env.ts";
 import { expect, test, waitReady } from "./fixtures.ts";
 import { INSTALLED, configure, start } from "./threads-support.ts";
+import { holds } from "./waits.ts";
 
 // what the browser logs when it refuses the page something; one pattern, since
 // test.use reads a two-entry array whose second entry is an object as [value, options]
@@ -87,8 +88,7 @@ test("a page learns nothing of the app and reaches nothing outside its frame", a
   expect.soft(r["violations"]).toContain("script-src-elem");
   await expect.soft(page.frameLocator('[data-testid="pages.frame"]').locator("#swapped")).toHaveCount(0);
   // a script from another address is never asked for: not one written in the page, not one the page makes and marks as its own
-  await page.waitForTimeout(500);
-  expect.soft(await leftRequests()).toEqual(before);
+  await holds(page, 500, leftRequests, before, { message: "scripts asked for from another address" });
   // WebRTC and popups: no constructor, and no frame of its own to find one in
   expect.soft(r["rtc"]).toBe("undefined,undefined,undefined");
   expect.soft(r["rtcNew"]).toBe("threw TypeError");
@@ -124,10 +124,8 @@ test("a page cannot move the app's window, and its frame cannot load anything bu
   const documents: string[] = [];
   page.on("response", (r) => { if (r.request().frame() !== page.mainFrame() && r.request().resourceType() === "document") documents.push(r.url()); });
   const at = await (async () => { await pageOf(page, NAVIGATE_PROMPT); return page.url(); })();
-  // the page moves its own frame to the app's address 100 ms after it runs
-  await page.waitForTimeout(1500);
-  expect(page.url()).toBe(at);
-  expect(documents.filter((u) => u.startsWith(WEB_ORIGIN))).toEqual([]);
+  // the page moves its own frame to the app's address 100 ms after it runs: the window stays and no app page loads in the frame, all through
+  await holds(page, 1500, async () => [page.url(), documents.filter((u) => u.startsWith(WEB_ORIGIN))], [at, []], { message: "the window's address and the app pages framed" });
   for (const f of page.frames()) {
     if (f === page.mainFrame()) continue;
     expect(f.url().startsWith(WEB_ORIGIN) && await f.locator("#app").count().catch(() => 0)).toBeFalsy();
@@ -155,8 +153,7 @@ for (const [label, { prompt }] of Object.entries(MOVING)) {
     const before = await leftRequests();
     await pageOf(page, prompt);
     const at = page.url();
-    await page.waitForTimeout(1500);
-    expect(page.url()).toBe(at);
+    await holds(page, 1500, async () => [page.url(), await leftRequests()], [at, before], { message: "the window's address and what reached the fake server" });
     const frames = page.frames().filter((f) => f !== page.mainFrame()).map((f) => f.url());
     test.info().annotations.push({ type: "frames", description: frames.join(" ") });
     expect(frames.length).toBeGreaterThan(0);

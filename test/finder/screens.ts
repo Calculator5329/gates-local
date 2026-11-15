@@ -9,7 +9,7 @@
 // first frame when the step opens something: what arrives after that frame
 // arrives late. A step without `opens` changes something in place, so what
 // it adds is the person's doing and only moves and blinks count.
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 /** What a step can use: the page and the walk's own helpers, so this table has no runtime imports. */
 export interface Ctx {
@@ -146,15 +146,24 @@ async function heldReply(c: Ctx): Promise<void> {
 /** The reply screen's models: tiny-chat does not think, so Writing has no thought's line to sit on. */
 const REPLY_MODELS = ["tiny-chat:2k", "qwen3.5:9b"];
 
+/** Resolves once a hovered control's hover state is drawn: two frames for its transitions to start, then those that end have ended. */
+const hoverDrawn = (b: Locator) => b.evaluate(async (el) => {
+  await new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+  const ending = el.getAnimations({ subtree: true }).filter((a) => Number.isFinite(a.effect?.getComputedTiming().endTime ?? Number.POSITIVE_INFINITY));
+  await Promise.all(ending.map((a) => a.finished.catch(() => undefined)));
+});
+
 async function liveThought(c: Ctx): Promise<void> {
   await c.toolsOn();
   await c.scenario("slow-drip", { toolCalls: 3, quietToolRounds: 1, tokenDelayMs: 1, firstTokenDelayMs: 0, holdThinkingAfterTokens: 4 });
   await c.send("Use a tool to check my notes");
   const chip = c.page.locator(".turn.a").last().locator("button.think");
-  for (let i = 0; i < 400 && !/\b1 tool call\b/.test((await chip.getAttribute("aria-label").catch(() => null)) ?? ""); i++) {
-    await c.release();
-    await c.page.waitForTimeout(50);
-  }
+  // a held round goes on at each release; between releases the chip's name is watched for the first call
+  const called = () => c.page.waitForFunction(
+    () => /\b1 tool call\b/.test([...document.querySelectorAll(".turn.a")].at(-1)?.querySelector("button.think")?.getAttribute("aria-label") ?? ""),
+    undefined, { timeout: 50 },
+  ).then(() => true, () => false);
+  for (let i = 0; i < 400 && !(await called()); i++) await c.release();
   await chip.click();
   // the steps list: round 1 closed, its call, round 2 open and growing; open round 1 too, as
   // settings-hides-chat.spec.ts does, so a thought shows whether or not round 2 is still held
@@ -281,7 +290,7 @@ export const SCREENS: readonly Screen[] = [
     paths: [`${WEB}/sidebar/Sidebar.tsx`, `${WEB}/sidebar/footer-state.ts`, `${WEB}/updates/update-state.ts`, `${WEB}/models/model-speed.tsx`, `${WEB}/lib/ui/Panel.tsx`, `${WEB}/lib/ui/panel.css`],
     seed: "design",
     steps: [
-      { name: "point at each footer icon", root: ".sb-foot", act: async (c) => { for (const b of await c.page.locator(".sb-foot button").all()) { await b.hover(); await c.page.waitForTimeout(120); } } },
+      { name: "point at each footer icon", root: ".sb-foot", act: async (c) => { for (const b of await c.page.locator(".sb-foot button").all()) { await b.hover(); await hoverDrawn(b); } } },
       { name: "open Settings from the footer", root: ".set", opens: section("General"), act: (c) => c.page.locator(".sb-foot").getByRole("button", { name: /^Settings/ }).click() },
       { name: "close Settings", root: ".sb", act: press("Escape") },
     ],

@@ -5,6 +5,7 @@
 // computer", with what they need. Decision 11: the memory mark alone says slower; no line above the list.
 import type { Page } from "@playwright/test";
 import { expect, openModels, stack, test, waitReady } from "./fixtures.ts";
+import { settled } from "./waits.ts";
 
 interface Profile {
   readonly name: string;
@@ -69,9 +70,13 @@ for (const profile of PROFILES) {
     await expect(list.locator("[aria-busy=true]")).toHaveCount(0);
     if (profile.download !== undefined) {
       await list.locator(`.dlrow[data-cat="${profile.download}"]`).getByTestId("models.download.start").click();
-      await expect(list.locator(`.dlrow[data-cat="${profile.download}"]`).getByRole("progressbar")).toBeVisible();
+      const bar = list.locator(`.dlrow[data-cat="${profile.download}"]`).getByRole("progressbar");
+      await expect(bar).toBeVisible();
       await page.mouse.move(0, 0);
-      await page.waitForTimeout(2500);
+      // the shot shows a download under way: its bar off zero and no tooltip left from the click
+      await expect(bar, "the download has moved").toHaveAttribute("aria-valuenow", /^[1-9]\d*$/);
+      await expect(page.locator("#tip.open")).toHaveCount(0);
+      await settled(page);
     }
     await page.screenshot({ path: info.outputPath(profile.shot), animations: "disabled" });
 

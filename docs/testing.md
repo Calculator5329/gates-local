@@ -46,6 +46,13 @@ page load, ready and teardown steps; the remainder includes actions,
 framework and browser setup. Explicit diagnostic recordings are excluded
 from journey warnings.
 
+A browser test waits for what it expects to see, never for a length of time.
+When no locator says it, `test/e2e/waits.ts` has three waits: `painted` (the
+next frame is drawn), `settled` (fonts in, nothing easing) and `holds` (a
+claim checked again and again through a span, such as "no tooltip past its
+delay"). Only `holds` waits on the clock; lint `gates/no-wait-for-timeout`
+refuses the clock anywhere else, including a hand-written disable.
+
 ## Whole on the first frame
 
 `flicker-audit.spec.ts` checks the rule in `docs/design.md`: a surface

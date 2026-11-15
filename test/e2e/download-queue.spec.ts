@@ -38,7 +38,14 @@ test("a message queued behind the first download says it once, and the model but
   await sendMessage(page, "Hello!");
   const row = page.locator(".qt-r");
   await expect(row).toBeVisible();
-  await page.waitForTimeout(1500);
+  // the button watched while the download moves through three percents, the message waiting all along
+  const percents = new Set<string>();
+  await expect.poll(async () => {
+    const percent = /\d+%/.exec((await btn.getAttribute("data-tip")) ?? "")?.[0];
+    if (percent !== undefined) percents.add(percent);
+    return percents.size;
+  }, { message: "the download's percent moved" }).toBeGreaterThanOrEqual(3);
+  await expect(row).toBeVisible();
   await page.screenshot({ path: info.outputPath("queued-download.png") });
   writeFileSync(info.outputPath("queued-download.json"), JSON.stringify({ button: await btn.boundingBox(), row: await row.boundingBox(), field: await page.locator("#ta").boundingBox() }));
   // said once: the queue row's clock, whose tip says when it sends; not the field, not the button

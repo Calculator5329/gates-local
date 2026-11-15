@@ -7,6 +7,7 @@
 import type { Page } from "@playwright/test";
 import { fakeComfy } from "./fake-comfy.ts";
 import { expect, stack, test, waitReady } from "./fixtures.ts";
+import { settled } from "./waits.ts";
 
 test.use({ video: "off", allowedErrors: [[/WebSocket connection to .* failed/, /Failed to load resource.*503/], { scope: "test" }] });
 let comfy: Awaited<ReturnType<typeof fakeComfy>>;
@@ -90,7 +91,7 @@ test("a card that turns up after a processor setup: one line and one button set 
   await expect(page.getByTestId("settings.images.card-size")).toHaveText(/^\d+\.\d\sGB/);
   // both labels stay in the button so it keeps its width; the one not shown is hidden from its name
   await expect(use).toHaveAccessibleName("Use the card");
-  await page.waitForTimeout(300);
+  await settled(page);
   await shots(page, ".srow:has([data-testid='settings.images.use-card'])", "card-later-offer", (f) => info.outputPath(f));
 
   // the build is held: Image mode stays reachable, the engine is still the processor's

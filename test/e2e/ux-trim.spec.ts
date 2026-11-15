@@ -7,6 +7,7 @@
 // stopped reply is marked by a stop square and its seconds instead of a sentence.
 import type { Page } from "@playwright/test";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { holds } from "./waits.ts";
 
 test.use({ video: "off" });
 
@@ -24,8 +25,7 @@ test("a model row and a context row open no tooltip; a row still names its model
   const picker = await openPicker(page);
   const row = picker.locator('.pk-r[data-m="gemma4:12b"]');
   await row.locator(".pk-n").hover();
-  await page.waitForTimeout(700);
-  await expect(page.locator("#tip.open"), "no tooltip on a model row").toHaveCount(0);
+  await holds(page, 700, () => page.locator("#tip.open").count(), 0, { message: "a tooltip on a model row" });
   await expect(picker.locator(".pk-r[data-tip], .pk-ctx-row[data-tip]")).toHaveCount(0);
   const select = row.locator(".pk-select");
   await expect(select).toHaveAccessibleName("Gemma 4 12B");
@@ -35,8 +35,7 @@ test("a model row and a context row open no tooltip; a row still names its model
   const ctx = picker.locator(".pk-ctx-row").first();
   await expect(ctx).toBeVisible();
   await ctx.hover();
-  await page.waitForTimeout(700);
-  await expect(page.locator("#tip.open"), "no tooltip on a context row").toHaveCount(0);
+  await holds(page, 700, () => page.locator("#tip.open").count(), 0, { message: "a tooltip on a context row" });
   // Kept: an icon-only family button still names itself.
   await picker.locator(".pk-fam").first().hover();
   await expect(page.locator("#tip.open")).toBeVisible();

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-15: browser tests wait for what they check, not for a set time
+
+- Internal: the browser tests no longer pause for a fixed time. Each waits for what it checks, or checks a "nothing happens" claim through the whole span, which fixes two tests that failed now and then.
+
 ## 2026-11-15: pop-ups dim the window without blurring it
 
 - Settings, Models and Usage still dim the window behind them, but no

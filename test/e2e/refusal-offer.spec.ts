@@ -14,6 +14,7 @@
 import type { Page } from "@playwright/test";
 import { FAKE_URL } from "./env.ts";
 import { expect, stack, test, waitReady } from "./fixtures.ts";
+import { settled } from "./waits.ts";
 
 const INSTALLED = ["gemma4:12b", "qwen3.5:9b", "qwen3.5:4b"];
 
@@ -99,7 +100,9 @@ test("WIN-MEM-07: the picker names whose numbers it shows, tells the selected ro
   await expect(picker).toBeVisible();
   // the tester's view: Gemma selected, the pointer on Qwen 3.5 4B
   await page.locator('#picker .pk-r[data-m="qwen3.5:4b"]').hover();
-  await page.waitForTimeout(150);
+  await expect(page.locator('#picker .pk-r[data-m="qwen3.5:4b"]')).toHaveClass(/\bhl\b/);
+  await expect(picker.getByTestId("models.picker.context-for")).toHaveText("Qwen 3.5 4B");
+  await settled(page);
   await shot(page, info.outputPath("picker.png"), "#picker .pk-context-head", '#picker .pk-r[data-m="gemma4:12b"]', NOTE);
   const head = picker.getByTestId("models.picker.context-for");
   await expect(head).toHaveText("Qwen 3.5 4B");

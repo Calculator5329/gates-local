@@ -8,6 +8,7 @@
 import type { Page } from "@playwright/test";
 import { fakeComfy } from "./fake-comfy.ts";
 import { expect, stack, test, waitReady } from "./fixtures.ts";
+import { holds } from "./waits.ts";
 
 test.use({ video: "off", allowedErrors: [[/WebSocket connection to .* failed/, /Failed to load resource.*503/], { scope: "test" }] });
 let comfy: Awaited<ReturnType<typeof fakeComfy>>;
@@ -68,7 +69,9 @@ for (const [w, h, tag] of [[1280, 800, "desk"], [390, 844, "phone"]] as const) {
       // Settings opened again mid-setup (another section, then back): the row is still the setup's
       await section(page, "general");
       await section(page, "images");
-      await page.waitForTimeout(500);
+      // the setup's row comes back and stays: it never gives way to the finished row's switch
+      await expect(setUp).toBeVisible();
+      await holds(page, 500, async () => [await setUp.isVisible(), await page.getByTestId("settings.images.enable").count()], [true, 0], { message: "the setup row, and the switch" });
       await page.mouse.move(2, 2);
       await page.screenshot({ path: info.outputPath(`setup-remount-${tag}.png`) });
       await expect(setUp, "the setup row after Settings opened again during the model step").toBeVisible();

@@ -12,6 +12,7 @@ import type { Page } from "@playwright/test";
 import { LONG_NAME } from "../fake-ollama/models.ts";
 import { CHECKOUT_CACHE, SHOTS_DIR } from "./env.ts";
 import { type RuntimeMode, type Scenario, expect, listButton, navButton, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { settled } from "./waits.ts";
 
 /** Thu 2026-11-12 14:00 in Chicago (CST, UTC-6). */
 const NOW = Date.UTC(2026, 10, 12, 20, 0);
@@ -90,7 +91,9 @@ const SHOTS: readonly Shot[] = [
       await stack.scenario("slow-drip", { holdAfterTokens: 46 });
       await sendMessage(p, "How do I check disk space before a download?");
       await expect(p.locator(".turn.a").last().getByRole("heading", { name: "Steps" })).toBeVisible();
-      await p.waitForTimeout(600);
+      // the reply is held after its 46th word, the code block's second line: shown once that line is in
+      await expect(p.locator(".turn.a").last().locator(".md pre").last()).toContainText("du -sh");
+      await settled(p);
       await p.mouse.move(720, 120);
     },
   },
@@ -148,9 +151,11 @@ const runningDownload = async (p: Page) => {
   await slowPulls();
   await downloadTab(p);
   await p.locator('.dlrow[data-cat="qwen3.5:4b"]').getByRole("button", { name: /^Download \d/ }).click();
-  await expect(p.locator('.dlrow[data-cat="qwen3.5:4b"]').getByRole("progressbar")).toBeVisible();
+  const bar = p.locator('.dlrow[data-cat="qwen3.5:4b"]').getByRole("progressbar");
+  await expect(bar).toBeVisible();
   await p.mouse.move(0, 0); // no tooltip left over from the click
-  await p.waitForTimeout(2500);
+  await expect(bar, "the download has moved").toHaveAttribute("aria-valuenow", /^[1-9]\d*$/);
+  await expect(p.locator("#tip.open")).toHaveCount(0);
 };
 const PHONE = { width: 412, height: 915 };
 
@@ -207,8 +212,7 @@ test.describe("models page", () => {
         // with no models the composer stays disabled: the shot's own locators wait instead
         if (shot.scenario === undefined) await waitReady(page);
         await shot.act(page);
-        await page.evaluate(() => document.fonts.ready.then(() => undefined));
-        await page.waitForTimeout(400);
+        await settled(page);
         await page.screenshot({ path: path.join(SHOTS_DIR, `${shot.name}.png`), animations: "disabled", caret: "hide" });
       });
     });
@@ -263,8 +267,7 @@ test.describe("settings sections", () => {
           await waitReady(page);
           await settings(label)(page);
           await act?.(page);
-          await page.evaluate(() => document.fonts.ready.then(() => undefined));
-          await page.waitForTimeout(400);
+          await settled(page);
           await page.screenshot({ path: path.join(SHOTS_DIR, `settings-${file}-${width}.png`), animations: "disabled", caret: "hide" });
         });
       });
@@ -298,9 +301,8 @@ for (const shot of SHOTS) {
         // the app is dark by default
         if (theme === "light") await goLight(page, shot.start !== "firstrun" && (shot.scenario === undefined || shot.scenario === "long-name"));
         await shot.act?.(page);
-        // let fit checks, popovers and fonts settle; animations are frozen below
-        await page.evaluate(() => document.fonts.ready.then(() => undefined));
-        await page.waitForTimeout(400);
+        // let popovers and fonts settle; animations are frozen below
+        await settled(page);
         await page.screenshot({ path: path.join(SHOTS_DIR, `${file}.png`), animations: "disabled", caret: "hide" });
       });
     });
@@ -402,8 +404,7 @@ for (const shot of MOBILE) {
           if (shot.start === "firstrun") await expect(page.locator(".first").getByRole("heading").first()).toBeVisible();
           else await waitReady(page);
           await shot.act?.(page);
-          await page.evaluate(() => document.fonts.ready.then(() => undefined));
-          await page.waitForTimeout(400);
+          await settled(page);
           mkdirSync(path.join(SHOTS_DIR, "mobile"), { recursive: true });
           await page.screenshot({ path: path.join(SHOTS_DIR, "mobile", `${file}.png`), animations: "disabled", caret: "hide" });
         });

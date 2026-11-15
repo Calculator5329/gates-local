@@ -12,6 +12,7 @@ import type { Locator, Page, TestInfo } from "@playwright/test";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 import { LONG_COMMAND } from "./seed.ts";
 import { release } from "./threads-support.ts";
+import { holds, painted } from "./waits.ts";
 
 test.use({ screenshot: "only-on-failure" });
 
@@ -131,8 +132,8 @@ test.describe("live", () => {
       const before = await topOf(chip);
       await chip.click();
       await expect(chip).toHaveAttribute("aria-expanded", "true");
-      await page.waitForTimeout(300);
-      expect(await topOf(chip), "opening the chip at the end moves nothing").toBe(before);
+      // read on drawn frames all through the open's ease and the hold after it
+      await holds(page, 300, async () => { await painted(page); return topOf(chip); }, before, { message: "opening the chip at the end moves nothing" });
       const list = reply.getByRole("list", { name: "Steps" });
       const items = list.locator(":scope > li");
       // round 2 is held inside its thinking: round 1 is one closed line, the call one line, round 2 open and growing
@@ -152,13 +153,14 @@ test.describe("live", () => {
 
       // at the end, the page follows: the newest line is on screen
       await tl.evaluate((n) => { n.scrollTop = n.scrollHeight; });
-      await page.waitForTimeout(100);
+      await painted(page);
       await untilCalls(chip, 3);
       await expect(items).toHaveCount(7);
-      await page.waitForTimeout(300);
-      const last = await items.last().evaluate((n) => n.getBoundingClientRect().bottom);
-      const view = await tl.evaluate((n) => n.getBoundingClientRect().bottom);
-      expect(last, "the newest line is on screen").toBeLessThanOrEqual(view);
+      await expect.poll(async () => {
+        await painted(page);
+        const last = await items.last().evaluate((n) => n.getBoundingClientRect().bottom);
+        return last - await tl.evaluate((n) => n.getBoundingClientRect().bottom);
+      }, { message: "the newest line is on screen" }).toBeLessThanOrEqual(0);
 
       // the choice holds after the reply is done
       await expect.poll(async () => { await release(); return reply.evaluate((n) => n.classList.contains("done")); }, { timeout: 20_000, intervals: [50] }).toBe(true);
@@ -184,8 +186,7 @@ test.describe("saved", () => {
     const line = longRow.locator(".wr-line");
     const above = await topOf(line);
     await line.click();
-    await page.waitForTimeout(450);
-    expect(await topOf(line), "opening a call never moves it").toBe(above);
+    await holds(page, 450, async () => { await painted(page); return topOf(line); }, above, { message: "opening a call never moves it" });
     const box = longRow.locator(".wr-body");
     const size = await box.evaluate((n) => ({ h: n.getBoundingClientRect().height, sh: n.scrollHeight, ch: n.clientHeight, sw: n.scrollWidth, cw: n.clientWidth }));
     expect(size.h).toBeLessThanOrEqual(360);

@@ -2,6 +2,7 @@
 // Streaming continuity: partial words show at once, Stop keeps them, and the
 // reveal stays steady between network bursts.
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { holds } from "./waits.ts";
 import { appUrl } from "./env.ts";
 
 test.use({ screenshot: "only-on-failure" });
@@ -112,8 +113,7 @@ test("Stop keeps the rendered blocks and cancels further text", async ({ page, o
   // Stop cancels delivery; the already received pacing tail still drains.
   await expect(reply.locator(".writing")).toHaveCount(0);
   const text = await reply.locator(".md").textContent();
-  await page.waitForTimeout(250);
-  expect(await reply.locator(".md").textContent()).toBe(text);
+  await holds(page, 250, () => reply.locator(".md").textContent(), text, { message: "the stopped reply's words" });
 });
 
 // Guards the owner's ask for a steady paced reveal: words keep coming between network bursts.

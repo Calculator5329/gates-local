@@ -9,6 +9,7 @@
 import { writeFileSync } from "node:fs";
 import type { Page, TestInfo } from "@playwright/test";
 import { expect, sendMessage, test, waitReady } from "./fixtures.ts";
+import { holds } from "./waits.ts";
 import { configure, pick, state } from "./threads-support.ts";
 
 const MODEL = "qwen3.5:9b";
@@ -32,7 +33,7 @@ test("a 5 s load and 2 s of thinking say Thought for 2 s, and the load is a ring
   // a load nobody is waiting on, a model just picked: nothing on screen moves
   await configure({ loadDelayMs: 5000 });
   await pick(page, MODEL);
-  await page.waitForTimeout(2000);
+  await holds(page, 2000, async () => [await face(), await send.locator(".ldring").count()], [idle, 0], { message: "the model button's face and the send ring while nobody waits on the load" });
   await shot(page, info, "first-load");
   expect.soft((await state()).loaded.map((m) => m.name), "still loading when looked at").not.toContain(MODEL);
   expect.soft(await face(), "the model button's face is as it was before the load").toBe(idle);
@@ -44,7 +45,8 @@ test("a 5 s load and 2 s of thinking say Thought for 2 s, and the load is a ring
   await sendMessage(page, "Why is the sky blue");
   const reply = page.locator(".turn.a").last();
   await expect(reply.locator(".think.run .lv-w > span").first()).toHaveText(/^Loading into/);
-  await page.waitForTimeout(2000);
+  await expect(send.locator(".ldring:not(.wait)")).toBeVisible();
+  await holds(page, 2000, face, idle, { message: "the model button's face while the message waits on the load" });
   await shot(page, info, "measured-load");
   // a message is waiting: the ring is on the button being waited on, filling over the first load's time
   await expect.soft(send.locator(".ldring:not(.wait)")).toBeVisible();
