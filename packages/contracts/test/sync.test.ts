@@ -8,7 +8,7 @@ const sync: SyncMetadata = { epoch: "process-a", changes: [
 ] };
 
 it("round-trips optional metadata without changing response or push payloads", () => {
-  const frames = [encodeResult("1", "threads.list", [], sync), encodePush("threads.changed", { threadId: "one" }, sync)];
+  const frames = [encodeResult("1", "threads.list", [], sync), encodePush("threads.changed", { threadId: "one", thread: null }, sync)];
   for (const frame of frames) {
     if (!frame.ok) throw frame.error;
     const decoded = decodeServerMessage(frame.value);
@@ -34,8 +34,8 @@ it("rejects malformed present metadata, including unsafe counters and unknown sc
   ];
   for (const metadata of invalid) {
     expect(decodeServerMessage(JSON.stringify({ type: "response", id: "1", ok: true, result: [], sync: metadata })).ok, JSON.stringify(metadata)).toBe(false);
-    expect(decodeServerMessage(JSON.stringify({ type: "push", channel: "threads.changed", payload: { threadId: "one" }, sync: metadata })).ok).toBe(false);
+    expect(decodeServerMessage(JSON.stringify({ type: "push", channel: "threads.changed", payload: { threadId: "one", thread: null }, sync: metadata })).ok).toBe(false);
     expect(encodeResult("1", "threads.list", [], metadata as SyncMetadata).ok).toBe(false);
-    expect(encodePush("threads.changed", { threadId: "one" }, metadata as SyncMetadata).ok).toBe(false);
+    expect(encodePush("threads.changed", { threadId: "one", thread: null }, metadata as SyncMetadata).ok).toBe(false);
   }
 });

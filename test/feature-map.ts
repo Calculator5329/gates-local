@@ -107,7 +107,7 @@ export const FEATURES: readonly Feature[] = [
     server: ["app/handlers.ts", "threads"],
     calls: ["threads.list", "threads.get"],
     pushes: ["threads.changed"],
-    specs: ["sidebar-running.spec.ts", "threads-preload.spec.ts", "sb-hairline.spec.ts", "mobile.spec.ts"],
+    specs: ["sidebar-running.spec.ts", "threads-preload.spec.ts", "sb-hairline.spec.ts", "mobile.spec.ts", "threads-numbered.spec.ts"],
     testIds: ["sidebar.thread.open", "chat.header.open-threads", "sidebar.drawer.close"],
   },
   {
@@ -1044,7 +1044,7 @@ export const FEATURES: readonly Feature[] = [
     id: "ordered-data",
     name: "Every window agrees",
     group: "No screen",
-    what: "Settings, models, the Library, updates and images carry a number on every answer, and a window applies only what is newer.",
+    what: "Settings, models, the Library, updates, images, the chat list and each chat carry a number on every answer, and a window applies only what is newer.",
     where: "The socket between server and window.",
     aka: ["ORDERED_DOMAINS", "sync", "revisions"],
     window: ["lib/session/server-state.ts"],
@@ -1052,7 +1052,7 @@ export const FEATURES: readonly Feature[] = [
     packages: ["contracts"],
     calls: ["sync.negotiate"],
     pushes: [],
-    specs: ["settings-two-windows.spec.ts", "two-clients.spec.ts"],
+    specs: ["settings-two-windows.spec.ts", "two-clients.spec.ts", "threads-numbered.spec.ts"],
   },
   {
     id: "update-install",

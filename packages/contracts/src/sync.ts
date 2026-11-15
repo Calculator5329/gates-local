@@ -11,6 +11,11 @@ export type SyncDomain = typeof SyncDomain.Type;
 const FIXED_SCOPES = ["settings", "runtime", "models", "catalog", "threads", "gpu", "fit-inputs", "active-turns", "sources", "source-imports", "image-status", "update",
   "suggested", "fit-table", "pulls", "loads", "memory", "speeds", "measures", "image-presets", "image-download", "image-setup", "image-jobs"] as const;
 export type FixedScope = typeof FIXED_SCOPES[number];
+/** A family's members: one chat (`thread:<id>`). */
+export type MemberScope = `thread:${string}`;
+export type ScopeName = FixedScope | MemberScope;
+/** The scope of one chat's messages. */
+export const chatScope = (threadId: string): MemberScope => `thread:${threadId}`;
 
 const Revision = S.Int.check(S.isGreaterThanOrEqualTo(0), S.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER));
 const Scope = S.String.check(S.isPattern(new RegExp(`^(?:${FIXED_SCOPES.join("|")}|(?:thread|turn|fit|pull|load|image):.+)$`)));
@@ -38,10 +43,30 @@ export interface SyncRow {
   readonly scope: FixedScope;
   /** Other things the answer carries whole beside `scope`'s, each with its own number (the list's runtime). */
   readonly also?: readonly FixedScope[];
+  /**
+   * The answer or push is also about one member of a family, and carries that member's number: the
+   * chat (`thread:<id>`) named by the call's or the push's `threadId`.
+   */
+  readonly member?: "thread";
 }
 
-/** Every scope a frame of `row` carries a number for. */
-export const scopesOf = (row: SyncRow): readonly FixedScope[] => [row.scope, ...row.also ?? []];
+/** The member a frame of `row` names: `threadId` of the call's params or the push's payload. */
+function memberOf(row: SyncRow, about: unknown): MemberScope | undefined {
+  if (row.member === undefined || typeof about !== "object" || about === null) return undefined;
+  const id = (about as { readonly threadId?: unknown }).threadId;
+  return typeof id === "string" ? chatScope(id) : undefined;
+}
+
+/**
+ * Every scope a frame of `row` carries a number for. `about`: the call's params or the push's
+ * payload, which name the member of a row that has one; a row with a member it does not name
+ * is missing a number by definition (`thread:` matches no scope a frame can carry).
+ */
+export function scopesOf(row: SyncRow, about?: unknown): readonly ScopeName[] {
+  const fixed: ScopeName[] = [row.scope, ...row.also ?? []];
+  if (row.member === undefined) return fixed;
+  return [...fixed, memberOf(row, about) ?? `${row.member}:`];
+}
 
 /**
  * Kinds the socket server numbers itself, in the order it gives them out: each push takes the
@@ -53,10 +78,10 @@ export const scopesOf = (row: SyncRow): readonly FixedScope[] => [row.scope, ...
 export const SENT_IN_ORDER: readonly SyncDomain[] = ["models", "images"];
 
 /** Only domains whose every writer is numbered; the socket server and the client enforce the rows of these. */
-export const ORDERED_DOMAINS: readonly SyncDomain[] = ["settings", "models", "sources", "updates", "images"];
+export const ORDERED_DOMAINS: readonly SyncDomain[] = ["settings", "models", "sources", "updates", "images", "threads"];
 
 /** The one snapshot number `sync` gives `scope` in this epoch; undefined when it gives none, several, or another epoch's. */
-export function revisionOf(sync: SyncMetadata | undefined, epoch: string, scope: FixedScope): number | undefined {
+export function revisionOf(sync: SyncMetadata | undefined, epoch: string, scope: ScopeName): number | undefined {
   if (sync?.epoch !== epoch) return undefined;
   const changes = sync.changes.filter(change => change.scope === scope);
   return changes.length === 1 && changes[0]?.kind === "snapshot" ? changes[0].rev : undefined;

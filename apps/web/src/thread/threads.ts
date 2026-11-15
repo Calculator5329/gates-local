@@ -1,15 +1,16 @@
 // Thread creation, cached history, snapshot reconciliation and index actions.
-import type { Message, MethodName, Params, ResultOf } from "@gates-local/contracts";
+import { type CallOptions, type Message, type MethodName, type Params, type Payload, type ResultOf, type SyncMetadata, type Thread, chatScope } from "@gates-local/contracts";
 import { describeModel, titleFrom } from "../lib/words/format.ts";
-import { choosable, newestOnly } from "../models/pick.ts";
+import { choosable } from "../models/pick.ts";
 import { type LiveTurn, NA, type State, getState, setState } from "../lib/store/store.ts";
 import { dropDraft, getDraft } from "../lib/store/drafts.ts";
 import { withTurn } from "./turn.ts";
 import { debounce } from "../lib/ui/kit/async.ts";
+import { createThreadNumbers } from "./numbers.ts";
 
 interface ThreadEffects {
   readonly applyServerEvent: typeof setState;
-  readonly call: <M extends MethodName>(method: M, params: Params<M>) => Promise<ResultOf<M>>;
+  readonly call: <M extends MethodName>(method: M, params: Params<M>, options?: CallOptions<M>) => Promise<ResultOf<M>>;
   readonly codeOf: (error: unknown) => string;
   readonly failure: (what: string, error: unknown, todo?: string) => string;
   readonly openThread: (threadId: string) => void;
@@ -82,11 +83,11 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     });
   }
 
-  // A thread list asked before a newer one, or before a local create or delete, is out of date (MP5-01).
-  const threadsOrder = newestOnly();
-
-  /** Threads cached before the last reconnect: the next visit reloads them. */
-  const stale = new Set<string>();
+  /**
+   * The list's number and each chat's: a row older than the one shown is dropped, and a cached chat
+   * is read again only when a push or a list named a newer number for it than its copy's.
+   */
+  const numbers = createThreadNumbers();
 
   /**
    * Thread loads in flight, each with the messages that reached its thread
@@ -121,7 +122,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
   const creatingDrafts = new Set<number>();
   // Speculation never enters the displayed store. Two histories, 4,000
   // messages and one million serialized characters bound what hover retains.
-  const previews = new Map<string, { messages: readonly Message[]; earlier: number; size: number }>();
+  const previews = new Map<string, { messages: readonly Message[]; earlier: number; size: number; at: number }>();
   interface Preload {
     readonly threadId: string;
     cancelled: boolean;
@@ -143,12 +144,12 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     if (preloading !== null && preloading.threadId === threadId) preloading.cancelled = true;
   }
 
-  function keepPreview(threadId: string, messages: readonly Message[], earlier: number): void {
+  function keepPreview(threadId: string, messages: readonly Message[], earlier: number, at: number): void {
     if (messages.length > 4000) return;
     const size = JSON.stringify(messages).length;
     if (size > 1_000_000) return;
     previews.delete(threadId);
-    previews.set(threadId, { messages, earlier, size });
+    previews.set(threadId, { messages, earlier, size, at });
     while (previews.size > 2 || [...previews.values()].reduce((n, p) => n + p.size, 0) > 1_000_000 ||
       [...previews.values()].reduce((n, p) => n + p.messages.length, 0) > 4000) {
       const oldest = previews.keys().next().value;
@@ -166,14 +167,15 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     const ready = () => {
       const s = getState();
       return s.conn.kind === "open" && s.pop?.id !== "thread" && s.threadId !== threadId &&
-        !(s.messages[threadId] !== undefined && !stale.has(threadId)) && !previews.has(threadId);
+        !(s.messages[threadId] !== undefined && numbers.current(threadId)) && !previews.has(threadId);
     };
     if (!ready()) return;
     intent(threadId, ready);
   }
 
-  function installHistory(threadId: string, messages: readonly Message[], earlier: number): void {
-    stale.delete(threadId);
+  /** A read of the chat at number `at` becomes what the window shows of it. */
+  function installHistory(threadId: string, messages: readonly Message[], earlier: number, at: number): void {
+    numbers.hold(threadId, at);
     setEarlier(threadId, earlier);
     applyServerEvent((s) => ({
       messages: { ...s.messages, [threadId]: messages },
@@ -185,26 +187,70 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
   }
 
   /**
-   * Chats the server said changed since the last list applied. A list read after such a push that
-   * does not have the chat says it was deleted, and only then does its draft end here; a list that
-   * merely leaves a chat out (one still being made, or one read before it) never ends a draft.
+   * A chat the server says is deleted (a row with no chat, pushed or the answer to this window's
+   * delete): its row, cached copy, model, error, preview and draft go. Only this ends a draft here; a
+   * list that leaves a chat out (one still being made, or one read before it) never does.
    */
-  const named = new Set<string>();
-
-  async function refreshThreads(): Promise<void> {
-    const ticket = threadsOrder.next();
-    const judged = [...named];
-    const threads = await call("threads.list", {}).catch(() => undefined);
-    if (threads === undefined || !threadsOrder.current(ticket)) return;
-    for (const id of judged) {
-      named.delete(id);
-      if (!threads.some(t => t.id === id)) dropDraft(id);
-    }
-    for (const id of previews.keys()) if (!threads.some(t => t.id === id)) invalidatePreload(id);
+  function forget(threadId: string): void {
+    invalidatePreload(threadId);
+    dropDraft(threadId);
+    // A snapshot sent before this deletion cannot bring it back.
+    landed.set(threadId, ++loadSeq);
+    setEarlier(threadId, 0);
+    numbers.drop(threadId);
     applyServerEvent((s) => {
-      const open = s.threadId !== null && threads.some((t) => t.id === s.threadId);
-      const threadModels = Object.fromEntries(Object.entries(s.threadModels).filter(([id]) => threads.some((t) => t.id === id)));
-      return { threads: sortThreads(threads), threadModels, ...(s.view === "thread" && !open ? { view: "new" as const, threadId: null } : {}) };
+      const { [threadId]: _gone, ...messages } = s.messages;
+      const { [threadId]: _model, ...threadModels } = s.threadModels;
+      const { [threadId]: _error, ...loadErrors } = s.loadErrors;
+      return { messages, threadModels, loadErrors, threads: s.threads.filter((t) => t.id !== threadId) };
+    });
+  }
+
+  /** One chat's row as the server has it at this number; null when it was deleted. */
+  function applyRow(threadId: string, thread: Thread | null, sync: SyncMetadata | undefined): void {
+    if (!numbers.row(threadId, numbers.of(sync, "threads"))) return;
+    if (thread === null) {
+      forget(threadId);
+      // the chat on screen is gone: its screen goes too, as a list without it did
+      const s = getState();
+      if (s.view === "thread" && s.threadId === threadId) applyServerEvent({ view: "new", threadId: null });
+      return;
+    }
+    applyServerEvent((s) => ({ threads: sortThreads([thread, ...s.threads.filter((t) => t.id !== threadId)]) }));
+  }
+
+  /**
+   * A push about one chat: its row, and the number of its messages. The open chat is read again when
+   * that number is newer than its copy's (a load in flight is compared when it lands); another
+   * chat keeps the number and is compared when it is opened.
+   */
+  function rowPushed({ threadId, thread }: Payload<"threads.changed">, sync: SyncMetadata | undefined): void {
+    applyRow(threadId, thread, sync);
+    if (thread === null) return;
+    // legacy: the push cannot say what changed, so a read ahead of the chat is thrown away, as before
+    if (!numbers.ordered()) { invalidatePreload(threadId); return; }
+    numbers.announce(threadId, numbers.of(sync, chatScope(threadId)));
+    const preview = previews.get(threadId);
+    if (preview !== undefined && preview.at < numbers.known(threadId)) previews.delete(threadId);
+    if (getState().threadId === threadId && !loading(threadId) && !numbers.current(threadId)) void loadThread(threadId, true);
+  }
+
+  /**
+   * The hydrate's list read. On an ordered connection it applies as it lands when newer than the list
+   * shown, and a chat whose row came after the read keeps that row (or stays deleted); each chat's
+   * number is noted, so a cached copy is read again on its next visit only if it moved. Legacy: the
+   * hydrate's batch applies the list as read, and every cached copy is read again on its next visit.
+   */
+  function listArrived(threads: readonly Thread[], sync: SyncMetadata | undefined): void {
+    if (!numbers.ordered()) return;
+    const newer = numbers.list(numbers.of(sync, "threads"));
+    if (newer === undefined) return;
+    for (const t of threads) if (!newer.has(t.id)) numbers.announce(t.id, numbers.of(sync, chatScope(t.id)));
+    applyServerEvent((s) => {
+      const listed = sortThreads([...threads.filter((t) => !newer.has(t.id)), ...s.threads.filter((t) => newer.has(t.id))]);
+      // a chat the list no longer has keeps no model pick (its draft stays: see forget)
+      const threadModels = Object.fromEntries(Object.entries(s.threadModels).filter(([id]) => listed.some((t) => t.id === id) || id === s.threadId));
+      return { threads: listed, threadModels };
     });
   }
 
@@ -215,12 +261,12 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
   }
 
   async function loadThread(threadId: string, force = false): Promise<void> {
-    if (!force && getState().messages[threadId] !== undefined && !stale.has(threadId)) return;
+    if (!force && getState().messages[threadId] !== undefined && numbers.current(threadId)) return;
     if (!force) {
       const preview = previews.get(threadId);
-      if (preview !== undefined) {
-        previews.delete(threadId);
-        installHistory(threadId, preview.messages, preview.earlier);
+      previews.delete(threadId);
+      if (preview !== undefined && preview.at >= numbers.known(threadId)) {
+        installHistory(threadId, preview.messages, preview.earlier, preview.at);
         return;
       }
       const p = preloading;
@@ -245,11 +291,20 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     if (preload === undefined || preload.used) setLoadError(threadId, null);
     const older = () => preload?.cancelled === true || req.seq < (landed.get(threadId) ?? 0);
     let wider = false;
+    let outdated = false;
+    // the chat's number this read is at: the answer's own, or (legacy, never compared) the newest named when it was sent
+    let at = numbers.asked(threadId);
     try {
       // the newest page, or as many as are already loaded: a reload never takes back what the reader asked for
       const limit = Math.max(PAGE_MESSAGES, getState().messages[threadId]?.length ?? 0);
-      const { messages: snapshot, earlier = 0 } = await call("threads.get", { threadId, limit });
+      const { messages: snapshot, earlier = 0 } = await call("threads.get", { threadId, limit }, { onResult: (_, sync) => { at = numbers.of(sync, chatScope(threadId)) ?? at; } });
       if (older()) return;
+      // a change was named for the chat while this read was out: its answer is older than that, and
+      // is read again instead of shown (a read ahead nobody opened yet is only dropped)
+      if (at < numbers.known(threadId)) {
+        outdated = preload === undefined || preload.used;
+        return;
+      }
       // an earlier page came in while this was asked: the reader holds messages in front of this
       // answer, so it is asked again for all of them (once: a front deleted meanwhile is not looped on)
       const front = getState().messages[threadId]?.[0];
@@ -259,8 +314,8 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
       }
       landed.set(threadId, req.seq);
       const messages = req.since.reduce(upsertMessage, snapshot);
-      if (preload !== undefined && !preload.used) keepPreview(threadId, messages, earlier);
-      else installHistory(threadId, messages, earlier);
+      if (preload !== undefined && !preload.used) keepPreview(threadId, messages, earlier, at);
+      else installHistory(threadId, messages, earlier, at);
     } catch (e) {
       if (older()) return;
       if (preload !== undefined && !preload.used) return;
@@ -276,6 +331,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
       if (preload !== undefined && preloading === preload) preloading = null;
     }
     if (wider) await fetchThread(threadId, undefined, true);
+    else if (outdated) await fetchThread(threadId, undefined, again);
   }
 
   /**
@@ -353,7 +409,12 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
 
   async function renameThread(threadId: string, title: string): Promise<void> {
     const t = title.trim();
-    if (t !== "") await threadAction("rename", threadId, () => call("threads.rename", { threadId, title: t }));
+    if (t !== "") await threadAction("rename", threadId, () => call("threads.rename", { threadId, title: t }, { onResult: rowAnswered }));
+  }
+
+  /** An action's answer is the chat's row at the action's number: it applies as a pushed row does. */
+  function rowAnswered(thread: Thread, sync: SyncMetadata | undefined): void {
+    applyRow(thread.id, thread, sync);
   }
 
   const deletions = new Map<string, Promise<void>>();
@@ -372,19 +433,10 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
   }
 
   async function performDelete(threadId: string): Promise<void> {
-    if (!await threadAction("delete", threadId, () => call("threads.delete", { threadId }))) return;
-    invalidatePreload(threadId);
-    dropDraft(threadId);
-    // A snapshot sent before this confirmed deletion cannot resurrect it.
-    landed.set(threadId, ++loadSeq);
-    setEarlier(threadId, 0);
-    threadsOrder.next();
-    applyServerEvent((s) => {
-      const { [threadId]: _gone, ...messages } = s.messages;
-      const { [threadId]: _model, ...threadModels } = s.threadModels;
-      const { [threadId]: _error, ...loadErrors } = s.loadErrors;
-      return { messages, threadModels, loadErrors, threads: s.threads.filter((t) => t.id !== threadId), queued: s.queued.filter((q) => q.threadId !== threadId) };
-    });
+    // the answer is the deletion's number: a list read before it cannot bring the row back
+    if (!await threadAction("delete", threadId, () => call("threads.delete", { threadId }, { onResult: (_, sync) => { numbers.row(threadId, numbers.of(sync, "threads")); } }))) return;
+    forget(threadId);
+    applyServerEvent((s) => ({ queued: s.queued.filter((q) => q.threadId !== threadId) }));
     if (getState().threadId === threadId) {
       const notice = getState().notice;
       newThread();
@@ -398,11 +450,15 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     if (creatingDrafts.has(version)) return null;
     creatingDrafts.add(version);
     try {
-      const t = await call("threads.create", { title: titleFrom(content) || "Attached images" });
+      let at = 0;
+      const t = await call("threads.create", { title: titleFrom(content) || "Attached images" }, { onResult: (made, sync) => {
+        rowAnswered(made, sync);
+        at = numbers.of(sync, chatScope(made.id)) ?? numbers.asked(made.id);
+      } });
       // Its history is known empty, so loadThread never runs for it: record the model it starts on here.
       const own = model === undefined ? {} : { threadModels: { ...getState().threadModels, [t.id]: model } };
-      threadsOrder.next();
-      applyServerEvent((st) => ({ threads: sortThreads([t, ...st.threads.filter((x) => x.id !== t.id)]), messages: { ...st.messages, [t.id]: [] }, ...own }));
+      numbers.hold(t.id, at);
+      applyServerEvent((st) => ({ messages: { ...st.messages, [t.id]: [] }, ...own }));
       openThread(t.id);
       return t.id;
     } catch {
@@ -434,7 +490,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
   }
 
   return {
-    refreshThreads, noteMessage, loadThread, restoreSaved, reloadThread, loading,
+    noteMessage, loadThread, restoreSaved, reloadThread, loading,
     preloadThread, loadEarlier,
     /** How many saved messages come before the ones loaded in this thread. */
     earlierOf: (threadId: string) => earlierCounts.get(threadId) ?? 0,
@@ -442,14 +498,19 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
       earlierListeners.add(listener);
       return () => { earlierListeners.delete(listener); };
     },
-    threadsChanged(threadId: string) { invalidatePreload(threadId); named.add(threadId); void refreshThreads(); },
+    rowPushed, listArrived, rowAnswered,
     renameThread, deleteThread, waitForThreadDeletion, createThread, untrackedDone, imageSaved,
     creatingDraft: (version: number) => creatingDrafts.has(version),
-    listOrder: threadsOrder,
-    markOtherThreadsStale(s: State) {
+    /**
+     * A new connection. On the same server (its epoch unchanged) every number the window holds stays,
+     * and the list read that follows says which cached chats moved. A restarted server or a legacy
+     * connection forgets them: each cached chat is read again on its next visit, and a preview or a
+     * read ahead from before is not used.
+     */
+    connected(epoch: string | undefined) {
+      if (!numbers.begin(epoch, Object.keys(getState().messages))) return;
       previews.clear();
       if (preloading !== null) preloading.cancelled = true;
-      for (const id of Object.keys(s.messages)) if (id !== s.threadId) stale.add(id);
     },
   };
 }

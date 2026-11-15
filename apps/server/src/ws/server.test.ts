@@ -124,11 +124,11 @@ describe("round trip over a real socket", () => {
     quiet.client.subscribe("chat.event", (event) => chat.push(event));
     quiet.client.subscribe("threads.changed", (event) => changed.push(event));
     for (let i = 0; i < 10_000; i++) server.push("chat.event", { ...payload, event: { type: "delta", text: "old" } });
-    server.push("threads.changed", { threadId: "thread" });
+    server.push("threads.changed", { threadId: "thread", thread: null });
     // Ping is not a request: the quiet client remains before the boundary.
     await new Promise<void>((resolve) => { quiet.ws.once("pong", () => resolve()); quiet.ws.ping(); });
     expect.soft(chat.length).toBe(0);
-    expect(changed).toEqual([{ threadId: "thread" }]);
+    expect(changed).toEqual([{ threadId: "thread", thread: null }]);
     await quiet.client.call("threads.list", {});
     expect(chat.length).toBe(1);
     expect(chat).toEqual([payload]);

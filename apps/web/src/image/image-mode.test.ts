@@ -127,8 +127,8 @@ it("each thread keeps its own choice: a pick in B leaves A's, and a new thread s
   b.server.answer("threads.list", () => ["A", "B"].map((id) => listedThread(id, kept[id])));
   b.server.answer("threads.setImageChoice", ({ threadId, choice: picked }) => { kept[threadId] = picked; return listedThread(threadId, picked); });
   b.server.answer("settings.update", (patch) => (saved = { ...saved, ...patch as Partial<Settings> }));
-  b.server.push("threads.changed", { threadId: "A" });
-  await until(() => st().threads.length === 2, 2000, "the thread list");
+  for (const id of ["A", "B"]) b.server.push("threads.changed", { threadId: id, thread: listedThread(id, kept[id]) });
+  await until(() => ["A", "B"].every((id) => st().threads.some((t) => t.id === id)), 2000, "the thread list");
   session.openThread("A");
   expect(choice.chosenImage(st())).toMatchObject({ preset: { id: FLUX.id }, width: 1024, height: 768 });
   session.openThread("B");

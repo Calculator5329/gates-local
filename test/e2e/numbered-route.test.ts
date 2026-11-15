@@ -40,7 +40,19 @@ it("numbers a spec's own answers and pushes as the newest, and keeps the server'
   page.send(JSON.stringify({ type: "response", id: "3", ok: false, error: { code: "failed", message: "no" } }));
 
   expect(revs(f.toPage.slice(1))).toEqual([[1], [2], [3], [1], [4], undefined, undefined]);
-  expect((JSON.parse(f.toPage[2] ?? "{}") as { sync?: { epoch: string } }).sync?.epoch).toBe("e1");
+  const told = (JSON.parse(f.toPage[0] ?? "{}") as { result?: { epoch: string } }).result?.epoch;
+  expect(told, "the page is told the route's own epoch").toMatch(/^e1\./);
+  expect((JSON.parse(f.toPage[2] ?? "{}") as { sync?: { epoch: string } }).sync?.epoch).toBe(told);
+});
+
+it("gives a page that reconnects through a new route a new epoch, so it forgets the last route's numbers", () => {
+  const epochs = [fakeRoute(), fakeRoute()].map(f => {
+    numberedRoute(f.socket);
+    f.page({ type: "request", id: "1", method: "sync.negotiate", params: { ordered: ["threads"] } });
+    f.server({ type: "response", id: "1", ok: true, result: { epoch: "e1", ordered: ["threads"] } });
+    return (JSON.parse(f.toPage[0] ?? "{}") as { result?: { epoch: string } }).result?.epoch;
+  });
+  expect(epochs[0]).not.toBe(epochs[1]);
 });
 
 it("numbers a spec's own list answer for the models and the runtime beside them", () => {
@@ -52,6 +64,18 @@ it("numbers a spec's own list answer for the models and the runtime beside them"
   page.send(JSON.stringify({ type: "response", id: "2", ok: true, result: { runtime: {}, models: [] } }));
   const sync = (JSON.parse(f.toPage[1] ?? "{}") as { sync?: { changes: Array<{ scope: string; rev: number }> } }).sync;
   expect(sync?.changes.map(c => [c.scope, c.rev])).toEqual([["models", 1], ["runtime", 1]]);
+});
+
+it("numbers a spec's own chat row and chat read for the chat they name", () => {
+  const f = fakeRoute();
+  const { page } = numberedRoute(f.socket);
+  f.page({ type: "request", id: "1", method: "sync.negotiate", params: { ordered: ["threads"] } });
+  f.server({ type: "response", id: "1", ok: true, result: { epoch: "e1", ordered: ["threads"] } });
+  f.page({ type: "request", id: "2", method: "threads.get", params: { threadId: "b" } });
+  page.send(JSON.stringify({ type: "push", channel: "threads.changed", payload: { threadId: "a", thread: null } }));
+  page.send(JSON.stringify({ type: "response", id: "2", ok: true, result: { thread: {}, messages: [] } }));
+  const scopes = f.toPage.slice(1).map(r => (JSON.parse(r) as { sync?: { changes: Array<{ scope: string; rev: number }> } }).sync?.changes.map(c => [c.scope, c.rev]));
+  expect(scopes).toEqual([[["threads", 1], ["thread:a", 1]], [["threads", 2], ["thread:b", 1]]]);
 });
 
 it("leaves every frame alone before the connection negotiated", () => {

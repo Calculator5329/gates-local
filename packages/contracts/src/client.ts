@@ -71,6 +71,7 @@ export interface Client {
 
 interface Pending {
   readonly method: MethodName;
+  readonly params: unknown;
   readonly resolve: (value: never) => void;
   readonly reject: (error: WireError) => void;
   readonly timer: ReturnType<typeof setTimeout>;
@@ -115,12 +116,13 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
     try { report(error); } finally { if (sync?.mode === "ordered") client.close(); }
   };
   // A row of an ordered kind must carry exactly one snapshot number for its scope in this epoch.
-  const metadataError = (metadata: SyncMetadata | undefined, row: SyncRow | undefined): WireError | undefined => {
+  // `about`: the call's params or the push's payload, which name the member a row is about.
+  const metadataError = (metadata: SyncMetadata | undefined, row: SyncRow | undefined, about: unknown): WireError | undefined => {
     if (sync?.mode !== "ordered") return;
     const { epoch } = sync;
     if ((metadata !== undefined && metadata.epoch !== epoch) ||
-      (row !== undefined && sync.domains.includes(row.domain) && scopesOf(row).some(scope => revisionOf(metadata, epoch, scope) === undefined))) {
-      return new WireError("bad-message", `missing or invalid ${row === undefined ? "synchronization" : scopesOf(row).join(" and ")} metadata; reconnect required`);
+      (row !== undefined && sync.domains.includes(row.domain) && scopesOf(row, about).some(scope => revisionOf(metadata, epoch, scope) === undefined))) {
+      return new WireError("bad-message", `missing or invalid ${row === undefined ? "synchronization" : scopesOf(row, about).join(" and ")} metadata; reconnect required`);
     }
   };
 
@@ -131,7 +133,7 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
     if (msg.type === "push") {
       const p = decodePayload(msg.channel, msg.payload);
       if (!p.ok) return protocolError(p.error);
-      const invalid = metadataError(msg.sync, pushSync(p.value.channel));
+      const invalid = metadataError(msg.sync, pushSync(p.value.channel), p.value.payload);
       if (invalid) return protocolError(invalid);
       for (const handler of subscribers.get(p.value.channel) ?? []) {
         try {
@@ -146,7 +148,7 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
     if (call === undefined) return report(new WireError("bad-message", `response for unknown id "${msg.id}"`));
     pending.delete(msg.id);
     clearTimeout(call.timer);
-    const invalid = metadataError(msg.sync, msg.ok ? methodSync(call.method) : undefined);
+    const invalid = metadataError(msg.sync, msg.ok ? methodSync(call.method) : undefined, call.params);
     if (invalid) { call.reject(invalid); return protocolError(invalid); }
     if (!msg.ok) return call.reject(new WireError(msg.error.code, msg.error.message, msg.error.blocking));
     const r = decodeResult(call.method, msg.result);
@@ -219,7 +221,7 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
           pending.delete(id);
           reject(new WireError("timeout", `${method} (${id}) got no response in ${timeoutMs} ms`));
         }, timeoutMs);
-        pending.set(id, { method, resolve: resolve as (value: never) => void, reject, timer, onMetadata: callOptions?.onMetadata,
+        pending.set(id, { method, params, resolve: resolve as (value: never) => void, reject, timer, onMetadata: callOptions?.onMetadata,
           onResult: callOptions?.onResult as Pending["onResult"],
           ...(method === "sync.negotiate" ? { offered: (params as Params<"sync.negotiate">).ordered } : {}),
         });

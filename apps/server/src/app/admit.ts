@@ -16,6 +16,7 @@ import type { FitReport } from "../fit/types.ts";
 import { catalogModels } from "../runtime/catalog.ts";
 import { AdmitCancelled, ModelActionError, type AdmitContext, type TurnReservation } from "../runtime/load.ts";
 import type { turnSettings } from "../settings/turn.ts";
+import { threadChanged } from "../threads/sync.ts";
 import { AppError, attachError, cancelledBeforeStart, imageError, preemptedBy, refusalOf, runtimeChangedTurn } from "./errors.ts";
 import type { RunTurn, TurnOptions } from "./run-turn.ts";
 import { endedOf, type AppContext, type Turn, type TurnFailure } from "./turn.ts";
@@ -276,7 +277,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
         // A file removed since the check above (its day ran out) is said, not saved as a dead reference.
         const userMessage = attachedFiles && files.length ? await attachedFiles.save(files, withImages, threadId).catch(stopFirst(attachError)) : await withImages();
         sendMark("saved");
-        push("threads.changed", { threadId });
+        push(...threadChanged(store, threadId));
         started = userMessage;
         turn.inMemory = true;
         // a model it loads is ready at its first token; one already in memory, now

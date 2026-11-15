@@ -46,8 +46,7 @@ it("failed thread actions preserve an open streaming/loading conversation across
       { name: "rename.failure", run: async w => { w.rename.fail("internal", "rename refused"); await drain(); } },
       { name: "delete.failure", run: async w => { w.remove.fail("internal", "delete refused"); await drain(); } },
       { name: "index.push", run: async w => {
-        w.browser.server.answer("threads.list", () => [{ ...original, title: "Other window's title" }, other]);
-        w.browser.server.push("threads.changed", { threadId: original.id });
+        w.browser.server.push("threads.changed", { threadId: original.id, thread: { ...original, title: "Other window's title" } });
         await drain();
       } },
       { name: "reply.done", run: async w => {

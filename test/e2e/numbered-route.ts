@@ -10,7 +10,7 @@
 import { methodSync, pushSync, scopesOf, type MethodName, type SyncDomain, type SyncMetadata, type SyncRow } from "@gates-local/contracts";
 import type { WebSocketRoute } from "@playwright/test";
 
-type Frame = { type?: string; id?: string; ok?: boolean; channel?: string; method?: string; result?: unknown; sync?: SyncMetadata };
+type Frame = { type?: string; id?: string; ok?: boolean; channel?: string; method?: string; params?: unknown; payload?: unknown; result?: unknown; sync?: SyncMetadata };
 
 export interface NumberedRoute {
   /** The page side: sends stamp or renumber; messages from the page are read for their method. */
@@ -19,11 +19,15 @@ export interface NumberedRoute {
   readonly server: WebSocketRoute;
 }
 
+let routes = 0;
+
 /** Number `socket`'s traffic; use the returned `page` wherever the spec used `socket`. */
 export function numberedRoute(socket: WebSocketRoute): NumberedRoute {
   let epoch: string | undefined;
   let ordered: readonly SyncDomain[] = [];
   const methods = new Map<string, MethodName>();
+  /** Each request's params, which name the chat of a call about one. */
+  const params = new Map<string, unknown>();
   const counters = new Map<string, number>();
   const seen = new Map<string, Map<number, number>>();
   const newest = new Map<string, number>();
@@ -52,8 +56,10 @@ export function numberedRoute(socket: WebSocketRoute): NumberedRoute {
     try { frame = JSON.parse(raw) as Frame; } catch { return raw; }
     if (frame.type === "response" && frame.id !== undefined && methods.get(frame.id) === "sync.negotiate" && frame.ok === true) {
       const result = frame.result as { epoch: string; ordered: readonly SyncDomain[] };
-      epoch = result.epoch; ordered = result.ordered;
-      return raw;
+      // Each route counts from 1, so a page that reconnects through a new one must not compare its
+      // numbers with the last route's: the route's own epoch makes the page forget them.
+      epoch = `${result.epoch}.route-${++routes}`; ordered = result.ordered;
+      return JSON.stringify({ ...frame, result: { ...result, epoch } });
     }
     if (epoch === undefined || (frame.type === "response" && frame.ok !== true)) return raw;
     if (frame.sync !== undefined) {
@@ -66,8 +72,10 @@ export function numberedRoute(socket: WebSocketRoute): NumberedRoute {
     }
     const row = rowOf(frame);
     if (row === undefined || !ordered.includes(row.domain)) return raw;
-    // A spec's own value: the newest of its thing (and of each thing it carries beside it, as a list's runtime).
-    return JSON.stringify({ ...frame, sync: { epoch, changes: scopesOf(row).map(scope => ({ scope, kind: "snapshot", rev: next(scope) })) } });
+    // A spec's own value: the newest of its thing (and of each thing it carries beside it, as a list's
+    // runtime, or the chat a push or a call names).
+    const about = frame.type === "push" ? frame.payload : frame.id === undefined ? undefined : params.get(frame.id);
+    return JSON.stringify({ ...frame, sync: { epoch, changes: scopesOf(row, about).map(scope => ({ scope, kind: "snapshot", rev: next(scope) })) } });
   };
 
   const upstream = socket.connectToServer();
@@ -81,7 +89,7 @@ export function numberedRoute(socket: WebSocketRoute): NumberedRoute {
     send: toPage,
     onMessage: (handler: (raw: string | Buffer) => unknown) => socket.onMessage(raw => {
       if (typeof raw === "string") {
-        try { const m = JSON.parse(raw) as Frame; if (m.id !== undefined && m.method !== undefined) methods.set(m.id, m.method as MethodName); } catch { /* not a frame */ }
+        try { const m = JSON.parse(raw) as Frame; if (m.id !== undefined && m.method !== undefined) { methods.set(m.id, m.method as MethodName); params.set(m.id, m.params); } } catch { /* not a frame */ }
       }
       return handler(raw);
     }),

@@ -172,12 +172,12 @@ describe("createClient", () => {
     client.subscribe("threads.changed", (_payload, metadata) => { expect(metadata).toEqual(sync); throw new Error("Push observer failed"); });
     client.subscribe("threads.changed", (payload, metadata) => got.push([payload, metadata]));
     const result = client.call("threads.create", { title: "First" });
-    expect(() => socket.reply(JSON.stringify({ type: "push", channel: "threads.changed", payload: { threadId: "one" }, sync }))).not.toThrow();
+    expect(() => socket.reply(JSON.stringify({ type: "push", channel: "threads.changed", payload: { threadId: "one", thread: null }, sync }))).not.toThrow();
     const frame = encodeResult(socket.lastRequest().id, "threads.create", methodSamples["threads.create"].result);
     if (!frame.ok) throw frame.error;
     socket.reply(frame.value);
     await expect(result).resolves.toEqual(methodSamples["threads.create"].result);
-    expect(got).toEqual([[{ threadId: "one" }, sync]]);
+    expect(got).toEqual([[{ threadId: "one", thread: null }, sync]]);
     expect(errors).toEqual([expect.objectContaining({ code: "internal", message: "subscriber for threads.changed threw: Push observer failed" })]);
     expect(socket.readyState).toBe(1);
     client.close();
@@ -233,7 +233,7 @@ describe("createClient", () => {
     expect(socket.readyState).toBe(3);
   });
 
-  it.each([{ epoch: "process-a", ordered: ["threads"] }, { epoch: "", ordered: [] }])("refuses unsolicited capabilities or a malformed epoch: %j", async result => {
+  it.each([{ epoch: "process-a", ordered: ["turns"] }, { epoch: "", ordered: [] }])("refuses unsolicited capabilities or a malformed epoch: %j", async result => {
     const socket = new FakeSocket(); socket.open();
     const client = createClient(socket, { onProtocolError: () => {} });
     const pending = client.negotiate();
@@ -271,7 +271,7 @@ describe("createClient", () => {
     const result = client.call("threads.list", {}, { onMetadata: metadata => { expect(metadata).toEqual(sync); trace.push("metadata"); } }).then(() => trace.push("completion"));
     socket.reply(JSON.stringify({ type: "response", id: socket.lastRequest().id, ok: true, result: [], sync }));
     expect(trace).toEqual(["metadata"]);
-    socket.reply(JSON.stringify({ type: "push", channel: "threads.changed", payload: { threadId: "one" }, sync }));
+    socket.reply(JSON.stringify({ type: "push", channel: "threads.changed", payload: { threadId: "one", thread: null }, sync }));
     await result;
     expect(trace).toEqual(["metadata", "push", "completion"]);
     expect(client.sync).toEqual({ mode: "legacy", epoch: "current" });
@@ -393,13 +393,13 @@ describe("createClient", () => {
     const client = createClient(socket, { onProtocolError: (e) => errors.push(e.code) });
     const got: unknown[] = [];
     const off = client.subscribe("threads.changed", (p) => got.push(p.threadId));
-    socket.reply(JSON.stringify({ type: "push", channel: "threads.changed", payload: { threadId: "t1" } }));
+    socket.reply(JSON.stringify({ type: "push", channel: "threads.changed", payload: { threadId: "t1", thread: null } }));
     socket.reply(JSON.stringify({ type: "push", channel: "threads.changed", payload: { threadId: 1 } }));
     socket.reply(JSON.stringify({ type: "push", channel: "nope", payload: {} }));
     socket.reply("garbage");
     socket.reply(Buffer.from(JSON.stringify({ type: "push", channel: "models.changed", payload: pushSamples["models.changed"][0] })));
     off();
-    socket.reply(JSON.stringify({ type: "push", channel: "threads.changed", payload: { threadId: "t2" } }));
+    socket.reply(JSON.stringify({ type: "push", channel: "threads.changed", payload: { threadId: "t2", thread: null } }));
     expect(got).toEqual(["t1"]);
     expect(errors).toEqual(["bad-payload", "bad-payload", "bad-message"]);
   });

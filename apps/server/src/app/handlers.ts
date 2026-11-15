@@ -11,6 +11,7 @@ import { threadPages } from "../pages/list.ts";
 import type { TurnReservation } from "../runtime/load.ts";
 import { turnSettings } from "../settings/turn.ts";
 import { createSourcesHandlers } from "../sources/handlers.ts";
+import { chatRead, listRead, threadChanged } from "../threads/sync.ts";
 import { createUpdateHandlers } from "../update/module.ts";
 import type { HandlerContext } from "../ws/server.ts";
 import type { Admission } from "./admit.ts";
@@ -135,13 +136,14 @@ export function createHandlers({
     ...measure?.handlers,
     // Settings › Tools says Ready for Run commands only after this probe ran a command in the sandbox.
     "tools.shell": async () => deps.shellStatus ? await deps.shellStatus() : { state: "off" as const, word: "Not checked" },
-    "threads.list": () => store.listThreads(),
-    "threads.create": ({ title }) => {
+    "threads.list": (_params, ctx) => listRead(store, ctx),
+    "threads.create": ({ title }, ctx) => {
       const thread = store.createThread(title === undefined ? {} : { title });
-      push("threads.changed", { threadId: thread.id });
+      push(...threadChanged(store, thread.id, ctx));
       return thread;
     },
-    "threads.get": ({ threadId, before, limit }) => {
+    "threads.get": ({ threadId, before, limit }, ctx) => {
+      chatRead(store, threadId, ctx);
       const draft = byThread.get(threadId)?.draftId;
       if (limit === undefined && before === undefined) {
         const saved = store.getThread(threadId);
@@ -153,22 +155,22 @@ export function createHandlers({
       return page;
     },
     "threads.pages": ({ threadId, before }) => threadPages(store, threadId, before, byThread.get(threadId)?.draftId),
-    "threads.rename": ({ threadId, title }) => {
+    "threads.rename": ({ threadId, title }, ctx) => {
       const thread = store.renameThread(threadId, title);
-      push("threads.changed", { threadId });
+      push(...threadChanged(store, threadId, ctx));
       return thread;
     },
-    "threads.setImageChoice": ({ threadId, choice }) => {
+    "threads.setImageChoice": ({ threadId, choice }, ctx) => {
       const thread = store.setImageChoice(threadId, choice);
-      push("threads.changed", { threadId });
+      push(...threadChanged(store, threadId, ctx));
       return thread;
     },
-    "threads.setImageCount": ({ threadId, count }) => {
+    "threads.setImageCount": ({ threadId, count }, ctx) => {
       const thread = store.setImageCount(threadId, count);
-      push("threads.changed", { threadId });
+      push(...threadChanged(store, threadId, ctx));
       return thread;
     },
-    "threads.delete": async ({ threadId }) => {
+    "threads.delete": async ({ threadId }, ctx) => {
       // Before the first await: no new turn or image job for this thread from here on.
       const marked = !deleting.has(threadId);
       deleting.add(threadId);
@@ -187,7 +189,7 @@ export function createHandlers({
       } finally {
         if (marked) deleting.delete(threadId);
       }
-      push("threads.changed", { threadId });
+      push(...threadChanged(store, threadId, ctx));
       pushSpeeds();
       return { threadId };
     },
@@ -206,7 +208,7 @@ export function createHandlers({
         await imageFiles?.collect(files).catch((error: unknown) => log(`image cleanup after message deletion failed: ${String(error)}`));
         await attachedFiles?.collect(attached).catch((error: unknown) => log(`attached-file cleanup after message deletion failed: ${String(error)}`));
       } finally { if (marked) deleting.delete(threadId); }
-      push("threads.changed", { threadId });
+      push(...threadChanged(store, threadId));
       pushSpeeds();
       return { messageId };
     },

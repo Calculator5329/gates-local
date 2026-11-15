@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import type { ImageChoice, Message, Params } from "@gates-local/contracts";
 import { IMAGES_UNSET, notRunning, type ImageModule } from "../image/module.ts";
+import { threadChanged } from "../threads/sync.ts";
 import { AppError, cancelledBeforeStart, refusalOf, threadGoing } from "./errors.ts";
 import type { AppContext, Taken, Turn, TurnEnd } from "./turn.ts";
 
@@ -139,7 +140,7 @@ export function createDrawTurn({ deps, store, log, push, reserve, replies, queue
         await Promise.all(jobIds.map((id) => image.wait(id).catch(() => undefined)));
         for (const id of jobIds) { try { store.deleteMessage(threadId, id); } catch { /* already gone */ } }
         store.deleteMessage(threadId, userMessage.id);
-        push("threads.changed", { threadId });
+        push(...threadChanged(store, threadId));
         throw e;
       }
     } catch (e) {
@@ -154,7 +155,7 @@ export function createDrawTurn({ deps, store, log, push, reserve, replies, queue
     if (count.now !== count.saved) {
       try { store.setImageCount(threadId, count.now); } catch (e) { log(`turn ${turn.turnId}: image count not kept: ${(e as Error).message}`); }
     }
-    push("threads.changed", { threadId });
+    push(...threadChanged(store, threadId));
     push("chat.event", { turnId: turn.turnId, threadId, event: { type: "start", model: choice.preset, userMessage, image: true } });
     // after the start: the list every window shows no longer has this message
     replies.notify();
@@ -181,7 +182,7 @@ export function createDrawTurn({ deps, store, log, push, reserve, replies, queue
       // The record ends with its last event; the windows hear what became of the messages behind it after that event.
       replies.ended(turn.turnId, last.type === "done" ? { how: "done", replyId: last.message.id } : { how: "stopped", by: { who: "person" } }, now);
       push("chat.event", { turnId: turn.turnId, threadId, event });
-      push("threads.changed", { threadId });
+      push(...threadChanged(store, threadId));
       replies.notify();
     }).finally(end);
     return userMessage;

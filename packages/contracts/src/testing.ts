@@ -374,7 +374,7 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
   "runtime.changed": [runtime, { state: "missing", owner: "none", baseUrl: "http://127.0.0.1:11434", detail: "no answer" }],
   "models.changed": [models, []],
   "models.suggested": [suggestedList(CHAT_MODELS)],
-  "threads.changed": [{ threadId: "t1" }],
+  "threads.changed": [{ threadId: "t1", thread }, { threadId: "t1", thread: null }],
   "queue.changed": [[], [{ id: "q-1", threadId: "t1", messageId: "m-q1", text: "and then?", at: 1_700_000_000_000, waitFor: "reply", held: true }]],
   "settings.changed": [settings],
   "gpu.changed": [gpu, { vendor: "none", occupants: [], systemMemoryAvailableBytes: 9_000_000_000, measuredAt: 1 }],

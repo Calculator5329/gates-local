@@ -651,7 +651,7 @@ const plain = () => snapshot([userMsg("m1", "t1", "hi")]);
 const withImage = () => snapshot([userMsg("m1", "t1", "hi"), { ...asstMsg("m2", "t1", "a fox"), images: ["images/j1.png"] }]);
 /** What the image module sends after it saved a job's message into t1. */
 function imageDone(): void {
-  b.server.push("threads.changed", { threadId: "t1" });
+  b.server.push("threads.changed", { threadId: "t1", thread: methodSamples["threads.create"].result });
   b.server.push("image.event", { jobId: "j1", threadId: "t1", state: "done", progress: 1, imagePath: "images/j1.png" });
 }
 

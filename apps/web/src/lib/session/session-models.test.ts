@@ -442,7 +442,7 @@ describe("a thread restored from storage takes the model of its latest saved rep
   });
 });
 
-it("a deleted thread, or one a refresh no longer lists, leaves no threadModels entry (MP4-05)", async () => {
+it("a thread deleted here or in another window leaves no threadModels entry (MP4-05)", async () => {
   const answers: Record<string, () => Promise<unknown>> = {};
   const { session, store, push, hydrated } = await boot(answers);
   await hydrated();
@@ -453,8 +453,8 @@ it("a deleted thread, or one a refresh no longer lists, leaves no threadModels e
   expect(Object.keys(store.getState().threadModels).toSorted()).toEqual(["A", "B"]);
   await session.deleteThread("A");
   expect(Object.keys(store.getState().threadModels)).toEqual(["B"]);
-  answers["threads.list"] = async () => [];
-  push("threads.changed", {});
+  // another window deleted B: its row comes with no chat
+  push("threads.changed", { threadId: "B", thread: null });
   await vi.waitFor(() => expect(store.getState().threadModels).toEqual({}));
 });
 
@@ -464,22 +464,24 @@ const failing = async () => {
   throw new Error("discovery pending");
 };
 
-describe("a threads.list answer older than a newer list or a local change is dropped (MP5-01)", () => {
-  it("an older list that lacks the thread neither drops it nor its unsent pick", async () => {
+// Legacy connection (this fake orders only the models kind): the hydrate's list read is applied with
+// its batch, and a row pushed while it was out waits behind it. The ordered case is in ordering-threads.test.ts.
+describe("a threads.list answer older than a pushed row never undoes the row (MP5-01)", () => {
+  it("a list read before a pushed row that lacks the thread neither drops it nor its unsent pick", async () => {
     const old = defer<unknown>();
-    const answers: Record<string, () => Promise<unknown>> = {};
+    const answers: Record<string, () => Promise<unknown>> = { "threads.list": () => old.promise };
     const { session, store, push, hydrated } = await boot(answers);
+    await settle();
+    push("threads.changed", { threadId: "S", thread: thread("S") });
+    old.resolve([]);
     await hydrated();
-    answers["threads.list"] = () => old.promise;
-    push("threads.changed", {});
-    answers["threads.list"] = async () => [thread("S")];
-    push("threads.changed", {});
-    await vi.waitFor(() => expect(store.getState().threads.map((t) => t.id)).toEqual(["S"]));
+    expect(store.getState().threads.map((t) => t.id)).toEqual(["S"]);
     session.openThread("S");
     session.pickModel(QWEN);
-    old.resolve([]);
+    // a row about another chat leaves S and its pick
+    push("threads.changed", { threadId: "T", thread: thread("T") });
     await settle();
-    expect(store.getState().threads.map((t) => t.id)).toEqual(["S"]);
+    expect(store.getState().threads.map((t) => t.id).toSorted()).toEqual(["S", "T"]);
     expect(store.getState().threadModels["S"]).toBe(QWEN);
     // the saved history (a Gemma reply) loads again: the unsent pick still wins
     answers["threads.get"] = async () => savedReply(GEMMA);
@@ -491,13 +493,15 @@ describe("a threads.list answer older than a newer list or a local change is dro
 
   it("a list asked before a local delete does not bring the thread back", async () => {
     const old = defer<unknown>();
-    const answers: Record<string, () => Promise<unknown>> = {};
-    const { session, store, push, hydrated } = await boot(answers);
-    await hydrated();
-    answers["threads.list"] = () => old.promise;
-    push("threads.changed", {});
+    const answers: Record<string, () => Promise<unknown>> = { "threads.list": () => old.promise };
+    const { session, store, push, calls } = await boot(answers);
+    await settle();
     await session.deleteThread("A");
+    // the server's row for the deletion, sent to every window
+    push("threads.changed", { threadId: "A", thread: null });
     old.resolve([thread("A")]);
+    // the first batch has applied once the second one's reads go out
+    await vi.waitFor(() => expect(calls).toContain("update.status"));
     await settle();
     expect(store.getState().threads).toEqual([]);
   });

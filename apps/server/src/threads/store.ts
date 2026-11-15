@@ -45,6 +45,14 @@ export interface ThreadStore {
     lacking: number;
   };
   readonly dbPath: string;
+  /**
+   * The numbers ordered windows compare (threads/sync.ts frames them). `list()`: every write to a
+   * chat takes the next one. `chat(id)`: the list's number at the last write to that chat's
+   * messages, 0 when there was none since the store opened. Both only go up.
+   */
+  readonly numbers: { list(): number; chat(threadId: string): number };
+  /** The chat's row as listThreads gives it, or undefined when there is no such chat. */
+  threadRow(threadId: string): Thread | undefined;
   listThreads(): Thread[];
   createThread(input?: { title?: string }): Thread;
   getThread(threadId: string): ThreadWithMessages;
@@ -209,9 +217,25 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
     return threadFromRow(row);
   };
 
+  // Every write below ends by taking the next number, after it committed: a reader that sees the
+  // number sees the write. `messages`: it changed the chat's messages, not only its row.
+  let listNumber = 0;
+  const chatNumbers = new Map<string, number>();
+  const wrote = (threadId: string, messages: boolean): void => {
+    listNumber++;
+    if (messages) chatNumbers.set(threadId, listNumber);
+  };
+
   return {
     dbPath,
     pictures,
+    numbers: { list: () => listNumber, chat: threadId => chatNumbers.get(threadId) ?? 0 },
+
+    threadRow(threadId) {
+      guard();
+      const row = stmt.getThread.get(threadId);
+      return row ? threadFromRow(row) : undefined;
+    },
 
     getMessage(messageId) {
       guard(); checkId("messageId", messageId);
@@ -231,6 +255,7 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
     deleteMessage(threadId, messageId) {
       guard(); checkId("messageId", messageId); loadThread(threadId);
       stmt.deleteMessage.run(messageId, threadId);
+      wrote(threadId, true);
     },
     imageReferences() {
       guard();
@@ -287,6 +312,7 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
       const t = now();
       const thread: Thread = { id: randomUUID(), title, createdAt: t, updatedAt: t };
       stmt.insertThread.run(thread.id, thread.title, thread.createdAt, thread.updatedAt);
+      wrote(thread.id, true);
       return thread;
     },
 
@@ -348,28 +374,34 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
       guard();
       checkId("threadId", threadId);
       const clean = checkTitle(title);
-      return transaction(() => {
+      const thread = transaction(() => {
         const res = stmt.renameThread.run(clean, now(), threadId);
         if (Number(res.changes) === 0) throw new ThreadNotFoundError(threadId);
         return loadThread(threadId);
       });
+      wrote(threadId, false);
+      return thread;
     },
 
     setImageChoice(threadId, choice) {
       guard();
       checkId("threadId", threadId);
       const clean = S.decodeUnknownSync(ImageChoice)(choice);
-      return transaction(() => {
+      const thread = transaction(() => {
         const res = stmt.setImageChoice.run(JSON.stringify(clean), threadId);
         if (Number(res.changes) === 0) throw new ThreadNotFoundError(threadId);
         return loadThread(threadId);
       });
+      wrote(threadId, false);
+      return thread;
     },
 
     fillImageChoice(threadId, choice) {
       guard();
       checkId("threadId", threadId);
-      return Number(stmt.fillImageChoice.run(JSON.stringify(S.decodeUnknownSync(ImageChoice)(choice)), threadId).changes) > 0;
+      const filled = Number(stmt.fillImageChoice.run(JSON.stringify(S.decodeUnknownSync(ImageChoice)(choice)), threadId).changes) > 0;
+      if (filled) wrote(threadId, false);
+      return filled;
     },
 
     imageChoiceOf(threadId) {
@@ -382,11 +414,13 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
       guard();
       checkId("threadId", threadId);
       const clean = S.decodeUnknownSync(ImageCount)(count);
-      return transaction(() => {
+      const thread = transaction(() => {
         const res = stmt.setImageCount.run(clean, threadId);
         if (Number(res.changes) === 0) throw new ThreadNotFoundError(threadId);
         return loadThread(threadId);
       });
+      wrote(threadId, false);
+      return thread;
     },
 
     deleteThread(threadId) {
@@ -394,12 +428,13 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
       checkId("threadId", threadId);
       const res = stmt.deleteThread.run(threadId);
       if (Number(res.changes) === 0) throw new ThreadNotFoundError(threadId);
+      wrote(threadId, true);
     },
 
     appendMessage(input, replacing = []) {
       guard();
       const msg = checkNewMessage(input, now);
-      return transaction(() => {
+      const saved = transaction(() => {
         loadThread(msg.threadId);
         for (const id of replacing) stmt.deleteMessage.run(id, msg.threadId);
         if (stmt.messageExists.get(msg.id)) throw new DuplicateMessageError(msg.id);
@@ -428,11 +463,13 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
         stmt.touchThread.run(Math.max(now(), msg.createdAt), msg.threadId);
         return msg;
       });
+      wrote(msg.threadId, true);
+      return saved;
     },
 
     stampTimes(threadId, messageId, times) {
       guard();
-      stmt.stampTimes.run(JSON.stringify(checkTimes(times)), messageId, threadId);
+      if (Number(stmt.stampTimes.run(JSON.stringify(checkTimes(times)), messageId, threadId).changes) > 0) wrote(threadId, true);
     },
 
     saveImageJob(event, prompt, picture) {
@@ -440,19 +477,21 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
       const clean = S.decodeUnknownSync(ImageEvent)(event);
       const threadId = clean.threadId;
       if (!threadId) return;
-      transaction(() => {
+      const saved = transaction(() => {
         // A thread deleted while its job settles must stay deleted.
-        if (!stmt.getThread.get(threadId)) return;
+        if (!stmt.getThread.get(threadId)) return false;
         stmt.insertImageCard.run(clean.jobId, threadId, prompt, now(), JSON.stringify(clean));
         stmt.updateImageCard.run(JSON.stringify(clean), clean.imagePath ? JSON.stringify([clean.imagePath]) : null, clean.jobId, threadId);
         if (clean.state === "done" && clean.imagePath && picture) pictures.record(clean.jobId, picture, now());
         stmt.touchThread.run(now(), threadId);
+        return true;
       });
+      if (saved) wrote(threadId, true);
     },
 
     claimImageRetry(threadId, previousJobId, jobId, fallback) {
       guard();
-      return transaction(() => {
+      const claim = transaction(() => {
         loadThread(threadId);
         const row = stmt.getImageCard.get(previousJobId, threadId);
         if (!row) throw new InvalidInputError("retryOf", "the image job is not in this thread");
@@ -469,17 +508,21 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
         stmt.touchThread.run(now(), threadId);
         return { jobId, prompt, choice, created: true };
       });
+      if (claim.created) wrote(threadId, true);
+      return claim;
     },
 
     interruptImageJobs() {
       guard();
-      return transaction(() => stmt.unfinishedImages.all().map((row) => {
+      const events = transaction(() => stmt.unfinishedImages.all().map((row) => {
         const old = S.decodeUnknownSync(ImageEvent)(JSON.parse(str(row, "image_job_json")));
         if (!old.threadId) throw new Error("Saved image job is missing its thread");
         const event: ImageEvent = { jobId: old.jobId, threadId: old.threadId, state: "error", errorKind: "restarted", message: "The app restarted before this image finished; try again.", ...(old.choice ? { choice: old.choice } : {}), ...(old.sent ? { sent: old.sent } : {}), ...(old.group ? { group: old.group } : {}) };
         stmt.updateImageCard.run(JSON.stringify(event), null, old.jobId, old.threadId);
         return event;
       }));
+      for (const threadId of new Set(events.map(event => event.threadId))) if (threadId) wrote(threadId, true);
+      return events;
     },
 
     modelSpeeds() {

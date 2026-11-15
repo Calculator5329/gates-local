@@ -229,6 +229,12 @@ async function hydrate(c: Client): Promise<void> {
   });
   numbered("image.download", (imageDownload) => applyServerEvent({ imageDownload }));
   numbered("image.setup", setupSaid);
+  // One chat's row and its messages' number: threads.ts compares them with the ones it holds per
+  // chat, so on an ordered connection a row applies at once; legacy waits behind the hydrate's reads.
+  c.subscribe("threads.changed", (p, sync) => applyServerEvent(() => {
+    if (ordering.ordered("threads")) { threadSession.rowPushed(p, sync); return; }
+    dispatch("threads.changed", () => { if (!ordering.ordered("threads")) threadSession.rowPushed(p, sync); });
+  }));
   settingsReads.begin();
   // the bridge answers without the server, so the folder is in even when the hydrate never reaches its reads
   void readFolder();
@@ -252,12 +258,12 @@ async function hydrateWith(
 ): Promise<void> {
   on("chat.event", onChatEvent);
   on("queue.changed", (list) => queueChanged(list));
-  on("threads.changed", ({ threadId }) => threadSession.threadsChanged(threadId));
   on("usage.changed", () => usageSession.usageChanged());
   // Install every receipt handler first. Ordered domains stay disabled until
   // their full migration lands; unsupported servers continue in legacy mode.
   const negotiated = await negotiate();
   settingsSession.ready();
+  threadSession.connected(negotiated.mode === "ordered" && negotiated.domains.includes("threads") ? negotiated.epoch : undefined);
   const orderedSettings = negotiated.mode === "ordered" && negotiated.domains.includes("settings");
 
   // settings.get is a local store read and the model choice needs only it and
@@ -271,13 +277,13 @@ async function hydrateWith(
   const listModels = batched(rowOf(methodSync("models.list")));
   const suggestedRead = batched(SUGGESTED);
   const memoryRead = batched(MEMORY);
-  const listTicket = threadSession.listOrder.next();
   const [status, listed, threads, snapshot, active, pendingPulls, suggested, memory, queue] = await Promise.all([
     call("runtime.status", {}, { onResult: (_, sync) => statusRead.arrived(sync) }),
     // The list's runtime is the one it was read beside; the newer of it and the status shows.
     // Its models say what is installed only beside a ready runtime (answered).
     call("models.list", {}, { onResult: (list, sync) => { listRuntime.arrived(sync); listModels.arrived(sync, answered(list.runtime)); } }).catch(() => undefined),
-    call("threads.list", {}),
+    // On an ordered connection the list applies as it lands, keeping a row pushed after it was read.
+    call("threads.list", {}, { onResult: threadSession.listArrived }),
     // Ordered snapshots are required; protocol rejection must fail bootstrap,
     // rather than become an optional unavailable read and reset retry backoff.
     orderedSettings
@@ -301,10 +307,10 @@ async function hydrateWith(
   settingsSession.noteVoiceSnapshot(settings);
   applyServerEvent((s) => {
     const withSettings = settings === NA || settings === undefined ? { settings } : settingsPatch(s, settings, true);
-    const ordered = threadSession.listOrder.current(listTicket) ? sortThreads(threads) : s.threads;
+    const chats = ordering.ordered("threads") ? s.threads : sortThreads(threads);
     const held = memory === NA || memory === undefined || !memoryRead.lands() ? {} : { memory, ...(s.threadId === null && !s.newChatPicked ? { newChatResident: residentChat({ memory }) } : {}) };
     const pulls = inBatch(PULLS, pendingPulls) ? reconcilePulls(s.pulls, pendingPulls) : s.pulls;
-    const next: State = { ...s, suggested: suggestedRead.lands() || suggested === NA ? suggested ?? s.suggested : s.suggested, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(pulls, models ?? s.models), threads: ordered, ...activeTurns(s, active), ...withSettings, ...held };
+    const next: State = { ...s, suggested: suggestedRead.lands() || suggested === NA ? suggested ?? s.suggested : s.suggested, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(pulls, models ?? s.models), threads: chats,...activeTurns(s, active), ...withSettings, ...held };
     return { ...next, ...decided(modelChoice(next)) };
   });
   if (settings !== NA && settings !== undefined) settingsSession.seedContext();
@@ -358,10 +364,10 @@ async function hydrateWith(
 
   const s = getState();
   if (s.view === "new" && threads.length === 0 && !firstRunDone()) setState({ view: "firstrun" });
-  // Anything cached from before this connection may be out of date: other
-  // threads reload on their next visit, the open one now (W-04).
-  threadSession.markOtherThreadsStale(s);
-  if (s.threadId !== null) await loadThread(s.threadId, true);
+  // A chat cached from before this connection is read again only if its number moved (on a legacy
+  // connection, or after the server restarted, every one has): the open one now, the others on
+  // their next visit (W-04).
+  if (s.threadId !== null) await loadThread(s.threadId);
   // turns may have ended while the connection was down
   usageSession.usageChanged();
 }
@@ -457,9 +463,9 @@ export async function pickImage(choice: ImageChoice): Promise<ActionResult> {
   const s = getState();
   const threadId = s.view === "thread" ? s.threadId : null;
   if (threadId !== null) {
-    const r = await act("threads.setImageChoice", { threadId, choice }, "save the image model");
+    // the answer is the chat's row at the pick's number, applied as a pushed row is
+    const r = await act("threads.setImageChoice", { threadId, choice }, "save the image model", undefined, { onResult: threadSession.rowAnswered });
     if (!r.ok) return r.message;
-    applyServerEvent((st) => ({ threads: st.threads.map((t) => (t.id === r.value.id ? r.value : t)) }));
   }
   // the phone cannot write Settings: its pick is the thread's alone, or the new thread's until its first send
   if (getState().unavailable["settings.update"] === true) {
@@ -477,10 +483,8 @@ export async function pickImageCount(count: number): Promise<ActionResult> {
     setState({ imageCountNew: count });
     return null;
   }
-  const r = await act("threads.setImageCount", { threadId, count }, "save the picture count");
-  if (!r.ok) return r.message;
-  applyServerEvent((st) => ({ threads: st.threads.map((t) => (t.id === r.value.id ? r.value : t)) }));
-  return null;
+  const r = await act("threads.setImageCount", { threadId, count }, "save the picture count", undefined, { onResult: threadSession.rowAnswered });
+  return r.ok ? null : r.message;
 }
 
 /**

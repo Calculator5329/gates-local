@@ -149,7 +149,7 @@ it("retains at most two speculative histories and rejects an oversized history",
 
 it("thread changes invalidate completed and in-flight speculative history", async () => {
   session.preloadThread("a"); await dwell();
-  browser.server.push("threads.changed", { threadId: "a" }); await vi.advanceTimersByTimeAsync(0);
+  browser.server.push("threads.changed", { threadId: "a", thread: snapshot("a").thread }); await vi.advanceTimersByTimeAsync(0);
   browser.server.answer("threads.get", ({ threadId }) => snapshot(threadId, "new truth"));
   session.openThread("a"); await vi.advanceTimersByTimeAsync(0);
   expect(store.getState().messages["a"]?.[0]?.content).toBe("new truth");
@@ -157,7 +157,7 @@ it("thread changes invalidate completed and in-flight speculative history", asyn
   session.preloadThread("b"); await dwell();
   const held = await holding;
   session.openThread("b");
-  browser.server.push("threads.changed", { threadId: "b" }); await vi.advanceTimersByTimeAsync(0);
+  browser.server.push("threads.changed", { threadId: "b", thread: snapshot("b").thread }); await vi.advanceTimersByTimeAsync(0);
   held.respond(snapshot("b", "old truth")); await vi.advanceTimersByTimeAsync(0);
   expect(store.getState().messages["b"]?.[0]?.content).toBe("new truth");
 });

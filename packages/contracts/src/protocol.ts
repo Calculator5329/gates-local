@@ -169,6 +169,12 @@ const IMAGE_DOWNLOAD: SyncRow = { domain: "images", scope: "image-download" };
 /** Set up images' step; the rest of image.setupInfo is read from the machine at each ask and has no number. */
 const IMAGE_SETUP: SyncRow = { domain: "images", scope: "image-setup" };
 const IMAGE_JOBS: SyncRow = { domain: "images", scope: "image-jobs" };
+// The threads kind. One number for the chat list, which every write to a chat takes the next of,
+// and one per chat: the list's number at the last write to that chat's messages. A list read also
+// carries every chat's number; an action on a chat's row answers with the list's number.
+const THREADS: SyncRow = { domain: "threads", scope: "threads" };
+/** One chat: its row's list number and its messages' number. */
+const CHAT: SyncRow = { domain: "threads", scope: "threads", member: "thread" };
 
 /** One definition for both ends: each method's params and result Schema, and whether the phone may call it. */
 export const methods = {
@@ -176,8 +182,8 @@ export const methods = {
   "voice.check": { params: S.Struct({ url: S.String }), result: S.Struct({ ready: S.Boolean }), phone: "allow" },
   "voice.transcribe": { params: S.Struct({ id: S.String, audio: S.String }), result: S.Struct({ text: S.String }), phone: "allow" },
   "voice.cancel": { params: S.Struct({ id: S.String }), result: NoParams, phone: "allow" },
-  "threads.list": { params: NoParams, result: S.Array(Thread), phone: "allow" },
-  "threads.create": { params: S.Struct({ title: S.optional(S.String) }), result: Thread, phone: "allow" },
+  "threads.list": { params: NoParams, result: S.Array(Thread), phone: "allow", sync: THREADS },
+  "threads.create": { params: S.Struct({ title: S.optional(S.String) }), result: Thread, phone: "allow", sync: THREADS },
   /**
    * A thread and its messages: all of them, or with `limit` the newest that many (from a question, so
    * a turn is never cut), or with `before` too the page before that message. `earlier` counts the
@@ -187,6 +193,7 @@ export const methods = {
     params: S.Struct({ threadId: S.String, before: S.optional(S.String), limit: S.optional(S.Int.check(S.isBetween({ minimum: 1, maximum: 100_000 }))) }),
     result: S.Struct({ thread: Thread, messages: S.Array(Message), earlier: S.optional(S.Int) }),
     phone: "allow",
+    sync: CHAT,
   },
   /**
    * Every page the thread's saved replies wrote, oldest first, each code once; with `before` only
@@ -194,12 +201,13 @@ export const methods = {
    * list is the whole thread's).
    */
   "threads.pages": { params: S.Struct({ threadId: S.String, before: S.optional(S.String) }), result: S.Array(ThreadPage), phone: "allow" },
-  "threads.rename": { params: S.Struct({ threadId: S.String, title: S.String }), result: Thread, phone: "allow" },
+  "threads.rename": { params: S.Struct({ threadId: S.String, title: S.String }), result: Thread, phone: "allow", sync: THREADS },
   /** The picker's pick in an open thread: that thread sends with it from now on; other threads keep theirs. */
-  "threads.setImageChoice": { params: S.Struct({ threadId: S.String, choice: ImageChoice }), result: Thread, phone: "allow" },
+  "threads.setImageChoice": { params: S.Struct({ threadId: S.String, choice: ImageChoice }), result: Thread, phone: "allow", sync: THREADS },
   /** The Image-mode count menu's pick in an open thread: its sends make this many pictures from now on. */
-  "threads.setImageCount": { params: S.Struct({ threadId: S.String, count: ImageCount }), result: Thread, phone: "allow" },
-  "threads.delete": { params: ThreadRef, result: S.Struct({ threadId: S.String }), phone: "deny" },
+  "threads.setImageCount": { params: S.Struct({ threadId: S.String, count: ImageCount }), result: Thread, phone: "allow", sync: THREADS },
+  /** Answers with the list's number of the deletion: a list read before it cannot bring the chat back. */
+  "threads.delete": { params: ThreadRef, result: S.Struct({ threadId: S.String }), phone: "deny", sync: THREADS },
   "messages.delete": { params: S.Struct({ threadId: S.String, messageId: S.String }), result: S.Struct({ messageId: S.String }), phone: "deny" },
   /**
    * Copy a non-image file the person attached into the server's data folder (up to 50 MB, base64 `data`).
@@ -503,7 +511,11 @@ export const pushes = {
   "models.changed": { payload: S.Array(ModelInfo), sync: MODELS },
   /** The chat list in use changed: a newer signed list arrived with the update check. The catalog changes with it. */
   "models.suggested": { payload: SuggestedList, sync: SUGGESTED },
-  "threads.changed": { payload: ThreadRef },
+  /**
+   * One chat changed: its row as it is now (null once it is deleted), numbered in the list, and its
+   * messages' number. A window holding an older copy of the messages reads them again when it shows them.
+   */
+  "threads.changed": { payload: S.Struct({ threadId: S.String, thread: S.NullOr(Thread) }), sync: CHAT },
   /** The whole queue again, after every change (queue.*). */
   "queue.changed": { payload: S.Array(QueuedMessage) },
   // Transient provenance, never persisted in Settings. A client can distinguish

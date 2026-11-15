@@ -11,7 +11,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { type Channel, type Client, type ImageEvent, type Message, type Params, type Payload, type SocketLike, WireError, createClient } from "@gates-local/contracts";
+import { type Channel, type Client, type ImageEvent, type Message, type Params, type Payload, type SocketLike, ORDERED_DOMAINS, WireError, createClient } from "@gates-local/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { type App, type AppDeps, createApp } from "../src/app.ts";
@@ -254,7 +254,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
     ...(opts.settings === undefined ? {} : { settings: opts.settings }),
     // Tools › Make images on: a send with tools: true offers the chat model the image tool.
     ...(lease && imageModule ? { lease, image: imageModule, imageTool: () => ({ preset: "z-image-int8", width: 1024, height: 1024 }) } : {}),
-    push: (c, p) => {
+    push: (c, p, changes) => {
       if (c === "chat.event") {
         const { turnId, threadId, event } = p as Payload<"chat.event">;
         if (event.type === "delta") opts.onDelta?.(turnId);
@@ -264,13 +264,14 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
         }
         if (event.type === "done" || event.type === "error") opts.onTerminal?.();
       }
-      server?.push(c, p);
+      server?.push(c, p, changes);
     },
     fit: fitReads,
     log: opts.log ?? (() => undefined),
   });
   cleanups.push(() => app.shutdown());
-  server = await startWsServer({ port: 0, token: TOKEN, allowedOrigins: [], handlers: app.handlers, onClientReady: (push) => app.replayTurns(push), log: () => undefined });
+  // Every kind ordered, as the app runs: a writer that pushes without its number fails here.
+  server = await startWsServer({ port: 0, token: TOKEN, allowedOrigins: [], ordered: ORDERED_DOMAINS, handlers: app.handlers, onClientReady: (push) => app.replayTurns(push), log: () => undefined });
   const ws = server;
   cleanups.push(() => ws.close());
 
@@ -1883,7 +1884,8 @@ describe("chat.cancel and threads.delete during a turn", () => {
     const r2 = await rig({ onDelta: () => {
       const question = r.store.getThread(threadId).messages.find((m) => m.role === "user");
       const remove = r.app.handlers["messages.delete"];
-      if (question !== undefined && remove !== undefined) void remove({ threadId, messageId: question.id }, { clientId: 1 });
+      // its announcement can come after the rig closed the store, which refuses the read of the row
+      if (question !== undefined && remove !== undefined) void Promise.resolve(remove({ threadId, messageId: question.id }, { clientId: 1 })).catch(() => undefined);
     } });
     r = r2;
     // One chunk: the delete lands with the done line already parsed.

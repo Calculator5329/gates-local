@@ -11,6 +11,7 @@ import type { TurnMessage } from "../chat/types.ts";
 import { fetchShow } from "../fit/ollama.ts";
 import type { TurnLoad } from "../runtime/load.ts";
 import type { TurnSettings } from "../settings/turn.ts";
+import { threadChanged } from "../threads/sync.ts";
 import type { NewMessage } from "../threads/types.ts";
 import type { ThreadImages } from "./drawing.ts";
 import { ENDED_EARLY, HALTED, endOf, endedOf, haltedEnd, runsAgain, type AppContext, type StreamDone, type Turn, type TurnEnd, type TurnFailure, type WireEvent } from "./turn.ts";
@@ -148,7 +149,7 @@ export function createTurnRunner({ deps, store, log, push, pushReply, draftEvery
       // The record ends with its last event: a window that reads now is told of no reply on its way.
       replies.ended(turnId, endOf(turn, event, ended), now);
       push("chat.event", { turnId, threadId, event });
-      if (event.type === "done" || event.partial !== undefined) push("threads.changed", { threadId });
+      if (event.type === "done" || event.partial !== undefined) push(...threadChanged(store, threadId));
       if (event.type === "done") pushSpeeds();
       // after its last event: the windows hear what became of the messages that waited behind it
       replies.notify();

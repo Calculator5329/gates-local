@@ -14,11 +14,11 @@ import type { Duplex } from "node:stream";
 import {
   type BlockingTurn,
   type Channel,
-  type FixedScope,
   type MethodName,
   type Params,
   type Payload,
   type ResultOf,
+  type ScopeName,
   type SyncChange,
   type SyncDomain,
   type SyncMetadata,
@@ -185,8 +185,8 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
   const clients = new Set<WebSocket>();
   const ordered = new WeakMap<WebSocket, readonly SyncDomain[]>();
   /** The last number given out for each scope of a kind this socket numbers (SENT_IN_ORDER). */
-  const issued = new Map<FixedScope, number>();
-  const sent = (scope: FixedScope): SyncChange => {
+  const issued = new Map<ScopeName, number>();
+  const sent = (scope: ScopeName): SyncChange => {
     const rev = (issued.get(scope) ?? 0) + 1;
     issued.set(scope, rev);
     return { scope, kind: "snapshot", rev };
@@ -286,7 +286,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     }
     // A method row of a kind this socket ordered answers with its numbers, or not at all.
     const numbered = row !== undefined && ordered.get(ws)?.includes(row.domain) === true;
-    const missing = numbered ? scopesOf(row).find(scope => revisionOf(captured, epoch, scope) === undefined) : undefined;
+    const missing = numbered ? scopesOf(row, decodedParams).find(scope => revisionOf(captured, epoch, scope) === undefined) : undefined;
     if (missing !== undefined) {
       return send(ws, encodeErrorResponse(id, "bad-result", `${method} did not capture ${missing} metadata`));
     }
@@ -352,9 +352,8 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
       const row = pushSync(channel);
       const changes = given ?? (row !== undefined && SENT_IN_ORDER.includes(row.domain) ? [sent(row.scope)] : undefined);
       const enabled = row !== undefined && ORDERED_DOMAINS.includes(row.domain) && (options.ordered ?? []).includes(row.domain);
-      if (enabled && revisionOf(changes === undefined ? undefined : { epoch, changes }, epoch, row.scope) === undefined) {
-        throw new Error(`${channel} did not capture ${row.scope} metadata`);
-      }
+      const missing = enabled ? scopesOf(row, payload).find(scope => revisionOf(changes === undefined ? undefined : { epoch, changes }, epoch, scope) === undefined) : undefined;
+      if (missing !== undefined) throw new Error(`${channel} did not capture ${missing} metadata`);
       let versioned: string | undefined;
       for (const ws of clients) {
         if (channel === "chat.event" && !chatClients.has(ws)) continue;

@@ -1,6 +1,6 @@
 // Two faults a person could see in the window, each reached here by what the server sends: a typed
-// draft lost when a thread list the window read left its chat out (the list came back without it,
-// then with it again), and a finished download that moved an older file aside saying nothing of
+// draft lost when a thread list the window read left its chat out (the list read on a reconnect came
+// back without it, then its row came again), and a finished download that moved an older file aside saying nothing of
 // where it went. Each spec takes its picture after a soft check, so a run on code without the fix
 // still leaves the picture of what a person saw, and fails.
 import type { Page, WebSocketRoute } from "@playwright/test";
@@ -32,28 +32,38 @@ test("a typed draft stays when a thread list the window reads leaves its chat ou
   // the title the next threads.list answer leaves out, or null to pass the server's answer on whole
   let omit: string | null = null;
   const lists = new Set<string>();
+  // each chat's row as the server last listed it, by title
+  const rows = new Map<string, { id: string; title: string }>();
   let route: WebSocketRoute | undefined;
+  let cut: (() => void) | undefined;
+  let listed = 0;
   await page.routeWebSocket(/\/\?token=/, (routed) => {
     const { page: socket } = numberedRoute(routed);
     route = socket;
     const server = socket.connectToServer();
+    cut = () => { void routed.close(); void server.close(); };
     socket.onMessage((raw) => {
       const m = JSON.parse(String(raw)) as Frame;
-      if (m.method === "threads.list" && m.id !== undefined && omit !== null) lists.add(m.id);
+      if (m.method === "threads.list" && m.id !== undefined) lists.add(m.id);
       server.send(raw);
     });
     server.onMessage((raw) => {
       const f = JSON.parse(String(raw)) as Frame;
       const left = omit;
-      if (f.type === "response" && f.id !== undefined && lists.delete(f.id) && Array.isArray(f.result) && left !== null) {
-        socket.send(JSON.stringify({ ...f, result: (f.result as { title?: string }[]).filter((t) => t.title !== left) }));
-      } else socket.send(raw);
+      if (f.type === "response" && f.id !== undefined && lists.delete(f.id) && Array.isArray(f.result)) {
+        listed += 1;
+        for (const t of f.result as { id: string; title: string }[]) rows.set(t.title, t);
+        if (left !== null) {
+          socket.send(JSON.stringify({ ...f, result: (f.result as { title?: string }[]).filter((t) => t.title !== left) }));
+          return;
+        }
+      }
+      socket.send(raw);
     });
   });
   await open(); await waitReady(page);
   await sendMessage(page, "First chat");
   await replied(page);
-  const first = decodeURIComponent(new URL(page.url()).hash.replace(/^#thread=/, ""));
   await page.getByTestId("sidebar.top.new-thread").click();
   await sendMessage(page, "Second chat");
   await replied(page);
@@ -61,14 +71,18 @@ test("a typed draft stays when a thread list the window reads leaves its chat ou
   await page.locator("#ta").fill("Second chat, words not sent yet");
   await page.locator(".sb-row", { hasText: "First chat" }).click();
   await expect(page.locator("#ta")).toHaveValue("");
-  // a change pushed for the first chat: the window reads its list again, and this answer leaves the second out
+  // the connection drops, and the list read on the next one leaves the second chat out
   omit = "Second chat";
-  const changed = JSON.stringify({ type: "push", channel: "threads.changed", payload: { threadId: first } });
-  route!.send(changed);
+  const before = listed;
+  cut!();
+  await expect.poll(() => listed, "the new connection read the list").toBe(before + 1);
+  await waitReady(page);
   await expect(second).toHaveCount(0);
-  // the next read has it again
+  // then its row arrives as the newest word on it
   omit = null;
-  route!.send(changed);
+  const row = rows.get("Second chat");
+  expect(row, "the second chat was listed before").toBeDefined();
+  route!.send(JSON.stringify({ type: "push", channel: "threads.changed", payload: { threadId: row!.id, thread: row } }));
   await expect(second).toHaveCount(1);
   await second.click();
   await expect(page.locator(".turn.a")).toHaveCount(1);

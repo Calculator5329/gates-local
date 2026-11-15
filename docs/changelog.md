@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-15: every window agrees on the chat list and on each chat
+
+- A message added to or removed from a chat in another window now
+  shows in the chat you have open here. Before, this window kept what it
+  had read until you opened the chat again or reloaded.
+- A chat renamed or deleted in another window arrives as that one row.
+  This window no longer reads the whole list again for it, and a list
+  read that started before the change can no longer bring back a
+  deleted chat or an old title.
+- After the connection drops and comes back, the window reads the list
+  once and reads a chat again only if it changed while away. Before, it
+  read every chat you had open again, one at each visit: ten chats, ten
+  reads; now none when nothing changed.
+- Internal: the chat list and each chat are numbered on the socket
+  ("threads" joins the ordered kinds), and `threads.changed` carries the
+  changed row, or none for a deleted chat.
+
 ## 2026-11-15: three browser tests guard what the app does with two chats
 
 - Internal: nothing changed for the person using the app. Three tests in

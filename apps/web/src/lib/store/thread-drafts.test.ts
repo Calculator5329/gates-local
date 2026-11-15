@@ -86,16 +86,19 @@ it("deleting A discards its draft without touching B", async () => {
 
 const row = (id: string) => ({ id, title: id, createdAt: 1, updatedAt: 1 });
 
-it("a pushed thread list that does not name a chat keeps that chat's draft", async () => {
+it("a thread list or a pushed row that does not name a chat keeps that chat's draft", async () => {
   session.openThread("B");
   drafts.editDraft("B half written");
   session.openThread("A");
+  // a row about another chat names A only
+  browser.server.push("threads.changed", { threadId: "A", thread: { ...row("A"), title: "A renamed" } });
+  await until(() => store.getState().threads.some(t => t.title === "A renamed"), 2000, "row applied");
   // a list read while B was still being made, or before it reached this server's list
   browser.server.answer("threads.list", () => [row("A")]);
-  browser.server.push("threads.changed", { threadId: "A" });
-  await until(() => store.getState().threads.length === 1, 2000, "list applied");
-  browser.server.answer("threads.list", () => [row("A"), row("B")]);
-  browser.server.push("threads.changed", { threadId: "B" });
+  const sockets = browser.server.sockets.length;
+  browser.server.socket.close();
+  await until(() => browser.server.sockets.length > sockets && store.getState().threads.length === 1, 4000, "list applied after the reconnect");
+  browser.server.push("threads.changed", { threadId: "B", thread: row("B") });
   await until(() => store.getState().threads.length === 2, 2000, "B listed again");
   session.openThread("B");
   expect(drafts.getDraft().text).toBe("B half written");
@@ -105,9 +108,8 @@ it("a chat deleted in another window ends its draft here", async () => {
   session.openThread("B");
   drafts.editDraft("B half written");
   session.openThread("A");
-  browser.server.answer("threads.list", () => [row("A")]);
-  browser.server.push("threads.changed", { threadId: "B" });
-  await until(() => store.getState().threads.length === 1, 2000, "list applied");
+  browser.server.push("threads.changed", { threadId: "B", thread: null });
+  await until(() => store.getState().threads.length === 1, 2000, "row applied");
   expect(drafts.savedDrafts().map(slot => slot.key)).not.toContain("B");
 });
 

@@ -16,6 +16,7 @@ import { ENGINE_BUSY_NOTE, imageSetup, type EngineLeave, type MemoryEngine, type
 import { pngFacts } from "../pictures/png.ts";
 import type { PictureFacts } from "../pictures/table.ts";
 import type { ThreadStore } from "../threads/store.ts";
+import { threadChanged } from "../threads/sync.ts";
 import { CANCEL_WAIT_MS, createComfyClient, type ComfyClientDeps } from "./client.ts";
 import { downloadFile, haveFile, partBytes, sizeOf, volumeFree, volumeOf, type DownloadOptions } from "./download.ts";
 import { isLocalComfy } from "./installed.ts";
@@ -368,7 +369,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
    * goes when its prompt is no longer running or its process changed.
    */
   const stuck = new Map<string, { promptId: string; pid?: number }>();
-  const emit: Push = (channel, payload) => { try { deps.push(channel, payload); } catch { /* a disconnected client cannot strand a GPU job */ } };
+  const emit: Push = (channel, payload, changes) => { try { deps.push(channel, payload, changes); } catch { /* a disconnected client cannot strand a GPU job */ } };
   /** The engine state the presets were last read again for: ComfyUI coming up or turning off changes the list, a job's busy and ready again does not. */
   let presetsFor: ImageStatus["state"] | undefined;
   const update = (next: ImageStatus): ImageStatus => {
@@ -903,7 +904,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       if (pinIn !== undefined && !unset && (kept === undefined || !same(choice, kept))) {
         try {
           deps.store.setImageChoice(pinIn, choice);
-          emit("threads.changed", { threadId: pinIn });
+          emit(...threadChanged(deps.store, pinIn));
         } catch { /* a thread deleted meanwhile */ }
       }
       clearIdle();
@@ -1034,7 +1035,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             if (staged !== undefined) deps.memory?.settled(staged);
             staged = undefined;
             event("done", { progress: 1, imagePath, runMs }, { width: made.width, height: made.height, seed, ...steps === undefined ? {} : { steps }, runMs, bytes: bytes.length });
-            if (params.threadId) emit("threads.changed", { threadId: params.threadId });
+            if (params.threadId) emit(...threadChanged(deps.store, params.threadId));
             update({ state: "ready", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
           }));
         } catch (error) {
