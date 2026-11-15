@@ -384,7 +384,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
         activity,
         uninterruptible,
         ...(startupToken === "" ? {} : { startupToken }),
-        changed: (status) => server?.push("update.changed", status),
+        changed: (status, change) => server?.push("update.changed", status, [change]),
         log: (line) => log(`update ${line}`),
       });
     },
@@ -397,7 +397,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
       onEveryChange: (listener) => services.settings.onChange((next, previous) => {
         if ((next.updateEveryChange === true) !== (previous.updateEveryChange === true)) listener();
       }),
-      changed: (status) => server?.push("update.changed", status),
+      changed: (status, change) => server?.push("update.changed", status, [change]),
       activity,
       uninterruptible,
       log: (line) => log(`update ${line}`),

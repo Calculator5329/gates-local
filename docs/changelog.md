@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-11-15: the update note and the models list stop going back in time
+
+- The update footer and Settings › Updates could show an older state for
+  a moment: if you clicked Check for updates, Download or the note's
+  close button while the window was still reading the update status, or
+  while it read it again to show what an update would stop, the slower
+  answer could land last and bring back the old check or the dismissed
+  note. Every version of the update status now carries a number, a
+  click's answer is the status it left, and the window shows only a
+  newer one. A check that could not run says why, as before.
+- The models list, a download's progress, the GPU memory panel, the fit
+  verdicts and the engine's status could show an older state for a
+  moment: an answer the window asked for before a change (after a
+  reconnect, a reload or a download starting) could land after the
+  newer news of that change and put the old list, an earlier percent or
+  a stale verdict back. Every answer and push about the models and the
+  engine now carries a number, and the window shows only a newer one. A
+  progress bar no longer steps back, a reload in the middle of a
+  download picks it up where it is, and "Download stalled" is shown only
+  when the app has actually stopped receiving the engine download, never
+  because the window's own clock guessed so.
+- If the Library cannot read the sample databases, its row now says so
+  with a Retry instead of waiting under placeholders until Settings is
+  opened again.
+
 ## 2026-11-15: browser tests wait for what they check, not for a set time
 
 - Internal: the browser tests no longer pause for a fixed time. Each waits for what it checks, or checks a "nothing happens" claim through the whole span, which fixes two tests that failed now and then.

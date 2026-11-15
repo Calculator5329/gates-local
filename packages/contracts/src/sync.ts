@@ -8,7 +8,8 @@ export const SyncDomain = S.Literals(["settings", "models", "threads", "turns", 
 export type SyncDomain = typeof SyncDomain.Type;
 
 /** The things that have one number each, and the families (`thread:<id>`) that have one per member. */
-const FIXED_SCOPES = ["settings", "runtime", "models", "catalog", "threads", "gpu", "fit-inputs", "active-turns", "sources", "source-imports", "image-status", "update"] as const;
+const FIXED_SCOPES = ["settings", "runtime", "models", "catalog", "threads", "gpu", "fit-inputs", "active-turns", "sources", "source-imports", "image-status", "update",
+  "suggested", "fit-table", "pulls", "loads", "memory", "speeds", "measures"] as const;
 export type FixedScope = typeof FIXED_SCOPES[number];
 
 const Revision = S.Int.check(S.isGreaterThanOrEqualTo(0), S.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER));
@@ -35,10 +36,24 @@ export type SyncNegotiation = typeof SyncNegotiation.Type;
 export interface SyncRow {
   readonly domain: SyncDomain;
   readonly scope: FixedScope;
+  /** Other things the answer carries whole beside `scope`'s, each with its own number (the list's runtime). */
+  readonly also?: readonly FixedScope[];
 }
 
+/** Every scope a frame of `row` carries a number for. */
+export const scopesOf = (row: SyncRow): readonly FixedScope[] => [row.scope, ...row.also ?? []];
+
+/**
+ * Kinds the socket server numbers itself, in the order it gives them out: each push takes the
+ * next number for its scope as it is sent, and each read takes one as it starts. A read gives the
+ * owner's value as it is at or after its start, and a push goes out as its value becomes current,
+ * so a higher number is never an older value. A part (one download's progress) takes the number of
+ * the whole it belongs to (every download), so a read of the whole is ordered against its parts.
+ */
+export const SENT_IN_ORDER: readonly SyncDomain[] = ["models"];
+
 /** Only domains whose every writer is numbered; the socket server and the client enforce the rows of these. */
-export const ORDERED_DOMAINS: readonly SyncDomain[] = ["settings", "sources"];
+export const ORDERED_DOMAINS: readonly SyncDomain[] = ["settings", "models", "sources", "updates"];
 
 /** The one snapshot number `sync` gives `scope` in this epoch; undefined when it gives none, several, or another epoch's. */
 export function revisionOf(sync: SyncMetadata | undefined, epoch: string, scope: FixedScope): number | undefined {

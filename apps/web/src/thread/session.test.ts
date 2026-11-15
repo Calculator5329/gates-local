@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, Payload, RuntimeStatus } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { type Browser, type Held, installBrowser, tick, until } from "../../test/harness.ts";
+import { numberServer } from "../../test/numbered-server.ts";
 import { draftView } from "../../test/draft-view.ts";
 import { drawTimes } from "./times.ts";
 
@@ -356,11 +357,13 @@ describe("hydration order (W-03, E-01)", () => {
   });
 
   it("a gpu push during the second batch is newer than the gpu snapshot", async () => {
+    // the server numbers the models kind, as the real one does: the push carries a newer number than the read
+    const numbering = numberServer(b.server, { serves: ["models"] });
     const gpu = b.server.hold("gpu.status");
     connect();
     const h = await gpu;
     const pushed = { ...methodSamples["gpu.status"].result, freeBytes: 1, measuredAt: 99 };
-    b.server.push("gpu.changed", pushed);
+    numbering.push("gpu.changed", pushed);
     await tick();
     h.respond(methodSamples["gpu.status"].result);
     await until(hydrated, 2000, "hydration");

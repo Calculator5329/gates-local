@@ -34,10 +34,6 @@ export function cardFit(fit: TableFit | undefined): TableFit | undefined {
 // One card reading per report, so a selector that returns it keeps its identity until the next table.
 const cards = new WeakMap<TableFit, TableFit>();
 
-/** A table replaces the last one only when it is from a newer reading: a restarted server, or a later build. */
-export const newerTable = (next: FitTable, last: FitTable | undefined): boolean =>
-  last === undefined || next.reading.boot !== last.reading.boot || next.reading.seq > last.reading.seq;
-
 // One report per row, so a selector that returns it keeps its identity until the next table.
 const reports = new WeakMap<FitRow, TableFit>();
 

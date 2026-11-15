@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 // A small hook host exercises the actual component's handlers across unmount
 // and remount. The browser journey covers the same navigation with real React.
 const host = vi.hoisted(() => ({
-  slots: [] as unknown[], at: 0, mark: 0, fresh: true, cleanups: [] as (() => void)[], request: vi.fn(), start: vi.fn(),
+  slots: [] as unknown[], at: 0, mark: 0, fresh: true, cleanups: [] as (() => void)[], request: vi.fn(), start: vi.fn(), retry: vi.fn(),
   rt: "ready", state: {} as Record<string, unknown>,
 }));
 vi.mock("react", async original => {
@@ -23,7 +23,7 @@ vi.mock("react", async original => {
     useEffect: (effect: () => (() => void) | undefined) => { if (host.fresh) { const done = effect(); if (done) host.cleanups.push(done); } },
   };
 });
-vi.mock("../lib/session/index.ts", () => ({ libraryRequest: host.request, applyServerEvent: (run: () => void) => run(), refreshSource: vi.fn(), removeSource: vi.fn() }));
+vi.mock("../lib/session/index.ts", () => ({ libraryRequest: host.request, applyServerEvent: (run: () => void) => run(), refreshSource: vi.fn(), removeSource: vi.fn(), retryImports: host.retry }));
 vi.mock("../lib/store/store.ts", () => ({ NA: "na", useStore: (select: (s: unknown) => unknown) => select(host.state) }));
 vi.mock("../runtime/words.tsx", () => ({ rtOf: () => host.rt }));
 vi.mock("../composer/starter.ts", () => ({ askWith: host.start }));
@@ -74,7 +74,20 @@ beforeEach(() => {
   host.state = { sources: [], settings: { tools: true }, models: [{ name: "chat", capabilities: ["completion", "tools"] }], unavailable: {}, get sourceImports() { return { samples: [SAMPLE], jobs }; } };
   host.request.mockImplementation(async () => ({ id: "job-1", kind: "sample", key: "chinook", label: "Chinook", state: "downloading", bytes: 0, total: 1000 }));
 });
-afterEach(() => { leaveSettings(); host.request.mockReset(); host.start.mockReset(); clock.mockRestore(); });
+afterEach(() => { leaveSettings(); host.request.mockReset(); host.start.mockReset(); host.retry.mockReset(); clock.mockRestore(); });
+
+// Guards the app's rule that every dead end names its cause and has a way forward: with no poll, a
+// failed read of the samples stays failed until the person retries it.
+it("a samples read that failed says so on its row with a Retry that reads them again", () => {
+  Object.defineProperty(host.state, "sourceImports", { get: () => "na" });
+  const tree = render();
+  const row = all(tree, (_type, props) => (props as { err?: unknown }).err === "Couldn't read the available samples.");
+  expect(row, "the failure is said on its own row").toHaveLength(1);
+  expect(all(tree, (_type, props) => (props as { "aria-hidden"?: unknown })["aria-hidden"] === "true" && props.className === "srow db-row"), "no placeholder rows wait for a read that is not coming").toHaveLength(0);
+  find(tree, "button", "Retry").onClick!();
+  expect(host.retry).toHaveBeenCalledTimes(1);
+  expect(host.request, "the Retry reads; it starts nothing").not.toHaveBeenCalled();
+});
 
 it.each(["cancelled", "error"] as const)("Retry after leaving Library and returning uses the %s job's repository (DG-02)", async state => {
   const url = "https://github.com/example/docs";

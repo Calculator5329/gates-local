@@ -1,12 +1,12 @@
 // Runtime words (shell.md F01, F18, F22, F42): the sidebar footer row, the
 // composer placeholder and the banner docked above the composer, one entry
 // per RuntimeStatus state plus "offline" for a dropped server connection.
-import { type ReactNode, useState } from "react";
+import type { ReactNode } from "react";
 import type { RuntimeStatus } from "@gates-local/contracts";
 import { NBSP, etaText, gb } from "../lib/words/format.ts";
 import { recheckRuntime } from "../lib/session/index.ts";
 import { NA, type State } from "../lib/store/store.ts";
-import { figuresMoved, stalledNow, wakeAtStall } from "./install-stall.ts";
+import { stalledNow } from "./install-stall.ts";
 
 export type Rt = "ready" | "installing" | "starting" | "missing" | "wrong" | "stopped" | "error" | "offline";
 
@@ -106,29 +106,23 @@ export function installWords(i: InstallSize | undefined): string | undefined {
   return [...etaText(p, { speed: false }).split(" · "), ...disk].map(whole).join(" · ");
 }
 
-export { INSTALL_STALL_MS, figuresMoved, installStalled, wakeAtStall } from "./install-stall.ts";
+export { stalledNow } from "./install-stall.ts";
 
 /** The step's words once the download has stalled, in the first window, the banner, the footer gear and Settings. */
 export const STALLED = "Download stalled";
 
 /**
- * The stall as a screen sees it: true once the figures have held for the stall time, and the
- * Retry that ends it (the server starts a stalled download again; the new attempt gets the whole
- * stall time). `words` are the figures without the time left, which a stalled speed does not give.
- * The stall's moment re-renders through the store (wakeAtStall), as it does the footer gear.
+ * The stall as a screen sees it: true once the server has said the download stalled, and the
+ * Retry that ends it (the server starts a stalled download again and answers the new status).
+ * `words` are the figures without the time left, which a stalled speed does not give.
  */
 export function useInstallStall(i: InstallSize | undefined): { stalled: boolean; words: string | undefined; retry: () => void } {
-  const [, retried] = useState(0);
   const stalled = stalledNow(i);
-  const retry = () => {
-    figuresMoved(i?.receivedBytes ?? 0, Date.now(), true);
-    retried((n) => n + 1);
-    wakeAtStall();
-    void recheckRuntime();
-  };
   const { bytesPerSecond: _, ...still } = i ?? { receivedBytes: 0, totalBytes: 0 };
-  return { stalled, words: installWords(stalled ? still : i), retry };
+  return { stalled, words: installWords(stalled ? still : i), retry: retryInstall };
 }
+
+const retryInstall = () => { void recheckRuntime(); };
 
 /** The engine install's title, the same in the first window and the banner. */
 export const INSTALL_TITLE = "Getting the chat engine ready";

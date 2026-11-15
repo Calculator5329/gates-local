@@ -14,6 +14,7 @@ import type { Duplex } from "node:stream";
 import {
   type BlockingTurn,
   type Channel,
+  type FixedScope,
   type MethodName,
   type Params,
   type Payload,
@@ -23,6 +24,8 @@ import {
   type SyncMetadata,
   WireError,
   ORDERED_DOMAINS,
+  SENT_IN_ORDER,
+  scopesOf,
   phoneMay,
   methodSync,
   pushSync,
@@ -181,6 +184,13 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
   const wss = new WebSocketServer({ noServer: true, maxPayload: options.maxPayloadBytes ?? 128 * 1024 * 1024 });
   const clients = new Set<WebSocket>();
   const ordered = new WeakMap<WebSocket, readonly SyncDomain[]>();
+  /** The last number given out for each scope of a kind this socket numbers (SENT_IN_ORDER). */
+  const issued = new Map<FixedScope, number>();
+  const sent = (scope: FixedScope): SyncChange => {
+    const rev = (issued.get(scope) ?? 0) + 1;
+    issued.set(scope, rev);
+    return { scope, kind: "snapshot", rev };
+  };
   const phoneClients = new WeakSet<WebSocket>();
   // Before the snapshot, active replies are recovered from that snapshot and
   // completed ones from RPC history. Keeping no chat backlog bounds idle clients.
@@ -264,7 +274,9 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     const handler = handlers[method] as ((p: unknown, c: HandlerContext) => unknown) | undefined;
     if (handler === undefined) return send(ws, encodeErrorResponse(id, "not-implemented", `${method} has no handler`));
     let result: unknown;
-    let captured: SyncMetadata | undefined;
+    const row = methodSync(method);
+    // A read of a kind the socket numbers takes its numbers now, before its value is read.
+    let captured: SyncMetadata | undefined = row !== undefined && SENT_IN_ORDER.includes(row.domain) ? { epoch, changes: scopesOf(row).map(sent) } : undefined;
     try {
       result = await handler(decodedParams, { ...ctx, capture: changes => { captured = { epoch, changes }; } });
     } catch (e) {
@@ -272,11 +284,11 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
       if (code === "internal") log(`${method} handler threw: ${message}`);
       return send(ws, encodeErrorResponse(id, code, message, blocking));
     }
-    // A method row of a kind this socket ordered answers with its number, or not at all.
-    const row = methodSync(method);
+    // A method row of a kind this socket ordered answers with its numbers, or not at all.
     const numbered = row !== undefined && ordered.get(ws)?.includes(row.domain) === true;
-    if (numbered && revisionOf(captured, epoch, row.scope) === undefined) {
-      return send(ws, encodeErrorResponse(id, "bad-result", `${method} did not capture ${row.scope} metadata`));
+    const missing = numbered ? scopesOf(row).find(scope => revisionOf(captured, epoch, scope) === undefined) : undefined;
+    if (missing !== undefined) {
+      return send(ws, encodeErrorResponse(id, "bad-result", `${method} did not capture ${missing} metadata`));
     }
     const frame = encodeResult(id, method, result as never, numbered ? captured : undefined);
     if (!frame.ok) {
@@ -331,12 +343,14 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
   return {
     port,
     ...(phone === undefined ? {} : { phoneSocket: phone.socketPath }),
-    push(channel, payload, changes) {
+    push(channel, payload, given) {
       const frame = encodePush(channel, payload);
       if (!frame.ok) throw frame.error;
       // A push row of an ordered kind carries its number, whoever is listening: an unnumbered
       // writer fails here, on its first push, not only once an ordered window happens to connect.
+      // A kind the socket numbers takes the next number as it is sent.
       const row = pushSync(channel);
+      const changes = given ?? (row !== undefined && SENT_IN_ORDER.includes(row.domain) ? [sent(row.scope)] : undefined);
       const enabled = row !== undefined && ORDERED_DOMAINS.includes(row.domain) && (options.ordered ?? []).includes(row.domain);
       if (enabled && revisionOf(changes === undefined ? undefined : { epoch, changes }, epoch, row.scope) === undefined) {
         throw new Error(`${channel} did not capture ${row.scope} metadata`);

@@ -233,7 +233,7 @@ describe("createClient", () => {
     expect(socket.readyState).toBe(3);
   });
 
-  it.each([{ epoch: "process-a", ordered: ["models"] }, { epoch: "", ordered: [] }])("refuses unsolicited capabilities or a malformed epoch: %j", async result => {
+  it.each([{ epoch: "process-a", ordered: ["threads"] }, { epoch: "", ordered: [] }])("refuses unsolicited capabilities or a malformed epoch: %j", async result => {
     const socket = new FakeSocket(); socket.open();
     const client = createClient(socket, { onProtocolError: () => {} });
     const pending = client.negotiate();

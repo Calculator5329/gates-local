@@ -1,13 +1,19 @@
-// Update status, receipt ordering and the desktop action. The installer stays
-// deferred until approval; server-derived state uses the shared projection.
-import type { UpdateStatus } from "@gates-local/contracts";
-import { newestOnly } from "../models/pick.ts";
+// Update status and the desktop action. The installer stays deferred until approval. The status is
+// ordered data: every read, push and action answer carries its number, and `newer` lets through
+// only a status newer than the one the window shows.
+import type { SyncMetadata, UpdateStatus } from "@gates-local/contracts";
 import { getState, NA, setState } from "../lib/store/store.ts";
 import type { ActionCall, ActionResult } from "../lib/session/connection.ts";
 
-export function createUpdates({ applyServerEvent, act }: { readonly applyServerEvent: typeof setState; readonly act: ActionCall }) {
-  const updateOrder = newestOnly();
+interface UpdatesDeps {
+  readonly applyServerEvent: typeof setState;
+  readonly act: ActionCall;
+  /** True when a status numbered `sync` is newer than the one applied (always, on a connection that did not order updates). */
+  readonly newer: (sync: SyncMetadata | undefined) => boolean;
+}
 
+export function createUpdates({ applyServerEvent, act, newer }: UpdatesDeps) {
+  /** A status the ordering let through: a push, a read, or an action's answer. */
   function receiveUpdate(update: UpdateStatus): void {
     applyServerEvent(s => {
       const known = s.update === undefined || s.update === NA ? undefined : s.update;
@@ -18,54 +24,39 @@ export function createUpdates({ applyServerEvent, act }: { readonly applyServerE
       return { update: known?.canControl === false ? { ...update, canControl: false } : update, ...(clear ? { updateError: null } : {}) };
     });
   }
+  /** An action's answer is the numbered status it left, applied like a read. */
+  const answered = { onResult: (update: UpdateStatus, sync: SyncMetadata | undefined) => { if (newer(sync)) receiveUpdate(update); } };
 
   /** Manual checks share the desktop server's checked target and activity. */
   async function checkForUpdates(): Promise<ActionResult> {
     if (getState().updateChecking || getState().updateInstalling) return null;
     setState({ updateChecking: true });
-    const r = await act("update.check", {}, "check for updates");
-    applyServerEvent((s) => {
-      if (r.ok && s.update !== undefined && s.update !== NA) {
-        updateOrder.next();
-        // a check that answered clears a failed install click's stale words
-        return { updateChecking: false, updateError: null, update: { ...s.update, lastCheck: r.value } };
-      }
-      return { updateChecking: false };
-    });
+    const r = await act("update.check", {}, "check for updates", "try again", answered);
+    // a check that answered clears a failed install click's stale words
+    applyServerEvent(r.ok ? { updateChecking: false, updateError: null } : { updateChecking: false });
     return r.ok ? null : r.message;
   }
 
-  /** An installed copy's Download click: the server answers with the check, now downloading; progress follows as update.changed. */
+  /** An installed copy's Download click: the server answers with the status, now downloading; progress follows as update.changed. */
   async function downloadUpdate(): Promise<ActionResult> {
-    const r = await act("update.download", {}, "download the update");
-    if (!r.ok) return r.message;
-    applyServerEvent((s) => {
-      if (s.update === undefined || s.update === NA) return {};
-      updateOrder.next();
-      return { update: { ...s.update, lastCheck: r.value } };
-    });
-    return null;
+    const r = await act("update.download", {}, "download the update", "try again", answered);
+    return r.ok ? null : r.message;
   }
 
   /** A phone dismisses its own note without writing through the desktop listener. */
   async function dismissUpdateResult(): Promise<void> {
     const current = getState().update;
-    applyServerEvent((s) => {
-      if (s.update === undefined || s.update === NA) return {};
-      updateOrder.next();
-      return { update: { ...s.update, result: null } };
-    });
-    if (current !== undefined && current !== NA && current.canControl === false) return;
-    await act("update.dismissResult", {}, "hide the update note");
+    if (current !== undefined && current !== NA && current.canControl === false) {
+      applyServerEvent({ update: { ...current, result: null } });
+      return;
+    }
+    await act("update.dismissResult", {}, "hide the update note", "try again", answered);
   }
 
   /** Re-read the status (target, approval and running work) for an ask that is about to show it. */
   async function readUpdateStatus(): Promise<ActionResult> {
-    const r = await act("update.status", {}, "read what an update would stop");
-    if (!r.ok) return r.message;
-    updateOrder.next();
-    receiveUpdate(r.value);
-    return null;
+    const r = await act("update.status", {}, "read what an update would stop", "try again", answered);
+    return r.ok ? null : r.message;
   }
 
   /**
@@ -94,5 +85,5 @@ export function createUpdates({ applyServerEvent, act }: { readonly applyServerE
     }
   }
 
-  return { updateOrder, receiveUpdate, checkForUpdates, downloadUpdate, dismissUpdateResult, readUpdateStatus, updateAndRestart };
+  return { receiveUpdate, checkForUpdates, downloadUpdate, dismissUpdateResult, readUpdateStatus, updateAndRestart };
 }

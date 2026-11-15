@@ -5,6 +5,7 @@
 import type { Page } from "@playwright/test";
 import { decodeResult, type FitTable } from "@gates-local/contracts";
 import { expect, openGpuMemory, sendMessage, test, waitReady } from "./fixtures.ts";
+import { numberedRoute } from "./numbered-route.ts";
 import { holds } from "./waits.ts";
 
 /** Prepare normally, then push a newer fit table while the picker is open. */
@@ -12,7 +13,9 @@ async function pickerReports(page: Page) {
   let table: FitTable | undefined;
   let refresh: (() => void) | undefined;
   const received = new Set<string>();
-  await page.routeWebSocket(/127\.0\.0\.1:5286/, ws => {
+  await page.routeWebSocket(/127\.0\.0\.1:5286/, routed => {
+    // the made-up table below goes out numbered, as the newest, as the server would number it
+    const { page: ws } = numberedRoute(routed);
     const server = ws.connectToServer();
     const methods = new Map<unknown, string>();
     ws.onMessage(message => {

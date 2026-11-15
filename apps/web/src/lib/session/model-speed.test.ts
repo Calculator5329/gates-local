@@ -5,11 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelSpeed } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { type Browser, installBrowser, tick, until } from "../../../test/harness.ts";
+import { type Numbering, numberServer } from "../../../test/numbered-server.ts";
 
 type Session = typeof import("./index.ts");
 type Store = typeof import("../store/store.ts");
 
 let b: Browser;
+/** The server numbers the models kind, as the real one does. */
+let numbering: Numbering;
 let session: Session;
 let store: Store;
 let disconnect: (() => void) | undefined;
@@ -19,6 +22,7 @@ const slow: ModelSpeed = { model: "gemma3:4b", tokensPerSecond: 8.4, replies: 1 
 
 beforeEach(async () => {
   b = installBrowser();
+  numbering = numberServer(b.server, { serves: ["models"] });
   vi.resetModules();
   session = await import("./index.ts");
   store = await import("../store/store.ts");
@@ -61,7 +65,7 @@ describe("measured speed in the store", () => {
     expect(speeds()).toEqual({ "qwen3.5:9b": fast });
 
     const after = { ...fast, tokensPerSecond: 97.2, replies: 9 };
-    b.server.broadcast("models.speed", [after, slow]);
+    numbering.push("models.speed", [after, slow]);
     await tick();
     expect(speeds()).toEqual({ "qwen3.5:9b": after, "gemma3:4b": slow });
     expect(b.server.calls("models.speed")).toHaveLength(1);
@@ -71,7 +75,7 @@ describe("measured speed in the store", () => {
     b.server.answer("models.speed", () => [fast, slow]);
     await boot();
     const before = speeds();
-    b.server.broadcast("models.speed", [{ ...fast }, { ...slow, tokensPerSecond: 9.1, replies: 2 }]);
+    numbering.push("models.speed", [{ ...fast }, { ...slow, tokensPerSecond: 9.1, replies: 2 }]);
     await tick();
     const now = speeds();
     if (now === undefined || now === "na" || before === undefined || before === "na") throw new Error("no speeds");
@@ -83,7 +87,7 @@ describe("measured speed in the store", () => {
     const held = b.server.hold("models.speed");
     disconnect = session.connect();
     const read = await held;
-    b.server.broadcast("models.speed", [fast]);
+    numbering.push("models.speed", [fast]);
     await tick();
     read.respond([]);
     await until(hydrated, 2000, "hydration");

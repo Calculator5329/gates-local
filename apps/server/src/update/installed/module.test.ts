@@ -66,11 +66,12 @@ function copy(o: { version?: string; keys?: readonly string[]; feed?: ReturnType
 /** The check's words as Settings shows them, after it decoded off the wire. */
 async function words(module: UpdateModule): Promise<{ lines: readonly string[]; page?: string; state: UpdateCheck["state"] }> {
   const check = await module.check();
-  const decoded = decodeResult("update.check", check);
-  if (!decoded.ok) throw new Error(`does not decode: ${JSON.stringify(check)}`);
+  // The check answers with the status it left: the check's words travel inside it.
+  const decoded = decodeResult("update.check", { ...module.status(), lastCheck: check });
+  if (!decoded.ok || decoded.value.lastCheck === null) throw new Error(`does not decode: ${JSON.stringify(check)}`);
   const status = decodeResult("update.status", module.status());
   if (!status.ok) throw new Error("status does not decode");
-  const c = decoded.value;
+  const c = decoded.value.lastCheck;
   if (c.state === "up-to-date") return { state: c.state, lines: [] };
   if (c.state === "available") throw new Error("an installed copy never offers an install");
   return { state: c.state, lines: c.lines, ...(c.page === undefined ? {} : { page: c.page }) };

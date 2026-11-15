@@ -3,7 +3,8 @@
 import type { ReactNode } from "react";
 import { isValidElement } from "react";
 import { vi } from "vitest";
-import type { Message, Params, Payload, ResultOf, Settings, SettingsPatch, SyncMetadata } from "@gates-local/contracts";
+import type { Message, Params, Payload, ResultOf, Settings, SettingsPatch, SyncDomain, SyncMetadata } from "@gates-local/contracts";
+import { type Numbering, numberServer } from "./numbered-server.ts";
 import { decodeResult } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { FakeServer, FakeSocket, installBrowser } from "./harness.ts";
@@ -207,15 +208,19 @@ export class OrderingWorld {
   intent: "old" | "connect" | "disconnect" | null = null;
   readonly healthSaves = new Map<string, boolean>();
   expectedCancelled = new Set<string>();
+  /** Set when the world was created serving numbered kinds. */
+  numbering: Numbering | undefined;
   get a(): WindowSession { const a = this.windows[0]; if (!a) throw new Error("Missing window A"); return a; }
   get b(): WindowSession { const b = this.windows[1]; if (!b) throw new Error("Missing window B"); return b; }
 
-  static async create(twoWindows = true, orderedSettings = process.env["REPLAY_ORDERED_SETTINGS"] !== "0"): Promise<OrderingWorld> {
+  /** `serves`: kinds the server numbers from the first connection on (numbered-server.ts), as the real one does. */
+  static async create(twoWindows = true, orderedSettings = process.env["REPLAY_ORDERED_SETTINGS"] !== "0", serves: readonly SyncDomain[] = []): Promise<OrderingWorld> {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     vi.setSystemTime(1_800_000_000_000);
     installBrowser();
     const world = new OrderingWorld();
     world.server.orderedSettings = orderedSettings;
+    if (serves.length > 0) world.numbering = numberServer(world.server, { serves });
     vi.stubGlobal("WebSocket", class extends FakeSocket { constructor(url: string) { super(url, world.server); } });
     for (const label of twoWindows ? ["A", "B"] : ["A"]) {
       vi.resetModules();

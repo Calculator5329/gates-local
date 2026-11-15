@@ -4,7 +4,7 @@
 // the few browser globals session.ts touches (location, history, document,
 // localStorage, requestAnimationFrame). Each test imports session.ts fresh.
 import { vi } from "vitest";
-import type { Channel, Message, MethodName, Params, Payload, QueuedMessage, ResultOf } from "@gates-local/contracts";
+import type { Channel, Message, MethodName, Params, Payload, QueuedMessage, ResultOf, SyncMetadata } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { createQueue } from "@gates-local/server/chat/queue.ts";
 
@@ -158,8 +158,9 @@ export class FakeServer {
     }
   }
 
-  push<C extends Channel>(channel: C, payload: Payload<C>): void {
-    this.socket.frame({ type: "push", channel, payload });
+  /** `sync`: the number an ordered push carries (numbered-server.ts gives it). */
+  push<C extends Channel>(channel: C, payload: Payload<C>, sync?: SyncMetadata): void {
+    this.socket.frame({ type: "push", channel, payload, ...(sync === undefined ? {} : { sync }) });
     this.pushed(channel, payload);
   }
 

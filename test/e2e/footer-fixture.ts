@@ -3,6 +3,7 @@
 // every state can be reached in one page without a real update or download.
 import type { PullProgress, UpdateStatus } from "@gates-local/contracts";
 import type { Page, WebSocketRoute } from "@playwright/test";
+import { numberedRoute } from "./numbered-route.ts";
 
 const BASE: UpdateStatus = { version: { kind: "commit", commit: "abc1234" }, result: null, lastCheck: null, activity: [] };
 const INSTALLED: UpdateStatus = { ...BASE, version: { kind: "installed", version: "1.2.0" } };
@@ -59,7 +60,8 @@ export async function footerSocket(page: Page) {
   let statusRefusal: string | undefined;
   let prepareBlock: string | undefined;
   const refuse = (id: string, message: string) => route?.send(JSON.stringify({ type: "response", id, ok: false, error: { code: "failed", message } }));
-  await page.routeWebSocket(/\/\?token=/, (socket) => {
+  await page.routeWebSocket(/\/\?token=/, (routed) => {
+    const { page: socket } = numberedRoute(routed);
     route = socket;
     const server = socket.connectToServer();
     socket.onMessage((raw) => {
@@ -72,7 +74,7 @@ export async function footerSocket(page: Page) {
       else if (message.method === "update.download") downloads.push(message.id);
       else if (message.method === "update.dismissResult") {
         update = { ...update, result: null };
-        socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result: { dismissed: true } }));
+        socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result: { ...update, canControl: true } }));
       } else if (message.method === "update.prepare") {
         const check = update.lastCheck;
         const result = check?.state === "available" && check.targetCommit !== undefined ? { state: "ready", reservation: "fixture-reservation", target: check.targetCommit } : { state: "changed", status: update };
@@ -111,9 +113,10 @@ export async function footerSocket(page: Page) {
     blockPrepare: (message?: string) => {
       prepareBlock = message;
     },
-    /** Answer every held update.check with an up-to-date result. */
+    /** Answer every held update.check with an up-to-date result, as the status it leaves. */
     releaseCheck: () => {
-      for (const id of held.splice(0)) route?.send(JSON.stringify({ type: "response", id, ok: true, result: { state: "up-to-date", checkedAt: 2, channel: "main", current: "abc1234" } }));
+      update = { ...update, lastCheck: { state: "up-to-date", checkedAt: 2, channel: "main", current: "abc1234" } };
+      for (const id of held.splice(0)) route?.send(JSON.stringify({ type: "response", id, ok: true, result: { ...update, canControl: true } }));
     },
     /** Refuse every held update.check with the server's words. */
     failCheck: (message: string) => {

@@ -576,8 +576,8 @@ export type FitMemory = typeof FitMemory.Type;
 /**
  * Every installed chat model and every model offered for download, at each context the app offers
  * (one row per size a model runs at), from one GPU reading. boot names the server process and seq
- * rises with each table it builds: a client keeps a table unless the next has another boot or a
- * greater seq, so a late table never replaces a newer one.
+ * counts the tables it has built. A window orders tables by the sync number every answer and push
+ * of the table carries (scope "fit-table"), never by these.
  */
 export const FitTable = S.Struct({
   reading: S.Struct({ boot: S.String, seq: Count, measuredAt: Millis }),

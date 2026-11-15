@@ -513,10 +513,10 @@ small graphs are exhausted and larger graphs retain the 64-schedule cap.
 | --- | --- | ---: | --- |
 | Fit and blocker preflight across a GPU reading | `fitEpoch` | 64 sampled | Old refusal replaces the fresh fitting verdict |
 | Model choice while preload preflight waits | `preload` current-model check | 7 exhaustive | Superseded model starts loading |
-| Refresh crossing another window's removal push | `modelsOrder.current` | 64 sampled | Removed model returns to the installed list |
+| Refresh crossing another window's removal push | the models kind's numbers (`models` in `ORDERED_DOMAINS`, given by the socket server) | 64 sampled | Removed model returns to the installed list |
 | Off-screen completion around reconnect hydration | `lostTurn` clears `runningTurns` | 64 sampled | Disconnected stream stays marked running |
 | Check and post-save image probes crossing busy | `imageOrder.current` | 13 exhaustive each | Ready replaces a newer busy push |
-| Update hydration crossing Check and Dismiss | `updateOrder.current` | 42 exhaustive | Fresh check disappears and dismissed result returns |
+| Update hydration crossing Check and Dismiss | the update status's numbers (`updates` in `ORDERED_DOMAINS`) | 42 exhaustive | Fresh check disappears and dismissed result returns |
 | Pull acknowledgement timeout after initial progress | Queued-row identity | 3 exhaustive | Received download progress disappears |
 
 These add 270 schedules, for 719 including the earlier cases and RP-01 witness.

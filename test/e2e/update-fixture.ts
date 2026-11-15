@@ -15,7 +15,8 @@ export function updateFixtureState() {
     show: () => { current = AVAILABLE; return { ...current, activity, approval: `fixture-${revision}` }; },
     notice: () => { current = { ...IDLE, result: { at: 1, outcome: "updated", line: "Updated to the approved commit." } }; return status(); },
     failure: () => { current = { ...IDLE, result: { at: 1, outcome: "stopped", line: `The update stopped at ${"stack_frame_".repeat(80)}. The previous version is restored.`, logPath: `/srv/updates/${"long-folder/".repeat(32)}failure.log` } }; return status(); },
-    dismiss: () => { current = { ...current, result: null }; return { dismissed: true }; },
+    // As the server does, the dismissal answers with the status it leaves.
+    dismiss: (): UpdateStatus => { current = { ...current, result: null }; return status(); },
     work: (items: readonly string[]) => { activity = items; revision++; },
     prepare: (approval: string): UpdatePreparation => {
       const latest = status();

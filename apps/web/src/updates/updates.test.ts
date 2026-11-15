@@ -485,7 +485,7 @@ describe("the check runs only on a click", () => {
     expect(b.server.calls("update.check")).toEqual([]);
     expect(session.canUpdateHere()).toBe(false);
 
-    const answer = methodSamples["update.check"].result;
+    const answer = methodSamples["update.check"].result.lastCheck;
     expect(await session.checkForUpdates()).toBeNull();
     expect(b.server.calls("update.check").length).toBe(1);
     const update = store.getState().update;
@@ -517,7 +517,7 @@ describe("the check runs only on a click", () => {
   it("the Download click sends update.download once and shows the answer", async () => {
     disconnect = session.connect();
     await until(hydrated, 2000, "hydration");
-    const answer = methodSamples["update.download"].result;
+    const answer = methodSamples["update.download"].result.lastCheck;
     expect(b.server.calls("update.download")).toEqual([]);
     expect(await session.downloadUpdate()).toBeNull();
     expect(b.server.calls("update.download").length).toBe(1);
@@ -600,7 +600,7 @@ describe("the check runs only on a click", () => {
   it("a successful background check reaches every window through the shared channel", async () => {
     disconnect = session.connect();
     await until(hydrated, 2000, "hydration");
-    const update = { ...CLONE, lastCheck: methodSamples["update.check"].result };
+    const update = { ...CLONE, lastCheck: methodSamples["update.check"].result.lastCheck };
     b.server.push("update.changed", update);
     await tick();
     expect(store.getState().update).toEqual(update);
@@ -611,7 +611,7 @@ describe("the check runs only on a click", () => {
     const held = b.server.hold("update.status");
     disconnect = session.connect();
     const request = await held;
-    const newer = { ...CLONE, lastCheck: methodSamples["update.check"].result };
+    const newer = { ...CLONE, lastCheck: methodSamples["update.check"].result.lastCheck };
     b.server.push("update.changed", newer);
     await tick();
     request.respond(CLONE);

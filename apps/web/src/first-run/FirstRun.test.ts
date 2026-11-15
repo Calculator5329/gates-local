@@ -17,7 +17,7 @@ vi.mock("../lib/ui/ui.tsx", () => ({ VLabel: () => null }));
 
 const { FirstRun, installStep, installWords } = await import("./FirstRun.tsx");
 const { Banner } = await import("../runtime/Banner.tsx");
-const { INSTALL_STALL_MS, figuresMoved, installStalled } = await import("../runtime/words.tsx");
+const { stalledNow } = await import("../runtime/words.tsx");
 const plain = (state: unknown, el: typeof FirstRun | typeof Banner) => {
   store.state = state;
   return renderToStaticMarkup(createElement(el)).replaceAll(/<[^>]*>/g, " ").replaceAll(/\s+/g, " ");
@@ -47,32 +47,39 @@ describe("an engine download whose figures stop moving says so and offers Retry"
     expect(other).toContain("Looking for Ollama");
   });
 
-  it("after the app's stall time with no new bytes, and not before; unpacking never stalls", () => {
-    expect(INSTALL_STALL_MS).toBe(5000);
-    expect(installStalled(at(10), 0, INSTALL_STALL_MS - 1)).toBe(false);
-    expect(installStalled(at(10), 0, INSTALL_STALL_MS)).toBe(true);
+  it("a stall is the server's word, and only for the download; unpacking never stalls", () => {
+    expect(stalledNow({ ...at(10), stalled: true })).toBe(true);
     // a stall at 0 bytes (the connection hung before the first byte) is a stall too
-    expect(installStalled(at(0), 0, INSTALL_STALL_MS)).toBe(true);
-    expect(installStalled(at(total), 0, 60_000)).toBe(false);
-    expect(installStalled(undefined, 0, 60_000)).toBe(false);
+    expect(stalledNow({ ...at(0), stalled: true })).toBe(true);
+    expect(stalledNow(at(10))).toBe(false);
+    expect(stalledNow({ ...at(total), stalled: true })).toBe(false);
+    expect(stalledNow(undefined)).toBe(false);
   });
 
-  it("the figures' last move is kept while they hold, and a Retry counts as a move", () => {
-    expect(figuresMoved(7, 1000)).toBe(1000);
-    expect(figuresMoved(7, 4000)).toBe(1000);
-    expect(figuresMoved(8, 4000)).toBe(4000);
-    expect(figuresMoved(8, 9000, true)).toBe(9000);
+  it("figures that have held for any time, with no word from the server, still say the download", () => {
+    const now = vi.spyOn(Date, "now");
+    try {
+      for (const moment of [1_000, 61_000]) {
+        now.mockReturnValue(moment);
+        for (const [el, view] of [[FirstRun, "firstrun"], [Banner, "new"]] as const) {
+          const t = plain(installing(300_000_000, view), el);
+          expect(t, view).toContain("Downloading Ollama");
+          expect(t, view).not.toContain("stalled");
+        }
+      }
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it("the first window and the banner say the download stalled and show Retry; a moving one shows neither", () => {
-    figuresMoved(300_000_000, Date.now() - INSTALL_STALL_MS - 1);
     for (const [el, view] of [[FirstRun, "firstrun"], [Banner, "new"]] as const) {
-      const t = plain(installing(300_000_000, view), el);
+      const stalled = installing(300_000_000, view);
+      const t = plain({ ...stalled, runtime: { ...stalled.runtime, install: { ...stalled.runtime.install, stalled: true } } }, el);
       expect(t, view).toContain("Download stalled");
       expect(t, view).toContain("Retry");
       expect(t, view).toMatch(/0\.3\sof\s1\.4\sGB/);
     }
-    figuresMoved(400_000_000, Date.now());
     for (const [el, view] of [[FirstRun, "firstrun"], [Banner, "new"]] as const) {
       const t = plain(installing(400_000_000, view), el);
       expect(t, view).toContain("Downloading Ollama");

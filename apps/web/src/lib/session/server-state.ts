@@ -12,6 +12,8 @@ export interface Ordering {
   ordered(domain: SyncDomain): boolean;
   /** True, and remembered, when `metadata` numbers `row`'s thing newer than the last applied. */
   accept(row: SyncRow, metadata: SyncMetadata | undefined): boolean;
+  /** True while `metadata`'s number for `row`'s thing is still the last one applied: nothing newer came since it was accepted. */
+  newest(row: SyncRow, metadata: SyncMetadata | undefined): boolean;
 }
 
 export interface SettingsAuthority {
@@ -42,6 +44,10 @@ export function createOrdering(): Ordering {
       if (next === undefined || next <= (applied.get(row.scope) ?? -1)) return false;
       applied.set(row.scope, next);
       return true;
+    },
+    newest(row, metadata) {
+      const rev = epoch === undefined ? undefined : revisionOf(metadata, epoch, row.scope);
+      return rev !== undefined && applied.get(row.scope) === rev;
     },
   };
 }

@@ -4,6 +4,7 @@ import type { Channel, MethodName, Payload, ResultOf } from "@gates-local/contra
 import { methodSamples } from "@gates-local/contracts/testing";
 import { type Held, type FakeSocket } from "../../test/harness.ts";
 import { drain, openTurn, OrderingWorld, runningIds } from "../../test/ordering-world.ts";
+import { numberServer } from "../../test/numbered-server.ts";
 import { replay, type ReplayEvent, type ReplayFrame, type ReplayScenario } from "../../test/ordering-replay.ts";
 
 vi.mock("react", async (original) => ({
@@ -42,7 +43,8 @@ class World {
     this.replies.delete(name); reply(); await drain();
   }
   async push<C extends Channel>(socket: FakeSocket, channel: C, payload: Payload<C>): Promise<void> {
-    socket.frame({ type: "push", channel, payload, ...(channel === "settings.changed" && this.wire.server.orderedSettings ? { sync: this.wire.server.settingsSync() } : {}) }); await drain();
+    const numbered = this.wire.numbering?.stamp(channel);
+    socket.frame({ type: "push", channel, payload, ...(numbered ? { sync: numbered } : channel === "settings.changed" && this.wire.server.orderedSettings ? { sync: this.wire.server.settingsSync() } : {}) }); await drain();
   }
 }
 
@@ -75,7 +77,8 @@ function preloadChoice(): ReplayScenario<World> {
 function modelRefresh(): ReplayScenario<World> {
   return {
     name: "modelsOrder: an old refresh cannot restore a removed model", dispose,
-    create: async () => { const w = await World.create(); w.wire.server.answer("models.refresh", () => ({ runtime: listedRuntime, models: w.models })); return w; },
+    // The server numbers the models kind, as the real one does: the old refresh carries the number it was asked with.
+    create: async () => { const w = new World(await OrderingWorld.create(true, undefined, ["models"])); w.wire.server.answer("models.refresh", () => ({ runtime: listedRuntime, models: w.models })); return w; },
     witnesses: [["refresh.request", "remove.request", "remove.complete", "models.push-A", "models.push-B", "remove.response.ready", "remove.response", "refresh.old.ready", "refresh.old.response"]],
     events: [
       event("refresh.request", [], (w) => w.capture("refresh.old", "models.refresh", () => { void w.wire.a.session.refreshModels(); }, { runtime: listedRuntime, models: initialModels })),
@@ -184,11 +187,20 @@ function imageStatus(kind: "check" | "post-save"): ReplayScenario<World> {
 }
 
 function updateHydration(): ReplayScenario<World> {
-  const checked = { ...methodSamples["update.check"].result, checkedAt: 99 };
+  const answered = methodSamples["update.check"].result;
+  const checked = answered.lastCheck === null ? null : { ...answered.lastCheck, checkedAt: 99 };
+  // The check and the dismissal answer with the numbered status they leave, as the server holds it
+  // when it answers: the check is kept once it finishes, and the result is gone once dismissed.
+  let held = { checked: false, dismissed: false };
+  const status = () => ({ ...answered, lastCheck: held.checked ? checked : null, ...(held.dismissed ? { result: null } : {}) });
   return {
     name: "update hydration: keep a fresh check and a dismissed result", dispose,
     create: async () => {
-      const w = await World.create(); await w.wire.drop(); await w.wire.reconnect();
+      held = { checked: false, dismissed: false };
+      const w = await World.create();
+      numberServer(w.wire.server, { serves: ["updates"], commits: ["update.check", "update.dismissResult"] });
+      await w.wire.drop(); await w.wire.reconnect();
+      w.wire.server.answer("update.dismissResult", () => { held.dismissed = true; return status(); });
       await w.wire.step(() => w.wire.server.response("snapshot"));
       // All second-batch responses, including update.status, are delivered except
       // GPU. Promise.all has not published them. No wire reordering is needed.
@@ -197,10 +209,15 @@ function updateHydration(): ReplayScenario<World> {
     },
     witnesses: [["check.request", "check.ready", "check.response", "dismiss", "batch.ready", "batch.release"]],
     events: [
-      event("check.request", [], (w) => w.capture("check", "update.check", () => { void w.wire.a.session.checkForUpdates(); }, checked)),
+      event("check.request", [], async (w) => {
+        const asked = w.wire.server.hold("update.check");
+        void w.wire.a.session.checkForUpdates(); await drain();
+        const request = await asked;
+        w.replies.set("check", () => { held.checked = true; request.respond(status()); });
+      }),
       event("check.ready", ["check.request"], noop, { emit: () => [frame("A", "check.response")] }),
       event("check.response", ["check.ready"], (w) => w.respond("check"), { delivery: true }),
-      // dismissUpdateResult changes the local cached result immediately.
+      // The dismissal is answered with the status it leaves, numbered after anything before it.
       event("dismiss", [], (w) => w.wire.step(() => { void w.wire.a.session.dismissUpdateResult(); })),
       event("batch.ready", [], noop, { emit: () => [frame("A", "batch.release")] }),
       event("batch.release", ["batch.ready"], (w) => w.respond("gpu"), { delivery: true }),

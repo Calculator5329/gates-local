@@ -52,7 +52,6 @@ import {
   SourceImport,
   SourceImports,
   Thread,
-  UpdateCheck,
   UpdateStatus,
   UpdatePreparation,
   UpdateCommitResult,
@@ -144,6 +143,20 @@ export interface PushRow {
 const SETTINGS: SyncRow = { domain: "settings", scope: "settings" };
 const SOURCES: SyncRow = { domain: "sources", scope: "sources" };
 const SOURCE_IMPORTS: SyncRow = { domain: "sources", scope: "source-imports" };
+const UPDATE: SyncRow = { domain: "updates", scope: "update" };
+// The models kind, numbered by the socket server in the order it gives each out (SENT_IN_ORDER).
+const RUNTIME: SyncRow = { domain: "models", scope: "runtime" };
+const MODELS: SyncRow = { domain: "models", scope: "models" };
+const MODEL_LIST: SyncRow = { domain: "models", scope: "models", also: ["runtime"] };
+const CATALOG: SyncRow = { domain: "models", scope: "catalog" };
+const SUGGESTED: SyncRow = { domain: "models", scope: "suggested" };
+const GPU: SyncRow = { domain: "models", scope: "gpu" };
+const FIT_TABLE: SyncRow = { domain: "models", scope: "fit-table" };
+const PULLS: SyncRow = { domain: "models", scope: "pulls" };
+const LOADS: SyncRow = { domain: "models", scope: "loads" };
+const MEMORY: SyncRow = { domain: "models", scope: "memory" };
+const SPEEDS: SyncRow = { domain: "models", scope: "speeds" };
+const MEASURES: SyncRow = { domain: "models", scope: "measures" };
 
 /** One definition for both ends: each method's params and result Schema, and whether the phone may call it. */
 export const methods = {
@@ -205,15 +218,15 @@ export const methods = {
    * The installed models with the runtime status they were read under, in one reply: an empty list
    * means "no models" only beside a ready runtime; beside any other state no Ollama answered.
    */
-  "models.list": { params: NoParams, result: ModelList, phone: "allow" },
-  "models.refresh": { params: NoParams, result: ModelList, phone: "allow" },
-  "runtime.status": { params: NoParams, result: RuntimeStatus, phone: "allow" },
+  "models.list": { params: NoParams, result: ModelList, phone: "allow", sync: MODEL_LIST },
+  "models.refresh": { params: NoParams, result: ModelList, phone: "allow", sync: MODEL_LIST },
+  "runtime.status": { params: NoParams, result: RuntimeStatus, phone: "allow", sync: RUNTIME },
   /** Look for Ollama again now (start the app's own copy where it may) and answer the new status; runtime.status only reads the cached one. */
-  "runtime.retry": { params: NoParams, result: RuntimeStatus, phone: "deny" },
+  "runtime.retry": { params: NoParams, result: RuntimeStatus, phone: "deny", sync: RUNTIME },
   /** Look for an Ollama that came back; starts and installs nothing, and a ready status stays as it is. The phone's Retry. */
-  "runtime.discover": { params: NoParams, result: RuntimeStatus, phone: "allow" },
+  "runtime.discover": { params: NoParams, result: RuntimeStatus, phone: "allow", sync: RUNTIME },
   /** The server's current fit table (built now if it has none); fit.changed pushes each newer one. */
-  "fit.table": { params: NoParams, result: FitTable, phone: "allow" },
+  "fit.table": { params: NoParams, result: FitTable, phone: "allow", sync: FIT_TABLE },
   "chat.send": {
     phone: "allow",
     params: S.Struct({
@@ -336,28 +349,28 @@ export const methods = {
   "settings.update": { params: S.Struct({ ...SettingsPatch.fields, voiceChange: S.optional(S.String.check(S.isMaxLength(128))) }), result: Settings, phone: "deny", sync: SETTINGS },
   "settings.model.update": { params: S.Struct({ model: S.String.check(S.isMinLength(1)), patch: S.NullOr(ModelSettingsPatch) }), result: Settings, phone: "deny", sync: SETTINGS },
   "settings.modelDefaults": { params: S.Struct({ model: S.String.check(S.isMinLength(1)) }), result: ModelDefaults, phone: "allow" },
-  "gpu.status": { params: NoParams, result: GpuStatus, phone: "allow" },
+  "gpu.status": { params: NoParams, result: GpuStatus, phone: "allow", sync: GPU },
   /** What the app keeps in memory now (one thing at a time), and the handoff while one runs; changes come on memory.changed. */
-  "memory.status": { params: NoParams, result: MemoryState, phone: "allow" },
-  "models.catalog": { params: NoParams, result: S.Array(CatalogEntry), phone: "allow" },
+  "memory.status": { params: NoParams, result: MemoryState, phone: "allow", sync: MEMORY },
+  "models.catalog": { params: NoParams, result: S.Array(CatalogEntry), phone: "allow", sync: CATALOG },
   /** The chat list in use (built in, or a newer signed one from the release page): maker groups and example names. */
-  "models.suggested": { params: NoParams, result: SuggestedList, phone: "allow" },
+  "models.suggested": { params: NoParams, result: SuggestedList, phone: "allow", sync: SUGGESTED },
   /** A typed name's size and fit before any download (Models › Download, "Something else"). */
   "models.estimate": { params: S.Struct({ name: S.String.check(S.isMinLength(1)), numCtx: NumCtx }), result: ModelEstimate, phone: "allow" },
   /** Download jobs still known to the server; reconnect reconciles missed terminal pushes. */
-  "models.pulls": { params: NoParams, result: S.Array(PullProgress), phone: "allow" },
+  "models.pulls": { params: NoParams, result: S.Array(PullProgress), phone: "allow", sync: PULLS },
   "models.pull": { params: ModelRef, result: PullProgress, phone: "deny" },
   "models.cancelPull": { params: ModelRef, result: S.Struct({ cancelled: S.Boolean }), phone: "deny" },
   "models.remove": { params: ModelRef, result: ModelRef, phone: "deny" },
   /** Preload a model at a window after a fit check (the picker calls it on selection). */
   "models.load": { params: S.Struct({ model: S.String, numCtx: NumCtx }), result: ModelLoad, phone: "allow" },
   /** Each model's measured speed from saved replies (ModelSpeed); later changes come on the models.speed push. */
-  "models.speed": { params: NoParams, result: S.Array(ModelSpeed), phone: "allow" },
+  "models.speed": { params: NoParams, result: S.Array(ModelSpeed), phone: "allow", sync: SPEEDS },
   /**
    * Every model measured on this computer (ModelMeasure), and the run going now or the one that
    * last stopped on an error; a new measure comes on the models.measures push, a step on models.measuring.
    */
-  "models.measures": { params: NoParams, result: MeasureList, phone: "allow" },
+  "models.measures": { params: NoParams, result: MeasureList, phone: "allow", sync: MEASURES },
   /**
    * Start measuring one installed model: it holds the GPU alone for a short check. Answers once the
    * run starts (it can take minutes); its steps, a late failure and the end come on models.measuring,
@@ -420,46 +433,47 @@ export const methods = {
   "setup.probe": { params: NoParams, result: SetupProbe, phone: "deny" },
   "setup.plan": { params: S.Struct({ images: S.optional(S.Boolean) }), result: SetupPlan, phone: "deny" },
   // ---- updates: status is local only; check fetches (manual or desktop timer)
-  "update.status": { params: NoParams, result: UpdateStatus, phone: "allow" },
-  "update.check": { params: NoParams, result: UpdateCheck, phone: "deny" },
+  // check, dismissResult and download answer with the status they leave, numbered like a read.
+  "update.status": { params: NoParams, result: UpdateStatus, phone: "allow", sync: UPDATE },
+  "update.check": { params: NoParams, result: UpdateStatus, phone: "deny", sync: UPDATE },
   "update.prepare": { params: S.Struct({ approval: S.String }), result: UpdatePreparation, phone: "deny" },
   "update.commit": { params: UpdateCommitRequest, result: UpdateCommitResult, phone: "deny" },
   "update.cancel": { params: S.Struct({ reservation: S.String }), result: S.Struct({ cancelled: S.Boolean }), phone: "deny" },
-  "update.dismissResult": { params: NoParams, result: S.Struct({ dismissed: S.Boolean }), phone: "deny" },
+  "update.dismissResult": { params: NoParams, result: UpdateStatus, phone: "deny", sync: UPDATE },
   // An installed copy's Download click (automatic checks off): fetch and check the newer version; never installs.
-  "update.download": { params: NoParams, result: UpdateCheck, phone: "deny" },
+  "update.download": { params: NoParams, result: UpdateStatus, phone: "deny", sync: UPDATE },
   // ---- usage: token counts per UTC hour and model from `since` (ms) on; models in first-use order
   "usage.read": { params: S.Struct({ since: S.Finite }), result: UsageRead, phone: "allow" },
 } as const satisfies Record<string, MethodRow>;
 
 /** Server-to-client channels and their payload Schemas. */
 export const pushes = {
-  "update.changed": { payload: UpdateStatus },
+  "update.changed": { payload: UpdateStatus, sync: UPDATE },
   "chat.event": { payload: S.Struct({ turnId: S.String, threadId: S.String, event: ChatEvent }) },
-  "runtime.changed": { payload: RuntimeStatus },
-  "models.changed": { payload: S.Array(ModelInfo) },
+  "runtime.changed": { payload: RuntimeStatus, sync: RUNTIME },
+  "models.changed": { payload: S.Array(ModelInfo), sync: MODELS },
   /** The chat list in use changed: a newer signed list arrived with the update check. The catalog changes with it. */
-  "models.suggested": { payload: SuggestedList },
+  "models.suggested": { payload: SuggestedList, sync: SUGGESTED },
   "threads.changed": { payload: ThreadRef },
   /** The whole queue again, after every change (queue.*). */
   "queue.changed": { payload: S.Array(QueuedMessage) },
   // Transient provenance, never persisted in Settings. A client can distinguish
   // its older save completing from a new action in another window.
   "settings.changed": { payload: S.Struct({ ...Settings.fields, voiceChange: S.optional(S.String.check(S.isMaxLength(128))) }), sync: SETTINGS },
-  "gpu.changed": { payload: GpuStatus },
+  "gpu.changed": { payload: GpuStatus, sync: GPU },
   /** A newer fit table: after a GPU reading moves, the model list changes, a load ends, a model unloads, or a turn starts or ends. */
-  "fit.changed": { payload: FitTable },
-  /** One per progress step of every download, until done, error or cancelled. */
-  "models.pull": { payload: PullProgress },
-  "models.load": { payload: ModelLoad },
+  "fit.changed": { payload: FitTable, sync: FIT_TABLE },
+  /** One per progress step of every download, until done, error or cancelled. Numbered as a part of models.pulls. */
+  "models.pull": { payload: PullProgress, sync: PULLS },
+  "models.load": { payload: ModelLoad, sync: LOADS },
   /** What is in memory changed, or a handoff moved to its next stage (leaving, measuring, loading). */
-  "memory.changed": { payload: MemoryState },
+  "memory.changed": { payload: MemoryState, sync: MEMORY },
   /** The whole list again, after a finished reply or a deletion changed what it counts. */
-  "models.speed": { payload: S.Array(ModelSpeed) },
-  /** The whole list again, after a Measure run finished. */
-  "models.measures": { payload: S.Array(ModelMeasure) },
-  /** A Measure run's steps: waiting, running with steps done, then done or error. */
-  "models.measuring": { payload: MeasureRun },
+  "models.speed": { payload: S.Array(ModelSpeed), sync: SPEEDS },
+  /** The whole list again, after a Measure run finished. A part of models.measures' answer. */
+  "models.measures": { payload: S.Array(ModelMeasure), sync: MEASURES },
+  /** A Measure run's steps: waiting, running with steps done, then done or error. A part of models.measures' answer. */
+  "models.measuring": { payload: MeasureRun, sync: MEASURES },
   "sources.changed": { payload: S.Array(Source), sync: SOURCES },
   "sources.imports": { payload: SourceImports, sync: SOURCE_IMPORTS },
   "image.status": { payload: ImageStatus },

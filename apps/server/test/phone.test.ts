@@ -109,7 +109,7 @@ it("AV-01 phone updates are status-only while the desktop listener retains its c
       "update.commit": () => { mutations++; return { accepted: false }; },
       "update.check": () => { mutations++; return methodSamples["update.check"].result; },
       "update.cancel": () => { mutations++; return { cancelled: false }; },
-      "update.dismissResult": () => { mutations++; return { dismissed: false }; },
+      "update.dismissResult": () => { mutations++; return methodSamples["update.dismissResult"].result; },
     },
     phone: { socketPath: fx.socketPath, origin: ORIGIN, user: USER, webRoot: fx.webRoot },
   });

@@ -34,6 +34,7 @@ import { randomUUID } from "node:crypto";
 import { cannotReplace, earlierFailure, pinnedDataFolder } from "@gates-local/update/installed/words";
 import { createUpdateAdmission, FINISHING, UPDATE_PAUSED, type UpdateAdmission } from "@gates-local/update/admission";
 import type { UpdateModule } from "../module.ts";
+import { publishStatus, type StatusListener } from "../published.ts";
 import { readRecord, removeRecord, takeRecord, type UpdateRecord, writeRecord } from "@gates-local/update/record";
 import type { ReleaseArtifact } from "@gates-local/update/release-manifest";
 import { checkInstalled, type InstalledOutcome } from "./check.ts";
@@ -141,7 +142,8 @@ export interface InstalledModuleDeps {
   readonly progressMs?: number;
   readonly now?: () => number;
   readonly log?: (line: string) => void;
-  readonly changed?: (status: UpdateStatus) => void;
+  /** A new status, with the number it was committed with. */
+  readonly changed?: StatusListener;
 }
 
 /** A verified newer version with a file for this copy: what a download needs. */
@@ -258,7 +260,7 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     if (!canRestart(restart) || found === undefined || failed !== undefined || c?.state !== "newer" || c.target !== found.target || c.download !== "ready" || c.restart !== true) return undefined;
     return installedTarget(found.target, listHash(found.list));
   };
-  const status = (): UpdateStatus => {
+  const work = (): UpdateStatus => {
     const activity = deps.activity?.() ?? [];
     const installing = admission.installing();
     const c = shown(lastCheck);
@@ -270,7 +272,9 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     }
     return { version: { kind: "installed", version: deps.version }, result, lastCheck: c, activity, installing, ...(offer ? { approval: offer.token } : {}) };
   };
-  const push = () => { if (!closed) deps.changed?.(status()); };
+  const published = publishStatus(work, deps.changed);
+  const status = published.read;
+  const push = () => { if (!closed) published.changed(); };
   const offAdmission = admission.onChange(push);
   if (restart === "windows") {
     // Looked for once: cleanup never deletes it while this version runs.
@@ -414,6 +418,7 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
 
   const update: UpdateModule = {
     status,
+    stamp: published.stamp,
     // Two clicks (or two windows) share one read; a background failure stays silent, as for clones.
     check,
     // The Download click: with no verified list in hand, check first.

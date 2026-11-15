@@ -68,7 +68,7 @@ describe("update.status", () => {
     expect(status.result).toEqual({ at: 5, outcome: "updated", line: "Updated to v0.2.0, 3 changes." });
     expect(status.lastCheck).toBeNull();
     encodes("update.status", status);
-    expect(handlers["update.dismissResult"]()).toEqual({ dismissed: true });
+    expect(handlers["update.dismissResult"]()).toMatchObject({ result: null, version: { kind: "commit" } });
     expect(update.status().result).toBeNull();
     expect(update.dismissResult()).toEqual({ dismissed: false });
     // A second server start finds nothing to show.
@@ -143,7 +143,7 @@ describe("update.check", () => {
     expect(a).toMatchObject({ state: "available", checkedAt: 42, channel: "main", total: 2, changes: ["Third", "Second"] });
     expect(c.commands.filter((x) => x.startsWith("git fetch")).length).toBe(1);
     expect(update.status().lastCheck).toBe(a);
-    encodes("update.check", a);
+    encodes("update.check", { ...update.status(), lastCheck: a });
   });
 
   it("drops the last check and says so when Get every change flips, since it answered for the other choice", async () => {
@@ -172,7 +172,7 @@ describe("update.check", () => {
     const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner: counting().runner, everyChange: () => true, now: () => 1 });
     const check = await update.check();
     expect(check).toMatchObject({ state: "up-to-date", channel: "main" });
-    encodes("update.check", check);
+    encodes("update.check", { ...update.status(), lastCheck: check });
   });
 
   it("explains a tracked change in the app's words", async () => {
@@ -183,7 +183,7 @@ describe("update.check", () => {
     writeFileSync(path.join(r.clone, "app.txt"), "edited\n");
     const check = await update.check();
     expect(check).toMatchObject({ state: "cannot-check", reason: "local-changes" });
-    encodes("update.check", check);
+    encodes("update.check", { ...update.status(), lastCheck: check });
   });
 
   it("says an update was cut off, rather than up to date, and the answer encodes", async () => {
@@ -195,7 +195,7 @@ describe("update.check", () => {
     const words = check.state === "cannot-check" ? check.lines.join(" ") : "";
     expect(words).toContain("pnpm run app-update");
     expect(words).toContain("git pull, pnpm install, pnpm start");
-    encodes("update.check", check);
+    encodes("update.check", { ...update.status(), lastCheck: check });
   });
 
   it("turns a refused folder into a reason to show, without starting a process", async () => {
@@ -206,7 +206,7 @@ describe("update.check", () => {
       const check = await update.check();
       expect(check).toMatchObject({ state: "cannot-check", reason: "error" });
       expect(check.state === "cannot-check" && check.lines[0]).toMatch(/outside the test root/);
-      encodes("update.check", check);
+      encodes("update.check", { ...update.status(), lastCheck: check });
       expect(c.commands).toEqual([]);
     } finally {
       rmSync(outside, { recursive: true, force: true });
@@ -227,13 +227,13 @@ describe("automatic checks share the updater engine", () => {
     expect(ready.state).toBe("ready");
     if (ready.state !== "ready") throw new Error("fixture not reserved");
     expect(() => admission.admit()).toThrow("closing to update");
-    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ installing: true }));
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ installing: true }), expect.objectContaining({ scope: "update" }));
     const committed = update.commit({ reservation: ready.reservation, target: ready.target, release: "main-release" });
     expect(committed.accepted).toBe(true);
     if (!committed.accepted) throw new Error("fixture not committed");
     expect(update.cancel(ready.reservation)).toEqual({ cancelled: false });
     expect(update.cancel(committed.release)).toEqual({ cancelled: true });
-    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ installing: false }));
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ installing: false }), expect.objectContaining({ scope: "update" }));
     expect(() => admission.admit()).not.toThrow();
   });
 

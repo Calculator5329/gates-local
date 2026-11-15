@@ -5,7 +5,8 @@
 // and manual update.check share a fetch and the checkout's install lock.
 // Background failures stay silent. Installing is never done from here: the
 // desktop app starts `pnpm run app-update` and quits (apps/desktop).
-import type { UpdateCheck, UpdateCommitRequest, UpdateCommitResult, UpdatePreparation, UpdateResult, UpdateStatus, UpdateVersion } from "@gates-local/contracts";
+import type { SyncChange, UpdateCheck, UpdateCommitRequest, UpdateCommitResult, UpdatePreparation, UpdateResult, UpdateStatus, UpdateVersion } from "@gates-local/contracts";
+import { publishStatus, type StatusListener } from "./published.ts";
 import { randomUUID } from "node:crypto";
 import type { HandlerContext, Handlers } from "../ws/server.ts";
 import type { Blocked, Inspection } from "@gates-local/update/check";
@@ -33,12 +34,16 @@ export interface UpdateModuleDeps {
   readonly activity?: () => readonly string[];
   /** Work that must finish, rather than being interrupted by an install. */
   readonly uninterruptible?: () => readonly string[];
-  readonly changed?: (status: UpdateStatus) => void;
+  /** A new status, with the number it was committed with. */
+  readonly changed?: StatusListener;
   readonly admission?: UpdateAdmission;
 }
 
 export interface UpdateModule {
+  /** The status now; a value that differs from the last one given out is committed and announced first. */
   status(): UpdateStatus;
+  /** The number a status from status() or changed was committed with. */
+  stamp(value: UpdateStatus): SyncChange;
   check(background?: boolean): Promise<UpdateCheck>;
   close(): Promise<void>;
   prepare(approval: string): Promise<UpdatePreparation>;
@@ -130,7 +135,7 @@ export function createUpdateModule(deps: UpdateModuleDeps): UpdateModule {
   const admission = deps.admission ?? createUpdateAdmission();
   let offer: { token: string; fingerprint: string } | undefined;
   const version = (): UpdateVersion => (deps.version ?? readVersion)(deps.root);
-  const status = (): UpdateStatus => {
+  const work = (): UpdateStatus => {
     // Main may acknowledge first startup after this server constructed its
     // modules. Pick up that success note before serving the new client.
     try { const ready = takeRecord(deps.dataDir); if (ready !== undefined) result = toResult(ready); }
@@ -143,7 +148,9 @@ export function createUpdateModule(deps: UpdateModuleDeps): UpdateModule {
     } else offer = undefined;
     return { version: version(), result, lastCheck, activity, installing, ...(offer ? { approval: offer.token } : {}) };
   };
-  const offAdmission = admission.onChange(() => deps.changed?.(status()));
+  const published = publishStatus(work, deps.changed);
+  const status = published.read;
+  const offAdmission = admission.onChange(published.changed);
   // A flip of the switch makes the last check about the other choice: drop it and say so, and a check
   // already running for the old choice is run again for the new one (choice counts the flips).
   let choice = 0;
@@ -151,7 +158,7 @@ export function createUpdateModule(deps: UpdateModuleDeps): UpdateModule {
     choice += 1;
     if (lastCheck === null) return;
     lastCheck = null;
-    deps.changed?.(status());
+    published.changed();
   }) ?? (() => undefined);
 
   const runCheck = async (): Promise<UpdateCheck> => {
@@ -184,7 +191,7 @@ export function createUpdateModule(deps: UpdateModuleDeps): UpdateModule {
       if (!closed && choice !== asked) return update.check(background);
       if (!closed && (!background || c.state !== "cannot-check")) {
         lastCheck = c;
-        deps.changed?.(status());
+        published.changed();
       }
       return c;
     },
@@ -211,21 +218,42 @@ export function createUpdateModule(deps: UpdateModuleDeps): UpdateModule {
     dismissResult: () => {
       const dismissed = result !== null;
       result = null;
-      deps.changed?.(status());
+      published.changed();
       return { dismissed };
     },
+    stamp: published.stamp,
   };
   return update;
 }
 
+/** A check the module answered without keeping it (paused, closing, nothing to download here): its words are the action's refusal. */
+class UpdateRefusal extends Error {
+  readonly code = "update-refused";
+}
+
 export function createUpdateHandlers(update: UpdateModule) {
+  // Every update method answers with the status as it is now, numbered: the window applies an
+  // action's answer like any read, and drops it when a newer push got there first.
+  const answer = (context: HandlerContext | undefined): UpdateStatus => {
+    const value = update.status();
+    context?.capture?.([update.stamp(value)]);
+    return { ...value, canControl: context?.listener !== "phone" };
+  };
+  const kept = (check: UpdateCheck, context: HandlerContext | undefined): UpdateStatus => {
+    const status = answer(context);
+    if (status.lastCheck?.checkedAt !== check.checkedAt && check.state === "cannot-check") throw new UpdateRefusal(check.lines.join(" "));
+    return status;
+  };
   return {
-    "update.status": (_params?: object, context?: HandlerContext) => ({ ...update.status(), canControl: context?.listener !== "phone" }),
-    "update.check": () => update.check(),
+    "update.status": (_params?: object, context?: HandlerContext) => answer(context),
+    "update.check": async (_params?: object, context?: HandlerContext) => kept(await update.check(), context),
     "update.prepare": ({ approval }) => update.prepare(approval),
     "update.commit": (request, context) => update.commit(request, context.signal),
     "update.cancel": ({ reservation }) => update.cancel(reservation),
-    "update.dismissResult": () => update.dismissResult(),
-    "update.download": () => update.download?.() ?? Promise.resolve<UpdateCheck>({ state: "cannot-check", checkedAt: Date.now(), reason: "error", lines: ["This copy updates from its git clone, so there is nothing to download here."] }),
+    "update.dismissResult": (_params?: object, context?: HandlerContext) => { update.dismissResult(); return answer(context); },
+    "update.download": async (_params?: object, context?: HandlerContext) => {
+      if (update.download === undefined) throw new UpdateRefusal("This copy updates from its git clone, so there is nothing to download here.");
+      return kept(await update.download(), context);
+    },
   } satisfies Partial<Handlers>;
 }

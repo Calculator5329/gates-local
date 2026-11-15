@@ -8,6 +8,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { FitTable } from "@gates-local/contracts";
 import type { State } from "../lib/store/store.ts";
 import { type Browser, installBrowser, tick, until } from "../../test/harness.ts";
+import { type Numbering, numberServer } from "../../test/numbered-server.ts";
 
 vi.mock("../lib/store/store.ts", async (original) => {
   const actual = await original<typeof import("../lib/store/store.ts")>();
@@ -28,6 +29,8 @@ const tableOf = (reading: number, boot = "b1"): FitTable => ({
 });
 
 let b: Browser;
+/** The server numbers the table as the real one does: every push and read of it carries the next number. */
+let server: Numbering;
 let session: typeof import("../lib/session/index.ts");
 let store: typeof import("../lib/store/store.ts");
 let Picker: typeof import("../picker/Picker.tsx")["Picker"];
@@ -35,6 +38,7 @@ let disconnect: (() => void) | undefined;
 
 beforeEach(async () => {
   b = installBrowser();
+  server = numberServer(b.server, { serves: ["models"] });
   vi.resetModules();
   b.server.answer("fit.table", () => tableOf(1));
   session = await import("../lib/session/index.ts");
@@ -63,14 +67,21 @@ function contextValues(): string[] {
 it("after a newer reading has been shown, no context row still shows the older reading's number", async () => {
   expect(contextValues()).toEqual(valuesOf(1));
 
-  b.server.push("fit.changed", tableOf(2));
+  server.push("fit.changed", tableOf(2));
   await until(() => store.getState().fitTable?.reading.seq === 2, 2000, "the newer table");
   expect(contextValues()).toEqual(valuesOf(2));
 
-  // A table from before arrives late: it never replaces the newer one.
-  b.server.push("fit.changed", tableOf(1));
+  // A table from before arrives late (a read asked before the newer push): it never replaces the newer one.
+  const reading = b.server.hold("fit.table");
+  b.server.socket.close();
+  const late = await reading;
+  await until(() => store.getState().conn.kind === "open", 2000, "the reconnect");
+  onModel();
+  server.push("fit.changed", tableOf(3));
+  await until(() => store.getState().fitTable?.reading.seq === 3, 2000, "the pushed table");
+  late.respond(tableOf(1));
   await tick(20);
-  expect(contextValues()).toEqual(valuesOf(2));
+  expect(contextValues()).toEqual(valuesOf(3));
 });
 
 // A lost connection withdraws the table: a restarted server on changed memory is another machine
@@ -123,10 +134,13 @@ it("a table from the old boot, answered as its connection closes, never restores
   expect(contextValues()).toEqual(valuesOf(1));
 });
 
-it("a restarted server's first table replaces the last one even with a lower seq", async () => {
-  b.server.push("fit.changed", tableOf(3));
+it("a pushed table replaces the last one whatever its own boot and seq say: the sync number orders it", async () => {
+  server.push("fit.changed", tableOf(3));
   await until(() => store.getState().fitTable?.reading.seq === 3, 2000, "seq 3");
-  b.server.push("fit.changed", tableOf(2, "b2"));
+  server.push("fit.changed", tableOf(2, "b2"));
   await until(() => store.getState().fitTable?.reading.boot === "b2", 2000, "the new boot's table");
   expect(contextValues()).toEqual(valuesOf(2));
+  server.push("fit.changed", tableOf(1, "b2"));
+  await until(() => store.getState().fitTable?.reading.seq === 1, 2000, "the lower seq, pushed later");
+  expect(contextValues()).toEqual(valuesOf(1));
 });

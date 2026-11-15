@@ -56,11 +56,10 @@ export async function installUpdate(act: ActionCall, start: StartUpdate, prior: 
     installed = snapshot.version.kind === "installed";
     // A clone checks first; an installed copy's approval comes only with its checked download.
     if (!installed && offerOf(snapshot) === undefined) {
+      // The check answers with the status it left, so there is nothing to read again.
       const checked = await act("update.check", {}, "check the update target");
       if (!checked.ok) { error = checked.message; return error; }
-      const refreshed = await act("update.status", {}, "read the checked update target");
-      if (!refreshed.ok) { error = refreshed.message; return error; }
-      snapshot = refreshed.value;
+      snapshot = checked.value;
     }
     let changed = prior !== offerOf(snapshot)?.seen;
     for (;;) {

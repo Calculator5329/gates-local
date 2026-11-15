@@ -1,16 +1,15 @@
 // Runtime/model reads, local model choice, catalog and download actions.
-import type { BlockingTurn, MemoryState, MethodName, Params, Payload, ResultOf, RuntimeStatus } from "@gates-local/contracts";
+import { type BlockingTurn, type CallOptions, type MemoryState, type MethodName, type Params, type Payload, type ResultOf, type RuntimeStatus, type SyncMetadata, type SyncRow, methodSync, pushSync } from "@gates-local/contracts";
 import { draftHolds } from "../lib/store/drafts.ts";
-import { type ModelDecision, choosable, modelChoice as pickChoice, modelNameKey, newestOnly } from "./pick.ts";
+import { type ModelDecision, choosable, modelChoice as pickChoice, modelNameKey } from "./pick.ts";
 import { describeModel, k } from "../lib/words/format.ts";
 import { imageMode } from "../image/image-choice.ts";
-import { wakeAtStall } from "../runtime/install-stall.ts";
 import { saveLoadTimes } from "../lib/store/load-times.ts";
 import { NA, type State, chatReady, getState, setState } from "../lib/store/store.ts";
 
-type Request = <M extends MethodName>(method: M, params: Params<M>) => Promise<ResultOf<M>>;
+type Request = <M extends MethodName>(method: M, params: Params<M>, options?: CallOptions<M>) => Promise<ResultOf<M>>;
 type Act = <M extends MethodName>(method: M, params: Params<M>, what: string, todo?: string) => Promise<{ readonly ok: true; readonly value: ResultOf<M> } | { readonly ok: false; readonly message: string }>;
-type Probe = <M extends MethodName>(method: M, params: Params<M>) => Promise<ResultOf<M> | typeof NA | undefined>;
+type Probe = <M extends MethodName>(method: M, params: Params<M>, options?: CallOptions<M>) => Promise<ResultOf<M> | typeof NA | undefined>;
 interface ModelEffects {
   readonly applyServerEvent: typeof setState;
   readonly call: Request;
@@ -19,6 +18,29 @@ interface ModelEffects {
   readonly isNA: (error: unknown) => boolean;
   readonly restoreSaved: () => void;
   readonly blockingFor: (model: string, numCtx: number) => Promise<readonly BlockingTurn[]>;
+  /** Whether a frame of `row`'s thing applies: on an ordered connection only when its number is newer than the last applied. */
+  readonly newer: (row: SyncRow, sync: SyncMetadata | undefined) => boolean;
+}
+
+const row = (sync: SyncRow | undefined): SyncRow => {
+  if (sync === undefined) throw new Error("a models row lost its sync row");
+  return sync;
+};
+/** The numbered things of the models kind the window applies (protocol.ts rows). */
+export const RUNTIME = row(pushSync("runtime.changed"));
+export const MODELS = row(pushSync("models.changed"));
+export const CATALOG = row(methodSync("models.catalog"));
+
+/**
+ * A list answer (models.list, models.refresh) carries the runtime it was read beside and the list,
+ * each with its own number; each applies when newer. The list says which models are installed only
+ * beside a ready runtime: beside any other state no Ollama answered, and the store keeps the list it
+ * had. Returns the patch, empty when nothing in it is newer.
+ */
+export function listArrived(listed: ResultOf<"models.list">, sync: SyncMetadata | undefined, newer: ModelEffects["newer"]): Partial<Pick<State, "runtime" | "models">> {
+  const runtime = newer(RUNTIME, sync) ? { runtime: listed.runtime } : {};
+  const models = answered(listed.runtime) && newer(MODELS, sync) ? { models: listed.models } : {};
+  return { ...runtime, ...models };
 }
 
 /** A memory refusal's words, as a send's ("Gemma 4 12B doesn't fit in memory at 16k."). */
@@ -104,31 +126,28 @@ export function memoryChanged(memory: MemoryState): void {
 
 export const decided = (d: ModelDecision): Partial<State> => (d.kind === "keep" ? {} : { model: d.kind === "set" ? d.model : undefined });
 
-export function createModels({ applyServerEvent, call, probe, act, isNA, restoreSaved, blockingFor }: ModelEffects) {
-  const modelsOrder = newestOnly();
-  const runtimeOrder = newestOnly();
-  // A catalog asked before a later models.changed describes the list before it: only the newest lands.
-  const catalogOrder = newestOnly();
-
-  /** The newest answer lands; an older one only while there is nothing to show, since the newer question may have failed (W1-02). */
-  const catalogLands = (ticket: number): boolean => catalogOrder.current(ticket) || getState().catalog === undefined;
-
+export function createModels({ applyServerEvent, call, probe, act, isNA, restoreSaved, blockingFor, newer }: ModelEffects) {
+  /** A catalog read applies when its number is newer: one asked before a later one, or before a models.changed, describes the list before it. */
   async function refreshCatalog(): Promise<void> {
     if (getState().catalog === NA) return;
-    const ticket = catalogOrder.next();
-    const catalog = await probe("models.catalog", {});
-    if (catalog !== undefined && catalogLands(ticket)) applyServerEvent({ catalog });
+    const catalog = await probe("models.catalog", {}, { onResult: (value, sync) => { if (newer(CATALOG, sync)) applyServerEvent({ catalog: value }); } });
+    if (catalog === NA) applyServerEvent({ catalog });
   }
 
-  async function refreshModels(): Promise<void> {
-    const ticket = modelsOrder.next();
-    const listed = await call("models.refresh", {}).catch(() => undefined);
-    if (listed === undefined || !modelsOrder.current(ticket) || !answered(listed.runtime)) return;
-    const { models } = listed;
+  /** The list's answer, as it arrives: its runtime and its models when newer, then the model choice. */
+  const listLanded = (listed: ResultOf<"models.list">, sync: SyncMetadata | undefined): void => {
+    const patch = listArrived(listed, sync, newer);
+    if (patch.runtime !== undefined) applyServerEvent({ runtime: patch.runtime });
+    const { models } = patch;
+    if (models === undefined) return;
     applyServerEvent((s) => ({ models, pulls: settlePulls(s.pulls, models) }));
     restoreSaved();
     chooseModel();
     if (getState().catalog === undefined) void refreshCatalog();
+  };
+
+  async function refreshModels(): Promise<void> {
+    await call("models.refresh", {}, { onResult: listLanded }).catch(() => undefined);
   }
 
   /** The server's last refusal of a pick, said in the status line; it leaves when the pick changes. */
@@ -225,22 +244,19 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
    * cached status.
    */
   async function recheckRuntime(): Promise<void> {
+    // Each answer applies when its number is newer: a runtime.changed that overtook it stays.
+    const landed = { onResult: (runtime: RuntimeStatus, sync: SyncMetadata | undefined) => { if (newer(RUNTIME, sync)) applyServerEvent({ runtime }); } };
     const asked = getState().unavailable["runtime.retry"]
-      ? call("runtime.discover", {})
-      : call("runtime.retry", {}).catch((e: unknown) => (isNA(e) ? call("runtime.status", {}) : Promise.reject(e)));
+      ? call("runtime.discover", {}, landed)
+      : call("runtime.retry", {}, landed).catch((e: unknown) => (isNA(e) ? call("runtime.status", {}, landed) : Promise.reject(e)));
     const runtime = await asked.catch(() => undefined);
-    if (runtime !== undefined) applyServerEvent({ runtime });
-    wakeAtStall();
     await refreshModels();
     if (runtime?.state === "ready") void refreshCatalog();
   }
 
+  /** A newer runtime status; a ready one reads the list and the catalog again, which describe the runtime they were read beside. */
   function runtimeChanged(runtime: Payload<"runtime.changed">): void {
-      // A list asked before the change describes the runtime before it (MP2-02); ask again.
-      modelsOrder.next();
-      runtimeOrder.next(); // and a runtime.status asked before it is older than this (MP4-03)
       applyServerEvent({ runtime });
-      wakeAtStall();
       if (runtime.state === "ready") {
         void refreshModels();
         // A catalog read before Ollama answered recommends nothing, so first run had no Download button.
@@ -249,9 +265,10 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
   }
 
   function modelsChanged(models: Payload<"models.changed">): void {
-      modelsOrder.next();
-      // the server pushes its runtime.changed before the list it read under it
-      if (!answered(getState().runtime)) return;
+      // As with a list answer: an empty list beside a runtime not known to be ready says nothing (no
+      // Ollama answered), and the store keeps its list. A list with models in it came from Ollama,
+      // even when it lands before this window has heard the runtime's status.
+      if (models.length === 0 && !answered(getState().runtime)) return;
       applyServerEvent((s) => ({ models, pulls: settlePulls(s.pulls, models) }));
       restoreSaved();
       chooseModel();
@@ -281,6 +298,6 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
       });
   }
 
-  return { modelsOrder, runtimeOrder, catalogOrder, catalogLands, refreshModels, refreshCatalog,
+  return { listLanded, refreshModels, refreshCatalog,
     pickModel, typedInComposer, pull, cancelPull, removeModel, recheckRuntime, runtimeChanged, modelsChanged, pullChanged, loadChanged };
 }

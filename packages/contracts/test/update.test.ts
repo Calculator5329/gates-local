@@ -9,12 +9,14 @@ const checks: UpdateCheck[] = [
 ];
 
 describe("update contracts", () => {
+  // A check answers with the status it leaves, so each check decodes inside one.
+  const status = methodSamples["update.status"].result;
   it.each(checks)("decodes the $state check", (check) => {
-    expect(decodeResult("update.check", check)).toEqual({ ok: true, value: check });
+    expect(decodeResult("update.check", { ...status, lastCheck: check })).toEqual({ ok: true, value: { ...status, lastCheck: check } });
   });
 
   it("refuses a check reason it does not know", () => {
-    expect(decodeResult("update.check", { state: "cannot-check", checkedAt: 1, reason: "sleepy", lines: [] }).ok).toBe(false);
+    expect(decodeResult("update.check", { ...status, lastCheck: { state: "cannot-check", checkedAt: 1, reason: "sleepy", lines: [] } }).ok).toBe(false);
   });
 
   it("decodes every version kind", () => {

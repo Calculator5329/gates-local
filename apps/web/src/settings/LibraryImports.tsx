@@ -6,10 +6,10 @@ import { handleKey } from "../lib/ui/handles.ts";
 import { Icon } from "../lib/ui/icons.tsx";
 import { askWhy, databaseRows, type DbRow } from "./library-rows.ts";
 import { chatModels } from "../models/pick.ts";
-import { applyServerEvent, libraryRequest, refreshSource, removeSource } from "../lib/session/index.ts";
+import { applyServerEvent, libraryRequest, refreshSource, removeSource, retryImports } from "../lib/session/index.ts";
 import { libraryToolCanUse } from "../lib/words/settings-rules.ts";
 import { PathText } from "../lib/ui/settings-controls.tsx";
-import { Fail, Grp, Skel } from "../lib/ui/settings-ui.tsx";
+import { Fail, Grp, Row, Skel } from "../lib/ui/settings-ui.tsx";
 import { askWith } from "../composer/starter.ts";
 import { NA, useStore } from "../lib/store/store.ts";
 
@@ -138,7 +138,6 @@ export default function LibraryImports({ add, clone, clones = [] }: { add: React
   const stored = useStore(s => s.sourceImports);
   const value: SourceImports | undefined = stored === NA ? undefined : stored;
   const [actionError, setError] = useState<string | null>(null);
-  const error = actionError ?? (stored === NA ? "Couldn't read the available samples." : null);
   const [url, setUrl] = useState("");
   const [pending, setPending] = useState<string>();
   const [opened, setOpened] = useState<readonly string[]>([]);
@@ -307,8 +306,13 @@ export default function LibraryImports({ add, clone, clones = [] }: { add: React
   const cloneAdded = repoReady(url);
   return (
     <>
-      <Grp title="Databases" busy={!value}>
-        {value ? null : Array.from({ length: USUAL_SAMPLES }, (_, i) => (
+      <Grp title="Databases" busy={stored === undefined}>
+        {/* a failed read names its cause and reads again on Retry; no push brings the list otherwise */}
+        {stored === NA ? (
+          <Row label="Sample databases" err="Couldn't read the available samples.">
+            <button type="button" className="btn outline" data-testid="settings.database.retry-samples" onClick={() => void retryImports()}>Retry</button>
+          </Row>
+        ) : value ? null : Array.from({ length: USUAL_SAMPLES }, (_, i) => (
           <div className="srow db-row" key={`skel-${i}`} data-skel="" aria-hidden="true">
             <span className="db-open">
               <Icon id="right" cls="db-caret s14" />
@@ -335,7 +339,7 @@ export default function LibraryImports({ add, clone, clones = [] }: { add: React
           </div> : null}
         </Grp>
       ) : null}
-      <Fail err={error} line />
+      <Fail err={actionError} line />
     </>
   );
 }

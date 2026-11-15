@@ -15,7 +15,7 @@ import {
   methodSync,
   pushSync,
 } from "./protocol.ts";
-import { ORDERED_DOMAINS, revisionOf, type SyncDomain, type SyncRow, type SyncMetadata, type SyncNegotiation } from "./sync.ts";
+import { ORDERED_DOMAINS, revisionOf, scopesOf, type SyncDomain, type SyncRow, type SyncMetadata, type SyncNegotiation } from "./sync.ts";
 
 const CONNECTING = 0;
 const OPEN = 1;
@@ -109,9 +109,10 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
   // A row of an ordered kind must carry exactly one snapshot number for its scope in this epoch.
   const metadataError = (metadata: SyncMetadata | undefined, row: SyncRow | undefined): WireError | undefined => {
     if (sync?.mode !== "ordered") return;
-    if ((metadata !== undefined && metadata.epoch !== sync.epoch) ||
-      (row !== undefined && sync.domains.includes(row.domain) && revisionOf(metadata, sync.epoch, row.scope) === undefined)) {
-      return new WireError("bad-message", `missing or invalid ${row?.scope ?? "synchronization"} metadata; reconnect required`);
+    const { epoch } = sync;
+    if ((metadata !== undefined && metadata.epoch !== epoch) ||
+      (row !== undefined && sync.domains.includes(row.domain) && scopesOf(row).some(scope => revisionOf(metadata, epoch, scope) === undefined))) {
+      return new WireError("bad-message", `missing or invalid ${row === undefined ? "synchronization" : scopesOf(row).join(" and ")} metadata; reconnect required`);
     }
   };
 

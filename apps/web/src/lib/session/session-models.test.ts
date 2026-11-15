@@ -3,7 +3,7 @@
 // module touches window at load, so each test stubs the browser globals and
 // imports a fresh copy. Kept apart from session.test.ts, whose discovery
 // tests need the real createClient this file mocks.
-import { type ModelInfo, methodNames, phoneMay } from "@gates-local/contracts";
+import { type CallOptions, type Channel, type ClientSync, type MethodName, type ModelInfo, type SyncMetadata, type SyncRow, methodNames, methodSync, phoneMay, pushSync, scopesOf } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -52,20 +52,41 @@ class FakeSocket extends EventTarget {
 
 /** Boots session.ts against a client whose answers the test may hold; returns the session, the store and a push. */
 async function boot(answers: Record<string, (params?: unknown) => Promise<unknown>> = {}, connections: Promise<void>[] = []) {
-  const subs = new Map<string, (p: unknown) => void>();
+  const subs = new Map<string, (p: unknown, sync?: SyncMetadata) => void>();
   const calls: string[] = [];
+  // The models kind numbered as the real socket server numbers it: a read takes the next number for
+  // each of its scopes as it is asked (handled), a push takes the next as it is sent.
+  const revs = new Map<string, number>();
+  const take = (row: SyncRow | undefined): SyncMetadata | undefined => row?.domain !== "models" ? undefined : {
+    epoch: "fixture",
+    changes: scopesOf(row).map((scope) => {
+      const rev = (revs.get(scope) ?? 0) + 1;
+      revs.set(scope, rev);
+      return { scope, kind: "snapshot" as const, rev };
+    }),
+  };
+  let negotiated: ClientSync | undefined;
   fake.client = {
-    negotiate: async () => ({ mode: "legacy" }),
+    negotiate: async () => (negotiated = { mode: "ordered", epoch: "fixture", domains: ["models"] }),
+    get sync() {
+      return negotiated;
+    },
     get closed() {
       return connections.shift() ?? new Promise(noop);
     },
-    subscribe: (channel: string, handler: (p: unknown) => void) => {
+    subscribe: (channel: string, handler: (p: unknown, sync?: SyncMetadata) => void) => {
       subs.set(channel, handler);
       return noop;
     },
-    call: (method: string, params?: unknown) => {
+    // As the real client: the accepted answer reaches onResult and onMetadata before the call settles.
+    call: (method: MethodName, params?: unknown, options?: CallOptions) => {
       calls.push(method);
-      return answers[method]?.(params) ?? Promise.resolve(defaults[method]);
+      const sync = take(methodSync(method));
+      return (answers[method]?.(params) ?? Promise.resolve(defaults[method])).then((value) => {
+        options?.onResult?.(value as never, sync);
+        options?.onMetadata?.(sync);
+        return value;
+      });
     },
   };
   vi.stubGlobal("window", {});
@@ -79,7 +100,7 @@ async function boot(answers: Record<string, (params?: unknown) => Promise<unknow
   const store = await import("../store/store.ts");
   session.connect();
   await vi.waitFor(() => expect(subs.has("models.changed")).toBe(true));
-  const push = (channel: string, payload: unknown) => subs.get(channel)?.(payload);
+  const push = (channel: Channel, payload: unknown) => subs.get(channel)?.(payload, take(pushSync(channel)));
   // threads.list is answered in hydration's first batch, so its threads mark that batch as applied.
   const hydrated = () => vi.waitFor(() => expect(store.getState().threads).toHaveLength(1));
   return { session, store, push, calls, hydrated };
@@ -137,7 +158,9 @@ it("BD-02 Retry on the phone looks again without runtime.retry, shows Ollama run
 
 it("a models.list answered after a newer models.changed push is dropped (MP2-02)", async () => {
   const list = defer<ReturnType<typeof listed>>();
-  const { store, push, hydrated } = await boot({ "models.list": () => list.promise });
+  const { store, push, calls, hydrated } = await boot({ "models.list": () => list.promise });
+  // the list was asked before the push was sent: its answer is the older value
+  await vi.waitFor(() => expect(calls).toContain("models.list"));
   push("models.changed", [info(GEMMA, true)]);
   list.resolve(listed([info(QWEN, true)]));
   await hydrated();

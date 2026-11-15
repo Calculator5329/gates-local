@@ -18,6 +18,7 @@ import type {
   Source,
   Thread,
   ToolStep,
+  UpdateStatus,
 } from "./shapes.ts";
 
 const thread: Thread = { id: "t1", title: "First", createdAt: 1_762_500_000_000, updatedAt: 1_762_500_001_000 };
@@ -170,6 +171,12 @@ const imageReady: ImageStatus ={ state: "ready", owner: "external", baseUrl: "ht
 
 const runtime: RuntimeStatus = { state: "ready", owner: "external", baseUrl: "http://127.0.0.1:11434", version: "0.40.4" };
 
+const updateStatus: UpdateStatus = {
+  version: { kind: "release", tag: "v0.1.0", commit: "85507ce", date: 1_762_500_000_000 },
+  result: { at: 1_762_500_005_000, outcome: "updated", line: "Updated to v0.1.0, 12 changes." },
+  lastCheck: null,
+};
+
 export const methodSamples: { readonly [M in MethodName]: { readonly params: Params<M>; readonly result: ResultOf<M> } } = {
   "sync.negotiate": { params: { ordered: [] }, result: { epoch: "sample-process", ordered: [] } },
   "voice.check": { params: { url: "http://127.0.0.1:18078" }, result: { ready: true } },
@@ -294,41 +301,42 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
       totalBytes: 0,
     },
   },
-  "update.status": {
-    params: {},
-    result: {
-      version: { kind: "release", tag: "v0.1.0", commit: "85507ce", date: 1_762_500_000_000 },
-      result: { at: 1_762_500_005_000, outcome: "updated", line: "Updated to v0.1.0, 12 changes." },
-      lastCheck: null,
-    },
-  },
+  "update.status": { params: {}, result: updateStatus },
   "update.prepare": { params: { approval: "approval-1" }, result: { state: "ready", reservation: "reservation-1", target: "b".repeat(40) } },
   "update.commit": { params: { reservation: "reservation-1", target: "b".repeat(40), release: "main-release-1" }, result: { accepted: true, release: "main-release-1" } },
   "update.cancel": { params: { reservation: "reservation-1" }, result: { cancelled: true } },
+  // The update actions answer with the status they leave.
   "update.check": {
     params: {},
     result: {
-      state: "available",
-      checkedAt: 1_762_500_006_000,
-      channel: "release",
-      current: "v0.1.0",
-      target: "v0.2.0",
-      total: 23,
-      changes: ["Settings: an Updates group", "Fix the model picker on phones"],
+      ...updateStatus,
+      lastCheck: {
+        state: "available",
+        checkedAt: 1_762_500_006_000,
+        channel: "release",
+        current: "v0.1.0",
+        target: "v0.2.0",
+        total: 23,
+        changes: ["Settings: an Updates group", "Fix the model picker on phones"],
+      },
     },
   },
-  "update.dismissResult": { params: {}, result: { dismissed: true } },
+  "update.dismissResult": { params: {}, result: { ...updateStatus, result: null } },
   "update.download": {
     params: {},
     result: {
-      state: "newer",
-      checkedAt: 1_762_500_006_000,
-      current: "1.2.3",
-      target: "1.3.0",
-      forThisCopy: true,
-      lines: ["Downloading version 1.3.0 (0 of 98 MB). You can keep chatting."],
-      page: "https://example.invalid/releases/latest",
-      download: "downloading",
+      version: { kind: "installed", version: "1.2.3" },
+      result: null,
+      lastCheck: {
+        state: "newer",
+        checkedAt: 1_762_500_006_000,
+        current: "1.2.3",
+        target: "1.3.0",
+        forThisCopy: true,
+        lines: ["Downloading version 1.3.0 (0 of 98 MB). You can keep chatting."],
+        page: "https://example.invalid/releases/latest",
+        download: "downloading",
+      },
     },
   },
   "usage.read": {

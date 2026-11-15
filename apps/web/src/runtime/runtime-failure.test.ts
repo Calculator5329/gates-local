@@ -98,10 +98,29 @@ const installing = (receivedBytes: number) => ({ state: "installing", owner: "ap
 
 describe("a stalled engine download is one reading: the first window, the banner, the footer gear and Settings", () => {
 
-  it("once the figures have held for the stall time, every place says the download stalled", async () => {
-    const { INSTALL_STALL_MS, figuresMoved } = await import("./words.tsx");
-    figuresMoved(300_000_000, Date.now() - INSTALL_STALL_MS - 1);
-    const p = await places(installing(300_000_000));
+  // The stall is the server's word (its own bound, after which a Retry starts the download again):
+  // a window keeping its own clock could say "stalled" and offer a Retry the server would ignore.
+  it("figures that hold, with no word from the server, never say stalled anywhere", async () => {
+    vi.useFakeTimers();
+    try {
+      const held = installing(300_000_000);
+      const first = await places(held);
+      vi.advanceTimersByTime(60_000);
+      const later = await places(held);
+      for (const p of [first, later]) {
+        for (const [where, words] of Object.entries(p)) {
+          expect(words, where).toContain("Downloading Ollama");
+          expect(words, where).not.toContain("Download stalled");
+        }
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a status the server marked stalled says so everywhere, with Retry", async () => {
+    const now = installing(500_000_000);
+    const p = await places({ ...now, install: { ...now.install, stalled: true } });
     for (const [where, words] of Object.entries(p)) {
       expect(words, where).toContain("Download stalled");
       expect(words, where).not.toContain("Downloading Ollama");
@@ -110,28 +129,21 @@ describe("a stalled engine download is one reading: the first window, the banner
     for (const where of ["banner", "first", "settings"]) expect(p[where], where).toContain("Retry");
   });
 
-  it("a status the server marked stalled says so everywhere, even before this window's own clock runs out", async () => {
-    const { figuresMoved } = await import("./words.tsx");
-    figuresMoved(500_000_000, Date.now());
-    const now = installing(500_000_000);
-    const p = await places({ ...now, install: { ...now.install, stalled: true } });
-    for (const [where, words] of Object.entries(p)) expect(words, where).toContain("Download stalled");
-  });
-
-  it("the stall moment itself wakes whatever reads the runtime, with no push from the server", async () => {
+  it("the stall arrives as the server's status and wakes whatever reads the runtime; held figures wake nothing", async () => {
     vi.useFakeTimers();
     try {
-      const { INSTALL_STALL_MS, rtInfo, wakeAtStall } = await import("./words.tsx");
-      setState({ ...initial, conn: { kind: "open" }, runtime: installing(400_000_000), models: [], view: "new" });
+      const { rtInfo } = await import("./words.tsx");
+      const now = installing(400_000_000);
+      setState({ ...initial, conn: { kind: "open" }, runtime: now, models: [], view: "new" });
       const gear = () => text(renderToStaticMarkup(createElement("div", null, rtInfo(getState()).text)));
       let woke = 0;
       const { subscribe } = await import("../lib/store/store.ts");
       const stop = subscribe(() => woke++);
-      wakeAtStall();
       expect(gear()).toContain("Downloading Ollama");
-      vi.advanceTimersByTime(INSTALL_STALL_MS - 10);
+      vi.advanceTimersByTime(60_000);
       expect(woke).toBe(0);
-      vi.advanceTimersByTime(20);
+      expect(gear()).toContain("Downloading Ollama");
+      setState({ runtime: { ...now, install: { ...now.install, stalled: true } } });
       expect(woke).toBe(1);
       expect(gear()).toContain("Download stalled");
       stop();

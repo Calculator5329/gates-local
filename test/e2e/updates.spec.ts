@@ -4,6 +4,7 @@ import type { UpdateCheck, UpdateStatus } from "@gates-local/contracts";
 import type { Page, WebSocketRoute } from "@playwright/test";
 import { test, expect, sendMessage, stack, waitReady } from "./fixtures.ts";
 import { updateFixtureState } from "./update-fixture.ts";
+import { numberedRoute } from "./numbered-route.ts";
 
 async function updates(page: Page, desktop = true, successful = false) {
   let route: WebSocketRoute | undefined;
@@ -18,7 +19,8 @@ async function updates(page: Page, desktop = true, successful = false) {
     };
     Object.assign(window, { gatesLocal: bridge });
   });
-  await page.routeWebSocket(/\/\?token=/, (socket) => {
+  await page.routeWebSocket(/\/\?token=/, (routed) => {
+    const { page: socket } = numberedRoute(routed);
     route = socket;
     const server = socket.connectToServer();
     socket.onMessage((raw) => {
@@ -26,7 +28,7 @@ async function updates(page: Page, desktop = true, successful = false) {
       if (message.method === "update.status") socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result: { ...fixture.status(), canControl: desktop } }));
       else if (message.method === "update.prepare") socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result: fixture.prepare(message.params?.approval ?? "") }));
       else if (message.method === "update.cancel") socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result: { cancelled: true } }));
-      else if (message.method === "update.dismissResult") socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result: fixture.dismiss() }));
+      else if (message.method === "update.dismissResult") socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result: { ...fixture.dismiss(), canControl: desktop } }));
       else server.send(raw);
     });
   });
@@ -152,14 +154,15 @@ test.describe("Version with the update state, then the automatic switch", () => 
   for (const copy of copies) test(`${copy.name}: one row for the version and its state; the card keeps its size through checking, up to date, found, failed and cannot update itself`, async ({ page, open }) => {
     let lastCheck: UpdateCheck | null = null;
     let answer: ((next: UpdateCheck) => void) | undefined;
-    await page.routeWebSocket(/\/\?token=/, (socket) => {
+    await page.routeWebSocket(/\/\?token=/, (routed) => {
+      const { page: socket } = numberedRoute(routed);
       const server = socket.connectToServer();
       socket.onMessage((raw) => {
         const message = JSON.parse(String(raw)) as { method?: string; id: string };
         const reply = (result: unknown) => socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result }));
         if (message.method === "update.status") reply({ ...copy.idle, lastCheck, canControl: true });
-        // The check waits for the test, so the card can be measured while it runs.
-        else if (message.method === "update.check") answer = (next) => { lastCheck = next; reply(next); };
+        // The check waits for the test, so the card can be measured while it runs; it answers with the status it leaves.
+        else if (message.method === "update.check") answer = (next) => { lastCheck = next; reply({ ...copy.idle, lastCheck, canControl: true }); };
         else {
           server.send(raw);
           // As the server does (update/module.ts): flipping Get every change drops the last check and says so.
@@ -251,13 +254,14 @@ test.describe("Version with the update state, then the automatic switch", () => 
     const idle: UpdateStatus = { version: { kind: "installed", version: "0.2.1" }, result: null, lastCheck: null, activity: [] };
     let lastCheck: UpdateCheck | null = null;
     let answer: ((next: UpdateCheck) => void) | undefined;
-    await page.routeWebSocket(/\/\?token=/, (socket) => {
+    await page.routeWebSocket(/\/\?token=/, (routed) => {
+      const { page: socket } = numberedRoute(routed);
       const server = socket.connectToServer();
       socket.onMessage((raw) => {
         const message = JSON.parse(String(raw)) as { method?: string; id: string };
         const reply = (result: unknown) => socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result }));
         if (message.method === "update.status") reply({ ...idle, lastCheck, canControl: true });
-        else if (message.method === "update.check") answer = (next) => { lastCheck = next; reply(next); };
+        else if (message.method === "update.check") answer = (next) => { lastCheck = next; reply({ ...idle, lastCheck, canControl: true }); };
         else server.send(raw);
       });
     });
@@ -311,13 +315,15 @@ test.describe("Version with the update state, then the automatic switch", () => 
     await page.addInitScript(() => {
       Object.assign(window, { gatesLocal: { updateApprovalVersion: 2, getServerUrl: async () => new URLSearchParams(location.search).get("server"), onState: () => () => undefined, updateAndRestart: async () => ({ ok: true }) } });
     });
-    await page.routeWebSocket(/\/\?token=/, (socket) => {
+    const status = () => ({ version: { kind: "installed", version: "0.2.1" }, result: null, lastCheck, activity: [], canControl: true });
+    await page.routeWebSocket(/\/\?token=/, (routed) => {
+      const { page: socket } = numberedRoute(routed);
       const server = socket.connectToServer();
       socket.onMessage((raw) => {
         const message = JSON.parse(String(raw)) as { method?: string; id: string };
         const reply = (result: unknown) => socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result }));
-        if (message.method === "update.status") reply({ version: { kind: "installed", version: "0.2.1" }, result: null, lastCheck, activity: [], canControl: true });
-        else if (message.method === "update.check") answer = (next) => { lastCheck = next; reply(next); };
+        if (message.method === "update.status") reply(status());
+        else if (message.method === "update.check") answer = (next) => { lastCheck = next; reply(status()); };
         else server.send(raw);
       });
     });
@@ -375,13 +381,14 @@ test.describe("Version with the update state, then the automatic switch", () => 
     // With no release tags the server checks main even with the switch off (update/check.ts, choice auto).
     const found: UpdateCheck = { state: "available", checkedAt: Date.UTC(2026, 10, 13, 6, 57), channel: "main", current: "7093c45", target: "def5678", targetCommit: `def5678${"0".repeat(33)}`, total: 2, changes: ["Faster chat", "A new setting"] };
     let lastCheck: UpdateCheck | null = null;
-    await page.routeWebSocket(/\/\?token=/, (socket) => {
+    await page.routeWebSocket(/\/\?token=/, (routed) => {
+      const { page: socket } = numberedRoute(routed);
       const server = socket.connectToServer();
       socket.onMessage((raw) => {
         const message = JSON.parse(String(raw)) as { method?: string; id: string };
         const reply = (result: unknown) => socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result }));
         if (message.method === "update.status") reply({ ...idle, lastCheck, canControl: true });
-        else if (message.method === "update.check") { lastCheck = found; reply(found); }
+        else if (message.method === "update.check") { lastCheck = found; reply({ ...idle, lastCheck, canControl: true }); }
         else server.send(raw);
       });
     });
@@ -412,7 +419,8 @@ test.describe("Version with the update state, then the automatic switch", () => 
     const after: UpdateCheck = { ...ready, restart: true, lines: ["Update 0.2.2 is downloaded and checked.","If version 0.2.2 does not start, Gates Local will not go back by itself. To go back, download version 0.2.1 from https://example.invalid/releases/tag/v0.2.1."] };
     const idle: UpdateStatus = { version: { kind: "installed", version: "0.2.1" }, result: null, lastCheck: before, activity: [] };
     let route: WebSocketRoute | undefined;
-    await page.routeWebSocket(/\/\?token=/, (socket) => {
+    await page.routeWebSocket(/\/\?token=/, (routed) => {
+      const { page: socket } = numberedRoute(routed);
       route = socket;
       const server = socket.connectToServer();
       socket.onMessage((raw) => {
@@ -455,7 +463,8 @@ test.describe("Version with the update state, then the automatic switch", () => 
     const settled: UpdateCheck = { ...ready, restart: true, lines: ["Update 0.2.2 is downloaded and checked.", "If version 0.2.2 does not start, Gates Local will not go back by itself. To go back, run C:\\Users\\me\\AppData\\Local\\gates-local\\updates\\0.2.1\\Gates-Local-0.2.1-Setup-x64.exe."] };
     const idle: UpdateStatus = { version: { kind: "installed", version: "0.2.1" }, result: null, lastCheck: coming, activity: [] };
     let route: WebSocketRoute | undefined;
-    await page.routeWebSocket(/\/\?token=/, (socket) => {
+    await page.routeWebSocket(/\/\?token=/, (routed) => {
+      const { page: socket } = numberedRoute(routed);
       route = socket;
       const server = socket.connectToServer();
       socket.onMessage((raw) => {
@@ -499,7 +508,8 @@ test.describe("Version with the update state, then the automatic switch", () => 
     const idle: UpdateStatus = { version: { kind: "installed", version: "0.2.1" }, result: null, lastCheck: upToDate("0.2.1", "release", Date.UTC(2026, 10, 13, 6, 57)), activity: [] };
     const newer: UpdateCheck = { state: "newer", checkedAt: Date.UTC(2026, 10, 13, 7, 0), current: "0.2.1", target: "0.2.2", forThisCopy: false, lines: ["Version 0.2.2 is available, but this copy cannot install it by itself. Download it from the release page."], page: "https://example.invalid/releases/latest" };
     let route: WebSocketRoute | undefined;
-    await page.routeWebSocket(/\/\?token=/, (socket) => {
+    await page.routeWebSocket(/\/\?token=/, (routed) => {
+      const { page: socket } = numberedRoute(routed);
       route = socket;
       const server = socket.connectToServer();
       socket.onMessage((raw) => {
