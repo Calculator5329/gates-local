@@ -2,8 +2,7 @@
 // clicked Restart, from the copy the store made of itself before migrating.
 //
 // The copy is `<data dir>/store-copies/threads.v<N>.sqlite`, one file with no
-// WAL, written by the store at migration time (threads/copies.ts, another
-// lane). The live store is `threads.sqlite` with its `-wal` and `-shm`.
+// WAL, written by the store at migration time (threads/copies.ts). The live store is `threads.sqlite` with its `-wal` and `-shm`.
 //
 // B2a moves every live file into `store-copies/aside-<id>/`; B2b copies the
 // copy to `threads.sqlite.restoring`, flushes it and renames it into place.
@@ -96,7 +95,7 @@ export function setAside(dataDir: string, id: string, ops: FileOps, afterRename?
  * B2b, action and recovery alike: copy, flush, rename into place, flush the folder.
  *
  * Two guards beyond the design's text, both from its rule that recovery never
- * trusts the phase alone (see the lane report):
+ * trusts the phase alone:
  * - A `-wal` or `-shm` at the live path in this phase can only be the old
  *   store's whose aside rename did not last. SQLite would replay that WAL onto
  *   the restored copy, so it joins the others in the aside folder first.

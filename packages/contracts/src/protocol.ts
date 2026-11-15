@@ -61,8 +61,6 @@ import {
 
 export const PROTOCOL_VERSION = 1;
 
-// ---------------------------------------------------------------- errors
-
 /** Codes the protocol itself produces. Handlers may add their own codes. */
 export type WireErrorCode =
   | "bad-message" // the envelope did not decode (bad JSON, wrong shape, binary frame)
@@ -105,8 +103,6 @@ function encodeWith(schema: S.Top, input: unknown, code: string, where: string):
     ? { ok: true, value: r.success }
     : { ok: false, error: new WireError(code, `${where}: ${r.failure.message}`) };
 }
-
-// ---------------------------------------------------------------- tables
 
 const NoParams = S.Struct({});
 const ModelList = S.Struct({ runtime: RuntimeStatus, models: S.Array(ModelInfo) });
@@ -178,7 +174,7 @@ export const methods = {
     phone: "allow",
   },
   /**
-   * The copies this window's saved drafts and queued messages still name (chat row 35): each one's
+   * The copies this window's saved drafts and queued messages still name: each one's
    * day starts again, so the day-old cleanup spares it. Sent at connect and every few hours.
    * Answers the paths that are already gone.
    */
@@ -245,7 +241,7 @@ export const methods = {
       /**
        * When this turn's load needs GPU memory a model with a running turn holds (turns.blocking),
        * end those turns first: each saves its partial reply and ends with error code "preempted"
-       * (neededBy: this model). Omitted or false: this turn waits for them, as before.
+       * (neededBy: this model). Omitted or false: this turn waits for them.
        */
       stopOthers: S.optional(S.Boolean),
       /**
@@ -263,7 +259,7 @@ export const methods = {
       askFirst: S.optional(S.Boolean),
     }),
     /**
-     * Answered once the turn is taken (chat row 32), before its fit, its load and saving the
+     * Answered once the turn is taken, before its fit, its load and saving the
      * question: the turn's id. Its `start` event follows with the saved question; a refusal from
      * then on comes as its `error` event, before any start. `replayed`: this messageId was
      * already saved, nothing new runs, and `userMessage` is that saved question.
@@ -290,7 +286,7 @@ export const methods = {
     phone: "allow",
   },
   "chat.cancel": { params: S.Struct({ turnId: S.String }), result: S.Struct({ cancelled: S.Boolean }), phone: "allow" },
-  // ---- the queue (2026-11-14): kept and sent by the server; queue.changed pushes the whole list after every change
+  // ---- the queue: kept and sent by the server; queue.changed pushes the whole list after every change
   "queue.list": { params: NoParams, result: S.Array(QueuedMessage), phone: "allow" },
   /**
    * Joins the end of the queue (held when it says so). One with an id already queued, or whose
@@ -324,7 +320,6 @@ export const methods = {
     phone: "allow",
   },
   "queue.remove": { params: S.Struct({ id: S.String }), result: S.Array(QueuedMessage), phone: "allow" },
-  // ---- v2 surface (2026-11-07): settings, GPU, downloads, Library, images
   "settings.get": { params: NoParams, result: Settings, phone: "allow" },
   "settings.update": { params: S.Struct({ ...SettingsPatch.fields, voiceChange: S.optional(S.String.check(S.isMaxLength(128))) }), result: Settings, phone: "deny" },
   "settings.model.update": { params: S.Struct({ model: S.String.check(S.isMinLength(1)), patch: S.NullOr(ModelSettingsPatch) }), result: Settings, phone: "deny" },
@@ -409,7 +404,7 @@ export const methods = {
   "image.setup": { params: NoParams, result: S.Struct({ started: S.Boolean }), phone: "deny" },
   /** The Pictures screen: finished pictures, newest first, a page at a time. */
   "pictures.list": { params: PictureListParams, result: PictureList, phone: "allow" },
-  // ---- setup (2026-11-07): read the machine, then plan models for it
+  // ---- setup: read the machine, then plan models for it
   "setup.probe": { params: NoParams, result: SetupProbe, phone: "deny" },
   "setup.plan": { params: S.Struct({ images: S.optional(S.Boolean) }), result: SetupPlan, phone: "deny" },
   // ---- updates: status is local only; check fetches (manual or desktop timer)
@@ -421,7 +416,7 @@ export const methods = {
   "update.dismissResult": { params: NoParams, result: S.Struct({ dismissed: S.Boolean }), phone: "deny" },
   // An installed copy's Download click (automatic checks off): fetch and check the newer version; never installs.
   "update.download": { params: NoParams, result: UpdateCheck, phone: "deny" },
-  // ---- usage (2026-11-11): token counts per UTC hour and model from `since` (ms) on; models in first-use order
+  // ---- usage: token counts per UTC hour and model from `since` (ms) on; models in first-use order
   "usage.read": { params: S.Struct({ since: S.Finite }), result: UsageRead, phone: "allow" },
 } as const satisfies Record<string, MethodRow>;
 
@@ -436,7 +431,6 @@ export const pushes = {
   "threads.changed": { payload: ThreadRef },
   /** The whole queue again, after every change (queue.*). */
   "queue.changed": { payload: S.Array(QueuedMessage) },
-  // ---- v2 surface (2026-11-07)
   // Transient provenance, never persisted in Settings. A client can distinguish
   // its older save completing from a new action in another window.
   "settings.changed": { payload: S.Struct({ ...Settings.fields, voiceChange: S.optional(S.String.check(S.isMaxLength(128))) }) },
@@ -487,8 +481,6 @@ function isMethod(name: string): name is MethodName {
 function isChannel(name: string): name is Channel {
   return Object.hasOwn(pushes, name);
 }
-
-// ---------------------------------------------------------------- envelopes
 
 export const RequestEnvelope = S.Struct({
   type: S.Literal("request"),

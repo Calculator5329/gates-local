@@ -1,4 +1,4 @@
-// A saved row's times, as the server stamped them when its turn ended (chat row 32): every
+// A saved row's times, as the server stamped them when its turn ended: every
 // window and every reload draws the same work seconds, thinking rounds and stop note from the
 // row, and no window keeps its own.
 import type { CatalogEntry, Message, ReplyTimes } from "@gates-local/contracts";
@@ -13,7 +13,7 @@ export interface Rounds {
 
 /** What a saved row draws from its times; each part undefined when the row has none. */
 export interface Drawn {
-  /** The work seconds (decision 2): thinking plus tool time, never the load or the writing. */
+  /** The work seconds: thinking plus tool time, never the load or the writing. */
   readonly workMs: number | undefined;
   /** From Enter to the model being ready: a load, or a wait behind another reply. Its own figure. */
   readonly waitMs: number | undefined;

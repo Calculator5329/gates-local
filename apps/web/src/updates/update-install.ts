@@ -74,7 +74,7 @@ export async function installUpdate(act: ActionCall, start: StartUpdate, prior: 
       if (approved !== undefined && snapshot.approval !== approved) return null;
       const work = updateWork(snapshot.activity);
       // the footer's ask's lines (update-work.ts), so both say the same once; it asks only when something
-      // running would stop, or the target changed since the person saw it (decision 23)
+      // running would stop, or the target changed since the person saw it
       const stops = (snapshot.activity?.length ?? 1) > 0;
       if (approved === undefined && (changed || stops) && !window.confirm([offer.ask, ...(work?.length === 0 ? [] : ["", ...workLines(work)])].join("\n"))) return null;
       const prepared = await act("update.prepare", { approval: snapshot.approval }, "reserve the approved update");

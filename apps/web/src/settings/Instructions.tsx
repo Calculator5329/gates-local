@@ -32,7 +32,7 @@ function PromptEditor({ value, inherited, model, locked }: { value: string | und
   return <Grp title="System prompt">
     <div className="inst-prompt" aria-busy={busy}>
       <label className="inst-check">
-        {/* the app's own switch, not the browser's checkbox (audit W14); the label still toggles it */}
+        {/* the app's own switch, not the browser's checkbox; the label still toggles it */}
         <button type="button" className="switch" role="switch" data-testid="settings.instructions.custom" aria-checked={custom} disabled={busy || locked} onClick={() => { setDraft({ custom: !custom, text }); setStatus({ text: "", error: false }); }} />
         {model === undefined ? "Use custom instructions for all chats" : "Override all-chat instructions for this model"}
       </label>

@@ -4,8 +4,8 @@
 // that save a row, done and an error with a partial, are applied in chat.ts
 // with that row in one store update; reduceTurn gives null for them too.
 //
-// What the reply is doing and its seconds are the server's reply record
-// (decision 33): this client keeps no clock of its own and guesses no stage.
+// What the reply is doing and its seconds are the server's reply record:
+// this client keeps no clock of its own and guesses no stage.
 import type { Payload, ToolStep, TurnEnded } from "@gates-local/contracts";
 import type { LiveTurn, State } from "../lib/store/store.ts";
 
@@ -33,7 +33,7 @@ const closed = (turn: LiveTurn) => turn.end?.kind === "error" && turn.end.code =
 const secsSince = (turn: LiveTurn, now: number) => Math.round((now - turn.startedAt) / 1000);
 
 /**
- * The reply's work at `now`, in milliseconds (decision 2): thinking plus tool time, never the
+ * The reply's work at `now`, in milliseconds: thinking plus tool time, never the
  * load and never the writing. The record's own figure, grown on this client's clock from when the
  * record arrived, only while it thinks or runs a call and has not ended here. Undefined before
  * the first record.
@@ -53,7 +53,7 @@ function frozen(turn: LiveTurn, now: number): Pick<LiveTurn, "reply" | "replyAt"
 
 type TurnEnd = Extract<ChatEvent, { type: "done" | "error" }>;
 
-/** How the server says the turn ended (chat row 32); an end without the word, from an older server, counts as a failure, which is said. */
+/** How the server says the turn ended; an end without the word, from an older server, counts as a failure, which is said. */
 export const endReason = (event: TurnEnd): TurnEnded["reason"] => event.ended?.reason ?? (event.type === "done" ? "done" : "failed");
 
 function upsertStep(steps: readonly ToolStep[], step: ToolStep): ToolStep[] {
@@ -91,7 +91,7 @@ function advance(turn: LiveTurn, event: TurnEvent, now: number): LiveTurn | null
     case "reply": {
       // a reply that ended here keeps the time it ended with; one the connection cut off takes the server's again
       if (turn.end !== undefined && !closed(turn)) return turn;
-      // the server runs a failed reply once more (decision 7): the second attempt starts over in the same place
+      // the server runs a failed reply once more: the second attempt starts over in the same place
       const again = turn.reply !== undefined && event.reply.attempt > turn.reply.attempt;
       return { ...turn, reply: event.reply, replyAt: now, ...(again ? { text: "", thinking: "", tools: [] } : {}) };
     }

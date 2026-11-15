@@ -13,7 +13,7 @@ export type UpdateClick = "check" | "update" | "download" | "restart" | "page" |
 
 /**
  * The icon says the state; its name (aria-label and tooltip) is a few words
- * and nothing more (audit of 0.2.4, the tooltip rule). Settings › Updates
+ * and nothing more. Settings › Updates
  * says the rest.
  */
 export interface UpdateIcon {
@@ -132,7 +132,7 @@ function installedIcon(check: Extract<UpdateCheck, { state: "newer" }>, canResta
     case "downloading":
       return icon("downloading", `Downloading ${target}`, null, { progress: null });
     case "ready":
-      // Ready is the green up-arrow alone, no dot (audit of 0.2.4, decision 22). A copy that cannot install it says the
+      // Ready is the green up-arrow alone, no dot. A copy that cannot install it says the
       // update waits and opens Settings › Updates, whose line says what to do and whose Open folder opens the file's folder.
       // restart false: this copy can install it once a check of its own ends (Windows: the kept installer), so it says it is still checking.
       if (check.restart === false) return icon("checking", "Checking for updates…", null);

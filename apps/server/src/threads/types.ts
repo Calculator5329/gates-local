@@ -60,7 +60,7 @@ export interface Message {
   files?: AttachedFile[];
   interrupted?: true;
   imageJob?: ImageEvent;
-  /** The reply's times, or on a question whose turn saved no reply, how that turn ended (chat row 32). */
+  /** The reply's times, or on a question whose turn saved no reply, how that turn ended. */
   times?: ReplyTimes;
 }
 

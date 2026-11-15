@@ -20,7 +20,7 @@ export const TOOL_TIME_BUDGET_MS = 5 * 60 * 1000;
 export const STREAM_STALL_MS = 120 * 1000;
 /**
  * Before its first chunk a request may wait this long: Ollama sends nothing while it reads the
- * prompt, and a tool result on a crowded GPU took over two minutes to read (chat row 23).
+ * prompt, and a tool result on a crowded GPU took over two minutes to read.
  * Shorter than FINAL_ANSWER_MS, so a final answer that never starts gets these words, not the cap's.
  */
 export const FIRST_BYTE_MS = 5 * 60 * 1000;
@@ -219,7 +219,7 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
     // Text mode shows its reply through the view, which keeps call syntax off screen (createTextView).
     const view = input.native ? undefined : createTextView();
     let viewed = ""; // what the view let through this round
-    let viewShown = ""; // what of that is on screen
+    let viewShown = "";
     /** Held text goes on screen, and so into what the turn saves. */
     const release = function* (): Generator<LoopEvent> {
       if (!holding) return;

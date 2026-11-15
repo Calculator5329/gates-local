@@ -95,7 +95,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
 
   /** Kept on the turn for App.admission; its refusal has already gone out as the turn's error event. */
   /**
-   * `replacedFiles`: the attached files of the rows a Retry replaces (chat row 35). Once the
+   * `replacedFiles`: the attached files of the rows a Retry replaces. Once the
    * admission settles, a copy no message holds any more goes; a refused Retry kept those rows.
    */
   const admitting = (turn: Turn, admission: Promise<Message>, replacedFiles: readonly string[] = [], carrying: readonly string[] = []) => {
@@ -111,7 +111,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
   /**
    * A turn chat.send took and answered: its fit, its load, its GPU claim and its saved question,
    * then its start and its reply. A refusal on the way is its one error event, before any start,
-   * so every window hears of it (chat row 32). It begins after the answer has gone out: no event
+   * so every window hears of it. It begins after the answer has gone out: no event
    * of this turn reaches a client before the answer that names it.
    */
   async function admitTurn(
@@ -278,7 +278,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
         else turn.clock.ready(Date.now());
         push("chat.event", { turnId: turn.turnId, threadId, event: turn.start });
         pushReply(turn);
-        // the plan read the GPU a moment ago: the table takes that reading (chat row 33)
+        // the plan read the GPU a moment ago: the table takes that reading
         fitTable.changed({ afterPlan: true });
         void runTurn(turn, ending, baseUrl, model, report.numCtx, modelHistory, load, { tools, think, settings, files: [...fileEntries.values()] });
       } catch (e) {
@@ -301,7 +301,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
   }
 
   /**
-   * A turn that ended before its start (chat row 32): one error event says why, with the turns
+   * A turn that ended before its start: one error event says why, with the turns
    * in the way for would-stop, and how it ended (a Stop, a halt, or a refusal). Nothing of it was
    * saved, so the sender's words go back to its composer.
    */

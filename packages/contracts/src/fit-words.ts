@@ -1,4 +1,4 @@
-// The one place a fit verdict becomes words. The server calls it wherever it judges a fit (fit/judge.ts)
+// The one place a fit verdict becomes words. The server calls it wherever it judges a fit (fit/fit.ts)
 // and sends the words with the verdict (FitReport.words, FitRow.card.words); every client prints them
 // as sent and judges nothing. The units live here so the server's words and the client's other
 // numbers read the same: "6.6 GB" is GiB with a no-break space, "16k" a context.

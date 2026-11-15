@@ -1,6 +1,6 @@
 // Settings-only update controls, deferred with the Settings screen.
 //
-// Two rows (audit of 0.2.4, decision 25): the version, said once in the label,
+// Two rows: the version, said once in the label,
 // with the state of the last check as its one grey line and the one control
 // that moves it on at the right; then the automatic switch. A clone's further
 // rows (every change or only releases, what the update brings) fold away
@@ -15,8 +15,7 @@
 // reads the signed release list and downloads a newer version for itself
 // (Download while automatic checks are off). A Linux AppImage that can
 // replace its own file then shows Restart to update; any other copy keeps
-// the checked download and opens its folder, to run it from there
-// (decision 24).
+// the checked download and opens its folder, to run it from there.
 import type { Settings, UpdateCheck, UpdateStatus, UpdateVersion } from "@gates-local/contracts";
 import { type ReactNode, useState } from "react";
 import { Icon } from "../lib/ui/icons.tsx";
@@ -113,7 +112,7 @@ function StateLine({ text, err, calm, kept }: { text: string; err: string | null
 /** A check that failed, or a download that did: said as an alert. */
 const troubled = (check: UpdateCheck | null) => check?.state === "cannot-check" || (check?.state === "newer" && (check.download === "bad" || check.download === "failed" || check.download === "disk"));
 
-/** A checked download this copy cannot install by itself (decision 24). restart false is one it can, once its own check ends. */
+/** A checked download this copy cannot install by itself. restart false is one it can, once its own check ends. */
 const keptDownload = (check: UpdateCheck | null): check is Extract<UpdateCheck, { state: "newer" }> => check?.state === "newer" && check.forThisCopy && check.download === "ready" && check.restart === undefined;
 /** A checked download this copy will install, while a check of its own still runs (Windows: the kept installer). */
 const restartComing = (check: UpdateCheck | null) => check?.state === "newer" && check.download === "ready" && check.restart === false;

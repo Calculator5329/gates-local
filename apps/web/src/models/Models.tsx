@@ -42,10 +42,7 @@ import { FitSkel, PHONE, closeTip, useMedia } from "../lib/ui/ui.tsx";
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
 const cannotSaveDefault = (s: State) => s.settings === NA || s.unavailable["settings.update"] === true;
 
-/** The failure of the last action a control ran; cleared when the next try starts. */
-// ---------------------------------------------------------------- names and fit
-
-/** The memory mark against the card (row 28); the verdict's words are its name and its tip, the number says the rest. */
+/** The memory mark against the card; the verdict's words are its name and its tip, the number says the rest. */
 function Fit({ report }: { report: TableFit | undefined }) {
   const tabled = useStore((s) => s.fitTable !== undefined);
   if (report === undefined) return tabled ? <span className="mp-fit none">–</span> : <span className="mp-fit none" aria-busy="true"><FitSkel w="120px" /></span>;
@@ -55,8 +52,6 @@ function Fit({ report }: { report: TableFit | undefined }) {
     </span>
   );
 }
-
-// ---------------------------------------------------------------- the installed list
 
 interface InstalledRow extends Row {
   readonly info: ModelInfo;
@@ -224,7 +219,7 @@ function Installed() {
         ) : <ModelRowView key={r.name} r={r} def={shownDef} saved={saved} onRemove={(back) => setRemoving({ row: r, back })} />)}
         {shown.length === 0 ? <div className="mp-none">No installed model matches “{filter.trim()}”.</div> : null}
       </div>
-      {/* what other programs hold, said once under the list and never in a row's mark (row 28) */}
+      {/* what other programs hold, said once under the list and never in a row's mark */}
       {others ? <p className="mp-others">{othersLine(others)}</p> : null}
       <div className="mp-foot">{sizeText(total)} on disk</div>
       {removing ? (
@@ -270,7 +265,7 @@ function ModelRowView({ r, def, saved, onRemove }: { r: InstalledRow; def: strin
           <MakerMark tag={r.name} />
           <span className="mp-nmn">{r.label.text}</span>
           {chip}
-          {/* the measured speed says it once, in its own column (row 29) */}
+          {/* the measured speed says it once, in its own column */}
           {measured ? null : <ModelSpeed tag={r.name} />}
         </div>
         {/* a model with no purpose has no second line: its Ollama name is in the row menu (Copy Ollama name) */}
@@ -293,8 +288,6 @@ function ModelRowView({ r, def, saved, onRemove }: { r: InstalledRow; def: strin
     </div>
   );
 }
-
-// ---------------------------------------------------------------- row menu
 
 function RowMenu({ r, saved, onRemove }: { r: InstalledRow; saved: string | undefined; onRemove: (back: HTMLElement | null) => void }) {
   const [open, setOpen] = useState(false);
@@ -408,8 +401,6 @@ function RowMenu({ r, saved, onRemove }: { r: InstalledRow; saved: string | unde
   );
 }
 
-// ---------------------------------------------------------------- remove dialog
-
 function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: InstalledRow; next: string | null | undefined; rows: readonly InstalledRow[]; onDefaultFailed: (note: string) => void; onClose: () => void }) {
   const [err, run] = useAct();
   const [busy, setBusy] = useState(false);
@@ -479,10 +470,8 @@ function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: Inst
   );
 }
 
-// ---------------------------------------------------------------- default fallback
-
 /**
- * The chip marks the saved default and a row's menu sets it (decision 10). When the saved default
+ * The chip marks the saved default and a row's menu sets it. When the saved default
  * cannot run here, new chats start on another model; without this line the chip would be untrue.
  */
 function Fallback({ rows }: { rows: readonly InstalledRow[] }) {
@@ -498,8 +487,6 @@ function Fallback({ rows }: { rows: readonly InstalledRow[] }) {
     </p>
   );
 }
-
-// ---------------------------------------------------------------- zero models
 
 function NoModels() {
   const downloading = useStore((s) => Object.values(s.pulls).some(awaitingInstall));
@@ -549,8 +536,6 @@ function NoModels() {
     </div>
   );
 }
-
-// ---------------------------------------------------------------- filter field
 
 function Field({ value, onChange, placeholder, label, cls }: { value: string; onChange: (v: string) => void; placeholder: string; label: string; cls?: string }) {
   const ref = useRef<HTMLInputElement>(null);

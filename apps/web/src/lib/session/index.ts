@@ -95,7 +95,7 @@ const modelsSession = createModels({ applyServerEvent,
 });
 export const { refreshModels, pickModel, typedInComposer, pull, cancelPull, removeModel, recheckRuntime } = modelsSession;
 const { modelsOrder, runtimeOrder, catalogOrder, catalogLands } = modelsSession;
-/** A typed name's size and fit before its download (row 22); undefined when the server cannot say. */
+/** A typed name's size and fit before its download; undefined when the server cannot say. */
 export const estimateModel = (name: string, numCtx: number) => call("models.estimate", { name, numCtx }).catch(() => undefined);
 
 // Image generation turning on (or a new address) reads the file list too: Make images left unset is
@@ -103,8 +103,6 @@ export const estimateModel = (name: string, numCtx: number) => call("models.esti
 const settingsSession = createSettings({ applyServerEvent, authority: applyServerEvent.settings, sync: () => connection.sync, act, applyTheme, applyAccent, refreshImageStatus: () => { probeImageStatus(); void loadImagePresets(); } });
 export const { setContext, updateSettings, updateModelSettings, resetSettings } = settingsSession;
 const { settingsPatch } = settingsSession;
-
-// ---------------------------------------------------------------- hydrate and pushes
 
 /** Channels whose snapshot the second hydrate batch reads (gpu.status, sources.list, models.speed). */
 const SECOND_BATCH: ReadonlySet<Channel> = new Set<Channel>(["gpu.changed", "fit.changed", "sources.changed", "update.changed", "models.speed", "models.measures", "models.measuring"]);
@@ -253,7 +251,7 @@ async function hydrateWith(
   // skeleton, and a pushed table that is newer wins whichever arrives first.
   void probe("fit.table", {}).then((fitTable) => { if (fitTable !== undefined && fitTable !== NA) fitTableArrived(fitTable); });
   // Settings › Tools opens with Run commands' own word: the sandbox probe runs now, not on the first
-  // visit, so the row never says Checking and then changes its words (owner: nothing arrives late).
+  // visit, so the row never says Checking and then changes its words (nothing arrives late).
   if (!/\bWindows\b/.test(globalThis.navigator?.userAgent ?? "")) checkShell();
   // update.status reads local files; the desktop server owns automatic checks.
   // Measured speeds are a saved-reply read the model list's first frame never waits on.

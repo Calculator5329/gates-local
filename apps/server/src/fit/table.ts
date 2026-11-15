@@ -63,7 +63,7 @@ export interface FitTableSource {
   get(): Promise<FitTable>;
   /**
    * Something the table depends on changed: build a new one (coalesced) and push it if it differs.
-   * `afterPlan`: a send just planned on a fresh GPU reading, and the build may take it (chat row 33).
+   * `afterPlan`: a send just planned on a fresh GPU reading, and the build may take it.
    */
   changed(options?: { afterPlan?: boolean }): void;
   /** A models.load notice: no table is built while a load is running (its memory is half counted). */

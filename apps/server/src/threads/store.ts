@@ -505,8 +505,6 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
   };
 }
 
-// ---------------------------------------------------------------- validation
-
 function checkId(field: string, value: unknown): asserts value is string {
   if (typeof value !== "string" || value.length === 0) throw new InvalidInputError(field, "expected a non-empty string");
   if (value.length > MAX_ID) throw new InvalidInputError(field, `longer than ${MAX_ID} characters`);
@@ -642,8 +640,6 @@ function checkImages(value: unknown): string[] | undefined {
     return item;
   });
 }
-
-// --------------------------------------------------------------------- rows
 
 function str(row: Row, key: string): string {
   const v = row[key];

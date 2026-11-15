@@ -1,5 +1,4 @@
-// A model loading into memory, shown where the wait is (chat row 34, owner's
-// pick D, 2026-11-13): a ring around Send while a message waits for the load,
+// A model loading into memory, shown where the wait is: a ring around Send while a message waits for the load,
 // and nothing on the model button. A model this machine has loaded before
 // fills the ring over its last load and holds at 90% until the server says
 // ready; a first load has no end to aim at, so an arc turns without one. The
@@ -25,7 +24,7 @@ export function LoadRing({ since, ms, ask = false }: Load & { readonly ask?: boo
   );
 }
 
-/** The model's download, a 2 px bar on the model button's bottom edge (chat row 29): filled to its percent, which the button's tip says in numbers. */
+/** The model's download, a 2 px bar on the model button's bottom edge: filled to its percent, which the button's tip says in numbers. */
 export function DownloadBar({ pct }: { pct: number }) {
   return <span className="ldbar dl" aria-hidden="true" style={{ transform: `scaleX(${Math.min(100, Math.max(0, pct)) / 100})` }} />;
 }

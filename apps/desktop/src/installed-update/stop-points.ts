@@ -1,6 +1,5 @@
 // The named points where a test build can kill the watcher (design section
-// 10, "Interruption, row level"). Reading GATES_LOCAL_UPDATE_TEST_STOP_AT in a
-// test build and turning it into a `stopAt` effect is the wiring lane's job.
+// 10, "Interruption, row level").
 //
 // `<row>.before`: the row's intent is on disk and its action has not started
 // (rows with no intent of their own, W1 and L2, at the row's start).

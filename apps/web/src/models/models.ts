@@ -69,7 +69,7 @@ export const residentChat = (s: Pick<State, "memory">): string | undefined =>
   s.memory?.resident?.kind === "chat" ? s.memory.resident.model : undefined;
 
 /**
- * What a new chat starts on (owner, 2026-11-13: the model in memory is the default): the chat model
+ * What a new chat starts on (the model in memory is the default): the chat model
  * in memory when the chat opened or a load ended under an empty box, as the installed list names it,
  * unless the person picked in this chat; else the model used last (`chosen`), else the server's pick.
  */
@@ -170,7 +170,7 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
   const typedAt = new Map<string, number>();
 
   /**
-   * A key typed in the message box starts the thread's model loading (chat row 39, owner pick A):
+   * A key typed in the message box starts the thread's model loading:
    * the load runs while the person writes, and opening the app takes nothing from the card. At most
    * one ask a minute per model; the server answers at once when the model is already in memory.
    */

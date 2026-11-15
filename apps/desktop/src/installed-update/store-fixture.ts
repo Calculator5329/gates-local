@@ -21,7 +21,7 @@ export function createStore(dataDir: string, version: number, ids: readonly stri
   db.close();
 }
 
-/** The store lane's pre-migration copy of the live store, at `store-copies/threads.v<N>.sqlite`. */
+/** The store's pre-migration copy of the live store, at `store-copies/threads.v<N>.sqlite`. */
 export function copyStore(dataDir: string, named = currentVersion(path.join(dataDir, STORE_NAME))): string {
   const target = copyPath(dataDir, named);
   mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });

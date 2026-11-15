@@ -1,6 +1,6 @@
 // Behavior follows T3 Code chat/ChatComposer.tsx at d137c5081ac5efb2b8ea9aec8b334e1bb4d0182a (MIT).
-// Native file-manager paths are the owner's explicit exception to image-first paste.
-// Other files attach by path (chat row 3): the server keeps a copy the model reads with its tools.
+// Native file-manager paths are an explicit exception to image-first paste.
+// Other files attach by path: the server keeps a copy the model reads with its tools.
 import type { ClipboardEvent } from "react";
 import type { ModelInfo } from "@gates-local/contracts";
 import { setState } from "../lib/store/store.ts";
@@ -100,7 +100,7 @@ export function splitDropped(data: { readonly files: ArrayLike<File>; readonly i
  * Files from the "+" menu's chooser, a drop or a paste. Images the model reads
  * take the pasted-image path (same limits, compression and chips). Any other
  * file is copied to the server and the message names it; the model opens it
- * with its read tool (chat row 3). A folder or an over-50 MB file is refused
+ * with its read tool. A folder or an over-50 MB file is refused
  * at a chip that says why.
  */
 export function attachFiles(files: readonly File[], folders: readonly string[] = []): Promise<void> {

@@ -4,8 +4,6 @@
 import type { CatalogEntry, FitVerdict } from "@gates-local/contracts";
 import { friendlyName } from "../lib/words/format.ts";
 
-// ---------------------------------------------------------------- fit words
-
 /** The dot beside a verdict's words (the server's, FitReport.words). A model too big for this machine is a limit, not a failure, so it is gray. */
 export const FIT_DOT: Record<FitVerdict, string> = { fits: "ok", spills: "warn", refuse: "off" };
 
@@ -19,8 +17,6 @@ export const about = (bytes: number) => {
 
 /** A model's size in the Size column: MB under 1 GB, else as `about`. */
 export const sizeText = (bytes: number) => (bytes < GB ? `${Math.round(bytes / 1024 ** 2)} MB` : about(bytes));
-
-// ---------------------------------------------------------------- what a model is
 
 /** The purpose the server gives an installed model it does not curate (recommended.ts OWN_MODEL_PURPOSE). */
 export const OWN_MODEL_PURPOSE = "Installed by you";
@@ -42,8 +38,6 @@ export function nameOf(tag: string, catalog: readonly CatalogEntry[] | undefined
 /** A Download row's name: the one Installed shows for the same model ("Qwen 3.8 27B abliterated", never its Ollama tag). */
 export const labelOf = (c: CatalogEntry): string => nameOf(c.name, [c]).text;
 
-// ---------------------------------------------------------------- names that do not fit
-
 /** "hf.co/user/repo-GGUF:Q4_K_M" → "hf.co/…/repo-GGUF:Q4_K_M"; ":latest" dropped. */
 export function shortTag(tag: string): string {
   return tag.replace(/:latest$/, "").replace(/^hf\.co\/[^/]+\//, "hf.co/…/");
@@ -61,8 +55,6 @@ export function splitTail(s: string): readonly [string, string] {
   }
   return [s.slice(0, -10), s.slice(-10)];
 }
-
-// ---------------------------------------------------------------- installed list
 
 export interface Row {
   readonly name: string;

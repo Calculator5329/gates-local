@@ -20,7 +20,7 @@ const USUAL_SAMPLES = 4;
 /** How long a finished download shows its check before the row shows the database. */
 const FINISH_MS = 900;
 const still = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-/** The shortest a download button takes to fill, from the press to full, so a quick download is seen to happen (owner 2026-11-13, settings row 12). */
+/** The shortest a download button takes to fill, from the press to full, so a quick download is seen to happen. */
 export const MIN_FILL_MS = 800;
 /** The fill a button shows: the real fraction, never ahead of what the time since the run began allows. */
 export const shownFill = (real: number, since: number | undefined, now: number) => since === undefined ? real : Math.min(real, Math.max(0, (now - since) / MIN_FILL_MS));

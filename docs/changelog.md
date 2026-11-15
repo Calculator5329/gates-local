@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-15: code comments say why, not where they came from
+
+- Internal only: comments that repeated the code or told its history are gone; the compiled code is unchanged.
+
 ## 2026-11-15: the window's code sits in one folder per feature
 
 - Internal move only: the window's files and their tests moved into

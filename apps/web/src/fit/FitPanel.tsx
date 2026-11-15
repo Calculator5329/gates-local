@@ -236,7 +236,7 @@ function useFitModel(model: string) {
 
 /**
  * The model's status in one row, the one place the fit is said here, and the GB numbers one step
- * away under Details. Context is set in the model picker only (decision 13), so the row names the
+ * away under Details. Context is set in the model picker only, so the row names the
  * size the chat runs at.
  */
 function SettingsBody({ model, title, head, action }: { model: string; title: string; head: string; action: ReactNode }) {

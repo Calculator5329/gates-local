@@ -1,5 +1,5 @@
 // Whether a GPU draws this page, for effects that cost a frame budget only software drawing lacks
-// (the pop-up backdrop's blur, decision 18). Asked once per page: a throwaway WebGL context is
+// (the pop-up backdrop's blur). Asked once per page: a throwaway WebGL context is
 // refused when the browser would draw it in software (failIfMajorPerformanceCaveat), and a context
 // that is granted but names a software renderer (SwiftShader, llvmpipe, Microsoft Basic Render
 // Driver) counts as none. The context is released at once.

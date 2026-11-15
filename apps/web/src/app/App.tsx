@@ -60,7 +60,7 @@ function unsetNow(s: State, saved: Unset): Unset & { readonly known: boolean } {
 }
 
 /**
- * The start screen's setup icons (chat row 20): the library's while library search is not set up, the image's
+ * The start screen's setup icons: the library's while library search is not set up, the image's
  * while image generation is not; each opens its Settings section and wears an amber ring. Empty, at its height,
  * on a set-up machine, so the bar never moves when the reads land.
  */

@@ -347,7 +347,7 @@ export function parseMemTotal(text: string): number | undefined {
 
 /**
  * The system memory free right now and the memory the computer has, from one reading. A model is
- * judged against the total (the owner's ruling, 2026-11-13); a reading with no MemTotal line
+ * judged against the total; a reading with no MemTotal line
  * takes MemAvailable for it.
  */
 export interface MemoryReading {

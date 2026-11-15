@@ -1,5 +1,5 @@
-// Non-image files a person attaches (chat row 3, owner pick C, 2026-11-11): "to get all
-// content from the file might not fit in the context window". The server keeps its own copy
+// Non-image files a person attaches: all of a file's content might not fit in the
+// context window. The server keeps its own copy
 // under files/ in the data folder, the message names it, and only that thread's turns may
 // read it, with the read tool, by its label. Its contents never go into the prompt.
 import { constants } from "node:fs";
@@ -109,7 +109,7 @@ interface References { fileReferences(): ReadonlyMap<string, number>; fileOwners
 /**
  * Saved messages own the copies. A copy no message holds is removed with its last message, or after a day (a draft or queue may still send it).
  * `firstSweepAfterMs` and `sweepEveryMs`: the sweep runs once that long after start-up, then this
- * often until stop() (chat row 35). Copies a window's saved drafts name are spared: it calls keep.
+ * often until stop(). Copies a window's saved drafts name are spared: it calls keep.
  */
 export function fileLifecycle(dataDir: string, store: References, options: { firstSweepAfterMs?: number; sweepEveryMs?: number; log?: (line: string) => void } = {}) {
   let tail: Promise<unknown> = Promise.resolve();
@@ -148,7 +148,7 @@ export function fileLifecycle(dataDir: string, store: References, options: { fir
   return {
     stop: () => { clearTimeout(first); clearInterval(timer); },
     collect: (paths: readonly string[]) => serial(() => collect(paths)),
-    /** files.release: chips removed from a draft or queued message (chat row 35). */
+    /** files.release: chips removed from a draft or queued message. */
     release: (paths: readonly string[]) => serial(() => collect(paths)),
     /** files.keep: a saved draft or queued message still names these; their day starts again. Answers the ones gone. */
     keep: (paths: readonly string[]) => serial(async () => {

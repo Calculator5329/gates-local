@@ -103,7 +103,7 @@ interface DownloadActions {
 const pctOf = (p: PullProgress) => (p.totalBytes ? Math.min(100, Math.round((p.completedBytes / p.totalBytes) * 100)) : 0);
 
 /**
- * The download button every model row shares, and first run (row 18, layout A): idle, its label is
+ * The download button every model row shares, and first run: idle, its label is
  * the download's size; running, the same box fills with the percent and the × beside it cancels.
  * Both boxes keep their size in every state, so nothing beside them moves.
  */
@@ -196,7 +196,7 @@ function DlRow({ c, report, actions }: { c: CatalogEntry; report: FitReport | un
   );
 }
 
-/** A row that cannot run here: what it needs, and no button (row 18). */
+/** A row that cannot run here: what it needs, and no button. */
 function BigRow({ c, report }: { c: CatalogEntry; report: FitReport }) {
   const name = labelOf(c);
   return (
@@ -235,8 +235,8 @@ export function CustomPull({ actions, numCtx }: { actions: DownloadActions; numC
   const answer = typed?.key === key && typed.numCtx === numCtx && tag !== "" ? typed.estimate : undefined;
   const v = answer?.fit ? verdictOf(answer.fit) : undefined;
   const big = v?.k === "no";
-  // The registry hears a typed name only on Enter or Download, never while it is typed (decision 26;
-  // README, Privacy). The answer is kept for the name and context it was asked for.
+  // The registry hears a typed name only on Enter or Download, never while it is typed (README,
+  // Privacy). The answer is kept for the name and context it was asked for.
   const lookUp = async (): Promise<ModelEstimate | undefined> => {
     const estimate = await estimateModel(tag, numCtx);
     setTyped({ key, numCtx, estimate });
@@ -341,7 +341,7 @@ export const othersOf = (s: Pick<State, "fitTable">) => (s.fitTable?.memory.kind
 
 /**
  * Who holds GPU memory above the card's steady baseline right now, said once under each list, never
- * in a row's mark (row 28). It is information: the rows are judged against the card's own memory, and
+ * in a row's mark. It is information: the rows are judged against the card's own memory, and
  * a send still judges right now.
  */
 export function othersLine(others: { programs: readonly string[]; bytes: number }): string {
@@ -350,7 +350,6 @@ export function othersLine(others: { programs: readonly string[]; bytes: number 
   return `${who} ${others.programs.length === 1 ? "is" : "are"} using ${gb(others.bytes)} of GPU memory right now.`;
 }
 
-/** The Download tab. */
 export function DownloadTab() {
   const [attempts, setAttempts] = useState<Record<string, { error: ActionResult | undefined; pulls: State["pulls"]; installed: ReturnType<typeof installation>; start: boolean }>>({});
   const run = async (name: string, action: Promise<ActionResult>, start = false) => {
@@ -412,7 +411,7 @@ export function DownloadTab() {
   // row's verdict stays live.
   const runs = (c: CatalogEntry) => verdict(c) === "fits" || verdict(c) === "spills";
   const group = () => {
-    // the server's picks for this computer's tier, in the tier's order (row 21)
+    // the server's picks for this computer's tier, in the tier's order
     const rec = list.filter(c => c.recommended && runs(c)).toSorted((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
     const more = list.filter(c => !rec.includes(c));
     return { context: numCtx, recommended: rec.map(c => c.name), other: more.map(c => c.name) };
@@ -429,7 +428,7 @@ export function DownloadTab() {
   const fresh = saved !== savedGroups;
   const holding = fresh && list.length > 0 && !settled && waited !== numCtx;
   const entries = new Map(list.map(c => [c.name, c]));
-  // A row that cannot run here shows in the last group, Too big for this computer (row 18). One
+  // A row that cannot run here shows in the last group, Too big for this computer. One
   // that leaves Recommended so never comes back this visit: should it run again, it is with the rest.
   const refuses = (c: CatalogEntry) => verdict(c) === "refuse";
   const refused = saved.recommended.filter(name => { const c = entries.get(name); return c !== undefined && refuses(c); });
@@ -450,7 +449,7 @@ export function DownloadTab() {
   // A newly discovered model appears at the end without moving existing rows.
   const more = [...rows(groups.other), ...list.filter(c => !known.has(c.name) && !refuses(c))];
   const big = holding ? [] : list.filter(refuses);
-  // Slower is said by each row's mark alone, its orange bar and "22 / 16 GB" (decision 11): no line
+  // Slower is said by each row's mark alone, its orange bar and "22 / 16 GB": no line
   // above the list, no words beside the bar.
   const others = table?.memory.kind === "gpu" ? table.memory.others : undefined;
   return (
@@ -476,7 +475,7 @@ export function DownloadTab() {
           ))}
         </Grp>
       ) : null}
-      {/* what other programs hold, said once under the models and never in a row's mark (row 28) */}
+      {/* what other programs hold, said once under the models and never in a row's mark */}
       {others && list.length > 0 ? <p className="na dl-others">{othersLine(others)}</p> : null}
       <Grp title="Something else"><CustomPull actions={actions} numCtx={numCtx} /></Grp>
       {big.length > 0 ? (

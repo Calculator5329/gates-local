@@ -116,7 +116,7 @@ export type Served = { kind: "file"; path: string } | { kind: "refused" } | { ki
  * checks, so a symlink or Windows junction under the root could expose a file
  * outside it. This resolves the root and the file and checks containment on
  * the resolved paths. "missing" (no such file, or a directory) makes the
- * handler fail the load, as before, so the window shows the retry page.
+ * handler fail the load, so the window shows the retry page.
  */
 export async function servedFile(root: string, requestUrl: string): Promise<Served> {
   const file = clientFile(root, requestUrl);

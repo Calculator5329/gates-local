@@ -1,4 +1,4 @@
-// Measure's page checks, run in this window (row 29). A model wrote a self-contained page; here it
+// Measure's page checks, run in this window. A model wrote a self-contained page; here it
 // is loaded with its scripts on, used the way the check says (click, type, read), and what it
 // showed goes back to the server, which grades it (apps/server/src/measure/score.ts).
 //
@@ -39,7 +39,6 @@ export const PAGE_MS = 5000;
  */
 const shown = () => typeof document === "undefined" || document.visibilityState !== "hidden";
 
-/** Resolves once this window is shown. */
 function whenShown(): Promise<void> {
   if (shown()) return Promise.resolve();
   return new Promise((resolve) => {

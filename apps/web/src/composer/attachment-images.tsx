@@ -24,7 +24,7 @@ export function RefusedFiles() {
 }
 
 /**
- * Files the message names (chat row 3): the server holds the copy, the chip shows the name and
+ * Files the message names: the server holds the copy, the chip shows the name and
  * size. In the composer with tools off, the chip says the model cannot open it yet.
  */
 export function AttachedFiles({ files, removable = false }: { files: readonly AttachedFile[]; removable?: boolean }) {

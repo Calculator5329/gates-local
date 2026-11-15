@@ -1,6 +1,6 @@
 // How long each model took to load on this machine: from the server's
 // "loading" notice to its "ready", as this browser saw them. The model
-// button's bar fills over the last one (chat row 16); a model with none
+// button's bar fills over the last one; a model with none
 // gets a counter instead, since nothing true can be said about its end.
 const KEY = "gates-local.model-load-ms";
 

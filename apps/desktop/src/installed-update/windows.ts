@@ -160,7 +160,6 @@ export interface WindowsClick {
   readonly running: string;
   /** verifyPrepared for this copy; it deletes a folder that fails. */
   readonly verify: (version: string) => Promise<Verified>;
-  /** startInstaller, or a fake. */
   readonly start: (installer: string) => Promise<InstallerStart>;
   readonly quit: () => void;
   readonly now?: () => number;

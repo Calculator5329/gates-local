@@ -1,6 +1,6 @@
-// A turn's reply record (decision 33): what the reply is doing and its times, kept by the server
+// A turn's reply record: what the reply is doing and its times, kept by the server
 // as it sends the turn's events, pushed to every window at each change, and saved on the reply's
-// row when it ends (chat row 32). Every window and every reload shows the same stage and seconds;
+// row when it ends. Every window and every reload shows the same stage and seconds;
 // no window keeps a clock of its own.
 import type { ReplyRecord, ReplyStage, ReplyTimes, TurnEnded } from "@gates-local/contracts";
 
@@ -26,7 +26,7 @@ export interface TurnClock {
   end(ended: TurnEnded, thought: string, why?: ReplyTimes["why"]): ReplyTimes;
 }
 
-/** Stages whose time is the reply's work: the one clock (decision 2), never the load and never the writing. */
+/** Stages whose time is the reply's work: the one clock, never the load and never the writing. */
 const WORKING: ReadonlySet<ReplyStage> = new Set(["thinking", "tool"]);
 
 /** A running total: its closed part plus the open part since `since`, as of `now`. */

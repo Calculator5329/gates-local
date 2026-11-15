@@ -62,7 +62,7 @@ export interface LiveTurn {
   readonly model: string;
   readonly startedAt: number;
   /**
-   * The server's reply record (decision 33): the live line's stage and seconds come from it and
+   * The server's reply record: the live line's stage and seconds come from it and
    * nothing else. Absent until its first push; frozen here at this client's Stop.
    */
   readonly reply?: ReplyRecord;
@@ -135,7 +135,7 @@ export interface StopAsk {
 
 /**
  * Why a reply stopped: the person pressed Stop this many seconds in (a mark, no words), a reason
- * they did not cause in its own words, or a failure (decision 7): the alert, "The reply didn't
+ * they did not cause in its own words, or a failure: the alert, "The reply didn't
  * finish." and Retry, with the runtime's own text in the tip.
  */
 export type StopNote =

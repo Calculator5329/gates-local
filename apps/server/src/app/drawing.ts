@@ -99,7 +99,7 @@ export function createDrawTurn({ deps, store, log, push, reserve, queueImage, ad
     return { turnId: turn.turnId };
   };
 
-  /** An Image mode turn chat.send answered: its question and its jobs, then its start; a refusal is its error event (chat row 32). */
+  /** An Image mode turn chat.send answered: its question and its jobs, then its start; a refusal is its error event. */
   const queueDrawing = async (
     image: ImageModule,
     turn: Turn,

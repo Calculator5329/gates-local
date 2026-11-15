@@ -8,8 +8,7 @@ import path from "node:path";
 
 /**
  * The window icon (X11, Windows, and Wayland compositors that take one); the
- * desktop entry's icon covers the rest. Packaged layout is provisional until
- * packaging lands.
+ * desktop entry's icon covers the rest.
  */
 export function iconFile(o: { packaged: boolean; resourcesPath: string; desktopDir: string }): string {
   return o.packaged ? path.join(o.resourcesPath, "icon.png") : path.join(o.desktopDir, "assets", "icon.png");

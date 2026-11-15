@@ -368,7 +368,7 @@ export async function attempt(run: () => Promise<WatchOutcome>): Promise<RunEnd>
 }
 
 /**
- * The design's invariants, after any run (section 10 and the lane brief):
+ * The design's invariants, after any run (section 10):
  * 1. the program path holds `old` or `new`;
  * 2. a run ending updated, rolled-back or stopped leaves a live store that holds exactly the rows from before (the migrated rows after an accept);
  * 3. nothing spawned or stopped once the transaction decided, and no file op changed the live store outside `restore-aside` and `restore-install`;

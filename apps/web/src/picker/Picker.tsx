@@ -28,7 +28,7 @@ function savedFavorites(): string[] {
   } catch { return []; }
 }
 
-/** A memory need as shown: an estimate carries a ~, a reading from a real load does not (audit T03). */
+/** A memory need as shown: an estimate carries a ~, a reading from a real load does not. */
 const shownNeed = (v: Verdict) => `${v.measured ? "" : "~"}${gb(v.need)}`;
 /** The card holds it, right now it is slower: an amber gauge beside the card's own word. */
 const SlowMark = () => <span style={{ display: "inline-flex", color: "var(--amber-fg)" }}><Icon id="gauge" cls="s12" /></span>;
@@ -50,7 +50,7 @@ export function ContextMemory({ v, cpu, frees = false, ready = true, notNow = fa
 
 /**
  * The footer's line: the card every size above is judged against ("16 GB GPU"), never what is free
- * this second (decision 12). A placeholder before the first table.
+ * this second. A placeholder before the first table.
  */
 function memoryLine(table: FitTable | undefined, whole: number | undefined) {
   if (!table) return <span aria-busy="true"><FitSkel w="120px" /></span>;
@@ -148,7 +148,7 @@ export function Picker() {
     const now = getState();
     if (row.downloading !== undefined || !canPick(cardFit(fitFor(now.fitTable, row.tag, ctxFor(chosenCtx, now.models, row.tag))))) return;
     closeTip(); setContext(chosenCtx); pickModel(row.tag); closePop();
-    // A size chosen here is the only context control (decision 13), so it is also the one the next
+    // A size chosen here is the only context control, so it is also the one the next
     // start begins at. Picking a model alone keeps the saved size: a small model's cap is not a choice.
     if (c !== undefined) saveContext(now, c);
     focusComposer();
@@ -211,7 +211,7 @@ export function Picker() {
     if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
   }
-  // A row's facts have no hover tooltip (the owner's call): its face shows the size and,
+  // A row's facts have no hover tooltip: its face shows the size and,
   // by colour, the fit. Screen readers get the size and the fit in words, from the table. Only a cut name has a tip.
   const facts = (row: Row) => {
     const fit = !row.v ? answered ? "No memory reading" : "Checking memory"

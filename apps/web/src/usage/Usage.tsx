@@ -145,7 +145,7 @@ export function Usage() {
       </div>
     </DialogHead>
     <div className="dlg-body">
-    {/* the same centred column as Models (decision 17) */}
+    {/* the same centred column as Models */}
     <div className="us">
       <div className="us-nums">
         <Num ph={ph} value={compact(t.promptTokens + t.completionTokens)} label="tokens" />

@@ -14,7 +14,7 @@ const HOLD_MS = 300;
 const HOLD_NOTE = "Hold the microphone or Space while you talk.";
 /**
  * Dictate. `held` is set while Stop holds this square (a queued message edited during a reply): the button is gone,
- * the component stays, and the shortcut says why it does not start. In talk mode (chat row 38, a try-out) the same
+ * the component stays, and the shortcut says why it does not start. In talk mode (a try-out) the same
  * button is held to talk, as is Space in an empty message box, and letting go sends with `send`.
  */
 export function Voice({ textarea, held = null, send }: { textarea: RefObject<HTMLTextAreaElement | null>; held?: string | null; send?: () => void }) {

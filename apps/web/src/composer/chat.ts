@@ -192,7 +192,7 @@ function localTimes(l: LiveTurn, end: NonNullable<LiveTurn["end"]>, now: number)
     spans: l.reply?.spans ?? [],
     callsAt: l.reply?.callsAt ?? {},
     ...(work === undefined ? {} : { workMs: Math.round(work) }),
-    // a Stop keeps the seconds this client showed; a failure keeps the runtime's text for its tip (decision 7)
+    // a Stop keeps the seconds this client showed; a failure keeps the runtime's text for its tip
     ended: end.kind === "stopped" ? { reason: "stopped", at: l.startedAt + end.secs * 1000 } : { reason: "failed", at: now },
     ...(end.kind === "error" ? { why: { code: end.code, message: end.message } } : {}),
   };
@@ -477,7 +477,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
   }
 
   /**
-   * This client's sends that have not started yet (chat row 32), by the message id each asks the
+   * This client's sends that have not started yet, by the message id each asks the
    * server to save: the turn's start brings the saved question with that id, and an error before
    * it is the refusal, which puts the words back. `turnId` is the one chat.send answered with; the
    * start, which names the question, can also be told apart before the answer is read.
@@ -862,7 +862,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     for (const { threadId, turnId, reply } of active) {
       const turn = turns[threadId];
       if (oldTurns.has(turnId)) continue;
-      // running again, with the record as it is now (decision 33)
+      // running again, with the record as it is now
       if (turn?.turnId === turnId) {
         const running = reduceTurn(turn, { type: "running" }, now) ?? turn;
         turns = withTurn(turns, threadId, reduceTurn(running, { type: "reply", reply }, now));
@@ -964,7 +964,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         flushWords(threadId);
         return update(threadId, turn.gen, event);
       case "reply":
-        // a second attempt starts over (decision 7): the first one's waiting words are dropped (the server holds the queue behind it)
+        // a second attempt starts over: the first one's waiting words are dropped (the server holds the queue behind it)
         if (turn.reply !== undefined && event.reply.attempt > turn.reply.attempt) waiting.delete(threadId);
         else if (!open) flushWords(threadId);
         // the open chat's words land in their own frame (one flush a frame); a chat off screen takes them at the phase change
@@ -1046,7 +1046,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
   /**
    * An event of a turn this client has no turn for. A turn begun by another
    * client (the same thread open on the phone and the desktop) becomes its
-   * chat's turn here too and streams (PH-02); a joining client gets the same
+   * chat's turn here too and streams; a joining client gets the same
    * start with a snapshot of words already sent.
    */
   function otherTurn({ turnId, threadId, event }: Payload<"chat.event">): void {

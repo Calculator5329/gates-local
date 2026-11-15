@@ -140,7 +140,7 @@ function UserBubble({ text, time, images = [], files = [], noted = false }: { te
 
 /** What a finished reply's line holds; the face draws it and knows nothing else. */
 interface ChipStep {
-  /** Work seconds (decision 2): thinking plus tool time; undefined when not known (an older thread). */
+  /** Work seconds: thinking plus tool time; undefined when not known (an older thread). */
   readonly secs: number | undefined;
   /** Tool calls; null when the reply has none. */
   readonly calls: number | null;
@@ -152,7 +152,7 @@ interface ChipStep {
 const workSecs = (ms: number | undefined) => (ms === undefined ? undefined : Math.max(1, Math.round(ms / 1000)));
 
 /**
- * The one live line of a running reply (decisions 1, 2, 33; layout B, owner 2026-11-14): the
+ * The one live line of a running reply: the
  * breathing dot the sidebar shows, the work seconds, then what the server's record says the reply
  * is doing. Nothing follows the words, so a long tool summary ends in "…" at the line's edge.
  * The seconds time thinking and tool work, so they sit in a slot of fixed width that appears, at
@@ -187,14 +187,14 @@ function LiveLine({ turn, tools }: { turn: LiveTurn; tools: readonly ToolStep[] 
   );
 }
 
-/** A finished reply's line in words: its work seconds and steps; at rest only the icon shows them (decision 3). */
+/** A finished reply's line in words: its work seconds and steps; at rest only the icon shows them. */
 function doneWords(step: ChipStep): string {
   if (step.calls === null) return step.secs === undefined ? "Thought" : `Thought for ${step.secs} s`;
   return `${step.secs === undefined ? "" : `${step.secs} s · `}${step.calls} step${step.calls === 1 ? "" : "s"}`;
 }
 
 /**
- * A finished reply's line (decision 3): at rest an icon and the chevron, the bulb for a thought,
+ * A finished reply's line: at rest an icon and the chevron, the bulb for a thought,
  * the check for steps and the red alert when a step failed; the words come back on hover and on
  * keyboard focus, in the same place.
  */
@@ -373,7 +373,7 @@ function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
   const named = step.summary.toLowerCase().startsWith(label.toLowerCase());
   const [line = "", ...rest] = (step.detail ?? "").split("\n");
   const { cmd, shell } = callLine(line);
-  // a failed step is its call with the red mark, never "Tool could not finish" (chat row 37)
+  // a failed step is its call with the red mark, never "Tool could not finish"
   const failed = step.state === "error" && !cut;
   const heading = !failed ? step.summary : cmd !== "" ? cmd : label;
   const meta = st === "run" ? (named ? "running" : `${label} · running`) : cut ? (named ? "stopped" : `${label} · stopped`) : failed ? (cmd !== "" ? lead : dur) : dur === "" ? lead : null;
@@ -399,7 +399,7 @@ function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
     >
       <div className="wr-line">
         <span className="wr-st" data-st={st}>
-          {/* a running call carries the one working mark (decision 1), never a spinner */}
+          {/* a running call carries the one working mark, never a spinner */}
           {st === "run" ? <span className="run-dot" /> : <Icon id={st === "done" ? "checkc" : "xc"} />}
         </span>
         <span className="wr-h">{heading}</span>
@@ -675,7 +675,7 @@ interface ReplyView extends Files {
 const SAYS_WHY = new Set(["context-too-small", "preempted", "runtime-changed"]);
 
 /**
- * A reply that did not finish (decision 7): the alert, the short words and Retry; the runtime's own
+ * A reply that did not finish: the alert, the short words and Retry; the runtime's own
  * text is in the tip. The server has already tried it a second time. Never the stop square.
  */
 function FailLine({ words, why, retryable }: { words: string; why: string; retryable: boolean }) {
@@ -712,7 +712,7 @@ function Reply({ msg, live, text, paced, thinking, tools, rounds, secs, allowedL
   const folded = thinking !== "" || calls.length > 0;
   return (
     <div className={`turn a${interrupted ? " interrupted" : streaming || pending ? "" : " done"}${knownStop ? " noted" : ""}`} data-testid="chat.reply.turn" tabIndex={0} aria-label={interrupted ? "Interrupted reply" : "Reply"} data-received={text.length} data-revealed={paced.length}>
-      {/* one line at the top from the send to the saved row (decisions 1 and 33): "Writing" sits above the words (chat row 30) */}
+      {/* one line at the top from the send to the saved row: "Writing" sits above the words */}
       {folded ? (
         <Fold thinking={thinking} tools={calls} secs={secs} live={streaming ? live : null} stopped={end !== undefined || interrupted} rounds={rounds} />
       ) : streaming ? (
@@ -747,7 +747,7 @@ interface RowProps extends Files {
 const LiveReply = memo(function LiveReply({ threadId, msg, last, origin, token }: { threadId: string; msg: Message | undefined; last: boolean } & Files) {
   const live = useStore((s) => (msg === undefined ? turnOf(s, threadId) ?? null : null));
   const catalog = useStore(catalogOf);
-  // the saved row's times are the server's, the same in every window and after a reload (chat row 32)
+  // the saved row's times are the server's, the same in every window and after a reload
   const saved = msg === undefined ? undefined : drawTimes(msg, catalog);
   const rounds = msg === undefined ? live?.reply : saved?.rounds;
   const text = msg?.content ?? live?.text ?? "";
@@ -813,7 +813,7 @@ const SLICE_TURNS = 40;
  */
 const FILL_TURNS = 120;
 /**
- * The page holds only what the reader asked for (chat row 40, owner pick A, 2026-11-13): a
+ * The page holds only what the reader asked for: a
  * thread opens with a window of its latest turns, and a button at the top adds the turns
  * before them, this many a press. Turns that come in at the end widen the window there. The
  * server sends a thread a page of messages at a time, the same size: a press past what is
@@ -1099,7 +1099,7 @@ export function Timeline({ threadId }: { threadId: string }) {
       <div className={messages.length >= LONG_THREAD ? "col long" : "col"} ref={col}>
         {loading && loadError === undefined ? <TurnSkel /> : null}
         {before > 0 ? (
-          // the arrow and the number say it (decision 5); the button's tip has how many there are before
+          // the arrow and the number say it; the button's tip has how many there are before
           <button type="button" className="earlier" data-testid="chat.thread.earlier" onClick={earlier}
             aria-label={`Show ${Math.min(WINDOW_TURNS, before).toLocaleString("en-US")} earlier`}
             data-tip={`${before.toLocaleString("en-US")} earlier`}>
@@ -1128,7 +1128,7 @@ export function Timeline({ threadId }: { threadId: string }) {
                   {why.words}
                 </div>
               ) : m?.role === "user" && why?.kind === "failed" ? (
-                // a question whose reply failed before its first word: the same line a failed reply has (decision 7)
+                // a question whose reply failed before its first word: the same line a failed reply has
                 <div className="stop-note under-u"><FailLine words="The reply didn't finish." why={why.why} retryable={last} /></div>
               ) : null}
             </Fragment>

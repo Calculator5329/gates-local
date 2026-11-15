@@ -343,7 +343,7 @@ function run(start: StartApp = {}): void {
     const failed = await shell.openPath(dataDir);
     return failed === "" ? null : `Couldn't open the folder: ${failed}`;
   });
-  // A checked download this copy cannot install by itself: show its file, checked again, to run from there (decision 24).
+  // A checked download this copy cannot install by itself: show its file, checked again, to run from there.
   // Only a version name crosses from the renderer; the folder is main's own, and nothing is deleted.
   ipcMain.handle(IPC.showUpdate, async (event, version: unknown): Promise<string | null> => {
     if (!fromOurWindow(event)) throw new Error("refused");

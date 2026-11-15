@@ -72,7 +72,7 @@ export function createUpdates({ applyServerEvent, act }: { readonly applyServerE
    * Reserve once locally, then load the existing checked-commit installer.
    * approved: the server approval the footer's ask showed; that ask was the
    * only one, and if the approval moved on nothing installs (the ask shows the
-   * new words). Without it, the installer asks natively as before.
+   * new words). Without it, the installer asks natively.
    */
   async function updateAndRestart(approved?: string): Promise<ActionResult> {
     const bridge = window.gatesLocal;

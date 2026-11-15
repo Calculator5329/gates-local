@@ -184,7 +184,7 @@ const waitingSince = (joined: string): ReadonlyMap<string, number> =>
 
 /**
  * Newest first, except that a thread whose reply has shown nothing yet sits under every
- * running thread that has, or that was asked before it (owner, chat row 23: the thread that
+ * running thread that has, or that was asked before it (the thread that
  * is working stays on top). Once its reply shows something it takes its place by date.
  */
 export function listOrder<T extends { id: string }>(threads: readonly T[], running: ReadonlySet<string>, waiting: ReadonlyMap<string, number>): readonly T[] {
@@ -394,7 +394,6 @@ export function SettingsNav({ inDialog = false }: { inDialog?: boolean }) {
   return inDialog ? <nav className="dlg-nav" aria-label="Settings sections">{list}</nav> : <nav className="sb-body">{list}</nav>;
 }
 
-// ---------------------------------------------------------------- the footer
 // One row of 32 px icon buttons, the same in chat and Settings and the same height in every
 // state: Settings and Models at the left, the update icon at the far right. No words in the
 // row; they live in each button's tooltip and aria-label.

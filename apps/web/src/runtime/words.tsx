@@ -78,7 +78,7 @@ export function portOf(baseUrl: string | undefined): string {
 
 export const PLACEHOLDER: Record<Rt, string> = {
   ready: "Ask anything…",
-  // a message typed during setup says when it goes once, in its queue row (chat row 31)
+  // a message typed during setup says when it goes once, in its queue row
   installing: "Ask anything…",
   starting: "Chat starts when Ollama is running…",
   missing: "Install Ollama to start chatting",
@@ -140,7 +140,7 @@ export type Failure = RuntimeStatus["failure"];
  * A runtime "error" by what failed (RuntimeStatus.failure): a download that stopped, one that
  * came down but is not the pinned file, an unpack that failed, or a start. `title` heads the banner
  * and the first window, `stat` is the gear's and Settings › Runtime's word. A status without a
- * cause is a start, as it was before causes.
+ * cause is a start.
  */
 export function failWords(failure: Failure): { title: string; stat: string } {
   switch (failure) {

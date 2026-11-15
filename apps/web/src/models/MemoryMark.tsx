@@ -1,5 +1,4 @@
-// One memory mark, the same wherever a model's memory shows (settings row 28, proposal 05, the owner
-// picked A): "the measure for a model is not what is available now its based on the ram in the card".
+// One memory mark, the same wherever a model's memory shows.
 // The bar is the whole card (with no GPU, the computer's memory), the fill is what this model takes,
 // and the number says both: "6.6 / 16 GB". The fill's colour is the verdict (green on the GPU, amber
 // slower, a grey full bar when it cannot run); the verdict's words are the mark's accessible name.
@@ -44,7 +43,7 @@ const KIND: Record<FitReport["verdict"], string> = { fits: "gpu", spills: "spill
 
 /**
  * The mark for one model's report. words: the verdict said in words, the mark's accessible name.
- * A value has no tooltip (decision 19): the colour and the number say it on screen.
+ * A value has no tooltip: the colour and the number say it on screen.
  */
 export function MemoryMark({ report, words }: { report: FitReport; words: string }) {
   const whole = useStore(markWhole);

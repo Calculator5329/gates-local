@@ -27,8 +27,6 @@ import { closeTip } from "../lib/ui/ui.tsx";
 // Voice to text and Instructions ship in the Settings chunk: a section that
 // suspends shows its fallback and then the real cards ~300 ms later (docs/design.md).
 
-// ---------------------------------------------------------------- General
-
 const THEMES: readonly (readonly [Theme, string])[] = [
   ["dark", "Dark"],
   ["light", "Light"],
@@ -79,8 +77,6 @@ function General() {
     </>
   );
 }
-
-// ---------------------------------------------------------------- Runtime
 
 function Runtime() {
   const conn = useStore((s) => s.conn);
@@ -229,8 +225,6 @@ function Runtime() {
   );
 }
 
-// ---------------------------------------------------------------- Tools
-
 interface ToolState {
   readonly word: string;
   readonly dot: string;
@@ -271,7 +265,7 @@ function libraryTool(on: boolean, sources: readonly Source[] | "na" | undefined,
   if (!on) return quiet("Turned off");
   if (sources === undefined) return { word: "Checking", dot: "run" };
   if (sources === NA) return quiet("Not available");
-  // One word for one state (audit W03): an empty Library reads the same on every row.
+  // One word for one state: an empty Library reads the same on every row.
   return { ...(libraryToolCanUse(tool, sources) ? { word: "Ready", dot: "ok" } : quiet(sources.length === 0 ? "Library empty" : missing)), go: () => openSettings("library") };
 }
 
@@ -320,7 +314,7 @@ function Tools() {
   return (
     <>
       <Head title="Tools" />
-      {/* Audit W03 (B1): the switch sits on the title of the one card it turns on; off dims the rows. */}
+      {/* The switch sits on the title of the one card it turns on; off dims the rows. */}
       <Grp title="Tools" action={settings === NA || settings === undefined ? undefined
         : locked ? <Status dot={on ? "ok" : "off"}>{on ? "On" : "Off"}</Status>
         : <button type="button" className="switch" role="switch" data-testid="settings.tools.enable" aria-checked={on} aria-label="Let the model use tools" data-tip="Use tools" onClick={() => void run(updateSettings({ tools: !on }))} />}>
@@ -352,8 +346,6 @@ function Tools() {
     </>
   );
 }
-
-// ---------------------------------------------------------------- Image generation
 
 /** The picture section of the setup guide for the system the app runs on (Settings is only changed on that computer). */
 const setupUrl = (userAgent: string) =>
@@ -490,7 +482,7 @@ function ImageState({ address }: { address: string }) {
   const [err, run] = useAct();
   if (status === NA) return null;
   const { state, word, dot } = imageFace(status);
-  // Not connected and Not running say no more: the address is in the field below (audit W08), and
+  // Not connected and Not running say no more: the address is in the field below, and
   // an address that does not answer is retried by Test connection beside it, nothing to install.
   const desc =
     state === "stopped"
@@ -634,8 +626,6 @@ function ImageFolder() {
     </>
   );
 }
-
-// ---------------------------------------------------------------- Library
 
 type SourceKind = Source["kind"];
 
@@ -830,7 +820,7 @@ function Library() {
   const clones = list.filter((x) => x.managed?.kind === "repository");
   return (
     <>
-      {/* Audit W07 and M04: no subtitle; only Tools off, which stops every read, is said, with its fix. */}
+      {/* No subtitle; only Tools off, which stops every read, is said, with its fix. */}
       <Head title="Library">
         {tools ? undefined : (
           <>
@@ -848,8 +838,6 @@ function Library() {
     </>
   );
 }
-
-// ---------------------------------------------------------------- Advanced
 
 /** Only the desktop app has one. Read before Settings opens (session/settings-reads.ts); a placeholder row if not yet. */
 function DataFolder() {
@@ -932,8 +920,6 @@ function Advanced() {
     </>
   );
 }
-
-// ---------------------------------------------------------------- Shortcuts
 
 /** The bindings App.tsx, Sidebar.tsx and Composer.tsx really handle. */
 const SHORTCUTS: readonly (readonly [string, readonly (readonly [string, readonly string[]])[]])[] = [

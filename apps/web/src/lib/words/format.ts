@@ -171,8 +171,8 @@ export function modelFacts(m: ModelInfo | undefined): { quant: string; disk: str
 }
 
 /**
- * The meta line under a finished reply, numbers only (decision 4): "4.5 s · 38 tok/s". The seconds
- * are the reply's work (thinking and tool time, decision 2); a reply that did no work has none.
+ * The meta line under a finished reply, numbers only: "4.5 s · 38 tok/s". The seconds
+ * are the reply's work (thinking and tool time); a reply that did no work has none.
  */
 /**
  * A reply's wait for its model, from Enter to ready: a load, or a turn queued behind another.

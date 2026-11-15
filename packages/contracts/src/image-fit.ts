@@ -1,6 +1,5 @@
 // Image fit, two questions. The picker's: does a size fit this card at all? It is judged by the
-// card's memory to the nearest GB, never by what is free this second (owner ruling: "the measure
-// for a model is not what is available now its based on the ram in the card"), since the chat
+// card's memory to the nearest GB, never by what is free this second, since the chat
 // model leaves the GPU before an image loads. The job's (apps/server/src/image/module.ts): once
 // everything the app may move has left, does the job fit in what is free now? Other programs can
 // still hold memory then, and the job says so in words.

@@ -1,6 +1,5 @@
 // Window keys the default menu used to give. Linux and Windows run with no
-// application menu at all (Ethan, 2026-11-07: no File/Edit/View/Window bar),
-// and Electron drops a menu's accelerators with it, so the keys come back
+// application menu at all, and Electron drops a menu's accelerators with it, so the keys come back
 // here, on before-input-event. There is no hidden menu: with none set,
 // nothing (Alt, autoHideMenuBar, a global menu bar) can show one again.
 // Copy, paste, select-all and undo are Chromium's own editing keys outside

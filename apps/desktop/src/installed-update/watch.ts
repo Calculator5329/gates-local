@@ -1,6 +1,6 @@
 // The watcher: rows W1 to C of an installed Linux update
 // (docs/design/installed-updates.md, section 2), and the resume of a
-// transaction a crash left on disk. Not called by the app yet.
+// transaction a crash left on disk.
 //
 // One engine runs both. Each row reads the intent on disk, does its action
 // (which is also its recovery, so running it again after a crash finishes
@@ -264,8 +264,6 @@ function row(r: Run, intent: Row): Promise<Finished | undefined> | Finished | un
   }
 }
 
-// ---- helpers ----
-
 const at = (r: Run, point: StopPoint): void => r.fx.stopAt?.(point);
 
 /** Writes the next intent; the run's copy changes only once it is on disk. */
@@ -326,8 +324,6 @@ function pauseCause(r: Run, e: unknown): PauseCause | null {
   }
   return null;
 }
-
-// ---- outcomes ----
 
 /**
  * "Before the replace": delete this transaction's incomplete staging files,
@@ -441,8 +437,6 @@ function settledByResult(r: Run): Finished | null {
   }
   return null;
 }
-
-// ---- the forward rows ----
 
 /** W1: wait for the old main and server, bounded by the time left before the deadline, then check the deadline again. */
 async function closeOldApp(r: Run): Promise<Finished | undefined> {
@@ -610,8 +604,6 @@ function decided(r: Run, intent: "accepted" | "went-back"): void {
   write(r, "cleanup", { ending: outcome });
 }
 
-// ---- the go-back rows ----
-
 /**
  * Whether a token launch can no longer be running: its saved tree is gone,
  * or with no saved record, it never ran or the computer restarted since. A
@@ -727,8 +719,6 @@ async function retryLaunch(r: Run, which: "t1" | "t2"): Promise<Finished | undef
   if (!cannotBeRunning(r, launchOf(r.tx, which))) return stuck(r, words.stuck(which === "t1" ? r.tx.to : r.tx.from));
   return which === "t1" ? launchNew(r) : launchOld(r);
 }
-
-// ---- row C ----
 
 /** Whether no process this transaction knows of is still running: the old main and server, T1 and T2. */
 function noAppRunning(r: Run): boolean {

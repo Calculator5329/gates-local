@@ -46,7 +46,7 @@ export function createApp(deps: AppDeps): App {
   const imageReady = (imageFiles?.sweep() ?? Promise.resolve()).catch((error: unknown) => log(`image sweep at start-up failed: ${String(error)}`));
   // Attached files' copies: the same rules as pasted images, in their own queue.
   // Ten minutes after start-up, so open windows first say what their saved drafts keep (files.keep),
-  // then hourly: a server that runs for days still drops a copy whose day ran out (chat row 35).
+  // then hourly: a server that runs for days still drops a copy whose day ran out.
   const attachedFiles = deps.dataDir ? fileLifecycle(deps.dataDir, store, { firstSweepAfterMs: 10 * 60 * 1000, sweepEveryMs: 60 * 60 * 1000, log }) : undefined;
   const draftEveryMs = deps.draftEveryMs ?? 1000;
   const turns = new Map<string, Turn>();
@@ -71,12 +71,12 @@ export function createApp(deps: AppDeps): App {
   });
   const { pump } = pumper;
 
-  /** The turn's reply record as it is now, to every window (decision 33). */
+  /** The turn's reply record as it is now, to every window. */
   const pushReply = (turn: Turn) => push("chat.event", { turnId: turn.turnId, threadId: turn.threadId, event: { type: "reply", reply: turn.clock.record(Date.now()) } });
 
   /** Models a models.load says are loading now (a preload the first key started, or another window's). */
   const loadingModels = new Set<string>();
-  /** A turn that waits while its own model loads says "loading", not "waiting" (decision 33). */
+  /** A turn that waits while its own model loads says "loading", not "waiting". */
   const waitsOnLoad = (turn: Turn) => {
     if (turn.terminal || turn.start !== undefined || turn.answered !== true) return;
     if (![...loadingModels].some((m) => sameModel(m, turn.model))) return;

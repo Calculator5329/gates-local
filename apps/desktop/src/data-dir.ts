@@ -12,7 +12,6 @@ export type DataDirInput = {
   platform: NodeJS.Platform;
   env: Readonly<Record<string, string | undefined>>;
   home: string;
-  /** Electron's userData folder. */
   userData: string;
   /** Omitted by clone-only commands, which keep their existing defaults. */
   packaged?: boolean;

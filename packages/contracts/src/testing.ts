@@ -399,8 +399,7 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
 const GIB = 1024 ** 3, MIB = 1024 ** 2;
 /**
  * The image fit's edges (image-fit.ts), one table for the server's job fit and the picker's mark:
- * both are tested on every row, so they cannot give different answers. The old picker kept a
- * 512 MiB margin the server never had; the rows inside it fit on both now.
+ * both are tested on every row, so they cannot give different answers.
  */
 export const imageFitEdges: readonly (ImageFitInput & { name: string; verdict: ImageFitAnswer["verdict"] })[] = [
   { name: "free exactly the estimate", estimateBytes: 9 * GIB, freeBytes: 9 * GIB, creditedBytes: 0, freeableBytes: 0, verdict: "fits" },

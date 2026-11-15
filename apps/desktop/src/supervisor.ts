@@ -100,7 +100,6 @@ export class Supervisor {
     return this.#state;
   }
 
-  /** Pid of the live child, if any. */
   get pid(): number | undefined {
     const child = this.#current?.child;
     return child !== undefined && isRunning(child) ? child.pid : undefined;

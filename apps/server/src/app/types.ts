@@ -18,7 +18,7 @@ import type { Usage } from "../usage/index.ts";
 import type { Handlers } from "../ws/server.ts";
 import type { Push } from "./push.ts";
 
-/** The slice-1 methods every build answers. v2 methods join as their lanes land; until then the socket answers "not-implemented". */
+/** The methods every build answers. The others join with their modules; until then the socket answers "not-implemented". */
 type CoreMethod =
   | "threads.list"
   | "threads.create"

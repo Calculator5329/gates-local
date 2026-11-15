@@ -1,5 +1,4 @@
-// The card, and who is using it right now. The owner's ruling (2026-11-13): "the measure for a
-// model is not what is available now its based on the ram in the card". Every list and Settings
+// The card, and who is using it right now. Every list and Settings
 // judge a model against the card's own memory; what other programs hold right now is shown beside
 // it, never as the verdict. A send still judges right now (fit.ts), since that load happens now.
 //

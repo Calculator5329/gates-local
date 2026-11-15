@@ -1,4 +1,4 @@
-// Talk mode (chat row 38, owner pick A, a try-out): hold the microphone or Space to talk, let go
+// Talk mode (a try-out): hold the microphone or Space to talk, let go
 // to send, and the reply is read aloud; the speaker icon turns the reading off. Off until turned
 // on in Settings, remembered on this device. The reading uses a voice the device itself has
 // (speechSynthesis voices marked localService); a voice that would speak through a cloud service is
@@ -140,7 +140,7 @@ export function startReading(out: Speaker): () => void {
     if (live === undefined) {
       if (gen === null) return;
       const ended = turnOf(s, threadId);
-      // Stop (chat row 42): what waits in the voice is pulled back and nothing more of it is read
+      // Stop: what waits in the voice is pulled back and nothing more of it is read
       if (ended?.gen === gen && ended.end?.kind === "stopped") { out.cancel(); gen = null; }
       // saved or failed: whatever was written is read to its end
       else finish();

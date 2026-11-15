@@ -196,7 +196,7 @@ export function createTurnRunner({ deps, store, log, push, pushReply, draftEvery
           counted = true;
         } } : {}),
       };
-      // A reply that fails on its own runs once more (decision 7): the person sees the second
+      // A reply that fails on its own runs once more: the person sees the second
       // attempt start over in the same place, and only its failure is said.
       for (let attempt = 1; ; attempt++) {
         const events = useTools ? streamToolTurn({ ...input, sources, image, ...(shell ? { shell } : {}), ...(imageChoice ? { queueImage: queueImageFor(threadId, controller.signal, imageChoice) } : {}) }) : streamTurn(input);
@@ -250,7 +250,7 @@ export function createTurnRunner({ deps, store, log, push, pushReply, draftEvery
         turn.text = "";
         turn.thinking = "";
         turn.clock.retry(Date.now());
-        // what waits behind it holds until the second attempt ends (decision 7)
+        // what waits behind it holds until the second attempt ends
         queue.retrying(threadId);
         pushReply(turn);
       }

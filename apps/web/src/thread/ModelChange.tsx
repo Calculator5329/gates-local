@@ -1,5 +1,4 @@
-// The quiet line above a turn answered by another thing than the turn before (owner, 2026-11-13:
-// "it tells you in a chat if you've changed models mid-chat"): marks and names, old then new, an
+// The quiet line above a turn answered by another thing than the turn before: marks and names, old then new, an
 // arrow between, no sentence. model-change.ts finds where.
 import { describeModel } from "../lib/words/format.ts";
 import { Icon } from "../lib/ui/icons.tsx";

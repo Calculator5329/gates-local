@@ -23,7 +23,7 @@ export type StreamDone = Extract<ChatEvent, { type: "done" }>;
 export const haltedEnd = (reason: AppError): TurnFailure => ({ type: "error", code: reason.code, message: reason.message, ...(reason.neededBy === undefined ? {} : { neededBy: reason.neededBy }) });
 
 /**
- * How `turn` ended with `event` (chat row 32), decided here once so no client guesses from codes:
+ * How `turn` ended with `event`, decided here once so no client guesses from codes:
  * a halt made way for something; a Stop, or deleting its question, stopped it; else done or failed.
  * A failure of its own that lands after a Stop is said as one.
  */
@@ -33,7 +33,7 @@ export const ENDED_EARLY: TurnFailure = { type: "error", code: "internal", messa
 const NO_SECOND_TRY = new Set(["num-ctx-invalid", "context-too-small", "cancelled", "model-not-found"]);
 
 /**
- * A reply that failed on its own runs once more (decision 7): never one the person stopped, a
+ * A reply that failed on its own runs once more: never one the person stopped, a
  * halt ended or a delete dropped, and never one whose calls already ran, since a second attempt
  * would run them again (a shell command, a queued picture).
  */
@@ -78,7 +78,7 @@ export interface Turn {
   dropReply: boolean;
   /** When chat.cancel first came for it: a Stop's end is then, not when the stream wound down. */
   stoppedAt?: number;
-  /** Its times from reserve(), saved on the reply (chat row 32). */
+  /** Its times from reserve(), saved on the reply. */
   readonly clock: TurnClock;
   /** chat.send has answered for it: its record may be pushed before its start. */
   answered?: boolean;
@@ -113,9 +113,9 @@ export interface AppContext {
   readonly draftEveryMs: number;
   readonly queue: Queue;
   readonly fitTable: FitTableSource;
-  /** The turn's reply record as it is now, to every window (decision 33). */
+  /** The turn's reply record as it is now, to every window. */
   readonly pushReply: (turn: Turn) => void;
-  /** A turn that waits while its own model loads says "loading", not "waiting" (decision 33). */
+  /** A turn that waits while its own model loads says "loading", not "waiting". */
   readonly waitsOnLoad: (turn: Turn) => void;
   /** The measured speeds, after a finished reply is saved or replies are deleted. */
   readonly pushSpeeds: () => void;

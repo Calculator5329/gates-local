@@ -20,7 +20,7 @@
 // What it never touches: whisper and every other program on the GPU (they are only measured),
 // and a running reply's model. No runner gets a second model beside a running reply: the plan
 // (fit.ts planWith) names that reply in the way, and a send asks before it stops it. An Ollama or ComfyUI the app did not start is asked, never
-// stopped, restarted or reconfigured (owner ruling 2026-11-13: an unload request is not a stop).
+// stopped, restarted or reconfigured (an unload request is not a stop).
 //
 // An Ollama that holds one model (the app's own, started with OLLAMA_MAX_LOADED_MODELS=1,
 // `holdsOne`) would replace the old model itself when the next one loads, but the plan counts the

@@ -196,7 +196,7 @@ export function Composer() {
   // During setup the gate style already greys every control; otherwise the pill says why it is off.
   const thinkNa = blocked ? null : thinkUnavailable(models?.find((m) => m.name === model), first !== undefined);
 
-  // the label is the name and nothing else, so the button keeps its width (chat rows 28, 29): a download
+  // the label is the name and nothing else, so the button keeps its width: a download
   // is the bar on its edge, and its percent, like a download still to come, is in the tip
   const modelTip =
     shownTag === undefined
@@ -215,7 +215,7 @@ export function Composer() {
 
   // before the first read nothing is known: the words of a ready app, never a problem not yet seen;
   // past the boot bound with still nothing read, one neutral word until the runtime answers
-  // a message typed during the first download says when it goes once, in its queue row (chat row 29)
+  // a message typed during the first download says when it goes once, in its queue row
   // Image on: Send goes to the picture model, whatever the chat engine is doing; only a dropped server stops it
   const needsModel = why ?? "Download a model to start chatting";
   const placeholder = drawing && !boot && !none && rt !== "offline" ? IMAGE_PLACEHOLDER
@@ -235,8 +235,8 @@ export function Composer() {
     if (memNo) sendTip = `Not enough memory at ${k(ctx)}`;
     else if (text && freed) sendTip = `Send${enter}. Another chat's reply stops first`;
   }
-  // Not ready and nothing queues: once typed words hide the placeholder, the tip is what it said is awaited
-  // (owner, 2026-11-14: "enter to send message is sometimes not working"); with the box empty the placeholder says it
+  // Not ready and nothing queues: once typed words hide the placeholder, the tip is what it said is awaited;
+  // with the box empty the placeholder says it
   if (!drawing && text && ((blocked && !queueable) || noModel)) sendTip = boot ? CONNECTING : noModel && ready ? needsModel : placeholder;
   // the model list not read yet, or the model not in it: send() would hold the message with nothing said
   const unlisted = !drawing && ready && !queueable && !noModel && model !== undefined && sendableModel(models, model) === undefined;
@@ -315,7 +315,7 @@ export function Composer() {
           submit();
         }}
       >
-        {/* chat row 36: the queue is a shelf inside the box, at its width */}
+        {/* the queue is a shelf inside the box, at its width */}
         <QueueTray />
         <div className="att"><AttachmentImages images={images} removable /><AttachedFiles files={files} removable /><RefusedFiles /></div>
         {/* "+ › Attach a file" opens this; like T3 Code's paperclip it takes any file, and each is sorted at its chip */}
@@ -434,7 +434,7 @@ export function Composer() {
                 <span className="t">{named === undefined ? "Image model" : named.preset.short ?? named.preset.name}</span>
                 {named === undefined ? null : <small className="picker-trigger-ctx">{sizeLabel(named.width, named.height)}</small>}
               </> : boot && shownTag === undefined ? <Skel w="8.5em" /> : <>
-                {/* a load changes nothing here (owner's pick D): it is the ring around Send, and its time is in this button's tip */}
+                {/* a load changes nothing here: it is the ring around Send, and its time is in this button's tip */}
                 {shownTag === undefined ? null : <MakerMark tag={shownTag} busy={pickerPending} />}
                 <span className="picker-trigger-name">{name}</span>
                 <small className="picker-trigger-ctx">{k(ctx)}</small>
@@ -499,21 +499,18 @@ function DraftTextarea({ textarea, placeholder, submit }: { textarea: RefObject<
   return <textarea ref={textarea} id="ta" data-testid="chat.composer.message" data-draft-version={version} className="ta" rows={1} placeholder={placeholder} aria-label="Message" value={draft} onPaste={paste}
     onChange={e => {
       editDraft(e.target.value);
-      // the first key starts the thread's model loading while the person writes (chat row 39)
+      // the first key starts the thread's model loading while the person writes
       if (e.target.value !== "") typedInComposer();
     }} onKeyDown={e => {
       if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !newlineOnEnter) { e.preventDefault(); submit(); }
     }} />;
 }
 
-// ---------------------------------------------------------------- queue and warning
-
 /** Why Ctrl+Shift+Space does not start dictation while Stop holds Dictate's square. */
 const VOICE_HELD = "Dictate comes back when this reply ends or you finish editing the queued message.";
 
 /**
- * What Enter in the message box does (owner, 2026-11-14: "enter to send message is sometimes not
- * working"): with Send on, send; with words typed and Send off for memory, what the click does
+ * What Enter in the message box does: with Send on, send; with words typed and Send off for memory, what the click does
  * (the memory panel); otherwise Send's reason at Send, or in the note over the box while Stop holds
  * Send's place. Nothing only with nothing typed.
  */
@@ -553,14 +550,14 @@ export const replyElsewhere = (s: State): boolean => {
 export const EDITED_ELSEWHERE = "Being edited in another window";
 /** In Send's words for another chat's reply ("Another chat's reply stops first"). */
 const AFTER_OTHER_REPLY = "Sends when another chat's reply ends";
-/** The owner's words for a queue behind a failed reply the server runs once more (chat row 23, decision 7). */
+/** The words for a queue behind a failed reply the server runs once more. */
 const RETRYING = "Retrying the reply before it";
 const RETRY_FAILED = "On hold: the reply before it didn't finish";
-/** A message waiting for the first download: the row shows a clock, and this is its tip and its spoken words (chat row 29). */
+/** A message waiting for the first download: the row shows a clock, and this is its tip and its spoken words. */
 export const AFTER_DOWNLOAD = "Sends when the download finishes";
-/** The same clock for a message waiting for setup (chat row 31). */
+/** The same clock for a message waiting for setup. */
 export const AFTER_SETUP = "Sends when setup finishes";
-/** The clock is the row's only mark for these, so its tip names it; a word on the row has no tip (decision 19). */
+/** The clock is the row's only mark for these, so its tip names it; a word on the row has no tip. */
 const CLOCKED = new Set<string | null>([AFTER_DOWNLOAD, AFTER_SETUP]);
 
 /**
@@ -612,11 +609,11 @@ const andFocus = (act: () => void) => () => {
   focusComposer();
 };
 
-/** More queued than this fold to the next two and a count (chat row 36). */
+/** More queued than this fold to the next two and a count. */
 const SHELF_ROWS = 3;
 
 /**
- * Messages waiting in this chat, on a shelf at the top of the message box (chat row 36). One line
+ * Messages waiting in this chat, on a shelf at the top of the message box. One line
  * each: what it will make (a picture when it was queued with Image on), its words, then icons to
  * send it now, edit it in the composer, or remove it. More than three fold to a count.
  */
@@ -647,7 +644,7 @@ function QueueTray() {
         const words = queueWords(q, editing, first, model, installing, elsewhere);
         return (
           <li key={q.id} className="qt-r" aria-label={`Queued ${q.draw === undefined ? "message" : "image"} ${i + 1} of ${n}`}>
-            {/* a chat is the default, so only a picture marks its kind (chat row 19) */}
+            {/* a chat is the default, so only a picture marks its kind */}
             {q.draw === undefined ? null : <span className="qt-k" data-tip="Image"><Icon id="image" cls="s14" /></span>}
             <span className="qt-t">{q.text}{q.images?.length ? ` · ${q.images.length} image${q.images.length === 1 ? "" : "s"}` : ""}{q.files?.length ? ` · ${q.files.length} file${q.files.length === 1 ? "" : "s"}` : ""}</span>
             {/* always there, empty while the message just waits, so a reader announces the word when it appears */}
@@ -833,8 +830,6 @@ export function CountMenu() {
     </div>
   );
 }
-
-// ---------------------------------------------------------------- + menu
 
 /** A menu's Image row: on or off, or, with nothing here that can draw, the pop-up that says so in the menu's place. */
 function menuImage(image: boolean, close: boolean): void {

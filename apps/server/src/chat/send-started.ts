@@ -1,4 +1,4 @@
-// For tests and the crash server: chat.send, then the turn's start (chat row 32). chat.send
+// For tests and the crash server: chat.send, then the turn's start. chat.send
 // answers with the turn id once the turn is taken; the saved question comes with its start, and a
 // refusal from then on is the turn's error event. In process, App.admission gives both.
 import type { Message, Params } from "@gates-local/contracts";

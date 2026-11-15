@@ -1,4 +1,4 @@
-// Settings › Models, Measure's detail (row 29): what a model's score is made of. Opened from the
+// Settings › Models, Measure's detail: what a model's score is made of. Opened from the
 // score on its row (the phone's measure line on a phone). The run's window, thinking, speed and
 // first word; the five parts with their weights; and each check with what a pass needs, what
 // went wrong, and on a click what the model wrote and which tools it called.

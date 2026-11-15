@@ -10,7 +10,7 @@ import "./panel.css";
 
 /**
  * The footer icon drawn at this point, under the dim. The icons stay in view beside the box
- * and are toggles (settings row 25), so a click on one does what it does: Settings, Models
+ * and are toggles, so a click on one does what it does: Settings, Models
  * and Usage switch straight to each other, and the lit one closes its own.
  */
 function footIconAt(x: number, y: number): HTMLElement | null {

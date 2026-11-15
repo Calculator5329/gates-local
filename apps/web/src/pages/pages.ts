@@ -44,8 +44,6 @@ export function versionsOf(texts: readonly string[], first: readonly string[] = 
   return out;
 }
 
-// ---------------------------------------------------------------- pages before the loaded messages
-
 /** Per chat, the server's pages before a message, as last read: kept while a newer read is on its way. */
 const older = new Map<string, { readonly before: string; readonly pages: readonly ThreadPage[] }>();
 const asking = new Set<string>();
@@ -90,8 +88,6 @@ export function usePages(threadId: string | null): { versions: PageVersion[]; wr
   const writing = running && pageBlocks(live).at(-1)?.closed === false;
   return { versions, writing, loaded: messages !== undefined && (earlier === 0 || before !== undefined) };
 }
-
-// ---------------------------------------------------------------- panel state
 
 interface View {
   readonly open: boolean;

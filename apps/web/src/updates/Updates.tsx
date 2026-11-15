@@ -64,7 +64,7 @@ const LOOK: Record<UpdateIcon["state"], { icon: IconId; tone?: FootProps["tone"]
   checking: { icon: "refresh", spin: true },
   available: { icon: "fetch", tone: "fg" },
   downloading: { icon: "fetch", tone: "fg" },
-  // Ready to restart: the green up-arrow alone, no dot (audit of 0.2.4, decision 22).
+  // Ready to restart: the green up-arrow alone, no dot.
   ready: { icon: "up", tone: "green" },
   // Downloaded for a copy that cannot install it: the same up-arrow, plain, with the amber dot; the click opens Settings.
   waiting: { icon: "up", tone: "fg" },
@@ -81,8 +81,8 @@ const UNSEEN = { position: "absolute", width: 1, height: 1, overflow: "hidden", 
 const BRIGHT = { color: "var(--foreground)" } as const;
 
 /**
- * The ask before the app closes, shown only when something would stop
- * (audit of 0.2.4, decision 23): the target and one line for each piece of
+ * The ask before the app closes, shown only when something would stop:
+ * the target and one line for each piece of
  * work the update stops (update-work.ts, the same lines as the installer's
  * native prompt), read fresh from the server when it opens. With nothing
  * running the click restarts at once. When those lines change while it is
@@ -224,7 +224,7 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
   // the check this footer saw when it clicked: a newer one that answers anywhere clears the click's error (update-state.ts)
   const since = check?.checkedAt ?? null;
   // Update (a clone) and Restart (an installed copy): with nothing running one click restarts; the ask shows
-  // only when a reply, a download, an image job or an import would stop (audit of 0.2.4, decision 23).
+  // only when a reply, a download, an image job or an import would stop.
   const restart = async () => {
     closeTip();
     setBefore(null);

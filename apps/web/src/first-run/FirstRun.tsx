@@ -138,7 +138,7 @@ function NoModels() {
     return (
       <Shell st={st} title="Downloading your first model" sub={sub}>
         <RecCard tag={active} have={false} entry={entry?.name === active ? entry : undefined}>
-          {/* the Download tab's own button: the percent fills it, the × beside it cancels (row 18) */}
+          {/* the Download tab's own button: the percent fills it, the × beside it cancels */}
           <div className="fr-dl">
             <span className="fr-dl-l">{etaText(p, { speed: false })}</span>
             <DlButton

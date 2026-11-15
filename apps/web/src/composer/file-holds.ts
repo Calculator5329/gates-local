@@ -1,4 +1,4 @@
-// Attached files a draft or a queued message still names (chat row 35). The server keeps an
+// Attached files a draft or a queued message still names. The server keeps an
 // unsent copy for a day; this window starts that day again on each connect and every few
 // hours, and gives a copy up as soon as its last chip here is removed.
 import type { MethodName, Params, ResultOf } from "@gates-local/contracts";

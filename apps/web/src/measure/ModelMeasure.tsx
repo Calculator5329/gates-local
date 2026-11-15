@@ -1,4 +1,4 @@
-// Settings › Models, Measure (row 29, proposal 06 A): a model's speed and score measured on this
+// Settings › Models, Measure: a model's speed and score measured on this
 // computer when the person asks, kept on its row. Until then the row has a Measure button across
 // both cells; while it runs, the button is the progress. The check runs on the server
 // (apps/server/src/measure); nothing here starts one without a click.

@@ -1,4 +1,4 @@
-// Measured models (Settings › Models, Measure; row 29): one read after the first frame, the
+// Measured models (Settings › Models, Measure): one read after the first frame, the
 // server's models.measures push when a run finishes, and models.measuring while one runs.
 import type { MeasureList, MeasureRun, ModelMeasure, Payload } from "@gates-local/contracts";
 import { NA, type State } from "../lib/store/store.ts";

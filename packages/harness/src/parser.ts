@@ -103,7 +103,7 @@ export function createTextView(): TextView {
   let visible = ""; // text outside thinking not yet judged
   let blocked = false;
   let started = false;
-  let space = ""; // white space waiting for text after it
+  let space = "";
   const outside = (text: string): string => {
     raw += text;
     let out = "";

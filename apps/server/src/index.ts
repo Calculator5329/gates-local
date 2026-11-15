@@ -1,2 +1,2 @@
-// Server entry. Composes contracts, threads, runtime and chat (slice 1).
+// Server entry. Composes contracts, threads, runtime and chat.
 export const SERVER_NAME = "gates-local-server";

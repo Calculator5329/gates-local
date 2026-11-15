@@ -172,8 +172,6 @@ export async function readGpuStatus(deps: GpuStatusDeps = {}): Promise<GpuStatus
   };
 }
 
-// ------------------------------------------------------------ Linux readers
-
 /** `systemctl --user show -p MainPID --value whisper-server.service`; read-only. */
 export function systemdMainPid(unit: string, runner: (cmd: string, args: readonly string[]) => Promise<string> = execText): Promise<number | undefined> {
   return runner("systemctl", ["--user", "show", "-p", "MainPID", "--value", unit]).then((out) => {

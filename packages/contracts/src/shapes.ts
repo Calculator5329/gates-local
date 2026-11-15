@@ -113,7 +113,7 @@ export const ImageEvent = S.Struct({
 export type ImageEvent = typeof ImageEvent.Type;
 
 /**
- * How a turn ended, as the server decided it (chat row 32): done; stopped by a person's Stop
+ * How a turn ended, as the server decided it: done; stopped by a person's Stop
  * (chat.cancel), or by deleting its question; preempted, the server stopping it to make way for
  * something (another model's load, a runtime change, the app closing); or failed. `at` is when it
  * ended: for a Stop, when the cancel came. Rides on the one terminal event, done or error.
@@ -125,7 +125,7 @@ export const TurnEnded = S.Struct({
 export type TurnEnded = typeof TurnEnded.Type;
 
 /**
- * A reply's times, stamped by the server from the events it sent (chat row 32), so every window
+ * A reply's times, stamped by the server from the events it sent, so every window
  * and every reload shows the same seconds. Absent on rows saved before 2026-11-14 and on pictures.
  */
 export const ReplyTimes = S.Struct({
@@ -167,7 +167,7 @@ export const ReplyStage = S.Literals(["waiting", "loading", "thinking", "tool", 
 export type ReplyStage = typeof ReplyStage.Type;
 
 /**
- * A running reply as the server keeps it (decision 33): one record per turn, pushed to every
+ * A running reply as the server keeps it: one record per turn, pushed to every
  * window at each change, and the only thing a window draws the live line from. Its times are
  * the server's; `workMs` is as of the push, and grows on the window's own clock only while the
  * stage is thinking or tool. The saved row's ReplyTimes are this record at the end.
@@ -505,7 +505,6 @@ export const FitReport = S.Struct({
    * reading's GPU side). A send's reading is taken after everything else was asked to leave.
    */
   memAvailableBytes: S.optional(Count),
-  /** Set when the refusal is the model's own context ceiling, not memory: the most it supports. */
   /** The verdict in words, on the basis it was judged on. Absent from an older server: a client then shows no verdict. */
   words: S.optional(FitWords),
 });
@@ -526,7 +525,7 @@ const { measuredAt: _rowsShareTheTableReading, ...fitRowFields } = FitReport.fie
  * there (GPU plus system memory). A row has no reading of its own: the table's is the only one.
  * stops: the models whose chats a send stops first, set only when stopping them is what makes it fit.
  * card: an installed model's verdict against the GPU's own memory, whatever other programs hold
- * right now (the owner's ruling, 2026-11-13); the row itself is planned right now, as a send loads
+ * right now; the row itself is planned right now, as a send loads
  * it. Every list and Settings show the card; only the composer and a send read right now. A row
  * offered for download is judged against the card already and has none.
  * card.inTheWay: set when the card fits the model and right now it spills: who holds the card's
@@ -615,7 +614,7 @@ export type BlockingTurn = typeof BlockingTurn.Type;
 /**
  * A message waiting to be sent, kept by the server (queue.*) so every window and the phone show
  * one queue and a reload keeps it. The server sends the first one nothing holds, one reply at a
- * time, oldest first. Added 2026-11-14.
+ * time, oldest first.
  */
 export const QueuedMessage = S.Struct({
   id: S.String.check(S.isMinLength(1), S.isMaxLength(200)),
@@ -657,7 +656,7 @@ export type QueuedMessage = typeof QueuedMessage.Type;
 
 export const ChatEvent = S.Union([
   // The turn began: its model and saved user message, so a client that did not send it
-  // (the same thread open elsewhere) can stream the reply too. Added 2026-11-07 (PH-02).
+  // (the same thread open elsewhere) can stream the reply too.
   // `image`: a direct Image turn; `model` is then the image preset id and no chat model runs.
   // `replayed`: sent again to a client that connected mid-reply, which did not see the turn begin.
   S.Struct({ type: S.Literal("start"), model: S.String, userMessage: Message, image: S.optional(S.Literal(true)), replayed: S.optional(S.Literal(true)) }),
@@ -689,17 +688,12 @@ export const ChatEvent = S.Union([
   }),
   // A tool call started, finished or failed; the same callId updates one step row.
   S.Struct({ type: S.Literal("tool"), step: ToolStep }),
-  // The turn's reply record changed (decision 33): its stage, its times, or a second attempt. Added 2026-11-14.
+  // The turn's reply record changed: its stage, its times, or a second attempt.
   S.Struct({ type: S.Literal("reply"), reply: ReplyRecord }),
 ]);
 export type ChatEvent = typeof ChatEvent.Type;
 
 export const NumCtx = PositiveInt;
-
-// ---------------------------------------------------------------- v2 surface
-// Added 2026-11-07 by the coordinator so the client, runtime, harness and
-// image lanes build against one table. A method with no handler answers
-// "not-implemented"; the client hides or explains what is not built yet.
 
 /** The context sizes the product offers; a model runs at the most it takes when that is less. */
 export const ContextSize = S.Literals([8192, 16384, 32768, 65536]);
@@ -790,7 +784,6 @@ export const Settings = S.Struct({
   updateEveryChange: S.optional(S.Boolean),
   /** Desktop-only automatic git checks. Unset means on. Never installs automatically. */
   updateAutomatic: S.optional(S.Boolean),
-  // textSize was removed 2026-11-13: a stored value is dropped on decode, so old files still load.
   /** Unset means "neutral". */
   accent: S.optional(Accent),
   /** Unset uses the installed model's system prompt. */
@@ -1109,8 +1102,6 @@ export const ImagePresets = S.Struct({
 });
 export type ImagePresets = typeof ImagePresets.Type;
 
-// ---------------------------------------------------------------- setup
-
 /** What `setup.probe` reads about this machine before it plans models. */
 export const SetupProbe = S.Struct({
   os: S.Struct({ platform: S.String, release: S.String, arch: S.String }),
@@ -1168,8 +1159,6 @@ export const SetupPlan = S.Struct({
   totalBytes: Count,
 });
 export type SetupPlan = typeof SetupPlan.Type;
-
-// ---------------------------------------------------------------- updates (2026-11-07)
 
 /** The version this copy runs, read from the clone's .git folder (no git process, no network). */
 export const UpdateVersion = S.Union([

@@ -10,7 +10,6 @@ export const GPU_POLL_MS = 3000;
 export const GPU_CHANGE_BYTES = 64 * MIB;
 
 export interface GpuWatcher {
-  /** The last reading, if any. */
   current(): GpuStatus | undefined;
   /** A fresh reading now; pushes gpu.changed when it moved enough. */
   read(): Promise<GpuStatus>;
