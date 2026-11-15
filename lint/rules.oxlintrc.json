@@ -1,0 +1,48 @@
+{
+  "$schema": "../node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "import", "react", "vitest"],
+  "jsPlugins": ["./plugin.ts"],
+  "categories": { "correctness": "off", "suspicious": "off", "pedantic": "off", "style": "off", "restriction": "off", "perf": "off", "nursery": "off" },
+  "ignorePatterns": ["**/dist/**", "**/out/**", "**/node_modules/**"],
+  "rules": {
+    "gates/no-relative-import-across-packages": "error",
+    "gates/no-wait-for-timeout": "error",
+    "gates/disable-needs-reason": "error",
+    "import/no-cycle": ["error", { "ignoreTypes": true }],
+    "import/extensions": ["error", "always", { "ignorePackages": true }],
+    "typescript/no-import-type-side-effects": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/ban-ts-comment": "error",
+    "unicorn/no-abusive-eslint-disable": "error",
+    "eslint/no-warning-comments": ["error", { "terms": ["todo", "fixme", "xxx", "hack"], "location": "start" }],
+    "vitest/no-focused-tests": "error",
+    "vitest/no-disabled-tests": "error",
+    "react/no-danger": "error",
+    "react/forbid-elements": ["error", { "forbid": [{ "element": "select", "message": "the app draws its own lists and menus, never the browser's dropdown" }] }]
+  },
+  "overrides": [
+    {
+      "files": ["**/apps/web/src/**"],
+      "excludeFiles": ["**/*.test.ts", "**/*.test.tsx"],
+      "rules": {
+        "gates/effect-needs-reason": "error",
+        "gates/timer-needs-reason": "error"
+      }
+    },
+    {
+      "files": ["**/packages/contracts/src/**"],
+      "excludeFiles": ["**/*.test.ts"],
+      "rules": {
+        "gates/closed-package": ["error", { "allow": ["effect"] }]
+      }
+    },
+    {
+      "files": ["**/apps/desktop/src/**/preload.ts", "**/apps/desktop/src/**/bridge.ts", "**/apps/desktop/src/**/supervisor-state.ts"],
+      "rules": {
+        "eslint/no-restricted-imports": ["error", { "patterns": [
+          { "group": ["node:*", "electron/main", "**/server/**"], "message": "The sandboxed preload has no Node and no server: share only pure modules with it." }
+        ] }]
+      }
+    }
+  ]
+}

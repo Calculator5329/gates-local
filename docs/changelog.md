@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-15: the project's rules are lint checks
+
+- Internal only, nothing changes on screen: `pnpm lint` now also checks
+  the project's own rules, counts the code that already breaks one and
+  fails when a count rises. `AGENTS.md` lists each rule and what checks it.
+
 ## 2026-11-15: update code shared by both apps is its own package
 
 - Internal: the update code and the Ollama file paths that the desktop and the server both use moved to `packages/update` and `packages/runtime-files`, so neither app imports the other's files. Nothing changes for the person using the app.
