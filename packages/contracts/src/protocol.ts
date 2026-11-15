@@ -12,6 +12,9 @@ import {
   ModelEstimate,
   ChatEvent,
   ReplyRecord,
+  ReplyAnswer,
+  ReplyId,
+  StopConsent,
   type FitOffer,
   FitTable,
   GpuStatus,
@@ -345,6 +348,43 @@ export const methods = {
     phone: "allow",
   },
   "queue.remove": { params: S.Struct({ id: S.String }), result: S.Array(QueuedMessage), phone: "allow" },
+  // ---- one waiting message, by its id: each call is answered with what happened to it (ReplyAnswer)
+  /**
+   * New words, a new model or a new context for a waiting message. `base`: the messageId this
+   * change started from, so words another window changed meanwhile are not overwritten;
+   * `messageId` names the words after it. With `text`, an edit this window has open is saved and closed.
+   */
+  "reply.change": {
+    params: S.Struct({
+      id: ReplyId,
+      base: S.String.check(S.isMinLength(1), S.isMaxLength(200)),
+      messageId: S.String.check(S.isMinLength(1), S.isMaxLength(200)),
+      text: S.optional(S.String),
+      images: S.optional(S.Array(S.String).check(S.isMaxLength(8))),
+      files: S.optional(S.Array(AttachedFile).check(S.isMaxLength(8))),
+      model: S.optional(S.String),
+      numCtx: S.optional(NumCtx),
+    }),
+    result: ReplyAnswer,
+    phone: "allow",
+  },
+  /** Open it in this window's composer (it keeps its place and is not sent), or give it back unchanged. */
+  "reply.edit": { params: S.Struct({ id: ReplyId, open: S.Boolean }), result: ReplyAnswer, phone: "allow" },
+  /** Off every list. The id is remembered, so a window that missed the removal cannot bring it back. */
+  "reply.remove": { params: S.Struct({ id: ReplyId }), result: ReplyAnswer, phone: "allow" },
+  /**
+   * Send now: it goes first, as soon as its chat is free. A reply on its way in that chat is
+   * stopped by the same call. `consent`: the yes to stopping other chats' replies.
+   */
+  "reply.now": { params: S.Struct({ id: ReplyId, consent: S.optional(StopConsent) }), result: ReplyAnswer, phone: "allow" },
+  /** On hold: it goes only when someone presses Send now. */
+  "reply.hold": { params: S.Struct({ id: ReplyId }), result: ReplyAnswer, phone: "allow" },
+  /**
+   * Stop. The reply stops and, in the same step, what would have gone on its own behind it in
+   * its chat holds; a message taken and not yet saved goes back on hold. For a reply that has
+   * already ended the answer is "gone", and what waits behind it holds all the same.
+   */
+  "reply.stop": { params: S.Struct({ id: ReplyId }), result: ReplyAnswer, phone: "allow" },
   "settings.get": { params: NoParams, result: Settings, phone: "allow", sync: SETTINGS },
   "settings.update": { params: S.Struct({ ...SettingsPatch.fields, voiceChange: S.optional(S.String.check(S.isMaxLength(128))) }), result: Settings, phone: "deny", sync: SETTINGS },
   "settings.model.update": { params: S.Struct({ model: S.String.check(S.isMinLength(1)), patch: S.NullOr(ModelSettingsPatch) }), result: Settings, phone: "deny", sync: SETTINGS },
@@ -490,6 +530,8 @@ export type Methods = typeof methods;
 export type MethodName = keyof Methods;
 export type Params<M extends MethodName> = Methods[M]["params"]["Type"];
 export type ResultOf<M extends MethodName> = Methods[M]["result"]["Type"];
+/** The calls that name one reply and are answered with what happened to it (ReplyAnswer). */
+export type ReplyCall = { [M in MethodName]: M extends `reply.${string}` ? M : never }[MethodName];
 
 export type Pushes = typeof pushes;
 export type Channel = keyof Pushes;

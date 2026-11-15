@@ -54,7 +54,7 @@ const connection = createConnection({ applyServerEvent,
   },
 });
 export const { connect, call, libraryRequest } = connection;
-const { probe, act } = connection;
+const { probe, act, reply } = connection;
 setFileCalls(call);
 let keeping: ReturnType<typeof setInterval> | undefined;
 
@@ -122,7 +122,7 @@ const { noteMessage, loadThread, restoreSaved, loading, createThread, untrackedD
 
 
 const chat = createChat({ applyServerEvent,
-  call, codeOf,
+  call, reply, codeOf,
   createThread,
   creatingDraft: threadSession.creatingDraft,
   loadThread,

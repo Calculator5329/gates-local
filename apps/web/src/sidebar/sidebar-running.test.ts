@@ -147,10 +147,11 @@ describe("sidebar running replies", () => {
     });
   }
 
-  it("clears the mark immediately when the user stops the reply", async () => {
+  it("clears the mark when the server takes the user's Stop", async () => {
     await answering("A");
     expect(marked()).toEqual(["A"]);
     session.stop();
+    await tick();
     expect(marked()).toEqual([]);
   });
 
@@ -169,9 +170,9 @@ describe("sidebar running replies", () => {
     try {
       // its start named the turn, so Stop cancels it now
       session.stop();
-      expect(marked()).toEqual([]);
       await tick();
-      expect(b.server.calls("chat.cancel").map((c) => c.params)).toEqual([{ turnId: "admitting-A" }]);
+      expect(marked()).toEqual([]);
+      expect(b.server.calls("reply.stop").map((c) => c.params)).toEqual([{ id: "admitting-A" }]);
     } finally {
       await acknowledge();
     }
@@ -185,6 +186,7 @@ describe("sidebar running replies", () => {
     await acknowledge();
     expect(marked()).toEqual(["A"]);
     session.stop();
+    await tick();
     expect(marked()).toEqual([]);
   });
 

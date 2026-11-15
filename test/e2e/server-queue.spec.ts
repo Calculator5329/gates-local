@@ -1,9 +1,11 @@
 // The queue is the server's: every window shows the same queued messages, a
 // change in one shows in the others, and a reload keeps what was waiting
 // without putting it on hold.
+import { createClient } from "@gates-local/contracts";
 import { type Page } from "@playwright/test";
 import { FAKE_URL } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { tap } from "./socket-tap.ts";
 
 const rows = (page: Page) => page.locator(".qt-r");
 const stop = (page: Page) => page.getByRole("button", { name: "Stop" });
@@ -40,6 +42,52 @@ test("a message queued in one window shows in a second window, and removing it t
   await expect(page.locator(".turn.u")).toHaveCount(1);
   await expect(other.locator(".turn.u")).toHaveCount(1);
   await other.close();
+});
+
+// Guards Stop as one step: the stop call is the last thing the server hears from the window, and nothing queued sends itself after.
+test("Stop from a window that closes the moment it is pressed holds every queued message", async ({ page, open, context }) => {
+  test.setTimeout(60_000);
+  await open();
+  await waitReady(page);
+  await stack.scenario("slow-drip", { holdAfterTokens: 46 });
+  await sendMessage(page, "How do I check disk space before a download?");
+  await expect(page.locator(".turn.a .md ul li")).toHaveCount(3, { timeout: 15_000 });
+  await sendMessage(page, "First in the queue");
+  await sendMessage(page, "Second in the queue");
+  await expect(rows(page)).toHaveCount(2);
+
+  const pressing = await context.newPage();
+  const t = await tap(pressing);
+  await pressing.goto(page.url());
+  await waitReady(pressing);
+  await expect(rows(pressing)).toHaveCount(2);
+  await expect(stop(pressing)).toBeVisible();
+
+  // every frame after the stop call is lost, and the window is gone
+  t.lastWords(["chat.cancel", "reply.stop"]);
+  await stop(pressing).click();
+  await expect.poll(() => t.cut()).toBe(true);
+  await pressing.close();
+
+  await expect(stop(page), "the reply stopped").toHaveCount(0, { timeout: 15_000 });
+  for (const n of [0, 1]) await expect(rows(page).nth(n), "held by the stop itself").toContainText("On hold");
+  await shot(page, "held-after-the-window-closed");
+
+  // the server's own account: both still wait on hold, nothing runs, and only the question was ever sent
+  const address = new URL(page.url()).searchParams.get("server");
+  if (!address) throw new Error("No test server");
+  const rpc = createClient(new WebSocket(address));
+  try {
+    const queued = await rpc.call("queue.list", {});
+    expect(queued.map((q) => [q.text, q.held])).toEqual([["First in the queue", true], ["Second in the queue", true]]);
+    expect(await rpc.call("turns.active", {})).toEqual([]);
+    const threadId = new URLSearchParams(new URL(page.url()).hash.slice(1)).get("thread") ?? "";
+    const { messages } = await rpc.call("threads.get", { threadId });
+    expect(messages.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["How do I check disk space before a download?"]);
+  } finally {
+    rpc.close();
+  }
+  await expect(page.locator(".turn.u")).toHaveCount(1);
 });
 
 // Guards the queue's edit flag: a window closed in the middle of an edit leaves nothing stuck.

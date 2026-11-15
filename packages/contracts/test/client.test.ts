@@ -348,6 +348,32 @@ describe("createClient", () => {
     await expect(client.closed).resolves.toBeUndefined();
   });
 
+  it("a call on one reply with no answer is 'not-reached', by closed socket or by timeout, and never a rejection", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    socket.open();
+    const client = createClient(socket, { timeoutMs: 50, onProtocolError: () => {} });
+    const late = client.reply("reply.remove", { id: "q1" });
+    vi.advanceTimersByTime(51);
+    await expect(late).resolves.toEqual({ answer: "not-reached", why: "timeout" });
+    const cut = client.reply("reply.hold", { id: "q1" });
+    socket.close();
+    await expect(cut).resolves.toEqual({ answer: "not-reached", why: "closed" });
+    await expect(client.reply("reply.now", { id: "q1" }), "asked after the close").resolves.toEqual({ answer: "not-reached", why: "closed" });
+  });
+
+  it("a call on one reply resolves with the server's answer, and a refused request still rejects", async () => {
+    const socket = new FakeSocket();
+    socket.open();
+    const client = createClient(socket);
+    const answered = client.reply("reply.remove", { id: "q1" });
+    socket.reply(JSON.stringify({ type: "response", id: socket.lastRequest().id, ok: true, result: { answer: "gone", why: "removed" } }));
+    await expect(answered).resolves.toEqual({ answer: "gone", why: "removed" });
+    const refused = client.reply("reply.remove", { id: "q1" });
+    socket.reply(JSON.stringify({ type: "response", id: socket.lastRequest().id, ok: false, error: { code: "bad-params", message: "no" } }));
+    await expect(refused).rejects.toMatchObject({ code: "bad-params" });
+  });
+
   it("client.close() rejects pending calls at once", async () => {
     const socket = new FakeSocket();
     socket.open();

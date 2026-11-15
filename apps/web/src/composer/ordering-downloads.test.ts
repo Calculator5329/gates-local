@@ -213,7 +213,8 @@ it.each(["error", "cancelled"] as const)("RS-01: connected %s keeps the message 
     client.socket.close(); await drain();
     expect(client.session.queueReason(client.store.getState())).toBeNull();
     expect(tray(), "a disconnect retains the live download and must not say stopped").toContain(WAITING);
-    client.session.removeQueued(q.id);
-    expect(tray()).toBeUndefined();
+    client.session.removeQueued(q.id); await drain();
+    expect(tray(), "a Remove the server never heard changes nothing").toContain(MESSAGE);
+    expect(client.store.getState().notice).toBe("Gates Local stopped answering. The message was not removed.");
   } finally { await dispose(w); }
 });

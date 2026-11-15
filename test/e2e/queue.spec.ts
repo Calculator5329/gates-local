@@ -3,6 +3,7 @@
 // where it can be edited, removed or sent now.
 import { type Page } from "@playwright/test";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { tap } from "./socket-tap.ts";
 
 const rows = (page: Page) => page.locator(".qt-r");
 const stop = (page: Page) => page.getByRole("button", { name: "Stop" });
@@ -95,4 +96,43 @@ test("Stop leaves a queued message on hold instead of sending it", async ({ page
   await rows(page).first().locator("[data-send-now]").click();
   await expect(rows(page)).toHaveCount(0);
   await expect(page.locator(".turn.u").last()).toContainText("Held back");
+});
+
+// Guards typed words: an edit saved to a message another window removed is told so, and keeps what was typed.
+test("saving an edit to a message a second window removed keeps the typed words and says it was removed", async ({ page, open, context }) => {
+  const t = await tap(page);
+  await open();
+  await waitReady(page);
+  await answering(page);
+  await sendMessage(page, "Waiting message");
+  await expect(rows(page)).toHaveCount(1);
+
+  const other = await context.newPage();
+  await other.goto(page.url());
+  await waitReady(other);
+  await expect(rows(other)).toHaveCount(1);
+
+  await rows(page).first().locator("[data-edit-queued]").click();
+  await expect(page.locator("#ta")).toHaveValue("Waiting message");
+  await page.locator("#ta").fill("Waiting message, reworded with care");
+  await expect(rows(other).first(), "the second window sees the edit").toContainText("Being edited in another window");
+
+  // the first window has not heard of the removal when it saves: the answer to the save is all it has
+  t.hold.add("queue.changed");
+  await rows(other).first().locator("[data-unqueue]").click();
+  await expect(rows(other)).toHaveCount(0);
+  await expect.poll(() => t.queued("queue.changed")).toBeGreaterThan(0);
+
+  await page.locator("#ta").press("Enter");
+  const notice = page.getByTestId("chat.composer.notice");
+  await page.screenshot({ path: test.info().outputPath("saved-after-removal.png") });
+  await expect(page.locator("#ta"), "the typed words are still in the composer").toHaveValue("Waiting message, reworded with care");
+  await expect(notice, "the line says what happened to the message").toContainText(/removed/i);
+  await page.screenshot({ path: test.info().outputPath("told-it-was-removed.png") });
+
+  t.release("queue.changed");
+  await expect(rows(page), "the removal shows here too").toHaveCount(0);
+  await expect(page.locator("#ta")).toHaveValue("Waiting message, reworded with care");
+  await expect(page.locator(".turn.u"), "nothing was sent").toHaveCount(1);
+  await other.close();
 });

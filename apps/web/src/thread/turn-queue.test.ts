@@ -255,7 +255,7 @@ it.each([false, true])("late confirmation retires only the matching recovered co
     expect(st().queued).toEqual([]);
     expect(st().messages["A"]?.filter(m => m.content === "slow admission")).toHaveLength(1);
     expect(sends()).toHaveLength(1);
-    expect(b.server.calls("chat.cancel")).toHaveLength(0);
+    expect(b.server.calls("reply.stop")).toHaveLength(0);
     expect(live()?.turnId).toBe("turn-A-1");
   }
 });
@@ -330,6 +330,8 @@ async function stopped(words: string): Promise<void> {
   if (words !== "") chat(turn, "A", { type: "delta", text: words });
   await tick();
   session.stop();
+  // the server takes the Stop (its record says so), then ends the turn
+  await tick();
   chat(turn, "A", { type: "error", code: "cancelled", message: "stopped", ended: { reason: "stopped", at: Date.now() } });
   await tick();
 }
@@ -667,7 +669,7 @@ describe("a turn left running behind another chat", () => {
     b.frame();
     const c = await answering("B");
     expect(sends()).toHaveLength(2);
-    expect(b.server.calls("chat.cancel")).toHaveLength(0);
+    expect(b.server.calls("reply.stop")).toHaveLength(0);
     chat(a, "A", { type: "delta", text: "two" });
     chat(c, "B", { type: "delta", text: "beta" });
     b.frame();
@@ -738,11 +740,15 @@ describe("picking a model while another is answering", () => {
     await answering("B");
     session.openThread("A");
     session.sendQueuedNow(id ?? "");
+    // the one call stops A's reply on the server: this window sends no Stop of its own
+    await until(() => live()?.end?.kind === "stopped", 1000, "the server's Stop for A's reply");
+    expect(store.runningThreads(st()).has("B"), "B's reply runs on").toBe(true);
     chat(a, "A", { type: "error", code: "cancelled", message: "stopped", ended: { reason: "stopped", at: Date.now() } });
     await until(() => sends().length === 3, 1000, "the explicit Send now");
     expect(sends()[2]).toMatchObject({ threadId: "A", content: "send now" });
     expect(b.server.calls("chat.send")[2]?.params).toMatchObject({ images, messageId });
-    expect(b.server.calls("chat.cancel").map((r) => r.params)).toEqual([{ turnId: a }]);
+    expect(b.server.calls("reply.now").map((r) => r.params)).toEqual([{ id }]);
+    expect(b.server.calls("reply.stop")).toEqual([]);
   });
 
   it("loads another model now when nothing would have to stop", async () => {
@@ -770,7 +776,7 @@ describe("messages typed while a reply is being written", () => {
     expect(st().queued).toMatchObject([{ threadId: "A", text: "next", waitFor: "reply", model: MODEL }]);
     expect(st().draft).toBe("");
     expect(sends()).toHaveLength(1);
-    expect(b.server.calls("chat.cancel")).toHaveLength(0);
+    expect(b.server.calls("reply.stop")).toHaveLength(0);
     expect(live()?.turnId).toBe(turn);
 
     chat(turn, "A", { type: "done", message: asstMsg("a1", "A"), stopReason: "stop" });
@@ -806,8 +812,13 @@ describe("messages typed while a reply is being written", () => {
     const turn = await answering("A");
     await session.send("next");
     session.stop();
+    // the press changes nothing here: the hold is the server's, made in the same call as the Stop
+    expect(st().queued).toMatchObject([{ text: "next" }]);
+    expect(st().queued[0]?.held).toBeUndefined();
     await tick();
-    expect(b.server.calls("chat.cancel")).toHaveLength(1);
+    expect(b.server.calls("reply.stop")).toHaveLength(1);
+    expect(b.server.calls("queue.update"), "no hold is sent row by row").toEqual([]);
+    expect(st().queued, "held before the stopped reply has ended").toMatchObject([{ text: "next", held: true }]);
     chat(turn, "A", { type: "error", code: "cancelled", message: "stopped", ended: { reason: "stopped", at: Date.now() } });
     await tick();
     expect(sends()).toHaveLength(1);
@@ -837,7 +848,11 @@ describe("messages typed while a reply is being written", () => {
     await session.send("urgent");
     session.sendQueuedNow(st().queued[1]?.id ?? "");
     await tick();
-    expect(b.server.calls("chat.cancel")).toHaveLength(1);
+    // one call: the server stops the reply and holds what else waited, and no Stop follows it
+    expect(b.server.calls("reply.now")).toHaveLength(1);
+    expect(b.server.calls("reply.stop")).toEqual([]);
+    expect(live()).toMatchObject({ end: { kind: "stopped" }, reply: { stage: "stopping" } });
+    expect(st().queued.map((q) => [q.text, q.held ?? false, q.now ?? false])).toEqual([["urgent", false, true], ["first", true, false]]);
     expect(sends()).toHaveLength(1); // the server refuses a second turn until this one ends
     chat(turn, "A", { type: "error", code: "cancelled", message: "stopped", ended: { reason: "stopped", at: Date.now() } });
     await until(() => sends().length === 2, 2000, "the interrupt");
@@ -853,6 +868,7 @@ describe("messages typed while a reply is being written", () => {
       await tick();
       await session.send("urgent");
       session.sendQueuedNow(st().queued[0]?.id ?? "");
+      await tick();
       chat(turn, "A", { type: "error", code: "cancelled", message: "stopped", ended: { reason: "stopped", at: Date.now() } });
       await until(() => sends().length === 2, 2000, "the interrupt");
       await tick();
@@ -904,7 +920,8 @@ describe("messages typed while a reply is being written", () => {
     await answering("A");
     await session.send("next");
     session.removeQueued(st().queued[0]?.id ?? "");
-    expect(st().queued).toEqual([]);
+    expect(st().queued, "still there until the server answers").toHaveLength(1);
+    await until(() => st().queued.length === 0, 2000, "the server's answer");
     expect(st().draft).toBe("");
   });
 
@@ -943,7 +960,86 @@ describe("messages typed while a reply is being written", () => {
     expect(st().draft).toBe("");
     expect(st().queued.map((q) => q.text)).toEqual(["one"]);
   });
+
+  it("an Update of a message removed elsewhere keeps the typed words and says it was removed", async () => {
+    const id = await reworded();
+    // another window's Remove, as the server takes it
+    b.server.queue.remove(id);
+    await session.send(st().draft);
+    expect(st().draft, "the typed words are still in the composer").toBe("one, better");
+    expect(st().editingQueued).toBeNull();
+    expect(st().notice).toBe("That message was removed. Your new words are still in the composer.");
+    expect(st().queued).toEqual([]);
+  });
+
+  it("an Update the server never heard changes nothing, and the same press again saves it once", async () => {
+    const id = await reworded();
+    // the save reaches the server, and the wait for its answer runs out
+    const held = b.server.hold("reply.change");
+    const pressed = session.send(st().draft);
+    const h = await held;
+    b.server.queue.change(id, { text: "one, better", messageId: h.params.messageId });
+    h.fail("timeout");
+    await pressed;
+    expect(st().draft).toBe("one, better");
+    expect(st().editingQueued, "the edit is still open").toBe(id);
+    expect(st().notice).toBe("Gates Local stopped answering. Your edit is still open. Press Update again.");
+    await session.send(st().draft);
+    expect(b.server.calls("reply.change").map((c) => (c.params as { messageId: string }).messageId), "the same change, asked twice").toEqual([h.params.messageId, h.params.messageId]);
+    expect(st().editingQueued).toBeNull();
+    expect(st().draft).toBe("");
+    expect(st().notice).toBeNull();
+    expect(st().queued.map((q) => q.text)).toEqual(["one, better"]);
+  });
+
+  it("Send now moves a message first when the server's list says so, never before", async () => {
+    await answering("A");
+    await session.send("one");
+    await session.send("two");
+    const two = st().queued[1]?.id ?? "";
+    const held = b.server.hold("reply.now");
+    session.sendQueuedNow(two);
+    await held;
+    expect(st().queued.map((q) => q.text), "unanswered, nothing has moved").toEqual(["one", "two"]);
+  });
+
+  it("a Remove of a message another window already removed says nothing twice", async () => {
+    await answering("A");
+    await session.send("one");
+    const one = st().queued[0]?.id ?? "";
+    const held = b.server.hold("reply.remove");
+    session.removeQueued(one);
+    const h = await held;
+    b.server.queue.remove(one);
+    h.respond({ answer: "gone", why: "removed" });
+    await tick();
+    expect(st().queued).toEqual([]);
+    expect(st().notice).toBeNull();
+  });
+
+  it("a Remove of a message the server is already sending leaves it and says it is on its way", async () => {
+    await answering("A");
+    await session.send("one");
+    const one = st().queued[0]?.id ?? "";
+    const held = b.server.hold("reply.remove");
+    session.removeQueued(one);
+    (await held).respond({ answer: "sending", reply: { id: one, threadId: "A", rev: 2, messageId: "m", text: "one", at: 1, stage: "starting", attempt: 1, startedAt: 1 } });
+    await tick();
+    expect(st().queued.map((q) => q.text)).toEqual(["one"]);
+    expect(st().notice).toBe("This message is already on its way.");
+  });
 });
+
+/** "one" waits behind chat A's reply and is open here with new words typed; its id. */
+async function reworded(): Promise<string> {
+  await answering("A");
+  await session.send("one");
+  const id = st().queued[0]?.id ?? "";
+  session.editQueued(id);
+  await tick();
+  type("one, better");
+  return id;
+}
 
 const CANCELLED: Payload<"chat.event">["event"] = { type: "error", code: "cancelled", message: "stopped", ended: { reason: "stopped", at: Date.now() } };
 const done = (id: string, threadId: string): Payload<"chat.event">["event"] => ({ type: "done", message: asstMsg(id, threadId), stopReason: "stop" });
@@ -1004,9 +1100,9 @@ async function stoppedThenReplaced(): Promise<Held<"chat.send">> {
   session.stop();
   await answering("B");
   session.openThread("A");
-  // B's reply runs in its own chat; A's stopped send no longer has a turn to come back to
+  // B's reply runs in its own chat; A's send still waits for the server's answer, and its Stop is asked once that names the turn
   expect(store.runningThreads(st()).has("B")).toBe(true);
-  expect(st().turns["A"]).toBeUndefined();
+  expect(st().turns["A"]).toMatchObject({ turnId: null, pendingUser: "typed" });
   return h;
 }
 
@@ -1077,10 +1173,12 @@ describe("a message the person typed is never lost", () => {
     it("after Stop during admission is back in its own chat's queue (CFS-02)", async () => {
       const h = await admitting();
       session.stop();
+      // the server takes the Stop before it refuses the send
+      await tick();
       h.fail("wont-fit", "no");
       await until(() => st().queued.length === 1, 2000, "the message back");
       expect(st().queued).toMatchObject([{ threadId: "A", text: "next", held: true }]);
-      expect(live()?.ending).toBeUndefined();
+      expect(live()?.reply?.stage).toBe("ended");
       expect(live()?.pendingUser).toBeNull();
     });
 
@@ -1165,7 +1263,7 @@ describe("a message the person typed is never lost", () => {
       session.sendQueuedNow(ids[0] ?? "");
       await until(() => st().stopAsk !== null, 2000, "the warning");
       session.removeQueued(ids[0] ?? "");
-      expect(st().stopAsk).toBeNull();
+      await until(() => st().stopAsk === null, 2000, "the server's answer, which takes the warning");
       session.confirmStopAsk(false);
       await tick();
       expect(sends()).toHaveLength(1);
@@ -1254,6 +1352,7 @@ describe("a message the person typed is never lost", () => {
       chat(turn, "B", { type: "delta", text: "words so far" });
       await tick();
       session.stop();
+      await tick();
       chat(turn, "B", CANCELLED);
       await tick();
       session.openThread("A");
@@ -1310,7 +1409,7 @@ describe("a message the person typed is never lost", () => {
       expect(st().stopAsk?.blocking).toEqual(BLOCKING);
       expect(st().draft).toBe("for B");
       expect(st().notice).toBeNull();
-      expect(b.server.calls("chat.cancel")).toHaveLength(0);
+      expect(b.server.calls("reply.stop")).toHaveLength(0);
       expect(sends()).toHaveLength(2);
       session.confirmStopAsk(false);
       await until(() => sends().length === 3, 2000, "the retry");

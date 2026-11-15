@@ -39,6 +39,10 @@ export interface Queue {
   /** Undefined when there is no such entry; "sending" when its turn has started. */
   change(id: string, patch: QueuePatch): "ok" | "sending" | undefined;
   remove(id: string): boolean;
+  /** Whether a message with this id was removed: it never comes back. */
+  removed(id: string): boolean;
+  /** On hold until Send now, whatever it waited for: a Send now asked for it is taken back, and a refusal's reason stays. */
+  hold(id: string): void;
   /** The entry to send now, if any. */
   next(ready: Ready): Entry | undefined;
   /** The server started a turn for it. */
@@ -47,7 +51,7 @@ export interface Queue {
   started(messageId: string): void;
   /** The turn started for an entry ended before its start: it goes back to its place, on hold, with why; what waited behind it in its chat holds too. */
   refused(turnId: string, why: Why): boolean;
-  /** A Stop came for the reply this entry's turn went out behind, before that turn reached the model: it goes back to its place, on hold. */
+  /** A Stop came for this entry's turn, or for the reply it went out behind, before the turn reached the model: it goes back to its place, on hold. */
   pullBack(turnId: string): boolean;
   /** Refused before any turn was taken for it: the same, in one change. */
   turnless(id: string, why: Why): void;
@@ -148,6 +152,10 @@ export function createQueue({ file, changed, log }: { file?: string | undefined;
       set(entries.filter((x) => x.id !== id));
       return true;
     },
+    removed: (id) => removed.has(id),
+    hold(id) {
+      map((q) => (q.id !== id || q.sending !== undefined || (q.held === true && q.now !== true && q.retry !== "running") ? q : { ...without(q, "now", "stopOthers", "stopTurns", "retry"), held: true }));
+    },
     next({ chat, anyTurn, busy }) {
       // a Send now first, and nothing overtakes it while it waits for its chat
       const q = entries.find((x) => free(x) && x.now === true) ?? entries.find((x) => free(x) && x.held !== true);
@@ -172,7 +180,8 @@ export function createQueue({ file, changed, log }: { file?: string | undefined;
     pullBack(turnId) {
       const q = entries.find((x) => x.sending === turnId);
       if (q === undefined) return false;
-      map((x) => (x === q ? { ...without(x, "sending", "why", "retry"), held: true } : x));
+      // also one that went by Send now: on hold it waits for the next Send now, as a refused one does
+      map((x) => (x === q ? { ...without(x, "sending", "why", "retry", "now", "stopOthers", "stopTurns"), waitFor: "reply", held: true } : x));
       return true;
     },
     turnless(id, why) {

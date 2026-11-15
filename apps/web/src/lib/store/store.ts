@@ -64,7 +64,7 @@ export interface LiveTurn {
   readonly startedAt: number;
   /**
    * The server's reply record: the live line's stage and seconds come from it and
-   * nothing else. Absent until its first push; frozen here at this client's Stop.
+   * nothing else, a Stop included (stage "stopping", `stoppedAt`). Absent until its first push.
    */
   readonly reply?: ReplyRecord;
   /** This client's time when `reply` arrived: its work grows from then while it thinks or runs a call. */
@@ -76,10 +76,8 @@ export interface LiveTurn {
   readonly pendingUser: string | null;
   readonly pendingImages?: readonly string[];
   readonly pendingFiles?: readonly AttachedFile[];
-  /** Set once the turn ended without a saved message. */
+  /** Set once the turn ended without a saved message, or the server's record says a Stop was taken (`secs` from that record). */
   readonly end?: { readonly kind: "stopped"; readonly secs: number } | { readonly kind: "error"; readonly code: string; readonly message: string };
-  /** Stopped here, but the server has not ended the turn yet (no terminal event, or chat.send still unanswered); Retry waits. */
-  readonly ending?: true;
   /**
    * Known only from turns.active, with no event of its own yet: it shows as
    * running in the sidebar and nothing more. The server lists a turn before it

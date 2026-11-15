@@ -249,7 +249,7 @@ describe("Stop then Retry (W-02)", () => {
     session.stop();
     session.retry(); // at once: the old turn has not ended on the server yet
     await tick();
-    expect(b.server.calls("chat.cancel")).toHaveLength(1);
+    expect(b.server.calls("reply.stop")).toHaveLength(1);
     expect(b.server.calls("chat.send")).toHaveLength(1);
 
     chat("turn-1", { type: "error", code: "cancelled", message: "cancelled", ended: { reason: "stopped", at: Date.now() } });
@@ -273,6 +273,8 @@ describe("Stop then Retry (W-02)", () => {
     await boot();
     await startFirstTurn();
     session.stop();
+    // the server's record says it took the Stop
+    await tick();
     const held = b.server.hold("chat.send");
     void session.send("next question");
     const h = await held;
@@ -297,12 +299,15 @@ describe("Stop then Retry (W-02)", () => {
     session.retry();
     await tick();
     expect(b.server.calls("chat.send")).toHaveLength(1);
-    expect(openTurn(store.getState())).toMatchObject({ turnId: null, pendingUser: "hi", end: { kind: "stopped" }, ending: true });
-    expect(b.server.calls("chat.cancel")).toHaveLength(0);
+    // nothing is stopped here until the server says so: the send still waits for its answer
+    expect(openTurn(store.getState())).toMatchObject({ turnId: null, pendingUser: "hi" });
+    expect(openTurn(store.getState())?.end).toBeUndefined();
+    expect(b.server.calls("reply.stop")).toHaveLength(0);
     expect(session.canRetry(store.getState())).toBe(false);
     h1.respond({ turnId: "turn-1", userMessage: userMsg("m1") });
     await tick();
-    expect(b.server.calls("chat.cancel").map((c) => c.params)).toEqual([{ turnId: "turn-1" }]);
+    expect(b.server.calls("reply.stop").map((c) => c.params)).toEqual([{ id: "turn-1" }]);
+    expect(openTurn(store.getState())).toMatchObject({ end: { kind: "stopped" }, reply: { stage: "stopping" } });
     session.retry(); // still waiting for turn-1's terminal event
     await tick();
     expect(b.server.calls("chat.send")).toHaveLength(1);
@@ -479,7 +484,7 @@ describe("Retry after a reconnect (WF-01)", () => {
     chat("turn-2", { type: "delta", text: "Fresh " });
     await tick();
     expect(openTurn(store.getState())?.gen).toBe(gen);
-    expect(b.server.calls("chat.cancel").map((c) => c.params)).toEqual([]);
+    expect(b.server.calls("reply.stop").map((c) => c.params)).toEqual([]);
     b.frame();
     expect(openTurn(store.getState())).toMatchObject({ turnId: "turn-2", text: "Fresh " });
     chat("turn-2", { type: "delta", text: "and whole" });
@@ -833,6 +838,7 @@ describe("background turn endings", () => {
     expect(running(store.getState(),"t1")).toBe(0);
     expect(running(store.getState(),"t2")).toBe(1);
     session.stop();
+    await tick();
     expect(running(store.getState(),"t2")).toBe(0);
   });
 
@@ -851,6 +857,8 @@ describe("background turn endings", () => {
     it(`keeps words and thinking when a parked reply ends with ${code}`, async () => {
       await boot();
       await startFirstTurn();
+      // the server's record comes with the start: the kept row's times are its
+      chat("turn-1", { type: "reply", reply: { stage: "thinking", startedAt: Date.now(), readyAt: Date.now(), workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {} } });
       chat("turn-1", { type: "thinking", text: "Reasoning before words" });
       chat("turn-1", { type: "delta", text: "Keep these partial words" });
       await tick(); b.frame();
@@ -941,7 +949,8 @@ describe("the same thread open in two clients (PH-02)", () => {
     session.stop();
     pending.fail("cancelled", "the turn was cancelled before it started");
     await tick();
-    expect(openTurn(store.getState())).toMatchObject({ turnId: null, end: { kind: "stopped" } });
+    // the Stop never reached the server, so no stopped reply is left to show
+    expect(openTurn(store.getState())).toBeNull();
     // later, the other client's turn in this thread streams here
     chat("turn-8", { type: "start", model: "gemma3:4b", userMessage: userMsg("m8", "t1", "theirs") });
     chat("turn-8", { type: "delta", text: "Theirs" });
@@ -972,6 +981,7 @@ describe("Stop keeps buffered words (W-05)", () => {
     chat("turn-1", { type: "delta", text: " final pending words" });
     await tick();
     session.stop();
+    await tick();
     expect(openTurn(store.getState())?.text).toBe("Hello final pending words");
     expect(openTurn(store.getState())?.end?.kind).toBe("stopped");
   });

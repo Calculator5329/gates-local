@@ -176,7 +176,7 @@ describe("a finished reply's line (decisions 3 and 4)", () => {
 
 describe("a stopped reply's time", () => {
   it("the line keeps the work and the square keeps Stop's seconds, live and saved: thinking 2 s, a 15 s call, Stop at 18 s", async () => {
-    const stopped = play(sent(), [push(0, { stage: "thinking", readyAt: 0 }), [0, { type: "thinking", text: "Hm." }], push(2000, { stage: "tool", readyAt: 0, workMs: 2000 }), [2000, { type: "tool", step: step("a", "running") }], [17_000, { type: "tool", step: step("a", "done", 15_000) }], push(17_000, { stage: "thinking", readyAt: 0, workMs: 17_000 }), [18_000, { type: "stop" }]]);
+    const stopped = play(sent(), [push(0, { stage: "thinking", readyAt: 0 }), [0, { type: "thinking", text: "Hm." }], push(2000, { stage: "tool", readyAt: 0, workMs: 2000 }), [2000, { type: "tool", step: step("a", "running") }], [17_000, { type: "tool", step: step("a", "done", 15_000) }], push(17_000, { stage: "thinking", readyAt: 0, workMs: 17_000 }), push(18_400, { stage: "stopping", readyAt: 0, workMs: 18_000, stoppedAt: 18_000 })]);
     const shown = await live(19_000, stopped);
     expect([bulb(shown), square(shown)]).toEqual(["18", "18"]);
     const after = await saved({ id: "s", threadId: T, role: "assistant", createdAt: 2, content: "", thinking: "Hm.", tools: stopped.tools, interrupted: true, times: stamped("stopped", 18, 18_000) });
@@ -184,7 +184,7 @@ describe("a stopped reply's time", () => {
   });
 
   it("stopped while thinking, with no calls and no words, the time shows once: in the line's name, not on the square", async () => {
-    const stopped = play(sent(), [push(0, { stage: "thinking", readyAt: 0 }), [0, { type: "thinking", text: "Hm." }], [3000, { type: "stop" }]]);
+    const stopped = play(sent(), [push(0, { stage: "thinking", readyAt: 0 }), [0, { type: "thinking", text: "Hm." }], push(3300, { stage: "stopping", readyAt: 0, workMs: 3000, stoppedAt: 3000 })]);
     const shown = await live(5000, stopped);
     expect(shown).toContain('class="stop-mark"');
     expect(square(shown)).toBeUndefined();
@@ -192,7 +192,7 @@ describe("a stopped reply's time", () => {
   });
 
   it("stopped before its first word, the row says Stopped once beside the square and keeps Regenerate, live and saved", async () => {
-    const stopped = play(sent(), [push(0, { stage: "waiting", readyAt: 0 }), [2000, { type: "stop" }]]);
+    const stopped = play(sent(), [push(0, { stage: "waiting", readyAt: 0 }), push(2300, { stage: "stopping", readyAt: 0, stoppedAt: 2000 })]);
     const shown = await live(2500, stopped);
     expect(visible(shown)).toMatch(/^Check my notes \d+:\d+ [AP]M Stopped 2 s$/);
     expect(shown.match(/>Stopped</g), "once on screen").toHaveLength(1);

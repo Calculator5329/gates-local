@@ -102,11 +102,14 @@ it("New thread on the new-chat screen keeps its words and gives the draft a new 
   expect(drafts.savedDrafts().map(d => d.key)).toEqual([null]);
 });
 
-it("M18: removing a queued editor restores the earlier draft and attachments", () => {
-  store.setState({ queued: [{ id: "q", threadId: "A", text: "queued words", at: 1, held: true, waitFor: "reply" }] });
+it("M18: removing a queued editor restores the earlier draft and attachments", async () => {
+  browser.server.queue.add({ id: "q", threadId: "A", messageId: "m-q", text: "queued words", at: 1, held: true, waitFor: "reply" });
+  await until(() => store.getState().queued.length === 1, 2000, "the server's list");
   drafts.replaceDraft("A", { text: "before edit", images: ["before-image"], sendId: "before-id" });
   session.editQueued("q"); drafts.editDraft("edited queue");
   session.removeQueued("q");
+  // the row goes when the server answers
+  await until(() => store.getState().queued.length === 0, 2000, "the server's answer");
   expect(drafts.getDraft("A")).toMatchObject({ text: "before edit", images: ["before-image"], sendId: "before-id" });
   expect(store.getState().queued).toEqual([]);
   expect(store.getState().editingQueued).toBeNull();

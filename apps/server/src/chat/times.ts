@@ -16,7 +16,7 @@ export interface TurnClock {
   ready(now: number): void;
   /** `event` was sent at `now`; `thought` is the thinking sent before it. True when the record changed. Nothing after a Stop counts. */
   see(event: TurnStep, now: number, thought: string): boolean;
-  /** The person pressed Stop at `now`: the times end there, whatever words were already on their way. */
+  /** A Stop was taken at `now`: the times end there, whatever words were already on their way, and the stage is stopping until the end. */
   stop(now: number, thought: string): void;
   /** The attempt failed and runs again from `now`: its rounds and first word start over; the work done so far stays counted. */
   retry(now: number): void;
@@ -46,7 +46,7 @@ export function turnClock(startedAt: number): TurnClock {
   let firstTokenAt: number | undefined;
   let thoughtMs: number | undefined;
   let ended: TurnEnded | undefined;
-  let stopped = false;
+  let stoppedAt: number | undefined;
   let open: { readonly since: number; readonly from: number } | undefined;
   let spans: { from: number; ms: number }[] = [];
   let callsAt: Record<string, number> = {};
@@ -78,10 +78,10 @@ export function turnClock(startedAt: number): TurnClock {
   };
   const thoughtUntil = (now: number) => Math.max(0, now - (readyAt ?? startedAt));
   /** The times stop at `now`: an open round closes, and a reply that thought and never answered thought until then. */
-  const finish = (now: number, thought: string) => {
+  const finish = (now: number, thought: string, as: "stopping" | "ended") => {
     close(now);
     if (thought !== "" && thoughtMs === undefined && firstTokenAt === undefined) thoughtMs = thoughtUntil(now);
-    moveTo("ended", now);
+    moveTo(as, now);
   };
   /** What a window draws: a change in any of these is pushed. */
   const shape = () => `${stage}|${attempt}|${readyAt}|${firstTokenAt}|${spans.length}|${Object.keys(callsAt).length}`;
@@ -99,12 +99,12 @@ export function turnClock(startedAt: number): TurnClock {
       if (stage === "loading") stage = "waiting";
     },
     stop(now, thought) {
-      if (stopped) return;
-      finish(now, thought);
-      stopped = true;
+      if (stoppedAt !== undefined || ended !== undefined) return;
+      finish(now, thought, "stopping");
+      stoppedAt = now;
     },
     retry(now) {
-      if (stopped || ended !== undefined) return;
+      if (stoppedAt !== undefined || ended !== undefined) return;
       attempt += 1;
       spans = [];
       callsAt = {};
@@ -116,7 +116,7 @@ export function turnClock(startedAt: number): TurnClock {
       moveTo(readyAt === undefined ? stage : "thinking", now);
     },
     see(event, now, thought) {
-      if (stopped) return false;
+      if (stoppedAt !== undefined) return false;
       const before = shape();
       if (event.type === "tool") {
         readyNow(now);
@@ -152,11 +152,14 @@ export function turnClock(startedAt: number): TurnClock {
         attempt,
         spans: [...spans],
         callsAt: { ...callsAt },
+        ...(stoppedAt === undefined ? {} : { stoppedAt }),
         ...(ended === undefined ? {} : { ended }),
       };
     },
     end(how, thought, why) {
-      if (!stopped) finish(how.at, thought);
+      // a stopped reply's times ended at its Stop: only the stage moves on
+      if (stoppedAt === undefined) finish(how.at, thought, "ended");
+      else moveTo("ended", how.at);
       ended = how;
       return {
         startedAt,

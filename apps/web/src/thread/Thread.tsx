@@ -18,7 +18,7 @@ import { focusComposer } from "../composer/focus.ts";
 import { cancelImage, earlierOf, fileUrl, loadEarlier, onEarlier, reloadThread, retry, retryImage } from "../lib/session/index.ts";
 import { AttachedFiles, AttachmentImages } from "../composer/attachment-images.tsx";
 import { type LiveTurn, NA, type State, type StopNote, getState, turnOf, useStore } from "../lib/store/store.ts";
-import { workMsAt } from "./turn.ts";
+import { stopping, workMsAt } from "./turn.ts";
 import { type Drawn, type Rounds, drawTimes } from "./times.ts";
 import { currentDraftKey, replaceDraft } from "../lib/store/drafts.ts";
 import { TurnSkel, closeTip, esc } from "../lib/ui/ui.tsx";
@@ -174,7 +174,7 @@ function LiveLine({ turn, tools }: { turn: LiveTurn; tools: readonly ToolStep[] 
   const words = stage === "loading" ? (cpu ? "Loading into memory…" : "Loading into GPU memory…")
     : stage === "thinking" ? "Thinking"
     : stage === "tool" ? (tools.findLast((s) => s.state === "running") ?? tools.at(-1))?.summary ?? "Thinking"
-    : stage === "writing" || stage === "ended" ? "Writing"
+    : stage === "writing" || stage === "stopping" || stage === "ended" ? "Writing"
     // a wait under a second says nothing, so nothing flashes before the model answers
     : imageBusy ? "Waiting for an image" : t - turn.startedAt >= 1000 ? "Waiting" : "";
   return (
@@ -703,7 +703,7 @@ function Reply({ msg, live, text, paced, thinking, tools, rounds, secs, allowedL
   // stopped while thinking, with no calls and no words, the pill holds the time and the square has no second copy;
   // with calls the bulb keeps the thinking and the square keeps Stop's seconds
   const foldTimed = calls.length === 0 && text === "" && thinking !== "";
-  // the same mark while the stopped turn is live and once its saved row takes over
+  // the same mark, with the server's seconds, while the stopped turn is live and once its saved row takes over
   const stopSecs = end?.kind === "stopped" ? end.secs : note?.kind === "stopped" ? note.secs : undefined;
   const stop = stopSecs !== undefined ? (foldTimed ? null : stopSecs) : interrupted && note === undefined ? null : undefined;
   const streaming = live !== null && end === undefined;
@@ -727,7 +727,7 @@ function Reply({ msg, live, text, paced, thinking, tools, rounds, secs, allowedL
       ) : note?.kind === "failed" ? <FailLine words="The reply didn't finish." why={note.why} retryable={regen} /> : null}
       {!streaming && !pending && !msg?.imageJob && !(text === "" && msg?.tools?.every(t => t.name === "image")) ? (
         // a stopped turn draws the row its saved reply will draw; Regenerate is off until the server has ended the turn (W-02)
-        <ActRow text={text} meta={meta} wait={wait} regen={regen} regenOff={live?.ending === true} stop={stop} empty={text === "" && !folded && notes.length === 0 && !msg?.images?.length} />
+        <ActRow text={text} meta={meta} wait={wait} regen={regen} regenOff={stopping(live ?? undefined)} stop={stop} empty={text === "" && !folded && notes.length === 0 && !msg?.images?.length} />
       ) : null}
     </div>
   );
@@ -756,7 +756,7 @@ const LiveReply = memo(function LiveReply({ threadId, msg, last, origin, token }
   const messages = useStore(s => queuedImage ? s.messages[threadId] ?? EMPTY : EMPTY);
   const allowedLinks = useMemo(() => imageTurnLinks(messages, tools), [messages, tools]);
   const note = saved?.note;
-  // the server's work time: the saved row's, or the record held still where the turn ended here
+  // the server's work time: the saved row's, or the record's once the turn has ended
   const workMs = live === null ? saved?.workMs : live.end === undefined ? undefined : workMsAt(live, Date.now());
   const r = live?.reply;
   const waitMs = live === null ? saved?.waitMs : r?.readyAt === undefined ? undefined : r.readyAt - r.startedAt;

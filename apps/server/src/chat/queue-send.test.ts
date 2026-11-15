@@ -1,99 +1,10 @@
 // The server sends its queue: a message queued behind a reply goes when that reply ends and
 // leaves the queue at its start; a Stop holds it until Send now.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { type Channel, type Payload, type QueuedMessage, methods } from "@gates-local/contracts";
+import { methods } from "@gates-local/contracts";
 import * as S from "effect/Schema";
-import { afterEach, expect, it, vi } from "vitest";
-import { AppError, createApp } from "../app.ts";
-import { openThreadStore } from "../threads/store.ts";
-
-const MODEL = "qwen3.5:9b";
-const cleanups: (() => void | Promise<void>)[] = [];
-afterEach(async () => {
-  vi.unstubAllGlobals();
-  for (const clean of cleanups.splice(0).toReversed()) await clean();
-});
-
-const until = async (ok: () => boolean, what: string) => {
-  for (let i = 0; i < 400 && !ok(); i++) await new Promise((r) => setTimeout(r, 5));
-  if (!ok()) throw new Error(`timed out waiting for ${what}`);
-};
-
-function rig(hooks: { fileOwnersRead?: () => void } = {}) {
-  const root = path.join(os.homedir(), ".cache", "gates-local-tests");
-  mkdirSync(root, { recursive: true });
-  const dir = mkdtempSync(path.join(root, "queue-send-"));
-  cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
-  const db = openThreadStore(path.join(dir, "threads.sqlite"));
-  const thread = db.createThread({ title: "A" });
-  const show: unknown = JSON.parse(readFileSync(new URL("../fit/fixtures/show-qwen3-5-9b.json", import.meta.url), "utf8"));
-  /** Each chat request's model and context. */
-  const asked: { model: string; numCtx: number }[] = [];
-  vi.stubGlobal("fetch", async (url: string | URL | Request, init?: RequestInit) => {
-    const where = new URL(String(url)).pathname;
-    if (where === "/api/chat") {
-      const body = JSON.parse(String(init?.body)) as { model: string; options: { num_ctx: number } };
-      asked.push({ model: body.model, numCtx: body.options.num_ctx });
-    }
-    if (where === "/api/show") return Response.json(show);
-    if (where === "/api/ps") return Response.json({ models: [] });
-    if (where === "/api/tags") return Response.json({ models: [{ name: MODEL, size: 6600000000, digest: "d", modified_at: "2026-11-01T00:00:00Z" }] });
-    if (where === "/api/chat") return new Response(`${JSON.stringify({ model: MODEL, message: { role: "assistant", content: "ok" }, done: true, done_reason: "stop" })}\n`);
-    throw new Error(`Unexpected request: ${where}`);
-  });
-  // each send's admit waits here: openOne lets the next one through, open lets every one through
-  const waiting: (() => void)[] = [];
-  let allowed = 0;
-  let all = false;
-  const pass = () => {
-    for (;;) {
-      const go = waiting[0];
-      if (go === undefined || !(all || allowed > 0)) return;
-      if (!all) allowed--;
-      waiting.shift();
-      go();
-    }
-  };
-  /** The next admits refuse with these, in order. */
-  const refusals: Error[] = [];
-  const open = () => { all = true; pass(); };
-  const openOne = () => { allowed++; pass(); };
-  const signal = new AbortController().signal;
-  const pushes: Array<{ channel: Channel; payload: unknown }> = [];
-  const model = { name: MODEL, digest: "d", sizeBytes: 6_600_000_000, modifiedAt: "2026-11-01T00:00:00Z", capabilities: ["completion" as const] };
-  // a test can act at the moment the server reads who owns the attached files (inside the save)
-  const store = new Proxy(db, { get: (target, key) => key === "fileOwnersRead" ? undefined : key === "fileOwners" ? () => { hooks.fileOwnersRead?.(); return target.fileOwners(); } : Reflect.get(target, key, target) });
-  const app = createApp({
-    store,
-    dataDir: dir,
-    runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
-    catalog: { current: () => [model], refresh: async () => ({ models: [model], changed: false }), onChange: () => () => {}, stop: () => {} },
-    push: (channel, payload) => { pushes.push({ channel, payload }); },
-    fit: { runNvidiaSmi: async (args) => (args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : ""), readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
-    models: { handlers: {}, loader: { reserve: () => ({
-      baseUrl: "http://fake", signal, cold: false, firstToken: () => {}, end: () => {},
-      admit: async (_ctx, options) => {
-        await new Promise<void>((go) => { waiting.push(go); pass(); });
-        const no = refusals.shift();
-        if (no !== undefined) throw no;
-        if (options?.fit === undefined) throw new Error("missing app fit");
-        return options.fit(signal, { handoff: undefined, leave: async () => undefined });
-      },
-    }) } },
-  });
-  cleanups.push(async () => { open(); await app.shutdown(); db.close(); });
-  const starts = () => pushes.flatMap((p) => {
-    const e = (p.payload as Payload<"chat.event">).event;
-    return p.channel === "chat.event" && e.type === "start" ? [e.userMessage.content] : [];
-  });
-  const queued = (): readonly QueuedMessage[] => (pushes.findLast((p) => p.channel === "queue.changed")?.payload ?? []) as readonly QueuedMessage[];
-  const entry = (id: string, text: string): QueuedMessage => ({ id, threadId: thread.id, messageId: `m-${id}`, text, at: 1, waitFor: "reply", model: MODEL, numCtx: 16384 });
-  return { app, db, thread, open, openOne, refusals, asked, pushes, starts, queued, entry, h: app.handlers as Required<typeof app.handlers> };
-}
-
-const settle = () => new Promise((r) => setTimeout(r, 50));
+import { expect, it, onTestFinished, vi } from "vitest";
+import { AppError } from "../app.ts";
+import { MODEL, rig, settle, until } from "../../test/send-rig.ts";
 
 it("a message queued behind a reply goes when that reply ends, and leaves the queue at its start", async () => {
   const r = rig();
@@ -174,15 +85,33 @@ it("a Stop that lands while a queued message's file is being saved still holds i
   expect(r.db.getMessage("m-q1"), "the pulled-back message was never saved").toBeUndefined();
 });
 
-it("a Stop long after the reply ended changes nothing", async () => {
-  const r = rig();
+it("a Stop long after the reply ended still holds what waits in its chat, and leaves the reply being written alone", async () => {
+  const r = rig({ drip: true });
   r.open();
-  const { turnId } = await r.h["chat.send"]({ threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
-  await until(() => r.starts().length === 1, "the reply");
+  const first = await r.h["chat.send"]({ threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+  await until(() => r.record(first.turnId)?.stage === "writing", "the first reply being written");
+  r.finish();
+  await until(() => r.events(first.turnId).some((e) => e.type === "done"), "the first reply's end");
+  // an hour passes: no length of time makes a Stop mean less
+  const ended = Date.now();
+  const clock = vi.spyOn(Date, "now").mockImplementation(() => Math.round(performance.timeOrigin + performance.now()) + 3_600_000);
+  onTestFinished(() => clock.mockRestore());
+  expect(Date.now() - ended).toBeGreaterThanOrEqual(3_600_000);
+  const second = await r.h["chat.send"]({ threadId: r.thread.id, content: "second", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+  await until(() => r.record(second.turnId)?.stage === "writing", "the second reply being written");
+  await r.h["queue.add"](r.entry("q1", "third"), { clientId: 1 });
+  await r.h["queue.add"](r.entry("q2", "fourth"), { clientId: 1 });
+  // the older call says no reply was stopped; what waits holds all the same
+  expect(await r.h["chat.cancel"]({ turnId: first.turnId }, { clientId: 2 })).toEqual({ cancelled: false });
+  expect(r.queued().map((q) => [q.id, q.held])).toEqual([["q1", true], ["q2", true]]);
+  expect(await r.h["reply.stop"]({ id: first.turnId }, { clientId: 2 })).toMatchObject({ answer: "gone", why: "sent", question: { content: "first" } });
+  expect(r.record(second.turnId)).toMatchObject({ stage: "writing" });
+  expect(r.record(second.turnId)?.stoppedAt).toBeUndefined();
+  r.finish();
+  await until(() => r.events(second.turnId).some((e) => e.type === "done"), "the second reply's end");
   await settle();
-  await r.h["queue.add"](r.entry("q1", "second"), { clientId: 1 });
-  await until(() => r.starts().length === 2, "the queued message sent");
-  expect(await r.h["chat.cancel"]({ turnId }, { clientId: 1 })).toEqual({ cancelled: false });
+  expect(r.starts(), "nothing held goes on its own").toEqual(["first", "second"]);
+  expect(r.queued().map((q) => [q.id, q.held, q.sending])).toEqual([["q1", true, undefined], ["q2", true, undefined]]);
 });
 
 it("a row left open in a composer goes on once that window's connection closes", async () => {

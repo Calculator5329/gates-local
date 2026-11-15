@@ -1,9 +1,10 @@
 // A turn as the app holds it from chat.send's reserve to its end, how it ended, and the
 // state the app's jobs share (app.ts builds it once and hands it to each).
-import type { Message, Payload, ToolStep, TurnEnded } from "@gates-local/contracts";
+import type { Message, Params, Payload, ToolStep, TurnEnded } from "@gates-local/contracts";
 import type { fileLifecycle } from "../chat/files.ts";
 import type { imageLifecycle } from "../chat/image-lifecycle.ts";
 import type { Queue } from "../chat/queue.ts";
+import type { Replies } from "../chat/replies.ts";
 import type { TurnClock } from "../chat/times.ts";
 import type { ChatEvent } from "../chat/types.ts";
 import type { FitTableSource } from "../fit/table.ts";
@@ -71,6 +72,8 @@ export interface Turn {
   /** Its saved question once it starts; rejects with its refusal (App.admission). */
   admission?: Promise<Message>;
   terminal: boolean;
+  /** What chat.send asked: a Stop before its question is saved is answered with these words, on hold. */
+  asked?: Pick<Params<"chat.send">, "content" | "messageId" | "images" | "files" | "think"> & { readonly numCtx?: number };
   start?: Extract<WireEvent, { type: "start" }>;
   /** The reply's row on disk while it streams. threads.get hides it: this reply reaches clients as its live turn. */
   draftId: string | undefined;
@@ -112,6 +115,8 @@ export interface AppContext {
   readonly attachedFiles: ReturnType<typeof fileLifecycle> | undefined;
   readonly draftEveryMs: number;
   readonly queue: Queue;
+  /** Each waiting message as one record, and the answer to every call that names one. */
+  readonly replies: Replies;
   readonly fitTable: FitTableSource;
   /** The turn's reply record as it is now, to every window. */
   readonly pushReply: (turn: Turn) => void;

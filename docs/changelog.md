@@ -1,5 +1,49 @@
 # Changelog
 
+## 2026-11-15: Stop and Send now are each one step on the server
+
+- Stop stops the reply and puts what waits behind it on hold in one
+  step on the server. Before, the window pressed Stop and then asked for
+  each waiting message to hold, one call each, so a message could slip
+  out between them or stay held in one window only.
+- Send now on a waiting message stops the reply before it and sends the
+  message in one step. Before, the window sent two calls and the second
+  could be lost.
+- A Stop that arrives after the reply has ended still holds what waits
+  in that chat and takes back a message that had just gone out and was
+  not yet saved, also one that went by Send now, however late the Stop
+  arrives. Before, this worked for five seconds and never for Send now.
+- Waiting messages show On hold when the server says they are held, not
+  at the press.
+
+## 2026-11-15: a waiting message never changes on screen before the server says so
+
+- Remove, Edit, Update, Send now and a memory offer's choice on a waiting
+  message each get one answer from the server: done, already sent,
+  removed, already on its way, or open in another window. The window
+  changes what it shows only then. Before, the window changed its own
+  copy first and ignored most failures.
+- Saving an edit to a message that another window removed or sent keeps
+  the typed words in the composer and says what happened to the message.
+  Before, the composer emptied and the words were lost.
+- A save that conflicts with another window's change is refused instead
+  of overwriting it.
+- When Gates Local is not answering, Remove and Update say so and leave
+  the message as it was. A second press of Update saves the edit once.
+- Send now on a message queued before any model was installed sends it
+  with the model the server picks, as when it goes on its own. Before,
+  it took the model the composer showed at that press.
+
+## 2026-11-15: a stopped reply shows the same seconds in every window
+
+- The seconds under a stopped reply now come from the server: the window
+  that pressed Stop, a second window and a reload all show one number.
+  Before, the pressing window counted on its own clock, so on a slow
+  connection it could show a second less than the others.
+- Stop takes effect on screen when the server says it took the Stop, not
+  at the press. On this computer that is the same instant; on a phone
+  over a slow connection the Stop button stays for that moment.
+
 ## 2026-11-15: the update note and the models list stop going back in time
 
 - The update footer and Settings › Updates could show an older state for

@@ -4,9 +4,10 @@
 // the few browser globals session.ts touches (location, history, document,
 // localStorage, requestAnimationFrame). Each test imports session.ts fresh.
 import { vi } from "vitest";
-import type { Channel, Message, MethodName, Params, Payload, QueuedMessage, ResultOf, SyncMetadata } from "@gates-local/contracts";
+import type { Channel, Message, MethodName, Params, Payload, QueuedMessage, ReplyAnswer, ReplyRecord, ResultOf, SyncMetadata } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { createQueue } from "@gates-local/server/chat/queue.ts";
+import { createReplies } from "@gates-local/server/chat/replies.ts";
 
 type Listener = (event: { data?: unknown }) => void;
 
@@ -65,6 +66,7 @@ export class FakeSocket {
     if (this.readyState === 3) return;
     this.readyState = 3;
     this.emit("close");
+    this.server.left(this);
   }
   frame(value: unknown): void {
     if (this.readyState === 1) this.emit("message", { data: JSON.stringify(value) });
@@ -127,7 +129,8 @@ export class FakeServer {
 
   handle(socket: FakeSocket, req: Request): void {
     this.log.push(req);
-    if (req.method === "chat.cancel") this.stopped.add((req.params as Params<"chat.cancel">).turnId);
+    this.caller = this.sockets.indexOf(socket) + 1;
+    if (req.method === "chat.cancel") this.answered.stop({ id: (req.params as Params<"chat.cancel">).turnId });
     const answer = (result: unknown) => socket.frame({ type: "response", id: req.id, ok: true, result });
     const send = req.params as Params<"chat.send">;
     const start = (payload: Payload<"chat.event">) => { socket.frame({ type: "push", channel: "chat.event", payload }); this.heard(payload); };
@@ -151,7 +154,7 @@ export class FakeServer {
     }
     const fn = this.answers.get(req.method);
     try {
-      ok(fn ? fn(req.params as never) : req.method.startsWith("queue.") ? this.queueCall(req) : methodSamples[req.method].result);
+      ok(fn ? fn(req.params as never) : req.method.startsWith("queue.") || req.method.startsWith("reply.") ? this.queueCall(req) : methodSamples[req.method].result);
     } catch (e) {
       const f = e as { code?: string; message?: string; blocking?: unknown };
       err(f.code ?? "internal", f.message ?? "failed", f.blocking);
@@ -173,7 +176,18 @@ export class FakeServer {
   // The server's queue: its real rules (server chat/queue.ts) and, in small, the server's pump
   // (app.ts sendQueued and heard). A queued message goes out as a chat.send the server makes
   // itself, logged with the windows' calls and answered by the same holds and answers.
-  readonly queue = createQueue({ changed: (list) => this.broadcast("queue.changed", list), log: () => undefined });
+  readonly queue = createQueue({ changed: (list) => { this.answered.changed(list); this.broadcast("queue.changed", list); }, log: () => undefined });
+  private readonly answered = createReplies({
+    queue: this.queue,
+    saved: () => undefined,
+    flight: () => undefined,
+    inChat: (threadId) => [...this.replies].find(([, t]) => t === threadId)?.[0],
+    stop: (turnId) => this.stop(turnId),
+    unsaved: () => undefined,
+  });
+  /** Which connection has each message open in its composer, and which one is calling now. */
+  private readonly editing = new Map<string, number>();
+  private caller = 0;
   /** Turns from an answered chat.send until their done or error, by id: their chats. */
   private readonly replies = new Map<string, string>();
   /** Windows' chat.send calls not answered yet, by request id: their chats. */
@@ -182,6 +196,9 @@ export class FakeServer {
   private readonly over = new Set<string>();
   private readonly stopped = new Set<string>();
   private readonly attempts = new Map<string, number>();
+  /** Each turn's last pushed record, and when the turn began for one with no push yet. */
+  private readonly records = new Map<string, ReplyRecord>();
+  private readonly begun = new Map<string, number>();
   private runtimeReady = methodSamples["runtime.status"].result.state === "ready";
   private hasModels = methodSamples["models.list"].result.models.length > 0;
   private pumpSoon = false;
@@ -191,11 +208,40 @@ export class FakeServer {
   private running(threadId: string, result: unknown): void {
     const r = result as { turnId?: string; replayed?: boolean } | null;
     // a test may push a turn's end before its chat.send is answered
-    if (r !== null && typeof r === "object" && r.replayed !== true && typeof r.turnId === "string" && !this.over.has(r.turnId)) this.replies.set(r.turnId, threadId);
+    if (r !== null && typeof r === "object" && r.replayed !== true && typeof r.turnId === "string" && !this.over.has(r.turnId)) {
+      this.replies.set(r.turnId, threadId);
+      if (!this.begun.has(r.turnId)) this.begun.set(r.turnId, Date.now());
+    }
   }
 
-  private queueCall(req: Request): readonly QueuedMessage[] {
+  /**
+   * The Stop itself as the server takes it: the reply's record, now stopping, goes to every window
+   * before the answer. Its chat, or none for a turn that is not running. What waits behind it is
+   * held by the server's own rules, in the same call (server chat/replies.ts).
+   */
+  private stop(turnId: string): string | undefined {
+    const threadId = this.replies.get(turnId);
+    const again = this.stopped.has(turnId);
+    this.stopped.add(turnId);
+    if (threadId === undefined || again) return threadId;
+    const now = Date.now();
+    const last: ReplyRecord = this.records.get(turnId) ?? { stage: "waiting", startedAt: this.begun.get(turnId) ?? now, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {} };
+    this.broadcast("chat.event", { turnId, threadId, event: { type: "reply", reply: { ...last, stage: "stopping", stoppedAt: now } } });
+    return threadId;
+  }
+
+  private queueCall(req: Request): readonly QueuedMessage[] | ReplyAnswer {
     const p = req.params as { id: string };
+    const by = this.caller;
+    const answer = this.replyCall(req, by);
+    if (answer !== undefined) {
+      if (req.method === "reply.edit" && answer.answer === "done") {
+        if ((req.params as Params<"reply.edit">).open) this.editing.set(p.id, by);
+        else this.editing.delete(p.id);
+      }
+      this.pump();
+      return answer;
+    }
     if (req.method === "queue.add") this.queue.add(req.params as QueuedMessage);
     if (req.method === "queue.update") {
       const { id, ...patch } = req.params as Params<"queue.update">;
@@ -204,6 +250,30 @@ export class FakeServer {
     if (req.method === "queue.remove") this.queue.remove(p.id);
     this.pump();
     return this.queue.list();
+  }
+
+  /** A call on one waiting message, answered by the server's own rules (server chat/replies.ts). */
+  private replyCall(req: Request, by: number): ReplyAnswer | undefined {
+    switch (req.method) {
+      case "reply.change": return this.answered.change(req.params as Params<"reply.change">, by);
+      case "reply.edit": return this.answered.edit(req.params as Params<"reply.edit">, by);
+      case "reply.remove": return this.answered.remove(req.params as Params<"reply.remove">);
+      case "reply.now": return this.answered.now(req.params as Params<"reply.now">);
+      case "reply.hold": return this.answered.hold(req.params as Params<"reply.hold">);
+      case "reply.stop": return this.answered.stop(req.params as Params<"reply.stop">);
+      default: return undefined;
+    }
+  }
+
+  /** A window's connection closed: the messages it had open in its composer are free again. */
+  left(socket: FakeSocket): void {
+    const by = this.sockets.indexOf(socket) + 1;
+    for (const [id, who] of this.editing) {
+      if (who !== by) continue;
+      this.editing.delete(id);
+      this.answered.release(id, by);
+    }
+    this.pump();
   }
 
   /** The server's catalog changed with no push yet (a scenario delivers that itself): its queue sees it. */
@@ -222,11 +292,13 @@ export class FakeServer {
     if (event.type === "reply") {
       const before = this.attempts.get(turnId) ?? 1;
       this.attempts.set(turnId, event.reply.attempt);
+      this.records.set(turnId, event.reply);
       if (event.reply.attempt > before) this.queue.retrying(threadId);
       return;
     }
     if (event.type === "start") {
       if (this.over.has(turnId)) return;
+      if (!this.begun.has(turnId)) this.begun.set(turnId, Date.now());
       this.started.add(turnId);
       this.replies.set(turnId, threadId);
       this.queue.started(event.userMessage.id);
@@ -235,6 +307,7 @@ export class FakeServer {
     if (event.type !== "done" && event.type !== "error") return;
     this.over.add(turnId);
     this.replies.delete(turnId);
+    this.answered.settled(turnId, threadId, undefined);
     // its chat.send may not be answered yet: the server's own turn has ended all the same
     for (const [id, t] of this.asked) if (t === threadId) this.asked.delete(id);
     const stopped = this.stopped.delete(turnId);

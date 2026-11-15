@@ -117,10 +117,10 @@ export class OrderingServer extends FakeServer {
       save(turnId, { turnId });
       if (!this.holdChat) this.response(turnId);
       if (!this.deferAdmission) this.admit(turnId);
-    } else if (request.method === "chat.cancel") {
+    } else if (request.method === "reply.stop") {
       this.log.push(request);
-      this.cancelled.push((request.params as { turnId: string }).turnId);
-      respond({ cancelled: true });
+      this.cancelled.push((request.params as { id: string }).id);
+      respond(methodSamples["reply.stop"].result);
     } else super.handle(socket, request);
   }
 

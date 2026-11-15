@@ -6,7 +6,8 @@
 //
 // What the reply is doing and its seconds are the server's reply record:
 // this client keeps no clock of its own and guesses no stage.
-import type { Payload, ToolStep, TurnEnded } from "@gates-local/contracts";
+// A press of Stop changes nothing here: the record says when the server took it.
+import type { Payload, ReplyRecord, ToolStep, TurnEnded } from "@gates-local/contracts";
 import type { LiveTurn, State } from "../lib/store/store.ts";
 
 export type ChatEvent = Payload<"chat.event">["event"];
@@ -16,11 +17,9 @@ export type TurnEvent =
   | ChatEvent
   /** chat.send answered: the turn has its id; its start brings the saved question. */
   | { readonly type: "sent"; readonly turnId: string }
-  /** The person pressed Stop; the server's end is still to come. */
-  | { readonly type: "stop" }
   /** chat.send was refused after the turn had ended here: it stays as it ended, without the question it was waiting to save. */
   | { readonly type: "refused" }
-  /** The connection dropped: a reply still being written stops here, and a stopped one stops waiting for the server. */
+  /** The connection dropped: a reply still being written is cut off here, and one the server was stopping stops waiting for it. */
   | { readonly type: "lost" }
   /** turns.active after a reconnect: the server is still writing this reply. */
   | { readonly type: "running" };
@@ -30,7 +29,12 @@ const CLOSED = { kind: "error", code: "closed", message: "The connection dropped
 /** Cut off by a dropped connection; the server may still be writing it. */
 const closed = (turn: LiveTurn) => turn.end?.kind === "error" && turn.end.code === "closed";
 
-const secsSince = (turn: LiveTurn, now: number) => Math.round((now - turn.startedAt) / 1000);
+/** A stopped reply's seconds: both ends are the server's times, so every window and the saved row agree. */
+const stoppedSecs = (reply: ReplyRecord | undefined, at: number | undefined): number =>
+  reply === undefined ? 0 : Math.max(0, Math.round(((reply.stoppedAt ?? at ?? reply.startedAt) - reply.startedAt) / 1000));
+
+/** The server took a Stop for this reply and has not ended it yet: no Retry, and nothing new starts in its chat. */
+export const stopping = (turn: Pick<LiveTurn, "reply"> | undefined): boolean => turn?.reply?.stage === "stopping";
 
 /**
  * The reply's work at `now`, in milliseconds: thinking plus tool time, never the
@@ -45,8 +49,11 @@ export function workMsAt(turn: Pick<LiveTurn, "reply" | "replyAt" | "end">, now:
   return r.workMs + (growing ? Math.max(0, now - (turn.replyAt ?? now)) : 0);
 }
 
-/** The record held still at `now`: the turn ended here (Stop, a failure, a dropped connection) before the server said so. */
-function frozen(turn: LiveTurn, now: number): Pick<LiveTurn, "reply" | "replyAt"> {
+/**
+ * The connection dropped at `now`, so no record can say where the reply stands: here it is over,
+ * its work counted up to the drop. The only time this client's clock ends a record.
+ */
+function cutOff(turn: LiveTurn, now: number): Pick<LiveTurn, "reply" | "replyAt"> {
   const work = workMsAt(turn, now);
   return turn.reply === undefined || work === undefined ? {} : { reply: { ...turn.reply, stage: "ended", workMs: Math.round(work) }, replyAt: now };
 }
@@ -89,11 +96,13 @@ function advance(turn: LiveTurn, event: TurnEvent, now: number): LiveTurn | null
         ...(turn.end === undefined || closed(turn) ? { end: undefined, text: "", thinking: "", tools: [] } : {}),
       };
     case "reply": {
-      // a reply that ended here keeps the time it ended with; one the connection cut off takes the server's again
-      if (turn.end !== undefined && !closed(turn)) return turn;
+      // a reply that failed here keeps how it ended; a stopped one, or one the connection cut off, takes the server's record
+      if (turn.end?.kind === "error" && !closed(turn)) return turn;
       // the server runs a failed reply once more: the second attempt starts over in the same place
       const again = turn.reply !== undefined && event.reply.attempt > turn.reply.attempt;
-      return { ...turn, reply: event.reply, replyAt: now, ...(again ? { text: "", thinking: "", tools: [] } : {}) };
+      const next = { ...turn, reply: event.reply, replyAt: now, ...(again ? { text: "", thinking: "", tools: [] } : {}) };
+      // the server took a Stop: the reply is stopped here from this record, with the record's seconds
+      return event.reply.stoppedAt === undefined ? next : { ...next, end: { kind: "stopped", secs: stoppedSecs(event.reply, undefined) } };
     }
     case "thinking":
       return turn.end !== undefined || event.text === "" ? turn : { ...turn, thinking: turn.thinking + event.text };
@@ -105,24 +114,22 @@ function advance(turn: LiveTurn, event: TurnEvent, now: number): LiveTurn | null
       return null;
     case "error": {
       if (event.partial !== undefined) return null;
-      // held at this client's time: the record's arrival was on this clock, the server's `at` is not
-      const ended = { ...turn, ending: undefined, ...(turn.end === undefined ? frozen(turn, now) : {}) };
-      // the server says why it ended: a Stop keeps the time this client's Stop showed, or is the time the server
-      // took it; a halt or a failure is said, also when it beat this client's Stop to the server
+      // the record ends with the turn: its work is what the server stamped on the question
+      const reply: ReplyRecord | undefined = turn.reply === undefined ? undefined
+        : { ...turn.reply, stage: "ended", workMs: event.question?.times?.workMs ?? turn.reply.workMs, ...(event.ended === undefined ? {} : { ended: event.ended }) };
+      const ended = { ...turn, ...(reply === undefined ? {} : { reply, replyAt: now }) };
+      // the server says why it ended: a halt or a failure is said, also when a Stop was on its way
       if (endReason(event) !== "stopped") return { ...ended, end: { kind: "error", code: event.code, message: event.message } };
-      if (turn.end?.kind === "stopped") return { ...ended, end: turn.end };
-      return { ...ended, end: { kind: "stopped", secs: secsSince(turn, event.ended?.at ?? now) } };
+      return { ...ended, end: turn.end?.kind === "stopped" ? turn.end : { kind: "stopped", secs: stoppedSecs(turn.reply, event.ended?.at) } };
     }
     case "sent":
       return { ...turn, turnId: event.turnId };
-    case "stop":
-      if (turn.end !== undefined) return turn;
-      return { ...turn, end: { kind: "stopped", secs: secsSince(turn, now) }, ending: true, ...frozen(turn, now) };
     case "refused":
-      return { ...turn, pendingUser: null, ending: undefined };
+      // the refusal was the turn's last event: a record the server was stopping is over
+      return { ...turn, pendingUser: null, ...(turn.reply?.stage === "stopping" ? { reply: { ...turn.reply, stage: "ended" as const } } : {}) };
     case "lost":
-      if (turn.end === undefined) return { ...turn, end: CLOSED, ...frozen(turn, now) };
-      return turn.ending === true ? { ...turn, ending: undefined } : turn;
+      if (turn.end === undefined) return { ...turn, end: CLOSED, ...cutOff(turn, now) };
+      return stopping(turn) ? { ...turn, ...cutOff(turn, now) } : turn;
     case "running":
       return closed(turn) ? { ...turn, end: undefined } : turn;
   }
@@ -136,7 +143,7 @@ export function withTurn(turns: State["turns"], threadId: string, turn: LiveTurn
   return rest;
 }
 
-/** A reply still being written, or stopped here and not yet ended on the server; one known only from turns.active may never start, so it is neither. */
+/** A reply still being written, or one the server is stopping and has not ended; one known only from turns.active may never start, so it is neither. */
 export function unfinished(turn: LiveTurn | undefined): boolean {
-  return turn !== undefined && turn.listed !== true && (turn.end === undefined || turn.ending === true);
+  return turn !== undefined && turn.listed !== true && (turn.end === undefined || stopping(turn));
 }

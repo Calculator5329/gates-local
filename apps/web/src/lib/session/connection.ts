@@ -1,5 +1,5 @@
 // One connection's reconnect loop, RPCs and draft-persistence lifetime.
-import { type CallOptions, type Client, type MethodName, type Params, type ResultOf, WireError, createClient } from "@gates-local/contracts";
+import { type CallOptions, type Client, type MethodName, type Params, type ReplyCall, type ReplyOutcome, type ResultOf, WireError, createClient } from "@gates-local/contracts";
 import { NA, setState } from "../store/store.ts";
 import { pinFramePolicy } from "../../pages/frame-policy.ts";
 
@@ -147,6 +147,12 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
     return client.call(method, params, options);
   }
 
+  /** A call that names one reply: the server's answer, or "not-reached" while disconnected. */
+  function reply<M extends ReplyCall>(method: M, params: Params<M>): Promise<ReplyOutcome> {
+    if (client === null) return Promise.resolve({ answer: "not-reached", why: "closed" });
+    return client.reply(method, params);
+  }
+
   /** A v2 read: its result, NA when the server lacks it, undefined on any other failure. */
   async function probe<M extends MethodName>(method: M, params: Params<M>, options?: CallOptions<M>): Promise<ResultOf<M> | typeof NA | undefined> {
     try {
@@ -172,5 +178,5 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
     return client.call(method, params);
   }
 
-  return { connect, call, probe, act, libraryRequest, get stopped() { return stopped; }, get sync() { return client?.sync; } };
+  return { connect, call, reply, probe, act, libraryRequest, get stopped() { return stopped; }, get sync() { return client?.sync; } };
 }

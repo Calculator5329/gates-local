@@ -16,6 +16,7 @@ import { suggestedList, type Payload } from "@gates-local/contracts";
 import { fileLifecycle } from "./chat/files.ts";
 import { imageLifecycle } from "./chat/image-lifecycle.ts";
 import { createQueue } from "./chat/queue.ts";
+import { createReplies, type Replies } from "./chat/replies.ts";
 import { turnClock } from "./chat/times.ts";
 import { sameModel } from "./fit/ollama.ts";
 import { createFitTable } from "./fit/table.ts";
@@ -26,6 +27,7 @@ import { onChatList } from "./runtime/chat-list.ts";
 import { createAdmission, type Admission } from "./app/admit.ts";
 import { createDrawTurn, createThreadImages } from "./app/drawing.ts";
 import { AppError } from "./app/errors.ts";
+import { turnReads } from "./app/flight.ts";
 import { createHandlers } from "./app/handlers.ts";
 import type { Push } from "./app/push.ts";
 import { createQueuePump } from "./app/queue-pump.ts";
@@ -63,7 +65,11 @@ export function createApp(deps: AppDeps): App {
   };
 
   // The queue every window shows, kept and sent here (chat/queue.ts, app/queue-pump.ts).
-  const queue = createQueue({ file: deps.dataDir === undefined ? undefined : path.join(deps.dataDir, "queue.json"), changed: (list) => push("queue.changed", list), log });
+  // Its records are numbered before any window hears of a change.
+  const changed = (list: Parameters<Replies["changed"]>[0]) => { replies.changed(list); push("queue.changed", list); };
+  const queue = createQueue({ file: deps.dataDir === undefined ? undefined : path.join(deps.dataDir, "queue.json"), changed, log });
+  // Each waiting message as one record, and the answer to every call that names one (chat/replies.ts).
+  const replies: Replies = createReplies({ queue, saved: (messageId) => store.getMessage(messageId), ...turnReads(turns, byThread, (turn) => pushReply(turn)) });
   const pumper = createQueuePump({
     queue, turns, byThread, closing: () => closing, catalog, runtime, settings: deps.settings,
     // bound late: the handlers are built last
@@ -181,7 +187,7 @@ export function createApp(deps: AppDeps): App {
       end: () => {
         turns.delete(turn.turnId);
         if (byThread.get(threadId) === turn) byThread.delete(threadId);
-        pumper.rememberEnd(turn.turnId, threadId);
+        replies.settled(turn.turnId, threadId, turn.start?.userMessage.id);
         end();
         // An admitted turn's model was busy in every row's plan; now it is not.
         if (turn.started) fitTable.changed();
@@ -196,13 +202,13 @@ export function createApp(deps: AppDeps): App {
 
   const context: AppContext = {
     deps, store, runtime, catalog, log, push, turns, byThread, closing: () => closing, deleting,
-    imageFiles, imageReady, attachedFiles, draftEveryMs, queue, fitTable, pushReply, waitsOnLoad, pushSpeeds, reserve, pump,
+    imageFiles, imageReady, attachedFiles, draftEveryMs, queue, replies, fitTable, pushReply, waitsOnLoad, pushSpeeds, reserve, pump,
   };
   const threadImages = createThreadImages(context);
   const runTurn = createTurnRunner({ ...context, queueImageFor: threadImages.queueImageFor });
   const admission: Admission = createAdmission({ ...context, runTurn });
   const drawTurn = createDrawTurn({ ...context, queueImage: threadImages.queueImage, admitting: admission.admitting, refused: admission.refused });
-  const handlers = createHandlers({ ...context, measure, lateStop: pumper.lateStop, threadImages, drawTurn, admission });
+  const handlers = createHandlers({ ...context, measure, threadImages, drawTurn, admission });
 
   return {
     handlers,

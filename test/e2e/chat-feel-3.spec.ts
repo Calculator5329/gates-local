@@ -1,75 +1,12 @@
 /// <reference lib="dom" />
 // Export as Markdown from the thread menu makes no file for a thread deleted
 // while its history loads, even when a hover already fetched that history.
-import type { Download, Page, WebSocketRoute } from "@playwright/test";
-import { expect, test, waitReady } from "./fixtures.ts";
-
-/**
- * Sits between the page and the server on the app's WebSocket: counts requests
- * by method and can hold chosen methods' answers until released.
- */
-interface Tap {
-  readonly calls: Map<string, number>;
-  readonly hold: Set<string>;
-  queued(method: string): number;
-  release(method: string): number;
-  readonly pending: Set<unknown>;
-}
-
-async function tap(page: Page): Promise<Tap> {
-  const calls = new Map<string, number>();
-  const hold = new Set<string>();
-  const held = new Map<string, (() => void)[]>();
-  const pending = new Set<unknown>();
-  const methodOf = new Map<unknown, string>();
-  await page.routeWebSocket(/.*/, (ws: WebSocketRoute) => {
-    const server = ws.connectToServer();
-    ws.onMessage((m) => {
-      const req = parse(m);
-      if (req?.type === "request" && typeof req.method === "string") {
-        calls.set(req.method, (calls.get(req.method) ?? 0) + 1);
-        methodOf.set(req.id, req.method);
-        pending.add(req.id);
-      }
-      server.send(m);
-    });
-    server.onMessage((m) => {
-      const res = parse(m);
-      const method = res?.type === "response" ? (methodOf.get(res.id) ?? "") : res?.type === "push" ? channelOf(res) : "";
-      const deliver = () => { pending.delete(res?.id); ws.send(m); };
-      if (hold.has(method)) {
-        const waiting = held.get(method) ?? [];
-        waiting.push(deliver); held.set(method, waiting);
-      } else deliver();
-    });
-  });
-  return {
-    calls,
-    hold,
-    pending,
-    queued: method => held.get(method)?.length ?? 0,
-    release: method => {
-      hold.delete(method);
-      const waiting = held.get(method) ?? [];
-      held.delete(method);
-      waiting.forEach(deliver => deliver());
-      return waiting.length;
-    },
-  };
-}
-
-function channelOf(frame: object): string {
-  return "channel" in frame && typeof frame.channel === "string" ? frame.channel : "";
-}
-
-function parse(m: string | Buffer): { type?: unknown; id?: unknown; method?: unknown } | undefined {
-  if (typeof m !== "string") return undefined;
-  try {
-    return JSON.parse(m) as { type?: unknown; id?: unknown; method?: unknown };
-  } catch {
-    return undefined;
-  }
-}
+//
+// A stopped reply's seconds are the server's: the window that pressed Stop shows
+// the number every other window and a reload show.
+import type { Download, Page } from "@playwright/test";
+import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { tap } from "./socket-tap.ts";
 
 const row = (page: Page, title: string) => page.locator(".sb-row", { hasText: title });
 
@@ -126,4 +63,40 @@ test.describe("Export as Markdown from the thread menu", () => {
       expect(files).toHaveLength(0);
     });
   }
+});
+
+const stopSecs = (page: Page) => page.locator(".turn.a").last().locator(".stop-mark .s");
+
+// Guards one number for a stopped reply: the seconds are counted where the reply ran, not on the clock of the window that pressed Stop.
+test("Stop on a slow connection shows the same seconds in the pressing window, a second window and after a reload", async ({ page, open, context }) => {
+  test.setTimeout(60_000);
+  const t = await tap(page);
+  // the press reaches the server a second and a half after the click
+  for (const method of ["chat.cancel", "reply.stop"]) t.late.set(method, 1500);
+  await open();
+  await waitReady(page);
+  await stack.scenario("slow-drip", { holdAfterTokens: 46 });
+  await sendMessage(page, "How do I check disk space before a download?");
+  await expect(page.locator(".turn.a .md ul li")).toHaveCount(3, { timeout: 20_000 });
+
+  const other = await context.newPage();
+  await other.goto(page.url());
+  await waitReady(other);
+  await expect(other.locator(".turn.a .md ul li"), "the second window watches the same reply").toHaveCount(3, { timeout: 20_000 });
+
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect(stopSecs(page)).toHaveText(/^\d+ s$/);
+  const pressed = (await stopSecs(page).textContent()) ?? "";
+  await page.screenshot({ path: test.info().outputPath("pressing-window.png") });
+  await expect(stopSecs(other), "the second window shows the pressing window's seconds").toHaveText(pressed);
+  await other.screenshot({ path: test.info().outputPath("second-window.png") });
+  // the saved row takes the live one's place without the number changing
+  await expect(page.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
+  await expect(page.locator(".turn.a").last()).toHaveClass(/\binterrupted\b/);
+  await expect(stopSecs(page), "the number never changes in the pressing window").toHaveText(pressed);
+
+  await page.reload();
+  await waitReady(page);
+  await expect(stopSecs(page), "a reload shows the same seconds").toHaveText(pressed);
+  await other.close();
 });

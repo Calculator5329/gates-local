@@ -179,7 +179,7 @@ it("a hydration whose turns.active no longer lists a listed turn drops it, with 
   const store = await import("../lib/store/store.ts");
   const { createChat } = await import("./chat.ts");
   const chat = createChat({
-    applyServerEvent: never, call: never, codeOf: () => "", createThread: never, creatingDraft: () => false, loadThread: never, loading: () => false,
+    applyServerEvent: never, call: never, reply: never, codeOf: () => "", createThread: never, creatingDraft: () => false, loadThread: never, loading: () => false,
     noteMessage: never, withMessage: never, untrackedDone: never, openThread: never, blockingFor: never,
   });
   const listing = [{ threadId: "A", turnId: "other", reply: record }];

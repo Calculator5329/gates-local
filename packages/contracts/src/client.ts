@@ -6,6 +6,7 @@ import {
   type MethodName,
   type Params,
   type Payload,
+  type ReplyCall,
   type ResultOf,
   WireError,
   decodePayload,
@@ -15,6 +16,7 @@ import {
   methodSync,
   pushSync,
 } from "./protocol.ts";
+import type { ReplyAnswer, ReplyOutcome } from "./shapes.ts";
 import { ORDERED_DOMAINS, revisionOf, scopesOf, type SyncDomain, type SyncRow, type SyncMetadata, type SyncNegotiation } from "./sync.ts";
 
 const CONNECTING = 0;
@@ -52,6 +54,12 @@ export type ClientSync =
 
 export interface Client {
   call<M extends MethodName>(method: M, params: Params<M>, options?: CallOptions<M>): Promise<ResultOf<M>>;
+  /**
+   * A call that names one reply: the server's answer, or "not-reached" when the socket closed or
+   * the wait ran out. This is the one place a missing answer becomes a value, so no caller
+   * swallows a rejection. A request refused as malformed still rejects.
+   */
+  reply<M extends ReplyCall>(method: M, params: Params<M>, options?: CallOptions<M>): Promise<ReplyOutcome>;
   subscribe<C extends Channel>(channel: C, handler: (payload: Payload<C>, sync?: SyncMetadata) => void): () => void;
   /** Once per socket; only an explicit unsupported-method refusal permits fallback. */
   negotiate(): Promise<ClientSync>;
@@ -217,6 +225,13 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
         });
         if (socket.readyState === CONNECTING) outbox.push([frame.value, id]);
         else transmit(frame.value, id);
+      });
+    },
+    reply(method, params, callOptions) {
+      return (client.call(method, params, callOptions) as Promise<ReplyAnswer>).catch((error: unknown): ReplyOutcome => {
+        if (error instanceof WireError && error.code === "closed") return { answer: "not-reached", why: "closed" };
+        if (error instanceof WireError && error.code === "timeout") return { answer: "not-reached", why: "timeout" };
+        throw error;
       });
     },
     subscribe(channel, handler) {

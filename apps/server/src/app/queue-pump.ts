@@ -5,9 +5,6 @@ import type { Queue, Why } from "../chat/queue.ts";
 import { rankChatModels } from "../runtime/pick.ts";
 import type { AppContext } from "./turn.ts";
 
-/** How long after a reply ends a Stop for it still holds the queue: a slow window's round trip. */
-const JUST_ENDED_MS = 5000;
-
 export interface QueuePumpDeps extends Pick<AppContext, "turns" | "byThread" | "closing" | "catalog" | "runtime"> {
   readonly queue: Queue;
   readonly settings: AppContext["deps"]["settings"];
@@ -16,10 +13,6 @@ export interface QueuePumpDeps extends Pick<AppContext, "turns" | "byThread" | "
 }
 
 export interface QueuePump {
-  /** A turn left the registry: a Stop for it a moment later still holds what queued behind it. */
-  rememberEnd(turnId: string, threadId: string): void;
-  /** chat.cancel for a turn that is no longer running. */
-  lateStop(turnId: string): void;
   /** Every chat.event the app pushes. */
   heard(payload: Payload<"chat.event">): void;
   /** Look at the queue once the current work settles: after a turn ends, the runtime or models change, or the queue does. */
@@ -29,29 +22,6 @@ export interface QueuePump {
 export function createQueuePump({ queue, turns, byThread, closing, catalog, runtime, settings, send }: QueuePumpDeps): QueuePump {
   /** Turns whose start went out: a terminal event of one that never started is its refusal. */
   const startedTurns = new Set<string>();
-  /**
-   * Turns that ended a moment ago, by id: a Stop for one of them lost the race to its last word, and
-   * still means stop for what queued behind it. Kept a few seconds, a few dozen at most.
-   */
-  const justEnded = new Map<string, { threadId: string; at: number }>();
-  const rememberEnd = (turnId: string, threadId: string) => {
-    const now = Date.now();
-    for (const [id, e] of justEnded) if (now - e.at > JUST_ENDED_MS || justEnded.size >= 64) justEnded.delete(id);
-    justEnded.set(turnId, { threadId, at: now });
-  };
-  /** A Stop for a reply that ended a moment ago: the send that went out behind it is pulled back if it has not reached the model, and what waits behind holds. */
-  const lateStop = (turnId: string) => {
-    const ended = justEnded.get(turnId);
-    justEnded.delete(turnId);
-    if (ended === undefined || Date.now() - ended.at > JUST_ENDED_MS) return;
-    const next = byThread.get(ended.threadId);
-    const entry = next === undefined ? undefined : queue.list().find((q) => q.sending === next.turnId);
-    if (next !== undefined && entry !== undefined && entry.now !== true && next.start === undefined && !next.controller.signal.aborted && queue.pullBack(next.turnId)) {
-      next.stoppedAt = Date.now();
-      next.controller.abort();
-    }
-    queue.ended(ended.threadId, "stopped");
-  };
   /** Every turn's events, from any window or the queue: the queue moves on what they say. */
   function heard({ turnId, threadId, event }: Payload<"chat.event">): void {
     if (event.type === "start") {
@@ -110,5 +80,5 @@ export function createQueuePump({ queue, turns, byThread, closing, catalog, runt
       pump();
     }
   }
-  return { rememberEnd, lateStop, heard, pump };
+  return { heard, pump };
 }

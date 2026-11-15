@@ -26,7 +26,10 @@ describe("turnClock (chat row 32, decision 33)", () => {
     c.stop(4_000, "Hmm");
     // the model's first answer word was already on its way when the cancel landed
     expect(c.see({ type: "delta", text: "Late" }, 4_100, "Hmm")).toBe(false);
+    // the record says so until the turn ends: stopping, with the moment of the Stop and the work until then
+    expect(c.record(4_200)).toMatchObject({ stage: "stopping", stoppedAt: 4_000, workMs: 2_500 });
     const t = c.end({ reason: "stopped", at: 4_000 }, "Hmm");
+    expect(c.record(4_300)).toMatchObject({ stage: "ended", stoppedAt: 4_000, workMs: 2_500, ended: { reason: "stopped", at: 4_000 } });
     expect(t.firstTokenAt).toBeUndefined();
     expect(t.thoughtMs).toBe(3_000);
     expect(t.workMs).toBe(2_500);

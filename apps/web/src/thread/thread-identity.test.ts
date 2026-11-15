@@ -100,8 +100,10 @@ it("draws the saved reply's row the moment Stop ends a reply: the mark, then Reg
   vi.stubGlobal("window", {});
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   const turn = { threadId: "proof", gen: 1, model: "m", startedAt: 1, text: "Words so far", thinking: "", tools: [], pendingUser: null, end: { kind: "stopped", secs: 187 } };
+  // the server's record: stopping until its last event ends the turn
+  const record = { startedAt: 1, readyAt: 1, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {}, stoppedAt: 187_001 };
   for (const ending of [true, false]) {
-    setState({ messages: { proof: [] }, turns: { proof: { ...turn, ...(ending ? { ending } : {}) } as never } });
+    setState({ messages: { proof: [] }, turns: { proof: { ...turn, reply: { ...record, stage: ending ? "stopping" : "ended" }, replyAt: 187_001 } as never } });
     const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
     expect(html).toMatch(/<div class="a-act stop"><span class="stop-mark"><span [^>]*><\/span><span class="s">187 s<\/span><\/span>/);
     expect(html).not.toContain('class="stopped"');

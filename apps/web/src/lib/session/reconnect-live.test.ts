@@ -81,7 +81,7 @@ it("TE-03: replay revives a closed reply, replaces its snapshot once and survive
   expect.soft(openTurn()?.tools).toHaveLength(1);
   session.stop();
   await tick();
-  expect(browser.server.calls("chat.cancel").map((call) => call.params)).toEqual([{ turnId: "turn-live" }]);
+  expect(browser.server.calls("reply.stop").map((call) => call.params)).toEqual([{ id: "turn-live" }]);
 });
 
 it("TE-03: a reply the server lists as still running gets its words replaced by the snapshot, not doubled", async () => {
@@ -106,8 +106,10 @@ it("TE-03: a reply with no replay keeps its closed state and partial words", asy
   expect(store.runningThreads(store.getState()).size).toBe(0);
 });
 
-it("TE-03: replay cannot revive a locally stopped reply", async () => {
+it("TE-03: replay cannot revive a reply the server stopped", async () => {
   session.stop();
+  // the server's record of the Stop reaches this window before the connection drops
+  await tick();
   const held = await dropConnection();
   replay();
   held.batch.respond(methodSamples["models.list"].result);

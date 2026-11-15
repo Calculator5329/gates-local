@@ -95,6 +95,7 @@ export function createDrawTurn({ deps, store, log, push, reserve, queueImage, ad
     if (image === undefined) throw new AppError("image-input", "Image generation is not available in this build.");
     // An Image mode turn never counts as a chat model in GPU memory: the job's own GPU claim covers it.
     const { turn, end } = reserve(threadId, choice.preset);
+    turn.asked = { content, messageId };
     admitting(turn, queueDrawing(image, turn, end, { threadId, content, choice, count, messageId, replaced }), replacedFiles);
     return { turnId: turn.turnId };
   };

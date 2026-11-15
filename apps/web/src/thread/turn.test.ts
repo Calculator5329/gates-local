@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Message, ReplyRecord } from "@gates-local/contracts";
 import type { LiveTurn } from "../lib/store/store.ts";
-import { reduceTurn, unfinished, withTurn, workMsAt } from "./turn.ts";
+import { reduceTurn, stopping, unfinished, withTurn, workMsAt } from "./turn.ts";
 
 const T0 = 1_000_000;
 const turn = (patch: Partial<LiveTurn> = {}): LiveTurn => ({ gen: 1, threadId: "A", turnId: "t1", model: "m", startedAt: T0, thinking: "", text: "", tools: [], pendingUser: null, ...patch });
@@ -27,15 +27,21 @@ describe("reduceTurn", () => {
     expect(reduceTurn(first, { type: "reply", reply: record({ stage: "waiting", attempt: 2 }) }, at(5))).toMatchObject({ text: "", thinking: "", tools: [], reply: { attempt: 2 } });
   });
 
-  it("a reply ended here holds its record still, and takes no later one", () => {
+  it("a reply is stopped by the server's record, with the record's seconds and work, whatever this client's clock says", () => {
     const thinking = reduceTurn(turn(), { type: "reply", reply: record({ stage: "thinking", workMs: 1000 }) }, at(10))!;
-    const stopped = reduceTurn(thinking, { type: "stop" }, at(12))!;
-    expect(stopped.reply).toMatchObject({ stage: "ended", workMs: 3000 });
+    // the server took the Stop 3 s after it started the reply; this client heard so at 12 s on its own clock
+    const stopped = reduceTurn(thinking, { type: "reply", reply: record({ stage: "stopping", workMs: 3000, stoppedAt: at(3) }) }, at(12))!;
+    expect(stopped).toMatchObject({ end: { kind: "stopped", secs: 3 }, reply: { stage: "stopping", workMs: 3000 } });
     expect(workMsAt(stopped, at(40))).toBe(3000);
-    expect(reduceTurn(stopped, { type: "reply", reply: record({ stage: "thinking", workMs: 9000 }) }, at(13))).toBe(stopped);
-    expect(reduceTurn(thinking, { type: "error", code: "stream-error", message: "x" }, at(14))?.reply).toMatchObject({ stage: "ended", workMs: 5000 });
-    // a reply the connection cut off takes the server's record again
+    // a reply that failed ends its record with the work the server stamped on its question, or the record's own
+    const stamped = { ...question, times: { startedAt: T0, spans: [], callsAt: {}, workMs: 4200, ended: { reason: "failed" as const, at: at(14) } } };
+    expect(reduceTurn(thinking, { type: "error", code: "stream-error", message: "x", question: stamped }, at(14))?.reply).toMatchObject({ stage: "ended", workMs: 4200 });
+    const failed = reduceTurn(thinking, { type: "error", code: "stream-error", message: "x" }, at(14))!;
+    expect(failed.reply).toMatchObject({ stage: "ended", workMs: 1000 });
+    expect(reduceTurn(failed, { type: "reply", reply: record({ stage: "thinking", workMs: 9000 }) }, at(15)), "a failed reply takes no later record").toBe(failed);
+    // a reply the connection cut off is held at the drop, and takes the server's record again
     const cut = reduceTurn(thinking, { type: "lost" }, at(11))!;
+    expect(cut.reply).toMatchObject({ stage: "ended", workMs: 2000 });
     expect(reduceTurn(cut, { type: "reply", reply: record({ stage: "writing", workMs: 6000 }) }, at(20))?.reply).toMatchObject({ stage: "writing", workMs: 6000 });
   });
 
@@ -60,30 +66,38 @@ describe("reduceTurn", () => {
   });
 
   it("an error without a saved row keeps the turn with why it ended", () => {
-    expect(reduceTurn(turn({ ending: true }), { type: "error", code: "preempted", message: "Stopped so B could load." }, T0)).toMatchObject({ end: { kind: "error", code: "preempted", message: "Stopped so B could load." }, ending: undefined });
+    const beingStopped = turn({ end: { kind: "stopped", secs: 4 }, reply: record({ stage: "stopping", stoppedAt: at(4) }) });
+    const ended = reduceTurn(beingStopped, { type: "error", code: "preempted", message: "Stopped so B could load." }, T0)!;
+    expect(ended).toMatchObject({ end: { kind: "error", code: "preempted", message: "Stopped so B could load." }, reply: { stage: "ended" } });
+    expect(stopping(ended)).toBe(false);
   });
 
-  it("a cancel keeps the time Stop showed, or takes the server's stop time when the stop came from elsewhere", () => {
-    const stopped = reduceTurn(turn(), { type: "stop" }, at(4));
-    expect(stopped).toMatchObject({ end: { kind: "stopped", secs: 4 }, ending: true });
-    expect(reduceTurn(stopped!, { type: "error", code: "cancelled", message: "c", ended: { reason: "stopped", at: at(5) } }, at(9))).toMatchObject({ end: { kind: "stopped", secs: 4 }, ending: undefined });
-    // stopped in another window at 6 s; the end reached this one at 7 s
-    expect(reduceTurn(turn(), { type: "error", code: "cancelled", message: "c", ended: { reason: "stopped", at: at(6) } }, at(7))?.end).toEqual({ kind: "stopped", secs: 6 });
+  it("a cancel's seconds are the server's in every window: the record's Stop, or the end's time against the record's start", () => {
+    // this client heard of the Stop 2 s after the server took it
+    const stopped = reduceTurn(turn({ reply: record({ stage: "writing" }) }), { type: "reply", reply: record({ stage: "stopping", stoppedAt: at(4) }) }, at(6))!;
+    expect(stopped.end).toEqual({ kind: "stopped", secs: 4 });
+    expect(stopping(stopped)).toBe(true);
+    const ended = reduceTurn(stopped, { type: "error", code: "cancelled", message: "c", ended: { reason: "stopped", at: at(4) } }, at(9))!;
+    expect(ended).toMatchObject({ end: { kind: "stopped", secs: 4 }, reply: { stage: "ended", ended: { reason: "stopped", at: at(4) } } });
+    expect(stopping(ended)).toBe(false);
+    // the end came with no stopping record before it; it reached this client at 7 s
+    expect(reduceTurn(turn({ reply: record({ stage: "writing" }) }), { type: "error", code: "cancelled", message: "c", ended: { reason: "stopped", at: at(6) } }, at(7))?.end).toEqual({ kind: "stopped", secs: 6 });
   });
 
-  it("chat row 32: how a reply stopped here ended is the server's word, not a guess from its code", () => {
-    const stopped = reduceTurn(turn(), { type: "stop" }, at(4))!;
-    expect(reduceTurn(stopped, { type: "error", code: "cancelled", message: "m", ended: { reason: "stopped", at: at(4) } }, at(9))).toMatchObject({ end: { kind: "stopped", secs: 4 }, ending: undefined });
-    // the server stopped it for another model before the Stop reached it: that is why it ended
+  it("chat row 32: how a stopped reply ended is the server's word, not a guess from its code", () => {
+    const stopped = reduceTurn(turn(), { type: "reply", reply: record({ stage: "stopping", stoppedAt: at(4) }) }, at(4))!;
+    expect(reduceTurn(stopped, { type: "error", code: "cancelled", message: "m", ended: { reason: "stopped", at: at(4) } }, at(9))).toMatchObject({ end: { kind: "stopped", secs: 4 } });
+    // the server stopped it for another model as the Stop reached it: that is why it ended
     expect(reduceTurn(stopped, { type: "error", code: "preempted", message: "Stopped so B could load.", ended: { reason: "preempted", at: at(4) } }, at(9)))
-      .toMatchObject({ end: { kind: "error", code: "preempted", message: "Stopped so B could load." }, ending: undefined });
-    expect(reduceTurn(stopped, { type: "error", code: "model-not-found", message: "HTTP 404", ended: { reason: "failed", at: at(5) } }, at(9))).toMatchObject({ end: { kind: "error", code: "model-not-found", message: "HTTP 404" }, ending: undefined });
+      .toMatchObject({ end: { kind: "error", code: "preempted", message: "Stopped so B could load." }, reply: { stage: "ended" } });
+    expect(reduceTurn(stopped, { type: "error", code: "model-not-found", message: "HTTP 404", ended: { reason: "failed", at: at(5) } }, at(9))).toMatchObject({ end: { kind: "error", code: "model-not-found", message: "HTTP 404" }, reply: { stage: "ended" } });
     expect(reduceTurn(turn(), { type: "error", code: "stream-error", message: "m", ended: { reason: "failed", at: at(9) } }, at(9))?.end).toMatchObject({ kind: "error" });
   });
 
-  it("Stop on an ended turn changes nothing", () => {
-    const ended = turn({ end: { kind: "error", code: "internal", message: "x" } });
-    expect(reduceTurn(ended, { type: "stop" }, T0)).toBe(ended);
+  it("only a record that carries the server's Stop stops a reply, and never one that already failed", () => {
+    expect(reduceTurn(turn(), { type: "reply", reply: record({ stage: "writing" }) }, at(5))?.end).toBeUndefined();
+    const failed = turn({ end: { kind: "error", code: "internal", message: "x" } });
+    expect(reduceTurn(failed, { type: "reply", reply: record({ stage: "stopping", stoppedAt: at(2) }) }, at(5))).toBe(failed);
   });
 
   it("chat.send's answer gives the turn its id; its start brings the saved question", () => {
@@ -95,13 +109,17 @@ describe("reduceTurn", () => {
   });
 
   it("a refused send keeps how it ended, without the question it waited to save", () => {
-    const stopped = turn({ turnId: null, pendingUser: "hi", end: { kind: "stopped", secs: 1 }, ending: true });
-    expect(reduceTurn(stopped, { type: "refused" }, T0)).toMatchObject({ pendingUser: null, ending: undefined, end: { kind: "stopped", secs: 1 } });
+    const stopped = turn({ pendingUser: "hi", end: { kind: "stopped", secs: 1 }, reply: record({ stage: "stopping", stoppedAt: at(1) }) });
+    const refused = reduceTurn(stopped, { type: "refused" }, T0)!;
+    expect(refused).toMatchObject({ pendingUser: null, end: { kind: "stopped", secs: 1 }, reply: { stage: "ended", stoppedAt: at(1) } });
+    expect(stopping(refused)).toBe(false);
   });
 
   it("a dropped connection cuts off a running reply, and a stopped one stops waiting", () => {
     expect(reduceTurn(turn(), { type: "lost" }, T0)?.end).toMatchObject({ kind: "error", code: "closed" });
-    expect(reduceTurn(turn({ end: { kind: "stopped", secs: 1 }, ending: true }), { type: "lost" }, T0)).toMatchObject({ end: { kind: "stopped", secs: 1 }, ending: undefined });
+    const lost = reduceTurn(turn({ end: { kind: "stopped", secs: 1 }, reply: record({ stage: "stopping", stoppedAt: at(1) }) }), { type: "lost" }, T0)!;
+    expect(lost).toMatchObject({ end: { kind: "stopped", secs: 1 }, reply: { stage: "ended" } });
+    expect(stopping(lost)).toBe(false);
   });
 
   it("a cut-off reply runs again on turns.active and on the server's start snapshot, which replaces its words", () => {
@@ -144,10 +162,11 @@ describe("the turn map", () => {
     expect(withTurn(map, "B", null)).toBe(map);
   });
 
-  it("a reply is unfinished while it is written, and while a Stop waits for the server", () => {
+  it("a reply is unfinished while it is written, and while the server is stopping it", () => {
     expect(unfinished(undefined)).toBe(false);
     expect(unfinished(turn())).toBe(true);
-    expect(unfinished(turn({ end: { kind: "stopped", secs: 1 }, ending: true }))).toBe(true);
+    expect(unfinished(turn({ end: { kind: "stopped", secs: 1 }, reply: record({ stage: "stopping", stoppedAt: at(1) }) }))).toBe(true);
+    expect(unfinished(turn({ end: { kind: "stopped", secs: 1 }, reply: record({ stage: "ended", stoppedAt: at(1) }) }))).toBe(false);
     expect(unfinished(turn({ end: { kind: "stopped", secs: 1 } }))).toBe(false);
     expect(unfinished(turn({ listed: true })), "the server may drop a listed turn without a word").toBe(false);
   });

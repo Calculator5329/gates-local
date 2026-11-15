@@ -21,12 +21,20 @@ const call = (method: string, params: unknown) => {
   calls.push({ method, params });
   return answers.get(method)?.(params) ?? Promise.resolve([]);
 };
+/** A waiting message as the server's record of it, at a stage. */
+const record = (id: string, stage: object = { stage: "queued" }) => ({ id, threadId: "t1", rev: 1, messageId: `m-${id}`, text: `words ${id}`, at: 1, ...stage });
+const taken = (id: string) => ({ answer: "sending", reply: record(id, { stage: "starting", attempt: 1, startedAt: 1 }) });
+// a call on one waiting message is done unless a test answers it otherwise
+const reply = (method: string, params: { id: string }) => {
+  calls.push({ method, params });
+  return answers.get(method)?.(params) ?? Promise.resolve({ answer: "done", reply: record(params.id) });
+};
 const none = () => undefined;
 // a fresh window per test: what it heard at connect starts over
 beforeEach(() => {
   chat = createChat({
     applyServerEvent: (patch: Partial<State> | ((s: State) => Partial<State>)) => setState(patch),
-    call, codeOf: (e: unknown) => (e instanceof WireError ? e.code : "internal"),
+    call, reply, codeOf: (e: unknown) => (e instanceof WireError ? e.code : "internal"),
     createThread: none, creatingDraft: none, loadThread: none, loading: () => false, noteMessage: none, withMessage: none, untrackedDone: none, openThread: none, blockingFor: () => [],
   } as unknown as Parameters<typeof createChat>[0]);
 });
@@ -46,21 +54,48 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 const row = (id: string): QueuedMessage => ({ id, threadId: "t1", messageId: `m-${id}`, text: `words ${id}`, at: 1, waitFor: "reply" });
 const adds = () => calls.filter((c) => c.method === "queue.add").map((c) => (c.params as QueuedMessage).id);
 
-it("an Edit that comes after the server started sending the message closes at the server's answer, and says it was sent", async () => {
+it("an Edit that comes after the server started sending the message closes at the server's answer, and says it is on its way", async () => {
   setState({ view: "thread", threadId: "t1", queued: [row("q1")] });
   replaceDraft("t1", { text: "half a thought" });
-  answers.set("queue.update", () => Promise.reject(new WireError("queue-sending", "This message is already being sent.")));
+  answers.set("reply.edit", () => Promise.resolve(taken("q1")));
   editQueued("q1");
   await settle();
   expect(getState().editingQueued).toBeNull();
   expect(getDraft("t1").text, "the words before the Edit are back").toBe("half a thought");
-  expect(getState().notice).toBe("That message was already sent.");
+  expect(getState().notice).toBe("This message is already on its way.");
+});
+
+it.each([
+  ["sent", { answer: "gone", why: "sent" }, "That message was already sent."],
+  ["removed in another window", { answer: "gone", why: "removed" }, "That message was removed."],
+  ["open in another window", { answer: "elsewhere", reply: record("q1", { stage: "editing", by: "2", back: { stage: "queued" } }) }, "That message is open in another window."],
+])("an Edit of a message already %s closes and says so", async (_what, answer, said) => {
+  setState({ view: "thread", threadId: "t1", queued: [row("q1")] });
+  replaceDraft("t1", { text: "half a thought" });
+  answers.set("reply.edit", () => Promise.resolve(answer));
+  editQueued("q1");
+  await settle();
+  expect(getState().editingQueued).toBeNull();
+  expect(getDraft("t1").text, "the words before the Edit are back").toBe("half a thought");
+  expect(getState().notice).toBe(said);
+});
+
+it("an Edit that never reaches the server stays open, and the next connection asks again", async () => {
+  setState({ view: "thread", threadId: "t1", queued: [row("q1")] });
+  answers.set("reply.edit", () => Promise.resolve({ answer: "not-reached", why: "closed" }));
+  editQueued("q1");
+  await settle();
+  expect(getState().editingQueued).toBe("q1");
+  expect(getState().notice).toBeNull();
+  answers.clear();
+  chat.queueListed([row("q1")]);
+  expect(calls.filter((c) => c.method === "reply.edit")).toHaveLength(2);
 });
 
 it("words typed into a late Edit before the server's answer stay in the composer as a new message", async () => {
   setState({ view: "thread", threadId: "t1", queued: [row("q1")] });
   let refuse!: () => void;
-  answers.set("queue.update", () => new Promise((_, no) => { refuse = () => no(new WireError("queue-sending", "This message is already being sent.")); }));
+  answers.set("reply.edit", () => new Promise((yes) => { refuse = () => yes({ answer: "gone", why: "sent" }); }));
   editQueued("q1");
   replaceDraft("t1", { text: "words q1, and more" });
   refuse();
@@ -109,9 +144,15 @@ it("a queued message refused for memory in view shows what runs instead, and the
   const s = getState();
   expect(s.notice).not.toBeNull();
   expect(s.noticeOffer).toEqual({ notice: s.notice, model: "qwen3.5:9b", numCtx: 16384, offer });
-  chooseForQueued("q1", "qwen3.5:9b", 8192);
-  expect(calls.at(-1)).toEqual({ method: "queue.update", params: { id: "q1", model: "qwen3.5:9b", numCtx: 8192 } });
-  expect(getState().queued[0]?.model).toBe("qwen3.5:9b");
+  expect(await chooseForQueued("q1", "qwen3.5:9b", 8192), "the server has the choice").toBe(true);
+  expect(calls.at(-1)).toEqual({ method: "reply.change", params: { id: "q1", base: "m-q1", messageId: "m-q1", model: "qwen3.5:9b", numCtx: 8192 } });
+});
+
+it("a choice for a message another window has open is not taken, and says so", async () => {
+  setState({ view: "thread", threadId: "t1", queued: [row("q1")] });
+  answers.set("reply.change", () => Promise.resolve({ answer: "elsewhere", reply: record("q1", { stage: "editing", by: "2", back: { stage: "queued" } }) }));
+  expect(await chooseForQueued("q1", "qwen3.5:9b", 8192)).toBe(false);
+  expect(getState().notice).toBe("That message is open in another window.");
 });
 
 it("a message the server sent leaves what this window would ask again", async () => {

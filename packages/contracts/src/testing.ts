@@ -209,6 +209,12 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   },
   "queue.update": { params: { id: "q-1", editing: true }, result: [] },
   "queue.remove": { params: { id: "q-1" }, result: [] },
+  "reply.change": { params: { id: "q-1", base: "m-q1", messageId: "m-q2", text: "and after that?" }, result: { answer: "done", reply: { id: "q-1", threadId: "t1", rev: 3, messageId: "m-q2", text: "and after that?", at: 1_700_000_000_000, stage: "queued" } } },
+  "reply.edit": { params: { id: "q-1", open: true }, result: { answer: "elsewhere", reply: { id: "q-1", threadId: "t1", rev: 4, messageId: "m-q1", text: "and then?", at: 1_700_000_000_000, stage: "editing", by: "2", back: { stage: "held", held: { why: "stopped" } } } } },
+  "reply.remove": { params: { id: "q-1" }, result: { answer: "gone", why: "removed" } },
+  "reply.now": { params: { id: "q-1", consent: { kind: "standing" } }, result: { answer: "sending", reply: { id: "q-1", threadId: "t1", rev: 5, messageId: "m-q1", text: "and then?", at: 1_700_000_000_000, stage: "starting", attempt: 1, startedAt: 1_700_000_000_500 } } },
+  "reply.hold": { params: { id: "q-1" }, result: { answer: "gone", why: "sent", question: userMessage } },
+  "reply.stop": { params: { id: "turn-1" }, result: { answer: "done", reply: { id: "turn-1", threadId: "t1", rev: 6, questionId: "m1", model: "qwen3:14b", startedAt: 1_700_000_000_000, readyAt: 1_700_000_000_800, workMs: 1200, toolMs: 0, try: 1, spans: [], callsAt: {}, stage: "stopping", stoppedAt: 1_700_000_002_000 } } },
 
   "messages.delete": { params: { threadId: "t1", messageId: "m1" }, result: { messageId: "m1" } },
   "files.attach": { params: { name: "notes.txt", type: "text/plain", data: "aGVsbG8=" }, result: { path: "files/att-0f8b5c1e-3a2d-4c7e-9b1a-2d3e4f5a6b7c", name: "notes.txt", size: 5, type: "text/plain" } },

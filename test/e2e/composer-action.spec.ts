@@ -56,7 +56,7 @@ test("the second click of Send's double-click cannot stop the reply it just star
   await page.routeWebSocket(/127\.0\.0\.1:5286/, (ws) => {
     const server = ws.connectToServer();
     ws.onMessage((message) => {
-      if (typeof message === "string" && (JSON.parse(message) as { method?: string }).method === "chat.cancel") cancellations.push(message);
+      if (typeof message === "string" && (JSON.parse(message) as { method?: string }).method === "reply.stop") cancellations.push(message);
       server.send(message);
     });
     server.onMessage((message) => ws.send(message));

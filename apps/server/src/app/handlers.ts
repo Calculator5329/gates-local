@@ -1,7 +1,7 @@
 // The request handlers: every contracts method the app answers, on the thread store, the
 // runtime, the catalog, the fit table and the queue. chat.send takes a turn here and hands it
 // to admit.ts (a chat model) or drawing.ts (Image mode).
-import type { Params } from "@gates-local/contracts";
+import type { Params, ReplyAnswer } from "@gates-local/contracts";
 import { checkAttachments } from "../chat/attachments.ts";
 import { saveFile } from "../chat/files.ts";
 import { withSendTimes } from "../chat/send-times.ts";
@@ -12,10 +12,10 @@ import type { TurnReservation } from "../runtime/load.ts";
 import { turnSettings } from "../settings/turn.ts";
 import { createSourcesHandlers } from "../sources/handlers.ts";
 import { createUpdateHandlers } from "../update/module.ts";
+import type { HandlerContext } from "../ws/server.ts";
 import type { Admission } from "./admit.ts";
 import type { DrawTurn, ThreadImages } from "./drawing.ts";
 import { AppError, threadGoing } from "./errors.ts";
-import type { QueuePump } from "./queue-pump.ts";
 import type { AppContext } from "./turn.ts";
 import type { AppHandlers } from "./types.ts";
 
@@ -29,9 +29,8 @@ function retriedRows(messages: readonly { readonly id: string; readonly role: st
 
 export interface HandlersDeps extends Pick<AppContext,
   "deps" | "store" | "runtime" | "catalog" | "log" | "push" | "turns" | "byThread" | "deleting" | "closing"
-  | "imageReady" | "imageFiles" | "attachedFiles" | "queue" | "fitTable" | "reserve" | "pump" | "pushSpeeds" | "pushReply"> {
+  | "imageReady" | "imageFiles" | "attachedFiles" | "queue" | "replies" | "fitTable" | "reserve" | "pump" | "pushSpeeds"> {
   readonly measure: Pick<ReturnType<typeof createMeasure>, "handlers"> | undefined;
-  readonly lateStop: QueuePump["lateStop"];
   readonly threadImages: ThreadImages;
   readonly drawTurn: DrawTurn;
   readonly admission: Admission;
@@ -39,12 +38,22 @@ export interface HandlersDeps extends Pick<AppContext,
 
 export function createHandlers({
   deps, store, runtime, catalog, log, push, turns, byThread, deleting, closing, imageReady, imageFiles, attachedFiles,
-  queue, fitTable, reserve, pump, pushSpeeds, pushReply, measure, lateStop, threadImages, drawTurn, admission,
+  queue, replies, fitTable, reserve, pump, pushSpeeds, measure, threadImages, drawTurn, admission,
 }: HandlersDeps) {
   const { queueImage, cancelThreadImages } = threadImages;
   const { admitTurn, admitting, blockingTurns, planBeside, notReady } = admission;
-  /** Which connection has each row open in its composer. */
-  const editors = new Map<string, number>();
+  /** A message open in one window's composer goes on when that window's connection closes. */
+  const leftOpen = (id: string, ctx: HandlerContext) => {
+    ctx.signal?.addEventListener("abort", () => {
+      replies.release(id, ctx.clientId);
+      pump();
+    }, { once: true });
+  };
+  /** A call on a waiting message may have freed the next one to go. */
+  const moved = (answer: ReplyAnswer): ReplyAnswer => {
+    pump();
+    return answer;
+  };
 
   const cancelThreadTurn = async (threadId: string, dropReply: boolean) => {
     const turn = byThread.get(threadId);
@@ -209,6 +218,7 @@ export function createHandlers({
       if (attaching.length && deps.dataDir === undefined) throw new AppError("image-input", "File storage is not available.");
       const settings = turnSettings(deps.settings?.get(), model);
       const { turn, end } = reserve(threadId, model);
+      turn.asked = { content, messageId, images, files: attaching, numCtx, think };
       let load: TurnReservation | undefined;
       try {
         // Before the answer, so models.remove sees this turn at once (throws while a removal runs).
@@ -231,38 +241,40 @@ export function createHandlers({
       }
       return queue.list();
     },
+    // queue.update and queue.remove are the older calls, for a page from before reply.*: the same
+    // queue and the same edit locks, answered with the whole list whatever happened
     "queue.update": ({ id, ...patch }, ctx) => {
       if (queue.change(id, patch) === "sending") throw new AppError("queue-sending", "This message is already being sent.");
-      // open in one window's composer: when that window's connection closes, the row goes on
-      if (patch.editing === false) editors.delete(id);
+      if (patch.editing === false) replies.release(id);
       if (patch.editing === true) {
-        editors.set(id, ctx.clientId);
-        ctx.signal?.addEventListener("abort", () => {
-          if (editors.get(id) !== ctx.clientId) return;
-          editors.delete(id);
-          queue.change(id, { editing: false });
-          pump();
-        }, { once: true });
+        replies.lock(id, ctx.clientId);
+        leftOpen(id, ctx);
       }
       pump();
       return queue.list();
     },
     "queue.remove": ({ id }) => {
-      if (queue.remove(id)) editors.delete(id);
+      queue.remove(id);
       return queue.list();
     },
 
+    "reply.change": (params, ctx) => moved(replies.change(params, ctx.clientId)),
+    "reply.edit": (params, ctx) => {
+      const answer = replies.edit(params, ctx.clientId);
+      if (params.open && answer.answer === "done") leftOpen(params.id, ctx);
+      return moved(answer);
+    },
+    "reply.remove": (params) => moved(replies.remove(params)),
+    "reply.now": (params) => moved(replies.now(params)),
+    "reply.hold": (params) => moved(replies.hold(params)),
+    "reply.stop": (params) => moved(replies.stop(params)),
+
+    // the older Stop, for a page from before reply.stop: the same one step, answered yes or no
     "chat.cancel": ({ turnId }) => {
       const turn = turns.get(turnId);
-      if (turn === undefined) lateStop(turnId);
-      if (turn === undefined || turn.controller.signal.aborted) return { cancelled: false };
-      turn.stoppedAt = Date.now();
-      // words already on their way when the Stop landed change no time on the row
-      turn.clock.stop(turn.stoppedAt, turn.thinking);
-      // every window stops its clock at the Stop, not when the stream winds down
-      if (turn.start !== undefined) pushReply(turn);
-      turn.controller.abort();
-      return { cancelled: true };
+      const cancelled = turn !== undefined && !turn.terminal && !turn.controller.signal.aborted;
+      moved(replies.stop({ id: turnId }));
+      return { cancelled };
     },
   } satisfies AppHandlers;
   return handlers;

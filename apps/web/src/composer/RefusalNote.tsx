@@ -39,8 +39,8 @@ export function takeOffer(kind: "context" | "model"): void {
   }
   const held = s.queued.find((q) => q.threadId === s.threadId && q.held === true && q.waitFor === "reply");
   if (held === undefined) return;
-  chooseForQueued(held.id, model, choice.numCtx);
-  sendQueuedNow(held.id);
+  // sent once the server says the message has the choice
+  void chooseForQueued(held.id, model, choice.numCtx).then((chosen) => { if (chosen) sendQueuedNow(held.id); });
 }
 
 /**

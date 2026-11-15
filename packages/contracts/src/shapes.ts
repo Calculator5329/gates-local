@@ -161,9 +161,9 @@ export type ReplyTimes = typeof ReplyTimes.Type;
 /**
  * What a running reply is doing: waiting for the GPU or the load gate, loading its model,
  * thinking (from the model being ready, also while it reads a call's result), running a call,
- * writing its answer, or ended.
+ * writing its answer, stopping (the server took a Stop and is saving the words so far), or ended.
  */
-export const ReplyStage = S.Literals(["waiting", "loading", "thinking", "tool", "writing", "ended"]);
+export const ReplyStage = S.Literals(["waiting", "loading", "thinking", "tool", "writing", "stopping", "ended"]);
 export type ReplyStage = typeof ReplyStage.Type;
 
 /**
@@ -187,6 +187,11 @@ export const ReplyRecord = S.Struct({
   /** The closed thinking spans and where each call came, for the fold's rounds; as on ReplyTimes. */
   spans: S.Array(S.Struct({ from: Count, ms: Count })),
   callsAt: S.Record(S.String, Count),
+  /**
+   * When the server took a Stop for this reply. A stopped reply's seconds are this less startedAt,
+   * in every window: the saved row ends at the same moment.
+   */
+  stoppedAt: S.optional(Millis),
   ended: S.optional(TurnEnded),
 });
 export type ReplyRecord = typeof ReplyRecord.Type;
@@ -696,6 +701,153 @@ export const ChatEvent = S.Union([
 export type ChatEvent = typeof ChatEvent.Type;
 
 export const NumCtx = PositiveInt;
+
+// ---------------------------------------------------------------- one record per message
+// A message is one record from the moment the server first hears of it until its reply is
+// saved. Its `stage` is the only thing that says where it is, and each stage carries only its
+// own data, so a held message that is also going next cannot be written down.
+
+export const ReplyId = S.String.check(S.isMinLength(1), S.isMaxLength(200));
+const ReplyCommon = {
+  /** Made by the window that typed it; a reply sent before it had one is named by its turn. */
+  id: ReplyId,
+  threadId: S.String,
+  /** The number of the change that made the record what it is: a larger one is newer. */
+  rev: Count,
+};
+/** The message itself: carried only until its question is saved. */
+const ReplyWords = {
+  /** Names these words. A change of words makes a new one. Saved in the chat means asked. */
+  messageId: S.String.check(S.isMinLength(1), S.isMaxLength(200)),
+  text: S.String,
+  images: S.optional(S.Array(S.String).check(S.isMaxLength(8))),
+  files: S.optional(S.Array(AttachedFile).check(S.isMaxLength(8))),
+  /** Typed before any model was installed: none, and it takes the best one installed. */
+  model: S.optional(S.String),
+  numCtx: S.optional(NumCtx),
+  think: S.optional(S.Boolean),
+  tools: S.optional(S.Boolean),
+  draw: S.optional(ImageChoice),
+  drawCount: S.optional(ImageCount),
+  /** A Retry: the question this send repeats. */
+  retryOf: S.optional(S.String.check(S.isMaxLength(200))),
+  at: Millis,
+};
+
+/** What is in the way of a queued message right now. The server works it out; a window never does. */
+export const WaitFor = S.Union([
+  S.Struct({ what: S.Literal("setup") }),
+  S.Struct({ what: S.Literal("download"), model: S.optional(S.String) }),
+  S.Struct({ what: S.Literal("reply"), reply: ReplyId }),
+  /** That reply failed and is being run once more. */
+  S.Struct({ what: S.Literal("retry"), reply: ReplyId }),
+]);
+export type WaitFor = typeof WaitFor.Type;
+
+/** Why a message is on hold. */
+export const HeldWhy = S.Union([
+  S.Struct({ why: S.Literal("stopped") }),
+  S.Struct({ why: S.Literal("failed") }),
+  S.Struct({ why: S.Literal("restart") }),
+  S.Struct({
+    why: S.Literal("refused"),
+    code: S.String,
+    message: S.String,
+    /** code "would-stop": the replies in the way. */
+    blocking: S.optional(S.Array(BlockingTurn)),
+    /** code "wont-fit": what runs instead. */
+    offer: S.optional(FitOffer),
+  }),
+]);
+export type HeldWhy = typeof HeldWhy.Type;
+
+/** The yes to stopping replies in other chats: standing, or for the replies a warning named. */
+export const StopConsent = S.Union([
+  S.Struct({ kind: S.Literal("standing") }),
+  S.Struct({ kind: S.Literal("named"), replies: S.Array(ReplyId).check(S.isMaxLength(32)) }),
+]);
+export type StopConsent = typeof StopConsent.Type;
+
+const QueuedReply = S.Struct({ ...ReplyCommon, ...ReplyWords, stage: S.Literal("queued"), waitFor: S.optional(WaitFor) });
+const HeldReply = S.Struct({ ...ReplyCommon, ...ReplyWords, stage: S.Literal("held"), held: HeldWhy });
+const NextReply = S.Struct({ ...ReplyCommon, ...ReplyWords, stage: S.Literal("next"), consent: S.optional(StopConsent) });
+const EditingReply = S.Struct({
+  ...ReplyCommon, ...ReplyWords, stage: S.Literal("editing"),
+  /** The window that has it open. One value: two windows cannot both hold it. */
+  by: S.String,
+  /** Where it returns when the edit is saved or cancelled. */
+  back: S.Union([
+    S.Struct({ stage: S.Literal("queued") }),
+    S.Struct({ stage: S.Literal("held"), held: HeldWhy }),
+    S.Struct({ stage: S.Literal("next"), consent: S.optional(StopConsent) }),
+  ]),
+});
+/** Taken: its files, its memory check and its load are running, and nothing of it is saved yet. */
+const StartingReply = S.Struct({
+  ...ReplyCommon, ...ReplyWords, stage: S.Literal("starting"),
+  /** Counts the starts of this record. */
+  attempt: PositiveInt,
+  startedAt: Millis,
+});
+/** The clock of a reply whose question is saved. */
+const ReplyClock = {
+  questionId: S.String,
+  model: S.String,
+  startedAt: Millis,
+  readyAt: S.optional(Millis),
+  firstTokenAt: S.optional(Millis),
+  workMs: Count,
+  toolMs: Count,
+  /** 1, then 2 while a failed reply runs once more. */
+  try: PositiveInt,
+  spans: S.Array(S.Struct({ from: Count, ms: Count })),
+  callsAt: S.Record(S.String, Count),
+};
+const LiveReply = S.Struct({ ...ReplyCommon, ...ReplyClock, stage: S.Literals(["loading", "thinking", "tool", "writing"]) });
+const DrawingReply = S.Struct({ ...ReplyCommon, stage: S.Literal("drawing"), questionId: S.String, startedAt: Millis, jobs: S.Array(S.String) });
+/** A Stop was taken: the clock stands at `stoppedAt` while the words so far are saved. */
+const StoppingReply = S.Struct({ ...ReplyCommon, ...ReplyClock, stage: S.Literal("stopping"), stoppedAt: Millis });
+const DoneReply = S.Struct({ ...ReplyCommon, stage: S.Literal("done"), at: Millis, questionId: S.String, replyId: S.String });
+const StoppedReply = S.Struct({
+  ...ReplyCommon, stage: S.Literal("stopped"), at: Millis, questionId: S.String,
+  /** The saved words so far; absent when nothing had been written. */
+  replyId: S.optional(S.String),
+  by: S.Union([
+    S.Struct({ who: S.Literal("person") }),
+    S.Struct({ who: S.Literal("preempted"), neededBy: S.optional(S.String) }),
+    S.Struct({ who: S.Literal("runtime") }),
+    S.Struct({ who: S.Literal("closing") }),
+  ]),
+});
+const FailedReply = S.Struct({
+  ...ReplyCommon, stage: S.Literal("failed"), at: Millis,
+  /** Absent for a Retry that was refused before it started. */
+  questionId: S.optional(S.String),
+  code: S.String, message: S.String,
+});
+
+/** A removed message is not in the union: it is on no list. */
+export const Reply = S.Union([QueuedReply, HeldReply, EditingReply, NextReply, StartingReply, LiveReply, DrawingReply, StoppingReply, DoneReply, StoppedReply, FailedReply]);
+export type Reply = typeof Reply.Type;
+
+/**
+ * The one answer to every call that names a reply (reply.*), for a well-formed call that met the
+ * record in some stage. A window changes its copy of a record only when the answer or a push
+ * says so.
+ */
+export const ReplyAnswer = S.Union([
+  /** The server did it, or it was already so: the record as it now is (for a remove, as it was). */
+  S.Struct({ answer: S.Literal("done"), reply: Reply }),
+  /** There is no waiting message with that id any more. `question`: why "sent", the saved question. */
+  S.Struct({ answer: S.Literal("gone"), why: S.Literals(["sent", "removed", "chat-deleted", "unknown"]), question: S.optional(Message) }),
+  /** It is on its way or being answered: too late for this call. */
+  S.Struct({ answer: S.Literal("sending"), reply: Reply }),
+  /** Another window has it open, or its words changed since this change began. */
+  S.Struct({ answer: S.Literal("elsewhere"), reply: Reply }),
+]);
+export type ReplyAnswer = typeof ReplyAnswer.Type;
+/** What a caller gets back: the server's answer, or the client's word that there was none. The server never sends "not-reached". */
+export type ReplyOutcome = ReplyAnswer | { readonly answer: "not-reached"; readonly why: "closed" | "timeout" };
 
 /** The context sizes the product offers; a model runs at the most it takes when that is less. */
 export const ContextSize = S.Literals([8192, 16384, 32768, 65536]);
