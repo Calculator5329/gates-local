@@ -1,6 +1,6 @@
 // settings.get, settings.update and the settings.changed push.
 import type { HandlerContext, Handlers } from "../ws/server.ts";
-import type { Push } from "../app.ts";
+import type { Push } from "../app/push.ts";
 import type { SettingsStore } from "./store.ts";
 import { fetchShow } from "../fit/ollama.ts";
 

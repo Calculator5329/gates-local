@@ -6,6 +6,7 @@
 import { statfs } from "node:fs/promises";
 import path from "node:path";
 import { cardBytes, type GpuStatus, type ImageSetup, type ImageSetupProgress } from "@gates-local/contracts";
+import { shortDisk } from "../runtime/install.ts";
 import type { InstallProgress } from "../runtime/types.ts";
 import { installEngine, isProcessorBuild, type EngineLayout } from "./engine.ts";
 import type { ImageModule } from "./module.ts";
@@ -14,7 +15,6 @@ import { MIN_ROOM, PRESETS, presetFiles } from "./presets.ts";
 import type { InstallManifest } from "../runtime/schemas.ts";
 
 const GIB = 1024 ** 3;
-const gb = (bytes: number) => `${(bytes / GIB).toFixed(1)} GB`;
 const ELSEWHERE = "A ComfyUI on another computer works too: set its address in Settings.";
 
 export const NO_ENGINE = "The app cannot set up images on this computer. A ComfyUI you run yourself works: set its address in Settings.";
@@ -38,7 +38,6 @@ export const CPU_SECONDS = { low: 100, high: 235 } as const;
 export const GPU_UNREAD = `The app could not read this computer's graphics card, so it cannot tell whether pictures can run here. ${ELSEWHERE}`;
 /** `room` is the held engine value's (imageRoom: the card to the nearest GB). */
 export const smallCard = (room: number) => `This graphics card has ${Math.round(room / GIB)} GB; Image mode needs 4 GB. ${ELSEWHERE}`;
-export const shortDisk = (need: number, free: number) => `Needs ${gb(need)} free; ${gb(free)} is free on this drive.`;
 
 /**
  * The disk the engine takes against its download: the archive while it unpacks, plus the unpacked

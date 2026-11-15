@@ -49,6 +49,7 @@
 // close() refuses new work and aborts and drains every preload, so a
 // shutdown never waits on a cold load holding its GPU claim.
 import type { FitOffer, FitReport, ModelLoad } from "@gates-local/contracts";
+import { createFifoGate, type LoadGate } from "../gpu/gate.ts";
 import type { GpuLease } from "../gpu/lease.ts";
 import { ENGINE_BUSY_NOTE, createLoadedRecord, type Handoff, type MemoryOwner, type Want } from "../gpu/memory.ts";
 import { canonicalTag } from "./recommended.ts";
@@ -79,26 +80,6 @@ export class ModelActionError extends Error {
 /** admit() gave up because the caller's signal aborted while it waited. */
 export class AdmitCancelled extends Error {
   override readonly name = "AdmitCancelled";
-}
-
-/**
- * Runs `fn` with the load gate held; the gate is released when `fn` settles.
- * An in-process FIFO mutex: it orders residency reads, fits and loads among
- * the chat claims that share the GPU lease (gpu/lease.ts). A turn's admit
- * runs inside the turn's own lease claim; load() takes its own claim.
- */
-export type LoadGate = <T>(fn: () => Promise<T>) => Promise<T>;
-
-export function createFifoGate(): LoadGate {
-  let tail: Promise<unknown> = Promise.resolve();
-  return <T>(fn: () => Promise<T>): Promise<T> => {
-    const run = tail.then(fn);
-    tail = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
-  };
 }
 
 export interface TurnLoad {

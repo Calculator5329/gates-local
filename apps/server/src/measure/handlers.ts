@@ -25,7 +25,7 @@
 import type { FitReport, MeasureList, MeasureRun, ModelInfo, ModelMeasure, PageSeen, ShellStatus } from "@gates-local/contracts";
 import type { GpuLease } from "../gpu/lease.ts";
 import type { MemoryOwner, Want } from "../gpu/memory.ts";
-import type { Push } from "../app.ts";
+import type { Push } from "../app/push.ts";
 import type { ModelLoader } from "../runtime/load.ts";
 import type { SettingsReader } from "../settings/store.ts";
 import { turnSettings } from "../settings/turn.ts";

@@ -34,7 +34,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { VRAM_SAFETY_MARGIN_BYTES } from "../fit/constants.ts";
 import { forgetGpuReadings } from "../fit/gpu.ts";
 import { sendSpan } from "../chat/send-times.ts";
-import { createFifoGate, type LoadGate } from "../runtime/load.ts";
+import { createFifoGate, type LoadGate } from "./gate.ts";
 import { canonicalTag } from "../runtime/recommended.ts";
 import type { LoadedModel } from "../runtime/types.ts";
 

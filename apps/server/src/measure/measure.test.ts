@@ -15,7 +15,7 @@ import { createMemoryOwner } from "../gpu/memory.ts";
 import { ModelActionError, type TurnReservation } from "../runtime/load.ts";
 import type { LoadedModel } from "../runtime/types.ts";
 import { MEASURE_VERSION, type FitReport, type MeasureRun, type ModelInfo, type ModelMeasure } from "@gates-local/contracts";
-import type { Push } from "../app.ts";
+import type { Push } from "../app/push.ts";
 
 const dir = () => mkdtempSync(path.join(tmpdir(), "measure-"));
 

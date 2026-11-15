@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-15: the server's chat code is split by job
+
+- Internal only, nothing changes on screen: the server's chat code is now
+  one file per job (requests, taking a send in, running a reply, pictures
+  in a chat, the queue), and two pairs of server files no longer import
+  each other.
+
 ## 2026-11-15: a Stop during a file save holds the message, and one bad saved row no longer empties the queue
 
 - A queued message with a photo or a file could still be asked when Stop

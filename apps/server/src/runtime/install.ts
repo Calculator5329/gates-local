@@ -14,10 +14,13 @@ import { pipeline } from "node:stream/promises";
 import zlib from "node:zlib";
 import { NBSP, gb } from "@gates-local/contracts";
 import { volumeFree } from "../image/download.ts";
-import { shortDisk } from "../image/setup.ts";
 import { binaryIn, installRoot, installedBinary, runtimeDir } from "./paths.ts";
 import type { InstallManifest } from "./schemas.ts";
 import type { InstallProgress } from "./types.ts";
+
+/** A drive without room for a download: both sizes in GB to one decimal (image setup says it the same way). */
+const diskGb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+export const shortDisk = (need: number, free: number) => `Needs ${diskGb(need)} free; ${diskGb(free)} is free on this drive.`;
 
 export type InstallErrorCode =
   | "unverified-manifest"

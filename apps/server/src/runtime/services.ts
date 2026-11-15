@@ -4,7 +4,7 @@
 // HTTP API) are read-only; nothing here stops or signals a process the app
 // did not start.
 import type { RuntimeMode } from "@gates-local/contracts";
-import type { Push } from "../app.ts";
+import type { Push } from "../app/push.ts";
 import { offerAfterRefusal } from "../fit/alternatives.ts";
 import { fitEach, planLoad, type FitDeps } from "../fit/fit.ts";
 import { catalogModels } from "./catalog.ts";

@@ -8,7 +8,7 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { imageFitVerdict, type GpuStatus, type ImageChoice, type ImageDownload, type ImageEvent, type ImagePresets, type ImageStatus, type Params, type PullProgress } from "@gates-local/contracts";
 import * as S from "effect/Schema";
-import type { Push } from "../app.ts";
+import type { Push } from "../app/push.ts";
 import { forgetGpuReadings, holdersSummary, readGpu, untilAborted } from "../fit/gpu.ts";
 import type { NvidiaSmiRunner } from "../fit/types.ts";
 import type { GpuLease } from "../gpu/lease.ts";
