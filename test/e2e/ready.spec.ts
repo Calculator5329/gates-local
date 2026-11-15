@@ -3,7 +3,7 @@
 // healthy runtime has no sidebar row), the composer already has a model, so a
 // message typed then sends. The model choice needs only models.list and
 // settings.get; it must not wait for gpu.status or the catalog
-// (apps/web/src/session.ts hydrate).
+// (apps/web/src/lib/session/index.ts hydrate).
 import { decodeRequest, decodeServerMessage } from "@gates-local/contracts";
 import { expect, sendMessage, test, waitReady } from "./fixtures.ts";
 

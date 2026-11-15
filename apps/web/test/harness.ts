@@ -6,7 +6,7 @@
 import { vi } from "vitest";
 import type { Channel, Message, MethodName, Params, Payload, QueuedMessage, ResultOf } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
-import { createQueue } from "../../server/src/chat/queue.ts";
+import { createQueue } from "@gates-local/server/chat/queue.ts";
 
 type Listener = (event: { data?: unknown }) => void;
 

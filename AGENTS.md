@@ -80,7 +80,16 @@ decision.
   measured free VRAM.
 - `apps/desktop/`: Electron main and preload; supervises the server.
 - `apps/web/`: the client. Its look is settled: black and gray with green,
-  as recorded in `docs/decisions.md`.
+  as recorded in `docs/decisions.md`. `src/` has one folder per feature
+  (`app/` for the shell and `styles.css`, then `composer/`, `thread/`,
+  `sidebar/`, `picker/`, `models/`, `fit/`, `runtime/`, `settings/` and
+  the rest); nothing sits at the top of `src/`. Shared code is in
+  `src/lib/`: `store/` (the store and drafts), `session/` (the
+  connection and server actions), `ui/` and `words/`. A feature's tests
+  sit beside its files; `apps/web/test/` keeps only the shared helpers
+  (fake DOM, harness, ordering replay). Window tests reach server and
+  harness code through `@gates-local/server/...` and
+  `@gates-local/harness`, never a relative path across apps.
 - `packages/harness/`: the turn loop, the tools a model can call and the
   sandbox they run in.
 - `packages/update/` holds the updaters and process state both apps use; `packages/runtime-files/` holds the app's Ollama paths and ownership record. No app imports another app's files.

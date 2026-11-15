@@ -1,7 +1,7 @@
 // Pages: a fenced html block in a reply that holds a whole document is a page.
 // The client runs it beside the chat; the server sends a model only the newest
 // one in full. Both read a reply's blocks here, with the fence rules the
-// client's Markdown renderer uses (apps/web/src/markdown.tsx), so a block the
+// client's Markdown renderer uses (apps/web/src/thread/markdown.tsx), so a block the
 // renderer draws as code is the block both sides call a page.
 
 export interface PageBlock {

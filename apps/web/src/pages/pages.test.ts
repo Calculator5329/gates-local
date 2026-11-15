@@ -2,9 +2,9 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Markdown } from "../markdown.tsx";
-import { SANDBOX_OFF_SKIP, runPage, runPages } from "../measure-pages.ts";
-import { setState } from "../store.ts";
+import { Markdown } from "../thread/markdown.tsx";
+import { SANDBOX_OFF_SKIP, runPage, runPages } from "../measure/measure-pages.ts";
+import { setState } from "../lib/store/store.ts";
 import { PAGE_MAX, pageAddress, pageFileName } from "./page-doc.ts";
 import { closePanel, follow, showVersion, shownOf, versionsOf } from "./pages.ts";
 import { PagePanel } from "./PagePanel.tsx";

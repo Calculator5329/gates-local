@@ -17,9 +17,9 @@ export default defineConfig({
           { name: "shell", tags: ["$initial"] },
           // Settings warming must not pull the conversation renderer back into
           // startup. Its clipboard helper is shared through the startup group.
-          { name: "conversation", includeDependenciesRecursively: false, test: /apps[\\/]web[\\/]src[\\/](?:Thread\.tsx|markdown\.tsx|paced\.ts|reveal\.ts|image-links\.ts|pages[\\/][\w-]+\.(?:tsx?|css))$/ },
+          { name: "conversation", includeDependenciesRecursively: false, test: /apps[\\/]web[\\/]src[\\/](?:thread[\\/](?:Thread\.tsx|markdown\.tsx|paced\.ts|reveal\.ts|image-links\.ts)|pages[\\/][\w-]+\.(?:tsx?|css))$/ },
           // Picker CSS stays with the pickers (the image picker shares it), outside idle-warmed screens.
-          { name: "picker", includeDependenciesRecursively: false, test: /apps[\\/]web[\\/]src[\\/](?:(?:Image)?Picker\.tsx|(?:image-)?picker\.css)$/ },
+          { name: "picker", includeDependenciesRecursively: false, test: /apps[\\/]web[\\/]src[\\/](?:picker[\\/](?:Picker\.tsx|picker\.css)|image[\\/](?:ImagePicker\.tsx|image-picker\.css))$/ },
           { name: "screens", test: /apps[\\/]web[\\/]src[\\/]/ },
         ] },
       },

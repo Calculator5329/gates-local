@@ -1,6 +1,6 @@
 [
   {
-    "file": "apps/web/src/ModelDownloads.tsx",
+    "file": "apps/web/src/models/ModelDownloads.tsx",
     "find": "            c.purpose\n          )}\n        </span>\n      </div>\n      {report && v ? <MemoryMark",
     "replace": "            <>{c.purpose}{/* finder case: the settings row 18 fix undone (every row says its verdict) */}{v ? <> · {markWords(v, cpu)}</> : null}</>\n          )}\n        </span>\n      </div>\n      {report && v ? <MemoryMark"
   }

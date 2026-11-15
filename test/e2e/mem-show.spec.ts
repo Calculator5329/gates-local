@@ -1,7 +1,7 @@
 // Pictures for two owner rulings (2026-11-13), taken the same way on any version of the app: the
 // model button of a new chat starts on the chat model in memory, and the thread says where the
 // model changed mid-chat (chat to chat, chat to image). The rules are guarded by unit tests
-// (apps/web/src/session-models.test.ts, apps/web/src/model-change.test.ts); this only shoots.
+// (apps/web/src/lib/session/session-models.test.ts, apps/web/src/thread/model-change.test.ts); this only shoots.
 import type { Page } from "@playwright/test";
 import { createClient } from "@gates-local/contracts";
 import { fakeComfy } from "./fake-comfy.ts";

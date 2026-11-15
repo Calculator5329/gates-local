@@ -1,6 +1,6 @@
 // The built web client on the phone listener. GET / and any path that is not
 // a file answer index.html with the same-origin meta, which tells the client
-// to open its socket on this page's own host (apps/web/src/session.ts).
+// to open its socket on this page's own host (apps/web/src/lib/session/index.ts).
 // Paths are checked twice: lexically on the raw request (no "..", ".",
 // backslash, NUL or doubled slash after decoding) and on the resolved real
 // path, so a symlink under the dist dir cannot reach a file outside it.

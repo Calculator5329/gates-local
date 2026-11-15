@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-15: the window's code sits in one folder per feature
+
+- Internal move only: the window's files and their tests moved into
+  feature folders under `apps/web/src`; nothing you see changed.
+
 ## 2026-11-15: the project's rules are lint checks
 
 - Internal only, nothing changes on screen: `pnpm lint` now also checks

@@ -122,7 +122,7 @@ describe("Settings' words for an installed copy", () => {
   });
 
   // "Gates Local will try again in an hour." is Settings' to add from the live
-  // switch (apps/web/test/updates.test.ts), never baked in here.
+  // switch (apps/web/src/updates/updates.test.ts), never baked in here.
   it("could not reach", async () => {
     const { module } = copy();
     expect(await words(module)).toEqual({ state: "cannot-check", lines: ["Could not reach the update server. Check your connection."] });

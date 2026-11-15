@@ -1,0 +1,37 @@
+import { useEffect, useSyncExternalStore } from "react";
+import { afterFirstPaint, type deferred } from "../lib/session/deferred.ts";
+import { firstRunScreen, settingsScreen } from "./screen-loaders.ts";
+export { firstRunScreen, imagePickerScreen, pickerScreen, settingsScreen, threadScreen } from "./screen-loaders.ts";
+
+const unwatched = () => () => {};
+
+/**
+ * Only a screen on show listens for its code landing. A preload (the thread
+ * screen once a new chat has text, settings after the first paint) would
+ * otherwise re-render the whole app, sidebar and all, inside someone's key;
+ * the render that shows the screen reads where its load got to.
+ */
+export function useScreen<T>(screen: ReturnType<typeof deferred<T>>, needed: boolean) {
+  const state = useSyncExternalStore(needed ? screen.subscribe : unwatched, screen.get, screen.get);
+  useEffect(() => {
+    if (needed) void screen.load();
+  }, [screen, needed]);
+  return state;
+}
+
+export function preloadScreens(): () => void {
+  return afterFirstPaint(() => {
+    void settingsScreen.load();
+    void firstRunScreen.load();
+  });
+}
+
+/** Old tabs may request a chunk removed by an update. Leave a usable way back. */
+export function ScreenError() {
+  return (
+    <p role="alert" className="na">
+      This page couldn't load. The app may have updated. {" "}
+      <button type="button" className="link" data-testid="ui.screen-error.reload" onClick={() => location.reload()}>Reload</button>
+    </p>
+  );
+}

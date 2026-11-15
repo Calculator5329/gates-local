@@ -17,14 +17,14 @@ describe("globRegex", () => {
 
 describe("screensFor", () => {
   const table = [
-    { id: "chat", paths: ["apps/web/src/Thread.tsx"] },
-    { id: "composer", paths: ["apps/web/src/Composer.tsx"] },
-    { id: "sidebar", paths: ["apps/web/src/Sidebar.tsx"] },
-    { id: "queue", paths: ["apps/web/src/Composer.tsx", "apps/web/src/Queue*.tsx"] },
+    { id: "chat", paths: ["apps/web/src/thread/Thread.tsx"] },
+    { id: "composer", paths: ["apps/web/src/composer/Composer.tsx"] },
+    { id: "sidebar", paths: ["apps/web/src/sidebar/Sidebar.tsx"] },
+    { id: "queue", paths: ["apps/web/src/composer/Composer.tsx", "apps/web/src/Queue*.tsx"] },
   ];
 
   it("picks every screen a changed file names, in table order", () => {
-    expect(screensFor(["apps/web/src/Composer.tsx"], table)).toEqual({ screens: ["composer", "queue"], unmatched: [], whole: false });
+    expect(screensFor(["apps/web/src/composer/Composer.tsx"], table)).toEqual({ screens: ["composer", "queue"], unmatched: [], whole: false });
   });
 
   it("walks the whole app for app code no screen names: unsure is everything", () => {
@@ -38,14 +38,14 @@ describe("screensFor", () => {
   });
 
   it("skips unit tests", () => {
-    expect(screensFor(["apps/web/src/Composer.test.ts"], table).screens).toEqual([]);
+    expect(screensFor(["apps/web/src/composer/Composer.test.ts"], table).screens).toEqual([]);
   });
 
   it("every real screen has a unique id and some paths", () => {
     expect(new Set(SCREENS.map((s) => s.id)).size).toBe(SCREENS.length);
     expect(SCREENS.every((s) => s.paths.length > 0 && s.steps.length + (s.load ? 1 : 0) > 0)).toBe(true);
     // a shared file walks the screens built on it, the core ones among them
-    expect(screensFor(["apps/web/src/styles.css"], SCREENS).screens).toEqual(expect.arrayContaining(["chat", "composer", "sidebar", "settings", "phone"]));
+    expect(screensFor(["apps/web/src/app/styles.css"], SCREENS).screens).toEqual(expect.arrayContaining(["chat", "composer", "sidebar", "settings", "phone"]));
   });
 });
 

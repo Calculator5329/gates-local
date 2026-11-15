@@ -45,10 +45,10 @@ saved beside that sample's downloaded database as
   copy are used.
 - **Files:** `docs/design/round-2-instrument.html`,
   `docs/design/round-2-t3-faithful.html`, `docs/design/shell.html`,
-  `apps/web/src/styles.css`, `apps/web/src/icons.tsx`,
-  `apps/web/src/App.tsx` (the header), `apps/web/src/Sidebar.tsx`,
-  `apps/web/src/Thread.tsx`, `apps/web/src/Composer.tsx`,
-  `apps/web/src/Banner.tsx`. Each carries a one-line header pointing at the
+  `apps/web/src/app/styles.css`, `apps/web/src/lib/ui/icons.tsx`,
+  `apps/web/src/app/App.tsx` (the header), `apps/web/src/sidebar/Sidebar.tsx`,
+  `apps/web/src/thread/Thread.tsx`, `apps/web/src/composer/Composer.tsx`,
+  `apps/web/src/runtime/Banner.tsx`. Each carries a one-line header pointing at the
   notice file.
 
 ## Lucide icons
@@ -59,7 +59,7 @@ saved beside that sample's downloaded database as
 - **What was used:** the icon sprite's line icons are Lucide icons, some
   copied path for path and some redrawn with rounded coordinates. The gate
   mark (`i-mark`) is this project's own. No Lucide package is a dependency.
-- **Files:** `apps/web/src/icons.tsx`, `docs/design/shell.html`,
+- **Files:** `apps/web/src/lib/ui/icons.tsx`, `docs/design/shell.html`,
   `docs/design/round-2-t3-faithful.html`,
   `docs/design/round-2-instrument.html`. Each carries a one-line header
   pointing at the notice file.

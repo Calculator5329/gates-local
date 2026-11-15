@@ -132,7 +132,7 @@ probe. Legacy migration and the bounded metadata-only single-tab path remain.
 - [x] Settings › Updates on a phone that only listens: the release page link grows the second row from 73 to 110 px at 390 px, because it is drawn outside `.upd-acts`. Reserve the line or keep the link in the tip, and add a 390 px listener step to the spec.
       *Done 2026-11-14:* "Updates take one click and say each thing once"; the release page link is drawn inside `.upd-acts` and only for a window that can install (`SettingsUpdates.tsx`), held by `test/e2e/updates.spec.ts` "at 390px a listener's row keeps its height and offers no control".
 - [x] Settings › Updates: a failed Download stays shown over a newer check (`outdated()` covers only a failed check).
-      *Done 2026-11-14, met before 0.2.4:* "Updates found on a clone without releases show again"; `outdated()` in `update-state.ts` judges a failed Download and a failed check the same way, held by `apps/web/test/updates.test.ts` "a failed Download gives way to a newer check".
+      *Done 2026-11-14, met before 0.2.4:* "Updates found on a clone without releases show again"; `outdated()` in `update-state.ts` judges a failed Download and a failed check the same way, held by `apps/web/src/updates/updates.test.ts` "a failed Download gives way to a newer check".
 - [ ] Settings: an accent name this version does not know (a file written by a newer version) fails the whole settings decode, so every setting goes back to its default. Drop the unknown value and keep the rest; the same holds for any later choice list.
 - [ ] The desktop app keeps no server log: the server's output is thrown away, so a reply that failed cannot be looked into afterwards. Keep a small rolling log in the app's data folder.
 - [ ] Pictures: the thumbnail encoder (WebAssembly) is proved in the packaged Linux build only. Run the packaged Windows build once and ask for a thumbnail before the Pictures screen ships.
@@ -179,7 +179,7 @@ probe. Legacy migration and the bounded metadata-only single-tab path remain.
 - [ ] <!-- workspace:id=work:e2c7100d-e7e6-59b0-87d1-f31241b341db --> Dropping files is proven with synthetic drag events only. Try a real drag from the desktop into the desktop window, and a dropped folder end to end (unit test only today).
 - [ ] <!-- workspace:id=work:148c4e5e-87c5-5429-8cf7-709ba730f126 --> Under reduced motion only Dictate's spinner holds still; the shared `.spin` rule still turns in seven other places (update checks, tool rows and status, two banners, the maker mark). Fix the shared rule.
 - [x] <!-- workspace:id=work:981392c1-7213-5ef6-9031-9cd0c746d284 --> While a reply runs, Stop's tooltip says "Enter queues your message" even when a "not sent" chip will block the queue.
-      *Done 2026-11-14:* "Chat: fewer lines, fewer words"; Stop's tip is "Stop", or "Cancel image" while a picture is made (`stopTip` in `apps/web/src/Composer.tsx`).
+      *Done 2026-11-14:* "Chat: fewer lines, fewer words"; Stop's tip is "Stop", or "Cancel image" while a picture is made (`stopTip` in `apps/web/src/composer/Composer.tsx`).
 
 Known limit: reloading in the seconds while a send is being accepted can lose
 that message. Keep the message recoverable across that reload in a future pass.
@@ -190,7 +190,7 @@ that message. Keep the message recoverable across that reload in a future pass.
       *Done 2026-11-09:* “Hold every running reply in one turn map with one reducer” replaces the source chat's turn in the map.
 Follow-up (TC-02): Add a server-side size limit or eligibility check before hover-preloading very large thread histories.
 *2026-11-14:* a hover preload now asks the server for the newest 200 messages
-only, as opening the thread does (`fetchThread` in `apps/web/src/session/threads.ts`),
+only, as opening the thread does (`fetchThread` in `apps/web/src/thread/threads.ts`),
 from "A question gets its answer in the chat".
 
 *In progress 2026-11-08:* Clipboard buttons share a fallback, truthful feedback
@@ -655,7 +655,7 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Accept:* decide whether an image is a call in the count, and say it once.
 - [x] <!-- workspace:id=work:a3401491-dd13-54bc-b25e-fefa10f035b1 --> A reply this window joined part-way shows no thinking time at all, although the server knows when the turn began.
       *Accept:* the replayed start carries the thinking time so far, or the chip says the time is unknown in its tip.
-      *Done 2026-11-14:* "A running reply shows one mark and the server's time"; `turns.active` and each push carry the server's reply record with its work time so far (`ReplyRecord` in `packages/contracts/src/shapes.ts`, replayed in `apps/web/test/reconnect-live.test.ts`).
+      *Done 2026-11-14:* "A running reply shows one mark and the server's time"; `turns.active` and each push carry the server's reply record with its work time so far (`ReplyRecord` in `packages/contracts/src/shapes.ts`, replayed in `apps/web/src/lib/session/reconnect-live.test.ts`).
 - [ ] <!-- workspace:id=work:948a47ed-3fce-57f8-ae44-185d5dfa0ab4 --> The line beside an opened call's `$` hides `source`, `limit`, `offset` and `timeoutMs`.
       *Accept:* the opened call shows every argument the model sent.
 - [ ] <!-- workspace:id=work:8c16196b-90a8-5d77-b7ca-bff62c209798 --> A round of thinking that finishes while it is being read closes under the reader.
@@ -891,7 +891,7 @@ time by the device's own `speechSynthesis` voice (local voices only), a
 speaker icon to turn it off. No voice is bundled.
 
 - [ ] Choose the bundled CPU voice; the owner picks before anything ships. Measured on disk: Pocket TTS English weights 219 MB (`model.safetensors` 219,029,196 bytes plus a 59 KB tokenizer; Milo's measured path; the CC0-catalogued voices are marius, javert, bill_boerst, stuart_bell, with alba as Milo's reference); Kokoro 82M 354 MB (ONNX 325.5 MB plus 28.2 MB of voices); Piper `en_US-lessac-high` 114 MB.
-      *Accept:* the chosen voice runs on the processor behind the same sentence reader (`apps/web/src/talk.ts` `Speaker`), with its first-audio time measured against `docs/design/voice.md` targets and its licence written down.
+      *Accept:* the chosen voice runs on the processor behind the same sentence reader (`apps/web/src/voice/talk.ts` `Speaker`), with its first-audio time measured against `docs/design/voice.md` targets and its licence written down.
       2026-11-13 listening page (chat row 41; the pick is by ear, on the owner's hub): three replies (short, list, long paragraph) read sentence by sentence on 12 efficiency cores with no GPU, two runs. First sound: Pocket TTS 0.04 to 0.09 s on every reply (it streams within a sentence); Kokoro 0.19 s short, 2.3 to 2.5 s for a 35-word first sentence; Piper 0.07 s short, 1.2 s for the same sentence. Seconds of audio per second of work: Pocket 3.7 to 6.3, Kokoro 5.6 to 6.2, Piper 10.2 to 10.6. What each needs to run besides its weights: Pocket TTS needs PyTorch (715 MB installed, CPU build); Kokoro and Piper need ONNX Runtime (67 to 78 MB) with espeak-ng data. Pocket TTS leaves longer quiet after a sentence (up to 1.9 s for javert). Licences read 2026-11-13 (chat row 43): one table in `docs/design/voice.md`, "What a bundled voice would ship, and its licence". Pocket TTS is the only set with no GPL part; Kokoro as packaged brings GPL phonemizing and two files with no stated licence; Piper brings a GPL runtime and a voice trained on research-only data.
 - [x] Stop on a reply also stops its reading and pulls back the sentences already handed to the voice (chat row 42, coordinator default named to the owner, 2026-11-13). A reply that fails is still read to its last written word. Any stop of the reply on screen counts, including one from another window; which window's Stop may stop a reply stays the open two-window row under Client ordering replay.
       *Proof:* `talk.test.ts` "Stop on a reply silences it" (red on dev: the queue kept "One.", "Two.", "Thr") and the Stop step in `test/e2e/voice.spec.ts` (red on dev: no cancel on Stop).

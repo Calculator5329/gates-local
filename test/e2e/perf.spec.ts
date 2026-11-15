@@ -100,7 +100,7 @@ interface SlowEvent {
   processing: number;
 }
 
-/** The client's test counters: glPerf in apps/web/src/session.ts, glRows in apps/web/src/Thread.tsx. */
+/** The client's test counters: glPerf in apps/web/src/lib/session/index.ts, glRows in apps/web/src/thread/Thread.tsx. */
 interface Probe {
   glPerf?: { deltas: number; flushes: number };
   glRows?: { renders: Record<string, number>; bustMemo?: boolean };
@@ -296,7 +296,7 @@ test("cold load: first paint and time to a ready composer", { tag: "@timing" }, 
  * Streams one reply at 4 ms a token (several tokens to a frame) and returns
  * the client's counters plus the most store flushes seen in one animation
  * frame. window.glPerf is the client's own counter object
- * (apps/web/src/session.ts); each write to flushes is stamped with the frame
+ * (apps/web/src/lib/session/index.ts); each write to flushes is stamped with the frame
  * it happened in, and counted when it ran outside an animation-frame
  * callback (a flush from a socket event, such as the terminal one).
  */
@@ -306,7 +306,7 @@ async function streamFlushes(page: Page, open: (hash?: string) => Promise<void>,
   await stack.scenario("models", { tokenDelayMs: 4 });
   await page.evaluate((flag) => {
     const w = window as unknown as FlushProbe;
-    // the control's regression (apps/web/src/session.ts): one extra publish at the done event
+    // the control's regression (apps/web/src/lib/session/index.ts): one extra publish at the done event
     w.glPerf.terminalFlush = flag;
     w.glFlushFrames = [];
     w.glOutsideFrame = 0;
@@ -378,7 +378,7 @@ test("streaming flushes at most once in any frame", async ({ page, open }) => {
 
 /** Renders of the 6 seeded rows from the live line showing until well into the reply; bust turns the control on. */
 async function seededRenders(page: Page, open: (hash?: string) => Promise<void>, thread: string | null, bust: boolean) {
-  // window.glRows: the row-render test flag in apps/web/src/Thread.tsx
+  // window.glRows: the row-render test flag in apps/web/src/thread/Thread.tsx
   await page.addInitScript((b) => {
     (window as unknown as Probe).glRows = { renders: {}, bustMemo: b };
   }, bust);

@@ -1,6 +1,6 @@
 [
   {
-    "file": "apps/web/src/SettingsUpdates.tsx",
+    "file": "apps/web/src/updates/SettingsUpdates.tsx",
     "find": "      <Row label={label} desc={desc}>",
     "replace": "      {/* finder case: updates row 8 undone (the state on a third row that comes and goes) */}\n      <Row label={label} />\n      {p.checking ? null : <Row label=\"State\" desc={desc} />}\n      <Row label=\"Check for updates\">"
   }

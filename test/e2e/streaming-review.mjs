@@ -11,12 +11,12 @@ if (!output) throw new Error("The browser runner must supply GL_E2E_RESULTS");
 await mkdir(output, { recursive: true });
 const bundle = await build({
   stdin: { resolveDir: path.resolve("apps/web"), loader: "tsx", contents: `
-    import './src/styles.css';
+    import './src/app/styles.css';
     import { StrictMode, useState } from 'react';
     import { createRoot } from 'react-dom/client';
-    import { usePacedText } from './src/paced.ts';
-    import { reveal } from './src/reveal.ts';
-    import { Markdown } from './src/markdown.tsx';
+    import { usePacedText } from './src/thread/paced.ts';
+    import { reveal } from './src/thread/reveal.ts';
+    import { Markdown } from './src/thread/markdown.tsx';
     function Probe() {
       const [reply, setReply] = useState({ text: 'Returning to a streaming reply', streaming: true });
       window.setReply = (text, streaming = true) => setReply({ text, streaming });

@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 import { build } from "esbuild";
 import path from "node:path";
-import type { State } from "../../apps/web/src/store.ts";
+import type { State } from "../../apps/web/src/lib/store/store.ts";
 import { expect, test } from "./fixtures.ts";
 
 declare global {
@@ -18,13 +18,13 @@ test.use({ video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASUR
 async function proof(page: import("@playwright/test").Page) {
   const bundle = await build({
     stdin: { resolveDir: path.resolve("apps/web"), loader: "tsx", contents: `
-      import './src/styles.css';
+      import './src/app/styles.css';
       import { createRoot } from 'react-dom/client';
       import { flushSync } from 'react-dom';
-      import { Timeline } from './src/Thread.tsx';
-      import { Markdown } from './src/markdown.tsx';
-      import { reveal } from './src/reveal.ts';
-      import { setState } from './src/store.ts';
+      import { Timeline } from './src/thread/Thread.tsx';
+      import { Markdown } from './src/thread/markdown.tsx';
+      import { reveal } from './src/thread/reveal.ts';
+      import { setState } from './src/lib/store/store.ts';
       const root = createRoot(document.getElementById('proof'));
       window.streamingProof = {
         timeline(patch) { flushSync(() => { setState(patch); root.render(<Timeline threadId="proof" />); }); },

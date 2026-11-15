@@ -1,6 +1,6 @@
 [
   {
-    "file": "apps/web/src/styles.css",
+    "file": "apps/web/src/app/styles.css",
     "find": ".wco .sb-head{padding-left:max(16px,calc(env(titlebar-area-x,0px) + 12px))}",
     "replace": ".wco .sb-head{padding-left:max(16px,calc(env(titlebar-area-x,0px) + 12px));border-bottom:1px solid var(--border)}"
   }

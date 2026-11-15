@@ -64,7 +64,7 @@ table is in, since a restarted server may see different memory.
   `aria-busy="true"` while it shows.
 - A flat muted block at the height of the text line it stands for, with
   a slow pulse. No pulse under reduced motion.
-- Use `Skel` or the `.skel` class (`apps/web/src/ui.tsx`), so the look
+- Use `Skel` or the `.skel` class (`apps/web/src/lib/ui/ui.tsx`), so the look
   changes in one place.
 
 `test/e2e/flicker-audit.spec.ts` checks all of this on a slow link; see

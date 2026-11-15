@@ -6,9 +6,9 @@
 // A desktop app started with Chromium's sandbox off shows a page's code and
 // runs it only on Run (sandbox.ts).
 import { useEffect, useMemo, useState } from "react";
-import { Icon, type IconId } from "../icons.tsx";
-import { useStore } from "../store.ts";
-import { useMedia } from "../ui.tsx";
+import { Icon, type IconId } from "../lib/ui/icons.tsx";
+import { useStore } from "../lib/store/store.ts";
+import { useMedia } from "../lib/ui/ui.tsx";
 import { COVER, setCovering } from "./cover.ts";
 import { PAGE_MAX, PAGE_SANDBOX, type PageAddress, openPageWindow, pageAddress, pageBytes, pageMb, savePage } from "./page-doc.ts";
 import { closePanel, follow, showVersion, shownOf, usePages, useView } from "./pages.ts";

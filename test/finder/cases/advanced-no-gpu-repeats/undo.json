@@ -1,6 +1,6 @@
 [
   {
-    "file": "apps/web/src/FitPanel.tsx",
+    "file": "apps/web/src/fit/FitPanel.tsx",
     "find": "<Row label={title} {...(gpuNotice === undefined && head !== \"\" ? { desc: head } : {})}>",
     "replace": "<Row label={title} desc={gpuNotice ?? head /* finder case: the no-GPU sentence said again on the row */}>"
   }

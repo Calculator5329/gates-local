@@ -8,8 +8,8 @@ import { ROOT, WEB_ORIGIN } from "./env.ts";
 const source = `
 import React, { useLayoutEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ErrorBoundary } from './ErrorBoundary.tsx';
-import { editDraft, useDraft } from './drafts.ts';
+import { ErrorBoundary } from './app/ErrorBoundary.tsx';
+import { editDraft, useDraft } from './lib/store/drafts.ts';
 let brokenThread = false, brokenApp = 'none';
 function Timeline({ id }) { if (brokenThread && id === 'bad') throw new Error('Saved message could not render'); return <p>Conversation {id}</p>; }
 function Composer() { const draft = useDraft(d => d.text); return <textarea aria-label="Message" value={draft} onChange={e => editDraft(e.target.value)} />; }
@@ -29,7 +29,7 @@ async function mount(page: Page) {
   const bundle = await build({ stdin: { contents: source, resolveDir: path.join(ROOT, "apps/web/src"), loader: "tsx" }, bundle: true, write: false, format: "iife", define: { "process.env.NODE_ENV": '"production"' } });
   const script = bundle.outputFiles[0]?.text;
   if (!script) throw new Error("The boundary probe did not build");
-  const styles = await readFile(path.join(ROOT, "apps/web/src/styles.css"), "utf8");
+  const styles = await readFile(path.join(ROOT, "apps/web/src/app/styles.css"), "utf8");
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.route("**/boundary-probe", route => route.fulfill({ contentType: "text/html", body: `<style>${styles}</style><div id="root"></div><script>${script}</script>` }));
   await page.goto(`${WEB_ORIGIN}/boundary-probe`);

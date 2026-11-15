@@ -3,7 +3,7 @@
 ## Ordered settings replays
 
 The production-session replay suites negotiate ordered settings by default.
-Run `pnpm exec vitest run apps/web/test/ordering-replay.test.ts apps/web/test/ordering-state.test.ts apps/web/test/ordering-downloads.test.ts` for the 999 original causal schedules, three additional explicit FIFO RP-01 witnesses and three focused ordered-settings action probes.
+Run `pnpm exec vitest run apps/web/src/thread/ordering-replay.test.ts apps/web/src/app/ordering-state.test.ts apps/web/src/composer/ordering-downloads.test.ts` for the 999 original causal schedules, three additional explicit FIFO RP-01 witnesses and three focused ordered-settings action probes.
 Set `REPLAY_ORDERED_SETTINGS=0` on the same command to compare the original
 legacy guards; the new explicitly ordered probes still exercise the new path.
 No invariant assertion changes between modes. Sampling remains bounded and
@@ -413,7 +413,7 @@ need no test seam. React supplies only non-rendering hooks for the speech button
 
 To add a scenario, describe what the person does, what the server can deliver,
 and what must stay true. Add named events in
-`apps/web/test/ordering-replay.test.ts`, with `after` constraints only where the
+`apps/web/src/thread/ordering-replay.test.ts`, with `after` constraints only where the
 code requires an order, with a short source comment for every edge. Keep the
 chosen button sequence separate from transport guarantees: it defines the input
 story, not a rule about delivery. The scripted server
@@ -487,7 +487,7 @@ A failure prints its completed prefix and the full JSON order. Paste its
 `REPLAY_ORDER='[...]'` before this command to run just that regression:
 
 ```sh
-pnpm exec vitest run apps/web/test/ordering-replay.test.ts -t 'speech preserves'
+pnpm exec vitest run apps/web/src/thread/ordering-replay.test.ts -t 'speech preserves'
 ```
 
 Use the matching test name. The pasted order is checked for missing events,

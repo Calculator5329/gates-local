@@ -1,5 +1,5 @@
-type Store = Pick<typeof import("../src/store.ts"), "getState">;
-type Drafts = Pick<typeof import("../src/drafts.ts"), "getDraft">;
+type Store = Pick<typeof import("../src/lib/store/store.ts"), "getState">;
+type Drafts = Pick<typeof import("../src/lib/store/drafts.ts"), "getDraft">;
 
 /** A read-only test observation; writes still use the real store and draft APIs. */
 export function draftView(store: Store, drafts: Drafts) {

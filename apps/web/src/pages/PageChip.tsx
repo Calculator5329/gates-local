@@ -1,8 +1,8 @@
 // What a page in a reply becomes: one chip naming the page and its version.
 // Clicking it shows that version in the panel.
 import { pageTitle } from "@gates-local/contracts";
-import { Icon } from "../icons.tsx";
-import { useStore } from "../store.ts";
+import { Icon } from "../lib/ui/icons.tsx";
+import { useStore } from "../lib/store/store.ts";
 import { showVersion, shownOf, usePages, useView } from "./pages.ts";
 import "./pages.css";
 

@@ -7,7 +7,7 @@
 import type { Page } from "@playwright/test";
 import { createClient, type PageAction, type PageSeen } from "@gates-local/contracts";
 import { CASES, pageIn, type PageCase } from "../../apps/server/src/measure/cases.ts";
-import { framed } from "../../apps/web/src/measure-harness.ts";
+import { framed } from "../../apps/web/src/measure/measure-harness.ts";
 import { WRONG } from "../fake-ollama/measure-reply.ts";
 import { LEFT_PATH } from "../fake-ollama/page-replies.ts";
 import { expect, openModels, stack, test, waitReady } from "./fixtures.ts";

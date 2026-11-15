@@ -7,7 +7,7 @@
 // panel is open are kept per chat in this browser, so they survive a reload.
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { type ThreadPage, pageBlocks, pageTitle } from "@gates-local/contracts";
-import { runningTurn, turnOf, useStore } from "../store.ts";
+import { runningTurn, turnOf, useStore } from "../lib/store/store.ts";
 
 /** What the session gives this module: the server's page list, and how many messages come before the loaded ones. */
 export interface PageReads {

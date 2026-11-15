@@ -1,0 +1,183 @@
+import { describe, expect, it } from "vitest";
+import { fitWords, type FitReport, type Message } from "@gates-local/contracts";
+import { CONTEXT_SIZES, cardGb, ctxFor, decodeSpeed, fileSize, gb, k, replyMeta, replyWait, shortAge, sourceDetail, verdictOf } from "./format.ts";
+import { drawTimes } from "../../thread/times.ts";
+import { homeTilde, libraryToolCanUse } from "./settings-rules.ts";
+
+const SP = String.fromCharCode(160);
+
+const src = (kind: "folder" | "file" | "sqlite", state: "ready" | "refreshing" | "error" = "ready") => ({ kind, state });
+
+describe("libraryToolCanUse: a tool is ready only with a source it can really read", () => {
+  it("Read files takes folders and files, never a SQLite database (readLibrary leaves those out)", () => {
+    expect(libraryToolCanUse("read", [src("folder")])).toBe(true);
+    expect(libraryToolCanUse("read", [src("file")])).toBe(true);
+    expect(libraryToolCanUse("read", [src("sqlite")])).toBe(false);
+  });
+
+  it("Query databases takes SQLite only (querySnapshot refuses anything else)", () => {
+    expect(libraryToolCanUse("query", [src("sqlite")])).toBe(true);
+    expect(libraryToolCanUse("query", [src("folder"), src("file")])).toBe(false);
+  });
+
+  it("Run commands sees every source in the sandbox", () => {
+    expect(libraryToolCanUse("run", [src("sqlite")])).toBe(true);
+    expect(libraryToolCanUse("run", [src("folder")])).toBe(true);
+    expect(libraryToolCanUse("run", [])).toBe(false);
+  });
+
+  it("a source that is not ready counts for nothing", () => {
+    expect(libraryToolCanUse("read", [src("folder", "error")])).toBe(false);
+    expect(libraryToolCanUse("query", [src("sqlite", "refreshing")])).toBe(false);
+    expect(libraryToolCanUse("run", [src("file", "error")])).toBe(false);
+  });
+});
+
+describe("gb", () => {
+  it("keeps the number and its unit on one line", () => {
+    expect(gb(5.1 * 1024 ** 3)).toBe(`5.1${SP}GB`);
+  });
+
+  it("says a whole card's size in whole GB, as the memory marks do (16303 MiB is a 16 GB card)", () => {
+    expect(cardGb(16303 * 1024 ** 2)).toBe(`16${SP}GB`);
+  });
+});
+
+describe("shortAge, the drawer's one time format", () => {
+  const now = Date.UTC(2026, 10, 12, 20);
+  const ago = (ms: number) => shortAge(now - ms, now);
+  const MIN = 60_000;
+  const HOUR = 60 * MIN;
+  const DAY = 24 * HOUR;
+  it.each([
+    [10_000, "now"],
+    [5 * MIN, "5m"],
+    [3 * HOUR, "3h"],
+    [2 * DAY, "2d"],
+    [21 * DAY, "3w"],
+    [150 * DAY, "5mo"],
+    [800 * DAY, "2y"],
+  ])("%d ms ago is %s", (ms, want) => {
+    expect(ago(ms)).toBe(want);
+  });
+});
+
+const size = (sizeBytes: number) => sourceDetail({ id: "s", kind: "file", label: "notes.txt", path: "notes.txt", addedAt: 0, sizeBytes, state: "ready" });
+describe("a home folder in a path", () => {
+  it.each([
+    ["/home/u/docs/notes", "~/docs/notes"],
+    ["/home/u", "~"],
+    ["/Users/u/docs", "~/docs"],
+    ["C:\\Users\\u\\Documents", "~\\Documents"],
+    ["/data/home/u/docs", "/data/home/u/docs"],
+    ["D:\\work", "D:\\work"],
+  ])("%s reads %s", (path, want) => {
+    expect(homeTilde(path)).toBe(want);
+  });
+});
+
+describe("a Library folder's detail", () => {
+  it("has none: the size on disk of a folder entry is not the size of what is in it", () => {
+    expect(sourceDetail({ id: "s", kind: "folder", label: "docs", path: "docs", addedAt: 0, sizeBytes: 4096, state: "ready" })).toBe("");
+  });
+});
+
+describe("a Library source's size", () => {
+  it("says a small file's real size, never rounds it up to 1 MB", () => {
+    // A 223-byte text file showed as "1 MB" in the Library (Windows test, 2026-11-07).
+    expect(size(223)).toBe("223 bytes");
+    expect(size(1)).toBe("1 byte");
+    expect(size(40_000)).toBe("39 KB");
+    expect(size(5 * 1024 ** 2)).toBe("5 MB");
+    expect(size(3 * 1024 ** 3)).toBe(`3.0${SP}GB`);
+  });
+});
+
+const GIB = 1024 ** 3;
+const base: FitReport = {
+  model: "m",
+  numCtx: 16384,
+  freeVramBytes: 12 * GIB,
+  needVramBytes: 0,
+  spillRamBytes: 0,
+  verdict: "refuse",
+  source: "estimate",
+  measuredAt: 1,
+};
+
+describe("the context a model runs at", () => {
+  const models = [{ name: "tiny:2k", maxContext: 2048 }, { name: "big:9b", maxContext: 262144 }, { name: "new:1b" }];
+
+  it("is the chosen size, never past what the model takes, and never jumps up to its maximum", () => {
+    expect(ctxFor(16384, models, "tiny:2k")).toBe(2048);
+    expect(ctxFor(16384, models, "big:9b")).toBe(16384);
+  });
+
+  it("stays the chosen size until the model is known", () => {
+    expect(ctxFor(16384, models, "new:1b")).toBe(16384);
+    expect(ctxFor(16384, models, "absent")).toBe(16384);
+    expect(ctxFor(16384, undefined, "tiny:2k")).toBe(16384);
+  });
+
+  it("offers an 8k choice and labels small windows honestly", () => {
+    expect(CONTEXT_SIZES).toEqual([8192, 16384, 32768, 65536]);
+    expect(k(2048)).toBe("2k");
+    expect(k(512)).toBe("512");
+  });
+});
+
+describe("verdictOf", () => {
+  it("prints the server's words and judges nothing itself", () => {
+    const refused: FitReport = { ...base, needVramBytes: 20 * GIB, shortfallBytes: 3 * GIB };
+    const v = verdictOf({ ...refused, words: fitWords(refused, "card", false) });
+    expect(v.word).toBe("Not enough memory at 16k");
+    expect(v.need).toBe(20 * GIB);
+    // a report the server sent without words prints nothing, keeping only the colour of its verdict
+    expect(verdictOf({ ...base, verdict: "fits" })).toMatchObject({ k: "gpu", word: "", label: "" });
+  });
+});
+
+const msg = (stats: Message["stats"]): Message => ({ id: "a", threadId: "t", role: "assistant", content: "x", createdAt: 1, ...(stats ? { stats } : {}) });
+
+describe("decode speed", () => {
+  it("divides by decode time, not the total that includes the load", () => {
+    // A cold turn: 4 s total (3.5 s of it loading the model), 60 tokens decoded in 0.5 s.
+    const m = msg({ completionTokens: 60, durationMs: 4000, evalDurationMs: 500 });
+    expect(decodeSpeed(m.stats)).toBe(120);
+    expect(replyMeta(m, 4500)).toBe("4.5 s · 120 tok/s");
+    // a reply that did no thinking or tool work says its speed alone
+    expect(replyMeta(m, 0)).toBe("120 tok/s");
+  });
+
+  it("a reply that waited for its model says the wait as its own figure, beside the work it did", () => {
+    // a first answer on a new card: ready 52.8 s after Enter, then 5.3 s of thinking
+    const saved: Message = { ...msg({ completionTokens: 1665, evalDurationMs: 15_000 }), times: { startedAt: 1_000, readyAt: 53_800, firstTokenAt: 59_100, spans: [], callsAt: {}, workMs: 5_300, ended: { reason: "done", at: 74_300 } } };
+    const drawn = drawTimes(saved, undefined);
+    expect(drawn.waitMs).toBe(52_800);
+    expect(replyWait(drawn.waitMs)).toBe("52.8 s");
+    expect(replyMeta(saved, drawn.workMs)).toBe("5.3 s · 111 tok/s");
+    // a warm reply, ready within a second of Enter, says no wait
+    expect(replyWait(drawTimes({ ...saved, times: { ...saved.times!, readyAt: 1_400 } }, undefined).waitMs)).toBeUndefined();
+    // a row saved before the server kept when the model was ready says none either
+    const { readyAt: _r, ...older } = saved.times!;
+    expect(drawTimes({ ...saved, times: older }, undefined).waitMs).toBeUndefined();
+  });
+
+  it("falls back to the total for a reply saved before decode time was kept", () => {
+    expect(decodeSpeed({ completionTokens: 60, durationMs: 2000 })).toBe(30);
+    expect(decodeSpeed({ completionTokens: 60 })).toBeUndefined();
+  });
+});
+
+describe("fileSize", () => {
+  it("moves up a unit when rounding reaches 1024 (LS-01)", () => {
+    expect(fileSize(1_048_064)).toBe("1 MB");
+    expect(fileSize(1_073_217_536)).toBe(`1.0${SP}GB`);
+  });
+
+  it("stays in the unit below that", () => {
+    expect(fileSize(1023)).toBe("1023 bytes");
+    expect(fileSize(1_047_552)).toBe("1023 KB");
+    expect(fileSize(1_072_693_248)).toBe("1023 MB");
+  });
+});

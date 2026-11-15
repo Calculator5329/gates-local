@@ -118,7 +118,7 @@ const WEB = "apps/web/src";
 /** The phone's thread drawer: its rows and its foot slide with it. */
 const DRAWER = [".sb-row", ".sb-foot > *"];
 /** Files the core screens draw with: a change here walks every screen that names them. */
-const SHARED =[`${WEB}/styles.css`, `${WEB}/ui.tsx`, `${WEB}/icons.tsx`, `${WEB}/App.tsx`, `${WEB}/store.ts`, `${WEB}/main.tsx`, `${WEB}/session/connection.ts`, "packages/contracts/**"];
+const SHARED =[`${WEB}/app/styles.css`, `${WEB}/lib/ui/ui.tsx`, `${WEB}/lib/ui/icons.tsx`, `${WEB}/app/App.tsx`, `${WEB}/lib/store/store.ts`, `${WEB}/app/main.tsx`, `${WEB}/lib/session/connection.ts`, "packages/contracts/**"];
 const STREAM = { holdAfterTokens: 46 };
 
 const openSettings = async (c: Ctx) => { await c.page.keyboard.press("Control+Comma"); await c.shows(".set .set-h h1"); };
@@ -167,7 +167,7 @@ export const SCREENS: readonly Screen[] = [
   {
     id: "start",
     name: "App start",
-    paths: [...SHARED, `${WEB}/screens.tsx`, `${WEB}/screen-loaders.ts`, `${WEB}/session.ts`, `${WEB}/session/server-state.ts`, `${WEB}/Sidebar.tsx`, `${WEB}/Draft*.tsx`, `${WEB}/starter.ts`],
+    paths: [...SHARED, `${WEB}/app/screens.tsx`, `${WEB}/app/screen-loaders.ts`, `${WEB}/lib/session/index.ts`, `${WEB}/lib/session/server-state.ts`, `${WEB}/sidebar/Sidebar.tsx`, `${WEB}/Draft*.tsx`, `${WEB}/composer/starter.ts`],
     seed: "design",
     load: { name: "load the app", root: "#app" },
     steps: [],
@@ -175,7 +175,7 @@ export const SCREENS: readonly Screen[] = [
   {
     id: "first-run",
     name: "First run",
-    paths: [`${WEB}/FirstRun.tsx`, `${WEB}/FirstRunShell.tsx`, `${WEB}/starter.ts`],
+    paths: [`${WEB}/first-run/FirstRun.tsx`, `${WEB}/first-run/FirstRunShell.tsx`, `${WEB}/composer/starter.ts`],
     seed: 0,
     firstRun: true,
     load: { name: "first run opens", root: ".first", opens: { selector: ".first h1" } },
@@ -184,7 +184,7 @@ export const SCREENS: readonly Screen[] = [
   {
     id: "chat",
     name: "Chat",
-    paths: [...SHARED, `${WEB}/Thread.tsx`, `${WEB}/markdown.tsx`, `${WEB}/copy.ts`, `${WEB}/reveal.ts`, `${WEB}/paced.ts`, `${WEB}/session/threads.ts`, `${WEB}/session/navigation.ts`, `${WEB}/session/turn.ts`, "apps/server/src/threads/**"],
+    paths: [...SHARED, `${WEB}/thread/Thread.tsx`, `${WEB}/thread/markdown.tsx`, `${WEB}/lib/ui/copy.ts`, `${WEB}/thread/reveal.ts`, `${WEB}/thread/paced.ts`, `${WEB}/thread/threads.ts`, `${WEB}/app/navigation.ts`, `${WEB}/thread/turn.ts`, "apps/server/src/threads/**"],
     seed: "design",
     steps: [
       { name: "open a thread", root: ".main", opens: { selector: ".hdr h2", text: "Fix the backup cron" }, act: (c) => c.page.locator(".sb-row").filter({ hasText: "Fix the backup cron" }).click() },
@@ -195,7 +195,7 @@ export const SCREENS: readonly Screen[] = [
   {
     id: "reply",
     name: "A reply streaming in",
-    paths: [`${WEB}/Thread.tsx`, `${WEB}/markdown.tsx`, `${WEB}/paced.ts`, `${WEB}/reveal.ts`, `${WEB}/styles.css`, `${WEB}/session/turn.ts`],
+    paths: [`${WEB}/thread/Thread.tsx`, `${WEB}/thread/markdown.tsx`, `${WEB}/thread/paced.ts`, `${WEB}/thread/reveal.ts`, `${WEB}/app/styles.css`, `${WEB}/thread/turn.ts`],
     seed: 0,
     installed: REPLY_MODELS,
     viewport: { width: 1440, height: 1080 },
@@ -220,7 +220,7 @@ export const SCREENS: readonly Screen[] = [
   {
     id: "work-chip",
     name: "A reply that calls tools",
-    paths: [`${WEB}/Thread.tsx`, `${WEB}/session/turn.ts`, `${WEB}/session/chat.ts`, "apps/server/src/chat/**", "packages/harness/**"],
+    paths: [`${WEB}/thread/Thread.tsx`, `${WEB}/thread/turn.ts`, `${WEB}/composer/chat.ts`, "apps/server/src/chat/**", "packages/harness/**"],
     seed: 0,
     setup: (c) => c.toolsOn(),
     steps: [{
@@ -238,7 +238,7 @@ export const SCREENS: readonly Screen[] = [
   {
     id: "composer",
     name: "Composer",
-    paths: [...SHARED, `${WEB}/Composer.tsx`, `${WEB}/composer-press.ts`, `${WEB}/Voice.tsx`, `${WEB}/voice-audio.ts`, `${WEB}/draft*.ts`, `${WEB}/drafts.ts`, `${WEB}/paste.ts`, `${WEB}/file-drop.tsx`, `${WEB}/attachment-images.tsx`, `${WEB}/refused-files.ts`, `${WEB}/session/chat.ts`],
+    paths: [...SHARED, `${WEB}/composer/Composer.tsx`, `${WEB}/composer/composer-press.ts`, `${WEB}/voice/Voice.tsx`, `${WEB}/voice/voice-audio.ts`, `${WEB}/composer/draft-*.ts`, `${WEB}/lib/store/drafts.ts`, `${WEB}/composer/paste.ts`, `${WEB}/composer/file-drop.tsx`, `${WEB}/composer/attachment-images.tsx`, `${WEB}/composer/refused-files.ts`, `${WEB}/composer/chat.ts`],
     // in a thread: a new thread's composer moving from the middle to the bottom on its first message is the design
     seed: "design",
     setup: async (c) => { await c.page.locator(".sb-row").filter({ hasText: "Fix the backup cron" }).click(); await c.shows(".turn"); await c.settle(); },
@@ -251,7 +251,7 @@ export const SCREENS: readonly Screen[] = [
   {
     id: "queue",
     name: "Queue tray",
-    paths: [`${WEB}/Composer.tsx`, `${WEB}/session/chat.ts`, `${WEB}/styles.css`, "apps/server/src/chat/**"],
+    paths: [`${WEB}/composer/Composer.tsx`, `${WEB}/composer/chat.ts`, `${WEB}/app/styles.css`, "apps/server/src/chat/**"],
     seed: 0,
     viewport: { width: 1920, height: 1080 },
     setup: heldReply,
@@ -266,7 +266,7 @@ export const SCREENS: readonly Screen[] = [
   {
     id: "sidebar",
     name: "Sidebar",
-    paths: [...SHARED, `${WEB}/Sidebar.tsx`, `${WEB}/session/threads.ts`, `${WEB}/session/navigation.ts`, `${WEB}/titlebar.ts`],
+    paths: [...SHARED, `${WEB}/sidebar/Sidebar.tsx`, `${WEB}/thread/threads.ts`, `${WEB}/app/navigation.ts`, `${WEB}/app/titlebar.ts`],
     seed: "design",
     steps: [
       { name: "point at Search", root: ".sb", act: (c) => c.page.locator(".sb-search, .sb input[type=search]").first().hover() },
@@ -278,7 +278,7 @@ export const SCREENS: readonly Screen[] = [
   {
     id: "footer",
     name: "Sidebar footer",
-    paths: [`${WEB}/Sidebar.tsx`, `${WEB}/footer-state.ts`, `${WEB}/update-state.ts`, `${WEB}/model-speed.tsx`, `${WEB}/Panel.tsx`, `${WEB}/panel.css`],
+    paths: [`${WEB}/sidebar/Sidebar.tsx`, `${WEB}/sidebar/footer-state.ts`, `${WEB}/updates/update-state.ts`, `${WEB}/models/model-speed.tsx`, `${WEB}/lib/ui/Panel.tsx`, `${WEB}/lib/ui/panel.css`],
     seed: "design",
     steps: [
       { name: "point at each footer icon", root: ".sb-foot", act: async (c) => { for (const b of await c.page.locator(".sb-foot button").all()) { await b.hover(); await c.page.waitForTimeout(120); } } },
@@ -289,7 +289,7 @@ export const SCREENS: readonly Screen[] = [
   {
     id: "models",
     name: "Models pop-up",
-    paths: [`${WEB}/Models.tsx`, `${WEB}/ModelDownloads.tsx`, `${WEB}/models-*.ts`, `${WEB}/session/models.ts`, `${WEB}/Panel.tsx`, `${WEB}/panel.css`, "apps/server/src/runtime/**"],
+    paths: [`${WEB}/models/Models.tsx`, `${WEB}/models/ModelDownloads.tsx`, `${WEB}/models/models-*.ts`,`${WEB}/models/models.ts`, `${WEB}/lib/ui/Panel.tsx`, `${WEB}/lib/ui/panel.css`, "apps/server/src/runtime/**"],
     seed: "design",
     steps: [
       { name: "open Models", root: ".dlg", opens: { selector: ".dlg-head h2", text: "Models" }, act: (c) => c.page.locator(".sb-foot").getByRole("button", { name: /^Models/ }).click() },
@@ -301,7 +301,7 @@ export const SCREENS: readonly Screen[] = [
   {
     id: "usage",
     name: "Usage",
-    paths: [`${WEB}/Usage.tsx`, `${WEB}/usage-data.ts`, `${WEB}/usage.css`, `${WEB}/session/usage.ts`, `${WEB}/Panel.tsx`, `${WEB}/panel.css`],
+    paths: [`${WEB}/usage/Usage.tsx`, `${WEB}/usage/usage-data.ts`, `${WEB}/usage/usage.css`, `${WEB}/usage/usage.ts`, `${WEB}/lib/ui/Panel.tsx`, `${WEB}/lib/ui/panel.css`],
     seed: "usage",
     steps: [
       { name: "open Usage", root: '[role=dialog][aria-label="Usage"]', opens: { selector: ".us-chart svg" }, act: click(".sb-foot .usage") },
@@ -312,7 +312,7 @@ export const SCREENS: readonly Screen[] = [
   {
     id: "picker",
     name: "Model picker",
-    paths: [`${WEB}/Picker.tsx`, `${WEB}/picker-models.ts`, `${WEB}/picker.css`, `${WEB}/pick.ts`, `${WEB}/fit-*.ts`, `${WEB}/FitPanel.tsx`, `${WEB}/session/speed.ts`, "apps/server/src/fit/**"],
+    paths: [`${WEB}/picker/Picker.tsx`, `${WEB}/picker/picker-models.ts`, `${WEB}/picker/picker.css`, `${WEB}/models/pick.ts`, `${WEB}/fit/fit-*.ts`, `${WEB}/fit/FitPanel.tsx`, `${WEB}/models/speed.ts`, "apps/server/src/fit/**"],
     seed: "design",
     steps: [
       { name: "open the picker", root: "#picker", opens: { selector: "#picker.open" }, act: click("#modelBtn") },
@@ -323,7 +323,7 @@ export const SCREENS: readonly Screen[] = [
   {
     id: "settings",
     name: "Settings",
-    paths: [...SHARED, `${WEB}/Settings.tsx`, `${WEB}/settings-*.ts*`, `${WEB}/Instructions.tsx`, `${WEB}/instruction-draft.ts`, `${WEB}/LibraryImports.tsx`, `${WEB}/library-rows.ts`, `${WEB}/VoiceSettings.tsx`, `${WEB}/FitPanel.tsx`, `${WEB}/session/settings*.ts`, "apps/server/src/settings/**"],
+    paths: [...SHARED, `${WEB}/settings/Settings.tsx`, `${WEB}/lib/ui/settings-*.tsx`, `${WEB}/lib/words/settings-rules.ts`, `${WEB}/settings/Instructions.tsx`, `${WEB}/settings/instruction-draft.ts`, `${WEB}/settings/LibraryImports.tsx`, `${WEB}/settings/library-rows.ts`, `${WEB}/voice/VoiceSettings.tsx`, `${WEB}/fit/FitPanel.tsx`, `${WEB}/settings/settings*.ts`, "apps/server/src/settings/**"],
     seed: "design",
     steps: [
       { name: "open Settings", root: ".set", opens: section("General"), act: press("Control+Comma") },
@@ -340,7 +340,7 @@ export const SCREENS: readonly Screen[] = [
   {
     id: "settings-busy",
     name: "Settings over a thinking reply",
-    paths: [`${WEB}/App.tsx`, `${WEB}/Panel.tsx`, `${WEB}/panel.css`, `${WEB}/Thread.tsx`, `${WEB}/styles.css`],
+    paths: [`${WEB}/app/App.tsx`, `${WEB}/lib/ui/Panel.tsx`, `${WEB}/lib/ui/panel.css`, `${WEB}/thread/Thread.tsx`, `${WEB}/app/styles.css`],
     seed: 0,
     // a phone, where Settings is a page over the hidden chat (App.tsx `under`), as the fix's own test runs it
     viewport: { width: 390, height: 844 },
@@ -353,7 +353,7 @@ export const SCREENS: readonly Screen[] = [
   {
     id: "settings-cpu",
     name: "Settings with no GPU",
-    paths: [`${WEB}/Settings.tsx`, `${WEB}/FitPanel.tsx`, `${WEB}/fit-*.ts`, `${WEB}/format.ts`, "apps/server/src/fit/**"],
+    paths: [`${WEB}/settings/Settings.tsx`, `${WEB}/fit/FitPanel.tsx`, `${WEB}/fit/fit-*.ts`, `${WEB}/lib/words/format.ts`, "apps/server/src/fit/**"],
     seed: "design",
     noGpu: true,
     steps: [
@@ -365,7 +365,7 @@ export const SCREENS: readonly Screen[] = [
   {
     id: "desktop",
     name: "Desktop titlebar layout",
-    paths: [`${WEB}/styles.css`, `${WEB}/titlebar.ts`, `${WEB}/Sidebar.tsx`, `${WEB}/App.tsx`],
+    paths: [`${WEB}/app/styles.css`, `${WEB}/app/titlebar.ts`, `${WEB}/sidebar/Sidebar.tsx`, `${WEB}/app/App.tsx`],
     seed: "design",
     titlebar: true,
     steps: [
@@ -376,7 +376,7 @@ export const SCREENS: readonly Screen[] = [
   {
     id: "updates",
     name: "Updates",
-    paths: [`${WEB}/Updates.tsx`, `${WEB}/SettingsUpdates.tsx`, `${WEB}/UpdateNote.tsx`, `${WEB}/update-*.ts`, `${WEB}/session/updates.ts`, "apps/server/src/update/**"],
+    paths: [`${WEB}/updates/Updates.tsx`, `${WEB}/updates/SettingsUpdates.tsx`, `${WEB}/updates/UpdateNote.tsx`, `${WEB}/updates/update-*.ts`, `${WEB}/updates/updates.ts`, "apps/server/src/update/**"],
     seed: "design",
     desktopUpdates: true,
     setup: openSettings,
@@ -387,7 +387,7 @@ export const SCREENS: readonly Screen[] = [
   {
     id: "image",
     name: "Image mode",
-    paths: [`${WEB}/ImagePicker.tsx`, `${WEB}/ImageMark.tsx`, `${WEB}/MakerMark.tsx`, `${WEB}/image-*.ts`, `${WEB}/image-picker.css`, `${WEB}/attachment-images.tsx`, "apps/server/src/image/**"],
+    paths: [`${WEB}/image/ImagePicker.tsx`, `${WEB}/image/ImageMark.tsx`, `${WEB}/models/MakerMark.tsx`, `${WEB}/image/image-*.ts`, `${WEB}/composer/image-compression.ts`, `${WEB}/thread/image-links.ts`, `${WEB}/image/image-picker.css`, `${WEB}/composer/attachment-images.tsx`, "apps/server/src/image/**"],
     seed: 0,
     comfy: true,
     setup: (c) => c.imagesOn(),
@@ -406,7 +406,7 @@ export const SCREENS: readonly Screen[] = [
   {
     id: "phone",
     name: "Phone, 390 wide",
-    paths: [`${WEB}/styles.css`, `${WEB}/App.tsx`, `${WEB}/Sidebar.tsx`, `${WEB}/Composer.tsx`, `${WEB}/sheet-focus.ts`, `${WEB}/screens.tsx`, `${WEB}/session/navigation.ts`],
+    paths: [`${WEB}/app/styles.css`, `${WEB}/app/App.tsx`, `${WEB}/sidebar/Sidebar.tsx`, `${WEB}/composer/Composer.tsx`, `${WEB}/app/sheet-focus.ts`, `${WEB}/app/screens.tsx`, `${WEB}/app/navigation.ts`],
     seed: "design",
     viewport: { width: 390, height: 844 },
     steps: [

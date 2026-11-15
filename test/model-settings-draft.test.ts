@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { openSettingsStore } from "../apps/server/src/settings/store.ts";
-import { controlPatch, editControl } from "../apps/web/src/instruction-draft.ts";
+import { controlPatch, editControl } from "../apps/web/src/settings/instruction-draft.ts";
 
 const cleanups: Array<() => unknown> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).toReversed()) await close(); });

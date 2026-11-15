@@ -13,13 +13,13 @@ type Request = Parameters<FakeServer["handle"]>[1];
 interface Delivery { readonly socket: FakeSocket; readonly request: Request; readonly result: unknown; readonly sync?: SyncMetadata }
 
 /** The chats a window shows a reply being written in, each with its turn id (null while its send waits for the answer). */
-export function runningIds(store: typeof import("../src/store.ts")): Record<string, string | null> {
+export function runningIds(store: typeof import("../src/lib/store/store.ts")): Record<string, string | null> {
   const s = store.getState();
   return Object.fromEntries([...store.runningThreads(s)].map((threadId) => [threadId, s.turns[threadId]?.turnId ?? null]));
 }
 
 /** The chat on screen's turn in a window, or null. */
-export function openTurn(store: typeof import("../src/store.ts")) {
+export function openTurn(store: typeof import("../src/lib/store/store.ts")) {
   const s = store.getState();
   return s.threadId === null ? null : s.turns[s.threadId] ?? null;
 }
@@ -191,9 +191,9 @@ function button(node: ReactNode, name: string): (() => unknown) | undefined {
 }
 
 export interface WindowSession {
-  readonly session: typeof import("../src/session.ts");
-  readonly store: typeof import("../src/store.ts");
-  readonly drafts: typeof import("../src/drafts.ts");
+  readonly session: typeof import("../src/lib/session/index.ts");
+  readonly store: typeof import("../src/lib/store/store.ts");
+  readonly drafts: typeof import("../src/lib/store/drafts.ts");
   readonly close: () => void;
   socket: FakeSocket;
   click(name: "Connect" | "Disconnect"): void;
@@ -219,15 +219,15 @@ export class OrderingWorld {
     vi.stubGlobal("WebSocket", class extends FakeSocket { constructor(url: string) { super(url, world.server); } });
     for (const label of twoWindows ? ["A", "B"] : ["A"]) {
       vi.resetModules();
-      vi.doUnmock("../src/session.ts");
+      vi.doUnmock("../src/lib/session/index.ts");
       // Historical source is read from a cache copy, with imports redirected
       // to the current support modules. Current runs use the production file.
       const historical = process.env["REPLAY_SESSION"];
-      const session: typeof import("../src/session.ts") = historical ? await import(/* @vite-ignore */ historical) : await import("../src/session.ts");
-      const store = await import("../src/store.ts");
-      const drafts = await import("../src/drafts.ts");
-      if (historical) vi.doMock("../src/session.ts", () => session);
-      const { VoiceSettings } = await import("../src/VoiceSettings.tsx");
+      const session: typeof import("../src/lib/session/index.ts") = historical ? await import(/* @vite-ignore */ historical) : await import("../src/lib/session/index.ts");
+      const store = await import("../src/lib/store/store.ts");
+      const drafts = await import("../src/lib/store/drafts.ts");
+      if (historical) vi.doMock("../src/lib/session/index.ts", () => session);
+      const { VoiceSettings } = await import("../src/voice/VoiceSettings.tsx");
       const close = session.connect();
       await drain();
       const socket = world.server.socket;
@@ -265,6 +265,6 @@ export class OrderingWorld {
     for (const socket of this.server.sockets) socket.close();
     await drain();
     vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals();
-    vi.doUnmock("../src/session.ts");
+    vi.doUnmock("../src/lib/session/index.ts");
   }
 }

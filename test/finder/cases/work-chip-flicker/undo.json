@@ -1,6 +1,6 @@
 [
   {
-    "file": "apps/web/src/Thread.tsx",
+    "file": "apps/web/src/thread/Thread.tsx",
     "find": "      <span className=\"run-dot\" />\n      {clocked ?",
     "replace": "      {stage === \"thinking\" && tools.length > 0 ? null : <span className=\"run-dot\" /> /* finder case: chat row 24 undone (nothing lit while the model reads a result) */}\n      {clocked ?"
   }

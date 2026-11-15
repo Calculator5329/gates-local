@@ -550,7 +550,7 @@
   "entries": [
     {
       "id": "chat.attachment.file",
-      "file": "src/attachment-images.tsx",
+      "file": "src/composer/attachment-images.tsx",
       "line": 36,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -559,7 +559,7 @@
     },
     {
       "id": "chat.attachment.refused-library",
-      "file": "src/attachment-images.tsx",
+      "file": "src/composer/attachment-images.tsx",
       "line": 20,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -570,7 +570,7 @@
     },
     {
       "id": "chat.attachment.refused-remove",
-      "file": "src/attachment-images.tsx",
+      "file": "src/composer/attachment-images.tsx",
       "line": 21,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -581,7 +581,7 @@
     },
     {
       "id": "chat.attachment.remove-file",
-      "file": "src/attachment-images.tsx",
+      "file": "src/composer/attachment-images.tsx",
       "line": 40,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -592,7 +592,7 @@
     },
     {
       "id": "chat.attachment.tools-on",
-      "file": "src/attachment-images.tsx",
+      "file": "src/composer/attachment-images.tsx",
       "line": 39,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -603,7 +603,7 @@
     },
     {
       "id": "chat.banner.install-place",
-      "file": "src/Banner.tsx",
+      "file": "src/runtime/Banner.tsx",
       "line": 150,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -612,7 +612,7 @@
     },
     {
       "id": "chat.banner.retry",
-      "file": "src/Banner.tsx",
+      "file": "src/runtime/Banner.tsx",
       "line": 124,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -623,7 +623,7 @@
     },
     {
       "id": "chat.composer.add",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 307,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -634,7 +634,7 @@
     },
     {
       "id": "chat.composer.attach-input",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 291,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -645,7 +645,7 @@
     },
     {
       "id": "chat.composer.context-meter",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 345,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -656,7 +656,7 @@
     },
     {
       "id": "chat.composer.count",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 684,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -667,7 +667,7 @@
     },
     {
       "id": "chat.composer.dictate",
-      "file": "src/Voice.tsx",
+      "file": "src/voice/Voice.tsx",
       "line": 205,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -678,7 +678,7 @@
     },
     {
       "id": "chat.composer.form",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 277,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -689,7 +689,7 @@
     },
     {
       "id": "chat.composer.image",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 321,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -700,7 +700,7 @@
     },
     {
       "id": "chat.composer.message",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 467,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -713,7 +713,7 @@
     },
     {
       "id": "chat.composer.model",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 385,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -724,7 +724,7 @@
     },
     {
       "id": "chat.composer.notice",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 438,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -733,7 +733,7 @@
     },
     {
       "id": "chat.composer.options",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 415,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -744,7 +744,7 @@
     },
     {
       "id": "chat.composer.send",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 424,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -755,7 +755,7 @@
     },
     {
       "id": "chat.composer.speak",
-      "file": "src/Voice.tsx",
+      "file": "src/voice/Voice.tsx",
       "line": 226,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -766,7 +766,7 @@
     },
     {
       "id": "chat.composer.stop-square",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 269,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -777,7 +777,7 @@
     },
     {
       "id": "chat.composer.thinking",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 356,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -788,7 +788,7 @@
     },
     {
       "id": "chat.count-menu.menu",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 725,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -799,7 +799,7 @@
     },
     {
       "id": "chat.fold.thinking",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 340,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -810,7 +810,7 @@
     },
     {
       "id": "chat.fold.toggle",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 316,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -821,7 +821,7 @@
     },
     {
       "id": "chat.header.new-thread",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 256,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -832,7 +832,7 @@
     },
     {
       "id": "chat.header.open-threads",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 120,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -843,7 +843,7 @@
     },
     {
       "id": "chat.header.title",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 241,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -856,7 +856,7 @@
     },
     {
       "id": "chat.image-job.action",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 639,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -867,7 +867,7 @@
     },
     {
       "id": "chat.markdown.copy-code",
-      "file": "src/markdown.tsx",
+      "file": "src/thread/markdown.tsx",
       "line": 209,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -878,7 +878,7 @@
     },
     {
       "id": "chat.markdown.link",
-      "file": "src/markdown.tsx",
+      "file": "src/thread/markdown.tsx",
       "line": 150,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -889,7 +889,7 @@
     },
     {
       "id": "chat.markdown.url",
-      "file": "src/markdown.tsx",
+      "file": "src/thread/markdown.tsx",
       "line": 162,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -900,7 +900,7 @@
     },
     {
       "id": "chat.options-menu.image",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 880,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -911,7 +911,7 @@
     },
     {
       "id": "chat.options-menu.image-off",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 889,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -922,7 +922,7 @@
     },
     {
       "id": "chat.options-menu.thinking",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 864,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -933,7 +933,7 @@
     },
     {
       "id": "chat.plus-menu.attach",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 763,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -944,7 +944,7 @@
     },
     {
       "id": "chat.plus-menu.image",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 801,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -955,7 +955,7 @@
     },
     {
       "id": "chat.plus-menu.image-setup",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 817,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -966,7 +966,7 @@
     },
     {
       "id": "chat.plus-menu.library",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 781,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -977,7 +977,7 @@
     },
     {
       "id": "chat.queue.more",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 579,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -988,7 +988,7 @@
     },
     {
       "id": "chat.reply.details",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 97,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -999,7 +999,7 @@
     },
     {
       "id": "chat.reply.regenerate",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 84,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1010,7 +1010,7 @@
     },
     {
       "id": "chat.reply.retry",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 743,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1021,7 +1021,7 @@
     },
     {
       "id": "chat.reply.turn",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 729,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1030,7 +1030,7 @@
     },
     {
       "id": "chat.reply.unseen-mark",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 676,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1039,7 +1039,7 @@
     },
     {
       "id": "chat.stop-warning.cancel",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 625,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1050,7 +1050,7 @@
     },
     {
       "id": "chat.stop-warning.confirm",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 628,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1061,7 +1061,7 @@
     },
     {
       "id": "chat.stop-warning.dialog",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 608,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1072,7 +1072,7 @@
     },
     {
       "id": "chat.stop-warning.never",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 622,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1083,7 +1083,7 @@
     },
     {
       "id": "chat.thread.earlier",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 1066,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1094,7 +1094,7 @@
     },
     {
       "id": "chat.thread.reload",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 1097,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1105,7 +1105,7 @@
     },
     {
       "id": "chat.tool-call.body",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 465,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1114,7 +1114,7 @@
     },
     {
       "id": "chat.tool-call.toggle",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 431,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1125,7 +1125,7 @@
     },
     {
       "id": "chat.user-message.edit",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 116,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1136,7 +1136,7 @@
     },
     {
       "id": "chat.user-message.turn",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 107,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1145,7 +1145,7 @@
     },
     {
       "id": "first-run.cancelled.open-models",
-      "file": "src/FirstRun.tsx",
+      "file": "src/first-run/FirstRun.tsx",
       "line": 220,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1156,7 +1156,7 @@
     },
     {
       "id": "first-run.cta.go",
-      "file": "src/FirstRun.tsx",
+      "file": "src/first-run/FirstRun.tsx",
       "line": 23,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1167,7 +1167,7 @@
     },
     {
       "id": "first-run.cta.link",
-      "file": "src/FirstRun.tsx",
+      "file": "src/first-run/FirstRun.tsx",
       "line": 28,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1178,7 +1178,7 @@
     },
     {
       "id": "first-run.model.details",
-      "file": "src/FirstRun.tsx",
+      "file": "src/first-run/FirstRun.tsx",
       "line": 83,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1189,7 +1189,7 @@
     },
     {
       "id": "image.picker.back",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 357,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1200,7 +1200,7 @@
     },
     {
       "id": "image.picker.back-to-chat",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 623,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1211,7 +1211,7 @@
     },
     {
       "id": "image.picker.blank",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 324,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1222,7 +1222,7 @@
     },
     {
       "id": "image.picker.close",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 314,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1233,7 +1233,7 @@
     },
     {
       "id": "image.picker.defaults",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 335,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1244,7 +1244,7 @@
     },
     {
       "id": "image.picker.defaults-list",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 344,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1255,7 +1255,7 @@
     },
     {
       "id": "image.picker.dialog",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 332,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1266,7 +1266,7 @@
     },
     {
       "id": "image.picker.download",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 304,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1277,7 +1277,7 @@
     },
     {
       "id": "image.picker.option",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 285,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1288,7 +1288,7 @@
     },
     {
       "id": "image.picker.other",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 336,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1299,7 +1299,7 @@
     },
     {
       "id": "image.picker.other-list",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 347,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1310,7 +1310,7 @@
     },
     {
       "id": "image.picker.select",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 286,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1321,7 +1321,7 @@
     },
     {
       "id": "image.picker.sizes",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 358,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1332,7 +1332,7 @@
     },
     {
       "id": "image.picker.start-comfy",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 327,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1343,7 +1343,7 @@
     },
     {
       "id": "image.picker.stop-download",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 302,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1354,7 +1354,7 @@
     },
     {
       "id": "image.picker.unready-option",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 299,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1365,7 +1365,7 @@
     },
     {
       "id": "image.picker.unready-select",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 300,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1376,7 +1376,7 @@
     },
     {
       "id": "image.unset.check-again",
-      "file": "src/ImageUnset.tsx",
+      "file": "src/image/ImageUnset.tsx",
       "line": 101,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1387,7 +1387,7 @@
     },
     {
       "id": "image.unset.set-up",
-      "file": "src/ImageUnset.tsx",
+      "file": "src/image/ImageUnset.tsx",
       "line": 99,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1398,7 +1398,7 @@
     },
     {
       "id": "image.unset.settings",
-      "file": "src/ImageUnset.tsx",
+      "file": "src/image/ImageUnset.tsx",
       "line": 100,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1409,7 +1409,7 @@
     },
     {
       "id": "models.custom.actions",
-      "file": "src/ModelDownloads.tsx",
+      "file": "src/models/ModelDownloads.tsx",
       "line": 299,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1420,7 +1420,7 @@
     },
     {
       "id": "models.custom.download-anyway",
-      "file": "src/ModelDownloads.tsx",
+      "file": "src/models/ModelDownloads.tsx",
       "line": 313,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1431,7 +1431,7 @@
     },
     {
       "id": "models.custom.library-link",
-      "file": "src/ModelDownloads.tsx",
+      "file": "src/models/ModelDownloads.tsx",
       "line": 290,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1442,7 +1442,7 @@
     },
     {
       "id": "models.custom.more",
-      "file": "src/ModelDownloads.tsx",
+      "file": "src/models/ModelDownloads.tsx",
       "line": 306,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1453,7 +1453,7 @@
     },
     {
       "id": "models.custom.name",
-      "file": "src/ModelDownloads.tsx",
+      "file": "src/models/ModelDownloads.tsx",
       "line": 298,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1466,7 +1466,7 @@
     },
     {
       "id": "models.default.option",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 522,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1477,7 +1477,7 @@
     },
     {
       "id": "models.default.row",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 541,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1488,7 +1488,7 @@
     },
     {
       "id": "models.default.select",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 561,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1499,7 +1499,7 @@
     },
     {
       "id": "models.download.cancel",
-      "file": "src/ModelDownloads.tsx",
+      "file": "src/models/ModelDownloads.tsx",
       "line": 143,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1510,7 +1510,7 @@
     },
     {
       "id": "models.download.start",
-      "file": "src/ModelDownloads.tsx",
+      "file": "src/models/ModelDownloads.tsx",
       "line": 134,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1521,7 +1521,7 @@
     },
     {
       "id": "models.download.too-big",
-      "file": "src/ModelDownloads.tsx",
+      "file": "src/models/ModelDownloads.tsx",
       "line": 522,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1532,7 +1532,7 @@
     },
     {
       "id": "models.downloading.cancel",
-      "file": "src/ModelDownloads.tsx",
+      "file": "src/models/ModelDownloads.tsx",
       "line": 77,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1543,7 +1543,7 @@
     },
     {
       "id": "models.empty.browse",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 635,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1554,7 +1554,7 @@
     },
     {
       "id": "models.empty.download-suggested",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 630,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1565,7 +1565,7 @@
     },
     {
       "id": "models.fit-panel.details",
-      "file": "src/FitPanel.tsx",
+      "file": "src/fit/FitPanel.tsx",
       "line": 322,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1576,7 +1576,7 @@
     },
     {
       "id": "models.fit-panel.show-model",
-      "file": "src/FitPanel.tsx",
+      "file": "src/fit/FitPanel.tsx",
       "line": 345,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1587,7 +1587,7 @@
     },
     {
       "id": "models.fit.memory-mark",
-      "file": "src/MemoryMark.tsx",
+      "file": "src/models/MemoryMark.tsx",
       "line": 57,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1596,7 +1596,7 @@
     },
     {
       "id": "models.fit.reason",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 55,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1605,7 +1605,7 @@
     },
     {
       "id": "models.installed.clear-filter",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 674,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1616,7 +1616,7 @@
     },
     {
       "id": "models.installed.filter",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 658,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1629,7 +1629,7 @@
     },
     {
       "id": "models.picker.all",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 200,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1640,7 +1640,7 @@
     },
     {
       "id": "models.picker.back",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 221,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1651,7 +1651,7 @@
     },
     {
       "id": "models.picker.back-to-chat",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 622,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1662,7 +1662,7 @@
     },
     {
       "id": "models.picker.close",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 204,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1673,7 +1673,7 @@
     },
     {
       "id": "models.picker.context-sizes",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 222,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1684,7 +1684,7 @@
     },
     {
       "id": "models.picker.dialog",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 195,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1695,7 +1695,7 @@
     },
     {
       "id": "models.picker.download-models",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 242,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1706,7 +1706,7 @@
     },
     {
       "id": "models.picker.favorite",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 213,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1717,7 +1717,7 @@
     },
     {
       "id": "models.picker.favorites",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 198,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1728,7 +1728,7 @@
     },
     {
       "id": "models.picker.maker",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 201,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1739,7 +1739,7 @@
     },
     {
       "id": "models.picker.memory-details",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 239,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1750,7 +1750,7 @@
     },
     {
       "id": "models.picker.more",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 217,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1761,7 +1761,7 @@
     },
     {
       "id": "models.picker.option",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 208,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1772,7 +1772,7 @@
     },
     {
       "id": "models.picker.search",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 204,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1785,7 +1785,7 @@
     },
     {
       "id": "models.picker.select",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 210,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1796,7 +1796,7 @@
     },
     {
       "id": "models.picker.use-max",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 238,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1807,7 +1807,7 @@
     },
     {
       "id": "models.remove.cancel",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 443,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1818,7 +1818,7 @@
     },
     {
       "id": "models.remove.confirm",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 449,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1829,7 +1829,7 @@
     },
     {
       "id": "models.remove.dialog",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 429,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1840,7 +1840,7 @@
     },
     {
       "id": "models.remove.scrim",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 428,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1851,7 +1851,7 @@
     },
     {
       "id": "models.row-menu.actions",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 326,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1862,7 +1862,7 @@
     },
     {
       "id": "models.row-menu.copy-name",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 363,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1873,7 +1873,7 @@
     },
     {
       "id": "models.row-menu.make-default",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 350,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1884,7 +1884,7 @@
     },
     {
       "id": "models.row-menu.measure",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 416,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1895,7 +1895,7 @@
     },
     {
       "id": "models.row-menu.open",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 331,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1906,7 +1906,7 @@
     },
     {
       "id": "models.row-menu.remove",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 382,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1917,7 +1917,7 @@
     },
     {
       "id": "models.tabs.download",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 141,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1928,7 +1928,7 @@
     },
     {
       "id": "models.tabs.installed",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 123,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1939,7 +1939,7 @@
     },
     {
       "id": "models.tabs.list",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 117,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1950,7 +1950,7 @@
     },
     {
       "id": "pictures.actions.again",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 124,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1961,7 +1961,7 @@
     },
     {
       "id": "pictures.actions.edit-prompt",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 128,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1972,7 +1972,7 @@
     },
     {
       "id": "pictures.actions.open-thread",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 135,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1983,7 +1983,7 @@
     },
     {
       "id": "pictures.detail.show-large",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 165,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -1994,7 +1994,7 @@
     },
     {
       "id": "pictures.detail.thread-link",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 155,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2005,7 +2005,7 @@
     },
     {
       "id": "pictures.error.try-again",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 436,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2016,7 +2016,7 @@
     },
     {
       "id": "pictures.grid.tile",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 292,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2027,7 +2027,7 @@
     },
     {
       "id": "pictures.head.open-threads",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 402,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2038,7 +2038,7 @@
     },
     {
       "id": "pictures.large.close",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 232,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2049,7 +2049,7 @@
     },
     {
       "id": "pictures.large.dialog",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 230,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2060,7 +2060,7 @@
     },
     {
       "id": "pictures.large.newer",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 236,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2071,7 +2071,7 @@
     },
     {
       "id": "pictures.large.older",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 241,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2082,7 +2082,7 @@
     },
     {
       "id": "pictures.search.input",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 397,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2095,7 +2095,7 @@
     },
     {
       "id": "pictures.search.toggle",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 415,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2106,7 +2106,7 @@
     },
     {
       "id": "pictures.selection.clear",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 204,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2117,7 +2117,7 @@
     },
     {
       "id": "pictures.thumb.show-large",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 183,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2128,7 +2128,7 @@
     },
     {
       "id": "settings.advanced.open-data-folder",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 681,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2139,7 +2139,7 @@
     },
     {
       "id": "settings.advanced.reset",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 694,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2150,7 +2150,7 @@
     },
     {
       "id": "settings.advanced.reset-cancel",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 708,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2161,7 +2161,7 @@
     },
     {
       "id": "settings.advanced.reset-confirm",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 714,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2172,7 +2172,7 @@
     },
     {
       "id": "settings.clone.start",
-      "file": "src/LibraryImports.tsx",
+      "file": "src/settings/LibraryImports.tsx",
       "line": 342,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2183,7 +2183,7 @@
     },
     {
       "id": "settings.clone.url",
-      "file": "src/LibraryImports.tsx",
+      "file": "src/settings/LibraryImports.tsx",
       "line": 341,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2196,7 +2196,7 @@
     },
     {
       "id": "settings.images.address",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 433,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2209,7 +2209,7 @@
     },
     {
       "id": "settings.images.enable",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 421,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2220,7 +2220,7 @@
     },
     {
       "id": "settings.images.open-comfyui",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 384,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2231,7 +2231,7 @@
     },
     {
       "id": "settings.images.retry",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 380,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2242,7 +2242,7 @@
     },
     {
       "id": "settings.images.setup-guide",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 350,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2253,7 +2253,7 @@
     },
     {
       "id": "settings.images.test-connection",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 434,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2264,7 +2264,7 @@
     },
     {
       "id": "settings.instructions.custom",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 38,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2275,7 +2275,7 @@
     },
     {
       "id": "settings.instructions.model",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 74,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2286,7 +2286,7 @@
     },
     {
       "id": "settings.instructions.model-menu",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 73,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2297,7 +2297,7 @@
     },
     {
       "id": "settings.instructions.prompt",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 41,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2310,7 +2310,7 @@
     },
     {
       "id": "settings.instructions.reset",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 44,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2321,7 +2321,7 @@
     },
     {
       "id": "settings.instructions.save",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 45,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2332,7 +2332,7 @@
     },
     {
       "id": "settings.instructions.scope-all",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 160,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2343,7 +2343,7 @@
     },
     {
       "id": "settings.instructions.scope-model",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 161,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2354,7 +2354,7 @@
     },
     {
       "id": "settings.library.add-sqlite",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 623,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2365,7 +2365,7 @@
     },
     {
       "id": "settings.library.turn-on-tools",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 648,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2376,7 +2376,7 @@
     },
     {
       "id": "settings.model-defaults.retry",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 140,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2387,7 +2387,7 @@
     },
     {
       "id": "settings.model-defaults.toggle",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 139,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2398,7 +2398,7 @@
     },
     {
       "id": "settings.nav.back-to-chat",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 385,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2409,7 +2409,7 @@
     },
     {
       "id": "settings.reply-controls.form",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 109,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2420,7 +2420,7 @@
     },
     {
       "id": "settings.reply-controls.reset-all",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 124,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2431,7 +2431,7 @@
     },
     {
       "id": "settings.reply-controls.save",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 124,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2442,7 +2442,7 @@
     },
     {
       "id": "settings.runtime.open-models-folder",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 209,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2453,7 +2453,7 @@
     },
     {
       "id": "settings.runtime.switch",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 139,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2464,7 +2464,7 @@
     },
     {
       "id": "settings.runtime.switch-cancel",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 175,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2475,7 +2475,7 @@
     },
     {
       "id": "settings.runtime.switch-confirm",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 181,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2486,7 +2486,7 @@
     },
     {
       "id": "settings.shell.back",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 144,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2497,7 +2497,7 @@
     },
     {
       "id": "settings.shell.done",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 151,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2508,7 +2508,7 @@
     },
     {
       "id": "settings.tools.enable",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 315,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2519,7 +2519,7 @@
     },
     {
       "id": "settings.tools.image-setup",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 303,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2530,7 +2530,7 @@
     },
     {
       "id": "settings.tools.make-images",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 336,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2541,7 +2541,7 @@
     },
     {
       "id": "settings.updates.automatic",
-      "file": "src/SettingsUpdates.tsx",
+      "file": "src/updates/SettingsUpdates.tsx",
       "line": 279,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2552,7 +2552,7 @@
     },
     {
       "id": "settings.updates.check",
-      "file": "src/SettingsUpdates.tsx",
+      "file": "src/updates/SettingsUpdates.tsx",
       "line": 175,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2563,7 +2563,7 @@
     },
     {
       "id": "settings.updates.download",
-      "file": "src/SettingsUpdates.tsx",
+      "file": "src/updates/SettingsUpdates.tsx",
       "line": 172,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2574,7 +2574,7 @@
     },
     {
       "id": "settings.updates.every-change",
-      "file": "src/SettingsUpdates.tsx",
+      "file": "src/updates/SettingsUpdates.tsx",
       "line": 282,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2585,7 +2585,7 @@
     },
     {
       "id": "settings.updates.release-page",
-      "file": "src/SettingsUpdates.tsx",
+      "file": "src/updates/SettingsUpdates.tsx",
       "line": 184,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2596,7 +2596,7 @@
     },
     {
       "id": "settings.updates.restart",
-      "file": "src/SettingsUpdates.tsx",
+      "file": "src/updates/SettingsUpdates.tsx",
       "line": 166,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2607,7 +2607,7 @@
     },
     {
       "id": "settings.updates.update",
-      "file": "src/SettingsUpdates.tsx",
+      "file": "src/updates/SettingsUpdates.tsx",
       "line": 159,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2618,7 +2618,7 @@
     },
     {
       "id": "settings.voice.address",
-      "file": "src/VoiceSettings.tsx",
+      "file": "src/voice/VoiceSettings.tsx",
       "line": 55,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2631,7 +2631,7 @@
     },
     {
       "id": "settings.voice.connect",
-      "file": "src/VoiceSettings.tsx",
+      "file": "src/voice/VoiceSettings.tsx",
       "line": 56,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2642,7 +2642,7 @@
     },
     {
       "id": "settings.voice.disconnect",
-      "file": "src/VoiceSettings.tsx",
+      "file": "src/voice/VoiceSettings.tsx",
       "line": 57,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2653,7 +2653,7 @@
     },
     {
       "id": "settings.voice.talk",
-      "file": "src/VoiceSettings.tsx",
+      "file": "src/voice/VoiceSettings.tsx",
       "line": 61,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2664,7 +2664,7 @@
     },
     {
       "id": "sidebar.drawer.close",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 532,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2675,7 +2675,7 @@
     },
     {
       "id": "sidebar.drawer.scrim",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 552,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2686,7 +2686,7 @@
     },
     {
       "id": "sidebar.foot.models",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 474,
       "element": "jsx-prop",
       "attribute": "testId",
@@ -2697,7 +2697,7 @@
     },
     {
       "id": "sidebar.foot.pictures",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 508,
       "element": "jsx-prop",
       "attribute": "testId",
@@ -2708,7 +2708,7 @@
     },
     {
       "id": "sidebar.foot.settings",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 429,
       "element": "jsx-prop",
       "attribute": "testId",
@@ -2719,7 +2719,7 @@
     },
     {
       "id": "sidebar.foot.update",
-      "file": "src/Updates.tsx",
+      "file": "src/updates/Updates.tsx",
       "line": 284,
       "element": "jsx-prop",
       "attribute": "testId",
@@ -2730,7 +2730,7 @@
     },
     {
       "id": "sidebar.foot.usage",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 491,
       "element": "jsx-prop",
       "attribute": "testId",
@@ -2741,7 +2741,7 @@
     },
     {
       "id": "sidebar.search.clear",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 353,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2752,7 +2752,7 @@
     },
     {
       "id": "sidebar.search.input",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 330,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2765,7 +2765,7 @@
     },
     {
       "id": "sidebar.thread-menu.delete",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 351,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2776,7 +2776,7 @@
     },
     {
       "id": "sidebar.thread-menu.export",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 344,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2787,7 +2787,7 @@
     },
     {
       "id": "sidebar.thread-menu.menu",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 338,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2798,7 +2798,7 @@
     },
     {
       "id": "sidebar.thread-menu.rename",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 340,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2809,7 +2809,7 @@
     },
     {
       "id": "sidebar.thread.menu",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 302,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2820,7 +2820,7 @@
     },
     {
       "id": "sidebar.thread.open",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 290,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2831,7 +2831,7 @@
     },
     {
       "id": "sidebar.top.new-thread",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 368,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2842,7 +2842,7 @@
     },
     {
       "id": "sidebar.update.cancel",
-      "file": "src/Updates.tsx",
+      "file": "src/updates/Updates.tsx",
       "line": 156,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2853,7 +2853,7 @@
     },
     {
       "id": "sidebar.update.go",
-      "file": "src/Updates.tsx",
+      "file": "src/updates/Updates.tsx",
       "line": 159,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2864,7 +2864,7 @@
     },
     {
       "id": "ui.dialog.close",
-      "file": "src/Panel.tsx",
+      "file": "src/lib/ui/Panel.tsx",
       "line": 43,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2875,7 +2875,7 @@
     },
     {
       "id": "ui.dialog.panel",
-      "file": "src/Panel.tsx",
+      "file": "src/lib/ui/Panel.tsx",
       "line": 30,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2884,7 +2884,7 @@
     },
     {
       "id": "ui.dialog.scrim",
-      "file": "src/Panel.tsx",
+      "file": "src/lib/ui/Panel.tsx",
       "line": 29,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2895,7 +2895,7 @@
     },
     {
       "id": "ui.error.copy",
-      "file": "src/ErrorBoundary.tsx",
+      "file": "src/app/ErrorBoundary.tsx",
       "line": 15,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2906,7 +2906,7 @@
     },
     {
       "id": "ui.error.retry",
-      "file": "src/ErrorBoundary.tsx",
+      "file": "src/app/ErrorBoundary.tsx",
       "line": 14,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2917,7 +2917,7 @@
     },
     {
       "id": "ui.pop.scrim",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 621,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2928,7 +2928,7 @@
     },
     {
       "id": "ui.screen-error.reload",
-      "file": "src/screens.tsx",
+      "file": "src/app/screens.tsx",
       "line": 34,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2939,7 +2939,7 @@
     },
     {
       "id": "ui.sheet.close",
-      "file": "src/ui.tsx",
+      "file": "src/lib/ui/ui.tsx",
       "line": 144,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2950,7 +2950,7 @@
     },
     {
       "id": "ui.update-note.dismiss",
-      "file": "src/UpdateNote.tsx",
+      "file": "src/updates/UpdateNote.tsx",
       "line": 29,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2961,7 +2961,7 @@
     },
     {
       "id": "usage.chart.plot",
-      "file": "src/Usage.tsx",
+      "file": "src/usage/Usage.tsx",
       "line": 158,
       "element": "jsx-prop",
       "attribute": "data-testid",
@@ -2974,7 +2974,7 @@
   "patterns": [
     {
       "pattern": "chat.attachment.remove-image-*",
-      "file": "src/attachment-images.tsx",
+      "file": "src/composer/attachment-images.tsx",
       "line": 53,
       "attribute": "data-testid",
       "tag": "button",
@@ -2984,7 +2984,7 @@
     },
     {
       "pattern": "chat.copy.*",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 61,
       "attribute": "data-testid",
       "tag": "button",
@@ -2994,7 +2994,7 @@
     },
     {
       "pattern": "chat.count-menu.pick-*",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 727,
       "attribute": "data-testid",
       "tag": "button",
@@ -3004,7 +3004,7 @@
     },
     {
       "pattern": "chat.queue.cancel-edit-*",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 563,
       "attribute": "data-testid",
       "tag": "button",
@@ -3014,7 +3014,7 @@
     },
     {
       "pattern": "chat.queue.edit-*",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 567,
       "attribute": "data-testid",
       "tag": "button",
@@ -3024,7 +3024,7 @@
     },
     {
       "pattern": "chat.queue.remove-*",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 571,
       "attribute": "data-testid",
       "tag": "button",
@@ -3034,7 +3034,7 @@
     },
     {
       "pattern": "chat.queue.send-now-*",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 558,
       "attribute": "data-testid",
       "tag": "button",
@@ -3044,7 +3044,7 @@
     },
     {
       "pattern": "chat.setup.open-*",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 84,
       "attribute": "data-testid",
       "tag": "button",
@@ -3054,7 +3054,7 @@
     },
     {
       "pattern": "image.picker.size-*",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 368,
       "attribute": "data-testid",
       "tag": "button",
@@ -3064,7 +3064,7 @@
     },
     {
       "pattern": "models.fit-panel.context-*",
-      "file": "src/FitPanel.tsx",
+      "file": "src/fit/FitPanel.tsx",
       "line": 298,
       "attribute": "data-testid",
       "tag": "button",
@@ -3074,7 +3074,7 @@
     },
     {
       "pattern": "models.picker.context-*",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 234,
       "attribute": "data-testid",
       "tag": "button",
@@ -3084,7 +3084,7 @@
     },
     {
       "pattern": "pictures.actions.*",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 113,
       "attribute": "data-testid",
       "tag": "button",
@@ -3094,7 +3094,7 @@
     },
     {
       "pattern": "settings.add-source.add-*",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 562,
       "attribute": "data-testid",
       "tag": "button",
@@ -3104,7 +3104,7 @@
     },
     {
       "pattern": "settings.add-source.cancel-*",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 569,
       "attribute": "data-testid",
       "tag": "button",
@@ -3114,7 +3114,7 @@
     },
     {
       "pattern": "settings.add-source.path-*",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 546,
       "attribute": "data-testid",
       "tag": "input",
@@ -3126,7 +3126,7 @@
     },
     {
       "pattern": "settings.appearance.accent-*",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 51,
       "attribute": "data-testid",
       "tag": "button",
@@ -3136,7 +3136,7 @@
     },
     {
       "pattern": "settings.copy.*",
-      "file": "src/settings-controls.tsx",
+      "file": "src/lib/ui/settings-controls.tsx",
       "line": 32,
       "attribute": "data-testid",
       "tag": "button",
@@ -3146,7 +3146,7 @@
     },
     {
       "pattern": "settings.database.ask-*",
-      "file": "src/LibraryImports.tsx",
+      "file": "src/settings/LibraryImports.tsx",
       "line": 254,
       "attribute": "data-testid",
       "tag": "button",
@@ -3156,7 +3156,7 @@
     },
     {
       "pattern": "settings.database.download-*",
-      "file": "src/LibraryImports.tsx",
+      "file": "src/settings/LibraryImports.tsx",
       "line": 121,
       "attribute": "data-testid",
       "tag": "button",
@@ -3166,7 +3166,7 @@
     },
     {
       "pattern": "settings.database.license-*",
-      "file": "src/LibraryImports.tsx",
+      "file": "src/settings/LibraryImports.tsx",
       "line": 261,
       "attribute": "data-testid",
       "tag": "a",
@@ -3176,7 +3176,7 @@
     },
     {
       "pattern": "settings.database.open-*",
-      "file": "src/LibraryImports.tsx",
+      "file": "src/settings/LibraryImports.tsx",
       "line": 280,
       "attribute": "data-testid",
       "tag": "button",
@@ -3186,7 +3186,7 @@
     },
     {
       "pattern": "settings.database.refresh-*",
-      "file": "src/LibraryImports.tsx",
+      "file": "src/settings/LibraryImports.tsx",
       "line": 292,
       "attribute": "data-testid",
       "tag": "button",
@@ -3196,7 +3196,7 @@
     },
     {
       "pattern": "settings.database.remove-*",
-      "file": "src/LibraryImports.tsx",
+      "file": "src/settings/LibraryImports.tsx",
       "line": 296,
       "attribute": "data-testid",
       "tag": "button",
@@ -3206,7 +3206,7 @@
     },
     {
       "pattern": "settings.database.source-*",
-      "file": "src/LibraryImports.tsx",
+      "file": "src/settings/LibraryImports.tsx",
       "line": 263,
       "attribute": "data-testid",
       "tag": "a",
@@ -3216,7 +3216,7 @@
     },
     {
       "pattern": "settings.instructions.model-*",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 79,
       "attribute": "data-testid",
       "tag": "div",
@@ -3226,7 +3226,7 @@
     },
     {
       "pattern": "settings.library.add-*",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 587,
       "attribute": "data-testid",
       "tag": "button",
@@ -3236,7 +3236,7 @@
     },
     {
       "pattern": "settings.models.measure-*",
-      "file": "src/ModelMeasure.tsx",
+      "file": "src/measure/ModelMeasure.tsx",
       "line": 80,
       "attribute": "data-testid",
       "tag": "button",
@@ -3246,7 +3246,7 @@
     },
     {
       "pattern": "settings.nav.open-*",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 391,
       "attribute": "data-testid",
       "tag": "button",
@@ -3256,7 +3256,7 @@
     },
     {
       "pattern": "settings.reply-controls.reset-*",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 120,
       "attribute": "data-testid",
       "tag": "button",
@@ -3266,7 +3266,7 @@
     },
     {
       "pattern": "settings.reply-controls.value-*",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 119,
       "attribute": "data-testid",
       "tag": "input",
@@ -3277,7 +3277,7 @@
     },
     {
       "pattern": "settings.sections.open-*",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 201,
       "attribute": "data-testid",
       "tag": "button",
@@ -3287,7 +3287,7 @@
     },
     {
       "pattern": "settings.segment.*",
-      "file": "src/settings-ui.tsx",
+      "file": "src/lib/ui/settings-ui.tsx",
       "line": 104,
       "attribute": "data-testid",
       "tag": "button",
@@ -3297,7 +3297,7 @@
     },
     {
       "pattern": "settings.source.actions-*",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 493,
       "attribute": "data-testid",
       "tag": "div",
@@ -3307,7 +3307,7 @@
     },
     {
       "pattern": "settings.source.more-*",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 494,
       "attribute": "data-testid",
       "tag": "button",
@@ -3317,7 +3317,7 @@
     },
     {
       "pattern": "settings.source.refresh-*",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 504,
       "attribute": "data-testid",
       "tag": "button",
@@ -3327,7 +3327,7 @@
     },
     {
       "pattern": "settings.source.remove-*",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 517,
       "attribute": "data-testid",
       "tag": "button",
@@ -3337,7 +3337,7 @@
     },
     {
       "pattern": "settings.tools.open-*",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 250,
       "attribute": "data-testid",
       "tag": "button",
@@ -3347,7 +3347,7 @@
     },
     {
       "pattern": "ui.path.*",
-      "file": "src/settings-controls.tsx",
+      "file": "src/lib/ui/settings-controls.tsx",
       "line": 21,
       "attribute": "data-testid",
       "tag": "span",
@@ -3355,7 +3355,7 @@
     },
     {
       "pattern": "usage.option.*",
-      "file": "src/Usage.tsx",
+      "file": "src/usage/Usage.tsx",
       "line": 84,
       "attribute": "data-testid",
       "tag": "button",
@@ -3377,7 +3377,7 @@
   "candidates": [
     {
       "id": "candidate:0d8b4733214a227c",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 84,
       "element": "button",
       "classification": "definite",
@@ -3390,7 +3390,7 @@
     },
     {
       "id": "candidate:147b60c070be0c90",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 120,
       "element": "button",
       "classification": "definite",
@@ -3403,7 +3403,7 @@
     },
     {
       "id": "candidate:0f61b2bf429281ca",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 144,
       "element": "button",
       "classification": "definite",
@@ -3416,7 +3416,7 @@
     },
     {
       "id": "candidate:51b79ce2c12cf58d",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 151,
       "element": "button",
       "classification": "definite",
@@ -3429,7 +3429,7 @@
     },
     {
       "id": "candidate:81aaf6b4c9b14508",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 197,
       "element": "button",
       "classification": "definite",
@@ -3442,7 +3442,7 @@
     },
     {
       "id": "candidate:6361224f64782a79",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 238,
       "element": "input",
       "classification": "definite",
@@ -3455,7 +3455,7 @@
     },
     {
       "id": "candidate:b59bd93ec154c183",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 256,
       "element": "button",
       "classification": "definite",
@@ -3468,7 +3468,7 @@
     },
     {
       "id": "candidate:069f4dd62dc2c86a",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 338,
       "element": "div",
       "classification": "review-required",
@@ -3481,7 +3481,7 @@
     },
     {
       "id": "candidate:8aaf445a9c0528c4",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 340,
       "element": "button",
       "classification": "definite",
@@ -3494,7 +3494,7 @@
     },
     {
       "id": "candidate:d15c23ee3bc3fe22",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 344,
       "element": "button",
       "classification": "definite",
@@ -3507,7 +3507,7 @@
     },
     {
       "id": "candidate:df3e21a650230e62",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 351,
       "element": "button",
       "classification": "definite",
@@ -3520,7 +3520,7 @@
     },
     {
       "id": "candidate:4a00820cdd104935",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 552,
       "element": "div",
       "classification": "review-required",
@@ -3533,7 +3533,7 @@
     },
     {
       "id": "candidate:19fd602725918c85",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 621,
       "element": "div",
       "classification": "review-required",
@@ -3546,7 +3546,7 @@
     },
     {
       "id": "candidate:b04702c49c7c2f90",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 622,
       "element": "button",
       "classification": "definite",
@@ -3559,7 +3559,7 @@
     },
     {
       "id": "candidate:ae0b629bf511a140",
-      "file": "src/App.tsx",
+      "file": "src/app/App.tsx",
       "line": 623,
       "element": "button",
       "classification": "definite",
@@ -3572,7 +3572,7 @@
     },
     {
       "id": "candidate:e46ee3e95c3ecd28",
-      "file": "src/attachment-images.tsx",
+      "file": "src/composer/attachment-images.tsx",
       "line": 20,
       "element": "button",
       "classification": "definite",
@@ -3585,7 +3585,7 @@
     },
     {
       "id": "candidate:8d46e488d632d60b",
-      "file": "src/attachment-images.tsx",
+      "file": "src/composer/attachment-images.tsx",
       "line": 21,
       "element": "button",
       "classification": "definite",
@@ -3598,7 +3598,7 @@
     },
     {
       "id": "candidate:88348e89a0f6b929",
-      "file": "src/attachment-images.tsx",
+      "file": "src/composer/attachment-images.tsx",
       "line": 39,
       "element": "button",
       "classification": "definite",
@@ -3611,7 +3611,7 @@
     },
     {
       "id": "candidate:0f7f900bf496a7cd",
-      "file": "src/attachment-images.tsx",
+      "file": "src/composer/attachment-images.tsx",
       "line": 40,
       "element": "button",
       "classification": "definite",
@@ -3624,7 +3624,7 @@
     },
     {
       "id": "candidate:51cde2b95f54969c",
-      "file": "src/attachment-images.tsx",
+      "file": "src/composer/attachment-images.tsx",
       "line": 53,
       "element": "button",
       "classification": "definite",
@@ -3637,7 +3637,7 @@
     },
     {
       "id": "candidate:39ad8b0db06b5cc8",
-      "file": "src/Banner.tsx",
+      "file": "src/runtime/Banner.tsx",
       "line": 124,
       "element": "button",
       "classification": "definite",
@@ -3650,7 +3650,7 @@
     },
     {
       "id": "candidate:07bddd452ad2d2b6",
-      "file": "src/Banner.tsx",
+      "file": "src/runtime/Banner.tsx",
       "line": 150,
       "element": "span",
       "classification": "review-required",
@@ -3663,7 +3663,7 @@
     },
     {
       "id": "candidate:968eaceebb9721f7",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 269,
       "element": "button",
       "classification": "definite",
@@ -3676,7 +3676,7 @@
     },
     {
       "id": "candidate:8580dd9651009f42",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 275,
       "element": "form",
       "classification": "review-required",
@@ -3689,7 +3689,7 @@
     },
     {
       "id": "candidate:f05e76b1c433b749",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 288,
       "element": "input",
       "classification": "definite",
@@ -3702,7 +3702,7 @@
     },
     {
       "id": "candidate:60d718c68237ee3d",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 303,
       "element": "button",
       "classification": "definite",
@@ -3715,7 +3715,7 @@
     },
     {
       "id": "candidate:d580ab9237906069",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 317,
       "element": "button",
       "classification": "definite",
@@ -3728,7 +3728,7 @@
     },
     {
       "id": "candidate:aa06c3738cf5b2a8",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 342,
       "element": "button",
       "classification": "definite",
@@ -3741,7 +3741,7 @@
     },
     {
       "id": "candidate:1a4e469fbc99b1ab",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 353,
       "element": "button",
       "classification": "definite",
@@ -3754,7 +3754,7 @@
     },
     {
       "id": "candidate:edc8a4390d44132e",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 381,
       "element": "button",
       "classification": "definite",
@@ -3767,7 +3767,7 @@
     },
     {
       "id": "candidate:8be65e614c8f4f74",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 415,
       "element": "button",
       "classification": "definite",
@@ -3780,7 +3780,7 @@
     },
     {
       "id": "candidate:7ff99b5deaacdc13",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 420,
       "element": "button",
       "classification": "definite",
@@ -3793,7 +3793,7 @@
     },
     {
       "id": "candidate:d6d0465b871633e5",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 438,
       "element": "p",
       "classification": "review-required",
@@ -3806,7 +3806,7 @@
     },
     {
       "id": "candidate:f69e16ed8921aa37",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 467,
       "element": "textarea",
       "classification": "definite",
@@ -3819,7 +3819,7 @@
     },
     {
       "id": "candidate:5625a9e9db91e198",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 558,
       "element": "button",
       "classification": "definite",
@@ -3832,7 +3832,7 @@
     },
     {
       "id": "candidate:61a407e43652d3d5",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 563,
       "element": "button",
       "classification": "definite",
@@ -3845,7 +3845,7 @@
     },
     {
       "id": "candidate:766b768deb4ffeb4",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 567,
       "element": "button",
       "classification": "definite",
@@ -3858,7 +3858,7 @@
     },
     {
       "id": "candidate:db3218e084392fdf",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 571,
       "element": "button",
       "classification": "definite",
@@ -3871,7 +3871,7 @@
     },
     {
       "id": "candidate:feba45121c2fb802",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 579,
       "element": "button",
       "classification": "definite",
@@ -3884,7 +3884,7 @@
     },
     {
       "id": "candidate:47dda42b5f7e4b96",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 606,
       "element": "div",
       "classification": "review-required",
@@ -3897,7 +3897,7 @@
     },
     {
       "id": "candidate:78a3f4bb1049e809",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 622,
       "element": "input",
       "classification": "definite",
@@ -3910,7 +3910,7 @@
     },
     {
       "id": "candidate:ab0d88af66e39bc3",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 625,
       "element": "button",
       "classification": "definite",
@@ -3923,7 +3923,7 @@
     },
     {
       "id": "candidate:42e1ee48088fc110",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 628,
       "element": "button",
       "classification": "definite",
@@ -3936,7 +3936,7 @@
     },
     {
       "id": "candidate:8a0bcd77e9ac3a05",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 680,
       "element": "button",
       "classification": "definite",
@@ -3949,7 +3949,7 @@
     },
     {
       "id": "candidate:3ef2167e74c1bcfd",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 725,
       "element": "div",
       "classification": "review-required",
@@ -3962,7 +3962,7 @@
     },
     {
       "id": "candidate:4c685e1e7280c169",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 727,
       "element": "button",
       "classification": "definite",
@@ -3975,7 +3975,7 @@
     },
     {
       "id": "candidate:64205cbd8cf3e2fe",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 759,
       "element": "button",
       "classification": "definite",
@@ -3988,7 +3988,7 @@
     },
     {
       "id": "candidate:df513f38bfb22e06",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 777,
       "element": "button",
       "classification": "definite",
@@ -4001,7 +4001,7 @@
     },
     {
       "id": "candidate:f84dbfcce0d0e335",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 796,
       "element": "button",
       "classification": "definite",
@@ -4014,7 +4014,7 @@
     },
     {
       "id": "candidate:3335e3e227cb4e21",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 813,
       "element": "button",
       "classification": "definite",
@@ -4027,7 +4027,7 @@
     },
     {
       "id": "candidate:083123d1a19f16c6",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 861,
       "element": "button",
       "classification": "definite",
@@ -4040,7 +4040,7 @@
     },
     {
       "id": "candidate:c7c3a069929d7788",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 880,
       "element": "button",
       "classification": "definite",
@@ -4053,7 +4053,7 @@
     },
     {
       "id": "candidate:336cae34277e3e45",
-      "file": "src/Composer.tsx",
+      "file": "src/composer/Composer.tsx",
       "line": 889,
       "element": "button",
       "classification": "definite",
@@ -4066,7 +4066,7 @@
     },
     {
       "id": "candidate:9ffb12b454449880",
-      "file": "src/ErrorBoundary.tsx",
+      "file": "src/app/ErrorBoundary.tsx",
       "line": 14,
       "element": "button",
       "classification": "definite",
@@ -4079,7 +4079,7 @@
     },
     {
       "id": "candidate:81f2123eb904cfca",
-      "file": "src/ErrorBoundary.tsx",
+      "file": "src/app/ErrorBoundary.tsx",
       "line": 15,
       "element": "button",
       "classification": "definite",
@@ -4092,7 +4092,7 @@
     },
     {
       "id": "candidate:f45674a823bef329",
-      "file": "src/FirstRun.tsx",
+      "file": "src/first-run/FirstRun.tsx",
       "line": 23,
       "element": "button",
       "classification": "definite",
@@ -4105,7 +4105,7 @@
     },
     {
       "id": "candidate:c5604f4f4ecaceba",
-      "file": "src/FirstRun.tsx",
+      "file": "src/first-run/FirstRun.tsx",
       "line": 28,
       "element": "button",
       "classification": "definite",
@@ -4118,7 +4118,7 @@
     },
     {
       "id": "candidate:a46d13581b15c8c9",
-      "file": "src/FirstRun.tsx",
+      "file": "src/first-run/FirstRun.tsx",
       "line": 74,
       "element": "span",
       "classification": "review-required",
@@ -4130,7 +4130,7 @@
     },
     {
       "id": "candidate:b86e82e26487e9d1",
-      "file": "src/FirstRun.tsx",
+      "file": "src/first-run/FirstRun.tsx",
       "line": 83,
       "element": "button",
       "classification": "definite",
@@ -4143,7 +4143,7 @@
     },
     {
       "id": "candidate:3920e8d8a60bb240",
-      "file": "src/FirstRun.tsx",
+      "file": "src/first-run/FirstRun.tsx",
       "line": 108,
       "element": "span",
       "classification": "review-required",
@@ -4155,7 +4155,7 @@
     },
     {
       "id": "candidate:652d9c211f06d0e7",
-      "file": "src/FirstRun.tsx",
+      "file": "src/first-run/FirstRun.tsx",
       "line": 220,
       "element": "button",
       "classification": "definite",
@@ -4168,7 +4168,7 @@
     },
     {
       "id": "candidate:873219df7b76d202",
-      "file": "src/FitPanel.tsx",
+      "file": "src/fit/FitPanel.tsx",
       "line": 295,
       "element": "button",
       "classification": "definite",
@@ -4181,7 +4181,7 @@
     },
     {
       "id": "candidate:388a7c19bab380dd",
-      "file": "src/FitPanel.tsx",
+      "file": "src/fit/FitPanel.tsx",
       "line": 322,
       "element": "summary",
       "classification": "definite",
@@ -4194,7 +4194,7 @@
     },
     {
       "id": "candidate:e97c33c834a60c8f",
-      "file": "src/FitPanel.tsx",
+      "file": "src/fit/FitPanel.tsx",
       "line": 345,
       "element": "button",
       "classification": "definite",
@@ -4207,7 +4207,7 @@
     },
     {
       "id": "candidate:0f4c70f802ed8559",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 285,
       "element": "div",
       "classification": "review-required",
@@ -4220,7 +4220,7 @@
     },
     {
       "id": "candidate:af63c66a0f4092ea",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 286,
       "element": "button",
       "classification": "definite",
@@ -4233,7 +4233,7 @@
     },
     {
       "id": "candidate:6ae3eaa8c461a297",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 299,
       "element": "div",
       "classification": "review-required",
@@ -4246,7 +4246,7 @@
     },
     {
       "id": "candidate:db1ae7b4319e23fd",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 300,
       "element": "button",
       "classification": "definite",
@@ -4259,7 +4259,7 @@
     },
     {
       "id": "candidate:b5f92f1e5f47c4b7",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 302,
       "element": "button",
       "classification": "definite",
@@ -4272,7 +4272,7 @@
     },
     {
       "id": "candidate:d9ba89b3eb5da5d8",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 304,
       "element": "button",
       "classification": "definite",
@@ -4285,7 +4285,7 @@
     },
     {
       "id": "candidate:2c44c1a3aa1da18d",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 314,
       "element": "button",
       "classification": "definite",
@@ -4298,7 +4298,7 @@
     },
     {
       "id": "candidate:da820fd43032012e",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 324,
       "element": "div",
       "classification": "review-required",
@@ -4311,7 +4311,7 @@
     },
     {
       "id": "candidate:88501e886961afd1",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 327,
       "element": "button",
       "classification": "definite",
@@ -4324,7 +4324,7 @@
     },
     {
       "id": "candidate:3f2bc1e88c34b404",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 332,
       "element": "div",
       "classification": "review-required",
@@ -4337,7 +4337,7 @@
     },
     {
       "id": "candidate:b83493a40a13e86e",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 335,
       "element": "button",
       "classification": "definite",
@@ -4350,7 +4350,7 @@
     },
     {
       "id": "candidate:e186d2daa4e7a047",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 336,
       "element": "button",
       "classification": "definite",
@@ -4363,7 +4363,7 @@
     },
     {
       "id": "candidate:1ab2eb70f2f717d4",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 344,
       "element": "div",
       "classification": "review-required",
@@ -4376,7 +4376,7 @@
     },
     {
       "id": "candidate:497bdb328e6d8ee7",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 347,
       "element": "div",
       "classification": "review-required",
@@ -4389,7 +4389,7 @@
     },
     {
       "id": "candidate:0ccbb4008af9e76a",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 357,
       "element": "button",
       "classification": "definite",
@@ -4402,7 +4402,7 @@
     },
     {
       "id": "candidate:d317f6aa8865ee9d",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 358,
       "element": "div",
       "classification": "review-required",
@@ -4415,7 +4415,7 @@
     },
     {
       "id": "candidate:309cb872496b4452",
-      "file": "src/ImagePicker.tsx",
+      "file": "src/image/ImagePicker.tsx",
       "line": 368,
       "element": "button",
       "classification": "definite",
@@ -4428,7 +4428,7 @@
     },
     {
       "id": "candidate:f815de75423c0fc8",
-      "file": "src/ImageUnset.tsx",
+      "file": "src/image/ImageUnset.tsx",
       "line": 99,
       "element": "button",
       "classification": "definite",
@@ -4441,7 +4441,7 @@
     },
     {
       "id": "candidate:670f0a744aafea49",
-      "file": "src/ImageUnset.tsx",
+      "file": "src/image/ImageUnset.tsx",
       "line": 100,
       "element": "button",
       "classification": "definite",
@@ -4454,7 +4454,7 @@
     },
     {
       "id": "candidate:af6d895a625e4859",
-      "file": "src/ImageUnset.tsx",
+      "file": "src/image/ImageUnset.tsx",
       "line": 101,
       "element": "button",
       "classification": "definite",
@@ -4467,7 +4467,7 @@
     },
     {
       "id": "candidate:dba84274c3678506",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 38,
       "element": "button",
       "classification": "definite",
@@ -4480,7 +4480,7 @@
     },
     {
       "id": "candidate:032b6393dcaa5318",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 41,
       "element": "textarea",
       "classification": "definite",
@@ -4493,7 +4493,7 @@
     },
     {
       "id": "candidate:99f63f7eb40ceed0",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 44,
       "element": "button",
       "classification": "definite",
@@ -4506,7 +4506,7 @@
     },
     {
       "id": "candidate:fae9e80fd8f63cd1",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 45,
       "element": "button",
       "classification": "definite",
@@ -4519,7 +4519,7 @@
     },
     {
       "id": "candidate:92e9298ad1da08ad",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 73,
       "element": "div",
       "classification": "review-required",
@@ -4532,7 +4532,7 @@
     },
     {
       "id": "candidate:5222c0df85c26088",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 74,
       "element": "button",
       "classification": "definite",
@@ -4545,7 +4545,7 @@
     },
     {
       "id": "candidate:3601c56dc97db935",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 79,
       "element": "div",
       "classification": "review-required",
@@ -4561,7 +4561,7 @@
     },
     {
       "id": "candidate:6971088da8905b90",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 109,
       "element": "form",
       "classification": "review-required",
@@ -4574,7 +4574,7 @@
     },
     {
       "id": "candidate:b0f9d8e5fa8763dd",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 119,
       "element": "input",
       "classification": "definite",
@@ -4587,7 +4587,7 @@
     },
     {
       "id": "candidate:15aa0c1c8ad67d21",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 120,
       "element": "button",
       "classification": "definite",
@@ -4600,7 +4600,7 @@
     },
     {
       "id": "candidate:9ca5703afc512496",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 124,
       "element": "button",
       "classification": "definite",
@@ -4613,7 +4613,7 @@
     },
     {
       "id": "candidate:500483145622c264",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 124,
       "element": "button",
       "classification": "definite",
@@ -4626,7 +4626,7 @@
     },
     {
       "id": "candidate:e024f7efdff034e5",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 139,
       "element": "summary",
       "classification": "definite",
@@ -4639,7 +4639,7 @@
     },
     {
       "id": "candidate:3c43dde680dd2999",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 140,
       "element": "button",
       "classification": "definite",
@@ -4652,7 +4652,7 @@
     },
     {
       "id": "candidate:500468f8a60da6f1",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 160,
       "element": "button",
       "classification": "definite",
@@ -4665,7 +4665,7 @@
     },
     {
       "id": "candidate:c5e41613d02528ad",
-      "file": "src/Instructions.tsx",
+      "file": "src/settings/Instructions.tsx",
       "line": 161,
       "element": "button",
       "classification": "definite",
@@ -4678,7 +4678,7 @@
     },
     {
       "id": "candidate:3f09de0002b59939",
-      "file": "src/LibraryImports.tsx",
+      "file": "src/settings/LibraryImports.tsx",
       "line": 118,
       "element": "button",
       "classification": "definite",
@@ -4691,7 +4691,7 @@
     },
     {
       "id": "candidate:248b1f184ef41cd2",
-      "file": "src/LibraryImports.tsx",
+      "file": "src/settings/LibraryImports.tsx",
       "line": 254,
       "element": "button",
       "classification": "definite",
@@ -4704,7 +4704,7 @@
     },
     {
       "id": "candidate:3bdf59a8e4802f42",
-      "file": "src/LibraryImports.tsx",
+      "file": "src/settings/LibraryImports.tsx",
       "line": 261,
       "element": "a",
       "classification": "definite",
@@ -4717,7 +4717,7 @@
     },
     {
       "id": "candidate:9b069ecd31528075",
-      "file": "src/LibraryImports.tsx",
+      "file": "src/settings/LibraryImports.tsx",
       "line": 263,
       "element": "a",
       "classification": "definite",
@@ -4730,7 +4730,7 @@
     },
     {
       "id": "candidate:a422e91c4b79bb53",
-      "file": "src/LibraryImports.tsx",
+      "file": "src/settings/LibraryImports.tsx",
       "line": 280,
       "element": "button",
       "classification": "definite",
@@ -4743,7 +4743,7 @@
     },
     {
       "id": "candidate:2d8ada73d4028a6b",
-      "file": "src/LibraryImports.tsx",
+      "file": "src/settings/LibraryImports.tsx",
       "line": 292,
       "element": "button",
       "classification": "definite",
@@ -4756,7 +4756,7 @@
     },
     {
       "id": "candidate:d10831c974365d5a",
-      "file": "src/LibraryImports.tsx",
+      "file": "src/settings/LibraryImports.tsx",
       "line": 296,
       "element": "button",
       "classification": "definite",
@@ -4769,7 +4769,7 @@
     },
     {
       "id": "candidate:9a907d2b7a490907",
-      "file": "src/LibraryImports.tsx",
+      "file": "src/settings/LibraryImports.tsx",
       "line": 341,
       "element": "input",
       "classification": "definite",
@@ -4782,7 +4782,7 @@
     },
     {
       "id": "candidate:5d1bbeb149e8df86",
-      "file": "src/LibraryImports.tsx",
+      "file": "src/settings/LibraryImports.tsx",
       "line": 342,
       "element": "button",
       "classification": "definite",
@@ -4795,7 +4795,7 @@
     },
     {
       "id": "candidate:9e3f3df019fe0e91",
-      "file": "src/markdown.tsx",
+      "file": "src/thread/markdown.tsx",
       "line": 150,
       "element": "a",
       "classification": "definite",
@@ -4808,7 +4808,7 @@
     },
     {
       "id": "candidate:30604e0f926a58db",
-      "file": "src/markdown.tsx",
+      "file": "src/thread/markdown.tsx",
       "line": 162,
       "element": "a",
       "classification": "definite",
@@ -4821,7 +4821,7 @@
     },
     {
       "id": "candidate:e44fea20ac54b410",
-      "file": "src/markdown.tsx",
+      "file": "src/thread/markdown.tsx",
       "line": 206,
       "element": "button",
       "classification": "definite",
@@ -4834,7 +4834,7 @@
     },
     {
       "id": "candidate:401f8ca9dd5cfe7f",
-      "file": "src/MemoryMark.tsx",
+      "file": "src/models/MemoryMark.tsx",
       "line": 51,
       "element": "span",
       "classification": "review-required",
@@ -4847,7 +4847,7 @@
     },
     {
       "id": "candidate:4d64037b5a67e99d",
-      "file": "src/ModelDownloads.tsx",
+      "file": "src/models/ModelDownloads.tsx",
       "line": 74,
       "element": "button",
       "classification": "definite",
@@ -4860,7 +4860,7 @@
     },
     {
       "id": "candidate:f37d697ee98f40a0",
-      "file": "src/ModelDownloads.tsx",
+      "file": "src/models/ModelDownloads.tsx",
       "line": 134,
       "element": "button",
       "classification": "definite",
@@ -4873,7 +4873,7 @@
     },
     {
       "id": "candidate:b019c69b2b6f5eb8",
-      "file": "src/ModelDownloads.tsx",
+      "file": "src/models/ModelDownloads.tsx",
       "line": 140,
       "element": "button",
       "classification": "definite",
@@ -4886,7 +4886,7 @@
     },
     {
       "id": "candidate:0822de643d87b350",
-      "file": "src/ModelDownloads.tsx",
+      "file": "src/models/ModelDownloads.tsx",
       "line": 290,
       "element": "a",
       "classification": "definite",
@@ -4899,7 +4899,7 @@
     },
     {
       "id": "candidate:e744582844b6c68e",
-      "file": "src/ModelDownloads.tsx",
+      "file": "src/models/ModelDownloads.tsx",
       "line": 298,
       "element": "input",
       "classification": "definite",
@@ -4912,7 +4912,7 @@
     },
     {
       "id": "candidate:767753e0585a496e",
-      "file": "src/ModelDownloads.tsx",
+      "file": "src/models/ModelDownloads.tsx",
       "line": 299,
       "element": "div",
       "classification": "review-required",
@@ -4925,7 +4925,7 @@
     },
     {
       "id": "candidate:33a048995fbff8dc",
-      "file": "src/ModelDownloads.tsx",
+      "file": "src/models/ModelDownloads.tsx",
       "line": 306,
       "element": "button",
       "classification": "definite",
@@ -4938,7 +4938,7 @@
     },
     {
       "id": "candidate:4159fbc66fd1596c",
-      "file": "src/ModelDownloads.tsx",
+      "file": "src/models/ModelDownloads.tsx",
       "line": 313,
       "element": "button",
       "classification": "definite",
@@ -4951,7 +4951,7 @@
     },
     {
       "id": "candidate:112229b7c5cfdb94",
-      "file": "src/ModelDownloads.tsx",
+      "file": "src/models/ModelDownloads.tsx",
       "line": 522,
       "element": "summary",
       "classification": "definite",
@@ -4964,7 +4964,7 @@
     },
     {
       "id": "candidate:e94a6ceb327825ee",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 55,
       "element": "span",
       "classification": "review-required",
@@ -4977,7 +4977,7 @@
     },
     {
       "id": "candidate:0e83191375374a1c",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 117,
       "element": "div",
       "classification": "review-required",
@@ -4990,7 +4990,7 @@
     },
     {
       "id": "candidate:4037fcebfbd51f7d",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 118,
       "element": "button",
       "classification": "definite",
@@ -5003,7 +5003,7 @@
     },
     {
       "id": "candidate:e63edc29a97bb4f0",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 136,
       "element": "button",
       "classification": "definite",
@@ -5016,7 +5016,7 @@
     },
     {
       "id": "candidate:2f1c0c5f795fe5ab",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 326,
       "element": "div",
       "classification": "review-required",
@@ -5029,7 +5029,7 @@
     },
     {
       "id": "candidate:6cc7abfab7a7e829",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 327,
       "element": "button",
       "classification": "definite",
@@ -5042,7 +5042,7 @@
     },
     {
       "id": "candidate:4e1de7a954965928",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 346,
       "element": "button",
       "classification": "definite",
@@ -5055,7 +5055,7 @@
     },
     {
       "id": "candidate:cb05b1bd0bcf765f",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 359,
       "element": "button",
       "classification": "definite",
@@ -5068,7 +5068,7 @@
     },
     {
       "id": "candidate:492e69a53b5d8e64",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 378,
       "element": "button",
       "classification": "definite",
@@ -5081,7 +5081,7 @@
     },
     {
       "id": "candidate:bde59d1d52bfd216",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 428,
       "element": "div",
       "classification": "review-required",
@@ -5094,7 +5094,7 @@
     },
     {
       "id": "candidate:55309fcd96764685",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 429,
       "element": "div",
       "classification": "review-required",
@@ -5108,7 +5108,7 @@
     },
     {
       "id": "candidate:f9adc2efb5bc4e1c",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 443,
       "element": "button",
       "classification": "definite",
@@ -5121,7 +5121,7 @@
     },
     {
       "id": "candidate:3637ca3ca433ae16",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 446,
       "element": "button",
       "classification": "definite",
@@ -5134,7 +5134,7 @@
     },
     {
       "id": "candidate:33aa0e2a130b993c",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 513,
       "element": "div",
       "classification": "review-required",
@@ -5150,7 +5150,7 @@
     },
     {
       "id": "candidate:0eb3fce5bbaf3859",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 541,
       "element": "div",
       "classification": "review-required",
@@ -5163,7 +5163,7 @@
     },
     {
       "id": "candidate:15baf0aa566fc1ee",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 557,
       "element": "button",
       "classification": "definite",
@@ -5176,7 +5176,7 @@
     },
     {
       "id": "candidate:956aa95d68ac0c5d",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 630,
       "element": "button",
       "classification": "definite",
@@ -5189,7 +5189,7 @@
     },
     {
       "id": "candidate:9453961ba4fa2721",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 635,
       "element": "button",
       "classification": "definite",
@@ -5202,7 +5202,7 @@
     },
     {
       "id": "candidate:c206f4480112949a",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 652,
       "element": "input",
       "classification": "definite",
@@ -5215,7 +5215,7 @@
     },
     {
       "id": "candidate:bcaeb970559b0a97",
-      "file": "src/Models.tsx",
+      "file": "src/models/Models.tsx",
       "line": 670,
       "element": "button",
       "classification": "definite",
@@ -5228,7 +5228,7 @@
     },
     {
       "id": "candidate:1983628f5f7feda3",
-      "file": "src/Panel.tsx",
+      "file": "src/lib/ui/Panel.tsx",
       "line": 29,
       "element": "div",
       "classification": "review-required",
@@ -5241,7 +5241,7 @@
     },
     {
       "id": "candidate:55b86b5e21894704",
-      "file": "src/Panel.tsx",
+      "file": "src/lib/ui/Panel.tsx",
       "line": 30,
       "element": "div",
       "classification": "review-required",
@@ -5254,7 +5254,7 @@
     },
     {
       "id": "candidate:84f7ed42c74c5e4a",
-      "file": "src/Panel.tsx",
+      "file": "src/lib/ui/Panel.tsx",
       "line": 43,
       "element": "button",
       "classification": "definite",
@@ -5267,7 +5267,7 @@
     },
     {
       "id": "candidate:0a3f8a597fb53f0d",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 195,
       "element": "div",
       "classification": "review-required",
@@ -5280,7 +5280,7 @@
     },
     {
       "id": "candidate:0fad7f58e958154f",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 198,
       "element": "button",
       "classification": "definite",
@@ -5293,7 +5293,7 @@
     },
     {
       "id": "candidate:f048e7267568c96d",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 200,
       "element": "button",
       "classification": "definite",
@@ -5306,7 +5306,7 @@
     },
     {
       "id": "candidate:f35a338ace6273df",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 201,
       "element": "button",
       "classification": "definite",
@@ -5319,7 +5319,7 @@
     },
     {
       "id": "candidate:4c3ce6665cf8649a",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 204,
       "element": "input",
       "classification": "definite",
@@ -5332,7 +5332,7 @@
     },
     {
       "id": "candidate:9d15b6fc15912d25",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 204,
       "element": "button",
       "classification": "definite",
@@ -5345,7 +5345,7 @@
     },
     {
       "id": "candidate:0006907d67538981",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 208,
       "element": "div",
       "classification": "review-required",
@@ -5358,7 +5358,7 @@
     },
     {
       "id": "candidate:85696fea7289061b",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 210,
       "element": "button",
       "classification": "definite",
@@ -5371,7 +5371,7 @@
     },
     {
       "id": "candidate:5d9b77579c7e5df5",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 213,
       "element": "button",
       "classification": "definite",
@@ -5384,7 +5384,7 @@
     },
     {
       "id": "candidate:bc22edeb591185bf",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 217,
       "element": "button",
       "classification": "definite",
@@ -5397,7 +5397,7 @@
     },
     {
       "id": "candidate:c9a4d7964a4d0d07",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 221,
       "element": "button",
       "classification": "definite",
@@ -5410,7 +5410,7 @@
     },
     {
       "id": "candidate:bf1de60f84393c1b",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 222,
       "element": "div",
       "classification": "review-required",
@@ -5423,7 +5423,7 @@
     },
     {
       "id": "candidate:624923db09d773b0",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 234,
       "element": "button",
       "classification": "definite",
@@ -5436,7 +5436,7 @@
     },
     {
       "id": "candidate:7964b96b7c5d8b97",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 238,
       "element": "button",
       "classification": "definite",
@@ -5449,7 +5449,7 @@
     },
     {
       "id": "candidate:2f81860bd2176ac7",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 239,
       "element": "button",
       "classification": "definite",
@@ -5462,7 +5462,7 @@
     },
     {
       "id": "candidate:9493321a4c801732",
-      "file": "src/Picker.tsx",
+      "file": "src/picker/Picker.tsx",
       "line": 242,
       "element": "button",
       "classification": "definite",
@@ -5475,7 +5475,7 @@
     },
     {
       "id": "candidate:6e7de07e607dfc31",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 113,
       "element": "button",
       "classification": "definite",
@@ -5488,7 +5488,7 @@
     },
     {
       "id": "candidate:b7d081c56d6c995a",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 124,
       "element": "button",
       "classification": "definite",
@@ -5501,7 +5501,7 @@
     },
     {
       "id": "candidate:b8de86a63d6cfa64",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 128,
       "element": "button",
       "classification": "definite",
@@ -5514,7 +5514,7 @@
     },
     {
       "id": "candidate:4a4f9d432011aedc",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 135,
       "element": "button",
       "classification": "definite",
@@ -5527,7 +5527,7 @@
     },
     {
       "id": "candidate:ae5c3151aff07a0f",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 155,
       "element": "button",
       "classification": "definite",
@@ -5540,7 +5540,7 @@
     },
     {
       "id": "candidate:9539d5b71a5bdf22",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 165,
       "element": "button",
       "classification": "definite",
@@ -5553,7 +5553,7 @@
     },
     {
       "id": "candidate:f90294f4384759dd",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 183,
       "element": "button",
       "classification": "definite",
@@ -5566,7 +5566,7 @@
     },
     {
       "id": "candidate:a645ec4cca4a08d7",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 204,
       "element": "button",
       "classification": "definite",
@@ -5579,7 +5579,7 @@
     },
     {
       "id": "candidate:b50d64e819f2e8d4",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 230,
       "element": "div",
       "classification": "review-required",
@@ -5592,7 +5592,7 @@
     },
     {
       "id": "candidate:fa33f96c3a8ec334",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 232,
       "element": "button",
       "classification": "definite",
@@ -5605,7 +5605,7 @@
     },
     {
       "id": "candidate:d0e712339e74f808",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 236,
       "element": "button",
       "classification": "definite",
@@ -5618,7 +5618,7 @@
     },
     {
       "id": "candidate:046a499db0a72abf",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 241,
       "element": "button",
       "classification": "definite",
@@ -5631,7 +5631,7 @@
     },
     {
       "id": "candidate:d84b5013e42373f6",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 288,
       "element": "button",
       "classification": "definite",
@@ -5644,7 +5644,7 @@
     },
     {
       "id": "candidate:f073bc3b444a4a8f",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 397,
       "element": "input",
       "classification": "definite",
@@ -5657,7 +5657,7 @@
     },
     {
       "id": "candidate:80201e3872385245",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 402,
       "element": "button",
       "classification": "definite",
@@ -5670,7 +5670,7 @@
     },
     {
       "id": "candidate:7105b839dbd1f50c",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 412,
       "element": "button",
       "classification": "definite",
@@ -5683,7 +5683,7 @@
     },
     {
       "id": "candidate:9d3f2fed3bc82ba0",
-      "file": "src/Pictures.tsx",
+      "file": "src/pictures/Pictures.tsx",
       "line": 436,
       "element": "button",
       "classification": "definite",
@@ -5696,7 +5696,7 @@
     },
     {
       "id": "candidate:c7ff4ec31928273a",
-      "file": "src/screens.tsx",
+      "file": "src/app/screens.tsx",
       "line": 34,
       "element": "button",
       "classification": "definite",
@@ -5709,7 +5709,7 @@
     },
     {
       "id": "candidate:cec0b3b83a41e22f",
-      "file": "src/settings-controls.tsx",
+      "file": "src/lib/ui/settings-controls.tsx",
       "line": 21,
       "element": "span",
       "classification": "review-required",
@@ -5722,7 +5722,7 @@
     },
     {
       "id": "candidate:1d1da262e3e528d1",
-      "file": "src/settings-controls.tsx",
+      "file": "src/lib/ui/settings-controls.tsx",
       "line": 32,
       "element": "button",
       "classification": "definite",
@@ -5735,7 +5735,7 @@
     },
     {
       "id": "candidate:7074bac47264f9b0",
-      "file": "src/settings-ui.tsx",
+      "file": "src/lib/ui/settings-ui.tsx",
       "line": 26,
       "element": "span",
       "classification": "review-required",
@@ -5747,7 +5747,7 @@
     },
     {
       "id": "candidate:6d4713b88f15b55c",
-      "file": "src/settings-ui.tsx",
+      "file": "src/lib/ui/settings-ui.tsx",
       "line": 104,
       "element": "button",
       "classification": "definite",
@@ -5760,7 +5760,7 @@
     },
     {
       "id": "candidate:9b53620500a1b9bc",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 51,
       "element": "button",
       "classification": "definite",
@@ -5773,7 +5773,7 @@
     },
     {
       "id": "candidate:7c5746c47447b4c4",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 139,
       "element": "button",
       "classification": "definite",
@@ -5786,7 +5786,7 @@
     },
     {
       "id": "candidate:20105c697e7dd60b",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 175,
       "element": "button",
       "classification": "definite",
@@ -5799,7 +5799,7 @@
     },
     {
       "id": "candidate:8487b0e930cc2363",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 178,
       "element": "button",
       "classification": "definite",
@@ -5812,7 +5812,7 @@
     },
     {
       "id": "candidate:7564c89de5d16865",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 209,
       "element": "button",
       "classification": "definite",
@@ -5825,7 +5825,7 @@
     },
     {
       "id": "candidate:e1f937f19f4b2655",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 250,
       "element": "button",
       "classification": "definite",
@@ -5838,7 +5838,7 @@
     },
     {
       "id": "candidate:b0c76ca6c79a5ea6",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 303,
       "element": "button",
       "classification": "definite",
@@ -5851,7 +5851,7 @@
     },
     {
       "id": "candidate:3baf025b49892965",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 315,
       "element": "button",
       "classification": "definite",
@@ -5864,7 +5864,7 @@
     },
     {
       "id": "candidate:5c2c4449ac261139",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 336,
       "element": "button",
       "classification": "definite",
@@ -5877,7 +5877,7 @@
     },
     {
       "id": "candidate:db9411656bc923b0",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 350,
       "element": "a",
       "classification": "definite",
@@ -5890,7 +5890,7 @@
     },
     {
       "id": "candidate:057c1d51c5320480",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 380,
       "element": "button",
       "classification": "definite",
@@ -5903,7 +5903,7 @@
     },
     {
       "id": "candidate:bfb0220b4f07ad00",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 384,
       "element": "a",
       "classification": "definite",
@@ -5916,7 +5916,7 @@
     },
     {
       "id": "candidate:bfc1fc7122488c89",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 421,
       "element": "button",
       "classification": "definite",
@@ -5929,7 +5929,7 @@
     },
     {
       "id": "candidate:eb8658d0e9e158f7",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 433,
       "element": "input",
       "classification": "definite",
@@ -5942,7 +5942,7 @@
     },
     {
       "id": "candidate:373cd13834eafe59",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 434,
       "element": "button",
       "classification": "definite",
@@ -5955,7 +5955,7 @@
     },
     {
       "id": "candidate:c3e5e17adb6a79f9",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 493,
       "element": "div",
       "classification": "review-required",
@@ -5968,7 +5968,7 @@
     },
     {
       "id": "candidate:4b8e6b7d1f279414",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 494,
       "element": "button",
       "classification": "definite",
@@ -5981,7 +5981,7 @@
     },
     {
       "id": "candidate:de5f52cdabdd755f",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 500,
       "element": "button",
       "classification": "definite",
@@ -5994,7 +5994,7 @@
     },
     {
       "id": "candidate:079a914b40f88c71",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 513,
       "element": "button",
       "classification": "definite",
@@ -6007,7 +6007,7 @@
     },
     {
       "id": "candidate:fefd853be57b1dee",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 543,
       "element": "input",
       "classification": "definite",
@@ -6020,7 +6020,7 @@
     },
     {
       "id": "candidate:e2b942c4a1c2016f",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 559,
       "element": "button",
       "classification": "definite",
@@ -6033,7 +6033,7 @@
     },
     {
       "id": "candidate:8adb735a4ffc8505",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 569,
       "element": "button",
       "classification": "definite",
@@ -6046,7 +6046,7 @@
     },
     {
       "id": "candidate:3f24cb312214943a",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 587,
       "element": "button",
       "classification": "definite",
@@ -6059,7 +6059,7 @@
     },
     {
       "id": "candidate:f0d339f5026a7635",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 623,
       "element": "button",
       "classification": "definite",
@@ -6072,7 +6072,7 @@
     },
     {
       "id": "candidate:45e92d1e853413dd",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 648,
       "element": "button",
       "classification": "definite",
@@ -6085,7 +6085,7 @@
     },
     {
       "id": "candidate:b445f2392ed16770",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 681,
       "element": "button",
       "classification": "definite",
@@ -6098,7 +6098,7 @@
     },
     {
       "id": "candidate:e91a287a7a9067e0",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 694,
       "element": "button",
       "classification": "definite",
@@ -6111,7 +6111,7 @@
     },
     {
       "id": "candidate:bf9ba5cecc84dd3f",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 708,
       "element": "button",
       "classification": "definite",
@@ -6124,7 +6124,7 @@
     },
     {
       "id": "candidate:f425327a3f15fa80",
-      "file": "src/Settings.tsx",
+      "file": "src/settings/Settings.tsx",
       "line": 711,
       "element": "button",
       "classification": "definite",
@@ -6137,7 +6137,7 @@
     },
     {
       "id": "candidate:7418ee9c789bc8e7",
-      "file": "src/SettingsUpdates.tsx",
+      "file": "src/updates/SettingsUpdates.tsx",
       "line": 159,
       "element": "button",
       "classification": "definite",
@@ -6150,7 +6150,7 @@
     },
     {
       "id": "candidate:bd63053a8f9493af",
-      "file": "src/SettingsUpdates.tsx",
+      "file": "src/updates/SettingsUpdates.tsx",
       "line": 166,
       "element": "button",
       "classification": "definite",
@@ -6163,7 +6163,7 @@
     },
     {
       "id": "candidate:c0da7582e55ad1e7",
-      "file": "src/SettingsUpdates.tsx",
+      "file": "src/updates/SettingsUpdates.tsx",
       "line": 172,
       "element": "button",
       "classification": "definite",
@@ -6176,7 +6176,7 @@
     },
     {
       "id": "candidate:dd8b5588fd69bcc2",
-      "file": "src/SettingsUpdates.tsx",
+      "file": "src/updates/SettingsUpdates.tsx",
       "line": 175,
       "element": "button",
       "classification": "definite",
@@ -6189,7 +6189,7 @@
     },
     {
       "id": "candidate:72ff20ab18c3a657",
-      "file": "src/SettingsUpdates.tsx",
+      "file": "src/updates/SettingsUpdates.tsx",
       "line": 184,
       "element": "a",
       "classification": "definite",
@@ -6202,7 +6202,7 @@
     },
     {
       "id": "candidate:d77f40663f9a8f24",
-      "file": "src/SettingsUpdates.tsx",
+      "file": "src/updates/SettingsUpdates.tsx",
       "line": 279,
       "element": "button",
       "classification": "definite",
@@ -6215,7 +6215,7 @@
     },
     {
       "id": "candidate:f63aeee46f6084da",
-      "file": "src/SettingsUpdates.tsx",
+      "file": "src/updates/SettingsUpdates.tsx",
       "line": 282,
       "element": "button",
       "classification": "definite",
@@ -6228,7 +6228,7 @@
     },
     {
       "id": "candidate:9bc3974a88d40032",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 290,
       "element": "button",
       "classification": "definite",
@@ -6241,7 +6241,7 @@
     },
     {
       "id": "candidate:9ef90ab01877e6ae",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 299,
       "element": "button",
       "classification": "definite",
@@ -6254,7 +6254,7 @@
     },
     {
       "id": "candidate:488d0ce5b4258c32",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 328,
       "element": "input",
       "classification": "definite",
@@ -6267,7 +6267,7 @@
     },
     {
       "id": "candidate:6895760bc1a0e416",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 350,
       "element": "button",
       "classification": "definite",
@@ -6280,7 +6280,7 @@
     },
     {
       "id": "candidate:f06a9ad6c267d9fb",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 368,
       "element": "button",
       "classification": "definite",
@@ -6293,7 +6293,7 @@
     },
     {
       "id": "candidate:ede2d80d48ea7e4a",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 385,
       "element": "button",
       "classification": "definite",
@@ -6306,7 +6306,7 @@
     },
     {
       "id": "candidate:a8698c4bc399f0b0",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 391,
       "element": "button",
       "classification": "definite",
@@ -6319,7 +6319,7 @@
     },
     {
       "id": "candidate:b5d5628174f729b6",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 428,
       "element": "FootButton",
       "classification": "review-required",
@@ -6332,7 +6332,7 @@
     },
     {
       "id": "candidate:aeb03e7b576cb953",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 473,
       "element": "FootButton",
       "classification": "review-required",
@@ -6345,7 +6345,7 @@
     },
     {
       "id": "candidate:70bc2bcd6fa840b6",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 490,
       "element": "FootButton",
       "classification": "review-required",
@@ -6358,7 +6358,7 @@
     },
     {
       "id": "candidate:79df97620a534be2",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 507,
       "element": "FootButton",
       "classification": "review-required",
@@ -6371,7 +6371,7 @@
     },
     {
       "id": "candidate:8f041332f7007f4c",
-      "file": "src/Sidebar.tsx",
+      "file": "src/sidebar/Sidebar.tsx",
       "line": 532,
       "element": "button",
       "classification": "definite",
@@ -6384,7 +6384,7 @@
     },
     {
       "id": "candidate:881ac170f6b3ca3c",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 61,
       "element": "button",
       "classification": "definite",
@@ -6397,7 +6397,7 @@
     },
     {
       "id": "candidate:6a6569175099bb2a",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 81,
       "element": "button",
       "classification": "definite",
@@ -6410,7 +6410,7 @@
     },
     {
       "id": "candidate:11e733729c988584",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 97,
       "element": "button",
       "classification": "definite",
@@ -6423,7 +6423,7 @@
     },
     {
       "id": "candidate:3660285b986214f4",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 107,
       "element": "div",
       "classification": "review-required",
@@ -6436,7 +6436,7 @@
     },
     {
       "id": "candidate:ce4995bd1c83489e",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 113,
       "element": "button",
       "classification": "definite",
@@ -6449,7 +6449,7 @@
     },
     {
       "id": "candidate:6888ee8b4aa21356",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 316,
       "element": "button",
       "classification": "definite",
@@ -6462,7 +6462,7 @@
     },
     {
       "id": "candidate:d92ec882b6e2c3c5",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 340,
       "element": "button",
       "classification": "definite",
@@ -6475,7 +6475,7 @@
     },
     {
       "id": "candidate:19e26063df1d09e1",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 429,
       "element": "div",
       "classification": "review-required",
@@ -6491,7 +6491,7 @@
     },
     {
       "id": "candidate:479b158a63680f72",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 465,
       "element": "div",
       "classification": "review-required",
@@ -6504,7 +6504,7 @@
     },
     {
       "id": "candidate:479210bfcb8832e7",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 639,
       "element": "button",
       "classification": "definite",
@@ -6517,7 +6517,7 @@
     },
     {
       "id": "candidate:9c53793b012c0da7",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 676,
       "element": "span",
       "classification": "review-required",
@@ -6530,7 +6530,7 @@
     },
     {
       "id": "candidate:05ab0ed583ec39d1",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 729,
       "element": "div",
       "classification": "review-required",
@@ -6543,7 +6543,7 @@
     },
     {
       "id": "candidate:9bdc0322d2558fd1",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 743,
       "element": "button",
       "classification": "definite",
@@ -6556,7 +6556,7 @@
     },
     {
       "id": "candidate:56420dd9a545d463",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 1066,
       "element": "button",
       "classification": "definite",
@@ -6569,7 +6569,7 @@
     },
     {
       "id": "candidate:1bff578732f8f3f2",
-      "file": "src/Thread.tsx",
+      "file": "src/thread/Thread.tsx",
       "line": 1097,
       "element": "button",
       "classification": "definite",
@@ -6582,7 +6582,7 @@
     },
     {
       "id": "candidate:8be6e0a0582baf5e",
-      "file": "src/ui.tsx",
+      "file": "src/lib/ui/ui.tsx",
       "line": 144,
       "element": "button",
       "classification": "definite",
@@ -6595,7 +6595,7 @@
     },
     {
       "id": "candidate:85d312ec8be1bd53",
-      "file": "src/UpdateNote.tsx",
+      "file": "src/updates/UpdateNote.tsx",
       "line": 29,
       "element": "button",
       "classification": "definite",
@@ -6608,7 +6608,7 @@
     },
     {
       "id": "candidate:bcbc5ac7b17baf8b",
-      "file": "src/Updates.tsx",
+      "file": "src/updates/Updates.tsx",
       "line": 44,
       "element": "button",
       "classification": "definite",
@@ -6620,7 +6620,7 @@
     },
     {
       "id": "candidate:eb86af3609f8402c",
-      "file": "src/Updates.tsx",
+      "file": "src/updates/Updates.tsx",
       "line": 156,
       "element": "button",
       "classification": "definite",
@@ -6633,7 +6633,7 @@
     },
     {
       "id": "candidate:191432915fba9309",
-      "file": "src/Updates.tsx",
+      "file": "src/updates/Updates.tsx",
       "line": 159,
       "element": "button",
       "classification": "definite",
@@ -6646,7 +6646,7 @@
     },
     {
       "id": "candidate:8c53fcd8cb1dcfe2",
-      "file": "src/Updates.tsx",
+      "file": "src/updates/Updates.tsx",
       "line": 283,
       "element": "FootButton",
       "classification": "review-required",
@@ -6659,7 +6659,7 @@
     },
     {
       "id": "candidate:490eb66a650d222b",
-      "file": "src/Usage.tsx",
+      "file": "src/usage/Usage.tsx",
       "line": 84,
       "element": "button",
       "classification": "definite",
@@ -6672,7 +6672,7 @@
     },
     {
       "id": "candidate:7cfe442b142ba106",
-      "file": "src/Usage.tsx",
+      "file": "src/usage/Usage.tsx",
       "line": 156,
       "element": "div",
       "classification": "review-required",
@@ -6686,7 +6686,7 @@
     },
     {
       "id": "candidate:886c86965c5b3234",
-      "file": "src/Voice.tsx",
+      "file": "src/voice/Voice.tsx",
       "line": 205,
       "element": "button",
       "classification": "definite",
@@ -6699,7 +6699,7 @@
     },
     {
       "id": "candidate:5ccd5b829b1c3638",
-      "file": "src/Voice.tsx",
+      "file": "src/voice/Voice.tsx",
       "line": 226,
       "element": "button",
       "classification": "definite",
@@ -6712,7 +6712,7 @@
     },
     {
       "id": "candidate:f9e4be98eff1fbd9",
-      "file": "src/VoiceSettings.tsx",
+      "file": "src/voice/VoiceSettings.tsx",
       "line": 55,
       "element": "input",
       "classification": "definite",
@@ -6725,7 +6725,7 @@
     },
     {
       "id": "candidate:36418f8742dd2e7d",
-      "file": "src/VoiceSettings.tsx",
+      "file": "src/voice/VoiceSettings.tsx",
       "line": 56,
       "element": "button",
       "classification": "definite",
@@ -6738,7 +6738,7 @@
     },
     {
       "id": "candidate:64018a7ef27d638f",
-      "file": "src/VoiceSettings.tsx",
+      "file": "src/voice/VoiceSettings.tsx",
       "line": 57,
       "element": "button",
       "classification": "definite",
@@ -6751,7 +6751,7 @@
     },
     {
       "id": "candidate:59c26da181a1567a",
-      "file": "src/VoiceSettings.tsx",
+      "file": "src/voice/VoiceSettings.tsx",
       "line": 61,
       "element": "button",
       "classification": "definite",
@@ -6766,7 +6766,7 @@
   "unresolvedCandidates": [
     {
       "id": "candidate:a46d13581b15c8c9",
-      "file": "src/FirstRun.tsx",
+      "file": "src/first-run/FirstRun.tsx",
       "line": 74,
       "element": "span",
       "classification": "review-required",
@@ -6778,7 +6778,7 @@
     },
     {
       "id": "candidate:3920e8d8a60bb240",
-      "file": "src/FirstRun.tsx",
+      "file": "src/first-run/FirstRun.tsx",
       "line": 108,
       "element": "span",
       "classification": "review-required",
@@ -6790,7 +6790,7 @@
     },
     {
       "id": "candidate:7074bac47264f9b0",
-      "file": "src/settings-ui.tsx",
+      "file": "src/lib/ui/settings-ui.tsx",
       "line": 26,
       "element": "span",
       "classification": "review-required",
@@ -6802,7 +6802,7 @@
     },
     {
       "id": "candidate:bcbc5ac7b17baf8b",
-      "file": "src/Updates.tsx",
+      "file": "src/updates/Updates.tsx",
       "line": 44,
       "element": "button",
       "classification": "definite",
@@ -6815,7 +6815,7 @@
   ],
   "unidentifiedInteractive": [
     {
-      "file": "src/FirstRun.tsx",
+      "file": "src/first-run/FirstRun.tsx",
       "line": 74,
       "element": "span",
       "candidateId": "candidate:a46d13581b15c8c9",
@@ -6825,7 +6825,7 @@
       ]
     },
     {
-      "file": "src/FirstRun.tsx",
+      "file": "src/first-run/FirstRun.tsx",
       "line": 108,
       "element": "span",
       "candidateId": "candidate:3920e8d8a60bb240",
@@ -6835,7 +6835,7 @@
       ]
     },
     {
-      "file": "src/settings-ui.tsx",
+      "file": "src/lib/ui/settings-ui.tsx",
       "line": 26,
       "element": "span",
       "candidateId": "candidate:7074bac47264f9b0",
@@ -6845,7 +6845,7 @@
       ]
     },
     {
-      "file": "src/Updates.tsx",
+      "file": "src/updates/Updates.tsx",
       "line": 44,
       "element": "button",
       "candidateId": "candidate:bcbc5ac7b17baf8b",
