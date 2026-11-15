@@ -73,11 +73,12 @@ it("keeps the existing no-GPU wording when nvidia-smi is absent", async () => {
 const GB = 1024 ** 3;
 /** A row as the server sends it: with its words. */
 const said = (r: FitReport, cpu: boolean) => ({ ...r, stops: [], words: fitWords(r, "card", cpu) });
-const shown =(gpu: GpuStatus, verdict: "fits" | "spills", memory: object): string => {
+/** `cpu`: the server's words say system memory (no card read, and the runner lists no copy on one). */
+const shown =(gpu: GpuStatus, verdict: "fits" | "spills", memory: object, cpu = gpu.vendor === "none"): string => {
   store.state = {
     model: "chat", numCtx: 16384, fitPanel: { model: null }, settings: { defaultNumCtx: 16384 },
     gpu, models: [], catalog: [], loads: {}, messages: {}, firstToken: {}, unavailable: {},
-    fitTable: { reading: { boot: "b", seq: 1, measuredAt: 1 }, memory, rows: [said({ model: "chat", numCtx: 16384, freeVramBytes: 12 * GB, needVramBytes: 5 * GB, spillRamBytes: verdict === "spills" ? 5 * GB : 0, verdict, source: "estimate", measuredAt: 1 }, gpu.vendor === "none")] },
+    fitTable: { reading: { boot: "b", seq: 1, measuredAt: 1 }, memory, rows: [said({ model: "chat", numCtx: 16384, freeVramBytes: 12 * GB, needVramBytes: 5 * GB, spillRamBytes: verdict === "spills" ? 5 * GB : 0, verdict, source: "estimate", measuredAt: 1 }, cpu)] },
   };
   // what a person reads before opening Details: tags and their attributes (tooltips) are not on the page
   return renderToStaticMarkup(createElement(GpuMemory)).split("<details")[0]!.replace(/<[^>]+>/g, " ");
@@ -109,6 +110,20 @@ it("has no Default context control, and a saved default is not an error", () => 
   expect(html).not.toContain("Default context");
   expect(html).not.toContain("data-ctx");
   expect(html).not.toContain("data-tip");
+});
+
+it("with no card the app can read, the numbers say system memory, never the GPU", () => {
+  shown({ vendor: "none", occupants: [], systemMemoryAvailableBytes: 16 * GB, measuredAt: 1 }, "fits", { kind: "cpu" });
+  const numbers = renderToStaticMarkup(createElement(GpuMemory)).split('class="fp-n fp-numbers"')[1]?.split("</div>")[0] ?? "";
+  expect(numbers).toContain("Runs in system memory.");
+  expect(numbers).not.toContain("on the GPU");
+});
+
+it("no card read, but the runner lists the model on one: the numbers follow that measurement", () => {
+  shown({ vendor: "none", occupants: [], systemMemoryAvailableBytes: 16 * GB, measuredAt: 1 }, "fits", { kind: "cpu" }, false);
+  const numbers = renderToStaticMarkup(createElement(GpuMemory)).split('class="fp-n fp-numbers"')[1]?.split("</div>")[0] ?? "";
+  expect(numbers).toContain("Runs entirely on the GPU.");
+  expect(numbers).not.toContain("Runs in system memory");
 });
 
 it("a refusal names the card as every other line does", () => {

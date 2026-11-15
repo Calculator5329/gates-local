@@ -59,7 +59,7 @@ test("a dropped text file is read by the model by its name, survives a reload, a
     await expect.poll(async () => (await rpc.call("threads.list", {})).some(t => t.id === threadId)).toBe(false);
     // the server's copy is gone: a message naming it is refused, not sent; Send answers at once, and the refusal is the turn's end (chat row 32)
     const other = await rpc.call("threads.create", {});
-    const model = (await rpc.call("models.list", {})).find(m => m.capabilities?.includes("completion"))!.name;
+    const model = (await rpc.call("models.list", {})).models.find(m => m.capabilities?.includes("completion"))!.name;
     const ends: string[] = [];
     rpc.subscribe("chat.event", p => { if (p.threadId === other.id && p.event.type === "error") ends.push(p.event.message); });
     await rpc.call("chat.send", { threadId: other.id, content: "again", model, numCtx: 4096, files: [file] });

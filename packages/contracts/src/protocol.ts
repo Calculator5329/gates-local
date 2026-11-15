@@ -109,6 +109,7 @@ function encodeWith(schema: S.Top, input: unknown, code: string, where: string):
 // ---------------------------------------------------------------- tables
 
 const NoParams = S.Struct({});
+const ModelList = S.Struct({ runtime: RuntimeStatus, models: S.Array(ModelInfo) });
 const ThreadRef = S.Struct({ threadId: S.String });
 const ModelRef = S.Struct({ name: S.String });
 const SourceRef = S.Struct({ id: S.String });
@@ -192,8 +193,12 @@ export const methods = {
     result: NoParams,
     phone: "allow",
   },
-  "models.list": { params: NoParams, result: S.Array(ModelInfo), phone: "allow" },
-  "models.refresh": { params: NoParams, result: S.Array(ModelInfo), phone: "allow" },
+  /**
+   * The installed models with the runtime status they were read under, in one reply: an empty list
+   * means "no models" only beside a ready runtime; beside any other state no Ollama answered.
+   */
+  "models.list": { params: NoParams, result: ModelList, phone: "allow" },
+  "models.refresh": { params: NoParams, result: ModelList, phone: "allow" },
   "runtime.status": { params: NoParams, result: RuntimeStatus, phone: "allow" },
   /** Look for Ollama again now (start the app's own copy where it may) and answer the new status; runtime.status only reads the cached one. */
   "runtime.retry": { params: NoParams, result: RuntimeStatus, phone: "deny" },

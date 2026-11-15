@@ -1,8 +1,8 @@
 // The server's fit table: every model at every offered context from one GPU reading, pushed as
 // fit.changed. The client keeps the last one and reads every fit value on screen from it; it asks
 // for no single fit and holds no verdict of its own.
-import type { FitReport, FitRow, FitTable, GpuOccupant } from "@gates-local/contracts";
-import { ctxFor } from "./format.ts";
+import type { FitMemory, FitReport, FitRow, FitTable, GpuOccupant } from "@gates-local/contracts";
+import { cardGb, ctxFor } from "./format.ts";
 
 /** Right now the model spills though the card holds it: who holds the card (the server's card.inTheWay) and what spills. */
 export interface SlowNow {
@@ -85,3 +85,14 @@ export const refusedNow = (fit: TableFit | undefined): boolean => fit !== undefi
 
 /** A pick needs the table's row for it, one that fits, spills, or runs once another chat stops. */
 export const canPick = (fit: TableFit | undefined): boolean => fit !== undefined && (fit.verdict !== "refuse" || stopsChat(fit));
+
+/**
+ * The picker's card line: the card every size is judged against ("16 GB GPU"), never what is free
+ * this second; with more than one card, all of them together, as the sizes are ("2 GPUs, 18 GB").
+ */
+export function cardLine(m: FitMemory, whole: number | undefined): string {
+  if (m.kind === "cpu") return "Runs in system memory";
+  if (m.kind === "unreadable") return "GPU reading unavailable";
+  if (whole === undefined) return "";
+  return m.gpuCount !== undefined && m.gpuCount > 1 ? `${m.gpuCount} GPUs, ${cardGb(whole)}` : `${cardGb(whole)} GPU`;
+}

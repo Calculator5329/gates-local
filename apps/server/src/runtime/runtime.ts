@@ -237,6 +237,28 @@ export const childHome = (appDataDir: string): string => path.join(runtimeDir(ap
  * finish rather than loading beside it. An Ollama already running when the app looks is used as
  * it is: it never gets this.
  */
+/**
+ * What an install failure is, for the status (RuntimeStatus.failure): the network ("download"),
+ * a file that is not the pinned one ("checksum"), a disk short of room ("disk"), or the unpack or
+ * move ("install", and anything that is not an InstallError).
+ */
+export function failureOf(e: unknown): NonNullable<RuntimeStatus["failure"]> {
+  if (!(e instanceof InstallError)) return "install";
+  switch (e.code) {
+    case "download-failed":
+    case "interrupted":
+      return "download";
+    case "hash-mismatch":
+      return "checksum";
+    case "disk-full":
+      return "disk";
+    case "unverified-manifest":
+    case "extract-failed":
+    case "move-failed":
+      return "install";
+  }
+}
+
 export function ownedChildEnv(env: Env, appDataDir: string, appPort: number, platform: NodeJS.Platform, ownHome: boolean): Record<string, string | undefined> {
   const child: Record<string, string | undefined> = { ...env, OLLAMA_HOST: `127.0.0.1:${appPort}`, OLLAMA_MAX_LOADED_MODELS: "1" };
   if (ownHome) child[platform === "win32" ? "USERPROFILE" : "HOME"] = childHome(appDataDir);
@@ -275,7 +297,8 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
   /** The process this object spawned, kept so Windows stops it through its handle, never a PID number. */
   let spawned: ChildProcess | undefined;
 
-  let current: RuntimeStatus = { state: "stopped", owner: "none", baseUrl: externalBaseUrl, detail: "not checked yet" };
+  // Before the first look nothing is known: a window that connects now reads a search, never a stopped Ollama nobody saw.
+  let current: RuntimeStatus = { state: "starting", owner: "none", baseUrl: externalBaseUrl, detail: "Looking for Ollama." };
   const statusListeners = new Set<Listener<RuntimeStatus>>();
   const progressListeners = new Set<Listener<InstallProgress>>();
   let inFlight: Promise<RuntimeStatus> | undefined;
@@ -605,12 +628,13 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       let said = { at: Date.now(), bytes: 0 };
       const mine = { abort: new AbortController(), lastBytesAt: Date.now(), bytes: 0, fetching: true };
       download = mine;
-      // no bytes for stallMs: the speed is no longer true, so it leaves the status (and with it the time left)
+      // no bytes for stallMs: the status says the stall, once, and the speed (with the time left) leaves it, being no longer true;
+      // the same bound lets a Retry end this attempt (ensure), so the status is said when a Retry would take effect
       const watch = setInterval(() => {
         const i = current.state === "installing" ? current.install : undefined;
-        if (i?.bytesPerSecond === undefined || Date.now() - mine.lastBytesAt < stallMs) return;
+        if (i === undefined || i.stalled === true || !mine.fetching || Date.now() - mine.lastBytesAt < stallMs) return;
         const { bytesPerSecond: _, ...still } = i;
-        setStatus({ ...current, install: still });
+        setStatus({ ...current, install: { ...still, stalled: true } });
       }, Math.max(50, Math.min(1000, stallMs / 4)));
       try {
         const r = await installPinned({
@@ -638,8 +662,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
           return ensureOnce();
         }
         const message = e instanceof InstallError ? e.message : `Installing Ollama failed: ${(e as Error).message}`;
-        const failure = e instanceof InstallError && (e.code === "download-failed" || e.code === "interrupted" || e.code === "hash-mismatch") ? "download" : "install";
-        return setStatus(noted({ state: "error", owner: "none", baseUrl: appBaseUrl, failure, detail: message }, c.note));
+        return setStatus(noted({ state: "error", owner: "none", baseUrl: appBaseUrl, failure: failureOf(e), detail: message }, c.note));
       } finally {
         clearInterval(watch);
         if (download === mine) download = undefined;

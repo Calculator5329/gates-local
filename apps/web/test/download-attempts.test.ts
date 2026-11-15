@@ -24,7 +24,7 @@ let store: typeof import("../src/store.ts");
 let DownloadTab: typeof import("../src/ModelDownloads.tsx")["DownloadTab"];
 let disconnect: (() => void) | undefined;
 const name = "qwen3.5:latest";
-const model = { ...methodSamples["models.list"].result[0]!, name };
+const model = { ...methodSamples["models.list"].result.models[0]!, name };
 beforeEach(async () => {
   browser = installBrowser(); vi.resetModules(); hooks.states = []; hooks.effects = [];
   const session = await import("../src/session.ts");

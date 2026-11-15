@@ -17,7 +17,8 @@ import { createChat } from "./session/chat.ts";
 import { KEEP_EVERY_MS, keepHeldFiles, setFileCalls } from "./file-holds.ts";
 import { createServerState } from "./session/server-state.ts";
 import { createSettings } from "./session/settings.ts";
-import { chooseModel, createModels, decided, memoryChanged, modelChoice, newChatModel, reconcilePulls, residentChat, settlePulls } from "./session/models.ts";
+import { wakeAtStall } from "./install-stall.ts";
+import { answered, chooseModel, createModels, decided, memoryChanged, modelChoice, newChatModel, reconcilePulls, residentChat, settlePulls } from "./session/models.ts";
 import { newerTable } from "./fit-table.ts";
 import { createThreads, sortThreads, withMessage } from "./session/threads.ts";
 import { applyAccent, applyTheme, dataFolder, serverUrl, webServerUrl } from "./session/platform.ts";
@@ -224,7 +225,8 @@ async function hydrateWith(
     // The queue every window shows: the server keeps it and sends it.
     probe("queue.list", {}),
   ]);
-  const models = modelsOrder.current(ticket) ? listed : undefined;
+  // a list read while no Ollama answered says nothing: the store keeps what it had
+  const models = modelsOrder.current(ticket) && listed !== undefined && answered(listed.runtime) ? listed.models : undefined;
   const runtime = runtimeOrder.current(statusTicket) ? status : undefined;
   const settings = settingsSession.endHydration(snapshot);
   settingsSession.noteVoiceSnapshot(settings);
@@ -235,6 +237,8 @@ async function hydrateWith(
     const next: State = { ...s, suggested: suggested ?? s.suggested, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(reconcilePulls(s.pulls, pendingPulls), models ?? s.models), threads: ordered, ...activeTurns(s, active), ...withSettings, ...held };
     return { ...next, ...decided(modelChoice(next)) };
   });
+  // a download already hanging at boot is called stalled at its moment, with no push to wake it
+  wakeAtStall();
   if (settings !== NA && settings !== undefined) settingsSession.seedContext();
   if (queue !== undefined && queue !== NA) queueListed(queue);
   restoreSaved();

@@ -18,15 +18,20 @@
 // and which of them this app loaded. The loader writes it; the GPU status reads it.
 //
 // What it never touches: whisper and every other program on the GPU (they are only measured),
-// and a running reply's model. An Ollama or ComfyUI the app did not start is asked, never
+// and a running reply's model. No runner gets a second model beside a running reply: the plan
+// (fit.ts planWith) names that reply in the way, and a send asks before it stops it. An Ollama or ComfyUI the app did not start is asked, never
 // stopped, restarted or reconfigured (owner ruling 2026-11-13: an unload request is not a stop).
 //
 // An Ollama that holds one model (the app's own, started with OLLAMA_MAX_LOADED_MODELS=1,
-// `holdsOne`) replaces the old model itself when the next one loads: a chat handoff then asks
-// nothing and waits for nothing, and the load clears the other models from the record at once.
-// An image still asks every chat model to leave, since Ollama frees nothing for ComfyUI.
+// `holdsOne`) would replace the old model itself when the next one loads, but the plan counts the
+// old model's memory as free before it has gone, and a driver that frees slowly then places the new
+// one partly in system memory. So a chat handoff asks the old one to leave too, and waits until
+// /api/ps no longer lists it and the GPU's free reading has come back to what the plan counted,
+// within the fit's VRAM margin (both bounded). The load clears the other models from the record.
+// An image asks every chat model to leave as well, since Ollama frees nothing for ComfyUI.
 import type { MemoryState, MemoryThing } from "@gates-local/contracts";
 import { setTimeout as delay } from "node:timers/promises";
+import { VRAM_SAFETY_MARGIN_BYTES } from "../fit/constants.ts";
 import { forgetGpuReadings } from "../fit/gpu.ts";
 import { sendSpan } from "../chat/send-times.ts";
 import { createFifoGate, type LoadGate } from "../runtime/load.ts";
@@ -75,7 +80,11 @@ export interface MemoryOwnerDeps {
   /** The bound on each wait (unload, settle); 20 s unless a test sets it. */
   readonly waitMs?: number;
   readonly pollMs?: number;
+  /** The fit's VRAM margin: free memory within this of what the plan counted has come back. */
+  readonly marginBytes?: number;
   readonly now?: () => number;
+  /** The pause between reads; a test passes one that moves its fake clock. */
+  readonly sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   readonly log?: (line: string) => void;
 }
 
@@ -190,13 +199,15 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
   const now = deps.now ?? Date.now;
   const waitMs = deps.waitMs ?? LEAVE_WAIT_MS;
   const pollMs = deps.pollMs ?? LEAVE_POLL_MS;
+  const marginBytes = deps.marginBytes ?? VRAM_SAFETY_MARGIN_BYTES;
+  const sleep = deps.sleep ?? ((ms: number, signal: AbortSignal) => delay(ms, undefined, { signal }));
   const gate = createFifoGate();
   let resident: MemoryThing | undefined;
   let handoff: MemoryState["handoff"];
   /** The setup the engine holds; "unknown" until it was asked to free once, or ran a job. */
   let engineHolds: string | "unknown" | "empty" = "unknown";
   let said = "";
-  /** A chat model wanted from an Ollama that replaces the one it holds itself: nothing is asked to leave. */
+  /** A chat model wanted from an Ollama that holds one model: the settle waits for what the plan counted as free. */
   const oneChat = (want: Want) => want.kind === "chat" && deps.holdsOne?.() === true;
 
   const state = (): MemoryState => ({ ...resident === undefined ? {} : { resident }, ...handoff === undefined ? {} : { handoff } });
@@ -231,7 +242,13 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
     }
   };
 
-  const chatLeaves = async (want: Want, signal: AbortSignal, onLeave?: (on: boolean) => void): Promise<{ left: string[]; stayed: string[] | undefined }> => {
+  /** The GPU's free bytes now, from a fresh reading; undefined with no card to read. */
+  const freeNow = async (signal: AbortSignal) => {
+    forgetGpuReadings();
+    return await deps.readFree?.(signal);
+  };
+
+  const chatLeaves = async (want: Want, signal: AbortSignal, onLeave?: (on: boolean) => void): Promise<{ left: string[]; stayed: string[] | undefined; target?: number }> => {
     const baseUrl = deps.ollamaUrl();
     if (baseUrl === undefined) return { left: [], stayed: [] };
     let listed: readonly LoadedModel[];
@@ -248,10 +265,13 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
     const kept = (m: LoadedModel) => want.kind === "chat" && canonicalTag(m.name) === canonicalTag(want.model);
     const busy = listed.filter((m) => !kept(m) && replying.has(canonicalTag(m.name))).map((m) => m.name);
     const asked = listed.filter((m) => !kept(m) && !replying.has(canonicalTag(m.name))).map((m) => m.name);
-    // An Ollama that holds one model unloads the old one itself before it loads the next (and waits
-    // for a running reply first); the fit counts what the old one holds as leaving (fit.ts planWith).
-    if (asked.length === 0 || oneChat(want)) return { left: [], stayed: busy };
+    if (asked.length === 0) return { left: [], stayed: busy };
     onLeave?.(true);
+    // An Ollama that holds one model: the fit counts what the old ones hold as free (fit.ts
+    // planWith), so the settle waits for the card to give that much back, within the margin.
+    const before = oneChat(want) ? await freeNow(signal) : undefined;
+    const held = listed.filter((m) => asked.includes(m.name)).reduce((sum, m) => sum + m.sizeVramBytes, 0);
+    const target = before === undefined ? {} : { target: before + held };
     for (const model of asked) await unload(baseUrl, model, signal);
     // Ollama answers the unload before its runner has gone: read until /api/ps no longer lists them.
     const deadline = now() + waitMs;
@@ -266,11 +286,11 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
         log(`reading /api/ps after an unload failed: ${(e as Error).message}`);
       }
       if (still.size === 0 || now() >= deadline) break;
-      await delay(pollMs, undefined, { signal });
+      await sleep(pollMs, signal);
     }
     const left = asked.filter((m) => !still.has(canonicalTag(m)));
     for (const model of left) deps.onUnloaded?.(model);
-    return { left, stayed: [...busy, ...asked.filter((m) => still.has(canonicalTag(m)))] };
+    return { left, stayed: [...busy, ...asked.filter((m) => still.has(canonicalTag(m)))], ...target };
   };
 
   const engineLeaves = async (want: Want, signal: AbortSignal): Promise<Handoff["engine"]> => {
@@ -293,20 +313,28 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
   /**
    * After something left: read the GPU until its free memory stopped rising for SETTLED_READS reads
    * in a row, or the bound passes. One flat read is not enough: the driver's number can lag the
-   * runner's exit by a read.
+   * runner's exit by a read. With a `target` (what the plan counts as free), until the reading is
+   * within the margin of it instead: a driver that frees slowly can hold still on the way.
    */
-  const settle = async (signal: AbortSignal) => {
+  const settle = async (signal: AbortSignal, target?: number) => {
     if (deps.readFree === undefined) return;
     const deadline = now() + waitMs;
-    forgetGpuReadings();
-    let before = await deps.readFree(signal);
+    let before = await freeNow(signal);
     // a computer with no card has no GPU memory to wait for: the models run from system memory
     if (before === undefined) return;
+    if (target !== undefined) {
+      while (before < target - marginBytes && now() < deadline) {
+        await sleep(pollMs, signal);
+        const after = await freeNow(signal);
+        if (after === undefined) return;
+        before = after;
+      }
+      return;
+    }
     let flat = 0;
     while (now() < deadline) {
-      await delay(pollMs, undefined, { signal });
-      forgetGpuReadings();
-      const after = await deps.readFree(signal);
+      await sleep(pollMs, signal);
+      const after = await freeNow(signal);
       if (after === undefined) return;
       flat = after - before < SETTLED_BYTES ? flat + 1 : 0;
       if (flat >= SETTLED_READS) return;
@@ -336,7 +364,7 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
           if (was?.kind === "image" && engine === "freed") resident = undefined;
           if (was?.kind === "chat" && chat.left.some((m) => canonicalTag(m) === was.model)) resident = undefined;
           try {
-            await sendSpan("settle", () => settle(signal));
+            await sendSpan("settle", () => settle(signal, chat.target));
           } catch (e) {
             signal.throwIfAborted();
             log(`reading the GPU after a handoff failed: ${(e as Error).message}`);

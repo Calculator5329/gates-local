@@ -30,7 +30,7 @@ import { setState } from "../src/store.ts";
 
 const { stops: _rowOnly, ...sampleRow } = methodSamples["fit.table"].result.rows[0]!;
 const fit = { ...sampleRow, measuredAt: 0 };
-const model = methodSamples["models.list"].result[0]!;
+const model = methodSamples["models.list"].result.models[0]!;
 const pulls = { [fit.model]: { name: fit.model, state: "done" as const, completedBytes: model.sizeBytes, totalBytes: model.sizeBytes } };
 let DownloadTab: typeof import("../src/ModelDownloads.tsx")["DownloadTab"];
 let Picker: typeof import("../src/Picker.tsx")["Picker"];

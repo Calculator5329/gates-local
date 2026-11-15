@@ -10,9 +10,10 @@ import { randomUUID } from "node:crypto";
 import { withNow, type CatalogEntry, type ContextSize, type FitMemory, type FitRow, type FitTable, type GpuOccupant, type ModelLoad } from "@gates-local/contracts";
 import type { GpuBaseline } from "./baseline.ts";
 import { VRAM_SAFETY_MARGIN_BYTES } from "./constants.ts";
-import { estimateBeforeDownload, judge, planWith, takeReadings, type FitDeps, type Readings, type TotalNeed, type TotalReport } from "./fit.ts";
+import { cardMargins, DEFAULT_MARGINS, estimateBeforeDownload, judge, planWith, takeReadings, type FitDeps, type Readings, type TotalNeed, type TotalReport } from "./fit.ts";
 import { defaultNvidiaSmi, GPU_REUSE_MS, readGpu } from "./gpu.ts";
 import { holdersOf } from "./gpu-status.ts";
+import { isCopyOf } from "./ollama.ts";
 import { FitError, type GpuSnapshot } from "./types.ts";
 
 /** The contexts the picker offers. */
@@ -77,7 +78,9 @@ export interface FitTableSource {
 function memoryOf(gpu: GpuSnapshot, margin: number, baseline: GpuBaseline | undefined, own: readonly number[], memTotalBytes?: number): FitMemory {
   if (gpu.gpuCount === 0) return memTotalBytes === undefined ? { kind: "cpu" } : { kind: "cpu", totalBytes: memTotalBytes };
   const others = baseline?.others(gpu, own);
-  return { kind: "gpu", freeBytes: gpu.freeBytes, usableBytes: Math.max(0, gpu.freeBytes - margin), totalBytes: gpu.totalBytes, ...(others ? { others } : {}) };
+  // every card together, less one margin on each (fit.ts cardMargins)
+  const usable = gpu.freeBytes - cardMargins({ ...DEFAULT_MARGINS, vramMarginBytes: margin }, gpu, "now").margins.vramMarginBytes;
+  return { kind: "gpu", freeBytes: gpu.freeBytes, usableBytes: Math.max(0, usable), totalBytes: gpu.totalBytes, ...(gpu.gpuCount > 1 ? { gpuCount: gpu.gpuCount } : {}), ...(others ? { others } : {}) };
 }
 
 /**
@@ -95,7 +98,14 @@ async function rowsFrom(deps: FitTableDeps, baseUrl: string, r: Readings, models
   let holders: GpuOccupant[] | undefined;
   const holdersNow = () => (holders ??= holdersOf(r.gpu.tenants, r.gpu.usedBytes, { image: (t) => own.includes(t.pid) || /comfy/i.test(t.processName) }).holders);
   const cardOf = (row: TableRow): TableRow => {
+    // No card to read, but the runner's own list has this model on one: that list is the measurement.
+    const listed = r.gpu.gpuCount === 0 ? r.ps.models.filter((m) => isCopyOf(m, row.model) && m.size_vram > 0) : [];
+    if (listed.some((m) => m.context_length === row.numCtx) && row.words !== undefined) {
+      const { verdict, freeVramBytes, spillRamBytes, shortfallBytes } = row;
+      return { ...row, card: { verdict, freeVramBytes, spillRamBytes, ...(shortfallBytes === undefined ? {} : { shortfallBytes }), words: withNow({ ...row.words, basis: "card" }, row) } };
+    }
     const { verdict, freeVramBytes, spillRamBytes, shortfallBytes, words } = judge("card", {
+      ...(listed.length > 0 ? { onCard: true } : {}),
       model: row.model,
       numCtx: row.numCtx,
       needBytes: row.needVramBytes,

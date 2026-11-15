@@ -16,7 +16,7 @@ vi.mock("react", async (original) => ({
 }));
 
 const NAME = "fresh:7b", BRIDGE = "bridge:7b", FAILED = "previous:7b";
-const installed = methodSamples["models.list"].result;
+const { runtime, models: installed } = methodSamples["models.list"].result;
 const first = installed[0];
 if (!first) throw new Error("Missing model fixture");
 const downloaded: ModelInfo = { ...first, name: NAME };
@@ -54,8 +54,8 @@ async function create(state: "queued" | "downloading" | "verifying", firstModel 
     words: (await import("../src/Composer.tsx")).queueWords,
   };
   w.wire.server.modelsSnapshot = w.models;
-  w.wire.server.answer("models.list", () => w.models);
-  w.wire.server.answer("models.refresh", () => w.models);
+  w.wire.server.answer("models.list", () => ({ runtime, models: w.models }));
+  w.wire.server.answer("models.refresh", () => ({ runtime, models: w.models }));
   w.wire.server.answer("models.pulls", () => {
     if (!available) throw { code: "not-implemented", message: "Older server" };
     return w.pending;

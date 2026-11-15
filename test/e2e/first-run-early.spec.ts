@@ -13,7 +13,7 @@ for (const [w, h, tag] of [[1280, 800, "desk"], [390, 844, "phone"]] as const) {
     // Guards a bug seen on a fresh install: Start chatting during the engine download stored "first
     // run finished", so the model offer never came back and the typed message waited forever.
     test("leaving first run during the engine download still offers the first model", async ({ page, open }, info) => {
-      const shot = (name: string) => page.screenshot({ path: info.outputPath(`${name}-${tag}.png`) });
+      const shot = (name: string) => page.screenshot({ path: info.outputPath(`${name}-${tag}.png`), animations: "disabled" });
       const rt = await fakeRuntime(page, installing);
       // the first model downloads slowly enough to be seen (about 9 s for 6.1 GB)
       await stack.scenario("no-models", { pullTickMs: 400 });

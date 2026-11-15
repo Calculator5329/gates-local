@@ -182,7 +182,7 @@ export class FakeServer {
   private readonly stopped = new Set<string>();
   private readonly attempts = new Map<string, number>();
   private runtimeReady = methodSamples["runtime.status"].result.state === "ready";
-  private hasModels = methodSamples["models.list"].result.length > 0;
+  private hasModels = methodSamples["models.list"].result.models.length > 0;
   private pumpSoon = false;
   private pumping = false;
   private serverCalls = 0;

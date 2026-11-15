@@ -31,7 +31,7 @@ const LLAMA = "llama3.2:3b";
 
 const defaults: Record<string, unknown> = {
   "runtime.status": { state: "ready", owner: "external", version: "0.12.0" },
-  "models.list": [info(QWEN), info(GEMMA), info(LLAMA, true)],
+  "models.list": { runtime: { state: "ready", owner: "external", version: "0.12.0" }, models: [info(QWEN), info(GEMMA), info(LLAMA, true)] },
   "threads.list": [{ id: "A", title: "A", createdAt: 1, updatedAt: 1 }],
   "threads.get": { messages: [] },
   "turns.blocking": [],
@@ -39,6 +39,9 @@ const defaults: Record<string, unknown> = {
   "models.load": { model: QWEN, numCtx: 16384, state: "ready" },
   "settings.get": { theme: "system", defaultNumCtx: 16384, thinking: true, imageGen: false },
 };
+
+/** A models.list or models.refresh answer from a running Ollama. */
+const listed = (models: ModelInfo[], runtime: unknown = defaults["runtime.status"]) => ({ runtime, models });
 
 class FakeSocket extends EventTarget {
   constructor() {
@@ -89,8 +92,26 @@ afterEach(() => {
 /** What main.tsx seeds on the phone: every method the table denies. */
 const phoneUnavailable = () => Object.fromEntries(methodNames.filter((m) => !phoneMay(m)).map((m) => [m, true] as const));
 
+it("an empty list pushed after Ollama stopped is not read as 'no models': the last list stays", async () => {
+  const { store, push, hydrated } = await boot();
+  await hydrated();
+  push("runtime.changed", { state: "stopped", owner: "none", baseUrl: "http://127.0.0.1:11434" });
+  push("models.changed", []);
+  expect(store.getState().models?.map((m) => m.name)).toEqual([QWEN, GEMMA, LLAMA]);
+  push("runtime.changed", { state: "ready", owner: "external", baseUrl: "http://127.0.0.1:11434" });
+  push("models.changed", []);
+  expect(store.getState().models).toEqual([]);
+});
+
+it("a first list read while no Ollama answers leaves the list unknown, never empty", async () => {
+  const stopped = { state: "stopped", owner: "none", baseUrl: "http://127.0.0.1:11434" };
+  const { store, hydrated } = await boot({ "runtime.status": async () => stopped, "models.list": async () => ({ runtime: stopped, models: [] }) });
+  await hydrated();
+  expect(store.getState().models).toBeUndefined();
+});
+
 it("BD-CO-01 Retry on the phone shows a model installed after the first load", async () => {
-  const { session, store, hydrated } = await boot({ "models.list": async () => [info(QWEN, true)], "models.refresh": async () => [info(QWEN, true), info(GEMMA)] });
+  const { session, store, hydrated } = await boot({ "models.list": async () => listed([info(QWEN, true)]), "models.refresh": async () => listed([info(QWEN, true), info(GEMMA)]) });
   await hydrated();
   store.setState({ unavailable: phoneUnavailable() });
   await session.recheckRuntime();
@@ -102,8 +123,8 @@ it("BD-02 Retry on the phone looks again without runtime.retry, shows Ollama run
   const { session, store, calls, hydrated } = await boot({
     "runtime.status": async () => ({ state: "stopped", owner: "none" }),
     "runtime.discover": async () => running,
-    "models.list": async () => [],
-    "models.refresh": async () => [info(QWEN, true)],
+    "models.list": async () => listed([], { state: "stopped", owner: "none" }),
+    "models.refresh": async () => listed([info(QWEN, true)], running),
   });
   await hydrated();
   store.setState({ unavailable: phoneUnavailable() });
@@ -115,21 +136,22 @@ it("BD-02 Retry on the phone looks again without runtime.retry, shows Ollama run
 });
 
 it("a models.list answered after a newer models.changed push is dropped (MP2-02)", async () => {
-  const list = defer<ModelInfo[]>();
+  const list = defer<ReturnType<typeof listed>>();
   const { store, push, hydrated } = await boot({ "models.list": () => list.promise });
   push("models.changed", [info(GEMMA, true)]);
-  list.resolve([info(QWEN, true)]);
+  list.resolve(listed([info(QWEN, true)]));
   await hydrated();
   expect(store.getState().models?.map((m) => m.name)).toEqual([GEMMA]);
   expect(store.getState().model).toBe(GEMMA);
 });
 
 it("hydration answers older than a runtime change keep neither the old list nor the old runtime status (MP2-02, MP4-03)", async () => {
-  const list = defer<ModelInfo[]>();
-  const { store, push, calls, hydrated } = await boot({ "models.list": () => list.promise, "models.refresh": async () => [info(GEMMA, true)] });
+  const list = defer<ReturnType<typeof listed>>();
+  const runtimeB = { state: "ready", owner: "external", baseUrl: "http://runtime-b", version: "0.40.4" };
+  const { store, push, calls, hydrated } = await boot({ "models.list": () => list.promise, "models.refresh": async () => listed([info(GEMMA, true)], runtimeB) });
   // hydration's runtime.status answered for runtime A (0.12.0); the push is newer: runtime B
-  push("runtime.changed", { state: "ready", owner: "external", baseUrl: "http://runtime-b", version: "0.40.4" });
-  list.resolve([info(QWEN, true)]);
+  push("runtime.changed", runtimeB);
+  list.resolve(listed([info(QWEN, true)]));
   await hydrated();
   await vi.waitFor(() => expect(store.getState().models?.map((m) => m.name)).toEqual([GEMMA]));
   expect(calls).toContain("models.refresh");
@@ -144,8 +166,8 @@ it("the catalog is asked again when the app's own Ollama turns ready, so first r
   let asked = 0;
   const { store, push, calls, hydrated } = await boot({
     "runtime.status": async () => ({ state: "installing", owner: "app" }),
-    "models.list": async () => [],
-    "models.refresh": async () => [],
+    "models.list": async () => listed([], { state: "installing", owner: "app" }),
+    "models.refresh": async () => listed([]),
     "models.catalog": async () => (asked++ === 0 ? unmarked : marked),
   });
   await hydrated();
@@ -363,7 +385,7 @@ describe("the model starts loading on the first key typed", () => {
 });
 
 const savedReply = (model: string) => ({ messages: [{ id: "m1", role: "assistant", model, content: "Saved answer", createdAt: 1 }] });
-const qwenPicked = [info(QWEN, true), info(GEMMA), info(LLAMA)];
+const qwenPicked = listed([info(QWEN, true), info(GEMMA), info(LLAMA)]);
 
 describe("a thread restored from storage takes the model of its latest saved reply (MP4-04)", () => {
   it("opens on that model and records it as the thread's", async () => {
@@ -465,7 +487,7 @@ describe("a saved model is restored once a model list arrives after the history 
     await hydrated();
     session.openThread("S");
     await vi.waitFor(() => expect(store.getState().messages["S"]).toBeDefined());
-    push("models.changed", qwenPicked);
+    push("models.changed", qwenPicked.models);
     expect(store.getState().model).toBe(GEMMA);
     expect(store.getState().threadModels["S"]).toBe(GEMMA);
   });
@@ -476,7 +498,7 @@ describe("a saved model is restored once a model list arrives after the history 
     session.openThread("S");
     await vi.waitFor(() => expect(store.getState().messages["S"]).toBeDefined());
     session.pickModel(LLAMA);
-    push("models.changed", qwenPicked);
+    push("models.changed", qwenPicked.models);
     expect(store.getState().model).toBe(LLAMA);
     expect(store.getState().threadModels["S"]).toBe(LLAMA);
   });
@@ -486,7 +508,7 @@ describe("a saved model is restored once a model list arrives after the history 
     await hydrated();
     session.openThread("S");
     await vi.waitFor(() => expect(store.getState().messages["S"]).toBeDefined());
-    push("models.changed", qwenPicked);
+    push("models.changed", qwenPicked.models);
     expect(store.getState().model).toBe(QWEN);
     expect(store.getState().threadModels["S"]).toBeUndefined();
   });
@@ -494,7 +516,7 @@ describe("a saved model is restored once a model list arrives after the history 
 
 it("a saved model that is installed but now only embeds is not restored (MP5-03)", async () => {
   const embedding: ModelInfo = { ...info(GEMMA), capabilities: ["embedding"] };
-  const { session, store, hydrated } = await boot({ "models.list": async () => [info(QWEN, true), embedding], "threads.get": async () => savedReply(GEMMA) });
+  const { session, store, hydrated } = await boot({ "models.list": async () => listed([info(QWEN, true), embedding]), "threads.get": async () => savedReply(GEMMA) });
   await hydrated();
   session.openThread("S");
   await vi.waitFor(() => expect(store.getState().messages["S"]).toBeDefined());
@@ -520,7 +542,7 @@ describe("a catalog that has not landed yet (W1-02)", () => {
 
   it("asks again on the next model refresh when none ever arrived", async () => {
     let asked = 0;
-    const { session, store, calls, hydrated } = await boot({ "models.refresh": async () => [info(LLAMA, true)], "models.catalog": () => (asked++ === 0 ? Promise.reject(new Error("no answer")) : Promise.resolve(sample)) });
+    const { session, store, calls, hydrated } = await boot({ "models.refresh": async () => listed([info(LLAMA, true)]), "models.catalog": () => (asked++ === 0 ? Promise.reject(new Error("no answer")) : Promise.resolve(sample)) });
     await hydrated();
     await vi.waitFor(() => expect(calls.filter((m) => m === "models.catalog")).toHaveLength(1));
     await new Promise((r) => setTimeout(r, 0));

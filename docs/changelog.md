@@ -1,5 +1,46 @@
 # Changelog
 
+## 2026-11-14: Ollama failures name their cause, and the fit reads every card
+
+- A download of Ollama that is not the pinned file now says "The Ollama
+  download didn't match its checksum", without the two hashes. Before it
+  said the download didn't finish and to check the network.
+- A disk short of room for Ollama says "Not enough disk space for
+  Ollama", with the space it needs once. Before it said Ollama didn't
+  install.
+- When the first model's download fails, its offer above the composer
+  says so once: "Qwen 3.5 9B did not finish downloading."
+- A stalled Ollama download reads Download stalled in the footer gear and
+  in Settings › Runtime too, as the first window says it, and Settings
+  offers Retry for it.
+- A window that opens in the first instant reads "Looking for Ollama",
+  never a stopped Ollama nobody had checked yet.
+- A model list read while Ollama is not answering is no longer taken as
+  "no models": the window keeps the last list it had.
+- On a computer whose graphics card the app cannot read, a model Ollama
+  had loaded on that card was called "Runs in system memory", while its
+  Details said "Runs entirely on the GPU". Both now follow Ollama's own
+  list: on the GPU, or partly in system memory with the share it
+  reports. A model that is not loaded there still says system memory,
+  and Details never says the GPU for it.
+- Every graphics card is read now, not only the first one listed. A
+  small display card listed first made every model Too big; now the fit
+  judges against all cards together, each extra card keeps its own small
+  margin, and the picker names the total ("2 GPUs, 18 GB"). Pictures
+  still use the largest card alone.
+- No model is planned beside a running reply on any Ollama, including
+  one you run yourself: the picker says Stops chat and Send asks first.
+  A row that says Stops chat is judged as the model runs once the reply
+  stops, so it no longer says it spills into system memory when it fits
+  on the card after the stop.
+- A preload while another chat is replying is refused instead of
+  holding up every send behind that reply. The model loads at the send.
+- With the app's own Ollama, moving to another model waits again for the
+  old one to leave the card before the next one loads, so the new one is
+  not squeezed into memory still held. When the card frees at once this
+  costs nothing; each extra check costs a quarter of a second, a slow
+  card in the tests took 1.0 s, and the wait never runs past 20 s.
+
 ## 2026-11-15: A page a model wrote cannot load a script from another address
 
 - The change that stopped a page swapping its own document marked every

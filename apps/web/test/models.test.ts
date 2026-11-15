@@ -34,8 +34,8 @@ beforeEach(async () => {
   disconnect = undefined;
   installed = [info("alpha:7b"), info("beta:7b"), info("gamma:7b")];
   saved = { ...methodSamples["settings.get"].result, defaultModel: "alpha:7b" };
-  b.server.answer("models.list", () => installed);
-  b.server.answer("models.refresh", () => installed);
+  b.server.answer("models.list", () => ({ runtime: methodSamples["runtime.status"].result, models: installed }));
+  b.server.answer("models.refresh", () => ({ runtime: methodSamples["runtime.status"].result, models: installed }));
   b.server.answer("settings.get", () => saved);
   b.server.answer("settings.update", (patch) => {
     // Only the default moves on this page; the rest of the patch is not under test.

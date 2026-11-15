@@ -456,7 +456,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   };
   const measure = deps.readGpu ?? (async () => {
     const gpu = await readGpu(deps.runNvidiaSmi);
-    return { freeBytes: gpu.freeBytes, tenants: gpu.tenants, holders: holdersSummary(gpu.tenants, gib) };
+    // ComfyUI runs on one card: the largest one's free memory, never every card's together
+    return { freeBytes: gpu.cards?.[0]?.freeBytes ?? gpu.freeBytes, tenants: gpu.tenants, holders: holdersSummary(gpu.tenants, gib) };
   });
   /**
    * The one answer to "may this image load" (owner ruling 2026-11-13: one thing in memory). Inside

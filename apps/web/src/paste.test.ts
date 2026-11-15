@@ -57,7 +57,7 @@ it("a file over 50 MB is refused at its chip in plain words and never read", asy
 });
 
 it("keeps images while naming an installed vision model; vision and text-only turns pass", () => {
-  const models = methodSamples["models.list"].result;
+  const { models } = methodSamples["models.list"].result;
   const images = ["data:image/png;base64,eA=="];
   const vision = models.find(m => m.capabilities?.includes("vision"))!;
   const text = models.find(m => m.capabilities?.includes("completion") && !m.capabilities.includes("vision"))!;

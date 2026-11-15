@@ -1,9 +1,10 @@
 // Runtime/model reads, local model choice, catalog and download actions.
-import type { BlockingTurn, MemoryState, MethodName, Params, Payload, ResultOf } from "@gates-local/contracts";
+import type { BlockingTurn, MemoryState, MethodName, Params, Payload, ResultOf, RuntimeStatus } from "@gates-local/contracts";
 import { draftHolds } from "../drafts.ts";
 import { type ModelDecision, choosable, modelChoice as pickChoice, modelNameKey, newestOnly } from "../pick.ts";
 import { describeModel, k } from "../format.ts";
 import { imageMode } from "../image-choice.ts";
+import { wakeAtStall } from "../install-stall.ts";
 import { saveLoadTimes } from "../load-times.ts";
 import { NA, type State, chatReady, getState, setState } from "../store.ts";
 
@@ -41,6 +42,13 @@ export function settlePulls(pulls: State["pulls"], models: State["models"]): Sta
   const installed = new Set(models?.map((m) => modelNameKey(m.name)));
   return Object.fromEntries(Object.entries(pulls).filter(([name, p]) => p.state !== "done" || !installed.has(modelNameKey(name))));
 }
+
+/**
+ * A model list is an answer only beside a ready runtime: there an empty list means no model is
+ * installed. Beside any other state no Ollama answered, so it says nothing and the store keeps what
+ * it had (unknown before the first ready list, else the last one read).
+ */
+export const answered = (runtime: Pick<RuntimeStatus, "state"> | undefined): boolean => runtime?.state === "ready";
 
 /** Keep the chat model valid: the settings default, else the smallest installed model (the fastest that fits). */
 export function chooseModel(): void {
@@ -114,8 +122,9 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
 
   async function refreshModels(): Promise<void> {
     const ticket = modelsOrder.next();
-    const models = await call("models.refresh", {}).catch(() => undefined);
-    if (models === undefined || !modelsOrder.current(ticket)) return;
+    const listed = await call("models.refresh", {}).catch(() => undefined);
+    if (listed === undefined || !modelsOrder.current(ticket) || !answered(listed.runtime)) return;
+    const { models } = listed;
     applyServerEvent((s) => ({ models, pulls: settlePulls(s.pulls, models) }));
     restoreSaved();
     chooseModel();
@@ -221,6 +230,7 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
       : call("runtime.retry", {}).catch((e: unknown) => (isNA(e) ? call("runtime.status", {}) : Promise.reject(e)));
     const runtime = await asked.catch(() => undefined);
     if (runtime !== undefined) applyServerEvent({ runtime });
+    wakeAtStall();
     await refreshModels();
     if (runtime?.state === "ready") void refreshCatalog();
   }
@@ -230,6 +240,7 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
       modelsOrder.next();
       runtimeOrder.next(); // and a runtime.status asked before it is older than this (MP4-03)
       applyServerEvent({ runtime });
+      wakeAtStall();
       if (runtime.state === "ready") {
         void refreshModels();
         // A catalog read before Ollama answered recommends nothing, so first run had no Download button.
@@ -239,6 +250,8 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
 
   function modelsChanged(models: Payload<"models.changed">): void {
       modelsOrder.next();
+      // the server pushes its runtime.changed before the list it read under it
+      if (!answered(getState().runtime)) return;
       applyServerEvent((s) => ({ models, pulls: settlePulls(s.pulls, models) }));
       restoreSaved();
       chooseModel();

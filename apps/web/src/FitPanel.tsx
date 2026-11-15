@@ -177,7 +177,7 @@ function Numbers({ r, v, name, gpu, loaded, slow }: { r: FitReport; v: Verdict; 
       {/* the fit judges a model against the whole card (freeVramBytes is its size), so the card is named as it is everywhere: 16 GB */}
       Estimated {gb(r.needVramBytes)}{noGpu(gpu) ? `; ${gpu?.detail ? gpuHead(gpu) : "no supported GPU"}` : ` of a ${cardGb(r.freeVramBytes)} GPU`}.
       <br />
-      {v.k === "spill" ? `${gb(v.amt)} in system memory; slower replies.` : slow !== undefined ? <span data-testid="models.fit-panel.slow-now">{slow.sentence}</span> : "Runs entirely on the GPU."}
+      {v.k === "spill" ? `${gb(v.amt)} in system memory; slower replies.` : slow !== undefined ? <span data-testid="models.fit-panel.slow-now">{slow.sentence}</span> : noGpu(gpu) && r.words?.word !== "Runs on GPU" ? "Runs in system memory." : "Runs entirely on the GPU."}
       <br />
       {r.source === "measured" ? (loaded ? `Measured ${gb(r.needVramBytes)} on last load.` : "Measured at this context.") : `Not measured at ${ctx} yet.`}
     </div>

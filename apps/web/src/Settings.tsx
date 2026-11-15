@@ -5,7 +5,7 @@
 // out instead of being shown switched off.
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { type Accent, type ImageSetupProgress, type ImageStatus, type ShellStatus, type Source, type Theme, cardBytes } from "@gates-local/contracts";
-import { failWords, installStep, installWords, portOf, rtInfo, rtOf, underTitle } from "./Banner.tsx";
+import { STALLED, failWords, installStep, portOf, rtInfo, rtOf, searching, underTitle, useInstallStall } from "./Banner.tsx";
 import { GpuMemory } from "./FitPanel.tsx";
 import { count, folderWords, gb, noGpu, sourceDetail } from "./format.ts";
 import { noImageEngine } from "./image-choice.ts";
@@ -93,9 +93,10 @@ function Runtime() {
   const port = portOf(runtime?.baseUrl);
   const app = runtime?.owner === "app";
   // while the app's own Ollama installs, the step and its numbers in the first window's and the banner's words
-  const words = rt === "installing" ? installWords(runtime?.install) : undefined;
+  const stall = useInstallStall(rt === "installing" ? runtime?.install : undefined);
+  const words = rt === "installing" ? stall.words : undefined;
   const stat =
-    rt === "ready" ? "Running" : rt === "installing" ? installStep(runtime?.install) : rt === "starting" ? "Starting" : rt === "missing" ? "Not installed" : rt === "wrong" ? `Port ${port} busy` : rt === "offline" ? "Reconnecting" : rt === "stopped" ? "Stopped" : failWords(runtime?.failure).stat;
+    rt === "ready" ? "Running" : rt === "installing" ? (stall.stalled ? STALLED : installStep(runtime?.install)) : rt === "starting" ? (searching({ runtime }) ? "Looking" : "Starting") : rt === "missing" ? "Not installed" : rt === "wrong" ? `Port ${port} busy` : rt === "offline" ? "Reconnecting" : rt === "stopped" ? "Stopped" : failWords(runtime?.failure).stat;
   const statD =
     rt === "ready"
       ? app
@@ -139,9 +140,9 @@ function Runtime() {
       <Head title="Runtime" />
       <Grp>
         <Row label={<Status dot={info.dot}>{stat}</Status>} desc={statD} err={err}>
-          {/* a failed download, unpack or start is retried here too, as on the banner and the first window */}
-          {rt === "error" && !noRetry ? (
-            <button type="button" className="btn outline" data-testid="settings.runtime.retry" onClick={() => void recheckRuntime()}>
+          {/* a failed or stalled download, unpack or start is retried here too, as on the banner and the first window */}
+          {(rt === "error" || stall.stalled) && !noRetry ? (
+            <button type="button" className="btn outline" data-testid="settings.runtime.retry" onClick={() => (stall.stalled ? stall.retry() : void recheckRuntime())}>
               Retry
             </button>
           ) : null}

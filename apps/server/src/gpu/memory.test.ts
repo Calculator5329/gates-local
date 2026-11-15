@@ -1,7 +1,7 @@
 // The memory owner alone: what it asks to leave, what it never touches, and when it waits.
 import { describe, expect, it } from "vitest";
 import type { LoadedModel } from "../runtime/types.ts";
-import { createMemoryOwner, type EngineLeave, type MemoryOwnerDeps } from "./memory.ts";
+import { createMemoryOwner, LEAVE_POLL_MS, LEAVE_WAIT_MS, type EngineLeave, type MemoryOwnerDeps } from "./memory.ts";
 
 const BASE = "http://ollama.test";
 const row = (name: string): LoadedModel => ({ name, sizeBytes: 1e9, sizeVramBytes: 1e9, contextLength: 16384 });
@@ -116,17 +116,72 @@ describe("one thing in memory: the handoff", () => {
   });
 });
 
+/**
+ * An Ollama that holds one model, with the real bounds (20 s, a read every 250 ms) on a fake clock:
+ * `t` is what the wait costs. The old model stays in /api/ps for `psReads` reads after its unload;
+ * the card reads `free` in turn.
+ */
+function slowDriver(psReads: number, free: number[]) {
+  const o = ollama(["a:1b"], ["a:1b"]);
+  let t = 0;
+  let left = Infinity;
+  let i = 0;
+  const fetch = (async (input: unknown, init?: RequestInit) => {
+    left = psReads;
+    return o.fetch(input as string, init);
+  }) as typeof globalThis.fetch;
+  const listLoaded = async () => {
+    if (left !== Infinity && left-- <= 0) o.listed.delete("a:1b");
+    return o.listLoaded();
+  };
+  const m = owner(o, {
+    fetch, listLoaded, holdsOne: () => true, waitMs: LEAVE_WAIT_MS, pollMs: LEAVE_POLL_MS,
+    now: () => t, sleep: async (ms) => { t += ms; },
+    readFree: async () => free[Math.min(i++, free.length - 1)],
+  });
+  return { m, o, elapsed: () => t, reads: () => i };
+}
+
 describe("an Ollama that holds one model (the app's own)", () => {
-  it("a chat handoff asks nothing to leave and waits for nothing: Ollama replaces the model itself", async () => {
-    const o = ollama(["a:1b"], ["a:1b"]);
-    let reads = 0;
-    const m = owner(o, { holdsOne: () => true, waitMs: 5_000, readFree: async () => { reads += 1; return 1e9; } });
-    const started = Date.now();
-    const h = await m.gate(() => m.handoff(chat("b:2b"), signal));
-    expect(Date.now() - started).toBeLessThan(1_000);
-    expect(o.asked).toEqual([]);
-    expect(reads).toBe(0);
-    expect(h).toMatchObject({ left: [], stayed: [] });
+  it("a chat handoff asks the old model to leave and waits until /api/ps drops it and the card gives back what the plan counted", async () => {
+    // 2 GB free with a:1b (1 GB on the card) loaded: the plan counts 3 GB, within the 0.5 GB margin.
+    const d = slowDriver(2, [2e9, 2e9, 2e9, 2.6e9]);
+    const h = await d.m.gate(() => d.m.handoff(chat("b:2b"), signal));
+    expect(d.o.asked).toEqual(["a:1b"]);
+    expect(h).toMatchObject({ left: ["a:1b"], stayed: [] });
+    // two reads of /api/ps that still list it (500 ms), then two card reads short of it (500 ms):
+    // the reading held still on the way, where two flat reads alone would have ended the wait.
+    expect(d.reads()).toBe(4);
+    expect(d.elapsed()).toBe(1_000);
+  });
+
+  it("a driver that frees at once costs no pause: one /api/ps read and two card reads", async () => {
+    const d = slowDriver(0, [2e9, 3e9]);
+    await d.m.gate(() => d.m.handoff(chat("b:2b"), signal));
+    expect(d.o.asked).toEqual(["a:1b"]);
+    expect(d.reads()).toBe(2);
+    expect(d.elapsed()).toBe(0);
+  });
+
+  it("a card that never gives the memory back: the wait ends at the 20 s bound and the load goes on", async () => {
+    const d = slowDriver(0, [2e9]);
+    const h = await d.m.gate(() => d.m.handoff(chat("b:2b"), signal));
+    expect(h.left).toEqual(["a:1b"]);
+    expect(d.elapsed()).toBe(LEAVE_WAIT_MS);
+  });
+
+  it("a model that never leaves /api/ps: that wait ends at its bound too, and it is named as stayed", async () => {
+    const d = slowDriver(Infinity, [2e9]);
+    const h = await d.m.gate(() => d.m.handoff(chat("b:2b"), signal));
+    expect(h).toMatchObject({ left: [], stayed: ["a:1b"] });
+    expect(d.elapsed()).toBe(LEAVE_WAIT_MS);
+  });
+
+  it("with no card to read the old model is still asked to leave, and nothing waits on the card", async () => {
+    const d = slowDriver(0, []);
+    const h = await d.m.gate(() => d.m.handoff(chat("b:2b"), signal));
+    expect(h.left).toEqual(["a:1b"]);
+    expect(d.elapsed()).toBe(0);
   });
 
   it("an image still asks every chat model to leave: Ollama frees nothing for ComfyUI", async () => {

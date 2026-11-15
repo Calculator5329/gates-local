@@ -1062,9 +1062,16 @@ export function createApp(deps: AppDeps): App {
       return {};
     },
 
-    "models.list": async () => catalog.current() ?? (await catalog.refresh()).models,
+    // the status is read after the list, so a reply never pairs a list with a runtime from before it
+    "models.list": async () => {
+      const models = catalog.current() ?? (await catalog.refresh()).models;
+      return { runtime: runtime.status(), models };
+    },
     "models.speed": () => store.modelSpeeds(),
-    "models.refresh": async () => (await catalog.refresh()).models,
+    "models.refresh": async () => {
+      const { models } = await catalog.refresh();
+      return { runtime: runtime.status(), models };
+    },
 
     "runtime.status": () => runtime.status(),
     "runtime.retry": () => runtime.ensure(),

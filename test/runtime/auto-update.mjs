@@ -314,7 +314,7 @@ require("./out/main.cjs");
     try {
       const thread = await control.call("threads.create", { title: "Interrupted reply proof" });
       interruptedThread = thread.id;
-      const model = (await control.call("models.list", {})).find((entry) => entry.capabilities.includes("completion"));
+      const model = (await control.call("models.list", {})).models.find((entry) => entry.capabilities.includes("completion"));
       assert.ok(model);
       let sawText = false;
       const off = control.subscribe("chat.event", (event) => { if (event.threadId === thread.id && event.event.type === "delta") sawText = true; });

@@ -3,10 +3,10 @@
 import "./picker.css";
 import { type KeyboardEvent, useLayoutEffect, useRef, useState } from "react";
 import type { ContextSize, FitTable, ModelInfo } from "@gates-local/contracts";
-import { CONTEXT_SIZES, type SlowReason, type Verdict, cardGb, ctxFor, gb, k, noGpu, slowReason, verdictOf } from "./format.ts";
+import { CONTEXT_SIZES, type SlowReason, type Verdict, ctxFor, gb, k, noGpu, slowReason, verdictOf } from "./format.ts";
 import { markWhole } from "./MemoryMark.tsx";
 import { openFit } from "./fit-actions.ts";
-import { answers, canPick, cardFit, fitFor, refusedNow, stopsChat } from "./fit-table.ts";
+import { answers, canPick, cardFit, cardLine, fitFor, refusedNow, stopsChat } from "./fit-table.ts";
 import { MakerMark } from "./MakerMark.tsx";
 import { ModelSpeed, speedWords } from "./model-speed.tsx";
 import { Icon } from "./icons.tsx";
@@ -54,8 +54,7 @@ export function ContextMemory({ v, cpu, frees = false, ready = true, notNow = fa
  */
 function memoryLine(table: FitTable | undefined, whole: number | undefined) {
   if (!table) return <span aria-busy="true"><FitSkel w="120px" /></span>;
-  const m = table.memory;
-  return m.kind === "cpu" ? "Runs in system memory" : m.kind === "unreadable" ? "GPU reading unavailable" : whole === undefined ? "" : `${cardGb(whole)} GPU`;
+  return cardLine(table.memory, whole);
 }
 
 /** Keep the picker's context choice for the next start; the chat already runs at it, so a failed save says nothing. */

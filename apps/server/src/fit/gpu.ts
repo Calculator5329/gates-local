@@ -6,7 +6,7 @@ import os from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import { MIB } from "./constants.ts";
 import { sendSpan } from "../chat/send-times.ts";
-import { FitError, type GpuSnapshot, type GpuTenant, type MeminfoReader, type NvidiaSmiRunner } from "./types.ts";
+import { FitError, type GpuCard, type GpuSnapshot, type GpuTenant, type MeminfoReader, type NvidiaSmiRunner } from "./types.ts";
 
 export const GPU_TOTALS_ARGS = [
   "--query-gpu=memory.total,memory.used,memory.free",
@@ -74,22 +74,28 @@ export interface GpuTotals {
   usedBytes: number;
   freeBytes: number;
   gpuCount: number;
+  cards?: readonly GpuCard[];
 }
 
-/** Parses `--query-gpu=memory.total,memory.used,memory.free` (MiB, no units). */
+/**
+ * Parses `--query-gpu=memory.total,memory.used,memory.free` (MiB, no units), one line per card.
+ * Every card counts: Ollama splits a model that does not fit on one card across all of them, so
+ * the figures are the cards together, and `cards` lists each, largest first, when there are more.
+ */
 export function parseGpuTotals(text: string): GpuTotals {
-  const rows: { total: number; used: number; free: number }[] = [];
+  const cards: GpuCard[] = [];
   for (const line of text.split(/\r?\n/)) {
     if (line.trim() === "") continue;
     const [total, used, free] = line.split(",").map((f) => parseMib(f));
     if (total === undefined || used === undefined || free === undefined) continue;
-    rows.push({ total, used, free });
+    cards.push({ totalBytes: total, usedBytes: used, freeBytes: free });
   }
-  const first = rows[0];
-  if (!first) {
+  if (cards.length === 0) {
     throw new FitError("gpu-unreadable", `nvidia-smi printed no GPU memory line: ${JSON.stringify(text.slice(0, 200))}`);
   }
-  return { totalBytes: first.total, usedBytes: first.used, freeBytes: first.free, gpuCount: rows.length };
+  const sum = (pick: (c: GpuCard) => number) => cards.reduce((s, c) => s + pick(c), 0);
+  const all = { totalBytes: sum((c) => c.totalBytes), usedBytes: sum((c) => c.usedBytes), freeBytes: sum((c) => c.freeBytes), gpuCount: cards.length };
+  return cards.length === 1 ? all : { ...all, cards: cards.toSorted((a, b) => b.totalBytes - a.totalBytes) };
 }
 
 /** Last path segment of a Linux or Windows command, without its flags or ".exe". A path may hold spaces ("Program Files"). */

@@ -516,8 +516,9 @@ describe("pushes from the runtime and the catalog", () => {
     const models = await r.waitFor("models.changed", (m) => m.length === 1);
     expect(models[0]).toMatchObject({ name: MODEL, sizeBytes: 6594474711 });
     expect(await r.client.call("runtime.status", {})).toMatchObject({ state: "ready" });
-    expect((await r.client.call("models.list", {})).map((m) => m.name)).toEqual([MODEL]);
-    expect((await r.client.call("models.refresh", {})).map((m) => m.name)).toEqual([MODEL]);
+    // the list comes with the runtime it was read under, so an empty one is never read apart from it
+    expect(await r.client.call("models.list", {})).toMatchObject({ runtime: { state: "ready" }, models: [{ name: MODEL }] });
+    expect((await r.client.call("models.refresh", {})).models.map((m) => m.name)).toEqual([MODEL]);
   });
 });
 
@@ -858,7 +859,7 @@ describe("a model with a 2,048 context window", () => {
     // One row for the size it runs at, whatever context is offered.
     const rows = (await r.client.call("fit.table", {})).rows.filter((row) => row.model === MODEL);
     expect(rows).toEqual([expect.objectContaining({ verdict: "fits", numCtx: 2048 })]);
-    expect(await r.client.call("models.list", {})).toEqual([expect.objectContaining({ name: MODEL, maxContext: 2048 })]);
+    expect((await r.client.call("models.list", {})).models).toEqual([expect.objectContaining({ name: MODEL, maxContext: 2048 })]);
 
     const t = await r.client.call("threads.create", {});
     const sent = await sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
@@ -947,7 +948,7 @@ async function stalledThinkTurn(more: Pick<Parameters<typeof rig>[0] & object, "
   // The catalog reads each model's capabilities with /api/show too (runtime/models.ts), on the
   // runtime's ready event. Wait until it lists the model: its capabilities are then cached by
   // digest, so the stall below meets only the turn's own calls (fit check, then think probe).
-  for (let i = 0; !(await r.client.call("models.list", {})).some((m) => m.name === MODEL); i += 1) {
+  for (let i = 0; !(await r.client.call("models.list", {})).models.some((m) => m.name === MODEL); i += 1) {
     if (i > 100) throw new Error("the catalog never listed the model");
     await sleep(20);
   }
@@ -2009,7 +2010,7 @@ describe("runtime.discover, the phone's Retry (BD-02)", () => {
     expect(seen).toMatchObject({ state: "ready", owner: "external" });
     expect(runtime.status()).toEqual(seen);
     expect(pushed.at(-1), "the computer's window hears the same status").toEqual(seen);
-    expect((await app.handlers["models.refresh"]({}, { clientId: 1 })).map((m) => m.name)).toEqual([MODEL]);
+    expect((await app.handlers["models.refresh"]({}, { clientId: 1 })).models.map((m) => m.name)).toEqual([MODEL]);
     expect(existsSync(ran)).toBe(false);
     expect(fake.requests.filter((r) => !r.startsWith("GET ") && !r.startsWith("POST /api/show"))).toEqual([]);
   });

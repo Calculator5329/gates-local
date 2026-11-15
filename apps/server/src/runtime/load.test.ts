@@ -441,7 +441,7 @@ describe("what the next thing may ask to leave: every resident model no running 
     expect(loader.appLoadedModels()).toEqual([]);
   });
 
-  it("in an Ollama that holds one model, a load pushes the app's old model unloaded at once and asks it nothing", async () => {
+  it("in an Ollama that holds one model, a load asks the app's old model to leave first and pushes it unloaded", async () => {
     const s = await fakeOllama([]);
     const pushes: ModelLoad[] = [];
     const memory = createMemoryOwner({ ollamaUrl: () => s.baseUrl, listLoaded: () => listLoaded(s.baseUrl), replying: () => [], holdsOne: () => true, waitMs: 100, pollMs: 1 });
@@ -450,7 +450,81 @@ describe("what the next thing may ask to leave: every resident model no running 
     await loader.load("b:2b", 16384);
     expect(pushes.map((p) => `${p.model} ${p.state}`)).toEqual(["a:1b loading", "a:1b ready", "b:2b loading", "a:1b unloaded", "b:2b ready"]);
     expect(loader.appLoadedModels()).toEqual(["b:2b"]);
-    expect(s.requests.filter((r) => r.path === "/api/generate").map((r) => (r.body as { keep_alive: unknown }).keep_alive)).toEqual(["5m", "5m"]);
+    // the old one is asked to leave before the next is sent, so the plan's free memory is real
+    expect(s.requests.filter((r) => r.path === "/api/generate").map((r) => (r.body as { keep_alive: unknown }).keep_alive)).toEqual(["5m", 0, "5m"]);
+  });
+});
+
+describe("a preload never waits behind a running reply: it is a hint, refused inside the gate", () => {
+  it("a reply that started after the client looked: the preload is refused, sends nothing, pushes nothing", async () => {
+    const s = await fakeOllama(["x:9b"]);
+    const pushes: ModelLoad[] = [];
+    const loader = loaderFor(s, pushes);
+    // the client asked who would be stopped and heard no one; then a reply starts in another chat
+    const turn = loader.reserve("x:9b");
+    await turn.admit(16384);
+    turn.firstToken();
+    await expect(loader.load("y:4b", 16384)).rejects.toMatchObject({ code: "model-in-use" });
+    expect(generates(s)).toBe(0);
+    expect(pushes).toEqual([]);
+    turn.end();
+    // the reply ended: the same preload loads
+    expect(await loader.load("y:4b", 16384)).toMatchObject({ state: "ready" });
+  });
+
+  it("a preload queued behind a cold reply's load is refused once that reply holds the model", async () => {
+    const s = await fakeOllama([]);
+    const pushes: ModelLoad[] = [];
+    const loader = loaderFor(s, pushes);
+    const turn = loader.reserve("x:9b");
+    await turn.admit(16384);
+    // the cold turn holds the gate until its first token; the preload waits for it
+    const preload = loader.load("y:4b", 16384);
+    const late = settled(preload, "preload behind a cold reply");
+    await sleep(20);
+    turn.firstToken();
+    expect(await late).toMatchObject({ code: "model-in-use" });
+    expect(generates(s)).toBe(0);
+    expect(pushes.filter((p) => p.model === "y:4b")).toEqual([]);
+    turn.end();
+  });
+
+  it("the replying model itself at another context is refused too; at the reply's own context it is ready as it is", async () => {
+    const ps: string[] = [];
+    const s = await fakeOllama(ps);
+    const loader = loaderFor(s, []);
+    // a cold reply: the app loads x and owns it
+    const turn = loader.reserve("x:9b");
+    await turn.admit(16384);
+    ps.push("x:9b");
+    turn.firstToken();
+    await expect(loader.load("x:9b", 8192)).rejects.toMatchObject({ code: "model-in-use" });
+    expect(await loader.load("x:9b", 16384)).toMatchObject({ state: "ready" });
+    expect(generates(s)).toBe(0);
+    turn.end();
+  });
+
+  it("a send that arrives during a preload waits for that one load and no longer", async () => {
+    const gen = deferred();
+    const ps: string[] = [];
+    const s = await fakeOllama(ps, [], {
+      "POST /api/generate": async (body, res) => {
+        await gen.promise;
+        const model = (body as { model: string }).model;
+        ps.push(model);
+        json(res, 200, { model, response: "", done: true, done_reason: "load" });
+      },
+    });
+    const loader = loaderFor(s, []);
+    const preload = loader.load("y:4b", 16384);
+    await until(() => generates(s) === 1);
+    const turn = loader.reserve("x:9b");
+    const admitted = settled(turn.admit(16384), "admission behind a preload");
+    await sleep(20);
+    gen.release();
+    expect(await preload).toMatchObject({ state: "ready" });
+    expect(await admitted).toMatchObject({ resolved: { verdict: "fits" } });
+    turn.end();
   });
 });
 
@@ -679,8 +753,8 @@ describe("chat turn reservation", () => {
 
     const warm = loader.reserve("warm:1b");
     await warm.admit(16384, { fit: fit("warm") });
-    // Warm: released at once, so a preload runs while the turn streams.
-    expect((await loader.load("c:1b", 16384)).state).toBe("ready");
+    // Warm: released at once, so a preload is answered while the turn streams (refused: a reply runs).
+    await expect(loader.load("c:1b", 16384)).rejects.toMatchObject({ code: "model-in-use" });
     warm.end();
   });
 

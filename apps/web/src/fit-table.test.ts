@@ -3,7 +3,7 @@
 // catalog entry's own estimate.
 import { expect, it } from "vitest";
 import type { FitTable } from "@gates-local/contracts";
-import { phaseOf, rowOf } from "./fit-table.ts";
+import { cardLine, phaseOf, rowOf } from "./fit-table.ts";
 
 const row = (model: string, numCtx: number, verdict: "fits" | "spills" | "refuse") =>
   ({ model, numCtx, verdict, needVramBytes: 1, freeVramBytes: 2, spillRamBytes: 0, source: "estimate", stops: [] }) as const;
@@ -24,4 +24,12 @@ it("a row is fresh in the table, checking before the first table, and none when 
   expect(phaseOf(t, rowOf(s, "a:1"))).toBe("fresh");
   expect(phaseOf(t, rowOf(s, "missing:1"))).toBe("none");
   expect(phaseOf(undefined, rowOf({ ...s, fitTable: undefined }, "a:1"))).toBe("checking");
+});
+
+it("the picker's card line names every card together, and one card as before", () => {
+  const GIB = 1024 ** 3;
+  const NBSP = String.fromCharCode(160);
+  expect(cardLine({ kind: "gpu", freeBytes: 1, usableBytes: 1, totalBytes: 18 * GIB, gpuCount: 2 }, 18 * GIB)).toBe(`2 GPUs, 18${NBSP}GB`);
+  expect(cardLine({ kind: "gpu", freeBytes: 1, usableBytes: 1, totalBytes: 16 * GIB }, 16 * GIB)).toBe(`16${NBSP}GB GPU`);
+  expect(cardLine({ kind: "cpu" }, undefined)).toBe("Runs in system memory");
 });

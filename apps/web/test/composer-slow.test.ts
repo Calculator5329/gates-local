@@ -38,7 +38,7 @@ beforeEach(() => {
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   setState({
     conn: { kind: "open" }, runtime: methodSamples["runtime.status"].result, gpu: methodSamples["gpu.status"].result,
-    model: MODEL, numCtx: CTX, models: [{ ...methodSamples["models.list"].result[0]!, name: MODEL }], pop: null, notice: null,
+    model: MODEL, numCtx: CTX, models: [{ ...methodSamples["models.list"].result.models[0]!, name: MODEL }], pop: null, notice: null,
   });
 });
 afterEach(() => vi.unstubAllGlobals());

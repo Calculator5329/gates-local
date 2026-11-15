@@ -27,9 +27,9 @@ export type RuntimeStatus = {
   /** The app's own Ollama holds one model at a time (contracts RuntimeStatus.holdsOne). */
   holdsOne?: boolean;
   /** "error": what failed (contracts RuntimeStatus.failure). */
-  failure?: "download" | "install" | "start";
+  failure?: "download" | "checksum" | "disk" | "install" | "start";
   /** "installing": the download of the app's own Ollama (contracts RuntimeStatus.install). */
-  install?: { receivedBytes: number; totalBytes: number; bytesPerSecond?: number };
+  install?: { receivedBytes: number; totalBytes: number; bytesPerSecond?: number; stalled?: true };
 };
 
 export type ModelInfo = {

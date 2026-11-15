@@ -6,7 +6,8 @@ import { httpGet } from "./http.ts";
 import { probe } from "./probe.ts";
 import { readProc, readRecord } from "./ownership.ts";
 import { installedBinary, ownedStateFile } from "./paths.ts";
-import { type OllamaRuntime, type RuntimeOptions, childHome, createOllamaRuntime, ownedChildEnv } from "./runtime.ts";
+import { InstallError } from "./install.ts";
+import { type OllamaRuntime, type RuntimeOptions, childHome, createOllamaRuntime, failureOf, ownedChildEnv } from "./runtime.ts";
 import type { InstallManifest } from "./schemas.ts";
 import {
   FAKE_RELEASE_FORMAT,
@@ -274,8 +275,8 @@ describe("missing", () => {
     const s = await rt.ensure();
     expect(s.state).toBe("error");
     expect(s.detail).toContain("did not match its pinned checksum");
-    // the status says the download is what failed, so no screen calls it a start that failed
-    expect(s.failure).toBe("download");
+    // the status says the checksum is what failed, so no screen calls it a start or the network
+    expect(s.failure).toBe("checksum");
     expect(existsSync(installedBinary(appDataDir, VERSION))).toBe(false);
   });
 
@@ -287,9 +288,20 @@ describe("missing", () => {
     const m = manifest({ url: release.url, sha256: createHash("sha256").update(tarball).digest("hex"), sizeBytes: tarball.length });
     const { rt, seen } = await makeRuntime({ externalBaseUrl: await nothingAt(), manifest: m, allowInstall: true, stallMs: 200 });
     const first = rt.ensure();
-    const deadline = Date.now() + 5000;
-    while (!seen.some((x) => (x.install?.receivedBytes ?? 0) > 0) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
-    await new Promise((r) => setTimeout(r, 400));
+    // the status that says the download stalled, not the clock: a loaded machine only makes it later
+    const stalled = await new Promise<RuntimeStatus>((resolve, reject) => {
+      const said = seen.find((x) => x.install?.stalled === true);
+      if (said !== undefined) return resolve(said);
+      const bound = setTimeout(() => reject(new Error("no status said the download stalled within 20 s")), 20_000);
+      const off = rt.onChange((x) => {
+        if (x.install?.stalled !== true) return;
+        clearTimeout(bound);
+        off();
+        resolve(x);
+      });
+    });
+    // what has arrived so far is kept, and no speed is claimed for a download that sends nothing
+    expect(stalled.install?.bytesPerSecond).toBeUndefined();
     release.mode = "ok";
     const s = await rt.ensure();
     expect(s.state).toBe("ready");
@@ -438,7 +450,24 @@ describe.skipIf(process.platform === "win32")("process tree: the app-owned Ollam
   });
 });
 
+describe("what an install failure is called", () => {
+  it("each install error has its own kind: network, checksum, disk, or the install itself", () => {
+    expect(failureOf(new InstallError("download-failed", "x"))).toBe("download");
+    expect(failureOf(new InstallError("interrupted", "x"))).toBe("download");
+    expect(failureOf(new InstallError("hash-mismatch", "x"))).toBe("checksum");
+    expect(failureOf(new InstallError("disk-full", "Needs 2.4 GB free; 0.5 GB is free on this drive."))).toBe("disk");
+    expect(failureOf(new InstallError("extract-failed", "x"))).toBe("install");
+    expect(failureOf(new InstallError("move-failed", "x"))).toBe("install");
+    expect(failureOf(new Error("anything else"))).toBe("install");
+  });
+});
+
 describe("status listener", () => {
+  it("before the first look the status is looking, never a stopped Ollama nobody saw", async () => {
+    const { rt } = await makeRuntime({ externalBaseUrl: await nothingAt() });
+    expect(rt.status()).toMatchObject({ state: "starting", owner: "none", detail: "Looking for Ollama." });
+  });
+
   it("emits only when the status changes", async () => {
     const fake = await startFakeOllama();
     cleanups.push(() => fake.close());

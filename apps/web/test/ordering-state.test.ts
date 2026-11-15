@@ -15,7 +15,7 @@ vi.mock("react", async (original) => ({
 }));
 
 const MODEL = "gemma3:4b", OLD_MODEL = "qwen3:14b", CTX = 16384;
-const initialModels = methodSamples["models.list"].result;
+const { runtime: listedRuntime, models: initialModels } = methodSamples["models.list"].result;
 const remainingModels = initialModels.filter((model) => model.name !== OLD_MODEL);
 const noop = () => {};
 const frame = (socket: string, name: string): ReplayFrame => ({ socket, event: name });
@@ -75,10 +75,10 @@ function preloadChoice(): ReplayScenario<World> {
 function modelRefresh(): ReplayScenario<World> {
   return {
     name: "modelsOrder: an old refresh cannot restore a removed model", dispose,
-    create: async () => { const w = await World.create(); w.wire.server.answer("models.refresh", () => w.models); return w; },
+    create: async () => { const w = await World.create(); w.wire.server.answer("models.refresh", () => ({ runtime: listedRuntime, models: w.models })); return w; },
     witnesses: [["refresh.request", "remove.request", "remove.complete", "models.push-A", "models.push-B", "remove.response.ready", "remove.response", "refresh.old.ready", "refresh.old.response"]],
     events: [
-      event("refresh.request", [], (w) => w.capture("refresh.old", "models.refresh", () => { void w.wire.a.session.refreshModels(); }, initialModels)),
+      event("refresh.request", [], (w) => w.capture("refresh.old", "models.refresh", () => { void w.wire.a.session.refreshModels(); }, { runtime: listedRuntime, models: initialModels })),
       // Input story: B removes a model after A has requested its old list.
       event("remove.request", ["refresh.request"], (w) => w.capture("remove", "models.remove", () => { void w.wire.b.session.removeModel(OLD_MODEL); }, { name: OLD_MODEL })),
       // runtime/handlers.ts awaits deletion and catalog.refresh, whose onChange broadcasts.

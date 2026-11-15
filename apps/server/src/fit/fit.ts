@@ -98,13 +98,31 @@ export interface DecideInput {
 export type FitBasis = FitWords["basis"];
 
 /** What a verdict needs of a GPU reading. */
-export type CardReading = Pick<GpuSnapshot, "gpuCount" | "freeBytes" | "totalBytes" | "measuredAt">;
+export type CardReading = Pick<GpuSnapshot, "gpuCount" | "freeBytes" | "totalBytes" | "measuredAt" | "cards">;
+
+/**
+ * The margins for a reading of more than one card. The fit judges the cards together, since
+ * Ollama splits a model that does not fit on one across all of them; but every extra card it uses
+ * holds its own CUDA context and runner scratch, Ollama keeps a minimum free on each, and a layer
+ * never splits across two cards. So each card after the largest gives up the VRAM margin too, and
+ * never more than it has (its size on the card basis, what is free on the now basis): a small
+ * display card beside a large one adds what it has beyond its margin, or nothing.
+ */
+export function cardMargins(margins: Margins, gpu: Pick<GpuSnapshot, "cards">, basis: FitBasis): { margins: Margins; extraBytes: number; extraCards: number } {
+  const extra = (gpu.cards ?? []).slice(1).map((c) => Math.min(margins.vramMarginBytes, basis === "card" ? c.totalBytes : c.freeBytes));
+  const extraBytes = extra.reduce((sum, b) => sum + b, 0);
+  return { margins: extraBytes === 0 ? margins : { ...margins, vramMarginBytes: margins.vramMarginBytes + extraBytes }, extraBytes, extraCards: extra.length };
+}
 
 /** The card's own GPU memory, whatever other programs hold: the whole card; with no GPU, what is free. */
 export const cardFreeBytes = (gpu: CardReading): number => (gpu.gpuCount === 0 ? gpu.freeBytes : Math.max(gpu.freeBytes, gpu.totalBytes));
 
-/** A report with its words, on the basis it was judged on. */
-export const worded = <R extends FitReport>(report: R, basis: FitBasis, gpu: Pick<GpuSnapshot, "gpuCount">): R => ({ ...report, words: fitWords(report, basis, gpu.gpuCount === 0) });
+/**
+ * A report with its words, on the basis it was judged on. `onCard`: the runner's own list (/api/ps
+ * size_vram) says the model is loaded on a card, so the words follow that measurement even when
+ * the app cannot read the card itself; only a model that is not loaded there runs in system memory.
+ */
+export const worded = <R extends FitReport>(report: R, basis: FitBasis, gpu: Pick<GpuSnapshot, "gpuCount">, onCard = false): R => ({ ...report, words: fitWords(report, basis, gpu.gpuCount === 0 && !onCard) });
 
 export interface JudgeInput {
   model: string;
@@ -119,6 +137,8 @@ export interface JudgeInput {
   memAvailableBytes?: number;
   margins?: Margins;
   note?: string;
+  /** The runner's own list has this model loaded on a card (worded): its words say the card, read or not. */
+  onCard?: boolean;
 }
 
 /**
@@ -132,6 +152,9 @@ export interface JudgeInput {
 export function judge(basis: FitBasis, input: JudgeInput): FitReport {
   const nowVram = input.freeVramBytes ?? input.gpu.freeBytes;
   const ram = cardRamBytes(input.memTotalBytes);
+  const cards = cardMargins(input.margins ?? DEFAULT_MARGINS, input.gpu, basis);
+  const cardsNote = cards.extraBytes === 0 ? undefined : `${formatGb(cards.extraBytes)} of the margin for ${cards.extraCards} more GPU${cards.extraCards === 1 ? "" : "s"}`;
+  const note = [input.note, cardsNote].filter((n) => n !== undefined).join("; ");
   const report = decideFit({
     model: input.model,
     numCtx: input.numCtx,
@@ -139,10 +162,10 @@ export function judge(basis: FitBasis, input: JudgeInput): FitReport {
     freeVramBytes: basis === "card" ? Math.max(cardFreeBytes(input.gpu), nowVram) : nowVram,
     memAvailableBytes: basis === "card" ? ram : Math.max(input.memAvailableBytes ?? 0, ram),
     measuredAt: input.gpu.measuredAt,
-    ...(input.margins ? { margins: input.margins } : {}),
-    ...(input.note === undefined ? {} : { note: input.note }),
+    ...(input.margins || cards.extraBytes > 0 ? { margins: cards.margins } : {}),
+    ...(note === "" ? {} : { note }),
   });
-  return worded(report, basis, input.gpu);
+  return worded(report, basis, input.gpu, input.onCard === true);
 }
 
 /** Pure verdict from an estimated need and measured free memory: judge's arithmetic, with no words. */
@@ -215,7 +238,7 @@ export function measuredReport(model: string, entry: PsEntry, numCtx: number, gp
       `${entry.name} loaded at num_ctx ${ctx}: /api/ps ${formatGb(entry.size)} total, ${formatGb(entry.size_vram)} in VRAM; ${runnerNote}` +
       (spill > 0 ? `; ${formatBytes(spill)} spilled to system RAM` : "; nothing spilled") +
       `; ${formatGb(gpu.freeBytes)} VRAM free now (measured).`,
-  }, "now", gpu);
+  }, "now", gpu, entry.size_vram > 0);
 }
 
 export interface FitDeps {
@@ -344,7 +367,7 @@ export async function fitWithReadings(deps: FitDeps, model: string, requested: n
         model, numCtx, freeVramBytes: r.gpu.freeBytes + held, needVramBytes: need, spillRamBytes: spill,
         verdict: spill > 0 ? "spills" : "fits", source: "estimate", measuredAt: r.gpu.measuredAt,
         message: `${model} is loaded at num_ctx ${numCtx} with ${formatGb(held)} on the GPU and the rest in system memory; it needs ${formatGb(need)} in all (estimate).`,
-      }, "now", r.gpu),
+      }, "now", r.gpu, held > 0),
       resident: true, gpu: r.gpu, memAvailableBytes: r.memAvailableBytes, estimate: estimate.need,
     };
   }
@@ -381,6 +404,7 @@ export async function fitWithReadings(deps: FitDeps, model: string, requested: n
     memAvailableBytes: ramNow,
     ...(deps.margins ? { margins: deps.margins } : {}),
     ...(notes.length > 0 ? { note: notes.join("; ") } : {}),
+    ...((loaded?.size_vram ?? 0) > 0 ? { onCard: true } : {}),
   });
   // A refusal carries the system memory of the reading it was decided from, beside its free VRAM.
   const reading = report.verdict === "refuse" ? { memAvailableBytes: r.memAvailableBytes } : {};
@@ -413,12 +437,13 @@ export async function checkFit(deps: FitDeps & { model: string; numCtx: number }
 
 export interface LoadPlan {
   /**
-   * The fit with no busy turn stopped. Before a handoff (the fit table, a question about a send),
-   * every other resident model's VRAM counts as reclaimable, since the handoff asks those to leave;
-   * after it (`measured`), only what the reading shows free.
+   * The fit as the load will run: with the `stop` models gone when there are any (the load waits
+   * for them), else with no busy turn stopped. Before a handoff (the fit table, a question about a send),
+   * every other idle resident model's VRAM counts as reclaimable, since the handoff asks those to
+   * leave; after it (`measured`), only what the reading shows free.
    */
   report: TotalReport;
-  /** The busy models whose turns must stop for the load (only chat.send stopOthers stops them). */
+  /** The busy models whose turns must stop for the load (only chat.send stopOthers stops them, once the person agreed). */
   stop: string[];
 }
 
@@ -427,15 +452,14 @@ export interface LoadPlan {
  * chat.send. From one reading. Resident models not in `busy` (no running reply uses them) are what
  * a handoff (gpu/memory.ts) asks to leave: a plan before the handoff counts their memory, a plan
  * after it (`measured`) counts only what the reading shows free, so a model that was asked and
- * stayed is measured as it is. Busy models come next, the fewest and largest first: they are
- * reclaimable only by stopping their turns, which only chat.send's stopOthers does, so `report`
- * never counts them. The image engine's memory is never counted: the handoff frees it, or it stays.
+ * stayed is measured as it is. Busy models are reclaimable only by stopping their turns, which only
+ * chat.send's stopOthers does. The image engine's memory is never counted: the handoff frees it, or
+ * it stays.
  *
- * `stop` is empty when the model is resident at this num_ctx, fits without any busy model, or
- * refuses even with every busy one gone (stopping them would not help); otherwise the busy ones
- * whose VRAM makes it fit. In an Ollama that holds one model no model fits beside a busy one: `stop`
- * is every busy model unless this one is resident or refuses even with them gone. The same model in
- * `busy` never counts. Reads only; never loads or stops anything.
+ * No model is planned beside a busy one, on any runner (one thing in memory): `stop` is every busy
+ * resident model, largest first, unless this one is resident at this num_ctx or refuses even with
+ * them gone (stopping them would not help). The same model in `busy` never counts. Reads only;
+ * never loads or stops anything.
  */
 export async function planLoad(deps: FitDeps & { model: string; numCtx: number; busy: readonly string[]; measured?: boolean }): Promise<LoadPlan> {
   return planWith(deps, await takeReadings(deps));
@@ -454,28 +478,22 @@ export async function planWith(deps: FitDeps & { model: string; numCtx: number; 
   // it unloads the idle ones itself at this load, and waits for a busy one's reply to end, so every
   // busy one is in the way whatever is free, on a card or not.
   const one = deps.holdsOne ?? holdsOneAt(deps.baseUrl);
-  if (r.gpu.gpuCount === 0) {
-    // With no GPU there is no VRAM to reclaim from another reply.
-    const check = await fitWithReadings(deps, deps.model, deps.numCtx, r);
-    const inTheWay = one && check.resident !== true && check.report.verdict !== "refuse";
-    return { report: check.report, stop: inTheWay ? candidates : [] };
-  }
   // The handoff asked nothing to leave from an Ollama that holds one model, so even after it
-  // (`measured`) what the idle ones hold counts as leaving.
-  const leaving = deps.measured === true && !one ? [] : others.filter((m) => !isBusy(m.name)).map((m) => m.name);
-  const plan = async (stop: readonly string[]) => (await fitWithReadings({ ...deps, reclaim: [...leaving, ...stop] }, deps.model, deps.numCtx, r)).report;
-  const first = await fitWithReadings({ ...deps, reclaim: leaving }, deps.model, deps.numCtx, r);
-  const report = first.report;
-  if (first.resident === true || candidates.length === 0) return { report, stop: [] };
-  if (one) return { report, stop: (await plan(candidates)).verdict === "refuse" ? [] : candidates };
-  if (report.verdict === "fits") return { report, stop: [] };
-  for (let n = 1; n <= candidates.length; n++) {
-    if ((await plan(candidates.slice(0, n))).verdict === "fits") return { report, stop: candidates.slice(0, n) };
-  }
-  // Every busy turn stopped and it only spills: stop them all; refused even then: stop none.
-  const last = candidates.length === 0 ? report : await plan(candidates);
-  if (last.verdict === "refuse") return { report, stop: [] };
-  return { report, stop: candidates };
+  // (`measured`) what the idle ones hold counts as leaving. With no GPU there is no VRAM to reclaim.
+  const onCard = r.gpu.gpuCount > 0;
+  const leaving = !onCard || (deps.measured === true && !one) ? [] : others.filter((m) => !isBusy(m.name)).map((m) => m.name);
+  const fit = (stop: readonly string[]) => fitWithReadings(onCard ? { ...deps, reclaim: [...leaving, ...stop] } : deps, deps.model, deps.numCtx, r);
+  const first = await fit([]);
+  if (first.resident === true || candidates.length === 0) return { report: first.report, stop: [] };
+  // One thing in memory, on every runner: no model is planned beside a busy reply, however much is
+  // free. An Ollama the person runs would load it beside; the app's own would wait for the reply.
+  // So every busy one is in the way.
+  const gone = (await fit(candidates)).report;
+  // Refused even with every busy reply gone: stopping them would not help, so none is in the way.
+  if (gone.verdict === "refuse") return { report: first.report, stop: [] };
+  // The load comes after those replies stop (asked first, or the app's own Ollama waits for them):
+  // it is judged as it will run then, never as if it ran beside them.
+  return { report: gone, stop: candidates };
 }
 
 /** planLoad's `stop`: the busy models a load would push out. */

@@ -70,7 +70,7 @@ async function measure(model: string): Promise<{ model: string; measure?: ModelM
   }
 }
 
-const models = named.length > 0 ? named : (await client.call("models.list", {})).filter((m) => m.capabilities.includes("completion")).map((m) => m.name);
+const models = named.length > 0 ? named : (await client.call("models.list", {})).models.filter((m) => m.capabilities.includes("completion")).map((m) => m.name);
 if (models.length === 0) usage("no installed chat model to measure");
 const results = [];
 for (const model of models) {

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GIB, MIB, RAM_SAFETY_MARGIN_BYTES, RUNTIME_OVERHEAD_BYTES, VRAM_SAFETY_MARGIN_BYTES } from "./constants.ts";
 import { estimateKvCache, parseArchInfo } from "./estimate.ts";
 import { json, startFakeServer, type FakeServer } from "./fake-http.ts";
-import { blockingModels, checkFit, checkModels, decideFit, fitEach, measuredFit, planLoad } from "./fit.ts";
+import { blockingModels, checkFit, checkModels, decideFit, fitEach, judge, measuredFit, planLoad } from "./fit.ts";
 import { createNvidiaSmiRunner, forgetGpuReadings, GPU_APPS_ARGS, GPU_REUSE_MS, GPU_TOTALS_ARGS, parseComputeApps, parseGpuTotals, parseMemAvailable, parseMemTotal, readGpu, readMemAvailable, readNvidiaSmi } from "./gpu.ts";
 import type { NvidiaSmiRunner } from "./types.ts";
 import { readGpuStatus } from "./gpu-status.ts";
@@ -19,6 +19,8 @@ const showFixture = (name: string) => JSON.parse(fixture(name)) as { model_info:
 const MACHINE_GPU = fixture("nvidia-smi-gpu.machine.txt"); // 16303, 6458, 9468
 const MACHINE_APPS = fixture("nvidia-smi-apps.machine.txt");
 const MACHINE_MEMINFO = fixture("meminfo.machine.txt"); // MemAvailable 14822112 kB
+/** A GPU reading from nvidia-smi's totals lines, one per card. */
+const reading = (text: string) => ({ ...parseGpuTotals(text), tenants: [], measuredAt: 1 });
 const SHOW: Record<string, ReturnType<typeof showFixture>> = {
   "qwen3.5:9b": showFixture("show-qwen3-5-9b.json"),
   "gemma4-abliterated:26b": showFixture("show-gemma4-abliterated-26b.json"),
@@ -216,7 +218,8 @@ describe("nvidia-smi parsing", () => {
       expect(status.detail).toBeUndefined();
       const deps = { baseUrl: s.baseUrl, model: "qwen3.5:9b", numCtx: 16384, runNvidiaSmi: run, readMeminfo: async () => MACHINE_MEMINFO };
       await expect(checkFit(deps)).resolves.toMatchObject({ gpu: { gpuCount: 0 }, report: { verdict: "spills" } });
-      await expect(planLoad({ ...deps, busy: ["resident"] })).resolves.toMatchObject({ stop: [], report: { verdict: "spills" } });
+      // a busy reply holds a model: nothing is planned beside it, card or no card
+      await expect(planLoad({ ...deps, busy: ["resident"] })).resolves.toMatchObject({ stop: ["resident"], report: { verdict: "spills" } });
       await expect(measuredFit({ ...deps, model: "resident" })).resolves.toMatchObject({ gpu: { gpuCount: 0 }, report: { source: "measured", verdict: "fits" } });
       return;
     }
@@ -315,6 +318,47 @@ describe("nvidia-smi parsing", () => {
     expect(totals.totalBytes).toBe(16303 * MIB);
     expect(totals.freeBytes).toBe(9468 * MIB);
     expect(totals.gpuCount).toBe(1);
+  });
+
+  it("reads every card, a small display card listed first included, and counts them together", () => {
+    const totals = parseGpuTotals("2048, 310, 1738\n16303, 6458, 9468\n");
+    expect(totals).toMatchObject({ totalBytes: (2048 + 16303) * MIB, usedBytes: (310 + 6458) * MIB, freeBytes: (1738 + 9468) * MIB, gpuCount: 2 });
+    // largest first: the card the base margin is taken on
+    expect(totals.cards?.map((c) => c.totalBytes)).toEqual([16303 * MIB, 2048 * MIB]);
+  });
+
+  describe("two cards are judged together", () => {
+    const one = reading("16303, 0, 16303\n");
+    const need = 16 * GIB;
+    const memTotalBytes = 8 * GIB;
+
+    it("a model too big for the large card alone fits on both, less one margin per card", () => {
+      const both = reading("2048, 310, 1738\n16303, 0, 16303\n");
+      expect(judge("card", { model: "m", numCtx: 16384, needBytes: need, gpu: one, memTotalBytes }).verdict).toBe("spills");
+      const r = judge("card", { model: "m", numCtx: 16384, needBytes: need, gpu: both, memTotalBytes });
+      expect(r.verdict).toBe("fits");
+      // 18351 MiB of cards, 512 MiB margin on each (the server's log line is in decimal GB)
+      expect(r.message).toContain("VRAM usable 18.17 GB (19.24 GB free minus 1.07 GB margin); 0.54 GB of the margin for 1 more GPU");
+      expect(r.words?.word).toBe("Runs on GPU");
+    });
+
+    it("a small display card beside the large one never makes the verdict Too big", () => {
+      // the display card listed first was the only one read: a 2 GB card, so a 16 GB model was Too big
+      const both = reading("2048, 310, 1738\n16303, 0, 16303\n");
+      for (const basis of ["card", "now"] as const) {
+        const r = judge(basis, { model: "m", numCtx: 16384, needBytes: 12 * GIB, gpu: both, memTotalBytes, memAvailableBytes: 6 * GIB });
+        expect(r.verdict).toBe("fits");
+        expect(r.words?.short).not.toBe("Too big");
+      }
+    });
+
+    it("a card smaller than the margin adds nothing and takes nothing", () => {
+      const tiny = reading("16303, 0, 16303\n256, 0, 256\n");
+      const alone = judge("now", { model: "m", numCtx: 16384, needBytes: need, gpu: one, memTotalBytes });
+      const beside = judge("now", { model: "m", numCtx: 16384, needBytes: need, gpu: tiny, memTotalBytes });
+      expect(beside.verdict).toBe(alone.verdict);
+      expect(beside.spillRamBytes).toBe(alone.spillRamBytes);
+    });
   });
 
   it("names the tenants with whisper as the permanent one", () => {
@@ -659,34 +703,41 @@ describe("blockingModels: which busy resident models a load would push out", () 
   const QWEN27 = "qwen3.8-abliterated:27b";
   const QWEN9 = "qwen3.5:9b";
 
-  it("CPU-only plans never stop another busy reply to reclaim VRAM", async () => {
+  it("with no card a busy reply is in the way all the same, on an Ollama the person runs", async () => {
     const s = await fakeOllama({ models: [{ name: QWEN27, size: 10 * GIB, size_vram: 0, context_length: 16384 }] });
-    const base = { baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, readMeminfo: plenty, now: () => 1,
+    const base = { baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, readMeminfo: plenty, now: () => 1, holdsOne: false,
       runNvidiaSmi: async () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); } };
     const alone = await planLoad({ ...base, busy: [] });
     expect(alone.report.verdict).toBe("spills");
-    expect(await planLoad({ ...base, busy: [QWEN27] })).toEqual({ report: alone.report, stop: [] });
+    expect(await planLoad({ ...base, busy: [QWEN27] })).toEqual({ report: alone.report, stop: [QWEN27] });
   });
 
-  it("none when the model fits beside them, is resident at this num_ctx, or is the busy model itself", async () => {
+  it("an Ollama the person runs, a model that fits beside a busy reply: the reply is in the way, never planned beside", async () => {
+    // the person's own runner (holdsOne false): it would load the second model next to the busy one
+    const s = await fakeOllama(resident([{ name: QWEN27, vram: 2e9 }]));
+    const base = { baseUrl: s.baseUrl, numCtx: 16384, readMeminfo: plenty, holdsOne: false, runNvidiaSmi: gpuWith(15000) };
+    expect(await planLoad({ ...base, model: QWEN9, busy: [QWEN27] })).toMatchObject({ report: { verdict: "fits" }, stop: [QWEN27] });
+    // the reply is not busy any more: nothing is in the way
+    expect((await planLoad({ ...base, model: QWEN9, busy: [] })).stop).toEqual([]);
+    // busy, but not loaded yet (no memory held): nothing to plan beside
+    expect((await planLoad({ ...base, model: QWEN9, busy: [GEMMA] })).stop).toEqual([]);
+  });
+
+  it("none when the model is resident at this num_ctx, or is the busy model itself", async () => {
     const s = await fakeOllama(resident([{ name: QWEN27, vram: 2e9 }, { name: QWEN9, vram: 8e9 }]));
-    const base = { baseUrl: s.baseUrl, numCtx: 16384, readMeminfo: plenty };
-    expect(await blockingModels({ ...base, model: QWEN9, busy: [QWEN27], runNvidiaSmi: gpuWith(15000) })).toEqual([]);
+    const base = { baseUrl: s.baseUrl, numCtx: 16384, readMeminfo: plenty, holdsOne: false };
     expect(await blockingModels({ ...base, model: QWEN9, busy: [QWEN27], runNvidiaSmi: gpuWith(500) })).toEqual([]);
     expect(await blockingModels({ ...base, model: QWEN27, busy: [QWEN27], runNvidiaSmi: gpuWith(500) })).toEqual([]);
   });
 
-  it("the fewest, largest first, whose VRAM makes it fit", async () => {
+  it("every busy one, largest first, however few of them would make room", async () => {
     const s = await fakeOllama(resident([{ name: GEMMA, vram: 2e9 }, { name: QWEN27, vram: 12e9 }]));
-    expect(await blockingModels({ baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, busy: [GEMMA, QWEN27], runNvidiaSmi: gpuWith(500), readMeminfo: plenty })).toEqual([QWEN27]);
+    expect(await blockingModels({ baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, busy: [GEMMA, QWEN27], holdsOne: false, runNvidiaSmi: gpuWith(500), readMeminfo: plenty })).toEqual([QWEN27, GEMMA]);
   });
 
-  it("R4-04: idle resident models count first: ~1 GB free, busy 4 GB, idle 9 GB stops nothing", async () => {
+  it("R4-04: idle resident models leave, a busy one is still in the way: ~1 GB free, busy 4 GB, idle 9 GB", async () => {
     const s = await fakeOllama(resident([{ name: QWEN27, vram: 4e9 }, { name: GEMMA, vram: 9e9 }]));
-    expect(await blockingModels({ baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, busy: [QWEN27], runNvidiaSmi: gpuWith(1000), readMeminfo: plenty })).toEqual([]);
-    // Not enough idle memory alone: the busy one goes, and the idle one still counts.
-    const t = await fakeOllama(resident([{ name: QWEN27, vram: 4e9 }, { name: GEMMA, vram: 3e9 }]));
-    expect(await blockingModels({ baseUrl: t.baseUrl, model: QWEN9, numCtx: 16384, busy: [QWEN27], runNvidiaSmi: gpuWith(1000), readMeminfo: plenty })).toEqual([QWEN27]);
+    expect(await blockingModels({ baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, busy: [QWEN27], holdsOne: false, runNvidiaSmi: gpuWith(1000), readMeminfo: plenty })).toEqual([QWEN27]);
   });
 
   it("all of them when the model only spills even with them gone; none when it refuses anyway", async () => {
@@ -706,7 +757,6 @@ describe("blockingModels: which busy resident models a load would push out", () 
   it("an Ollama that holds one model never runs it beside a busy reply: the busy one is in the way however much is free", async () => {
     const s = await fakeOllama(resident([{ name: QWEN27, vram: 2e9 }]));
     const base = { baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, busy: [QWEN27], runNvidiaSmi: gpuWith(15000), readMeminfo: plenty };
-    expect(await planLoad(base)).toMatchObject({ report: { verdict: "fits" }, stop: [] });
     expect(await planLoad({ ...base, holdsOne: true })).toMatchObject({ report: { verdict: "fits" }, stop: [QWEN27] });
     // the busy model itself, already resident: nothing to replace
     expect((await planLoad({ ...base, model: QWEN27, holdsOne: true })).stop).toEqual([]);
@@ -718,7 +768,6 @@ describe("blockingModels: which busy resident models a load would push out", () 
     const s = await fakeOllama({ models: [{ name: QWEN27, size: 2e9, size_vram: 0, context_length: 16384 }] });
     const base = { baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, busy: [QWEN27], readMeminfo: plenty, now: () => 1,
       runNvidiaSmi: async () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); } };
-    expect((await planLoad(base)).stop).toEqual([]);
     expect((await planLoad({ ...base, holdsOne: true })).stop).toEqual([QWEN27]);
   });
 

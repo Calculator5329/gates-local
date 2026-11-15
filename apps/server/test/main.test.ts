@@ -155,7 +155,7 @@ describe("server CLI", () => {
       expect(status.state).toBe("ready");
     }, { timeout: 20_000 });
     expect(status).toMatchObject({ state: "ready", owner: "external", baseUrl: fake.baseUrl, version: "0.0.7-cli-fake" });
-    expect((await client.call("models.list", {})).map((m) => m.name)).toEqual(["fake:1b"]);
+    expect((await client.call("models.list", {})).models.map((m) => m.name)).toEqual(["fake:1b"]);
     client.close();
 
     expect(s.stdout).toEqual([readyLine]); // exactly one stdout line; logs went to stderr

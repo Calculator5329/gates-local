@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import type { FitTable } from "@gates-local/contracts";
 import { afterEach, expect, it } from "vitest";
-import { MIB } from "./constants.ts";
+import { MIB, VRAM_SAFETY_MARGIN_BYTES } from "./constants.ts";
 import { json, startFakeServer, type FakeServer } from "./fake-http.ts";
 import { createGpuBaseline } from "./baseline.ts";
 import { planLoad } from "./fit.ts";
@@ -263,6 +263,48 @@ it("a row names the busy chat a send stops first only when stopping it makes roo
 
 const at8k = (x: FitTable, model: string) => x.rows.find((r) => r.model === model && r.numCtx === 8192);
 
+it("an Ollama the person runs, a busy reply on a small model: a model that would fit beside it says Stops chat", async () => {
+  const OTHER = "qwen3.5:2b";
+  const otherMib = Math.round(2e9 / MIB);
+  server = await startFakeServer({
+    "GET /api/tags": (_b, res) => json(res, 200, { models: [{ name: GEMMA, size: 6e9, digest: "b" }] }),
+    "GET /api/ps": (_b, res) => json(res, 200, { models: [{ name: OTHER, model: OTHER, size: 2e9, size_vram: 2e9, context_length: 16384 }] }),
+    "POST /api/show": (_b, res) => json(res, 200, SHOW),
+  });
+  const s = server;
+  const fit = { runNvidiaSmi: card(otherMib), readMeminfo: MEMINFO, baseline: createGpuBaseline(), holdsOne: false };
+  const build = (busy: readonly string[]) => createFitTable({ baseUrl: () => s.baseUrl, fit, models: async () => [{ name: GEMMA, downloadBytes: 6e9, installed: true }], busy: () => busy, comfyPid: () => undefined, push: () => {}, boot: "b" }).get();
+  const idle = at8k(await build([]), GEMMA);
+  // room beside it: with the small model idle, nothing is in the way
+  expect(idle).toMatchObject({ verdict: "fits", stops: [] });
+  const busy = at8k(await build([OTHER]), GEMMA);
+  expect(busy?.stops).toEqual([OTHER]);
+  expect(busy?.card?.words?.short).toBe("Stops chat");
+});
+
+it("a row that says Stops chat is judged with the busy reply gone: no system memory, nothing else in the way", async () => {
+  const OTHER = "qwen3.5:9b";
+  const otherMib = Math.round(9e9 / MIB);
+  server = await startFakeServer({
+    "GET /api/tags": (_b, res) => json(res, 200, { models: [{ name: GEMMA, size: 6e9, digest: "b" }] }),
+    "GET /api/ps": (_b, res) => json(res, 200, { models: [{ name: OTHER, model: OTHER, size: 9e9, size_vram: 9e9, context_length: 16384 }] }),
+    "POST /api/show": (_b, res) => json(res, 200, SHOW),
+  });
+  const s = server;
+  for (const holdsOne of [false, true]) {
+    const fit = { runNvidiaSmi: card(otherMib), readMeminfo: MEMINFO, baseline: createGpuBaseline(), holdsOne };
+    const t = await createFitTable({ baseUrl: () => s.baseUrl, fit, models: async () => [{ name: GEMMA, downloadBytes: 6e9, installed: true }], busy: () => [OTHER], comfyPid: () => undefined, push: () => {}, boot: "b" }).get();
+    const row = at8k(t, GEMMA);
+    expect(row?.stops).toEqual([OTHER]);
+    // beside the 9 GB reply it would spill; once that reply stops it runs on the card
+    expect(row).toMatchObject({ verdict: "fits", spillRamBytes: 0 });
+    expect(row?.card).toMatchObject({ verdict: "fits", spillRamBytes: 0 });
+    expect(row?.card?.inTheWay).toBeUndefined();
+    expect(row?.card?.words).toMatchObject({ short: "Stops chat", detail: "" });
+    expect(JSON.stringify(row)).not.toContain("in system memory");
+  }
+});
+
 // Settings row 10 and its addendum, 2026-11-13: another program holding 9.7 GB made every model
 // look worse. The owner's ruling: a model is measured against the card's own memory; what other
 // programs hold right now is shown, never the verdict. Only a send (and the composer) judge right now.
@@ -315,6 +357,57 @@ it("a model is judged against the card's own memory; a send is judged right now"
   expect(busySend.freeVramBytes).toBe((16303 - 2202 - 1822 - 300 - blenderMib) * MIB);
   // The list's one line names who holds the memory, and how much.
   expect(busy.memory).toMatchObject({ kind: "gpu", freeBytes: busySend.freeVramBytes, others: { programs: ["blender"], bytes: blenderMib * MIB } });
+});
+
+/** A computer whose card nvidia-smi cannot read: the program is not there. */
+const noSmi: NvidiaSmiRunner = async () => {
+  throw Object.assign(new Error("spawn nvidia-smi ENOENT"), { code: "ENOENT" });
+};
+
+it("a card the app cannot read: a model Ollama lists on the card says so; one not loaded runs in system memory", async () => {
+  const OTHER = "qwen3.5:2b";
+  const onCard = { name: GEMMA, model: GEMMA, size: 19e9, size_vram: 19e9, context_length: 16384 };
+  const partly = { ...onCard, size_vram: 12e9 };
+  for (const [loaded, word] of [[onCard, "Runs on GPU"], [partly, "Partly in system memory, slower"]] as const) {
+    server = await startFakeServer({
+      "GET /api/tags": (_b, res) => json(res, 200, { models: [{ name: GEMMA, size: WEIGHTS, digest: "b" }, { name: OTHER, size: 2e9, digest: "c" }] }),
+      "GET /api/ps": (_b, res) => json(res, 200, { models: [loaded] }),
+      "POST /api/show": (_b, res) => json(res, 200, SHOW),
+    });
+    const s = server;
+    const t = await createFitTable({
+      baseUrl: () => s.baseUrl, fit: { runNvidiaSmi: noSmi, readMeminfo: async () => "MemTotal: 64000000 kB\nMemAvailable: 30000000 kB\n", baseline: createGpuBaseline() },
+      models: async () => [{ name: GEMMA, downloadBytes: WEIGHTS, installed: true }, { name: OTHER, downloadBytes: 2e9, installed: true }],
+      busy: () => [], comfyPid: () => undefined, push: () => {}, boot: "b",
+    }).get();
+    const row = t.rows.find((r) => r.model === GEMMA && r.numCtx === 16384);
+    // the runner's own list is the measurement: the row and its card words follow it
+    expect(row?.words?.mark, `${loaded.size_vram} on the card`).toBe(word === "Runs on GPU" ? "Runs on the GPU" : word);
+    expect(row?.card?.words?.mark).toBe(word === "Runs on GPU" ? "Runs on the GPU" : word);
+    if (loaded === partly) expect(row?.card?.spillRamBytes).toBe(row?.spillRamBytes);
+    // a model that is not loaded, with no card to read, runs in system memory
+    expect(t.rows.find((r) => r.model === OTHER)?.card?.words?.mark).toMatch(/^Runs in system memory/);
+    await server.close();
+    server = undefined;
+  }
+});
+
+/** A 2 GB display card listed first; the 16 GB card beside it holds whisper and another app. */
+const twoCards: NvidiaSmiRunner = async (args) => {
+  if (args[0]?.startsWith("--query-gpu")) return `2048, 310, 1738\n16303, ${2202 + 1822 + 300}, ${16303 - 2202 - 1822 - 300}\n`;
+  return "5100, /usr/bin/whisper-server, 2202\n5400, /opt/media-vault/vision-runtime/bin/python, 1822\n";
+};
+
+it("two cards, a small display card listed first: every row is judged against both, the line names them", async () => {
+  const s = await ollama({ models: [] });
+  const { t } = table(s, twoCards, { fit: { runNvidiaSmi: twoCards, readMeminfo: MEMINFO, baseline: createGpuBaseline() } });
+  const got = await t.get();
+  const free = (1738 + 16303 - 2202 - 1822 - 300) * MIB;
+  // one margin on each card
+  expect(got.memory).toMatchObject({ kind: "gpu", gpuCount: 2, totalBytes: (2048 + 16303) * MIB, freeBytes: free, usableBytes: free - 2 * VRAM_SAFETY_MARGIN_BYTES });
+  const rows = got.rows.filter((r) => r.model === GEMMA);
+  expect(rows.length).toBeGreaterThan(0);
+  for (const row of rows) expect(row.card?.words?.short).not.toBe("Too big");
 });
 
 it("with no runtime there are no rows, and the footer's line still reads the GPU", async () => {

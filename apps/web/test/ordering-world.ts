@@ -52,7 +52,7 @@ export class OrderingServer extends FakeServer {
   readonly cancelled: string[] = [];
   readonly labels = new Map<FakeSocket, string>();
   holdHydration = false;
-  modelsSnapshot: ResultOf<"models.list"> = methodSamples["models.list"].result;
+  modelsSnapshot: ResultOf<"models.list">["models"] = methodSamples["models.list"].result.models;
   holdChat = false;
   deferAdmission = false;
   private nextTurn = 0;
@@ -70,7 +70,7 @@ export class OrderingServer extends FakeServer {
       if (this.holdHydration && label === "A") save("snapshot", this.settings, this.settingsSync());
       else respond(this.settings, this.settingsSync());
     } else if (request.method === "models.list" && this.holdHydration && label === "A") {
-      this.log.push(request); save("hydration", this.modelsSnapshot);
+      this.log.push(request); save("hydration", { runtime: methodSamples["models.list"].result.runtime, models: this.modelsSnapshot });
     } else if (request.method === "voice.check") {
       this.log.push(request); save(`health-${++this.nextHealth}`, methodSamples["voice.check"].result);
     } else if (request.method === "settings.update") {

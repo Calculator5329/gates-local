@@ -7,7 +7,8 @@ import { type Browser, installBrowser, tick, until } from "./harness.ts";
 let b: Browser;
 let store: typeof import("../src/store.ts");
 let disconnect: (() => void) | undefined;
-const model = methodSamples["models.list"].result[0]!;
+const { runtime } = methodSamples["models.list"].result;
+const model = methodSamples["models.list"].result.models[0]!;
 const done: PullProgress = { name: model.name, state: "done", completedBytes: model.sizeBytes, totalBytes: model.sizeBytes };
 
 beforeEach(async () => {
@@ -37,7 +38,7 @@ it("holds completion until the installed list arrives, then removal cannot reviv
   await tick();
   expect(store.getState().pulls[model.name]).toBeUndefined();
   b.server.push("models.changed", []);
-  held.respond([]);
+  held.respond({ runtime, models: [] });
   await tick();
   expect(store.getState().pulls[model.name]).toBeUndefined();
 });
@@ -54,7 +55,7 @@ it("a refreshed list settles completion without needing a list push", async () =
   const refresh = b.server.hold("models.refresh");
   b.server.push("models.pull", done);
   const held = await refresh;
-  held.respond([model]);
+  held.respond({ runtime, models: [model] });
   await until(() => store.getState().models?.some((m) => m.name === model.name) === true);
   expect(store.getState().pulls[model.name]).toBeUndefined();
 });

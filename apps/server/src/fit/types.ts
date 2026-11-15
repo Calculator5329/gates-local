@@ -42,12 +42,21 @@ export interface GpuTenant {
   permanent: boolean;
 }
 
+/** One card's memory, as nvidia-smi lists it. */
+export interface GpuCard {
+  totalBytes: number;
+  usedBytes: number;
+  freeBytes: number;
+}
+
 export interface GpuSnapshot {
   totalBytes: number;
   usedBytes: number;
   freeBytes: number;
-  /** Number of GPUs nvidia-smi listed; the fit uses the first. */
+  /** Number of GPUs nvidia-smi listed; the figures above are all of them together. */
   gpuCount: number;
+  /** Each card when there are more than one, largest first (fit.ts cardMargins). */
+  cards?: readonly GpuCard[];
   /** Confirmed absence reported by nvidia-smi; absent when the executable is missing. */
   unavailableDetail?: string;
   tenants: GpuTenant[];

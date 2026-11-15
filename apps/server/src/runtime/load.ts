@@ -16,7 +16,10 @@
 // too, via residentModels()), so a model Ollama let go of leaves it with an
 // "unloaded" push. A reading of a runtime switched away from prunes nothing.
 // A preload takes the same per-model reservation as a turn, so models.remove
-// refuses while either runs.
+// refuses while either runs. A preload is a hint: while a reply runs on another
+// model (or on this one at another context) it is refused inside the gate
+// (model-in-use, nothing pushed), so it never waits behind that reply holding
+// the gate, and a send never waits behind a preload for more than its load.
 //
 // One thing in memory (gpu/memory.ts): with a memory owner, the load gate is
 // its gate, and every load and admission first runs its handoff inside it
@@ -230,6 +233,8 @@ export const PS_UNREADABLE_MESSAGE = "Could not read which models Ollama has loa
 const SHUTTING_DOWN_MESSAGE = "The app is shutting down, so no model can be loaded.";
 const SHUTDOWN_STOPPED_MESSAGE = "The app is shutting down, so this model's load was stopped.";
 const switched = () => new ModelActionError("runtime-switching", RUNTIME_SWITCHING_MESSAGE);
+/** A preload refused because a reply is running: the model loads at the send, behind its warning. */
+const behindReply = (model: string) => new ModelActionError("model-in-use", `A reply is running in another chat, so ${model} loads when you send.`);
 const withBusyNote = (report: FitReport, handoff: Handoff | undefined): FitReport =>
   report.verdict === "refuse" && handoff?.engine === "busy" ? { ...report, message: `${report.message ?? `${report.model} does not fit.`} ${ENGINE_BUSY_NOTE}` } : report;
 
@@ -377,6 +382,11 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       const before = stopped();
       if (before) return finish(before);
       if (removing.has(tag)) return finish({ model, numCtx, state: "error", message: removingMessage(model) });
+      // A preload is a hint. Beside a running reply on another model its plan names that reply in
+      // the way (fit.ts planWith), and the app's own Ollama would queue it behind the reply while it
+      // held this gate, so every send waited too. Asked here, inside the gate, so a reply that began
+      // after the client looked is seen. Refused with nothing pushed: the send loads it, and asks.
+      if ([...replying.keys()].some((t) => t !== tag)) throw behindReply(model);
       // One thing in memory: everything else is asked to leave, then this load measures.
       const handoff = await memory?.handoff(want(requested), signal);
       const afterHandoff = stopped();
@@ -401,6 +411,8 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       // Empty generate uses a runner slot too. A redundant preload could wait
       // behind its reply while holding the load gate needed by another chat.
       if (here.models.get(tag)?.contextLength === numCtx) return finish({ model, numCtx, state: "ready" });
+      // Its own reply runs at another context: Ollama would reload it under that reply, after it.
+      if (replying.has(tag)) throw behindReply(model);
       memory?.stage(want(numCtx), "loading");
       notice = openNotice(model, numCtx);
       try {
@@ -430,6 +442,8 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
     try {
       return await (deps.lease ? deps.lease.run("chat", signal, () => gate(owning)) : gate(owning));
     } catch (e) {
+      // Refused behind a running reply: the caller hears it, no client is told of a load.
+      if (e instanceof ModelActionError && e.code === "model-in-use") throw e;
       // The GPU claim was given up before it was granted (switch or shutdown), or the fit threw.
       return finish(stopped() ?? { model, numCtx, state: "error", message: `Could not load ${model}: ${(e as Error).message}` });
     }

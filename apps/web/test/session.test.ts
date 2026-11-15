@@ -18,7 +18,7 @@ let store: Store;
 
 const READY: RuntimeStatus = methodSamples["runtime.status"].result;
 const STARTING: RuntimeStatus = { state: "starting", owner: "app", baseUrl: "http://127.0.0.1:11435", detail: "Starting Ollama." };
-const MODELS = methodSamples["models.list"].result;
+const MODELS = methodSamples["models.list"].result.models;
 const userMsg = (id: string, threadId = "t1", content = "hello"): Message => ({ id, threadId, role: "user", content, createdAt: 1 });
 const asstMsg = (id: string, threadId = "t1", content = "hi there"): Message => ({ id, threadId, role: "assistant", content, model: "gemma3:4b", createdAt: 2 });
 
@@ -165,7 +165,7 @@ it.each([
   }
   const afterReceipt = latest + Number(steps.includes("foreign"));
   expect(store.getState().voiceConnectionVersion).toBe(afterReceipt);
-  hydration.respond(MODELS);
+  hydration.respond({ runtime: READY, models: MODELS });
   await until(hydrated, 2000, "hydration replay"); await tick();
   expect(store.getState().voiceConnectionVersion).toBe(afterReceipt);
 });
@@ -327,7 +327,7 @@ describe("hydration order (W-03, E-01)", () => {
     await tick();
     b.server.push("runtime.changed", READY);
     await tick();
-    h.respond(MODELS);
+    h.respond({ runtime: READY, models: MODELS });
     await until(hydrated, 2000, "hydration");
     await tick();
     expect(store.getState().runtime?.state).toBe("ready");
@@ -348,7 +348,7 @@ describe("hydration order (W-03, E-01)", () => {
     await tick();
     b.server.push("runtime.changed", READY);
     await tick();
-    h.respond(MODELS);
+    h.respond({ runtime: READY, models: MODELS });
     await until(hydrated, 3000, "hydration after reconnect");
     await tick();
     expect(store.getState().runtime?.state).toBe("ready");

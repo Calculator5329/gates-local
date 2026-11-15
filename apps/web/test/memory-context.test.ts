@@ -33,7 +33,7 @@ beforeEach(() => {
   vi.stubGlobal("window", {});
   setState({
     conn: { kind: "open" }, runtime: methodSamples["runtime.status"].result,
-    model: MODEL, numCtx: 65536, models: [{ ...methodSamples["models.list"].result[0]!, name: MODEL }],
+    model: MODEL, numCtx: 65536, models: [{ ...methodSamples["models.list"].result.models[0]!, name: MODEL }],
     settings: { ...methodSamples["settings.get"].result, defaultNumCtx: 16384 },
     fitPanel: { model: null }, gpu: methodSamples["gpu.status"].result,
     fitTable: tableOf([at(16384)]),

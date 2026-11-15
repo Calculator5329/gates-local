@@ -447,11 +447,13 @@ export const RuntimeStatus = S.Struct({
    */
   holdsOne: S.optional(S.Boolean),
   /**
-   * "error": what failed. "download": the app's own Ollama did not finish downloading (cut off,
-   * stalled or not the pinned file); "install": it came down but did not unpack or may not be
+   * "error": what failed. "download": the app's own Ollama did not finish downloading (cut off or
+   * stalled); "checksum": it came down but is not the pinned file (its checksum or size differs);
+   * "disk": the drive has too little room for it (before the download, or a write refused); the
+   * detail carries the figures; "install": it came down but did not unpack or may not be
    * installed; "start": it is there and did not start. Absent for an error from elsewhere.
    */
-  failure: S.optional(S.Literals(["download", "install", "start"])),
+  failure: S.optional(S.Literals(["download", "checksum", "disk", "install", "start"])),
   /** "installing": how far the download of the app's own Ollama is, as a model download says it. Received equals total while it is checked and unpacked. */
   install: S.optional(S.Struct({
     receivedBytes: Count,
@@ -459,6 +461,8 @@ export const RuntimeStatus = S.Struct({
     bytesPerSecond: S.optional(S.Finite),
     /** The disk the installed copy takes, from the pinned release (larger than the download, which is compressed); absent where not measured. */
     diskBytes: S.optional(Count),
+    /** No bytes for the stall time: said once, with no speed; the next bytes or a Retry's new attempt clear it. */
+    stalled: S.optional(S.Literal(true)),
   })),
 });
 export type RuntimeStatus = typeof RuntimeStatus.Type;
@@ -559,6 +563,8 @@ export const FitMemory = S.Union([
     freeBytes: Count,
     usableBytes: Count,
     totalBytes: S.optional(Count),
+    /** More than one card: the figures are them together. Absent with one. */
+    gpuCount: S.optional(Count),
     others: S.optional(S.Struct({ programs: S.Array(S.String), bytes: Count })),
   }),
   S.Struct({ kind: S.Literal("cpu"), totalBytes: S.optional(Count) }),

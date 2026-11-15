@@ -74,7 +74,7 @@ test("real model streams, stops, recalls the thread and survives a server restar
   try {
     const runtime = await server.client.call("runtime.retry", {});
     expect(runtime.state).toBe("ready");
-    const models = await server.client.call("models.refresh", {});
+    const { models } = await server.client.call("models.refresh", {});
     const installed = models.find((m) => m.name === model);
     expect(installed, `Required real model ${model} is missing; installed: ${models.map((m) => m.name).join(", ")}`).toBeDefined();
     expect(installed!.sizeBytes).toBeLessThan(1_000_000_000);

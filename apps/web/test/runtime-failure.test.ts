@@ -3,7 +3,7 @@
 // finish, with Retry; only a failed start says Ollama didn't start.
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { State } from "../src/store.ts";
 
 vi.mock("../src/store.ts", async (original) => {
@@ -53,6 +53,91 @@ it("a download that stopped says so everywhere, with Retry, and never that Ollam
     expect(p[where], where).toContain("Stopped at 0.6 of 1.5 GB");
     expect(p[where]?.match(/Ollama download/g)?.length ?? 0, where).toBeLessThanOrEqual(1);
   }
+});
+
+it("a download that didn't match its checksum says the checksum everywhere, once, and never the network", async () => {
+  const mismatch = { ...base, failure: "checksum", detail: `The Ollama download did not match its pinned checksum (expected sha256 ${"a".repeat(64)}, got ${"b".repeat(64)}). Nothing was installed. Retry once; if it fails again the release file changed and the pinned manifest needs updating.` } as const;
+  const p = await places(mismatch);
+  expect(p["gear"]).toContain("The Ollama download didn't match its checksum");
+  expect(p["settings"]).toContain("Checksum didn't match");
+  for (const where of ["banner", "first"]) expect(p[where], where).toContain("The Ollama download didn't match its checksum");
+  for (const [where, words] of Object.entries(p)) {
+    expect(words, where).not.toMatch(/network|didn't start|didn't finish|didn't install/i);
+    // the title names the checksum; the sentence under it does not say it again
+    expect(words.match(/checksum/gi)?.length ?? 0, where).toBe(1);
+  }
+  for (const where of ["banner", "first", "settings"]) expect(p[where], where).toContain("Retry");
+});
+
+it("a disk too small for Ollama says the disk everywhere, with the needed figure once, and never an unpack or the network", async () => {
+  for (const detail of ["Needs 2.4 GB free; 0.5 GB is free on this drive.", "The disk is full. Needs 2.4 GB free; 0.5 GB is free on this drive."]) {
+    const p = await places({ ...base, failure: "disk", detail });
+    for (const where of ["banner", "first", "gear"]) expect(p[where], where).toContain("Not enough disk space for Ollama");
+    expect(p["settings"]).toContain("Not enough disk space");
+    for (const [where, words] of Object.entries(p)) {
+      expect(words, where).not.toMatch(/network|unpack|didn't start|didn't install|didn't finish/i);
+      expect(words.match(/disk/gi)?.length ?? 0, where).toBe(1);
+    }
+    for (const where of ["banner", "first", "settings"]) {
+      expect(p[where]?.match(/Needs 2\.4 GB free/g)?.length ?? 0, where).toBe(1);
+      expect(p[where], where).toContain("Retry");
+    }
+  }
+});
+
+it("the server's first status, before any look, reads as a search everywhere and never as a stopped Ollama", async () => {
+  const p = await places({ state: "starting", owner: "none", baseUrl: "http://127.0.0.1:11434", detail: "Looking for Ollama." });
+  for (const [where, words] of Object.entries(p)) {
+    expect(words, where).toMatch(/Looking/);
+    expect(words, where).not.toMatch(/stopped|isn't running|Starting Ollama/i);
+  }
+});
+
+const installing = (receivedBytes: number) => ({ state: "installing", owner: "app", baseUrl: base.baseUrl, detail: "Installing Ollama.", install: { receivedBytes, totalBytes: 1_543_547_172 } }) as const;
+
+describe("a stalled engine download is one reading: the first window, the banner, the footer gear and Settings", () => {
+
+  it("once the figures have held for the stall time, every place says the download stalled", async () => {
+    const { INSTALL_STALL_MS, figuresMoved } = await import("../src/Banner.tsx");
+    figuresMoved(300_000_000, Date.now() - INSTALL_STALL_MS - 1);
+    const p = await places(installing(300_000_000));
+    for (const [where, words] of Object.entries(p)) {
+      expect(words, where).toContain("Download stalled");
+      expect(words, where).not.toContain("Downloading Ollama");
+    }
+    // the gear sends the person to Settings › Runtime, so Retry is there as on the banner and the first window
+    for (const where of ["banner", "first", "settings"]) expect(p[where], where).toContain("Retry");
+  });
+
+  it("a status the server marked stalled says so everywhere, even before this window's own clock runs out", async () => {
+    const { figuresMoved } = await import("../src/Banner.tsx");
+    figuresMoved(500_000_000, Date.now());
+    const now = installing(500_000_000);
+    const p = await places({ ...now, install: { ...now.install, stalled: true } });
+    for (const [where, words] of Object.entries(p)) expect(words, where).toContain("Download stalled");
+  });
+
+  it("the stall moment itself wakes whatever reads the runtime, with no push from the server", async () => {
+    vi.useFakeTimers();
+    try {
+      const { INSTALL_STALL_MS, rtInfo, wakeAtStall } = await import("../src/Banner.tsx");
+      setState({ ...initial, conn: { kind: "open" }, runtime: installing(400_000_000), models: [], view: "new" });
+      const gear = () => text(renderToStaticMarkup(createElement("div", null, rtInfo(getState()).text)));
+      let woke = 0;
+      const { subscribe } = await import("../src/store.ts");
+      const stop = subscribe(() => woke++);
+      wakeAtStall();
+      expect(gear()).toContain("Downloading Ollama");
+      vi.advanceTimersByTime(INSTALL_STALL_MS - 10);
+      expect(woke).toBe(0);
+      vi.advanceTimersByTime(20);
+      expect(woke).toBe(1);
+      expect(gear()).toContain("Download stalled");
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 it("a start that failed still says Ollama didn't start", async () => {

@@ -22,7 +22,7 @@ const PLAIN: ImagePreset = { ...PIXEL, id: "flux2-klein-4b-compact", name: "FLUX
 const MOSS: ImagePreset = { id: "moss-image", name: "MOSS-Image", family: "moss", measured: false, sizes: [{ width: 1024, height: 1024, bytes: 10 * GIB }, { width: 1024, height: 768, bytes: 10 * GIB }] };
 const presetsOf = (...presets: ImagePreset[]): ImagePresets => ({ presets, readAt: 1, current: { preset: presets[0] ?? PIXEL, width: 768, height: 768 } });
 const SETTINGS: Settings = { ...methodSamples["settings.get"].result, imageGen: true };
-const CHAT: ModelInfo = methodSamples["models.list"].result[0]!;
+const CHAT: ModelInfo = methodSamples["models.list"].result.models[0]!;
 
 let Composer: typeof import("../src/Composer.tsx")["Composer"];
 let ImagePicker: typeof import("../src/ImagePicker.tsx")["ImagePicker"];

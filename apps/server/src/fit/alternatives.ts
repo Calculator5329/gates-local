@@ -3,7 +3,7 @@
 // the refused load lacks, the GPU and system memory apart. Every candidate is planned on the reading
 // that refused (planWith, as the fit table's rows are), so the offer and the refusal agree.
 import type { FitOffer } from "@gates-local/contracts";
-import { DEFAULT_MARGINS, planWith, takeReadings, type FitDeps, type Margins, type Readings } from "./fit.ts";
+import { cardMargins, DEFAULT_MARGINS, planWith, takeReadings, type FitDeps, type Margins, type Readings } from "./fit.ts";
 import { GPU_REUSE_MS } from "./gpu.ts";
 import { sameModel } from "./ollama.ts";
 import { TABLE_CONTEXTS } from "./table.ts";
@@ -73,7 +73,8 @@ export async function offerFrom(deps: OfferDeps, r: Readings, refused: FitReport
       if (report !== undefined) models.push({ ...report, numCtx: deps.defaultNumCtx });
     }
   }
-  return chooseOffer({ refused, contexts, models, ...(deps.margins ? { margins: deps.margins } : {}) });
+  // the margins the refusal was judged with: one per card on a reading of more than one (cardMargins)
+  return chooseOffer({ refused, contexts, models, margins: cardMargins(deps.margins ?? DEFAULT_MARGINS, r.gpu, "now").margins });
 }
 
 /**
