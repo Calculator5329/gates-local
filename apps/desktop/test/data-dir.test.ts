@@ -2,7 +2,7 @@ import path from "node:path";
 import { mkdirSync, mkdtempSync, renameSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
-import type { OwnershipCheck } from "../../server/src/runtime/ownership.ts";
+import type { OwnershipCheck } from "@gates-local/runtime-files/ownership";
 import { modelFolderActions, serverDataDir } from "../src/data-dir.ts";
 
 const linux = { platform: "linux" as const, home: "/home/u", userData: "/home/u/.config/gates-local" };

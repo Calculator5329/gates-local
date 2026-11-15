@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { groupAlive } from "../../apps/server/src/process-state.ts";
+import { groupAlive } from "@gates-local/update/process-state";
 import { firstRunTimes } from "./first-run.ts";
 
 const seam = vi.hoisted(() => ({

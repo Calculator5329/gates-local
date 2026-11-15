@@ -4,9 +4,9 @@
 // named Gates-Local-<version>-Setup-x64.exe. No real Ollama, ComfyUI or model
 // download: the copy is told where they are not.
 //
-//   node apps/desktop/scripts/packaged-windows-update.ts --round IU-W1 --install <N Setup.exe> --newer <N+1 Setup.exe> --output <dir>
-//   node apps/desktop/scripts/packaged-windows-update.ts --round IU-W3 --newer <N+1 Setup.exe> --output <dir>
-//   node apps/desktop/scripts/packaged-windows-update.ts --round IU-W2 --newer <broken N+1 Setup.exe> --output <dir>
+//   node test/packaged/packaged-windows-update.ts --round IU-W1 --install <N Setup.exe> --newer <N+1 Setup.exe> --output <dir>
+//   node test/packaged/packaged-windows-update.ts --round IU-W3 --newer <N+1 Setup.exe> --output <dir>
+//   node test/packaged/packaged-windows-update.ts --round IU-W2 --newer <broken N+1 Setup.exe> --output <dir>
 //
 // Each round starts the installed copy (installing N first with --install),
 // serves N+1 on a loopback feed signed with a key made in this process, waits
@@ -27,9 +27,9 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createPrivateKey, createPublicKey, generateKeyPairSync } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { GatesLocalBridge } from "../src/bridge.ts";
-import { PENDING_FILE, UNINSTALLER } from "../src/installed-update/windows.ts";
-import { artifactFor, cleanEnv, watchGit } from "./packaged-copy.ts";
+import type { GatesLocalBridge } from "../../apps/desktop/src/bridge.ts";
+import { PENDING_FILE, UNINSTALLER } from "../../apps/desktop/src/installed-update/windows.ts";
+import { artifactFor, cleanEnv, watchGit } from "../../apps/desktop/scripts/packaged-copy.ts";
 import { downloadedLine } from "./update-words.ts";
 import { Checks, freePort, message, openUpdates, pause, publicKeyBase64, restartButton, rpc, seedData, shoot, startFeed, threadTitles, until, waitDownloaded } from "./installed-update-probe.ts";
 

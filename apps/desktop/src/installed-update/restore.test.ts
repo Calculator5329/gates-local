@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { realFileOps } from "./files.ts";
+import { realFileOps } from "@gates-local/update/installed/files";
 import { asideFolder, copyPath, installCopy, restoreEntry, setAside, STORE_NAME } from "./restore.ts";
 import { contents, copyStore, createStore, liveFiles, migrateWithLiveWal } from "./store-fixture.ts";
 

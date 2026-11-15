@@ -14,6 +14,9 @@ importers:
       '@gates-local/harness':
         specifier: workspace:*
         version: link:packages/harness
+      '@gates-local/update':
+        specifier: workspace:*
+        version: link:packages/update
       '@playwright/test':
         specifier: 1.61.1
         version: 1.61.1
@@ -38,6 +41,12 @@ importers:
       '@gates-local/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@gates-local/runtime-files':
+        specifier: workspace:*
+        version: link:../../packages/runtime-files
+      '@gates-local/update':
+        specifier: workspace:*
+        version: link:../../packages/update
     devDependencies:
       electron:
         specifier: ^45.2.3
@@ -51,6 +60,15 @@ importers:
       '@gates-local/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@gates-local/harness':
+        specifier: workspace:*
+        version: link:../../packages/harness
+      '@gates-local/runtime-files':
+        specifier: workspace:*
+        version: link:../../packages/runtime-files
+      '@gates-local/update':
+        specifier: workspace:*
+        version: link:../../packages/update
       '@jsquash/webp':
         specifier: 1.5.0
         version: 1.5.0
@@ -102,7 +120,23 @@ importers:
         specifier: ^4.1.2
         version: 4.1.2
 
-  packages/harness: {}
+  packages/harness:
+    dependencies:
+      '@gates-local/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+
+  packages/runtime-files:
+    dependencies:
+      effect:
+        specifier: ^4.1.2
+        version: 4.1.2
+
+  packages/update:
+    dependencies:
+      '@gates-local/contracts':
+        specifier: workspace:*
+        version: link:../contracts
 
 packages:
 

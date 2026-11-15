@@ -11,7 +11,7 @@
 // after a crash, it finishes from whatever is on disk.
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
-import { exists, identify, moveInto, removeIfPresent, sameIdentity, type FileOps } from "./files.ts";
+import { exists, identify, moveInto, removeIfPresent, sameIdentity, type FileOps } from "@gates-local/update/installed/files";
 
 export const STORE_NAME = "threads.sqlite";
 export const STORE_COPIES = "store-copies";

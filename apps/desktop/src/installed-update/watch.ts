@@ -16,20 +16,20 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import type { ProcessRecord } from "../../../server/src/update/identity.ts";
-import { acquireFileLock, type LockOptions } from "../../../server/src/update/lock.ts";
-import { verifyManifest, type ReleaseArtifact, type ReleaseManifest } from "../../../server/src/update/release-manifest.ts";
-import { compare, parseRelease } from "../../../server/src/update/semver.ts";
-import { exists, identify, ioCode, ioDest, ioPath, isFullDisk, realFileOps, sameIdentity, savedFile, type FileOps, type Identity } from "./files.ts";
+import type { ProcessRecord } from "@gates-local/update/identity";
+import { acquireFileLock, type LockOptions } from "@gates-local/update/lock";
+import { verifyManifest, type ReleaseArtifact, type ReleaseManifest } from "@gates-local/update/release-manifest";
+import { compare, parseRelease } from "@gates-local/update/semver";
+import { exists, identify, ioCode, ioDest, ioPath, isFullDisk, realFileOps, sameIdentity, savedFile, type FileOps, type Identity } from "@gates-local/update/installed/files";
 import { flushProgramFolder, holds, keepPrevious, programPaths, putBack, recoverStage, removeKept, removeStaging, renameIntoPlace, type ProgramPaths } from "./linux.ts";
 import { asideFolder, copyPath, installCopy, restoreEntry, setAside, STORE_NAME, storeVersion } from "./restore.ts";
 import type { StopPoint } from "./stop-points.ts";
 import {
   approve, LOCK_NAME, readTransaction, removeTransaction, transactionFile, UnreadableTransaction, UPDATES_FOLDER, writeIntent,
   type Approval, type Ending, type InstalledTransaction, type Intent, type TokenLaunch,
-} from "./transaction.ts";
-import * as words from "./words.ts";
-import type { PauseCause, Words } from "./words.ts";
+} from "@gates-local/update/installed/transaction";
+import * as words from "@gates-local/update/installed/words";
+import type { PauseCause, Words } from "@gates-local/update/installed/words";
 
 /** Rows L2 and B4: how long a token launch has to acknowledge. */
 export const ACK_TIMEOUT_MS = 60_000;

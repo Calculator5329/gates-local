@@ -4,7 +4,7 @@
 // Ollama would cut without saying so. Tokens are estimated: Ollama counts
 // them only after the request, and four characters a token is close enough
 // to leave the model room to answer.
-import { observationBody, type ModelMessage } from "../../../../packages/harness/src/index.ts";
+import { observationBody, type ModelMessage } from "@gates-local/harness";
 import type { TurnMessage } from "./types.ts";
 
 const MESSAGE_FRAMING_TOKENS = 4;

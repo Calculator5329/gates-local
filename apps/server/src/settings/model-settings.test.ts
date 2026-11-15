@@ -16,7 +16,6 @@ import { createSettingsHandlers } from "./handlers.ts";
 import { defaultSettings, openSettingsStore } from "./store.ts";
 import { turnSettings } from "./turn.ts";
 import { chatRequestBody } from "../chat/stream.ts";
-import { controlPatch, editControl } from "../../../web/src/instruction-draft.ts";
 
 const cleanups: Array<() => unknown> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).toReversed()) await close(); });
@@ -32,17 +31,6 @@ const decodeModelPatch = (patch: unknown) => decodeRequest(JSON.stringify({ type
 const fixture: unknown = JSON.parse(readFileSync(new URL("../fit/fixtures/show-qwen3-5-9b.json", import.meta.url), "utf8"));
 
 const MAXIMUMS = { temperature: 5, top_p: 1, top_k: 262144, repeat_penalty: 10, seed: 2147483647, num_predict: 65536, keep_alive: 604800 };
-it("MT-01: reverting 0.5 to 0.6 to 0.5 does not overwrite another client's 0.7 when seed is saved", async () => {
-  const store = await saved();
-  store.updateModel(MODEL, { temperature: 0.5 });
-  let draft = editControl(store.get().modelSettings?.[MODEL] ?? {}, {}, "temperature", "0.6");
-  draft = editControl(store.get().modelSettings?.[MODEL] ?? {}, draft, "temperature", "0.5");
-  store.updateModel(MODEL, { temperature: 0.7 });
-  draft = editControl(store.get().modelSettings?.[MODEL] ?? {}, draft, "seed", "42");
-  store.updateModel(MODEL, controlPatch(draft));
-  expect(store.get().modelSettings?.[MODEL]).toEqual({ temperature: 0.7, seed: 42 });
-  expect(draft).not.toHaveProperty("temperature");
-});
 describe("MS-02: numeric bounds and legacy settings", () => {
   it.each(Object.entries(MAXIMUMS))("refuses %s above its maximum at shared schema and wire boundaries", (key, max) => {
     expect(() => S.decodeUnknownSync(ModelSettings)({ [key]: max + 1 })).toThrow(key);

@@ -19,8 +19,8 @@
 import { type ChatModels, parseChatModels } from "@gates-local/contracts";
 import fs from "node:fs";
 import path from "node:path";
-import { verifySigned } from "../release-manifest.ts";
-import { FEED_LIMITS, type Get } from "./feed.ts";
+import { verifySigned } from "@gates-local/update/release-manifest";
+import { FEED_LIMITS, type Get } from "@gates-local/update/installed/feed";
 
 export const MODELS_SCHEMA = 1;
 export const MODELS_DIR = "models-list";

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { launchMode } from "../src/launch.ts";
-import { createUpdateAdmission } from "../../server/src/update/admission.ts";
+import { createUpdateAdmission } from "@gates-local/update/admission";
 import { RUNNING_FILE, clearRunning, readRunning, writeRunning } from "../src/running.ts";
 import { APPROVAL_DEADLINE_ENV, approvedHandoffEnv, cannotUpdate, launchApprovedUpdate, nodeCommand, onceUntilFailed, relaunchEnv, targetKind, updaterLaunch, validUpdateRequest, type UpdateControl } from "../src/update-launch.ts";
 

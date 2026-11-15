@@ -11,12 +11,12 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { defaultSettings, SETTINGS_FILE_NAME, SETTINGS_FILE_VERSION } from "../../server/src/settings/store.ts";
-import { openThreadStore } from "../../server/src/threads/store.ts";
-import { encodeManifest, signManifest } from "../../server/src/update/release-manifest.ts";
-import type { GatesLocalBridge } from "../src/bridge.ts";
-import { findFreePort } from "../src/supervisor.ts";
-import { artifactFor } from "./packaged-copy.ts";
+import { defaultSettings, SETTINGS_FILE_NAME, SETTINGS_FILE_VERSION } from "../../apps/server/src/settings/store.ts";
+import { openThreadStore } from "../../apps/server/src/threads/store.ts";
+import { encodeManifest, signManifest } from "@gates-local/update/release-manifest";
+import type { GatesLocalBridge } from "../../apps/desktop/src/bridge.ts";
+import { findFreePort } from "../../apps/desktop/src/supervisor.ts";
+import { artifactFor } from "../../apps/desktop/scripts/packaged-copy.ts";
 import { settledDownload } from "./update-words.ts";
 
 // Ports the runtime and ComfyUI own on a real machine; nothing here uses them.

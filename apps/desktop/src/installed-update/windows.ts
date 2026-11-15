@@ -20,11 +20,11 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { type Identity, updatesRoot, type Verified, verifyKept } from "../../../server/src/update/installed/download.ts";
-import { writeRecord } from "../../../server/src/update/record.ts";
-import { compare, parseRelease } from "../../../server/src/update/semver.ts";
+import { type Identity, updatesRoot, type Verified, verifyKept } from "@gates-local/update/installed/download";
+import { writeRecord } from "@gates-local/update/record";
+import { compare, parseRelease } from "@gates-local/update/semver";
 import type { UpdateAndRestartResult } from "../bridge.ts";
-import * as words from "./words.ts";
+import * as words from "@gates-local/update/installed/words";
 
 export const PENDING_FILE = "windows-pending.json";
 /** Silent, as an update (the stock close prompt is skipped), and start the app when done. */

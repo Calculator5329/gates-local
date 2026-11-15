@@ -1,7 +1,7 @@
 // Packaged probe: an installed copy shows its version and checks a signed
 // release list. Run only on the test machine, with a display:
 //
-//   node apps/desktop/scripts/packaged-installed-check.ts <test build> <plain build> [output]
+//   node test/packaged/packaged-installed-check.ts <test build> <plain build> [output]
 //
 // Linux takes two AppImages; Windows takes the installed Gates Local.exe
 // (packaged-copy.ts). Both builds are the same version N. The first was
@@ -21,10 +21,10 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
-import { defaultSettings, SETTINGS_FILE_NAME, SETTINGS_FILE_VERSION } from "../../server/src/settings/store.ts";
-import { encodeManifest, signManifest } from "../../server/src/update/release-manifest.ts";
-import type { GatesLocalBridge } from "../src/bridge.ts";
-import { artifactFor, cleanEnv, dataFolderIn, launchCopy, otherPlatform, ownPlatform, watchGit, workFolder } from "./packaged-copy.ts";
+import { defaultSettings, SETTINGS_FILE_NAME, SETTINGS_FILE_VERSION } from "../../apps/server/src/settings/store.ts";
+import { encodeManifest, signManifest } from "@gates-local/update/release-manifest";
+import type { GatesLocalBridge } from "../../apps/desktop/src/bridge.ts";
+import { artifactFor, cleanEnv, dataFolderIn, launchCopy, otherPlatform, ownPlatform, watchGit, workFolder } from "../../apps/desktop/scripts/packaged-copy.ts";
 
 const [marked, plain] = process.argv.slice(2);
 if (!marked || !plain || (marked === "-" && plain === "-")) throw new Error("Pass the test build and the plain build (\"-\" skips one).");

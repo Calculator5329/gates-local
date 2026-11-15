@@ -75,6 +75,7 @@ decision.
   as recorded in `docs/decisions.md`.
 - `packages/harness/`: the turn loop, the tools a model can call and the
   sandbox they run in.
+- `packages/update/` holds the updaters and process state both apps use; `packages/runtime-files/` holds the app's Ollama paths and ownership record. No app imports another app's files.
 
 ## Conventions
 

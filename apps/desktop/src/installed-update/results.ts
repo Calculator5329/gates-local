@@ -2,7 +2,7 @@
 // `installed` part (docs/design/installed-updates.md, section 1). The server
 // reads the same file: a token launch opens admission on the result carrying
 // its token, and the next ordinary start shows it once.
-import { readRecord, writeRecord, type InstalledRecord } from "../../../server/src/update/record.ts";
+import { readRecord, writeRecord, type InstalledRecord } from "@gates-local/update/record";
 import type { InstalledResult } from "./watch.ts";
 
 /** Written with the record's flush (file, then folder) before the watcher goes on. */

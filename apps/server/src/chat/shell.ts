@@ -1,5 +1,5 @@
 import type { ShellStatus } from "@gates-local/contracts";
-import type { SandboxProbe } from "../../../../packages/harness/src/sandbox/index.ts";
+import type { SandboxProbe } from "@gates-local/harness/sandbox";
 
 /**
  * Run commands, as Settings and the turn see it: ready only after the probe ran a command in the

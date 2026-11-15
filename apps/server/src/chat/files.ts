@@ -7,7 +7,7 @@ import { lstat, mkdir, open, readdir, realpath, unlink, utimes, type FileHandle 
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { AttachedFile } from "@gates-local/contracts";
-import type { LibraryEntry } from "../../../../packages/harness/src/index.ts";
+import type { LibraryEntry } from "@gates-local/harness";
 
 const sizeWords = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 ** 2 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 

@@ -16,7 +16,9 @@
     "smoke": "node scripts/build.ts && node scripts/smoke.ts"
   },
   "dependencies": {
-    "@gates-local/contracts": "workspace:*"
+    "@gates-local/contracts": "workspace:*",
+    "@gates-local/runtime-files": "workspace:*",
+    "@gates-local/update": "workspace:*"
   },
   "devDependencies": {
     "electron": "^45.2.3",

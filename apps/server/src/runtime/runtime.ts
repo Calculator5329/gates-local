@@ -40,7 +40,7 @@ import { forgetGpuReadings } from "../fit/gpu.ts";
 import { PINNED_OLLAMA, pinnedOllamaFor } from "./manifest.ts";
 import { InstallError, findAnyInstalled, installPinned, isInstalled } from "./install.ts";
 import { listLoaded } from "./models.ts";
-import { checkOwnership, clearRecord, listenerPid, readProc, stopOwned, writeRecord, type ProcPlatform, type StopResult, type SyncRunner } from "./ownership.ts";
+import { checkOwnership, clearRecord, listenerPid, readProc, stopOwned, writeRecord, type ProcPlatform, type StopResult, type SyncRunner } from "@gates-local/runtime-files/ownership";
 import {
   type Env,
   appModelsDir,
@@ -52,9 +52,10 @@ import {
   ownedStateFile,
   runtimeDir,
   serveLogFile,
-} from "./paths.ts";
+} from "@gates-local/runtime-files/paths";
 import { DEFAULT_PROBE_TIMEOUT_MS, type ProbeResult, portOf, probe } from "./probe.ts";
-import type { InstallManifest, OwnedRecord } from "./schemas.ts";
+import type { OwnedRecord } from "@gates-local/runtime-files/ownership";
+import type { InstallManifest } from "./schemas.ts";
 import type { InstallProgress, Listener, RuntimeStatus } from "./types.ts";
 
 export const DEFAULT_EXTERNAL_BASE_URL = "http://127.0.0.1:11434";

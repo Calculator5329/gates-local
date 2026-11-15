@@ -23,7 +23,7 @@ export interface Message {
   model?: string;
   createdAt: number;
   stats?: MessageStats;
-  tools?: import("../../../../packages/harness/src/types.ts").ToolStep[];
+  tools?: import("@gates-local/harness").ToolStep[];
   images?: string[];
   contextNotice?: string;
 }

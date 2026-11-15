@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { readRecord, RECORD_FILE, writeRecord } from "../../../server/src/update/record.ts";
+import { readRecord, RECORD_FILE, writeRecord } from "@gates-local/update/record";
 import { hasEarlierFailure, readResult, writeResult } from "./results.ts";
 import type { InstalledResult } from "./watch.ts";
 

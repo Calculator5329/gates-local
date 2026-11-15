@@ -7,7 +7,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { randomUUID } from "node:crypto";
 import { createSources, SQLITE_FILE_REFUSED } from "./index.ts";
-import { createTools, runLoop, type ModelMessage } from "../../../../packages/harness/src/index.ts";
+import { createTools, runLoop, type ModelMessage } from "@gates-local/harness";
 const isSqliteFile = (file: string) => statSync(file).isFile() && readFileSync(file).subarray(0, 16).equals(Buffer.from("SQLite format 3\0", "latin1"));
 const children: ChildProcess[] = [];
 const dirs: string[] = [];

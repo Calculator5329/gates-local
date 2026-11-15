@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto";
 import { chmodSync, closeSync, copyFileSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readSync, renameSync, rmSync, statSync, unlinkSync, writeSync } from "node:fs";
 import path from "node:path";
-import type { ReleaseArtifact } from "../../../server/src/update/release-manifest.ts";
+import type { ReleaseArtifact } from "../release-manifest.ts";
 
 export interface FileOps {
   /** Creates or truncates `file`, writes `data`, fsyncs it and closes it. */

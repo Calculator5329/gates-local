@@ -6,7 +6,7 @@
 // in the Electron profile on Windows (%APPDATA% roams) or ~/.config on Linux.
 import path from "node:path";
 import { lstatSync, realpathSync } from "node:fs";
-import type { OwnershipCheck } from "../../server/src/runtime/ownership.ts";
+import type { OwnershipCheck } from "@gates-local/runtime-files/ownership";
 
 export type DataDirInput = {
   platform: NodeJS.Platform;

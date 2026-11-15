@@ -6,11 +6,11 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { acquireFileLock } from "../../../server/src/update/lock.ts";
+import { acquireFileLock } from "@gates-local/update/lock";
 import { copyOf, launchFacts, probeUpdateLock, routeUnrouted, takeProfileLock, tokenWait } from "./routing.ts";
 import { writeResult } from "./results.ts";
-import { approve, LOCK_NAME, transactionFile, writeIntent } from "./transaction.ts";
-import { earlierFailure, otherCopy, secondLaunch } from "./words.ts";
+import { approve, LOCK_NAME, transactionFile, writeIntent } from "@gates-local/update/installed/transaction";
+import { earlierFailure, otherCopy, secondLaunch } from "@gates-local/update/installed/words";
 
 const roots: string[] = [];
 const pids: number[] = [];

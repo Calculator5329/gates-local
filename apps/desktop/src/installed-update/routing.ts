@@ -4,12 +4,12 @@
 // profile instance lock, and this copy's identity by real paths.
 import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
-import { acquireFileLock } from "../../../server/src/update/lock.ts";
-import { readRecord } from "../../../server/src/update/record.ts";
+import { acquireFileLock } from "@gates-local/update/lock";
+import { readRecord } from "@gates-local/update/record";
 import { decideUnrouted, type LaunchFacts, type UnroutedFacts } from "./launch-kinds.ts";
 import { hasEarlierFailure } from "./results.ts";
-import { LOCK_NAME, readTransaction, transactionFile, UnreadableTransaction, UPDATES_FOLDER, type InstalledTransaction } from "./transaction.ts";
-import type { Words } from "./words.ts";
+import { LOCK_NAME, readTransaction, transactionFile, UnreadableTransaction, UPDATES_FOLDER, type InstalledTransaction } from "@gates-local/update/installed/transaction";
+import type { Words } from "@gates-local/update/installed/words";
 
 export type Copy = LaunchFacts["copy"];
 

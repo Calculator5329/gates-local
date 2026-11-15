@@ -7,11 +7,11 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { CHAT_MODELS, type ChatModels } from "@gates-local/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { signManifest } from "../release-manifest.ts";
-import { FEED_LIMITS, type Fetched, type Get } from "./feed.ts";
+import { signManifest } from "@gates-local/update/release-manifest";
+import { FEED_LIMITS, type Fetched, type Get } from "@gates-local/update/installed/feed";
 import { createInstalledUpdateModule } from "./module.ts";
 import { createModelLists, encodeModelsFile, type ListOutcome, MODELS_DIR, MODELS_FILE, MODELS_SIGNATURE_FILE, type ModelListsDeps } from "./models-list.ts";
-import { BASE, LIST_URL, memoryFeed, MODELS_SIG_URL, MODELS_URL, releaseKey, SIG_URL, signedList } from "./testing.ts";
+import { BASE, LIST_URL, memoryFeed, MODELS_SIG_URL, MODELS_URL, releaseKey, SIG_URL, signedList } from "@gates-local/update/installed/testing";
 
 const key = releaseKey();
 const made: string[] = [];

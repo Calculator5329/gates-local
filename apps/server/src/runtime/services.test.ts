@@ -10,7 +10,7 @@ import { json, startFakeServer, type FakeServer, type Route } from "../fit/fake-
 import type { ImageModule } from "../image/module.ts";
 import { openThreadStore } from "../threads/store.ts";
 import { httpGet } from "./http.ts";
-import { appModelsDir, installedBinary } from "./paths.ts";
+import { appModelsDir, installedBinary } from "@gates-local/runtime-files/paths";
 import { createGpuLease, type GpuLease } from "../gpu/lease.ts";
 import { createModelServices, type ModelServices } from "./services.ts";
 import { freePort, freePortRun, removeDir, tmpDir, writeFakeBinary } from "./test-fakes.ts";

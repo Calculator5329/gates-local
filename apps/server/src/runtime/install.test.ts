@@ -3,7 +3,7 @@ import { accessSync, constants, existsSync, mkdirSync, readdirSync, writeFileSyn
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InstallError, installNeed, installPinned, shortDisk } from "./install.ts";
-import { installDir, installedBinary, runtimeDir } from "./paths.ts";
+import { installDir, installedBinary, runtimeDir } from "@gates-local/runtime-files/paths";
 import type { InstallManifest } from "./schemas.ts";
 import { FAKE_RELEASE_FORMAT, FAKE_RELEASE_LIB, type ReleaseServer, buildFakeRelease, removeDir, startReleaseServer, tmpDir } from "./test-fakes.ts";
 import type { InstallProgress } from "./types.ts";

@@ -9,7 +9,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { type AddressInfo, createServer } from "node:net";
 import path from "node:path";
-import { runtimeDir } from "../runtime/paths.ts";
+import { runtimeDir } from "@gates-local/runtime-files/paths";
 import { engineDir, engineFiles, engineRoot, isProcessorBuild, type EngineLayout } from "./engine.ts";
 import type { ComfyService } from "./service.ts";
 

@@ -2,7 +2,7 @@
 // the reply kept on disk while it streams, one more attempt after a failure of its own, and
 // what is saved however it ends.
 import type { TurnEnded } from "@gates-local/contracts";
-import type { LibraryEntry } from "../../../../packages/harness/src/index.ts";
+import type { LibraryEntry } from "@gates-local/harness";
 import { PAGE_RULE } from "../chat/pages.ts";
 import { sendTimesLine } from "../chat/send-times.ts";
 import { streamTurn, type UsageFigures } from "../chat/stream.ts";

@@ -4,9 +4,9 @@ import { constants, copyFileSync, createReadStream, existsSync, lstatSync, mkdir
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { FEED_LIMITS } from "../apps/server/src/update/installed/feed.ts";
+import { FEED_LIMITS } from "@gates-local/update/installed/feed";
 import { encodeModelsFile, MODELS_FILE, MODELS_SIGNATURE_FILE, parseModelsFile } from "../apps/server/src/update/installed/models-list.ts";
-import { encodeManifest, parseManifest, signManifest, TRUSTED_RELEASE_KEYS, validateReleaseVersion, verifyManifest, verifySigned, type ReleaseArtifact, type ReleaseManifest } from "../apps/server/src/update/release-manifest.ts";
+import { encodeManifest, parseManifest, signManifest, TRUSTED_RELEASE_KEYS, validateReleaseVersion, verifyManifest, verifySigned, type ReleaseArtifact, type ReleaseManifest } from "@gates-local/update/release-manifest";
 import { parseChatModels } from "../packages/contracts/src/chat-models.ts";
 
 const LIST_PATH = "packages/contracts/src/chat-models.json";
@@ -175,7 +175,7 @@ function readKey(value: string | undefined) {
   catch { throw new Error("Cannot read release private key; provide an Ed25519 PKCS8 PEM file"); }
 }
 async function checkTrusted(cwd: string, key: KeyObject) {
-  const source: unknown = await import(pathToFileURL(path.join(cwd, "apps/server/src/update/release-manifest.ts")).href);
+  const source: unknown = await import(pathToFileURL(path.join(cwd, "packages/update/src/release-manifest.ts")).href);
   if (typeof source !== "object" || source === null || !("TRUSTED_RELEASE_KEYS" in source) || !Array.isArray(source.TRUSTED_RELEASE_KEYS)) throw new Error("Checkout must export TRUSTED_RELEASE_KEYS");
   const publicKey = createPublicKey(key).export({ type: "spki", format: "der" }).toString("base64");
   if (!source.TRUSTED_RELEASE_KEYS.some((entry: unknown) => entry === publicKey)) throw new Error("Signing key is not in this checkout's TRUSTED_RELEASE_KEYS; add its public key and land that commit before building");

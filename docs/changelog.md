@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-15: update code shared by both apps is its own package
+
+- Internal: the update code and the Ollama file paths that the desktop and the server both use moved to `packages/update` and `packages/runtime-files`, so neither app imports the other's files. Nothing changes for the person using the app.
+
 ## 2026-11-15: the server's chat code is split by job
 
 - Internal only, nothing changes on screen: the server's chat code is now

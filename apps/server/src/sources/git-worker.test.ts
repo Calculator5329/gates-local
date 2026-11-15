@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { expect, it, vi } from "vitest";
-import { isAlive } from "../update/wait.ts";
+import { isAlive } from "@gates-local/update/wait";
 
 it.runIf(process.platform === "linux")("AW-02 Windows git worker leaves an exited root alone and waits for close", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "gl-git-worker-"));

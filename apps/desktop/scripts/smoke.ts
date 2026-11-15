@@ -35,7 +35,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { findFreePort } from "../src/supervisor.ts";
-import { processAlive } from "../../server/src/process-state.ts";
+import { processAlive } from "@gates-local/update/process-state";
 
 const root = path.resolve(import.meta.dirname, "..");
 const electronBin = createRequire(import.meta.url)("electron") as string;

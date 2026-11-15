@@ -1,9 +1,9 @@
 // One check of an installed copy: read the release list and its signature,
 // verify them with the contract reader, compare the versions. Nothing is
 // downloaded or written. The words for each outcome live in module.ts.
-import { type ReleaseArtifact, verifyManifest } from "../release-manifest.ts";
-import { compare, parseRelease } from "../semver.ts";
-import { FEED_LIMITS, type Get } from "./feed.ts";
+import { type ReleaseArtifact, verifyManifest } from "@gates-local/update/release-manifest";
+import { compare, parseRelease } from "@gates-local/update/semver";
+import { FEED_LIMITS, type Get } from "@gates-local/update/installed/feed";
 
 export type InstalledOutcome =
   /** The build's version is not major.minor.patch (the default 0.0.0-dev). */

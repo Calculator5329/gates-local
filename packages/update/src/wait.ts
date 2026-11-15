@@ -1,6 +1,6 @@
 // Waiting for the app to close before the detached updater touches the
 // checkout. An exited process awaiting reaping is already closed.
-import { processAlive as isAlive } from "../process-state.ts";
+import { processAlive as isAlive } from "./process-state.ts";
 export { isAlive };
 
 export interface WaitOptions {

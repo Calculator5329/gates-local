@@ -13,8 +13,8 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import type { ProcessRecord } from "../../../server/src/update/identity.ts";
-import { validateReleaseVersion, type ReleaseArtifact } from "../../../server/src/update/release-manifest.ts";
+import type { ProcessRecord } from "../identity.ts";
+import { validateReleaseVersion, type ReleaseArtifact } from "../release-manifest.ts";
 import { ioCode, realFileOps, type FileOps, type Identity } from "./files.ts";
 
 export const UPDATES_FOLDER = "updates";

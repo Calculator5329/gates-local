@@ -8,7 +8,7 @@
 import { type ChildProcessByStdio, execFile, spawn } from "node:child_process";
 import path from "node:path";
 import type { Readable } from "node:stream";
-import { groupAlive } from "../process-state.ts";
+import { groupAlive } from "./process-state.ts";
 import { guardTarget, testRoot } from "./guard.ts";
 import { isAlive } from "./wait.ts";
 

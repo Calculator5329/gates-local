@@ -41,6 +41,7 @@
   "devDependencies": {
     "@gates-local/contracts": "workspace:*",
     "@gates-local/harness": "workspace:*",
+    "@gates-local/update": "workspace:*",
     "@playwright/test": "1.61.1",
     "@types/node": "^26.6.6",
     "esbuild": "^0.28.2",

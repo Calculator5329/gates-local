@@ -5,8 +5,8 @@
 // rename counts. The ack is a request, not a decision: the watcher decides.
 import { closeSync, fsyncSync, openSync, readFileSync, renameSync, writeSync } from "node:fs";
 import path from "node:path";
-import type { ProcessRecord } from "../../../server/src/update/identity.ts";
-import { UPDATES_FOLDER } from "./transaction.ts";
+import type { ProcessRecord } from "@gates-local/update/identity";
+import { UPDATES_FOLDER } from "@gates-local/update/installed/transaction";
 import type { Ack } from "./watch.ts";
 
 export const ACK_NAME = "update-startup.json";

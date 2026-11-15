@@ -2,8 +2,8 @@
 import http from "node:http";
 import { describe, expect, it } from "vitest";
 import { checkInstalled, listUrls } from "./check.ts";
-import { boundedGet } from "./feed.ts";
-import { BASE, LIST_URL, memoryFeed, releaseKey, SIG_URL, signedList } from "./testing.ts";
+import { boundedGet } from "@gates-local/update/installed/feed";
+import { BASE, LIST_URL, memoryFeed, releaseKey, SIG_URL, signedList } from "@gates-local/update/installed/testing";
 
 const key = releaseKey();
 const run = (feed: ReturnType<typeof memoryFeed>, over: { version?: string; keys?: readonly string[]; platform?: string } = {}) =>

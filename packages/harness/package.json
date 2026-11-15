@@ -2,6 +2,14 @@
   "name": "@gates-local/harness",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.ts" },
-  "scripts": { "typecheck": "tsc -p tsconfig.json" }
+  "exports": {
+    ".": "./src/index.ts",
+    "./sandbox": "./src/sandbox/index.ts",
+    "./paths": "./src/paths.ts",
+    "./sql": "./src/sql.ts"
+  },
+  "scripts": { "typecheck": "tsc -p tsconfig.json" },
+  "dependencies": {
+    "@gates-local/contracts": "workspace:*"
+  }
 }

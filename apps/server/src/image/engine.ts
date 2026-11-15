@@ -12,7 +12,7 @@ import { access } from "node:fs/promises";
 import path from "node:path";
 import * as Schema from "effect/Schema";
 import { installPinned, type InstallResult, type InstallTarget } from "../runtime/install.ts";
-import { runtimeDir } from "../runtime/paths.ts";
+import { runtimeDir } from "@gates-local/runtime-files/paths";
 import { decode, InstallManifest, parseJson } from "../runtime/schemas.ts";
 import type { InstallProgress } from "../runtime/types.ts";
 

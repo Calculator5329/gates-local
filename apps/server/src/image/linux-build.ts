@@ -16,7 +16,7 @@ import { constants, readFileSync } from "node:fs";
 import { access, cp, mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { installPinned, type InstallTarget } from "../runtime/install.ts";
-import { runtimeDir } from "../runtime/paths.ts";
+import { runtimeDir } from "@gates-local/runtime-files/paths";
 import type { InstallManifest } from "../runtime/schemas.ts";
 import type { InstallProgress } from "../runtime/types.ts";
 import { ENGINE_VERSION, engineDir, engineRoot, PROCESSOR_BUILD } from "./engine.ts";

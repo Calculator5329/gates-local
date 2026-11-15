@@ -2,14 +2,14 @@
 // the server has committed the person's approval of `<version>:<list digest>`:
 // re-verify the download from its bytes, check it is the approved list, build
 // the approval with this app's process records, begin, and quit.
-import { inUpdatesFolder, type Verified } from "../../../server/src/update/installed/download.ts";
-import { INSTALL_REFUSAL, type Restart } from "../../../server/src/update/installed/module.ts";
-import type { ProcessRecord } from "../../../server/src/update/identity.ts";
+import { inUpdatesFolder, type Verified } from "@gates-local/update/installed/download";
+import { INSTALL_REFUSAL, type Restart } from "@gates-local/update/installed/copy";
+import type { ProcessRecord } from "@gates-local/update/identity";
 import type { UpdateAndRestartResult } from "../bridge.ts";
 import type { Copy } from "./routing.ts";
-import type { Approval } from "./transaction.ts";
+import type { Approval } from "@gates-local/update/installed/transaction";
 import type { Begin } from "./watch.ts";
-import * as words from "./words.ts";
+import * as words from "@gates-local/update/installed/words";
 
 export interface InstalledClick {
   readonly restart: Restart;

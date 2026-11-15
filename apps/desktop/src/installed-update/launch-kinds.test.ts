@@ -1,10 +1,10 @@
 // One row per line of the design's launch table (section 2, "Three kinds of
 // launch, one lock rule each") and each refusal.
 import { expect, it } from "vitest";
-import { STARTUP_TOKEN_ENV } from "../../../server/src/update/startup.ts";
+import { STARTUP_TOKEN_ENV } from "@gates-local/update/startup";
 import { decideLaunch, decideUnrouted, WATCH_FLAG, type LaunchFacts, type LaunchKind, type UnroutedFacts } from "./launch-kinds.ts";
-import { approve, transactionFile, type InstalledTransaction } from "./transaction.ts";
-import * as words from "./words.ts";
+import { approve, transactionFile, type InstalledTransaction } from "@gates-local/update/installed/transaction";
+import * as words from "@gates-local/update/installed/words";
 
 const here = { program: "/apps/Gates-Local.AppImage", dataDir: "/home/p/.config/gates-local-installed/data" };
 const file = transactionFile(here.dataDir);

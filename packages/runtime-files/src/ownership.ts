@@ -17,7 +17,22 @@ import { mkdirSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync,
 import { isIPv4, isIPv6 } from "node:net";
 import { endianness } from "node:os";
 import path from "node:path";
-import { OwnedRecord, decode, parseJson } from "./schemas.ts";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+
+export const OwnedRecord = Schema.Struct({
+  pid: Schema.Number,
+  startTime: Schema.String,
+  command: Schema.String,
+  baseUrl: Schema.String,
+  binary: Schema.String,
+  startedAt: Schema.Number,
+  /** OLLAMA_MODELS as given to this process, so a restart that adopts it still knows. Absent in older records. */
+  modelsDir: Schema.optional(Schema.String),
+  /** Started with OLLAMA_MAX_LOADED_MODELS=1, so an adopted copy is known to hold one model. Absent in older records. */
+  holdsOne: Schema.optional(Schema.Boolean),
+});
+export type OwnedRecord = typeof OwnedRecord.Type;
 
 export type ProcIdentity = { pid: number; startTime: string; command: string; state: string };
 
@@ -254,10 +269,14 @@ export function readRecord(file: string): OwnedRecord | undefined {
   } catch {
     return undefined;
   }
-  const json = parseJson(text);
-  if (!json.ok) return undefined;
-  const r = decode(OwnedRecord, json.value);
-  return r.ok ? r.value : undefined;
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  const r = Schema.decodeUnknownResult(OwnedRecord)(json);
+  return Result.isSuccess(r) ? r.success : undefined;
 }
 
 export function writeRecord(file: string, record: OwnedRecord): void {

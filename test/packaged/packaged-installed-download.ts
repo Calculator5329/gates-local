@@ -2,7 +2,7 @@
 // checks it against the signed release list. Run only on the test machine,
 // with a display:
 //
-//   node apps/desktop/scripts/packaged-installed-download.ts <test build> [output]
+//   node test/packaged/packaged-installed-download.ts <test build> [output]
 //
 // Linux takes the AppImage, Windows the installed Gates Local.exe
 // (packaged-copy.ts); the lists name this platform's artifact.
@@ -27,10 +27,10 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
-import { defaultSettings, SETTINGS_FILE_NAME, SETTINGS_FILE_VERSION } from "../../server/src/settings/store.ts";
-import { encodeManifest, signManifest } from "../../server/src/update/release-manifest.ts";
-import type { GatesLocalBridge } from "../src/bridge.ts";
-import { artifactFor, cleanEnv, dataFolderIn, launchCopy, ownPlatform, watchGit, workFolder } from "./packaged-copy.ts";
+import { defaultSettings, SETTINGS_FILE_NAME, SETTINGS_FILE_VERSION } from "../../apps/server/src/settings/store.ts";
+import { encodeManifest, signManifest } from "@gates-local/update/release-manifest";
+import type { GatesLocalBridge } from "../../apps/desktop/src/bridge.ts";
+import { artifactFor, cleanEnv, dataFolderIn, launchCopy, ownPlatform, watchGit, workFolder } from "../../apps/desktop/scripts/packaged-copy.ts";
 import { downloadedLine } from "./update-words.ts";
 
 const [testBuild] = process.argv.slice(2);

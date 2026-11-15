@@ -118,7 +118,7 @@ test.each(["no checkout", "wrong commit", "untrusted key", "trusted key"] as con
   const pair = generateKeyPairSync("ed25519");
   writeFileSync(key, pair.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
   const repo = path.join(f.dir, "repo"); const head = checkout(repo);
-  const trustFile = path.join(repo, "apps/server/src/update/release-manifest.ts"); mkdirSync(path.dirname(trustFile), { recursive: true });
+  const trustFile = path.join(repo, "packages/update/src/release-manifest.ts"); mkdirSync(path.dirname(trustFile), { recursive: true });
   const publicKey = pair.publicKey.export({ type: "spki", format: "der" }).toString("base64");
   // The wrong-commit case trusts the key, so only the commit check can refuse it.
   writeFileSync(trustFile, `export const TRUSTED_RELEASE_KEYS = ${JSON.stringify(scenario === "trusted key" || scenario === "wrong commit" ? [publicKey] : [])};\n`);
@@ -316,7 +316,7 @@ function modelsCheckout(trusted: boolean) {
   writeFileSync(key, pair.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
   const publicKey = pair.publicKey.export({ type: "spki", format: "der" }).toString("base64");
   const repo = path.join(dir, "repo"); checkout(repo);
-  const trustFile = path.join(repo, "apps/server/src/update/release-manifest.ts"); mkdirSync(path.dirname(trustFile), { recursive: true });
+  const trustFile = path.join(repo, "packages/update/src/release-manifest.ts"); mkdirSync(path.dirname(trustFile), { recursive: true });
   writeFileSync(trustFile, `export const TRUSTED_RELEASE_KEYS = ${JSON.stringify(trusted ? [publicKey] : [])};\n`);
   const list = path.join(repo, "packages/contracts/src/chat-models.json"); mkdirSync(path.dirname(list), { recursive: true });
   const real = path.join(import.meta.dirname, "../packages/contracts/src/chat-models.json");
@@ -330,7 +330,7 @@ test("models builds and signs a list the installed copy's reader accepts", async
   const result = run(f.repo, ["models", "--key", f.key, f.out]);
   expect(result).toMatchObject({ status: 0, output: expect.stringContaining("models.json signature: written") });
   expect(result.output).not.toContain("PRIVATE KEY");
-  const { verifySigned } = await import(pathToFileURL(path.join(import.meta.dirname, "../apps/server/src/update/release-manifest.ts")).href);
+  const { verifySigned } = await import(pathToFileURL(path.join(import.meta.dirname, "../packages/update/src/release-manifest.ts")).href);
   const { parseModelsFile } = await import(pathToFileURL(path.join(import.meta.dirname, "../apps/server/src/update/installed/models-list.ts")).href);
   const bytes = readFileSync(path.join(f.out, "models.json"));
   verifySigned(bytes, readFileSync(path.join(f.out, "models.json.sig")), [f.publicKey]);

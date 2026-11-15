@@ -8,15 +8,15 @@
 import type { UpdateCheck, UpdateCommitRequest, UpdateCommitResult, UpdatePreparation, UpdateResult, UpdateStatus, UpdateVersion } from "@gates-local/contracts";
 import { randomUUID } from "node:crypto";
 import type { HandlerContext, Handlers } from "../ws/server.ts";
-import type { Blocked, Inspection } from "./check.ts";
-import { inspect } from "./check.ts";
-import { refusalLines, stoppedLine } from "./cli.ts";
-import { STEP_WORDS } from "./apply.ts";
-import { type UpdateRecord, takeRecord } from "./record.ts";
-import type { Runner } from "./run.ts";
-import { readVersion, type VersionInfo } from "./version.ts";
-import { acquireLock } from "./lock.ts";
-import { createUpdateAdmission, UPDATE_PAUSED, type UpdateAdmission } from "./admission.ts";
+import type { Blocked, Inspection } from "@gates-local/update/check";
+import { inspect } from "@gates-local/update/check";
+import { refusalLines, stoppedLine } from "@gates-local/update/cli";
+import { STEP_WORDS } from "@gates-local/update/apply";
+import { type UpdateRecord, takeRecord } from "@gates-local/update/record";
+import type { Runner } from "@gates-local/update/run";
+import { readVersion, type VersionInfo } from "@gates-local/update/version";
+import { acquireLock } from "@gates-local/update/lock";
+import { createUpdateAdmission, UPDATE_PAUSED, type UpdateAdmission } from "@gates-local/update/admission";
 
 export interface UpdateModuleDeps {
   /** The clone the server runs from. */

@@ -7,18 +7,18 @@ import { appendFileSync, closeSync, mkdtempSync, openSync, readdirSync, readFile
 import { randomUUID } from "node:crypto";
 import { tmpdir, uptime } from "node:os";
 import path from "node:path";
-import { processRecord, startOf, treeGone, type ProcessRecord } from "../../../server/src/update/identity.ts";
-import { endTree } from "../../../server/src/update/run.ts";
-import { STARTUP_TOKEN_ENV } from "../../../server/src/update/startup.ts";
-import { processAlive } from "../../../server/src/process-state.ts";
+import { processRecord, startOf, treeGone, type ProcessRecord } from "@gates-local/update/identity";
+import { endTree } from "@gates-local/update/run";
+import { STARTUP_TOKEN_ENV } from "@gates-local/update/startup";
+import { processAlive } from "@gates-local/update/process-state";
 import { relaunchEnv } from "../update-launch.ts";
 import { waitForAck } from "./ack.ts";
 import { WATCH_FLAG } from "./launch-kinds.ts";
 import { readResult, writeResult } from "./results.ts";
 import { STOP_POINTS, type StopPoint } from "./stop-points.ts";
-import { UPDATES_FOLDER } from "./transaction.ts";
+import { UPDATES_FOLDER } from "@gates-local/update/installed/transaction";
 import type { WatcherEffects } from "./watch.ts";
-import type { Words } from "./words.ts";
+import type { Words } from "@gates-local/update/installed/words";
 
 /** Test builds only: where the run is killed (a name from stop-points.ts). */
 export const TEST_STOP_AT_ENV = "GATES_LOCAL_UPDATE_TEST_STOP_AT";

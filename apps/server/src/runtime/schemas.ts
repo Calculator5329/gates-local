@@ -1,5 +1,6 @@
 // Effect Schemas for everything the runtime module reads from outside:
-// Ollama HTTP responses, the ownership state file and the install manifest.
+// Ollama HTTP responses and the install manifest. The ownership record's
+// schema is in @gates-local/runtime-files/ownership.
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
@@ -41,20 +42,6 @@ export const GenerateResponse = Schema.Struct({
   done: Schema.optionalKey(Schema.Boolean),
   error: Schema.optionalKey(Schema.String),
 });
-
-export const OwnedRecord = Schema.Struct({
-  pid: Schema.Number,
-  startTime: Schema.String,
-  command: Schema.String,
-  baseUrl: Schema.String,
-  binary: Schema.String,
-  startedAt: Schema.Number,
-  /** OLLAMA_MODELS as given to this process, so a restart that adopts it still knows. Absent in older records. */
-  modelsDir: Schema.optional(Schema.String),
-  /** Started with OLLAMA_MAX_LOADED_MODELS=1, so an adopted copy is known to hold one model. Absent in older records. */
-  holdsOne: Schema.optional(Schema.Boolean),
-});
-export type OwnedRecord = typeof OwnedRecord.Type;
 
 export const InstallManifest = Schema.Struct({
   version: Schema.String,

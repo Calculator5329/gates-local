@@ -4,7 +4,7 @@ import path from "node:path";
 import { homedir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { createSources } from "./index.ts";
-import { createUpdateAdmission } from "../update/admission.ts";
+import { createUpdateAdmission } from "@gates-local/update/admission";
 import { createImportActivity, withImportAdmission } from "./activity.ts";
 
 it("AV-03 shutdown cancels and joins a real snapshot worker before returning", async () => {

@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +6,6 @@ import { Worker } from "node:worker_threads";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { renderStatusPage } from "../../../desktop/src/status-page.ts";
 import { StoreCopyError } from "./errors.ts";
 import { ensureMessageColumns, LATEST_VERSION, migrate, MIGRATIONS, type Migration } from "./migrations.ts";
 
@@ -423,44 +421,6 @@ describe("copies before schema upgrades", () => {
     });
     expect(() => migrate(db, path)).toThrow("because the saved copy could not be opened or read.");
     expect(version(db)).toBe(3);
-    expect(files()).toEqual([]);
-  });
-
-  it("SQLite disk-full errors reach the existing startup error page with recovery instructions", () => {
-    const { path } = fixture(3);
-    const main = new URL("../main.ts", import.meta.url).href;
-    const source = `
-      import { DatabaseSync } from 'node:sqlite';
-      import { randomUUID } from 'node:crypto';
-      const exec = DatabaseSync.prototype.exec;
-      DatabaseSync.prototype.exec = function(sql) {
-        if (sql.startsWith('VACUUM INTO')) throw Object.assign(new Error('database or disk is full'), { code: 'ERR_SQLITE_ERROR', errcode: 13 });
-        if (sql.startsWith('BEGIN')) throw new Error('migration reached a step without a saved copy');
-        return exec.call(this, sql);
-      };
-      process.argv = [process.execPath, '--port', '0', '--data-dir', ${JSON.stringify(dir)}];
-      process.env.GATES_LOCAL_SERVER_TOKEN = randomUUID();
-      const { main } = await import(${JSON.stringify(main)});
-      await main();
-    `;
-    const result = spawnSync(process.execPath, ["--input-type=module", "--eval", source], {
-      env: { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GATES_LOCAL_"))), GATES_LOCAL_RUNTIME: "discover-only", GATES_LOCAL_OLLAMA_BINARY: "none" },
-      encoding: "utf8", timeout: 10_000,
-    });
-    expect(result.error).toBeUndefined();
-    expect(result.status, result.stderr).toBe(1);
-    const message = "Gates Local could not save a copy of your chats before upgrading them, because the disk is full. Free some space and start it again. Nothing was changed.";
-    expect(result.stderr).toContain(message);
-    // The raw cause is in the server's output, on its own line before the sentence.
-    const lines = result.stderr.trim().split("\n");
-    const cause = lines.findIndex(line => line === "[server] thread store: database or disk is full");
-    expect(cause, result.stderr).toBeGreaterThanOrEqual(0);
-    expect(lines.findIndex(line => line.includes(message))).toBeGreaterThan(cause);
-    expect(renderStatusPage({ kind: "server", state: {
-      status: "crashed", launch: 1, reason: { kind: "exit", code: 1, signal: null },
-      stderrTail: result.stderr.trim().split("\n"), restartBlockedUntil: null,
-    } })).toContain(message);
-    expect(version(connect(path))).toBe(3);
     expect(files()).toEqual([]);
   });
 

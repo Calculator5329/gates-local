@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, expect, it } from "vitest";
-import { identify, realFileOps, type FileOps, type Identity } from "./files.ts";
+import { identify, realFileOps, type FileOps, type Identity } from "@gates-local/update/installed/files";
 import { holds, keepPrevious, programPaths, putBack, recoverStage, removeKept, removeStaging, replace, stage } from "./linux.ts";
 
 const roots: string[] = [];

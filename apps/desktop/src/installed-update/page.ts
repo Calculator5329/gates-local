@@ -4,7 +4,7 @@
 // release page and the one action are links, and main catches the navigation
 // (an action) or opens it in the system browser (the release page).
 import { escapeHtml } from "../status-page.ts";
-import type { Words } from "./words.ts";
+import type { Words } from "@gates-local/update/installed/words";
 
 const ACTION_SCHEME = "gates-local-update:";
 export type PageAction = "continue";

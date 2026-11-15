@@ -174,9 +174,9 @@ public keys from `GATES_LOCAL_UPDATE_TEST_KEYS` (comma-separated base64
 SPKI) and accepts a loopback `http` feed, so a packaged run can serve its
 own signed lists. `pnpm release:artifact` refuses to run while
 `GATES_LOCAL_TEST_BUILD` is set, so a test build never becomes a release
-artifact. `apps/desktop/scripts/packaged-installed-check.ts` drives a test
+artifact. `test/packaged/packaged-installed-check.ts` drives a test
 build and a plain build through every Updates state.
-`apps/desktop/scripts/packaged-installed-download.ts` drives a test build
+`test/packaged/packaged-installed-download.ts` drives a test build
 through each download state and counts the requests its feed answers.
 
 ### Linux checkpoint, 2026-11-09
@@ -241,7 +241,7 @@ developer paths. They did not establish developer/installed isolation.
 ```sh
 GATES_LOCAL_BUILD_VERSION=0.0.1-test pnpm package:linux
 GATES_LOCAL_BUILD_VERSION=0.0.2-test pnpm package:linux
-node apps/desktop/scripts/packaged-upgrade.ts dist/installer/Gates-Local-0.0.1-test-x86_64.AppImage dist/installer/Gates-Local-0.0.2-test-x86_64.AppImage
+node test/packaged/packaged-upgrade.ts dist/installer/Gates-Local-0.0.1-test-x86_64.AppImage dist/installer/Gates-Local-0.0.2-test-x86_64.AppImage
 node apps/desktop/scripts/packaged-normal.ts dist/installer/Gates-Local-0.0.2-test-x86_64.AppImage
 ```
 
@@ -303,7 +303,7 @@ The run exited 0 with no remaining owned processes, and wrote
 ```sh
 GATES_LOCAL_BUILD_VERSION=0.0.3-test pnpm package:linux
 GATES_LOCAL_BUILD_VERSION=0.0.4-test pnpm package:linux
-node apps/desktop/scripts/packaged-upgrade.ts dist/installer/Gates-Local-0.0.3-test-x86_64.AppImage dist/installer/Gates-Local-0.0.4-test-x86_64.AppImage dist/pk01-upgrade
+node test/packaged/packaged-upgrade.ts dist/installer/Gates-Local-0.0.3-test-x86_64.AppImage dist/installer/Gates-Local-0.0.4-test-x86_64.AppImage dist/pk01-upgrade
 ```
 
 This still uses extraction mode and `--no-sandbox` in the Linux test
@@ -486,14 +486,14 @@ Each round needs installers built natively from the branch as test builds:
 one version per installer (for example a, b, c, d = N, N+1, N+2, N+3). Record
 every location absent first, and clean them afterwards.
 
-`apps/desktop/scripts/packaged-windows-update.ts` runs a round on Windows,
+`test/packaged/packaged-windows-update.ts` runs a round on Windows,
 from the source folder, with no `GATES_LOCAL_*` variable set and no git on
 `PATH`:
 
 ```powershell
-node apps/desktop/scripts/packaged-windows-update.ts --round IU-W1 --install <a Setup.exe> --newer <b Setup.exe> --output <dir>
-node apps/desktop/scripts/packaged-windows-update.ts --round IU-W3 --newer <c Setup.exe> --output <dir>
-node apps/desktop/scripts/packaged-windows-update.ts --round IU-W2 --newer <d Setup.exe> --output <dir>
+node test/packaged/packaged-windows-update.ts --round IU-W1 --install <a Setup.exe> --newer <b Setup.exe> --output <dir>
+node test/packaged/packaged-windows-update.ts --round IU-W3 --newer <c Setup.exe> --output <dir>
+node test/packaged/packaged-windows-update.ts --round IU-W2 --newer <d Setup.exe> --output <dir>
 ```
 
 Run them in that order: IU-W1 installs a, the next two start from what the
@@ -549,7 +549,7 @@ pnpm release:keygen --out "$HOME/.local/share/gates-release-signing/release.pem"
 
 The command prints only the public key, as a base64 Ed25519 SPKI string.
 Add that string to `TRUSTED_RELEASE_KEYS` in
-`apps/server/src/update/release-manifest.ts`, then land that commit before
+`packages/update/src/release-manifest.ts`, then land that commit before
 building any release that uses this key. The source list has held one key
 since 2026-11-11. A build from before that commit has no release key and
 cannot check updates.

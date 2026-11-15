@@ -2,10 +2,10 @@
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
-import type { Relaunch } from "../../server/src/update/cli.ts";
-import { createProcessRecorder, startOf, treeGone, type ProcessRecord } from "../../server/src/update/identity.ts";
-import { endTree, type EndTreeOptions } from "../../server/src/update/run.ts";
-import { STARTUP_TOKEN_ENV, type StartupProcess } from "../../server/src/update/startup.ts";
+import type { Relaunch } from "@gates-local/update/cli";
+import { createProcessRecorder, startOf, treeGone, type ProcessRecord } from "@gates-local/update/identity";
+import { endTree, type EndTreeOptions } from "@gates-local/update/run";
+import { STARTUP_TOKEN_ENV, type StartupProcess } from "@gates-local/update/startup";
 import { relaunchEnv } from "./update-launch.ts";
 
 export interface RelaunchDeps {

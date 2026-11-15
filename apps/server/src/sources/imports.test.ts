@@ -6,13 +6,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createTools } from "../../../../packages/harness/src/tools.ts";
+import { createTools } from "@gates-local/harness";
 import { createSources } from "./index.ts";
 import { createLibraryImports } from "./imports.ts";
 import { cloneRepository, githubRepo, importSize, REPO_BYTES, runGit, type GitTransport } from "./clone.ts";
 import { SAMPLES, type PinnedSample } from "./samples.ts";
 import { createImportActivity } from "./activity.ts";
-import { createUpdateAdmission } from "../update/admission.ts";
+import { createUpdateAdmission } from "@gates-local/update/admission";
 
 const roots: string[] = [];
 afterEach(() => { vi.unstubAllEnvs(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

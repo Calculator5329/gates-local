@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { refusalLines } from "./cli.ts";
+import { refusalLines } from "@gates-local/update/cli";
 import { resultLine } from "./module.ts";
 
 it.each([

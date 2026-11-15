@@ -7,9 +7,9 @@ import fs from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LIST_FILE, SIGNATURE_FILE, verifyPrepared } from "../../../server/src/update/installed/download.ts";
-import { artifactFile, listFor, releaseKey, sha512 } from "../../../server/src/update/installed/testing.ts";
-import { readRecord } from "../../../server/src/update/record.ts";
+import { LIST_FILE, SIGNATURE_FILE, verifyPrepared } from "@gates-local/update/installed/download";
+import { artifactFile, listFor, releaseKey, sha512 } from "@gates-local/update/installed/testing";
+import { readRecord } from "@gates-local/update/record";
 import { goBackInstaller, INSTALLER_ARGS, pendingFile, settlePending, startInstaller, startWindowsUpdate, writePending, type WindowsClick } from "./windows.ts";
 
 const key = releaseKey();

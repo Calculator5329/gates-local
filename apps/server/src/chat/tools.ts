@@ -1,12 +1,12 @@
 import * as S from "effect/Schema";
-import { createTools, runLoop, toolBlock, type LibraryEntry, type ModelEvent, type ModelMessage, type ToolCall, type ToolResult } from "../../../../packages/harness/src/index.ts";
+import { createTools, runLoop, toolBlock, type LibraryEntry, type ModelEvent, type ModelMessage, type ToolCall, type ToolResult } from "@gates-local/harness";
 import { STREAM_LINE_LIMIT, STREAM_LINE_TOO_LONG, streamTurn, usageFigures, type StreamTurnInput } from "./stream.ts";
 import type { ChatEvent as PlainChatEvent } from "./types.ts";
 import type { ShellStatus } from "@gates-local/contracts";
 import { contextWords, estimateTokens, fitRound, fitToWindow } from "./window.ts";
 import { ollamaSettings } from "../settings/turn.ts";
 import { sendMark, sendSpan } from "./send-times.ts";
-type ChatEvent = PlainChatEvent | { type: "tool"; step: import("../../../../packages/harness/src/types.ts").ToolStep };
+type ChatEvent = PlainChatEvent | { type: "tool"; step: import("@gates-local/harness").ToolStep };
 
 export interface ToolTurnInput extends StreamTurnInput {
   sources: readonly LibraryEntry[];

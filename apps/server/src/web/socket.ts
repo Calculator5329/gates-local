@@ -20,7 +20,7 @@ import { type BigIntStats, lstatSync, mkdirSync, unlinkSync } from "node:fs";
 import type { Server } from "node:http";
 import { connect } from "node:net";
 import path from "node:path";
-import { acquireFileLock } from "../update/lock.ts";
+import { acquireFileLock } from "@gates-local/update/lock";
 
 /** Linux sun_path is 108 bytes including the terminating NUL. */
 const MAX_SOCKET_PATH_BYTES = 107;

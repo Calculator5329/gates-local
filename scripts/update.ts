@@ -13,9 +13,9 @@ import { serverDataDir } from "../apps/desktop/src/data-dir.ts";
 import { readRunning } from "../apps/desktop/src/running.ts";
 import { APPROVAL_DEADLINE_ENV } from "../apps/desktop/src/update-launch.ts";
 import { createRelaunch } from "../apps/desktop/src/update-relaunch.ts";
-import type { Pnpm } from "../apps/server/src/update/apply.ts";
-import { runCli } from "../apps/server/src/update/cli.ts";
-import { isAlive } from "../apps/server/src/update/wait.ts";
+import type { Pnpm } from "@gates-local/update/apply";
+import { runCli } from "@gates-local/update/cli";
+import { isAlive } from "@gates-local/update/wait";
 
 const root = path.resolve(import.meta.dirname, "..");
 const env = process.env;

@@ -4,13 +4,13 @@ import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { acquireFileLock } from "../../../server/src/update/lock.ts";
+import { acquireFileLock } from "@gates-local/update/lock";
 import { holds } from "./linux.ts";
 import { contents, copyStore } from "./store-fixture.ts";
-import { updateLockFile, type InstalledTransaction } from "./transaction.ts";
+import { updateLockFile, type InstalledTransaction } from "@gates-local/update/installed/transaction";
 import { beginUpdate, resumeWatcher, retryCleanup, runWatcher, type WatcherEffects } from "./watch.ts";
 import { attempt, BEFORE, checkInvariants, FROM, MIGRATED, newLog, removeWorlds, STORE_AFTER, STORE_BEFORE, TO, World, type Fault, type RunEnd, type RunLog } from "./watch-fixture.ts";
-import * as words from "./words.ts";
+import * as words from "@gates-local/update/installed/words";
 
 afterEach(removeWorlds);
 

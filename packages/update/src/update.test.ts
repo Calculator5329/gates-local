@@ -935,7 +935,7 @@ const stageThenEdit = () => {
   writeFileSync(path.join(r.clone, "other.txt"), "working\n");
 };
 
-const scripts = (file: string) => (JSON.parse(readFileSync(path.join(import.meta.dirname, "../../../..", file), "utf8")) as { scripts: Record<string, string> }).scripts;
+const scripts = (file: string) => (JSON.parse(readFileSync(path.join(import.meta.dirname, "../../..", file), "utf8")) as { scripts: Record<string, string> }).scripts;
 
 describe("the person changes the copy while it installs", () => {
   it("keeps a staged version and the working copy: no automatic reset, and the steps by hand", async () => {

@@ -15,7 +15,7 @@
 // the window runs it later (score.ts). Nothing here takes the GPU lease or checks the fit: the
 // caller does both before it calls measureModel.
 import { MEASURE_VERSION, type MeasureCheck, type ModelMeasure, type ShellStatus, type ToolStep } from "@gates-local/contracts";
-import { createTools, type LibraryEntry, type ToolCall, type ToolResult } from "../../../../packages/harness/src/index.ts";
+import { createTools, type LibraryEntry, type ToolCall, type ToolResult } from "@gates-local/harness";
 import { streamToolTurn } from "../chat/tools.ts";
 import type { TurnMessage } from "../chat/types.ts";
 import { BUDGET, CASES, SHOP_ID, pageIn, type MeasureCase, type Turn } from "./cases.ts";

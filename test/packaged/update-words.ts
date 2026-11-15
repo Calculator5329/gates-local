@@ -4,8 +4,8 @@
 // footer's name from the sidebar (updateIcon).
 import { expect, type Locator } from "@playwright/test";
 import type { UpdateStatus } from "@gates-local/contracts";
-import { downloadLines, type Restart } from "../../server/src/update/installed/module.ts";
-import { updateIcon } from "../../web/src/update-state.ts";
+import { downloadLines, type Restart } from "@gates-local/update/installed/copy";
+import { updateIcon } from "../../apps/web/src/update-state.ts";
 
 /**
  * The line a copy shows once a download is checked. restart is what this copy

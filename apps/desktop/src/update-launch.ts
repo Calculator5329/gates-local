@@ -12,7 +12,7 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { uptime } from "node:os";
-import { HANDOFF_GRACE_MS } from "../../server/src/update/admission.ts";
+import { HANDOFF_GRACE_MS } from "@gates-local/update/admission";
 import { BACKGROUND_ENV, BACKGROUND_FLAG } from "./launch.ts";
 import type { UpdateCommitRequest, UpdateCommitResult, UpdateInstallRequest } from "@gates-local/contracts";
 import type { UpdateAndRestartResult } from "./bridge.ts";

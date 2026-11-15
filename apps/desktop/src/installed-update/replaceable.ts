@@ -3,7 +3,7 @@
 // main and handed to the server in GATES_LOCAL_INSTALLED_RESTART.
 import { closeSync, existsSync, openSync, realpathSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
-import type { Restart } from "../../../server/src/update/installed/module.ts";
+import type { Restart } from "@gates-local/update/installed/copy";
 import { UNINSTALLER } from "./windows.ts";
 
 export interface ReplaceFacts {

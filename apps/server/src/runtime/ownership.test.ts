@@ -18,7 +18,7 @@ import {
   writeRecord,
   type ListenerFs,
   type SyncRunner,
-} from "./ownership.ts";
+} from "@gates-local/runtime-files/ownership";
 import { removeDir, spawnSleeper, tmpDir } from "./test-fakes.ts";
 
 let work: string;

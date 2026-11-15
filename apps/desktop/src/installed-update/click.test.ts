@@ -2,10 +2,10 @@
 // against the approved target, build the approval, begin, quit. Every refusal
 // has its sentence, and nothing is written or spawned on one.
 import { describe, expect, it } from "vitest";
-import type { Verified } from "../../../server/src/update/installed/download.ts";
-import type { ReleaseArtifact } from "../../../server/src/update/release-manifest.ts";
+import type { Verified } from "@gates-local/update/installed/download";
+import type { ReleaseArtifact } from "@gates-local/update/release-manifest";
 import { startInstalledUpdate, type InstalledClick } from "./click.ts";
-import type { Approval } from "./transaction.ts";
+import type { Approval } from "@gates-local/update/installed/transaction";
 import type { Begin } from "./watch.ts";
 
 const DIGEST = "a".repeat(128);

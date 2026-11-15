@@ -4,8 +4,8 @@ import { homedir } from "node:os";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import { compare, newestRelease, parseRelease } from "../apps/server/src/update/semver.ts";
-import { groupAlive, processAlive } from "../apps/server/src/process-state.ts";
+import { compare, newestRelease, parseRelease } from "@gates-local/update/semver";
+import { groupAlive, processAlive } from "@gates-local/update/process-state";
 
 export interface Totals { passed: number; failed: number; skipped: number }
 export interface Step { name: string; blocking: boolean; status: "passed" | "failed"; exitCode: number; durationMs: number }

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { urlsFromText } from "../../contracts/src/links.ts";
+import { urlsFromText } from "@gates-local/contracts";
 import { createCallHold, createTextView, looseCall, parseTextCalls, partialAnswer, repairCall } from "./parser.ts";
 import type { ToolDefinition } from "./prompt.ts";
 import type { LoopEvent, ModelEvent, ModelMessage, ModelStream, ToolCall, ToolResult, ToolStep } from "./types.ts";

@@ -6,8 +6,8 @@
 // Linux launch, which shares the data folder.
 import { app, BrowserWindow, Menu, shell, type BrowserWindowConstructorOptions } from "electron";
 import path from "node:path";
-import { acquireFileLock } from "../../../server/src/update/lock.ts";
-import { STARTUP_TOKEN_ENV } from "../../../server/src/update/startup.ts";
+import { acquireFileLock } from "@gates-local/update/lock";
+import { STARTUP_TOKEN_ENV } from "@gates-local/update/startup";
 import { hidesMenu } from "../keys.ts";
 import { openOutside } from "../links.ts";
 import { dataUrl } from "../status-page.ts";
@@ -15,9 +15,9 @@ import { logLine, sweepOwnTmp, watcherEffects } from "./handoff.ts";
 import { decideLaunch, WATCH_FLAG } from "./launch-kinds.ts";
 import { pageAction, renderUpdatePage, type PageAction } from "./page.ts";
 import { launchFacts, routeUnrouted, takeProfileLock, type Copy } from "./routing.ts";
-import { updateLockFile } from "./transaction.ts";
+import { updateLockFile } from "@gates-local/update/installed/transaction";
 import { resumeWatcher, retryCleanup, runWatcher } from "./watch.ts";
-import type { Words } from "./words.ts";
+import type { Words } from "@gates-local/update/installed/words";
 
 export interface InstalledHost {
   readonly copy: Copy;

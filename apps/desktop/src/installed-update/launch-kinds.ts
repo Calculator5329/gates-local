@@ -9,10 +9,10 @@
 // `acquireFileLock` judges it: "held" means a live owner other than this
 // process; an owner that is dead by pid and start time counts as free,
 // because the lock can be taken over.
-import { STARTUP_TOKEN_ENV } from "../../../server/src/update/startup.ts";
-import { transactionFile, type InstalledTransaction } from "./transaction.ts";
-import * as words from "./words.ts";
-import type { Words } from "./words.ts";
+import { STARTUP_TOKEN_ENV } from "@gates-local/update/startup";
+import { transactionFile, type InstalledTransaction } from "@gates-local/update/installed/transaction";
+import * as words from "@gates-local/update/installed/words";
+import type { Words } from "@gates-local/update/installed/words";
 
 /** Passed only by the old main at row H: `--gates-local-update-watch=<transaction file>`. */
 export const WATCH_FLAG = "--gates-local-update-watch";

@@ -19,6 +19,8 @@
 // the checked installer silently, and the row says how to go back, naming
 // the running version's kept installer, which no cleanup deletes. Any other
 // copy keeps its checked download, and the desktop app opens its folder.
+// What this module and the desktop app share (the environment between them,
+// the feed, Restart and the download's words) is @gates-local/update/installed/copy.
 //
 // Results: the watcher leaves one in update-result.json. A token launch
 // (GATES_LOCAL_UPDATE_STARTUP_TOKEN) keeps admission closed until it reads a
@@ -27,91 +29,24 @@
 // The automatic timer (automatic.ts) and the updateAutomatic switch are shared
 // with the clone updater unchanged; its hourly check is also the download's
 // retry. Settings reads the switch itself for the bracketed sentences.
-import type { UpdateCheck, UpdateCommitRequest, UpdateDownload, UpdatePreparation, UpdateResult, UpdateStatus } from "@gates-local/contracts";
+import type { UpdateCheck, UpdateCommitRequest, UpdatePreparation, UpdateResult, UpdateStatus } from "@gates-local/contracts";
 import { randomUUID } from "node:crypto";
-import fs from "node:fs";
-import { cannotReplace, type CannotReplace, downloaded, earlierFailure, keptDownload, pinnedDataFolder, readyWindows } from "../../../../desktop/src/installed-update/words.ts";
-import { createUpdateAdmission, FINISHING, UPDATE_PAUSED, type UpdateAdmission } from "../admission.ts";
-import { REPO_URL } from "../cli.ts";
+import { cannotReplace, earlierFailure, pinnedDataFolder } from "@gates-local/update/installed/words";
+import { createUpdateAdmission, FINISHING, UPDATE_PAUSED, type UpdateAdmission } from "@gates-local/update/admission";
 import type { UpdateModule } from "../module.ts";
-import { readRecord, removeRecord, takeRecord, type UpdateRecord, writeRecord } from "../record.ts";
-import { parseReleaseKey, type ReleaseArtifact, TRUSTED_RELEASE_KEYS } from "../release-manifest.ts";
+import { readRecord, removeRecord, takeRecord, type UpdateRecord, writeRecord } from "@gates-local/update/record";
+import type { ReleaseArtifact } from "@gates-local/update/release-manifest";
 import { checkInstalled, type InstalledOutcome } from "./check.ts";
-import { type DownloadOutcome, downloadRelease, inUpdatesFolder, listHash, preparedRelease, removeVersions, type Space, type Verified, verifyKept } from "./download.ts";
-import { boundedGet, type Get, refusedAddress, type Stream, streamGet } from "./feed.ts";
+import { canRestart, downloadLines, type Fetch, type GoBack, INSTALL_REFUSAL, INSTALLED_VERSION_ENV, type InstalledFeed, installedTarget, type Restart, runningAppImage } from "@gates-local/update/installed/copy";
+import { type DownloadOutcome, downloadRelease, inUpdatesFolder, listHash, preparedRelease, removeVersions, type Space, type Verified, verifyKept } from "@gates-local/update/installed/download";
+import { boundedGet, type Get, type Stream, streamGet } from "@gates-local/update/installed/feed";
 import type { ModelLists } from "./models-list.ts";
-
-export const INSTALLED_VERSION_ENV = "GATES_LOCAL_INSTALLED_VERSION";
-export const FEED_ENV = "GATES_LOCAL_UPDATE_FEED";
-export const TEST_KEYS_ENV = "GATES_LOCAL_UPDATE_TEST_KEYS";
-
-/** B: the public repository's release pages, from the same address the clone updater uses. */
-export const DEFAULT_FEED = new URL(`${REPO_URL.replace(/\.git$/, "")}/releases`);
-
-export interface InstalledFeed {
-  readonly base: URL;
-  /** The page the words send a person to: B/latest. */
-  readonly page: string;
-  readonly keys: readonly string[];
-  readonly allowLoopbackHttp: boolean;
-}
-
-/**
- * Where an installed copy checks and which keys it trusts. testBuild is true
- * only when the packaged copy holds resources/test-build.json: then, and only
- * then, GATES_LOCAL_UPDATE_TEST_KEYS is read and a loopback http feed is
- * accepted. GATES_LOCAL_UPDATE_FEED may name another https base in any copy.
- */
-export function installedFeed(env: NodeJS.ProcessEnv, o: { readonly testBuild: boolean; readonly trusted?: readonly string[]; readonly log?: (line: string) => void }): InstalledFeed {
-  const log = o.log ?? (() => undefined);
-  let base = DEFAULT_FEED;
-  const override = env[FEED_ENV] ?? "";
-  if (override !== "") {
-    let url: URL | undefined;
-    try { url = new URL(override); } catch { log(`${FEED_ENV} is not an address; using the release page`); }
-    if (url !== undefined) {
-      const refused = url.search !== "" || url.hash !== "" ? "an address with a query or fragment" : refusedAddress(url, o.testBuild);
-      if (refused === null) base = url;
-      else log(`${FEED_ENV} names ${refused}; using the release page`);
-    }
-  }
-  const keys = [...(o.trusted ?? TRUSTED_RELEASE_KEYS)];
-  if (o.testBuild) {
-    for (const key of (env[TEST_KEYS_ENV] ?? "").split(",").map((k) => k.trim()).filter((k) => k !== "")) {
-      try { parseReleaseKey(key); keys.push(key); }
-      catch { log(`${TEST_KEYS_ENV} holds an entry that is not a release key; it is ignored`); }
-    }
-  }
-  return { base, page: `${base.href.replace(/\/+$/, "")}/latest`, keys, allowLoopbackHttp: o.testBuild };
-}
 
 /** The installed module when the desktop app said this is an installed copy, else the clone updater. */
 export function chooseUpdateModule(env: NodeJS.ProcessEnv, build: { readonly installed: (version: string) => UpdateModule; readonly clone: () => UpdateModule }): UpdateModule {
   const version = env[INSTALLED_VERSION_ENV] ?? "";
   return version === "" ? build.clone() : build.installed(version);
 }
-
-export const INSTALL_REFUSAL = "This installed copy of Gates Local cannot update itself yet. Download the new version from the release page.";
-
-export const RESTART_ENV = "GATES_LOCAL_INSTALLED_RESTART";
-/**
- * Whether this copy can replace its own file, as the desktop app found it at
- * startup (section 2, "Who may update"): yes, one of the refusal cases,
- * windows for an install made by the Windows installer (section 3, W-A: the
- * checked installer runs silently), or none, for a copy with no installer
- * step, which keeps the old words.
- */
-export type Restart = "yes" | "windows" | "none" | "pinned" | CannotReplace;
-const RESTARTS: readonly Restart[] = ["yes", "windows", "none", "pinned", "read-only", "no-permission", "not-appimage", "download-folder"];
-export const parseRestart = (value: string | undefined): Restart => RESTARTS.find((r) => r === value) ?? "none";
-/** Restart to update is offered: an AppImage that can replace its file, or a Windows install. */
-export const canRestart = (restart: Restart): restart is "yes" | "windows" => restart === "yes" || restart === "windows";
-
-/** Where a Windows copy goes back to (section 3, W-A step 2): its own version's kept installer, else that version's release page. */
-export type GoBack = { readonly installer: string } | { readonly current: string; readonly releasePage: string };
-
-/** The admission target of an installed copy: the version and the SHA-512 of the exact signed list bytes. */
-export const installedTarget = (version: string, listDigest: string) => `${version}:${listDigest}`;
 
 const blocked = (message: string) => ({ state: "blocked" as const, message });
 
@@ -147,56 +82,6 @@ export function installedCheck(outcome: InstalledOutcome, o: { readonly version:
         : `Version ${outcome.target} is available, but this copy cannot install it by itself. Download it from the release page.`;
       return { state: "newer", checkedAt, current: o.version, target: outcome.target, forThisCopy, lines: [line], page };
     }
-  }
-}
-
-/** Where the download of version target stands, with what its words need. */
-export type Fetch =
-  | { readonly state: "downloading"; readonly received: number; readonly total: number }
-  | { readonly state: "disk"; readonly volume: string; readonly needed: number; readonly free: number }
-  | { readonly state: Exclude<UpdateDownload, "downloading" | "disk"> };
-
-const MB = 1_000_000;
-/** Megabytes for the words: one decimal under 10 MB, whole above. */
-function mb(bytes: number, round: (n: number) => number = Math.round): string {
-  const value = bytes / MB;
-  return value < 10 ? (round(value * 10) / 10).toFixed(1) : String(round(value));
-}
-
-/** The download's words, in place of "Version <new> is available.".
- *  Ready: a copy that can restart into it says so beside its Restart button (a Windows copy also says how to go back). Any other
- *  keeps the checked file and says, in one line that fits the card, what to do with it; Settings opens its folder. */
-export function downloadLines(target: string, fetch: Fetch, restart: Restart = "none", goBack?: GoBack, platform: string = process.platform, program: string | null = null): string[] {
-  switch (fetch.state) {
-    case "downloading":
-      return [`Downloading version ${target} (${mb(fetch.received, Math.floor)} of ${mb(fetch.total)} MB). You can keep chatting.`];
-    case "bad":
-      return [`The download of version ${target} did not match the signed release list, so it was deleted.`];
-    case "failed":
-      return [`Could not download version ${target}. Check your connection.`];
-    case "disk":
-      // Needed rounds up and free rounds down, so the two never read equal when the space is short.
-      return [`Not enough free space on ${fetch.volume} for version ${target} (needs ${mb(fetch.needed, Math.ceil)} MB, ${mb(fetch.free, Math.floor)} MB free). Free some space, then use Check for updates.`];
-    case "ready":
-      if (restart === "yes") return [downloaded(target).text];
-      if (restart === "windows") {
-        const detail = goBack === undefined ? undefined : readyWindows(target, goBack).detail;
-        return [downloaded(target).text, ...(detail === undefined ? [] : [detail])];
-      }
-      // Nothing is downloaded twice: the person uses the file already here (Windows: the installer; Linux: the AppImage), told why in a few words.
-      return [keptDownload(target, restart, { platform, program }).text];
-  }
-}
-
-/** The real path of the file the AppImage runtime says it started (APPIMAGE), when it is a file; else null. */
-export function runningAppImage(env: NodeJS.ProcessEnv): string | null {
-  const value = env["APPIMAGE"];
-  if (value === undefined || value === "") return null;
-  try {
-    const real = fs.realpathSync(value);
-    return fs.statSync(real).isFile() ? real : null;
-  } catch {
-    return null;
   }
 }
 

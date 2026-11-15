@@ -1,4 +1,4 @@
-import type { UpdateAdmission } from "../update/admission.ts";
+import type { UpdateAdmission } from "@gates-local/update/admission";
 import type { Sources } from "./index.ts";
 
 /** Track full import lifetimes, including worker exit and cleanup, rather than RPC acknowledgements. */

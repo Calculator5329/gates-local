@@ -7,7 +7,7 @@
 // `.<name>.previous-<id>` keeps the old one. The program file keeps the
 // person's name (owner decision D4).
 import path from "node:path";
-import { exists, identify, ioCode, removeIfPresent, sameIdentity, type FileOps, type Identity } from "./files.ts";
+import { exists, identify, ioCode, removeIfPresent, sameIdentity, type FileOps, type Identity } from "@gates-local/update/installed/files";
 
 export interface ProgramPaths {
   readonly program: string;

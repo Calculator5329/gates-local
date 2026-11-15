@@ -14,7 +14,7 @@ import { pipeline } from "node:stream/promises";
 import zlib from "node:zlib";
 import { NBSP, gb } from "@gates-local/contracts";
 import { volumeFree } from "../image/download.ts";
-import { binaryIn, installRoot, installedBinary, runtimeDir } from "./paths.ts";
+import { binaryIn, installRoot, installedBinary, runtimeDir } from "@gates-local/runtime-files/paths";
 import type { InstallManifest } from "./schemas.ts";
 import type { InstallProgress } from "./types.ts";
 

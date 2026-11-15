@@ -5,12 +5,12 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { updaterLaunch } from "../../../desktop/src/update-launch.ts";
-import { runCli, type Relaunch } from "./cli.ts";
-import { acknowledgeStartup } from "./startup.ts";
-import { RECORD_FILE } from "./record.ts";
-import type { Runner } from "./run.ts";
-import { type Repos, commit, fakePnpm, head, makeRepos, publish, removeRepos, testEnv } from "./testing.ts";
+import { updaterLaunch } from "../apps/desktop/src/update-launch.ts";
+import { runCli, type Relaunch } from "@gates-local/update/cli";
+import { acknowledgeStartup } from "@gates-local/update/startup";
+import { RECORD_FILE } from "@gates-local/update/record";
+import type { Runner } from "@gates-local/update/run";
+import { type Repos, commit, fakePnpm, head, makeRepos, publish, removeRepos, testEnv } from "@gates-local/update/testing";
 
 let r: Repos;
 

@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { defaultAppDataDir, detectModelsDir, findModelsDirs, findOnPath } from "./paths.ts";
+import { defaultAppDataDir, detectModelsDir, findModelsDirs, findOnPath } from "@gates-local/runtime-files/paths";
 import { probe } from "./probe.ts";
 import { freePort, removeDir, startFakeOllama, startWrongService, tmpDir, writeFakeBinary } from "./test-fakes.ts";
 

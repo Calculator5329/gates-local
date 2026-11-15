@@ -28,7 +28,7 @@ import { createMemoryOwner, ENGINE_BUSY_NOTE, type MemoryEngine, type MemoryOwne
 import { createOllamaRuntime, type OllamaRuntime } from "../src/runtime/runtime.ts";
 import { createRuntimeSwitch } from "../src/runtime/switch.ts";
 import { defaultSettings } from "../src/settings/store.ts";
-import { installedBinary } from "../src/runtime/paths.ts";
+import { installedBinary } from "@gates-local/runtime-files/paths";
 import { FAKE_RELEASE_FORMAT, freePort, startFakeOllama, startReleaseServer, writeFakeBinary } from "../src/runtime/test-fakes.ts";
 import { openThreadStore, type ThreadStore } from "../src/threads/store.ts";
 import { type WsServer, startWsServer } from "../src/ws/server.ts";

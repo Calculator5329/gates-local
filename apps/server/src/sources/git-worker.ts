@@ -1,7 +1,7 @@
 // The server holds stdin open. Even if it is killed, EOF ends this worker's git
 // process tree before it exits, so an interrupted clone cannot survive a restart.
 import { spawn } from "node:child_process";
-import { endTree } from "../update/run.ts";
+import { endTree } from "@gates-local/update/run";
 
 const args: unknown = JSON.parse(process.argv[2] ?? "null");
 const cwd = process.argv[3];

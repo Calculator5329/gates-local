@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { checkTag, runReleaseCheck, runReleaseCommand, unitTotals, type ReleaseReport, cleanEnvironment, missingHostTools } from "../scripts/release.ts";
-import { groupAlive, processAlive } from "../apps/server/src/process-state.ts";
+import { groupAlive, processAlive } from "@gates-local/update/process-state";
 
 const scratch: string[] = [];
 const processCleanups: Array<() => void> = [];

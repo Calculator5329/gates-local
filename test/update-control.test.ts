@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
-import { startWsServer } from "../../server/src/ws/server.ts";
-import { withUpdateControl } from "../src/update-control.ts";
-import { launchApprovedUpdate } from "../src/update-launch.ts";
+import { startWsServer } from "../apps/server/src/ws/server.ts";
+import { withUpdateControl } from "../apps/desktop/src/update-control.ts";
+import { launchApprovedUpdate } from "../apps/desktop/src/update-launch.ts";
 
 it("AU-01 main validates over the real authenticated wire and releases only its transferred capability", async () => {
   const targetCommit = "a".repeat(40);

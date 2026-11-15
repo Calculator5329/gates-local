@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { setTimeout } from "node:timers/promises";
-import { groupAlive, processAlive } from "../../apps/server/src/process-state.ts";
+import { groupAlive, processAlive } from "@gates-local/update/process-state";
 
 /** Own only children started here; keep detached groups until every member stops. */
 export function ownProcesses(signal: AbortSignal) {

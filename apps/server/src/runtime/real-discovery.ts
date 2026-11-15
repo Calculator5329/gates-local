@@ -3,7 +3,7 @@
 // Only GETs /, /api/version, /api/tags and /api/ps. discover() never starts,
 // installs, pulls, loads or stops anything; installs are off as well.
 import { listLoaded, listModels } from "./models.ts";
-import { detectModelsDir, findModelsDirs } from "./paths.ts";
+import { detectModelsDir, findModelsDirs } from "@gates-local/runtime-files/paths";
 import { createOllamaRuntime } from "./runtime.ts";
 
 const runtime = createOllamaRuntime({ allowInstall: false });

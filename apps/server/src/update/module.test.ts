@@ -7,15 +7,15 @@ import path from "node:path";
 import { encodeResult } from "@gates-local/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createUpdateHandlers, createUpdateModule } from "./module.ts";
-import { RECORD_FILE, writeRecord } from "./record.ts";
-import type { Runner } from "./run.ts";
-import { type Repos, commit, fakePnpm, head, makeRepos, publish, removeRepos, testEnv } from "./testing.ts";
-import { saveTransaction } from "./transaction.ts";
-import { acquireLock } from "./lock.ts";
+import { RECORD_FILE, writeRecord } from "@gates-local/update/record";
+import type { Runner } from "@gates-local/update/run";
+import { type Repos, commit, fakePnpm, head, makeRepos, publish, removeRepos, testEnv } from "@gates-local/update/testing";
+import { saveTransaction } from "@gates-local/update/transaction";
+import { acquireLock } from "@gates-local/update/lock";
 import { automaticChecks } from "./automatic.ts";
 import { openSettingsStore } from "../settings/store.ts";
-import { createUpdateAdmission } from "./admission.ts";
-import { inspect } from "./check.ts";
+import { createUpdateAdmission } from "@gates-local/update/admission";
+import { inspect } from "@gates-local/update/check";
 
 let r: Repos;
 

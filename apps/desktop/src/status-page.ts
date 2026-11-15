@@ -4,7 +4,7 @@
 // preload bridge (window.gatesLocal), so it works with the sandbox on.
 
 import { describeCrash, type BridgeState } from "./bridge.ts";
-import { windowsGoBack } from "./installed-update/words.ts";
+import { windowsGoBack } from "@gates-local/update/installed/words";
 
 export type StatusView =
   /** goBack: on Windows, the kept installer of the version before this one (installed updates, design section 3, step 7). */

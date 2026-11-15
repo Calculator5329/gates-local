@@ -3,9 +3,9 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { expect, it, vi } from "vitest";
 import { createServerShutdown } from "./shutdown.ts";
-import { createUpdateAdmission } from "./update/admission.ts";
+import { createUpdateAdmission } from "@gates-local/update/admission";
 import { createUpdateModule } from "./update/module.ts";
-import { fakePnpm, makeRepos, removeRepos, testEnv } from "./update/testing.ts";
+import { fakePnpm, makeRepos, removeRepos, testEnv } from "@gates-local/update/testing";
 import { createImportActivity, withImportAdmission } from "./sources/activity.ts";
 import { createSources } from "./sources/index.ts";
 

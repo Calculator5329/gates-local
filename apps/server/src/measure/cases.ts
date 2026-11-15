@@ -15,7 +15,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, 
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { MeasurePart, PageAction } from "@gates-local/contracts";
-import type { LibraryEntry, ToolStep } from "../../../../packages/harness/src/types.ts";
+import type { LibraryEntry, ToolStep } from "@gates-local/harness";
 
 /**
  * Weights of the parts in the score, out of 100. A new kind of check joins the part whose work it

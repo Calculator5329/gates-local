@@ -11,9 +11,9 @@ const commands = vi.hoisted(() => ({ spawn: vi.fn(), execFile: vi.fn() }));
 const identities = vi.hoisted(() => new Map<number, string | null>());
 const tokens = vi.hoisted(() => new Map<number, string>());
 vi.mock("node:child_process", async original => ({ ...await original<typeof import("node:child_process")>(), ...commands }));
-vi.mock("../update/wait.ts", async original => ({ ...await original<typeof import("../update/wait.ts")>(), isAlive: (pid: number) => identities.has(pid) }));
-vi.mock("../runtime/ownership.ts", async original => ({
-  ...await original<typeof import("../runtime/ownership.ts")>(),
+vi.mock("@gates-local/update/wait", async original => ({ ...await original<typeof import("@gates-local/update/wait")>(), isAlive: (pid: number) => identities.has(pid) }));
+vi.mock("@gates-local/runtime-files/ownership", async original => ({
+  ...await original<typeof import("@gates-local/runtime-files/ownership")>(),
   readWindowsProc: (pid: number) => identities.get(pid) == null ? undefined : ({ pid, startTime: identities.get(pid), command: identities.get(pid) === "start-" + pid ? "node git-worker.ts " + tokens.get(pid) : "node another-worker", state: "R" }),
 }));
 const platform = Object.getOwnPropertyDescriptor(process, "platform")!;

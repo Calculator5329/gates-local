@@ -1,10 +1,10 @@
 // Packaged Linux upgrade probes. Run only on the test machine, with a display.
 // No real Ollama/ComfyUI or model downloads.
 //
-//   node apps/desktop/scripts/packaged-upgrade.ts <older> <newer> [output]
+//   node test/packaged/packaged-upgrade.ts <older> <newer> [output]
 //     Build-to-build persistence: a person replaces the AppImage by hand.
 //
-//   node apps/desktop/scripts/packaged-upgrade.ts --installed-update <N> <N+1> [output] [--only=IU-03,IU-05] [--cases=W1.before,earlier-failure] [--parallel=4]
+//   node test/packaged/packaged-upgrade.ts --installed-update <N> <N+1> [output] [--only=IU-03,IU-05] [--cases=W1.before,earlier-failure] [--parallel=4]
 //     The installed copy's own update (docs/design/installed-updates.md,
 //     section 10), from two test builds (GATES_LOCAL_TEST_BUILD=1) named
 //     Gates-Local-<version>-x86_64.AppImage:
@@ -30,17 +30,19 @@ import { homedir } from "node:os";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { SETTINGS_FILE_NAME } from "../../server/src/settings/store.ts";
-import { openThreadStore } from "../../server/src/threads/store.ts";
-import type { GatesLocalBridge } from "../src/bridge.ts";
-import { WATCH_FLAG } from "../src/installed-update/launch-kinds.ts";
-import { rowOf, STOP_POINTS, type Row, type StopPoint } from "../src/installed-update/stop-points.ts";
-import { approve, INSTALLED_APPROVAL_MS, transactionFile, UPDATES_FOLDER, writeIntent } from "../src/installed-update/transaction.ts";
-import { writeResult } from "../src/installed-update/results.ts";
-import { earlierFailure, otherCopy, rolledBack, secondLaunch, startedTooLate, stuck, updated, watcherDied, type CannotReplace } from "../src/installed-update/words.ts";
-import { fuseProblem, thisMachine } from "./appimage-fuse.ts";
+import { SETTINGS_FILE_NAME } from "../../apps/server/src/settings/store.ts";
+import { openThreadStore } from "../../apps/server/src/threads/store.ts";
+import type { GatesLocalBridge } from "../../apps/desktop/src/bridge.ts";
+import { WATCH_FLAG } from "../../apps/desktop/src/installed-update/launch-kinds.ts";
+import { rowOf, STOP_POINTS, type Row, type StopPoint } from "../../apps/desktop/src/installed-update/stop-points.ts";
+import { approve, INSTALLED_APPROVAL_MS, transactionFile, UPDATES_FOLDER, writeIntent } from "@gates-local/update/installed/transaction";
+import { writeResult } from "../../apps/desktop/src/installed-update/results.ts";
+import { earlierFailure, otherCopy, rolledBack, secondLaunch, startedTooLate, stuck, updated, watcherDied, type CannotReplace } from "@gates-local/update/installed/words";
+import { fuseProblem, thisMachine } from "../../apps/desktop/scripts/appimage-fuse.ts";
 import { downloadedLine, footerName } from "./update-words.ts";
 import { Checks, freePort, message, openUpdates, pause, personClick, publicKeyBase64, restartButton, rpc, seedData, sha512Of, shoot, shootNote, startFeed, until, waitDownloaded, type IuFeed, type PageDocument } from "./installed-update-probe.ts";
+
+const desktopApp = path.resolve(import.meta.dirname, "../../apps/desktop");
 
 function digest(file: string): string {
   return createHash("sha256").update(readFileSync(file)).digest("hex");
@@ -171,8 +173,8 @@ async function checkUpgrade(developerPage: Page, olderArtifact: string, newerArt
 // Keeping it open catches the real single-instance collision, not just a
 // pair of different strings returned by path helpers.
 const developer = await _electron.launch({
-  executablePath: createRequire(import.meta.url)("electron") as string,
-  args: [path.resolve(import.meta.dirname, ".."), "--no-sandbox", "--disable-gpu"],
+  executablePath: createRequire(path.join(desktopApp, "package.json"))("electron") as string,
+  args: [desktopApp, "--no-sandbox", "--disable-gpu"],
   env, artifactsDir: output, timeout: 30_000,
 });
 try {

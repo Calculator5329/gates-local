@@ -5,8 +5,8 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { processRecord } from "../../../server/src/update/identity.ts";
-import { STARTUP_TOKEN_ENV } from "../../../server/src/update/startup.ts";
+import { processRecord } from "@gates-local/update/identity";
+import { STARTUP_TOKEN_ENV } from "@gates-local/update/startup";
 import { forwardedArgs, launchEnv, loggedStopAt, processGone, spawnedOutput, spawnProgram, sweepOwnTmp, testStopAt } from "./handoff.ts";
 import { WATCH_FLAG } from "./launch-kinds.ts";
 

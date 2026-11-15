@@ -8,8 +8,8 @@
 import { readFileSync } from "node:fs";
 import { request } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { type FrameNavigation, type GuardedContents, guardNavigation } from "../../../desktop/src/links.ts";
-import { type WsServer, startWsServer } from "../ws/server.ts";
+import { type FrameNavigation, type GuardedContents, guardNavigation } from "../apps/desktop/src/links.ts";
+import { type WsServer, startWsServer } from "../apps/server/src/ws/server.ts";
 
 const TOKEN = "per-launch-secret";
 const APP = "gates-local://app";
@@ -21,7 +21,7 @@ afterEach(async () => {
 
 /** The client's frame policy as built: the one frame-src source in index.html. */
 function builtFrameSource(): string {
-  const html = readFileSync(new URL("../../../web/index.html", import.meta.url), "utf8");
+  const html = readFileSync(new URL("../apps/web/index.html", import.meta.url), "utf8");
   const policy = /<meta http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(html)?.[1] ?? "";
   const sources = /(?:^|;)\s*frame-src\s+([^;]+)/.exec(policy)?.[1]?.trim().split(/\s+/) ?? [];
   expect(sources).toHaveLength(1);
