@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-15: the Library and Settings stop asking again for what they have
+
+- Your Library list could go back to an older version for a moment: when
+  you added or refreshed a source while the app was still reading the
+  list, the slower answer could land after the change and undo it. Every
+  version of the list now carries a number, and the window shows only a
+  newer one, whatever order they arrive in.
+- With Library open, the window asked the server for the sample
+  downloads twice a second for as long as it stayed open, even with
+  nothing downloading. A download's progress now comes to the window as
+  it happens, and the open Library asks for nothing. The same numbering
+  keeps a slow answer from moving a download's bar backwards.
+- Settings no longer reads the data folder again each time it opens; the
+  folder is read once per window, and a late answer still shows without
+  reopening Settings. The models folder in Settings › Runtime is the one
+  the app reports with its runtime status, instead of a second lookup;
+  Open still checks the folder before opening it.
+
 ## 2026-11-15: five ways the app could lose a file, leave you stuck or flatter a model
 
 - If you started Gates Local from the file an update had downloaded

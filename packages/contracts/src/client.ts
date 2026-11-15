@@ -12,8 +12,10 @@ import {
   decodeResult,
   decodeServerMessage,
   encodeRequest,
+  methodSync,
+  pushSync,
 } from "./protocol.ts";
-import { ORDERED_DOMAINS, settingsRevision, settingsSnapshotMethod, type SyncDomain, type SyncMetadata, type SyncNegotiation } from "./sync.ts";
+import { ORDERED_DOMAINS, revisionOf, type SyncDomain, type SyncRow, type SyncMetadata, type SyncNegotiation } from "./sync.ts";
 
 const CONNECTING = 0;
 const OPEN = 1;
@@ -32,6 +34,8 @@ export interface ClientOptions {
   readonly timeoutMs?: number;
   /** Frames the client could not use (bad envelope, unknown id, bad payload). Defaults to console.warn. */
   readonly onProtocolError?: (error: WireError) => void;
+  /** The domains negotiate() offers. Default ORDERED_DOMAINS. */
+  readonly ordered?: readonly SyncDomain[];
 }
 
 export interface CallOptions<M extends MethodName = MethodName> {
@@ -102,11 +106,12 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
   const protocolError = (error: WireError) => {
     try { report(error); } finally { if (sync?.mode === "ordered") client.close(); }
   };
-  const metadataError = (metadata: SyncMetadata | undefined, settings: boolean): WireError | undefined => {
+  // A row of an ordered kind must carry exactly one snapshot number for its scope in this epoch.
+  const metadataError = (metadata: SyncMetadata | undefined, row: SyncRow | undefined): WireError | undefined => {
     if (sync?.mode !== "ordered") return;
     if ((metadata !== undefined && metadata.epoch !== sync.epoch) ||
-      (settings && sync.domains.includes("settings") && settingsRevision(metadata, sync.epoch) === undefined)) {
-      return new WireError("bad-message", "missing or invalid settings synchronization metadata; reconnect required");
+      (row !== undefined && sync.domains.includes(row.domain) && revisionOf(metadata, sync.epoch, row.scope) === undefined)) {
+      return new WireError("bad-message", `missing or invalid ${row?.scope ?? "synchronization"} metadata; reconnect required`);
     }
   };
 
@@ -117,7 +122,7 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
     if (msg.type === "push") {
       const p = decodePayload(msg.channel, msg.payload);
       if (!p.ok) return protocolError(p.error);
-      const invalid = metadataError(msg.sync, msg.channel === "settings.changed");
+      const invalid = metadataError(msg.sync, pushSync(p.value.channel));
       if (invalid) return protocolError(invalid);
       for (const handler of subscribers.get(p.value.channel) ?? []) {
         try {
@@ -132,7 +137,7 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
     if (call === undefined) return report(new WireError("bad-message", `response for unknown id "${msg.id}"`));
     pending.delete(msg.id);
     clearTimeout(call.timer);
-    const invalid = metadataError(msg.sync, msg.ok && settingsSnapshotMethod(call.method));
+    const invalid = metadataError(msg.sync, msg.ok ? methodSync(call.method) : undefined);
     if (invalid) { call.reject(invalid); return protocolError(invalid); }
     if (!msg.ok) return call.reject(new WireError(msg.error.code, msg.error.message, msg.error.blocking));
     const r = decodeResult(call.method, msg.result);
@@ -222,7 +227,7 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
       };
     },
     negotiate() {
-      return negotiation ??= client.call("sync.negotiate", { ordered: ORDERED_DOMAINS }).then((): ClientSync => {
+      return negotiation ??= client.call("sync.negotiate", { ordered: options.ordered ?? ORDERED_DOMAINS }).then((): ClientSync => {
         if (isClosed || sync === undefined) throw new WireError("closed", "socket closed during negotiation");
         return sync;
       }).catch((error: unknown) => {

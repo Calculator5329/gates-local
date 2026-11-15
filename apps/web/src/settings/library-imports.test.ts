@@ -23,7 +23,7 @@ vi.mock("react", async original => {
     useEffect: (effect: () => (() => void) | undefined) => { if (host.fresh) { const done = effect(); if (done) host.cleanups.push(done); } },
   };
 });
-vi.mock("../lib/session/index.ts", () => ({ libraryRequest: host.request, applyServerEvent: (run: () => void) => run(), settingsReads: { imports: () => undefined, keepImports: () => {} }, refreshSource: vi.fn(), removeSource: vi.fn() }));
+vi.mock("../lib/session/index.ts", () => ({ libraryRequest: host.request, applyServerEvent: (run: () => void) => run(), refreshSource: vi.fn(), removeSource: vi.fn() }));
 vi.mock("../lib/store/store.ts", () => ({ NA: "na", useStore: (select: (s: unknown) => unknown) => select(host.state) }));
 vi.mock("../runtime/words.tsx", () => ({ rtOf: () => host.rt }));
 vi.mock("../composer/starter.ts", () => ({ askWith: host.start }));
@@ -70,16 +70,17 @@ beforeEach(() => {
   now = 0;
   clock = vi.spyOn(performance, "now").mockImplementation(() => now);
   host.rt = "ready";
-  host.state = { sources: [], settings: { tools: true }, models: [{ name: "chat", capabilities: ["completion", "tools"] }], unavailable: {} };
-  host.request.mockImplementation(async (method: string) => method === "sources.imports" ? { samples: [SAMPLE], jobs } : { id: "job-1", kind: "sample", key: "chinook", label: "Chinook", state: "downloading", bytes: 0, total: 1000 });
+  // The store as the server's sources.imports pushes keep it: whatever the jobs are now.
+  host.state = { sources: [], settings: { tools: true }, models: [{ name: "chat", capabilities: ["completion", "tools"] }], unavailable: {}, get sourceImports() { return { samples: [SAMPLE], jobs }; } };
+  host.request.mockImplementation(async () => ({ id: "job-1", kind: "sample", key: "chinook", label: "Chinook", state: "downloading", bytes: 0, total: 1000 }));
 });
 afterEach(() => { leaveSettings(); host.request.mockReset(); host.start.mockReset(); clock.mockRestore(); });
 
 it.each(["cancelled", "error"] as const)("Retry after leaving Library and returning uses the %s job's repository (DG-02)", async state => {
   const url = "https://github.com/example/docs";
   let repoJobs: { id: string; kind: "repository"; key: string; label: string; state: string; bytes: number }[] = [];
-  host.request.mockImplementation(async (method: string, params: { url?: string }) => {
-    if (method === "sources.imports") return { samples: [], jobs: repoJobs };
+  Object.defineProperty(host.state, "sourceImports", { get: () => ({ samples: [], jobs: repoJobs }) });
+  host.request.mockImplementation(async (_method: string, params: { url?: string }) => {
     repoJobs = [{ id: "job", kind: "repository", key: params.url ?? "", label: "example/docs", state: "cloning", bytes: 0 }];
     return repoJobs[0];
   });

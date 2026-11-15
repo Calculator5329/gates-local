@@ -28,7 +28,10 @@ it("nothing waits before a hydrate begins", () => {
 
 it("begin, read, end: Settings opens once both reads are in, and keeps them", async () => {
   const imports = deferred<SourceImports>(), folder = deferred<string | null>();
-  const reads = createSettingsReads({ readImports: () => imports.promise, readFolder: () => folder.promise });
+  // Each read puts its answer in the store itself; these stand in for the store.
+  let stored: SourceImports | undefined;
+  let storedFolder: string | null | undefined;
+  const reads = createSettingsReads({ readImports: () => imports.promise.then((v) => { stored = v; }), readFolder: () => folder.promise.then((f) => { storedFolder = f; }) });
   reads.begin();
   const open = reads.ready();
   expect(open).not.toBeNull();
@@ -39,8 +42,8 @@ it("begin, read, end: Settings opens once both reads are in, and keeps them", as
   await reading;
   expect(await settled(open)).toBe(true);
   reads.end();
-  expect(reads.imports()).toBe(IMPORTS);
-  expect(reads.folder()).toBe("/data");
+  expect(stored).toBe(IMPORTS);
+  expect(storedFolder).toBe("/data");
   expect(reads.ready(), "nothing is on its way after the reads").toBeNull();
 });
 
@@ -57,13 +60,13 @@ it("Settings also waits for what Set up images would fetch, and opens when that 
 });
 
 it("a failed read still lets Settings open", async () => {
-  const reads = createSettingsReads({ readImports: () => Promise.reject(new Error("down")), readFolder: async () => null });
+  let storedFolder: string | null | undefined;
+  const reads = createSettingsReads({ readImports: () => Promise.reject(new Error("down")), readFolder: async () => { storedFolder = null; } });
   reads.begin();
   const open = reads.ready();
   await reads.read();
   expect(await settled(open)).toBe(true);
-  expect(reads.imports()).toBeUndefined();
-  expect(reads.folder()).toBeNull();
+  expect(storedFolder, "the other read still lands").toBeNull();
 });
 
 it("a hydrate that ends before its reads lets Settings open", async () => {

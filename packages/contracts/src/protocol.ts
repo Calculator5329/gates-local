@@ -3,7 +3,7 @@
 // that does not decode comes back as a WireError with a named code.
 import * as Result from "effect/Result";
 import * as S from "effect/Schema";
-import { SyncDomain, SyncMetadata, SyncNegotiation } from "./sync.ts";
+import { SyncDomain, SyncMetadata, SyncNegotiation, type SyncRow } from "./sync.ts";
 import { SuggestedList } from "./chat-models.ts";
 import {
   AttachedFile,
@@ -131,7 +131,19 @@ export interface MethodRow {
   readonly params: S.Top;
   readonly result: S.Top;
   readonly phone: PhoneAccess;
+  /** The answer is the whole of one numbered thing (sync.ts). */
+  readonly sync?: SyncRow;
 }
+
+/** A push channel: its payload, and when the payload is the whole of one numbered thing, which. */
+export interface PushRow {
+  readonly payload: S.Top;
+  readonly sync?: SyncRow;
+}
+
+const SETTINGS: SyncRow = { domain: "settings", scope: "settings" };
+const SOURCES: SyncRow = { domain: "sources", scope: "sources" };
+const SOURCE_IMPORTS: SyncRow = { domain: "sources", scope: "source-imports" };
 
 /** One definition for both ends: each method's params and result Schema, and whether the phone may call it. */
 export const methods = {
@@ -320,9 +332,9 @@ export const methods = {
     phone: "allow",
   },
   "queue.remove": { params: S.Struct({ id: S.String }), result: S.Array(QueuedMessage), phone: "allow" },
-  "settings.get": { params: NoParams, result: Settings, phone: "allow" },
-  "settings.update": { params: S.Struct({ ...SettingsPatch.fields, voiceChange: S.optional(S.String.check(S.isMaxLength(128))) }), result: Settings, phone: "deny" },
-  "settings.model.update": { params: S.Struct({ model: S.String.check(S.isMinLength(1)), patch: S.NullOr(ModelSettingsPatch) }), result: Settings, phone: "deny" },
+  "settings.get": { params: NoParams, result: Settings, phone: "allow", sync: SETTINGS },
+  "settings.update": { params: S.Struct({ ...SettingsPatch.fields, voiceChange: S.optional(S.String.check(S.isMaxLength(128))) }), result: Settings, phone: "deny", sync: SETTINGS },
+  "settings.model.update": { params: S.Struct({ model: S.String.check(S.isMinLength(1)), patch: S.NullOr(ModelSettingsPatch) }), result: Settings, phone: "deny", sync: SETTINGS },
   "settings.modelDefaults": { params: S.Struct({ model: S.String.check(S.isMinLength(1)) }), result: ModelDefaults, phone: "allow" },
   "gpu.status": { params: NoParams, result: GpuStatus, phone: "allow" },
   /** What the app keeps in memory now (one thing at a time), and the handoff while one runs; changes come on memory.changed. */
@@ -366,11 +378,11 @@ export const methods = {
    * window can ask. `claimed` false: another window runs them, or the run no longer waits.
    */
   "models.measurePagesClaim": { params: S.Struct({ model: S.String, at: S.Finite }), result: S.Struct({ claimed: S.Boolean }), phone: "deny" },
-  "sources.list": { params: NoParams, result: S.Array(Source), phone: "allow" },
+  "sources.list": { params: NoParams, result: S.Array(Source), phone: "allow", sync: SOURCES },
   "sources.add": { params: S.Struct({ kind: SourceKind, path: S.String, label: S.optional(S.String) }), result: Source, phone: "deny" },
   "sources.remove": { params: SourceRef, result: SourceRef, phone: "deny" },
   "sources.refresh": { params: SourceRef, result: Source, phone: "deny" },
-  "sources.imports": { params: NoParams, result: SourceImports, phone: "allow" },
+  "sources.imports": { params: NoParams, result: SourceImports, phone: "allow", sync: SOURCE_IMPORTS },
   "sources.downloadSample": { params: SourceRef, result: SourceImport, phone: "deny" },
   "sources.clone": { params: S.Struct({ url: S.String }), result: SourceImport, phone: "deny" },
   "sources.cancelImport": { params: SourceRef, result: S.Struct({ cancelled: S.Boolean }), phone: "deny" },
@@ -433,7 +445,7 @@ export const pushes = {
   "queue.changed": { payload: S.Array(QueuedMessage) },
   // Transient provenance, never persisted in Settings. A client can distinguish
   // its older save completing from a new action in another window.
-  "settings.changed": { payload: S.Struct({ ...Settings.fields, voiceChange: S.optional(S.String.check(S.isMaxLength(128))) }) },
+  "settings.changed": { payload: S.Struct({ ...Settings.fields, voiceChange: S.optional(S.String.check(S.isMaxLength(128))) }), sync: SETTINGS },
   "gpu.changed": { payload: GpuStatus },
   /** A newer fit table: after a GPU reading moves, the model list changes, a load ends, a model unloads, or a turn starts or ends. */
   "fit.changed": { payload: FitTable },
@@ -448,8 +460,8 @@ export const pushes = {
   "models.measures": { payload: S.Array(ModelMeasure) },
   /** A Measure run's steps: waiting, running with steps done, then done or error. */
   "models.measuring": { payload: MeasureRun },
-  "sources.changed": { payload: S.Array(Source) },
-  "sources.imports": { payload: SourceImports },
+  "sources.changed": { payload: S.Array(Source), sync: SOURCES },
+  "sources.imports": { payload: SourceImports, sync: SOURCE_IMPORTS },
   "image.status": { payload: ImageStatus },
   "image.event": { payload: ImageEvent },
   /** A model file image.download is fetching: its setup, its place in the list, its progress. */
@@ -458,7 +470,7 @@ export const pushes = {
   "image.setup": { payload: ImageSetupProgress },
   /** A model request finished and was counted; usage.read has the new numbers. */
   "usage.changed": { payload: S.Struct({}) },
-} as const;
+} as const satisfies Record<string, PushRow>;
 
 export type Methods = typeof methods;
 export type MethodName = keyof Methods;
@@ -474,6 +486,11 @@ export const channelNames = Object.keys(pushes) as Channel[];
 
 /** The table's answer for the phone listener; the server and the phone client both read it here. */
 export const phoneMay = (method: MethodName): boolean => methods[method].phone === "allow";
+
+/** The numbered thing a method answers with, from its row; both ends enforce it for ordered domains. */
+export const methodSync = (method: MethodName): SyncRow | undefined => (methods[method] as MethodRow).sync;
+/** The numbered thing a push carries, from its row. */
+export const pushSync = (channel: Channel): SyncRow | undefined => (pushes[channel] as PushRow).sync;
 
 function isMethod(name: string): name is MethodName {
   return Object.hasOwn(methods, name);

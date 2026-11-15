@@ -3,7 +3,8 @@ import { accessSync, closeSync, constants, existsSync, mkdirSync, openSync, read
 import path from "node:path";
 import { Worker } from "node:worker_threads";
 import * as S from "effect/Schema";
-import { Source } from "@gates-local/contracts";
+import { Source, type SyncChange } from "@gates-local/contracts";
+import { createRevisions } from "../ws/revisions.ts";
 import { canonicalPathSync, containsPath } from "@gates-local/harness/paths";
 import type { LibraryEntry } from "@gates-local/harness";
 import { lstatIfAny, openChild, openDir, openEntry, sameFile, unlinkIfAny, type Dir } from "./anchored.ts";
@@ -12,6 +13,10 @@ import type { SourceImport } from "@gates-local/contracts";
 
 export interface Sources {
   list(): Source[];
+  /** The last list announced, unchanged since; it is what onChange listeners were given. */
+  published(): readonly Source[];
+  /** The number a list from published() or onChange was committed with. */
+  stamp(value: readonly Source[]): SyncChange;
   entries(): LibraryEntry[];
   add(input: { kind: Source["kind"]; path: string; label?: string }, signal?: AbortSignal): Promise<Source>;
   remove(id: string): void;
@@ -247,13 +252,19 @@ export function createSources(deps: SourcesDeps): Sources {
   const lastGood = new Map(sources.map(s => [s.id, s]));
   const listeners = new Set<(sources: Source[]) => void>();
   const list = () => sources.map(s => ({ ...s }));
+  // Each saved list is committed with its number before it is announced; sources.list answers
+  // with the committed list and its number, so a slow answer can never undo a newer push.
+  let published: readonly Source[] = list();
+  const revisions = createRevisions<readonly Source[]>("sources", published);
   const save = () => {
     for (const s of sources) if (s.state !== "refreshing") lastGood.set(s.id, s);
     for (const id of lastGood.keys()) if (!sources.some(s => s.id === id)) lastGood.delete(id);
     const pending = registryPath + ".pending";
     writeFileSync(pending, JSON.stringify(sources, null, 2), { mode: 0o600 });
     renameSync(pending, registryPath);
-    for (const listener of listeners) listener(list());
+    const value = list();
+    published = revisions.commit(value);
+    for (const listener of listeners) listener(value);
   };
   const checkPath = (input: { path: string; kind: Source["kind"]; id?: string; managed?: Source["managed"] }): string => {
     const canonical = canonicalPathSync(input.path);
@@ -327,6 +338,8 @@ export function createSources(deps: SourcesDeps): Sources {
   }
   return {
     list,
+    published: () => published,
+    stamp: revisions.stamp,
     entries: () => sources.filter(s => {
       if (s.state !== "ready") return false;
       try { return checkPath(s) === s.path; } catch { return false; }

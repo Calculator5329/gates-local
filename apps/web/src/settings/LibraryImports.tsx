@@ -6,7 +6,7 @@ import { handleKey } from "../lib/ui/handles.ts";
 import { Icon } from "../lib/ui/icons.tsx";
 import { askWhy, databaseRows, type DbRow } from "./library-rows.ts";
 import { chatModels } from "../models/pick.ts";
-import { applyServerEvent, libraryRequest, refreshSource, removeSource, settingsReads } from "../lib/session/index.ts";
+import { applyServerEvent, libraryRequest, refreshSource, removeSource } from "../lib/session/index.ts";
 import { libraryToolCanUse } from "../lib/words/settings-rules.ts";
 import { PathText } from "../lib/ui/settings-controls.tsx";
 import { Fail, Grp, Skel } from "../lib/ui/settings-ui.tsx";
@@ -131,11 +131,14 @@ function FillButton({ name, handle, real, since, running, done, idle, blocked, o
   );
 }
 
-/** Settings › Library: one list of databases with the samples in it, then Clone a repository. Polls only while open; remount and restart read the server's state. */
+/** Settings › Library: one list of databases with the samples in it, then Clone a repository. The imports come with their pushes. */
 export default function LibraryImports({ add, clone, clones = [] }: { add: ReactNode; clone: boolean; clones?: readonly ReactNode[] }) {
-  // Read before Settings opened (session/settings-reads.ts), so the rows are there on the first frame.
-  const [value, setValue] = useState<SourceImports | undefined>(settingsReads.imports());
-  const [error, setError] = useState<string | null>(null);
+  // Read once per connection before Settings opens (session/settings-reads.ts), then kept current by
+  // sources.imports pushes, so the rows are there on the first frame and a job's progress moves by itself.
+  const stored = useStore(s => s.sourceImports);
+  const value: SourceImports | undefined = stored === NA ? undefined : stored;
+  const [actionError, setError] = useState<string | null>(null);
+  const error = actionError ?? (stored === NA ? "Couldn't read the available samples." : null);
   const [url, setUrl] = useState("");
   const [pending, setPending] = useState<string>();
   const [opened, setOpened] = useState<readonly string[]>([]);
@@ -147,45 +150,33 @@ export default function LibraryImports({ add, clone, clones = [] }: { add: React
   const chat = useStore(s => rtOf(s) === "ready" && chatModels(s.models ?? []).length > 0);
   const download = useStore(s => s.unavailable["sources.downloadSample"] !== true);
   const edit = useStore(s => s.unavailable["sources.remove"] !== true);
-  const live = useRef(true);
-  const request = useRef(false);
   // Samples whose download this visit saw running: when one lands, its row shows the finish once.
   const ran = useRef(new Set<string>());
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   // When each sample's current run began, for the shortest fill.
   const started = useRef(new Map<string, number>());
+  // oxlint-disable-next-line gates/effect-needs-reason -- stops the finish timers, which outlive React's render, when Library closes
   useEffect(() => {
-    live.current = true;
-    const read = async () => {
-      if (request.current) return;
-      request.current = true;
-      try { const next = await libraryRequest("sources.imports", {}); settingsReads.keepImports(next); applyServerEvent(() => { if (live.current) setValue(next); }); }
-      catch (e) { applyServerEvent(() => { if (live.current) setError(e instanceof Error ? e.message : "Couldn't read the available samples. Retry."); }); }
-      finally { request.current = false; }
-    };
-    void read();
-    const timer = setInterval(() => void read(), 500);
     const held = timers.current;
-    return () => { live.current = false; clearInterval(timer); for (const t of held) clearTimeout(t); held.clear(); };
+    return () => { for (const t of held) clearTimeout(t); held.clear(); };
   }, []);
+  // The server announces a new job before it answers with it, so the job is in the store by the time this returns.
   const start = async (key: string, action: () => Promise<SourceImport>) => {
     if (pending !== undefined) return;
     setError(null);
     setPending(key);
-    try {
-      const job = await action();
-      applyServerEvent(() => { if (live.current) setValue(v => v && ({ ...v, jobs: [...v.jobs.filter(j => j.id !== job.id && !(j.kind === job.kind && j.key === job.key)), job] })); });
-    } catch (e) { applyServerEvent(() => { if (live.current) setError(e instanceof Error ? e.message : "Couldn't start this import. Retry."); }); }
-    finally { if (live.current) setPending(undefined); }
+    try { await action(); }
+    catch (e) { applyServerEvent(() => setError(e instanceof Error ? e.message : "Couldn't start this import. Retry.")); }
+    finally { setPending(undefined); }
   };
   const cancel = async (job: SourceImport) => {
     try { await libraryRequest("sources.cancelImport", { id: job.id }); }
-    catch { applyServerEvent(() => { if (live.current) setError("Couldn't cancel while disconnected. Retry once Gates Local reconnects."); }); }
+    catch { applyServerEvent(() => setError("Couldn't cancel while disconnected. Retry once Gates Local reconnects.")); }
   };
   const act = async (key: string, action: Promise<string | null>) => {
     setRowErr(e => { const { [key]: _gone, ...rest } = e; return rest; });
     const failed = await action;
-    if (failed !== null && live.current) setRowErr(e => ({ ...e, [key]: failed }));
+    if (failed !== null) setRowErr(e => ({ ...e, [key]: failed }));
   };
   const list = sources === NA || sources === undefined ? [] : sources;
   const rows = value ? databaseRows(value.samples, list, value.jobs) : databaseRows([], list.filter(s => s.managed?.kind !== "sample"), []);
@@ -207,7 +198,7 @@ export default function LibraryImports({ add, clone, clones = [] }: { add: React
     setFinishing(f => [...f, ...ids]);
     // The check shows for FINISH_MS once the fill is full, and a quick download's fill is still sweeping.
     const sweep = Math.max(0, ...ids.map(id => MIN_FILL_MS - (performance.now() - (started.current.get(id) ?? -Infinity))));
-    const t = setTimeout(() => { timers.current.delete(t); if (live.current) setFinishing(f => f.filter(id => !ids.includes(id))); }, FINISH_MS + sweep);
+    const t = setTimeout(() => { timers.current.delete(t); setFinishing(f => f.filter(id => !ids.includes(id))); }, FINISH_MS + sweep);
     timers.current.add(t);
   }, [landed]);
   const toggle = (key: string) => setOpened(o => o.includes(key) ? o.filter(k => k !== key) : [...o, key]);

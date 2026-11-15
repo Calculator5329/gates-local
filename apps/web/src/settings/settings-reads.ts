@@ -4,18 +4,17 @@
 // sources, image and update status) is in, and what Set up images would fetch;
 // Settings waits for that, up to a bound, so a slow server shows placeholders
 // instead of a dead key.
-import type { SourceImports } from "@gates-local/contracts";
 
 interface Reads {
-  readonly readImports: () => Promise<SourceImports>;
-  readonly readFolder: () => Promise<string | null>;
+  /** The samples and imports, put in the store by the read itself; their pushes keep them current. */
+  readonly readImports: () => Promise<unknown>;
+  /** The data folder, put in the store by the read itself. */
+  readonly readFolder: () => Promise<unknown>;
   /** What Set up images would fetch, put in the store by the read itself: its row draws no guess first. */
   readonly readSetup?: () => Promise<unknown>;
 }
 
 export function createSettingsReads({ readImports, readFolder, readSetup }: Reads) {
-  let imports: SourceImports | undefined;
-  let folder: string | null | undefined;
   let waiting: Promise<void> | null = null;
   let reading = false;
   // A read outlived the bound: later opens show placeholders at once instead
@@ -41,8 +40,8 @@ export function createSettingsReads({ readImports, readFolder, readSetup }: Read
       reading = true;
       try {
         await Promise.allSettled([
-          readImports().then((v) => { imports = v; }),
-          readFolder().then((f) => { folder = f; }),
+          readImports(),
+          readFolder(),
           readSetup?.(),
         ]);
       } finally {
@@ -60,11 +59,5 @@ export function createSettingsReads({ readImports, readFolder, readSetup }: Read
       const current = waiting;
       return Promise.race([current, new Promise<void>((resolve) => setTimeout(() => { if (waiting === current) late = true; resolve(); }, ms))]);
     },
-    imports: (): SourceImports | undefined => imports,
-    /** Library's own polling keeps the list fresh for the next visit. */
-    keepImports(next: SourceImports): void {
-      imports = next;
-    },
-    folder: (): string | null | undefined => folder,
   };
 }

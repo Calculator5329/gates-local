@@ -14,7 +14,7 @@ import { Icon, type IconId } from "../lib/ui/icons.tsx";
 import LibraryImports from "./LibraryImports.tsx";
 import { ModelsPage } from "../models/Models.tsx";
 import { sizeText } from "../models/models-rules.ts";
-import { addSource, canOpenFolder, checkImageStatus, checkShell, dataFolder, folderDialog, loadImageSetup, openDataFolder, openSettings, recheckRuntime, refreshSource, removeSource, resetSettings, saveImageFolder, settingsReads, startImageSetup, updateSettings } from "../lib/session/index.ts";
+import { addSource, canOpenFolder, checkImageStatus, checkShell, folderDialog, loadImageSetup, openDataFolder, openSettings, recheckRuntime, refreshSource, removeSource, resetSettings, saveImageFolder, startImageSetup, updateSettings } from "../lib/session/index.ts";
 import { NA, setState, useStore } from "../lib/store/store.ts";
 import { CopyButton, PathText, Status } from "../lib/ui/settings-controls.tsx";
 import { type LibraryTool, libraryToolCanUse } from "../lib/words/settings-rules.ts";
@@ -117,17 +117,9 @@ function Runtime() {
   const [openErr, runOpen] = useAct();
   const total = (models ?? []).reduce((a, m) => a + m.sizeBytes, 0);
   const folders = folderWords();
-  const [knownFolder, setKnownFolder] = useState<string | null>(null);
-  useEffect(() => {
-    let current = true;
-    setKnownFolder(null);
-    if (app && runtime?.state === "ready") {
-      void window.gatesLocal?.modelsFolder?.().then(folder => { if (current) setKnownFolder(folder); }).catch(() => undefined);
-    }
-    return () => { current = false; };
-  }, [app, runtime?.state, runtime?.modelsDir, runtime?.baseUrl]);
-  // Desktop uses main's verified ownership record. A browser can only copy the server-reported path.
-  const folder = window.gatesLocal === undefined ? runtime?.modelsDir : app && runtime?.state === "ready" ? knownFolder ?? undefined : undefined;
+  // The folder the app's own Ollama runs with, from the server's runtime status; on the desktop,
+  // Open asks main, which checks its ownership record again before opening anything.
+  const folder = window.gatesLocal === undefined || (app && runtime?.state === "ready") ? runtime?.modelsDir : undefined;
   const locked = useStore((s) => s.unavailable["settings.update"] === true);
   const noRetry = useStore((s) => s.unavailable["runtime.retry"] === true);
   const switchable =!locked && !nothingToSwitchTo && canSwitch && rt !== "installing" && rt !== "starting" && rt !== "offline";
@@ -839,19 +831,11 @@ function Library() {
   );
 }
 
-/** Only the desktop app has one. Read before Settings opens (session/settings-reads.ts); a placeholder row if not yet. */
+/** Only the desktop app has one. Read once per window, before Settings opens (session/index.ts); a placeholder row until it is in. */
 function DataFolder() {
-  const [path, setPath] = useState<string | null | undefined>(() => settingsReads.folder() ?? (window.gatesLocal?.dataFolder === undefined ? null : undefined));
+  const read = useStore((s) => s.dataFolder);
+  const path = read ?? (window.gatesLocal?.dataFolder === undefined ? null : undefined);
   const [err, run] = useAct();
-  useEffect(() => {
-    let live = true;
-    void dataFolder().then((p) => {
-      if (live) setPath(p);
-    });
-    return () => {
-      live = false;
-    };
-  }, []);
   if (path === null) return null;
   if (path === undefined) return <Row label="Data folder" desc={<Skel w="24em" />} busy><Skel w="7em" /></Row>;
   return (

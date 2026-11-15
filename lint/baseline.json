@@ -30,8 +30,8 @@
       "apps/web/src/picker/Picker.tsx": 3,
       "apps/web/src/pictures/Pictures.tsx": 7,
       "apps/web/src/settings/Instructions.tsx": 2,
-      "apps/web/src/settings/LibraryImports.tsx": 3,
-      "apps/web/src/settings/Settings.tsx": 6,
+      "apps/web/src/settings/LibraryImports.tsx": 2,
+      "apps/web/src/settings/Settings.tsx": 4,
       "apps/web/src/sidebar/Sidebar.tsx": 4,
       "apps/web/src/thread/Thread.tsx": 6,
       "apps/web/src/thread/markdown.tsx": 1,
@@ -101,7 +101,7 @@
       "apps/web/src/pictures/Pictures.tsx": 3,
       "apps/web/src/pictures/pictures.ts": 2,
       "apps/web/src/runtime/install-stall.ts": 1,
-      "apps/web/src/settings/LibraryImports.tsx": 3,
+      "apps/web/src/settings/LibraryImports.tsx": 2,
       "apps/web/src/settings/Settings.tsx": 2,
       "apps/web/src/settings/settings-reads.ts": 1,
       "apps/web/src/sidebar/Sidebar.tsx": 5,
@@ -120,7 +120,6 @@
     "typescript/no-explicit-any": {},
     "typescript/no-import-type-side-effects": {
       "apps/web/src/app/ordering-state.test.ts": 1,
-      "apps/web/src/lib/session/index.ts": 1,
       "test/e2e/queue.spec.ts": 1,
       "test/e2e/server-queue.spec.ts": 1,
       "test/e2e/stop-others.spec.ts": 1

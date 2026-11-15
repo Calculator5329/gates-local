@@ -9,6 +9,10 @@ import {
   type ImageChoice,
   type ModelMeasure,
   type Payload,
+  type SyncMetadata,
+  type SyncRow,
+  methodSync,
+  pushSync,
 } from "@gates-local/contracts";
 import { runPages } from "../../measure/measure-pages.ts";
 import { newestOnly } from "../../models/pick.ts";
@@ -55,7 +59,27 @@ export const { connect, call, libraryRequest } = connection;
 const { probe, act } = connection;
 setFileCalls(call);
 let keeping: ReturnType<typeof setInterval> | undefined;
-export const settingsReads = createSettingsReads({ readImports: () => libraryRequest("sources.imports", {}), readFolder: dataFolder, readSetup: () => loadImageSetup() });
+
+// A kind in ORDERED_DOMAINS arrives numbered once the connection ordered it: an answer or a push
+// applies when its number is newer than the one the window last applied, in whatever order they
+// come. On a legacy connection, every answer applies and pushes wait behind the hydrate's reads.
+const ordering = applyServerEvent.ordering;
+function rowOf(row: SyncRow | undefined): SyncRow {
+  if (row === undefined) throw new Error("This channel or method is not one of an ordered kind.");
+  return row;
+}
+const LIBRARY = rowOf(methodSync("sources.list"));
+const IMPORTS = rowOf(methodSync("sources.imports"));
+/** True when an answer of `row`'s kind should apply: always on a legacy connection, else when newer. */
+const newer = (row: SyncRow, sync: SyncMetadata | undefined) => !ordering.ordered(row.domain) || ordering.accept(row, sync);
+
+/** The samples and imports Library shows. Its pushes keep them current; this read is the hydrate's one. */
+const readImports = () => probe("sources.imports", {}, { onResult: (sourceImports, sync) => { if (newer(IMPORTS, sync)) applyServerEvent({ sourceImports }); } })
+  .then((answer) => { if (answer === NA) applyServerEvent({ sourceImports: NA }); });
+/** The data folder does not change while the window is open: one read from the desktop bridge, kept in the store. */
+let folderRead: Promise<void> | undefined;
+const readFolder = () => folderRead ??= dataFolder().then((folder) => { setState({ dataFolder: folder }); }, () => { folderRead = undefined; });
+export const settingsReads = createSettingsReads({ readImports, readFolder, readSetup: () => loadImageSetup() });
 const updatesSession = createUpdates({ applyServerEvent, act });
 export const { checkForUpdates, downloadUpdate, dismissUpdateResult, readUpdateStatus, updateAndRestart } = updatesSession;
 const { updateOrder } = updatesSession;
@@ -104,7 +128,10 @@ const settingsSession = createSettings({ applyServerEvent, authority: applyServe
 export const { setContext, updateSettings, updateModelSettings, resetSettings } = settingsSession;
 const { settingsPatch } = settingsSession;
 
-/** Channels whose snapshot the second hydrate batch reads (gpu.status, sources.list, models.speed). */
+/**
+ * Channels whose snapshot the second hydrate batch reads (gpu.status, sources.list, models.speed).
+ * A numbered push of an ordered kind is never held: sources.changed waits here only on a legacy connection.
+ */
 const SECOND_BATCH: ReadonlySet<Channel> = new Set<Channel>(["gpu.changed", "fit.changed", "sources.changed", "update.changed", "models.speed", "models.measures", "models.measuring"]);
 
 async function hydrate(c: Client): Promise<void> {
@@ -126,6 +153,18 @@ async function hydrate(c: Client): Promise<void> {
   };
   const on = <C extends Channel>(channel: C, handler: (p: Payload<C>) => void) =>
     c.subscribe(channel, (p) => applyServerEvent(() => dispatch(channel, () => handler(p))));
+  // A push of an ordered kind applies at once when newer. Unnumbered (legacy, or sent before this
+  // socket's negotiation) it waits like any other push, and is dropped if the connection is ordered:
+  // the read that follows the negotiation is newer than it.
+  const numbered = <C extends "sources.changed" | "sources.imports">(channel: C, apply: (p: Payload<C>) => void) => {
+    const row = rowOf(pushSync(channel));
+    c.subscribe(channel, (p, sync) => applyServerEvent(() => {
+      if (ordering.ordered(row.domain)) { if (ordering.accept(row, sync)) apply(p); return; }
+      dispatch(channel, () => { if (!ordering.ordered(row.domain)) apply(p); });
+    }));
+  };
+  numbered("sources.changed", (sources) => applyServerEvent({ sources }));
+  numbered("sources.imports", (sourceImports) => applyServerEvent({ sourceImports }));
   c.subscribe("settings.changed", (payload, metadata) => applyServerEvent(() => settingsSession.receiveSettings(payload, (run) => dispatch("settings.changed", run), metadata)));
   c.subscribe("image.status", (imageStatus) => applyServerEvent(() => {
     imageOrder.next(); // Receipt supersedes probes even while hydration buffers application.
@@ -137,6 +176,8 @@ async function hydrate(c: Client): Promise<void> {
     }
   }));
   settingsReads.begin();
+  // the bridge answers without the server, so the folder is in even when the hydrate never reaches its reads
+  void readFolder();
   try {
     await hydrateWith(on, release, c.negotiate);
   } finally {
@@ -172,7 +213,6 @@ async function hydrateWith(
     runMeasurePages(list);
   });
   on("models.measuring", (run) => applyServerEvent((s) => measuringChanged(s, run)));
-  on("sources.changed", (sources) => applyServerEvent({ sources }));
   on("update.changed", updatesSession.receiveUpdate);
   on("usage.changed", () => usageSession.usageChanged());
   on("image.event", (e) => {
@@ -268,12 +308,12 @@ async function hydrateWith(
   const [gpu, catalog, sources, update, speeds, measures] = await Promise.all([
     probe("gpu.status", {}),
     probe("models.catalog", {}),
-    probe("sources.list", {}),
+    probe("sources.list", {}, { onResult: (list, sync) => { if (ordering.ordered(LIBRARY.domain) && ordering.accept(LIBRARY, sync)) applyServerEvent({ sources: list }); } }),
     probe("update.status", {}),
     probe("models.speed", {}),
     probe("models.measures", {}),
   ]);
-  applyServerEvent((s) => ({ gpu, sources, ...(updateOrder.current(updateTicket) ? { update } : {}), ...(catalogLands(catalogTicket) ? { catalog } : {}), ...speedsRead(s, speeds), ...measuresRead(measures) }));
+  applyServerEvent((s) => ({ gpu, ...(ordering.ordered(LIBRARY.domain) ? {} : { sources }), ...(updateOrder.current(updateTicket) ? { update } : {}), ...(catalogLands(catalogTicket) ? { catalog } : {}), ...speedsRead(s, speeds), ...measuresRead(measures) }));
   if (measures !== undefined && measures !== NA) runMeasurePages(measures.measures);
   release("none");
   void settingsReads.read();

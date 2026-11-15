@@ -9,6 +9,7 @@ import { ModelSettings, ModelSettingsPatch, Settings, SettingsPatch, type SyncCh
 import * as Result from "effect/Result";
 import * as S from "effect/Schema";
 import { canonicalTag } from "../runtime/recommended.ts";
+import { createRevisions } from "../ws/revisions.ts";
 import { boundedModelSettings } from "./turn.ts";
 
 /** The file format version this build writes. A higher one is a newer build's file. */
@@ -160,25 +161,19 @@ export async function openSettingsStore(options: SettingsStoreOptions): Promise<
   }
 
   const listeners = new Set<SettingsListener>();
-  let revision = 0;
-  const revisions = new WeakMap<Settings, number>([[current, revision]]);
+  const revisions = createRevisions<Settings>("settings", current);
   const persist = (next: Settings): Settings => {
     if (sameSettings(next, current)) return current;
     writeAtomic(file, next, options.rename);
     const previous = current;
-    current = next;
-    revisions.set(next, ++revision);
+    current = revisions.commit(next);
     for (const l of listeners) l(next, previous);
     return next;
   };
   return {
     loadNote,
     get: () => current,
-    stamp(value) {
-      const rev = revisions.get(value);
-      if (rev === undefined) throw new Error("Settings value was not captured by this store");
-      return { scope: "settings", kind: "snapshot", rev };
-    },
+    stamp: revisions.stamp,
     update(patch) {
       return persist(S.decodeUnknownSync(Settings)(applyPatch(current, S.decodeUnknownSync(SettingsPatch)(patch))));
     },

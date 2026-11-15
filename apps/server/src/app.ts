@@ -140,8 +140,9 @@ export function createApp(deps: AppDeps): App {
       log(`model speeds not read: ${(e as Error).message}`);
     }
   };
-  const offSources = deps.sources?.onChange(sources => push("sources.changed", sources));
-  const offImports = deps.libraryImports?.onChange(value => push("sources.imports", value));
+  const { sources: library, libraryImports } = deps;
+  const offSources = library?.onChange(sources => push("sources.changed", sources, [library.stamp(sources)]));
+  const offImports = libraryImports?.onChange(value => push("sources.imports", value, [libraryImports.stamp(value)]));
 
   /** Claims the thread synchronously so a second send cannot slip in during the fit check. */
   const reserve = (threadId: string, model: string): { turn: Turn; end: () => void } => {

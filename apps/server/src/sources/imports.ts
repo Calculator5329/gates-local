@@ -3,6 +3,7 @@ import { open, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { SourceImport, SourceImports } from "@gates-local/contracts";
 import type { Handlers } from "../ws/server.ts";
+import { createRevisions } from "../ws/revisions.ts";
 import type { Sources } from "./index.ts";
 import type { ImportActivity } from "./activity.ts";
 import { IMPORT_MS, cloneRepository, githubRepo, importSize, runGit, type GitTransport } from "./clone.ts";
@@ -92,9 +93,20 @@ export function createLibraryImports(deps: ImportsDeps) {
   const finishedAt = new Map<string, number>();
   const now = deps.now ?? Date.now;
   const listeners = new Set<(value: SourceImports) => void>();
-  const snapshot = (): SourceImports => ({ samples: samples.map(s => ({ id: s.id, label: s.label, description: s.description, sizeBytes: s.sizeBytes, url: s.url, license: s.license, licenseUrl: s.licenseUrl, tables: s.tables, questions: s.questions })), jobs: [...jobs.values()].map(j => ({ ...j })) });
-  const emit = () => { const value = snapshot(); for (const listener of listeners) listener(value); };
-  const update = (id: string, patch: Partial<SourceImport>) => { const old = jobs.get(id); if (old) { jobs.set(id, { ...old, ...patch }); emit(); } };
+  const build = (): SourceImports => ({ samples: samples.map(s => ({ id: s.id, label: s.label, description: s.description, sizeBytes: s.sizeBytes, url: s.url, license: s.license, licenseUrl: s.licenseUrl, tables: s.tables, questions: s.questions })), jobs: [...jobs.values()].map(j => ({ ...j })) });
+  // Every change to the jobs is committed here with its number, then announced: the answer to
+  // sources.imports and each push carry the number of the value they hold.
+  let current = build();
+  const revisions = createRevisions<SourceImports>("source-imports", current);
+  const snapshot = () => current;
+  const emit = () => { const value = current = revisions.commit(build()); for (const listener of listeners) listener(value); };
+  const update = (id: string, patch: Partial<SourceImport>) => {
+    const old = jobs.get(id);
+    if (!old) return;
+    const next = { ...old, ...patch };
+    if (Object.keys(next).every(key => next[key as keyof SourceImport] === old[key as keyof SourceImport])) return;
+    jobs.set(id, next); emit();
+  };
   const checkRecovered = () => {
     for (const [id, held] of recovered) {
       if (!held.worker || !workerGone(held.worker)) continue;
@@ -196,7 +208,7 @@ export function createLibraryImports(deps: ImportsDeps) {
     return { ...job };
   };
   const handlers = {
-    "sources.imports": () => snapshot(),
+    "sources.imports": (_params, ctx) => { const value = current; ctx?.capture?.([revisions.stamp(value)]); return value; },
     "sources.downloadSample": ({ id }) => { const sample = samples.find(s => s.id === id); if (!sample) throw new Error("This sample is not available."); return begin("sample", id, sample.label, sample); },
     "sources.clone": ({ url }) => { const key = githubRepo(url); return begin("repository", key, key.slice("https://github.com/".length)); },
     "sources.cancelImport": ({ id }) => { checkRecovered(); const controller = running.get(id); controller?.abort(new DOMException("Cancelled. Nothing was added; retry whenever you like.", "AbortError")); return { cancelled: controller !== undefined }; },
@@ -204,5 +216,5 @@ export function createLibraryImports(deps: ImportsDeps) {
   // Recovered workers belong to a previous server. Keep them in the update
   // snapshot until their identity is confirmed gone; never try to kill them.
   const activity = (): readonly string[] => { checkRecovered(); return [...recovered.values()].map(({ job }) => `Import: ${job.label}`); };
-  return { handlers, snapshot, activity, onChange(listener: (value: SourceImports) => void) { listeners.add(listener); return () => { listeners.delete(listener); }; }, close() { for (const c of running.values()) c.abort(new DOMException("The app closed during the import. Retry.", "AbortError")); } };
+  return { handlers, snapshot, stamp: revisions.stamp, activity, onChange(listener: (value: SourceImports) => void) { listeners.add(listener); return () => { listeners.delete(listener); }; }, close() { for (const c of running.values()) c.abort(new DOMException("The app closed during the import. Retry.", "AbortError")); } };
 }

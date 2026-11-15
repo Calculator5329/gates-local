@@ -137,6 +137,7 @@ and is the next one to get a check.
 | A page the model wrote runs sandboxed in its own frame and learns nothing of the app. | test `test/e2e/pages-lockdown.spec.ts` |
 | Every wire method decides whether the phone may call it; the phone is for chat only. | type: the required `phone` field in `packages/contracts/src/protocol.ts`; test `test/e2e/phone.spec.ts` |
 | Data crossing a boundary (wire, files, runtime responses) is decoded with Effect Schema. | type for the wire: the `methods` table in `packages/contracts/src/protocol.ts`; prose elsewhere |
+| A kind of data in `ORDERED_DOMAINS` carries its number on every answer and push of it, and the window applies only what is newer than it has. | the `sync` field on rows in `packages/contracts/src/protocol.ts`; the socket server refuses an answer or push of an ordered kind without its number, and so does the client (`packages/contracts/test/client.test.ts`) |
 | A reply's stage and running state come from the server as one typed value; the window only draws it. | type `ReplyStage` in `packages/contracts/src/shapes.ts` |
 | A statement about fit carries what it was measured against. | type `FitBasis` in `apps/server/src/fit/fit.ts` |
 | A chat request never sets `num_gpu`. | tests `apps/server/test/app.test.ts`, `test/e2e/paste.spec.ts` |

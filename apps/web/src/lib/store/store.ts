@@ -29,6 +29,7 @@ import type {
   Settings,
   ShellStatus,
   Source,
+  SourceImports,
   SuggestedList,
   Thread,
   ToolStep,
@@ -241,6 +242,10 @@ export interface State {
   readonly measuring: Readonly<Record<string, MeasureRun>>;
   readonly pulls: Readonly<Record<string, PullProgress>>;
   readonly sources: Maybe<readonly Source[]>;
+  /** The sample databases and the Library's imports, kept current by sources.imports pushes. */
+  readonly sourceImports: Maybe<SourceImports>;
+  /** The desktop app's data folder, fixed for the window's life and read from its bridge once; null outside it. */
+  readonly dataFolder: string | null | undefined;
   readonly imageStatus: Maybe<ImageStatus>;
   /** The shell sandbox's probe (tools.shell), read when Settings › Tools opens. */
   readonly shellStatus: Maybe<ShellStatus>;
@@ -320,6 +325,8 @@ const initial: State = {
   measuring: {},
   pulls: {},
   sources: undefined,
+  sourceImports: undefined,
+  dataFolder: undefined,
   imageStatus: undefined,
   shellStatus: undefined,
   imagePresets: undefined,

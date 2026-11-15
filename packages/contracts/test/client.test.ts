@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { type SocketLike, WireError, createClient, encodeResult } from "../src/index.ts";
+import { ORDERED_DOMAINS, type SocketLike, WireError, createClient, encodeResult } from "../src/index.ts";
 import { methodSamples, pushSamples } from "../src/testing.ts";
 
 type Listener = (event: { data?: unknown }) => void;
@@ -96,6 +96,52 @@ describe("createClient", () => {
     expect(errors).toEqual([expect.objectContaining({ code: "bad-message" })]);
     expect(socket.readyState).toBe(3);
   });
+
+  it("every ordered kind is held to its rows' numbers, not only settings", async () => {
+    // Explicit, so the check stays about a kind other than settings whatever ORDERED_DOMAINS holds.
+    const socket = new FakeSocket(); socket.open();
+    const errors: WireError[] = [];
+    const client = createClient(socket, { ordered: ["settings", "sources"], onProtocolError: error => errors.push(error) });
+    const ready = client.negotiate();
+    expect(socket.lastRequest().params).toEqual({ ordered: ["settings", "sources"] });
+    socket.reply(JSON.stringify({ type: "response", id: socket.lastRequest().id, ok: true, result: { epoch: "current", ordered: ["settings", "sources"] } }));
+    await ready;
+    const seen: unknown[] = [];
+    client.subscribe("sources.changed", value => seen.push(value));
+    socket.reply(JSON.stringify({ type: "push", channel: "sources.changed", payload: [], sync: { epoch: "current", changes: [{ scope: "sources", kind: "snapshot", rev: 1 }] } }));
+    expect(seen).toEqual([[]]);
+    socket.reply(JSON.stringify({ type: "push", channel: "sources.changed", payload: [] }));
+    expect(seen).toEqual([[]]);
+    expect(errors).toEqual([expect.objectContaining({ code: "bad-message" })]);
+    expect(socket.readyState).toBe(3);
+  });
+
+  it("an answer for an ordered kind without its number is refused", async () => {
+    const socket = new FakeSocket(); socket.open();
+    const errors: WireError[] = [];
+    const client = createClient(socket, { ordered: ["settings", "sources"], onProtocolError: error => errors.push(error) });
+    const ready = client.negotiate();
+    socket.reply(JSON.stringify({ type: "response", id: socket.lastRequest().id, ok: true, result: { epoch: "current", ordered: ["settings", "sources"] } }));
+    await ready;
+    const list = client.call("sources.list", {});
+    socket.reply(JSON.stringify({ type: "response", id: socket.lastRequest().id, ok: true, result: [], sync: { epoch: "current", changes: [{ scope: "settings", kind: "snapshot", rev: 1 }] } }));
+    await expect(list).rejects.toMatchObject({ code: "bad-message" });
+    expect(socket.readyState).toBe(3);
+  });
+
+  it("a kind the server did not order may arrive without a number", async () => {
+    const socket = new FakeSocket(); socket.open();
+    const client = createClient(socket, { ordered: ["settings", "sources"], onProtocolError: () => undefined });
+    const ready = client.negotiate();
+    socket.reply(JSON.stringify({ type: "response", id: socket.lastRequest().id, ok: true, result: { epoch: "current", ordered: ["settings"] } }));
+    await ready;
+    const seen: unknown[] = [];
+    client.subscribe("sources.changed", value => seen.push(value));
+    socket.reply(JSON.stringify({ type: "push", channel: "sources.changed", payload: [] }));
+    expect(seen).toEqual([[]]);
+    expect(socket.readyState).toBe(1);
+    client.close();
+  });
   it.each([false, true])("SS6-02/03: a throwing metadata hook preserves delivery and acknowledgement (reporter throws=%s)", async reporterThrows => {
     const socket = new FakeSocket(); socket.open();
     const errors: WireError[] = [];
@@ -143,7 +189,7 @@ describe("createClient", () => {
     const first = client.negotiate();
     expect(client.negotiate()).toBe(first);
     const request = socket.lastRequest();
-    expect(request).toMatchObject({ method: "sync.negotiate", params: { ordered: ["settings"] } });
+    expect(request).toMatchObject({ method: "sync.negotiate", params: { ordered: ORDERED_DOMAINS } });
     socket.reply(JSON.stringify({ type: "response", id: request.id, ok: true, result: { epoch: "process-a", ordered: [] } }));
     await expect(first).resolves.toEqual({ mode: "legacy", epoch: "process-a" });
     expect(client.sync).toEqual({ mode: "legacy", epoch: "process-a" });

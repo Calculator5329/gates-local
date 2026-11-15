@@ -26,7 +26,7 @@ test("a sample downloads in its own row: same place and height throughout, one r
   await button.click(); await expect(button).toHaveText(/^\d+%$/);
   await expect(button).toHaveAttribute("data-tip", "Cancel download");
   for (let n = 0; n < 4; n++) { expect(await size(row)).toEqual(before); expect(await size(button)).toEqual(buttonBefore); }
-  // Part filled: the fake sends 512 bytes every 200 ms and the list polls every 500 ms.
+  // Part filled: the fake sends 512 bytes every 200 ms and each step is pushed to the window.
   await expect(button).toHaveText(/^[3-7]\d%$/); expect(await size(button)).toEqual(buttonBefore);
   // Pressing the filling button cancels; the grey line says so and the button offers Retry.
   await button.click(); await expect(button).toHaveText("Retry"); await expect(row.locator(".import-status")).toContainText("Cancelled.");

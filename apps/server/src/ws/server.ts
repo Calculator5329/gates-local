@@ -24,7 +24,9 @@ import {
   WireError,
   ORDERED_DOMAINS,
   phoneMay,
-  settingsSnapshotMethod,
+  methodSync,
+  pushSync,
+  revisionOf,
   decodeRequest,
   encodeErrorResponse,
   encodePush,
@@ -270,9 +272,13 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
       if (code === "internal") log(`${method} handler threw: ${message}`);
       return send(ws, encodeErrorResponse(id, code, message, blocking));
     }
-    const needsSettings = ordered.get(ws)?.includes("settings") && settingsSnapshotMethod(method);
-    if (needsSettings && captured === undefined) return send(ws, encodeErrorResponse(id, "bad-result", `${method} did not capture settings metadata`));
-    const frame = encodeResult(id, method, result as never, needsSettings ? captured : undefined);
+    // A method row of a kind this socket ordered answers with its number, or not at all.
+    const row = methodSync(method);
+    const numbered = row !== undefined && ordered.get(ws)?.includes(row.domain) === true;
+    if (numbered && revisionOf(captured, epoch, row.scope) === undefined) {
+      return send(ws, encodeErrorResponse(id, "bad-result", `${method} did not capture ${row.scope} metadata`));
+    }
+    const frame = encodeResult(id, method, result as never, numbered ? captured : undefined);
     if (!frame.ok) {
       log(`${method} returned a result that breaks its Schema: ${frame.error.message}`);
       return send(ws, encodeErrorResponse(id, frame.error.code, frame.error.message));
@@ -328,11 +334,17 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     push(channel, payload, changes) {
       const frame = encodePush(channel, payload);
       if (!frame.ok) throw frame.error;
+      // A push row of an ordered kind carries its number, whoever is listening: an unnumbered
+      // writer fails here, on its first push, not only once an ordered window happens to connect.
+      const row = pushSync(channel);
+      const enabled = row !== undefined && ORDERED_DOMAINS.includes(row.domain) && (options.ordered ?? []).includes(row.domain);
+      if (enabled && revisionOf(changes === undefined ? undefined : { epoch, changes }, epoch, row.scope) === undefined) {
+        throw new Error(`${channel} did not capture ${row.scope} metadata`);
+      }
       let versioned: string | undefined;
       for (const ws of clients) {
         if (channel === "chat.event" && !chatClients.has(ws)) continue;
-        if (channel === "settings.changed" && ordered.get(ws)?.includes("settings")) {
-          if (changes === undefined) throw new Error("settings.changed did not capture settings metadata");
+        if (row !== undefined && changes !== undefined && ordered.get(ws)?.includes(row.domain)) {
           if (versioned === undefined) {
             const encoded = encodePush(channel, payload, { epoch, changes });
             if (!encoded.ok) throw encoded.error;
