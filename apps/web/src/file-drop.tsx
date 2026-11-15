@@ -22,8 +22,12 @@ const carriesFiles = (e: DragEvent) => !inPage && (e.dataTransfer?.types.include
 export function refusesDrop(target: EventTarget | null): boolean {
   const el = target as { closest?: (selector: string) => unknown } | null;
   if (el === null || typeof el.closest !== "function") return true;
-  return el.closest("input, textarea, [contenteditable]:not([contenteditable='false'])") === null;
+  const field = el.closest("input, textarea, [contenteditable]:not([contenteditable='false'])") as { tagName?: string; type?: string; disabled?: boolean; readOnly?: boolean } | null;
+  if (field === null || field.disabled === true || field.readOnly === true) return true;
+  return field.tagName === "INPUT" && !TYPED.has((field.type ?? "").toLowerCase());
 }
+/** The inputs a person types text into. A checkbox, a slider or a button takes none, so the window would follow a link dropped there. */
+const TYPED = new Set(["", "text", "search", "url", "email", "tel", "password", "number"]);
 /** Refuses a drag this window does not take; true when it did. */
 function refuse(e: DragEvent): boolean {
   if (inPage || carriesFiles(e) || !refusesDrop(e.target)) return false;

@@ -14,11 +14,24 @@ person fed in. The app treats it as hostile. It runs script, in a frame.
 - The WebRTC constructors are removed before the page's own script runs.
 - Every script element gets a one-time code from the server as the page
   is served. A `javascript:` address carries no code, so the page cannot
-  swap its document for a fresh one (which would have WebRTC back).
-- The app's window does not listen to the frame, and a frame that moves
-  to another address is taken down.
+  swap its document for a fresh one (which would have WebRTC back). The
+  code is not a secret from the page: its own script can read it. All it
+  does is tell a script element from a `javascript:` address.
+- A second policy travels beside the first, and a script must pass
+  both. It allows only script written in the page, so a script element
+  with an address is never fetched, whatever code it carries.
+- In a chat the app's window does not listen to the frame. While
+  Measure runs a page check, the window takes the check's results from
+  its own page frame as plain text; the page under test can read the
+  check's code, so a page could report results it did not earn. They
+  go into the score and nowhere else.
+- A frame cannot be moved to an address outside the page route: the
+  desktop app refuses the move and the frame stays as it was; in a
+  browser the frame may only load the page route, where any address but
+  an unused page's answers with an empty page.
 - A link or text dragged out of the page onto the app's window is
-  refused anywhere a person could not type.
+  refused anywhere a person could not type: a checkbox, a slider, a
+  button and a disabled or read-only field count as such.
 
 `test/e2e/pages-lockdown.spec.ts` runs a probe page against these in
 Chromium.

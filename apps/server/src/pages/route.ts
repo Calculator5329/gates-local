@@ -26,8 +26,12 @@ export const PAGES_KEPT = 32;
  * Script elements run by the nonce the server writes onto each one as it serves the page, and
  * handlers written on elements run as before. A `javascript:` address carries no nonce, so the
  * page cannot navigate its frame to one: that would swap in a new document, in a new window
- * with the WebRTC constructors back. `script-src` stays for eval and for a browser that does not
- * know the two narrower directives.
+ * with the WebRTC constructors back. `script-src` stays for a browser that does not know the two
+ * narrower directives.
+ *
+ * A nonce lets a script element run whatever its address, and the page's own script can read its
+ * nonce and put it on a script it makes. So the nonce alone would let a page load a script from
+ * any host: see {@link PAGE_NO_REMOTE_SCRIPT}, the second policy every page is served with.
  */
 export function pagePolicy(nonce: string): string {
   return [
@@ -47,6 +51,14 @@ export function pagePolicy(nonce: string): string {
     "sandbox allow-scripts",
   ].join("; ");
 }
+
+/**
+ * A second policy, sent beside the first; a script must pass both. This one names no host and no
+ * nonce, so a script element with an address fails it however it is marked, while a script written
+ * in the page passes. The first policy still refuses a `javascript:` address, which this one alone
+ * would allow.
+ */
+export const PAGE_NO_REMOTE_SCRIPT = "script-src 'unsafe-inline'";
 
 /** A fresh nonce for one served page. */
 export const pageNonce = (): string => randomBytes(16).toString("hex");
@@ -73,7 +85,8 @@ export function pageHeaders(nonce: string, frameAncestors?: string): Record<stri
   const policy = pagePolicy(nonce);
   return {
     "Content-Type": "text/html; charset=utf-8",
-    "Content-Security-Policy": frameAncestors === undefined ? policy : `${policy}; frame-ancestors ${frameAncestors}`,
+    // two policies in one header, split by the comma
+    "Content-Security-Policy": `${frameAncestors === undefined ? policy : `${policy}; frame-ancestors ${frameAncestors}`}, ${PAGE_NO_REMOTE_SCRIPT}`,
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
     "X-DNS-Prefetch-Control": "off",

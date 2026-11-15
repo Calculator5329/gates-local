@@ -11,6 +11,8 @@ beforeAll(async () => {
   ({ refusesDrop } = await import("../src/file-drop.tsx"));
 });
 
+/** A drop target whose nearest field is `f`. */
+const field = (f: object) => ({ closest: () => f }) as unknown as EventTarget;
 const el = (editable: boolean) => ({ closest: () => (editable ? {} : null) }) as unknown as EventTarget;
 function drag(types: string[], target: EventTarget | null) {
   const dataTransfer = { types, dropEffect: "copy" };
@@ -50,4 +52,13 @@ it("a drag that began in this window is left alone", () => {
 it("a target with no element under it is refused", () => {
   expect(refusesDrop(null)).toBe(true);
   expect(refusesDrop({} as EventTarget)).toBe(true);
+});
+
+it("a field that takes no typing is refused: a checkbox, a slider, a button, a disabled or read-only field", () => {
+  for (const type of ["checkbox", "radio", "range", "button", "submit", "file", "color", "date"]) expect(refusesDrop(field({ tagName: "INPUT", type })), type).toBe(true);
+  expect(refusesDrop(field({ tagName: "TEXTAREA", disabled: true }))).toBe(true);
+  expect(refusesDrop(field({ tagName: "INPUT", type: "text", readOnly: true }))).toBe(true);
+  for (const type of ["text", "search", "url", "TEXT", ""]) expect(refusesDrop(field({ tagName: "INPUT", type })), type).toBe(false);
+  expect(refusesDrop(field({ tagName: "TEXTAREA" }))).toBe(false);
+  expect(refusesDrop(field({ tagName: "DIV" }))).toBe(false);
 });

@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-15: A page a model wrote cannot load a script from another address
+
+- The change that stopped a page swapping its own document marked every
+  script element so it could run, and that mark also let a script
+  element load from any address. A page is now served with a second
+  policy beside the first, and a script must pass both: one written in
+  the page runs, one with an address is never fetched. This was on the
+  development branch only and was never in a release.
+- A link dragged onto a checkbox, a slider, a button or a disabled or
+  read-only field is refused like anywhere else a person could not
+  type.
+- `docs/design/pages.md` now says three things as they are: the code on
+  each script is not a secret from the page, a frame that tries to move
+  is refused where it stands, and Measure listens to its own page frame
+  while a page check runs.
+
 ## 2026-11-14: The running line times only work, an empty stopped reply says Stopped, and a queued message says what it waits for
 
 - A queued message waiting behind a reply in another chat gave no

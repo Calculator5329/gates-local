@@ -128,6 +128,8 @@ result.eval = tryIt(() => eval("1 + 1"));
 try { parent.postMessage({ from: "page" }, "*"); result.posted = "sent"; } catch (e) { result.posted = "threw " + e.name; }
 // swapping its own document through a javascript: address would give it a new window; a refusal shows in violations
 location.href = "javascript:'<p id=swapped>swapped</p>'";
+// a script from another address, one the page makes and marks as its own scripts are marked; the fake server logs it if it is asked
+const made = document.createElement("script"); made.nonce = document.currentScript.nonce; made.src = "${FAKE_ORIGIN}${LEFT_PATH}/made-script"; document.head.append(made);
 const img = (src) => new Promise((done) => { const i = new Image(); i.onload = () => done("loaded"); i.onerror = () => done("failed"); i.src = src; });
 Promise.all([
   fetch("${PROBE_TARGET}").then(() => "reached", (e) => "failed " + e.name),
@@ -138,6 +140,7 @@ Promise.all([
   setTimeout(() => { document.getElementById("out").textContent = JSON.stringify(result); }, 50);
 });
 </script>
+<script src="${FAKE_ORIGIN}${LEFT_PATH}/written-script"></script>
 </body>
 </html>`;
 }

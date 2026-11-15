@@ -56,6 +56,7 @@ test("the frame is the server's one-time page address, sandboxed to scripts only
 
 test("a page learns nothing of the app and reaches nothing outside its frame", async ({ page, open }) => {
   await open(); await waitReady(page);
+  const before = await leftRequests();
   await pageOf(page, PROBE_PROMPT);
   const out = page.frameLocator('[data-testid="pages.frame"]').locator("#out");
   await expect(out).not.toHaveText("running");
@@ -85,6 +86,9 @@ test("a page learns nothing of the app and reaches nothing outside its frame", a
   // its own document stays: a javascript: address is refused as a script element with no nonce
   expect.soft(r["violations"]).toContain("script-src-elem");
   await expect.soft(page.frameLocator('[data-testid="pages.frame"]').locator("#swapped")).toHaveCount(0);
+  // a script from another address is never asked for: not one written in the page, not one the page makes and marks as its own
+  await page.waitForTimeout(500);
+  expect.soft(await leftRequests()).toEqual(before);
   // WebRTC and popups: no constructor, and no frame of its own to find one in
   expect.soft(r["rtc"]).toBe("undefined,undefined,undefined");
   expect.soft(r["rtcNew"]).toBe("threw TypeError");

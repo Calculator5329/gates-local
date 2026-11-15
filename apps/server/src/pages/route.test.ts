@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { type WsServer, startWsServer } from "../ws/server.ts";
-import { PAGES_KEPT, PAGE_MAX_BYTES, PAGE_TTL_MS, createPageRoute, pageDocument, pagePolicy } from "./route.ts";
+import { PAGES_KEPT, PAGE_MAX_BYTES, PAGE_TTL_MS, createPageRoute, pageDocument, pagePolicy, PAGE_NO_REMOTE_SCRIPT } from "./route.ts";
 
 const TOKEN = "per-launch-secret";
 const APP = "http://127.0.0.1:5187";
@@ -88,7 +88,12 @@ describe("the page route on the computer's listener", () => {
     expect(address).not.toContain(TOKEN);
     expect(address).not.toContain("token");
     const r = await send(server, "GET", new URL(address).pathname);
-    const policy = String(r.headers["content-security-policy"]);
+    // two policies in the one header; a script has to pass both
+    const [policy = "", second, ...more] = String(r.headers["content-security-policy"]).split(", ");
+    expect(more).toEqual([]);
+    // the second names no host, no nonce and no trust handed on: a script element with an address fails it
+    expect(second).toBe("script-src 'unsafe-inline'");
+    expect(second).toBe(PAGE_NO_REMOTE_SCRIPT);
     const nonce = /script-src-elem 'nonce-([0-9a-f]{32})' 'strict-dynamic'/.exec(policy)?.[1];
     expect(nonce, policy).toBeDefined();
     expect(policy).toBe(pagePolicy(nonce!));
@@ -141,7 +146,7 @@ describe("the page route on the phone's listener", () => {
     // everything else on this listener refuses framing; its pages are framed by the phone's own origin
     expect(r.headers["x-frame-options"]).toBeUndefined();
     expect(r.headers["content-security-policy"]).toMatch(/^default-src 'none'; .*; sandbox allow-scripts; frame-ancestors /);
-    expect(String(r.headers["content-security-policy"]).endsWith(`; frame-ancestors ${PHONE_ORIGIN}`)).toBe(true);
+    expect(String(r.headers["content-security-policy"]).endsWith(`; frame-ancestors ${PHONE_ORIGIN}, ${PAGE_NO_REMOTE_SCRIPT}`)).toBe(true);
     expect((await send(phone, "GET", `/pages/${id}`, SERVE)).status).toBe(404);
     expect((await send(phone, "GET", "/", SERVE)).headers["x-frame-options"]).toBe("DENY");
   });
