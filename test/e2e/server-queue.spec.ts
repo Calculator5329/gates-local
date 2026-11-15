@@ -138,6 +138,8 @@ test("an update with three messages saved in this browser hands them to the serv
   await open();
   await waitReady(page);
   await sendMessage(page, "How do I check disk space before a download?");
+  await expect(page, "the new chat has its id").toHaveURL(/#thread=/);
+  await expect(page.locator(".turn.a")).toHaveCount(1, { timeout: 15_000 });
   await expect(stop(page)).toHaveCount(0, { timeout: 15_000 });
   const threadId = new URLSearchParams(new URL(page.url()).hash.slice(1)).get("thread");
   expect(threadId).toBeTruthy();
