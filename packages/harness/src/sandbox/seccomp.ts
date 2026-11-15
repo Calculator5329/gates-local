@@ -1,110 +1,92 @@
-// A classic-BPF seccomp program for bwrap's `--seccomp <fd>`. It stops the
-// sandbox from taking file locks or leases, so a shell reading a live database
-// or file in a folder source can never block the owner's writer. Everything else is
-// allowed; bwrap's namespaces and read-only mounts do the rest.
-//
-// bwrap reads the raw program: an array of `struct sock_filter`
-// { u16 code; u8 jt; u8 jf; u32 k } (8 bytes each, little-endian on both
-// supported arches). The kernel runs it against `struct seccomp_data`:
-//   offset 0  int nr        the syscall number
-//   offset 4  u32 arch      AUDIT_ARCH_* of the calling convention
-//   offset 16 u64 args[6]   args[1] low word at 24 (little-endian)
-//
-// The program, instruction by instruction:
-//   0  ld  [4]                        load arch
-//   1  jeq ARCH, 0, DENY              a foreign arch (i386 or arm32 compat,
-//                                     x32 is caught below) is denied for
-//                                     every syscall: its numbers mean other
-//                                     calls, so no allow-list holds for it
-//   2  ld  [0]                        load the syscall number
-//   x86_64 only:
-//   3  jset 0x40000000, DENY, 0       the x32 bit: x32 calls reuse x86_64
-//                                     numbers plus this bit, so deny them all
-//   .  jeq FLOCK, DENY, 0             flock(2) is denied
-//   .  jeq FCNTL, 0, ALLOW            not fcntl: allowed
-//   .  ld  [24]                       fcntl: load args[1] (cmd), low word;
-//                                     the kernel reads cmd as unsigned int,
-//                                     so the high word cannot bypass this
-//   .  jeq F_SETLK, DENY, 0           6
-//   .  jeq F_SETLKW, DENY, 0          7
-//   .  jeq F_OFD_SETLK, DENY, 0       37
-//   .  jeq F_OFD_SETLKW, DENY, 0      38
-//   .  jeq F_SETLEASE, DENY, 0        1024: a read lease makes the owner's
-//                                     writable open block (or fail EAGAIN)
-//   ALLOW: ret SECCOMP_RET_ALLOW      every other syscall and fcntl cmd
-//   DENY:  ret SECCOMP_RET_ERRNO|EPERM
-//
-// F_GETLK, F_OFD_GETLK and F_GETLEASE stay allowed: they only ask, they take nothing.
-
 export type SeccompArch = "x64" | "arm64";
 
-const BPF_LD_W_ABS = 0x20; // BPF_LD | BPF_W | BPF_ABS
-const BPF_JEQ_K = 0x15; // BPF_JMP | BPF_JEQ | BPF_K
-const BPF_JSET_K = 0x45; // BPF_JMP | BPF_JSET | BPF_K
-const BPF_RET_K = 0x06; // BPF_RET | BPF_K
+const BPF_LD_W_ABS = 0x20;
+const BPF_JEQ_K = 0x15;
+const BPF_JSET_K = 0x45;
+const BPF_RET_K = 0x06;
 const SECCOMP_RET_ALLOW = 0x7fff0000;
 const SECCOMP_RET_ERRNO = 0x00050000;
 const EPERM = 1;
+// external: Linux's x32 calls reuse the x86_64 syscall numbers plus this bit.
 const X32_SYSCALL_BIT = 0x40000000;
+const AUDIT_ARCH_X86_64 = 0xc000003e;
+const AUDIT_ARCH_AARCH64 = 0xc00000b7;
+// external: Linux's struct seccomp_data { int nr; u32 arch; u64 instruction_pointer; u64 args[6] }, little-endian.
+const SECCOMP_DATA_OFFSET = { nr: 0, arch: 4, firstArg: 16, lowWordOfSecondArg: 24 } as const;
+const BYTES_PER_ARG = 8;
+const ARG_COUNT = 6;
+// external: Linux's struct sock_filter { u16 code; u8 jt; u8 jf; u32 k }, little-endian on both arches; bwrap passes the array on as it is.
+const SOCK_FILTER = { bytes: 8, code: 0, jt: 2, jf: 3, k: 4 } as const;
+// external: a read lease (F_SETLEASE) makes Linux block the owner's writable open, or fail it with EAGAIN.
 export const LOCK_COMMANDS = { F_SETLK: 6, F_SETLKW: 7, F_OFD_SETLK: 37, F_OFD_SETLKW: 38, F_SETLEASE: 1024 } as const;
 
+// external: Linux numbers flock and fcntl in asm/unistd_64.h for x86_64 and asm-generic/unistd.h for aarch64.
 export const ARCHES: Record<SeccompArch, { audit: number; flock: number; fcntl: number; x32: boolean }> = {
-  x64: { audit: 0xc000003e, flock: 73, fcntl: 72, x32: true }, // AUDIT_ARCH_X86_64, asm/unistd_64.h
-  arm64: { audit: 0xc00000b7, flock: 32, fcntl: 25, x32: false }, // AUDIT_ARCH_AARCH64, asm-generic/unistd.h
+  x64: { audit: AUDIT_ARCH_X86_64, flock: 73, fcntl: 72, x32: true },
+  arm64: { audit: AUDIT_ARCH_AARCH64, flock: 32, fcntl: 25, x32: false },
 };
 
 export function isSeccompArch(arch: string): arch is SeccompArch {
   return arch === "x64" || arch === "arm64";
 }
 
-/** The filter bytes for one arch; see the header for each instruction. */
+type Target = number | "DENY" | "ALLOW";
+type Insn = { code: number; jt: Target; jf: Target; k: number };
+const NEXT = 0;
+const load = (offset: number): Insn => ({ code: BPF_LD_W_ABS, jt: NEXT, jf: NEXT, k: offset });
+const denyUnlessEqual = (k: number): Insn => ({ code: BPF_JEQ_K, jt: NEXT, jf: "DENY", k });
+const denyIfEqual = (k: number): Insn => ({ code: BPF_JEQ_K, jt: "DENY", jf: NEXT, k });
+const allowUnlessEqual = (k: number): Insn => ({ code: BPF_JEQ_K, jt: NEXT, jf: "ALLOW", k });
+const denyIfAnyBitOf = (k: number): Insn => ({ code: BPF_JSET_K, jt: "DENY", jf: NEXT, k });
+const returning = (k: number) => ({ code: BPF_RET_K, jt: NEXT, jf: NEXT, k });
+
 export function lockFilter(arch: SeccompArch): Buffer {
   const a = ARCHES[arch];
-  type Insn = { code: number; jt: number | "DENY" | "ALLOW"; jf: number | "DENY" | "ALLOW"; k: number };
   const body: Insn[] = [
-    { code: BPF_LD_W_ABS, jt: 0, jf: 0, k: 4 },
-    { code: BPF_JEQ_K, jt: 0, jf: "DENY", k: a.audit },
-    { code: BPF_LD_W_ABS, jt: 0, jf: 0, k: 0 },
-    ...(a.x32 ? [{ code: BPF_JSET_K, jt: "DENY" as const, jf: 0, k: X32_SYSCALL_BIT }] : []),
-    { code: BPF_JEQ_K, jt: "DENY", jf: 0, k: a.flock },
-    { code: BPF_JEQ_K, jt: 0, jf: "ALLOW", k: a.fcntl },
-    { code: BPF_LD_W_ABS, jt: 0, jf: 0, k: 24 },
-    ...Object.values(LOCK_COMMANDS).map((k): Insn => ({ code: BPF_JEQ_K, jt: "DENY", jf: 0, k })),
+    load(SECCOMP_DATA_OFFSET.arch),
+    // external: under a foreign arch Linux reads the same syscall numbers as other calls, so no allow-list holds for it.
+    denyUnlessEqual(a.audit),
+    load(SECCOMP_DATA_OFFSET.nr),
+    ...(a.x32 ? [denyIfAnyBitOf(X32_SYSCALL_BIT)] : []),
+    denyIfEqual(a.flock),
+    allowUnlessEqual(a.fcntl),
+    // external: Linux reads fcntl's command, its second argument, as an unsigned int, so the low word is all of it.
+    load(SECCOMP_DATA_OFFSET.lowWordOfSecondArg),
+    ...Object.values(LOCK_COMMANDS).map(denyIfEqual),
   ];
   const allow = body.length;
   const deny = allow + 1;
-  // Jump offsets count from the next instruction.
-  const offset = (target: Insn["jt"], at: number) => target === "ALLOW" ? allow - at - 1 : target === "DENY" ? deny - at - 1 : target;
+  // external: Linux counts a BPF jump offset from the next instruction.
+  const offset = (target: Target, at: number) => target === "ALLOW" ? allow - at - 1 : target === "DENY" ? deny - at - 1 : target;
   const program = [
     ...body.map((insn, at) => ({ ...insn, jt: offset(insn.jt, at), jf: offset(insn.jf, at) })),
-    { code: BPF_RET_K, jt: 0, jf: 0, k: SECCOMP_RET_ALLOW },
-    { code: BPF_RET_K, jt: 0, jf: 0, k: SECCOMP_RET_ERRNO | EPERM },
+    returning(SECCOMP_RET_ALLOW),
+    returning(SECCOMP_RET_ERRNO | EPERM),
   ];
-  const bytes = Buffer.alloc(program.length * 8);
+  const bytes = Buffer.alloc(program.length * SOCK_FILTER.bytes);
   program.forEach((insn, i) => {
-    bytes.writeUInt16LE(insn.code, i * 8);
-    bytes.writeUInt8(insn.jt, i * 8 + 2);
-    bytes.writeUInt8(insn.jf, i * 8 + 3);
-    bytes.writeUInt32LE(insn.k >>> 0, i * 8 + 4);
+    bytes.writeUInt16LE(insn.code, i * SOCK_FILTER.bytes + SOCK_FILTER.code);
+    bytes.writeUInt8(insn.jt, i * SOCK_FILTER.bytes + SOCK_FILTER.jt);
+    bytes.writeUInt8(insn.jf, i * SOCK_FILTER.bytes + SOCK_FILTER.jf);
+    bytes.writeUInt32LE(insn.k >>> 0, i * SOCK_FILTER.bytes + SOCK_FILTER.k);
   });
   return bytes;
 }
 
-/** A tiny classic-BPF interpreter over the same instructions, for tests. */
 export function runFilter(program: Buffer, data: { nr: number; arch: number; args?: readonly number[] }): number {
   const word = (offset: number) => {
-    if (offset === 0) return data.nr >>> 0;
-    if (offset === 4) return data.arch >>> 0;
-    const arg = (offset - 16) / 8;
-    if (offset >= 16 && offset % 8 === 0 && arg < 6) return (data.args?.[arg] ?? 0) >>> 0;
+    if (offset === SECCOMP_DATA_OFFSET.nr) return data.nr >>> 0;
+    if (offset === SECCOMP_DATA_OFFSET.arch) return data.arch >>> 0;
+    const arg = (offset - SECCOMP_DATA_OFFSET.firstArg) / BYTES_PER_ARG;
+    if (offset >= SECCOMP_DATA_OFFSET.firstArg && offset % BYTES_PER_ARG === 0 && arg < ARG_COUNT) return (data.args?.[arg] ?? 0) >>> 0;
     throw new Error(`Unexpected load offset ${offset}`);
   };
   let acc = 0;
-  for (let pc = 0; pc * 8 < program.length;) {
-    const code = program.readUInt16LE(pc * 8);
-    const jt = program.readUInt8(pc * 8 + 2);
-    const jf = program.readUInt8(pc * 8 + 3);
-    const k = program.readUInt32LE(pc * 8 + 4);
+  for (let pc = 0; pc * SOCK_FILTER.bytes < program.length;) {
+    const code = program.readUInt16LE(pc * SOCK_FILTER.bytes + SOCK_FILTER.code);
+    const jt = program.readUInt8(pc * SOCK_FILTER.bytes + SOCK_FILTER.jt);
+    const jf = program.readUInt8(pc * SOCK_FILTER.bytes + SOCK_FILTER.jf);
+    const k = program.readUInt32LE(pc * SOCK_FILTER.bytes + SOCK_FILTER.k);
     if (code === BPF_LD_W_ABS) { acc = word(k); pc++; }
     else if (code === BPF_JEQ_K) pc += 1 + (acc === k ? jt : jf);
     else if (code === BPF_JSET_K) pc += 1 + ((acc & k) !== 0 ? jt : jf);

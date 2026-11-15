@@ -1,12 +1,3 @@
-// gpu.status: what holds GPU memory now, named for people. Read-only: this
-// module never signals, stops or reconfigures any process it lists.
-//
-// Occupants come from nvidia-smi's compute apps. Whisper (by name, or the
-// MainPID of whisper-server.service on Linux) and other apps are protected.
-// Ollama runners carry the model names from /api/ps; a ComfyUI python that
-// listens on 8188 is "image"; used memory no process accounts for is
-// "unknown". Missing nvidia-smi or confirmed unavailable devices are "none";
-// failed reads and absence contradicted by resident GPU bytes are "unreadable".
 import { execFile } from "node:child_process";
 import { readdir, readFile, readlink } from "node:fs/promises";
 import os from "node:os";
@@ -17,10 +8,10 @@ import { FitError, type GpuTenant, type MeminfoReader, type NvidiaSmiRunner } fr
 
 export const GPU_STATUS_ARGS = ["--query-gpu=name,memory.total,memory.used,memory.free", "--format=csv,noheader,nounits"] as const;
 
-/** ComfyUI's default port: a python GPU process listening here is the image runtime. */
+// external: ComfyUI listens on 8188 unless it is started with another port.
 export const COMFYUI_PORT = 8188;
 
-/** Below this, memory nvidia-smi cannot attribute is noise, not an occupant. */
+// why: less than this that nvidia-smi cannot attribute is noise, not an occupant.
 const UNKNOWN_MIN_BYTES = 64 * MIB;
 
 export interface ResidentModel {
@@ -31,27 +22,13 @@ export interface ResidentModel {
 export interface GpuStatusDeps {
   platform?: NodeJS.Platform;
   runNvidiaSmi?: NvidiaSmiRunner;
-  /** Linux: the text of /proc/meminfo. */
   readMeminfo?: MeminfoReader;
-  /** Elsewhere: os.freemem(). */
   freemem?: () => number;
-  /** Linux: MainPID of whisper-server.service, undefined when it is not running. */
   whisperPid?: () => Promise<number | undefined>;
-  /** /api/ps of the Ollama in use; [] when there is none. */
   residentModels?: () => Promise<readonly ResidentModel[]>;
-  /** Which of these pids listen on the TCP port. */
   listeningPids?: (port: number, pids: readonly number[]) => Promise<ReadonlySet<number>>;
-  /**
-   * The ComfyUI process this app runs (the image module's held engine value), whatever its port.
-   * The port-8188 guess stays for a ComfyUI started outside the app.
-   */
   imagePid?: () => number | undefined;
-  /** Friendly model name for a tag ("Qwen 3.5 9B"). */
   modelLabel?: (tag: string) => string;
-  /**
-   * Resident models no running reply uses: what the next thing in memory asks to leave
-   * (gpu/memory.ts), so those are the unprotected chat models.
-   */
   mayUnload?: () => readonly string[];
   now?: () => number;
 }
@@ -69,19 +46,21 @@ function parseStatusTotals(text: string): { name: string; totalBytes: number; us
   throw new FitError("gpu-unreadable", "nvidia-smi printed no GPU memory line");
 }
 
-async function systemMemoryAvailable(deps: GpuStatusDeps, platform: NodeJS.Platform): Promise<number> {
-  if (platform === "linux") {
-    try {
-      return parseMemAvailable(await (deps.readMeminfo ?? (() => readFile("/proc/meminfo", "utf8")))());
-    } catch {
-      // fall through to the portable reading
-    }
+async function procMemAvailable(deps: GpuStatusDeps): Promise<number | undefined> {
+  try {
+    return parseMemAvailable(await (deps.readMeminfo ?? (() => readFile("/proc/meminfo", "utf8")))());
+  } catch {
+    // why: an unreadable /proc/meminfo leaves the portable reading to answer.
+    return undefined;
   }
-  return (deps.freemem ?? os.freemem)();
 }
 
-/** Splits the runners' measured bytes across the resident models in proportion to their size_vram. */
-function chatOccupants(runnerBytes: number, models: readonly ResidentModel[], label: (tag: string) => string, mine: (tag: string) => boolean): GpuOccupant[] {
+async function systemMemoryAvailable(deps: GpuStatusDeps, platform: NodeJS.Platform): Promise<number> {
+  const fromProc = platform === "linux" ? await procMemAvailable(deps) : undefined;
+  return fromProc ?? (deps.freemem ?? os.freemem)();
+}
+
+function chatOccupants(runnerBytes: number, models: readonly ResidentModel[], label: (tag: string) => string, mayBeAskedToLeave: (tag: string) => boolean): GpuOccupant[] {
   if (models.length === 0) return runnerBytes > 0 ? [{ label: "Ollama", bytes: runnerBytes, kind: "chat-model", protected: true }] : [];
   const vramSum = models.reduce((s, m) => s + m.sizeVramBytes, 0);
   const total = Math.max(runnerBytes, vramSum);
@@ -89,16 +68,10 @@ function chatOccupants(runnerBytes: number, models: readonly ResidentModel[], la
     label: label(m.name),
     bytes: Math.round(vramSum > 0 ? (total * m.sizeVramBytes) / vramSum : total / models.length),
     kind: "chat-model" as const,
-    protected: !mine(m.name),
+    protected: !mayBeAskedToLeave(m.name),
   }));
 }
 
-/**
- * Everything holding GPU memory but the model runtime's runners, named for people as gpu.status
- * names them, biggest first: Whisper, ComfyUI, other apps by name, and the memory no listed process
- * accounts for. One naming for every surface that says who is on the card (gpu.status, the fit
- * table's card.inTheWay). `whisper` and `image` add to what the tenant's own role says.
- */
 export function holdersOf(
   tenants: readonly GpuTenant[],
   usedBytes: number,
@@ -113,15 +86,15 @@ export function holdersOf(
     grouped.set(key, prev ? { ...prev, bytes: prev.bytes + o.bytes } : o);
   };
   for (const t of tenants) {
-    // No reading for this process (every process on Windows, and any nvidia-smi may not inspect):
-    // it gets no row and no size. Its memory is in the measured remainder below.
+    // external: nvidia-smi gives no memory for any process on Windows, nor for one it may not inspect.
     if (t.usedBytes === undefined) continue;
     const bytes = t.usedBytes;
     accounted += bytes;
     if (t.role === "whisper" || is.whisper?.(t) === true) add({ label: "Whisper", bytes, kind: "whisper", protected: true });
     else if (t.role === "ollama") runnerBytes += bytes;
     else if (is.image?.(t) === true) add({ label: "ComfyUI", bytes, kind: "image", protected: false });
-    else if (t.unnamed) accounted -= bytes; // measured, no name: it joins the remainder
+    // why: measured but with no name, so it joins the remainder.
+    else if (t.unnamed) accounted -= bytes;
     else add({ label: t.label, bytes, kind: "other-app", protected: true });
   }
   const holders = [...grouped.values()];
@@ -152,15 +125,16 @@ export async function readGpuStatus(deps: GpuStatusDeps = {}): Promise<GpuStatus
   const comfy = pythons.length > 0 && deps.listeningPids ? await deps.listeningPids(COMFYUI_PORT, pythons).catch(() => new Set<number>()) : new Set<number>();
   const imagePid = deps.imagePid?.();
   const label = deps.modelLabel ?? ((tag: string) => tag);
-  // Unprotected is what the next thing in memory asks to leave (gpu/memory.ts), read here without a second /api/ps.
+  // why: unprotected is what the next thing in memory asks to leave, read without a second /api/ps.
   const listed = new Set(deps.mayUnload?.() ?? []);
-  const mine = (tag: string) => listed.has(tag);
+  const mayBeAskedToLeave = (tag: string) => listed.has(tag);
 
   const { holders, runnerBytes } = holdersOf(tenants, totals.usedBytes, {
     whisper: (t) => t.pid === whisperPid,
+    // why: imagePid is the ComfyUI this app runs, on any port; the port finds one started outside it.
     image: (t) => t.pid === imagePid || comfy.has(t.pid),
   });
-  const occupants = [...chatOccupants(runnerBytes, models, label, mine), ...holders].toSorted((a, b) => b.bytes - a.bytes);
+  const occupants = [...chatOccupants(runnerBytes, models, label, mayBeAskedToLeave), ...holders].toSorted((a, b) => b.bytes - a.bytes);
 
   return {
     vendor: "nvidia",
@@ -172,7 +146,6 @@ export async function readGpuStatus(deps: GpuStatusDeps = {}): Promise<GpuStatus
   };
 }
 
-/** `systemctl --user show -p MainPID --value whisper-server.service`; read-only. */
 export function systemdMainPid(unit: string, runner: (cmd: string, args: readonly string[]) => Promise<string> = execText): Promise<number | undefined> {
   return runner("systemctl", ["--user", "show", "-p", "MainPID", "--value", unit]).then((out) => {
     const pid = Number(out.trim());
@@ -186,25 +159,23 @@ function execText(cmd: string, args: readonly string[]): Promise<string> {
   });
 }
 
-/** Socket inodes in LISTEN state on the port, from /proc/net/tcp and tcp6 text. */
+// external: a /proc/net/tcp row is "sl local_address rem_address st tx:rx tr:tm retrnsmt uid timeout inode", and st 0A is LISTEN.
+const TCP_ROW = { fields: 10, localAddress: 1, state: 3, inode: 9, listen: "0A" } as const;
+
 export function listeningInodes(procNetTcp: readonly string[], port: number): Set<string> {
   const hexPort = port.toString(16).toUpperCase().padStart(4, "0");
   const inodes = new Set<string>();
   for (const text of procNetTcp) {
     for (const line of text.split("\n").slice(1)) {
       const f = line.trim().split(/\s+/);
-      // sl local_address rem_address st tx:rx tr:tm retrnsmt uid timeout inode
-      if (f.length < 10 || f[3] !== "0A") continue;
-      if (f[1]?.split(":").pop()?.toUpperCase() === hexPort && f[9] !== "0") inodes.add(f[9] ?? "");
+      if (f.length < TCP_ROW.fields || f[TCP_ROW.state] !== TCP_ROW.listen) continue;
+      const inode = f[TCP_ROW.inode];
+      if (f[TCP_ROW.localAddress]?.split(":").pop()?.toUpperCase() === hexPort && inode !== "0") inodes.add(inode ?? "");
     }
   }
   return inodes;
 }
 
-/**
- * Linux: which pids hold a listening socket on the port. A process whose fds
- * this user cannot read counts when its command line names ComfyUI.
- */
 export async function procListeningPids(port: number, pids: readonly number[]): Promise<ReadonlySet<number>> {
   const tables = await Promise.all(["/proc/net/tcp", "/proc/net/tcp6"].map((f) => readFile(f, "utf8").catch(() => "")));
   const inodes = listeningInodes(tables, port);
@@ -223,6 +194,7 @@ export async function procListeningPids(port: number, pids: readonly number[]): 
           }
         }
       } catch {
+        // why: its fds are not this user's to read, so its command line decides.
         const cmdline = await readFile(`/proc/${pid}/cmdline`, "utf8").catch(() => "");
         if (/comfy/i.test(cmdline)) hits.add(pid);
       }
@@ -231,7 +203,6 @@ export async function procListeningPids(port: number, pids: readonly number[]): 
   return hits;
 }
 
-/** Caches a slow read (a systemctl spawn) for ttlMs. */
 export function cached<T>(read: () => Promise<T>, ttlMs: number, now: () => number = Date.now): () => Promise<T> {
   let value: { at: number; v: Promise<T> } | undefined;
   return () => {

@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-11-15: a comment in the source has to be one of six kinds
+
+- Internal: nothing changed for the person using the app. A lint rule,
+  `gates/comment-is-a-kind`, now reads every comment in the product
+  source. A comment passes only as a licence header, a directive with
+  its reason, a line starting `external:` that names the outside thing
+  forcing the code, a line starting `decision:` that quotes a row of
+  `docs/decisions.md` or a heading of `docs/design.md` that exists,
+  the documentation on something a package exports, or a line starting
+  `why:`: one line of at most 100 characters, directly above the code
+  it gives the reason for. The comments already there are counted per
+  file, and that count can only fall.
+- A name in the product source may be at most 31 characters, and lint
+  refuses a longer one. No name was longer before this work.
+- Six folders were cleared by hand as a sample: the fit, usage, voice
+  and sidebar code and the harness and runtime-files packages. Of 485
+  comments one is left. What the others said is now held by an
+  ordinary name, a type, a test that fails, or a `why:` line (139 of
+  them): thirteen tests were added for rules that only a comment had
+  stated, such as "the stall clock never runs while the reader handles
+  a chunk" and "a plan only reads".
+
 ## 2026-11-15: every window agrees on the chat list and on each chat
 
 - A message added to or removed from a chat in another window now

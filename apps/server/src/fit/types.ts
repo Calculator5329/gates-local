@@ -1,7 +1,4 @@
-// Plain shapes for the fit check. FitReport mirrors the shared shape that
-// packages/contracts carries as a Schema; `message` is an addition (the
-// human sentence that names the numbers).
-import type { FitWords } from "@gates-local/contracts";
+import type { FitReport as WireFitReport, FitWords } from "@gates-local/contracts";
 
 export type FitVerdict = "fits" | "spills" | "refuse";
 
@@ -16,33 +13,28 @@ export interface FitReport {
   source: "measured" | "estimate";
   measuredAt: number;
   message?: string;
-  /** On a refusal: the system memory available in the reading it was decided from. */
   memAvailableBytes?: number;
-  /** The verdict in words, on the basis it was judged on (fit.ts judge). */
   words?: FitWords;
 }
 
-/** Who holds GPU memory. Whisper is the permanent tenant the fit plans around. */
+type OnWire = FitReport extends WireFitReport ? true : never;
+// why: a compile-time check that a FitReport goes on the wire as it is.
+export const FIT_REPORT_ON_WIRE: OnWire = true;
+
 export type TenantRole = "whisper" | "ollama" | "occupant";
 
 export interface GpuTenant {
   pid: number;
-  /** The program's own name for display ("whisper-server", "Discord"): no folders, no flags, no ".exe". */
   label: string;
-  /** nvidia-smi gave a bracketed note instead of a name ("[Insufficient Permissions]"). */
   unnamed?: true;
-  /** A desktop process (the compositor, the Windows shell): never something to tell a person to close. */
   system?: true;
-  /** The raw process_name from nvidia-smi. */
   processName: string;
-  /** undefined when nvidia-smi reports [N/A]. */
+  // external: nvidia-smi reports [N/A] in place of the memory of a process it cannot read.
   usedBytes?: number;
   role: TenantRole;
-  /** True for whisper: never stopped, evicted, restarted or reconfigured. */
   permanent: boolean;
 }
 
-/** One card's memory, as nvidia-smi lists it. */
 export interface GpuCard {
   totalBytes: number;
   usedBytes: number;
@@ -53,17 +45,13 @@ export interface GpuSnapshot {
   totalBytes: number;
   usedBytes: number;
   freeBytes: number;
-  /** Number of GPUs nvidia-smi listed; the figures above are all of them together. */
   gpuCount: number;
-  /** Each card when there are more than one, largest first (fit.ts cardMargins). */
   cards?: readonly GpuCard[];
-  /** Confirmed absence reported by nvidia-smi; absent when the executable is missing. */
   unavailableDetail?: string;
   tenants: GpuTenant[];
   measuredAt: number;
 }
 
-/** Breakdown of an estimated need, so the UI can show where the bytes go. */
 export interface NeedEstimate {
   model: string;
   numCtx: number;
@@ -72,7 +60,6 @@ export interface NeedEstimate {
   overheadBytes: number;
   totalBytes: number;
   contextLength?: number;
-  /** Layers that carry a KV cache (hybrid and sliding-window models have fewer). */
   kvLayers: number;
 }
 
@@ -94,10 +81,6 @@ export class FitError extends Error {
   }
 }
 
-/**
- * Runs nvidia-smi with the given args and resolves its stdout. `signal`
- * (when given) kills the child: a fit that is called off never waits on it.
- */
+// why: the signal kills the child, so a fit that is called off never waits on it.
 export type NvidiaSmiRunner = (args: readonly string[], signal?: AbortSignal) => Promise<string>;
-/** Resolves the text of /proc/meminfo; `signal` ends the read early. */
 export type MeminfoReader = (signal?: AbortSignal) => Promise<string>;

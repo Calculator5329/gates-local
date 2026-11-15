@@ -1,17 +1,3 @@
-// Process ownership. A process the app starts is recorded with its PID,
-// kernel start time and command line. Only a live process matching all three
-// is "ours"; anything else is left alone.
-//
-// Linux reads /proc. Windows has no /proc: identity comes from one
-// PowerShell CIM query (creation date and command line). Windows never
-// stops a process by PID number (a check-then-kill can hit a reused PID):
-// runtime.ts stops the child it spawned through its handle, and a record
-// from an earlier run is "adopted" and left running. The platform and the
-// command runner are injectable so both paths are tested on Linux.
-//
-// A live identity is not enough to adopt a port: the recorded process may
-// have let go of it (shutting down, cleaning up runners) and another Ollama
-// taken it. listenerPid() names the process that holds a listening port.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { isIPv4, isIPv6 } from "node:net";
@@ -20,6 +6,12 @@ import path from "node:path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
+/**
+ * What the app records about a process it started: its PID, kernel start
+ * time and command line. `modelsDir` is the OLLAMA_MODELS given to it, and
+ * `holdsOne` says it was started with OLLAMA_MAX_LOADED_MODELS=1, so a
+ * restart that adopts the process still knows both. Older records have neither.
+ */
 export const OwnedRecord = Schema.Struct({
   pid: Schema.Number,
   startTime: Schema.String,
@@ -27,9 +19,7 @@ export const OwnedRecord = Schema.Struct({
   baseUrl: Schema.String,
   binary: Schema.String,
   startedAt: Schema.Number,
-  /** OLLAMA_MODELS as given to this process, so a restart that adopts it still knows. Absent in older records. */
   modelsDir: Schema.optional(Schema.String),
-  /** Started with OLLAMA_MAX_LOADED_MODELS=1, so an adopted copy is known to hold one model. Absent in older records. */
   holdsOne: Schema.optional(Schema.Boolean),
 });
 export type OwnedRecord = typeof OwnedRecord.Type;
@@ -41,6 +31,7 @@ export type SyncRunner = (file: string, args: readonly string[]) => string;
 
 const runSync: SyncRunner = (file, args) => execFileSync(file, [...args], { encoding: "utf8", windowsHide: true, timeout: 10_000, stdio: ["ignore", "pipe", "ignore"] });
 
+/** The platform and command runner to use in place of this machine's, so a test on Linux runs the Windows path. */
 export interface ProcPlatform {
   readonly platform?: NodeJS.Platform;
   readonly run?: SyncRunner;
@@ -60,7 +51,7 @@ export function readWindowsProc(pid: number, run: SyncRunner = runSync): ProcIde
     if (typeof v !== "object" || v === null) return undefined;
     const { ProcessId, CreationDate, CommandLine } = v as Record<string, unknown>;
     if (ProcessId !== pid || CreationDate === undefined || CreationDate === null) return undefined;
-    // CreationDate's JSON form differs across PowerShell versions; compared as an opaque string.
+    // external: PowerShell versions print CreationDate as different JSON, so it is compared as text.
     const startTime = typeof CreationDate === "string" ? CreationDate : JSON.stringify(CreationDate);
     return { pid, startTime, command: typeof CommandLine === "string" ? CommandLine : "", state: "R" };
   } catch {
@@ -73,10 +64,11 @@ export function readProc(pid: number, on: ProcPlatform = {}): ProcIdentity | und
   if ((on.platform ?? process.platform) === "win32") return readWindowsProc(pid, on.run);
   try {
     const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-    // comm (field 2) may contain spaces and parens; fields after the last ')'.
-    const rest = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-    const state = rest[0] ?? "";
-    const startTime = rest[19]; // field 22
+    // external: /proc/<pid>/stat holds the command in field 2 with its spaces and parentheses,
+    // so fields are counted from the last ")": the state is next, and starttime (field 22) is 19 on.
+    const afterCommand = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    const state = afterCommand[0] ?? "";
+    const startTime = afterCommand[19];
     if (!startTime || state === "Z" || state === "X") return undefined;
     const command = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean).join(" ");
     return { pid, startTime, command, state };
@@ -98,34 +90,34 @@ const realFs: ListenerFs = {
   readlink: (file) => readlinkSync(file),
 };
 
+/**
+ * Linux only. `pids` narrows the search to those processes' fds (the
+ * recorded or spawned pid) in place of every /proc/<pid>. `host` is the
+ * probed address, an IP literal, default 127.0.0.1: a listener counts only
+ * on it or on a wildcard.
+ */
 export interface ListenerOptions extends ProcPlatform {
-  /** Linux: search only these processes' fds (the recorded or spawned pid); default every /proc/<pid>. */
   readonly pids?: readonly number[];
-  /** Linux: the probed address (an IP literal); a listener counts only on it or a wildcard. Default 127.0.0.1. */
   readonly host?: string;
   readonly fs?: ListenerFs;
 }
 
-/**
- * The address bytes of a /proc/net/tcp{,6} local_address hex field: 32-bit
- * words printed in host byte order, so each word is reversed on little-endian.
- */
-function procAddressBytes(hex: string): number[] | undefined {
-  if (!/^[0-9A-Fa-f]+$/.test(hex) || (hex.length !== 8 && hex.length !== 32)) return undefined;
+function procAddressBytes(localAddressHex: string): number[] | undefined {
+  if (!/^[0-9A-Fa-f]+$/.test(localAddressHex) || (localAddressHex.length !== 8 && localAddressHex.length !== 32)) return undefined;
   const bytes: number[] = [];
-  for (let w = 0; w < hex.length; w += 8) {
-    const word = [0, 2, 4, 6].map((i) => Number.parseInt(hex.slice(w + i, w + i + 2), 16));
+  for (let w = 0; w < localAddressHex.length; w += 8) {
+    const word = [0, 2, 4, 6].map((i) => Number.parseInt(localAddressHex.slice(w + i, w + i + 2), 16));
+    // external: /proc/net/tcp prints an address as 32-bit words in host byte order.
     bytes.push(...(endianness() === "LE" ? word.toReversed() : word));
   }
   return bytes;
 }
 
-/** The bytes of an IPv4 or IPv6 literal (IPv6 brackets allowed); undefined for anything else. */
-function hostBytes(host: string): { family: 4 | 6; bytes: number[] } | undefined {
+function ipLiteralBytes(host: string): { family: 4 | 6; bytes: number[] } | undefined {
   const bare = host.replace(/^\[(.*)\]$/, "$1");
   if (isIPv4(bare)) return { family: 4, bytes: bare.split(".").map(Number) };
   if (!isIPv6(bare) || bare.includes("%")) return undefined;
-  // Normalise through the URL parser: compressed, IPv4 tail as hex groups.
+  // external: Node's URL parser prints an IPv6 host compressed, with an IPv4 tail as hex groups.
   const groups = new URL(`http://[${bare}]/`).hostname.slice(1, -1).split(":");
   const gap = groups.indexOf("");
   const full = gap === -1 ? groups : [...groups.slice(0, gap), ...Array.from({ length: 8 - groups.filter(Boolean).length }, () => "0"), ...groups.slice(gap).filter(Boolean)];
@@ -135,33 +127,32 @@ function hostBytes(host: string): { family: 4 | 6; bytes: number[] } | undefined
 const same = (a: readonly number[], b: readonly number[]) => a.length === b.length && a.every((v, i) => v === b[i]);
 const MAPPED_PREFIX = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff];
 
-/**
- * A listener bound to `local` serves `probed`: the same address, or a
- * wildcard in the probed family, and [::ffff:a.b.c.d] serves a.b.c.d. A tcp6
- * [::] never counts for IPv4: whether that one socket is dual-stack is its
- * own IPV6_V6ONLY, which /proc does not show (bindv6only is only the
- * default), so an IPv6-only listener could be taken for the IPv4 one.
- */
+const isWildcard = (address: readonly number[]) => address.every((b) => b === 0);
+
 function serves(local: number[], probed: { family: 4 | 6; bytes: number[] }): boolean {
-  if (local.length === 4) return probed.family === 4 && (same(local, probed.bytes) || local.every((b) => b === 0));
-  if (probed.family === 6) return same(local, probed.bytes) || local.every((b) => b === 0);
+  if (local.length === 4) return probed.family === 4 && (same(local, probed.bytes) || isWildcard(local));
+  if (probed.family === 6) return same(local, probed.bytes) || isWildcard(local);
+  // external: /proc does not show a socket's IPV6_V6ONLY (bindv6only is only the default), so a tcp6 [::]
+  // listener may be IPv6-only and is not taken to serve IPv4; only an IPv4-mapped address is.
   return same(local.slice(0, 12), MAPPED_PREFIX) && same(local.slice(12), probed.bytes);
 }
+
+const PROC_NET_TCP_COLUMN = { localAddress: 1, state: 3, inode: 9 } as const;
+const PROC_NET_TCP_LISTEN_STATE = "0A";
 
 /**
  * Linux: the inodes of LISTEN sockets on `port` in /proc/net/tcp or
  * /proc/net/tcp6 text; with `host`, only those bound to it or a wildcard.
  */
 export function listenInodes(text: string, port: number, host?: string): string[] {
-  const probed = host === undefined ? undefined : hostBytes(host);
+  const probed = host === undefined ? undefined : ipLiteralBytes(host);
   if (host !== undefined && probed === undefined) return [];
   const inodes: string[] = [];
   for (const line of text.split("\n").slice(1)) {
-    // sl local_address rem_address st tx:rx tr:when retrnsmt uid timeout inode ...
-    const f = line.trim().split(/\s+/);
-    const local = f[1];
-    if (f.length < 10 || local === undefined || f[3] !== "0A") continue;
-    const inode = f[9];
+    const columns = line.trim().split(/\s+/);
+    const local = columns[PROC_NET_TCP_COLUMN.localAddress];
+    if (columns.length < 10 || local === undefined || columns[PROC_NET_TCP_COLUMN.state] !== PROC_NET_TCP_LISTEN_STATE) continue;
+    const inode = columns[PROC_NET_TCP_COLUMN.inode];
     if (inode === undefined || inode === "0") continue;
     const colon = local.lastIndexOf(":");
     if (Number.parseInt(local.slice(colon + 1), 16) !== port) continue;
@@ -241,7 +232,8 @@ export function parseWindowsListener(out: string): number | undefined {
  * The process listening on loopback `port`: Linux matches the LISTEN
  * socket's inode in /proc/net/tcp{,6} against /proc/<pid>/fd links, Windows
  * asks Get-NetTCPConnection. Any other platform, or any failed read, is
- * undefined (never "ours").
+ * undefined (never "ours"). A recorded process that is alive may have let
+ * go of its port, and another Ollama taken it: this names who holds it now.
  */
 export async function listenerPid(port: number, options: ListenerOptions = {}): Promise<number | undefined> {
   const platform = options.platform ?? process.platform;
@@ -290,6 +282,7 @@ export function clearRecord(file: string): void {
   rmSync(file, { force: true });
 }
 
+/** `ours` only while the recorded PID is alive with the recorded start time and command line. */
 export function checkOwnership(file: string, on: ProcPlatform = {}): OwnershipCheck {
   const record = readRecord(file);
   if (!record) return { kind: "no-record" };
@@ -304,24 +297,25 @@ export function checkOwnership(file: string, on: ProcPlatform = {}): OwnershipCh
   return { kind: "ours", record };
 }
 
+/** `adopted`: on Windows, ours from an earlier run, with no handle to stop it through; left running. */
 export type StopResult =
   | { stopped: true; pid: number }
   | { stopped: false; reason: "no-record" | "gone" }
-  /** Windows: ours, from an earlier run, with no handle to stop it through; left running. */
   | { stopped: false; reason: "adopted" }
   | { stopped: false; reason: "not-ours"; detail: string };
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** POSIX only. The app starts Ollama as a process-group leader so its runners go too. */
 function signal(pid: number, sig: NodeJS.Signals): void {
   try {
+    // external: POSIX takes a negative PID as the whole process group, so Ollama's runners go with it.
     process.kill(-pid, sig);
   } catch {
     try {
       process.kill(pid, sig);
     } catch {
-      // already gone
+      // why: a process that is already gone needs no signal.
+      return;
     }
   }
 }
@@ -345,16 +339,17 @@ export async function stopOwned(file: string, graceMs = 5000, on: ProcPlatform =
   }
   if ((on.platform ?? process.platform) === "win32") return { stopped: false, reason: "adopted" };
   const { pid } = check.record;
+  const stillOurs = () => checkOwnership(file, on).kind === "ours";
   signal(pid, "SIGTERM");
   const deadline = Date.now() + graceMs;
   while (Date.now() < deadline) {
-    if (checkOwnership(file, on).kind !== "ours") break;
+    if (!stillOurs()) break;
     await sleep(50);
   }
-  // Re-verify before the hard kill: never SIGKILL a PID that was reused.
-  if (checkOwnership(file, on).kind === "ours") {
+  // why: checked again before the hard kill, as the PID may have been reused by then.
+  if (stillOurs()) {
     signal(pid, "SIGKILL");
-    for (let i = 0; i < 40 && checkOwnership(file, on).kind === "ours"; i++) await sleep(50);
+    for (let i = 0; i < 40 && stillOurs(); i++) await sleep(50);
   }
   clearRecord(file);
   return { stopped: true, pid };

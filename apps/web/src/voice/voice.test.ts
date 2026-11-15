@@ -104,6 +104,22 @@ it("rendering the microphone leaves capture unloaded; the first press loads and 
   expect(h.audioLoaded).toBe(true);
 });
 
+it("the rest of a double-click on Stop does not start a dictation on the microphone that took its place; a later click does", async () => {
+  const now = vi.spyOn(performance, "now").mockReturnValue(1000);
+  let stopHoldsTheSquare: string | null = "Stop the reply first.";
+  const view = () => render(() => Voice({ textarea: { current: null }, held: stopHoldsTheSquare }));
+  expect(view()).toBeNull();
+  stopHoldsTheSquare = null;
+  const click = (clicksInARow: number) => (props(view(), "Dictate").onClick as (e: { detail: number }) => void)({ detail: clicksInARow });
+  now.mockReturnValue(1100);
+  click(1); await settle();
+  expect(h.capture).not.toHaveBeenCalled();
+  now.mockReturnValue(1500);
+  click(1);
+  await vi.waitFor(() => expect(h.capture).toHaveBeenCalledTimes(1));
+  now.mockRestore();
+});
+
 it("VC-01: sending or clearing a draft invalidates its pending transcript even if the edit id stays null", async () => {
   const response = held<{ text: string }>();
   h.call.mockImplementation((method: string) => method === "voice.transcribe" ? response.promise : Promise.resolve({}));

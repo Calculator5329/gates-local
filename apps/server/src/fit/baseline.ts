@@ -1,41 +1,31 @@
-// The card, and who is using it right now. Every list and Settings
-// judge a model against the card's own memory; what other programs hold right now is shown beside
-// it, never as the verdict. A send still judges right now (fit.ts), since that load happens now.
-//
-// Who to name: the steady baseline is the least GPU memory seen held by everything that is neither
-// a model runtime's runner (Ollama unloads an idle model to make room) nor this app's own ComfyUI
-// (a load may stop it): the desktop, whisper and the other always-on services. It is learned from
-// the readings this process takes, so it starts at the first reading and only goes down. A program
-// well above its share of it is the one the Download tab names.
 import type { FitMemory } from "@gates-local/contracts";
 import { MIB } from "./constants.ts";
 import type { GpuSnapshot, GpuTenant } from "./types.ts";
 
-/** Less than this above the baseline is noise, not a program to name. */
+// why: less than this above the baseline is noise, not a program to name.
 export const OTHERS_MIN_BYTES = 512 * MIB;
 
 export type GpuOthers = NonNullable<Extract<FitMemory, { kind: "gpu" }>["others"]>;
 
 export interface GpuBaseline {
-  /** Learns from one reading; `own` names this app's processes (its ComfyUI), never counted as other programs. */
-  observe(gpu: GpuSnapshot, own?: readonly number[]): void;
-  /** The programs holding memory above the baseline right now, and how much; undefined when none do. */
-  others(gpu: GpuSnapshot, own?: readonly number[]): GpuOthers | undefined;
+  observe(gpu: GpuSnapshot, ownComfyPids?: readonly number[]): void;
+  others(gpu: GpuSnapshot, ownComfyPids?: readonly number[]): GpuOthers | undefined;
 }
 
 const bytesOf = (t: GpuTenant) => t.usedBytes ?? 0;
 const sum = (ts: readonly GpuTenant[]) => ts.reduce((n, t) => n + bytesOf(t), 0);
+// external: Ollama unloads an idle model to make room, so what its runners hold is never part of what is held for good.
 const runners = (gpu: GpuSnapshot) => gpu.tenants.filter((t) => t.role === "ollama");
 
 export function createGpuBaseline(): GpuBaseline {
-  /** The least memory held outside the runners and this app's ComfyUI, and who held it then. */
   let least: { bytes: number; by: ReadonlyMap<string, number> } | undefined;
 
   return {
     observe(gpu, own = []) {
-      // The totals and the process list are two nvidia-smi runs: a process listed with more than the
-      // card says is used started or grew between them, and would set the baseline too low for good.
-      if (gpu.gpuCount === 0 || sum(gpu.tenants) > gpu.usedBytes) return;
+      // external: nvidia-smi gives the totals and the process list in two runs, so a process that started or grew between them is listed with more than the card says is used.
+      const grewBetweenRuns = sum(gpu.tenants) > gpu.usedBytes;
+      // why: a reading taken while a process grew would set the baseline too low for good.
+      if (gpu.gpuCount === 0 || grewBetweenRuns) return;
       const mine = gpu.tenants.filter((t) => own.includes(t.pid));
       const held = Math.max(0, gpu.usedBytes - sum(runners(gpu)) - sum(mine));
       if (least !== undefined && held >= least.bytes) return;
@@ -45,12 +35,13 @@ export function createGpuBaseline(): GpuBaseline {
     },
     others(gpu, own = []) {
       if (gpu.gpuCount === 0 || least === undefined) return undefined;
-      // This app's ComfyUI is not another program: a load stops it when it is idle.
+      // why: this app's ComfyUI is not another program: a load stops it when it is idle.
       const bytes = gpu.usedBytes - sum(runners(gpu)) - sum(gpu.tenants.filter((t) => own.includes(t.pid))) - least.bytes;
       if (bytes < OTHERS_MIN_BYTES) return undefined;
       const programs: string[] = [];
       for (const t of gpu.tenants) {
-        if (t.role === "ollama" || own.includes(t.pid) || bytesOf(t) - (least.by.get(t.processName) ?? 0) < OTHERS_MIN_BYTES) continue;
+        const aboveItsShare = bytesOf(t) - (least.by.get(t.processName) ?? 0);
+        if (t.role === "ollama" || own.includes(t.pid) || aboveItsShare < OTHERS_MIN_BYTES) continue;
         const name = /comfy/i.test(t.processName) ? "ComfyUI" : t.label;
         if (!programs.includes(name)) programs.push(name);
       }

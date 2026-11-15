@@ -361,6 +361,27 @@ describe("the hold ends as soon as the text cannot be a call", () => {
   });
 });
 
+describe("text still held as a possible call when the tool deadline cuts the round", () => {
+  it("is not shown or saved; the model alone gets it back, as its unfinished reply", async () => {
+    const requests: ModelMessage[][] = [];
+    const stream: ModelStream = async function* (messages, options) {
+      requests.push(structuredClone([...messages]));
+      if (options?.tools === false) {
+        yield { type: "delta", text: "Done." };
+        yield { type: "complete", content: "Done.", calls: [], stopReason: "stop" };
+        return;
+      }
+      for (const text of HELD) yield { type: "delta", text };
+      await never(options!.signal!);
+    };
+    const events: LoopEvent[] = [];
+    for await (const event of runLoop({ messages: [{ role: "user", content: "A sci fi background image" }], native: true, stream, signal: new AbortController().signal,
+      definitions: withImage, execute: async () => ({ output: "", summary: "" }), toolTimeBudgetMs: 30 })) events.push(event);
+    expect(events.flatMap(e => e.type === "delta" ? [e.text] : []).join("")).toBe("Done.");
+    expect(events.at(-1)).toMatchObject({ type: "complete", content: "Done." });
+    expect(requests.at(-1)!.at(-2)).toEqual({ role: "assistant", content: HELD.join("") });
+  });
+});
 describe("a round with no tools offered holds nothing and recovers nothing: the reply is the answer", () => {
   const call = '{"name":"read","arguments":{"path":"/library/other"}}';
   const first = { calls: [{ name: "read", arguments: { path: "/library/docs" } }] };

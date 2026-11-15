@@ -1,4 +1,3 @@
-// Fit check: measured free VRAM against a model's need at a num_ctx.
 export * from "./constants.ts";
 export * from "./types.ts";
 export { formatBytes, formatGb } from "./format.ts";

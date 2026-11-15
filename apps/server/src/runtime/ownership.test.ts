@@ -95,6 +95,29 @@ describe("stopOwned", () => {
     expect(c.exitCode).toBeNull();
   });
 
+  it("with Windows given as the platform, adopts a matching live record and signals nothing", async () => {
+    const c = await sleeper();
+    recordFor(c.pid!);
+    const record = readRecord(file)!;
+    const run: SyncRunner = () => JSON.stringify({ ProcessId: record.pid, CreationDate: record.startTime, CommandLine: record.command });
+    expect(await stopOwned(file, 500, { platform: "win32", run })).toEqual({ stopped: false, reason: "adopted" });
+    expect(alive(c.pid!)).toBe(true);
+    expect(c.signalCode).toBeNull();
+    expect(readRecord(file)).toEqual(record);
+  });
+
+  it.skipIf(process.platform === "win32")("sends no SIGKILL once the record stops matching during the grace period", async () => {
+    const c = spawn(process.execPath, ["-e", 'process.on("SIGTERM", () => {}); console.log("ready"); setInterval(() => {}, 1000)'], { stdio: ["ignore", "pipe", "ignore"] });
+    children.push(c);
+    await once(c.stdout!, "data");
+    recordFor(c.pid!);
+    const stopping = stopOwned(file, 300);
+    recordFor(c.pid!, { command: "/different/ollama serve" });
+    await stopping;
+    expect(alive(c.pid!)).toBe(true);
+    expect(c.signalCode).toBeNull();
+  });
+
   it.skipIf(process.platform === "win32")("stops a process whose PID, start time and command all match the record", async () => {
     const c = await sleeper();
     recordFor(c.pid!);

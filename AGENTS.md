@@ -113,7 +113,8 @@ feature as the screen does, with its folders, wire calls and browser specs.
   the last released commit and moves only when a release is cut, so a
   release check never holds up work. Nothing lands on `main` directly.
 - Files ported from another repo start with a comment naming the origin
-  path and commit, and keep the origin's shape so later fixes still merge.
+  path, commit and licence, and keep the origin's shape so later fixes
+  still merge.
 
 ## Rules and what enforces them
 
@@ -131,6 +132,8 @@ and is the next one to get a check.
 | No `any`, no `@ts-ignore`. | lint `typescript/no-explicit-any`, `typescript/ban-ts-comment` |
 | A lint rule is switched off by name, with the reason on the same line. | lint `unicorn/no-abusive-eslint-disable`, `gates/disable-needs-reason` |
 | No TODO, FIXME, XXX or HACK comment: finish it, or put it in `docs/roadmap.md`. | lint `eslint/no-warning-comments` |
+| A comment in the product source (`apps/*/src`, `packages/*/src`, tests aside) is one of six kinds: a licence or origin header that opens the file; a directive with its reason; `external:` naming the outside thing that forces the code; `decision:` with a row of `docs/decisions.md` or a heading of `docs/design.md` that exists; JSDoc on an exported declaration a package offers to others; `why:` with a reason of our own, as one `//` line of at most 100 characters directly above the code it explains. Anything else is a name, a type or a check. | lint `gates/comment-is-a-kind`; folders not yet cleared are counted in `lint/baseline.json` |
+| A name says what the thing is and is at most 31 characters in the product source; a reason goes in a `why:` line, never in the name. | lint `eslint/id-length` for the length; prose for the rest |
 | An effect in the window's code keeps something outside React in step, and says what. | lint `gates/effect-needs-reason` |
 | A timer in the window's code is there because time is the point, and says what it waits for. | lint `gates/timer-needs-reason` |
 | A test name (`data-testid`) is written in one place in the window's source, so it names one control. | test `apps/web/src/app/test-ids.test.ts` |

@@ -1,6 +1,3 @@
-// The three Ollama reads the fit check needs: /api/tags (weights size),
-// /api/show (architecture) and /api/ps (what is loaded and where). Effect
-// Schema decodes each response at the boundary; unknown keys are ignored.
 import * as S from "effect/Schema";
 import { FitError } from "./types.ts";
 import { sendSpan } from "../chat/send-times.ts";
@@ -25,7 +22,7 @@ const ShowResponse = S.Struct({
 });
 export type ShowResponse = typeof ShowResponse.Type;
 
-/** /api/show with verbose: true, read only for its tensor list (the answer also carries the whole vocabulary). */
+// external: Ollama's verbose /api/show carries the whole vocabulary beside the tensor list, about 12 MB for a gemma4 file.
 const TensorsResponse = S.Struct({
   tensors: S.optional(S.Array(S.Struct({ name: S.String, type: S.String, shape: S.Array(S.Number) }))),
 });
@@ -44,6 +41,8 @@ export type PsEntry = typeof PsEntry.Type;
 const PsResponse = S.Struct({ models: S.Array(PsEntry) });
 export type PsResponse = typeof PsResponse.Type;
 
+const USUAL_TIMEOUT_MS = 15_000;
+
 function request(baseUrl: string, path: string, init: RequestInit | undefined): Promise<unknown> {
   return sendSpan(path.replace("/api/", ""), () => requestNow(baseUrl, path, init));
 }
@@ -52,7 +51,7 @@ async function requestNow(baseUrl: string, path: string, init: RequestInit | und
   const url = new URL(path, baseUrl);
   let response: Response;
   try {
-    response = await fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(15_000) });
+    response = await fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(USUAL_TIMEOUT_MS) });
   } catch (error) {
     throw new FitError("runtime-unreachable", `${url.href}: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -74,51 +73,47 @@ function decode<Sch extends S.ConstraintDecoder<unknown>>(schema: Sch, path: str
   }
 }
 
-/** `signal` ends the request early; it is combined with the usual 15 s timeout. */
-const withSignal = (signal: AbortSignal | undefined): RequestInit => (signal === undefined ? {} : { signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) });
+const withSignal = (signal: AbortSignal | undefined): RequestInit => (signal === undefined ? {} : { signal: AbortSignal.any([signal, AbortSignal.timeout(USUAL_TIMEOUT_MS)]) });
 
-/** `signal` ends the request early; it is combined with the usual 15 s timeout. */
 export async function fetchTags(baseUrl: string, signal?: AbortSignal): Promise<TagsResponse> {
   return decode(TagsResponse, "/api/tags", await request(baseUrl, "/api/tags", withSignal(signal)));
 }
 
-/** `signal` ends the request early; it is combined with the usual 15 s timeout. */
 export async function fetchShow(baseUrl: string, model: string, signal?: AbortSignal): Promise<ShowResponse> {
   const body = await request(baseUrl, "/api/show", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ model }),
-    ...(signal === undefined ? {} : { signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) }),
+    ...withSignal(signal),
   });
   return decode(ShowResponse, "/api/show", body);
 }
 
-/** The model's tensors (name, type, shape), from a verbose /api/show; about 12 MB for a gemma4 file, so ask it rarely. */
 export async function fetchTensors(baseUrl: string, model: string, signal?: AbortSignal): Promise<TensorsResponse> {
   const body = await request(baseUrl, "/api/show", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ model, verbose: true }),
-    ...(signal === undefined ? {} : { signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) }),
+    ...withSignal(signal),
   });
   return decode(TensorsResponse, "/api/show", body);
 }
 
-/** `signal` ends the request early; it is combined with the usual 15 s timeout. */
 export async function fetchPs(baseUrl: string, signal?: AbortSignal): Promise<PsResponse> {
   return decode(PsResponse, "/api/ps", await request(baseUrl, "/api/ps", withSignal(signal)));
 }
 
-/** Ollama names carry an implicit ":latest"; match either spelling. */
+// external: Ollama reads a name with no tag as that name with ":latest".
 const withTag = (name: string) => (name.includes(":") ? name : `${name}:latest`);
 
 export function sameModel(a: string, b: string): boolean {
   return withTag(a) === withTag(b);
 }
 
-/** `m` is a copy of `model`, listed under its own name or another one. */
-export function isCopyOf(m: PsEntry, model: string): boolean {
-  return sameModel(m.name, model) || (m.model !== undefined && sameModel(m.model, model));
+export function isCopyOf(listed: PsEntry, model: string): boolean {
+  const underItsOwnName = sameModel(listed.name, model);
+  const underAnotherName = listed.model !== undefined && sameModel(listed.model, model);
+  return underItsOwnName || underAnotherName;
 }
 
 export function findLoaded(ps: PsResponse, model: string): PsEntry | undefined {

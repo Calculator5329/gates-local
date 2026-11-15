@@ -1,8 +1,3 @@
-// The Usage screen's server side: the store, its one read method and its one
-// push. The turn path calls record() at the end of each model request; the
-// first start of this version fills the record once from the replies stored
-// before it; a fill that fails runs again next start, with the same cutoff.
-
 import type { Params } from "@gates-local/contracts";
 
 import type { Handlers } from "../ws/server.ts";
@@ -19,7 +14,6 @@ export interface Usage {
 export interface UsageDeps {
   file: string;
   push: (channel: "usage.changed", payload: Record<string, never>) => void;
-  /** The stored replies for the one-time fill and how many have no figures; read only when the fill has not run. */
   replies?: () => { replies: Iterable<StoredReply>; lacking: number };
   log?: (line: string) => void;
   now?: () => number;
@@ -30,14 +24,15 @@ const countedReplies = (n: number) => (n === 1 ? "1 counted reply has" : `${n} c
 export function createUsage(deps: UsageDeps): Usage {
   const log = deps.log ?? (() => undefined);
   const store = openUsageStore(deps.file, { log, ...(deps.now ? { now: deps.now } : {}) });
-  if (deps.replies) {
+  const replies = deps.replies;
+  if (replies) {
     try {
       let lacking = 0;
       let filled = 0;
       let untimed = 0;
       const ran = store.fillOnce({
         *[Symbol.iterator]() {
-          const stored = deps.replies!();
+          const stored = replies();
           lacking = stored.lacking;
           for (const reply of stored.replies) {
             filled++;
@@ -55,10 +50,9 @@ export function createUsage(deps: UsageDeps): Usage {
     "usage.read": ({ since }: Params<"usage.read">) => store.read(since),
   } satisfies Partial<Handlers>;
   return {
-    record(model, figures, reply) {
-      // Usage never stops a reply: a write that fails is logged and dropped.
+    record(model, figures, firstRequest) {
       try {
-        store.record(model, figures, reply);
+        store.record(model, figures, firstRequest);
       } catch (err) {
         log(`usage: could not record a request (${(err as Error).message})`);
         return;

@@ -40,21 +40,19 @@ const BUDGET = {
 } as const;
 type Budget = keyof typeof BUDGET;
 const STOPPED_TIME = "Stopped: this turn's tool time budget ran out.";
-/** The longest fixed notice; each call still to be answered in a reply keeps room for one. */
-const NOTICE_MAX = Math.max(NOT_RUN_PER_REPLY.length, STOPPED_TIME.length, ...Object.values(BUDGET).map(t => t.length));
-const CUT = "\n[cut: this turn's tool output budget ran out]";
+const LONGEST_NOTICE = Math.max(NOT_RUN_PER_REPLY.length, STOPPED_TIME.length, ...Object.values(BUDGET).map(t => t.length));
+const CUT_MARK = "\n[cut: this turn's tool output budget ran out]";
 const FINAL_ANSWER = (budget: Budget, cut: boolean) => `This turn's tool ${budget} budget ran out. No more tools: answer now with what you have.`
   + (cut ? " Your previous reply was cut off by the time limit; give your whole answer now." : "");
 const seconds = (ms: number) => `${ms / 1000} s`;
 
-/** Cuts an observation to `room` characters, marking the cut when the mark fits. */
-function fit(output: string, room: number): string {
-  if (output.length <= room) return output;
-  if (room <= CUT.length) return output.slice(0, Math.max(0, room));
-  return output.slice(0, room - CUT.length) + CUT;
+function cutToRoom(observation: string, room: number): string {
+  if (observation.length <= room) return observation;
+  if (room <= CUT_MARK.length) return observation.slice(0, Math.max(0, room));
+  return observation.slice(0, room - CUT_MARK.length) + CUT_MARK;
 }
 
-/** Settles with `work`, or rejects with the signal's reason as soon as it aborts, whether or not `work` listens. */
+// why: rejects as soon as the signal aborts, whether or not the work listens to it.
 async function race<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   work.catch(() => undefined);
   signal.throwIfAborted();
@@ -66,10 +64,6 @@ async function race<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   try { return await Promise.race([work, aborted]); } finally { signal.removeEventListener("abort", fail!); }
 }
 
-/**
- * One model request under `signals` plus a stall guard: `firstByteMs` for the first chunk
- * (the model reading its prompt), then `stallMs` between chunks.
- */
 async function* modelRequest(stream: ModelStream, messages: readonly ModelMessage[], tools: boolean, signals: readonly AbortSignal[], stallMs: number, firstByteMs: number): AsyncGenerator<ModelEvent> {
   const stall = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -78,7 +72,7 @@ async function* modelRequest(stream: ModelStream, messages: readonly ModelMessag
   let started = false;
   try {
     for (;;) {
-      // The clock runs only while waiting on the model, never while the consumer handles a chunk.
+      // why: the clock runs only while waiting on the model, never while a chunk is handled.
       timer = started
         ? setTimeout(() => stall.abort(new Error(`The model stopped sending for ${seconds(stallMs)}; the reply was stopped.`)), stallMs)
         : setTimeout(() => stall.abort(new Error(`The model did not start answering within ${seconds(firstByteMs)}; the reply was stopped.`)), firstByteMs);
@@ -90,7 +84,7 @@ async function* modelRequest(stream: ModelStream, messages: readonly ModelMessag
     }
   } finally {
     clearTimeout(timer);
-    // A stream deaf to its signal may never settle; do not wait for it to close.
+    // why: a stream deaf to its signal may never settle, so its close is not waited for.
     void Promise.resolve().then(() => iterator.return?.()).catch(() => undefined);
   }
 }
@@ -119,60 +113,56 @@ export function observationBody(message: ModelMessage): { body: string; withBody
   return { body: message.content.slice(start, -TEXT_RESULT_END.length), withBody: body => ({ ...message, content: `${lead}${body}${TEXT_RESULT_END}` }) };
 }
 
+/**
+ * One turn. `signal` is the turn's cancel: it aborts the model request or tool in flight at once.
+ * `definitions` are the tools offered this turn: a reply that is only a call to one of them,
+ * written as JSON text, is run. `numCtx` is the turn's num_ctx, which sets toolOutputBudget.
+ * `toolTimeBudgetMs`, `stallMs`, `firstByteMs` and `finalAnswerMs` stand in for
+ * TOOL_TIME_BUDGET_MS, STREAM_STALL_MS, FIRST_BYTE_MS and FINAL_ANSWER_MS.
+ */
 export interface LoopInput {
   messages: readonly ModelMessage[];
   stream: ModelStream;
   execute: (call: ToolCall, signal: AbortSignal) => Promise<ToolResult>;
-  /** The turn's cancel: aborts the model request or tool in flight at once. */
   signal: AbortSignal;
   native: boolean;
-  /** The tools offered this turn: a reply that is only a call to one of them, written as JSON text, is run (looseCall). */
   definitions?: readonly ToolDefinition[];
   maxTurns?: number;
-  /** The turn's num_ctx; the tool output budget is num_ctx * 3 / 2 characters. */
   numCtx?: number;
-  /** The tool phase (TOOL_TIME_BUDGET_MS). */
   toolTimeBudgetMs?: number;
-  /** The stall guard (STREAM_STALL_MS). */
   stallMs?: number;
-  /** The wait for a request's first chunk (FIRST_BYTE_MS). */
   firstByteMs?: number;
-  /** The final-answer cap (FINAL_ANSWER_MS). */
   finalAnswerMs?: number;
 }
 
 /** Collect one whole model response before running any tool; length stops are never executable. */
 export async function* runLoop(input: LoopInput): AsyncGenerator<LoopEvent> {
-  const phase = new AbortController();
-  const deadline = setTimeout(() => phase.abort(new Error(BUDGET.time)), input.toolTimeBudgetMs ?? TOOL_TIME_BUDGET_MS);
-  try { yield* turn(input, phase.signal); } finally { clearTimeout(deadline); }
+  const toolPhase = new AbortController();
+  const deadline = setTimeout(() => toolPhase.abort(new Error(BUDGET.time)), input.toolTimeBudgetMs ?? TOOL_TIME_BUDGET_MS);
+  try { yield* turn(input, toolPhase.signal); } finally { clearTimeout(deadline); }
 }
 
-async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopEvent> {
+const BETWEEN_PARTS = "\n\n";
+
+async function* turn(input: LoopInput, toolPhase: AbortSignal): AsyncGenerator<LoopEvent> {
   const messages = [...input.messages];
   const tools: ToolStep[] = [];
-  /**
-   * The saved message is exactly what the user saw: every delta the loop yields goes through
-   * `show`, and `shown` is their concatenation. A reply part's leading whitespace is held
-   * until text arrives, so a whitespace-only part is never shown; parts are joined by a
-   * "\n\n" delta of their own (a client concatenates deltas, tool events add nothing).
-   */
+  // why: every delta goes through show, so the saved message is exactly what the person saw.
   let shown = "";
-  let held = "";
+  let leadingWhitespace = "";
   let partOpen = false;
   function* show(text: string): Generator<LoopEvent> {
     if (!partOpen) {
-      held += text;
-      if (!held.trim()) return;
-      text = held; held = ""; partOpen = true;
-      if (shown) { shown += "\n\n"; yield { type: "delta", text: "\n\n" }; }
+      leadingWhitespace += text;
+      if (!leadingWhitespace.trim()) return;
+      text = leadingWhitespace; leadingWhitespace = ""; partOpen = true;
+      if (shown) { shown += BETWEEN_PARTS; yield { type: "delta", text: BETWEEN_PARTS }; }
     }
     shown += text;
     yield { type: "delta", text };
   }
-  const endPart = () => { partOpen = false; held = ""; };
-  /** A whole part at once: a text-mode answer, a reply that streamed no deltas, the loop's own notices. */
-  function* say(text: string): Generator<LoopEvent> { endPart(); yield* show(text); endPart(); }
+  const endPart = () => { partOpen = false; leadingWhitespace = ""; };
+  function* showAsOwnPart(text: string): Generator<LoopEvent> { endPart(); yield* show(text); endPart(); }
   const offered = input.definitions ?? [];
   const stallMs = input.stallMs ?? STREAM_STALL_MS;
   const firstByteMs = input.firstByteMs ?? FIRST_BYTE_MS;
@@ -184,113 +174,96 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
   let badCalls = 0;
   let thinking = "";
   const finish = (stopReason = "stop"): Extract<LoopEvent, { type: "complete" }> => ({ type: "complete", content: shown, stopReason, tools, ...(thinking ? { thinking } : {}) });
-  /**
-   * The one path every observation takes (results, errors, invalid calls, "not run"):
-   * counted against the output budget and cut to what is left of it, keeping `reserve`
-   * characters for the calls still to be answered in this reply. Text mode escapes first,
-   * so what is counted is the body the model receives.
-   */
   const observe = (name: string, raw: string, reserve: number): string => {
+    // why: text mode escapes first, so what is counted is the body the model receives.
     const output = input.native ? raw : escapeToolOutput(raw);
-    const text = fit(output, outputBudget - toolOutput - reserve);
+    const text = cutToRoom(output, outputBudget - toolOutput - reserve);
     toolOutput += text.length;
     if (text.length < output.length || toolOutput + reserve >= outputBudget) spent ??= "output";
     messages.push(input.native ? { role: "tool", tool_name: name, content: text } : { role: "user", content: textToolResult(name, text) });
     return text;
   };
-  /** `cut` is answer text the deadline interrupted; the final request sees it as the assistant's unfinished reply. */
   const askFinal = (budget: Budget, cut?: string) => {
     spent ??= budget;
     final = true;
+    // why: the final request sees the answer the deadline cut as the assistant's unfinished reply.
     if (cut) messages.push({ role: "assistant", content: cut });
     messages.push({ role: "user", content: FINAL_ANSWER(spent, cut !== undefined) });
   };
   for (let round = 0; round < (input.maxTurns ?? 24); round++) {
     input.signal.throwIfAborted();
-    if (!final && phase.aborted) askFinal("time");
+    if (!final && toolPhase.aborted) askFinal("time");
     let complete: Extract<ModelEvent, { type: "complete" }> | undefined;
-    // Answer text as it streamed, kept if the deadline cuts this request.
-    const arrived: string[] = [];
-    // Text is held while the reply could still be a call written as text (looseCall), so a call
-    // never flashes as an answer; it is shown the moment it cannot be one. The final round offers
-    // the model no tools, so nothing is held there: its reply is the answer.
+    const streamedText: string[] = [];
+    // why: text is held while the reply could still be a call, so a call never flashes as an answer.
     const hold = !final && offered.length > 0 ? createCallHold(offered) : undefined;
     let holding = hold !== undefined;
-    // Text mode shows its reply through the view, which keeps call syntax off screen (createTextView).
     const view = input.native ? undefined : createTextView();
-    let viewed = ""; // what the view let through this round
+    let passedByView = "";
     let viewShown = "";
-    /** Held text goes on screen, and so into what the turn saves. */
-    const release = function* (): Generator<LoopEvent> {
+    const showHeldText = function* (): Generator<LoopEvent> {
       if (!holding) return;
       holding = false;
-      if (view) { viewShown = viewed; yield* show(viewed); } else yield* show(arrived.join(""));
+      if (view) { viewShown = passedByView; yield* show(passedByView); } else yield* show(streamedText.join(""));
     };
-    const cap = new AbortController();
-    const capTimer = final ? setTimeout(() => cap.abort(new Error(`The final answer ran past its ${seconds(finalMs)} limit and was stopped.`)), finalMs) : undefined;
+    const finalAnswerCap = new AbortController();
+    const capTimer = final ? setTimeout(() => finalAnswerCap.abort(new Error(`The final answer ran past its ${seconds(finalMs)} limit and was stopped.`)), finalMs) : undefined;
     try {
-      // Tool rounds live inside the tool phase; the final answer has its own cap instead.
-      for await (const event of modelRequest(input.stream, messages, !final, [input.signal, final ? cap.signal : phase], stallMs, firstByteMs)) {
+      for await (const event of modelRequest(input.stream, messages, !final, [input.signal, final ? finalAnswerCap.signal : toolPhase], stallMs, firstByteMs)) {
         if (event.type === "complete") complete = event;
         else if (event.type === "thinking") yield event;
         else {
-          arrived.push(event.text);
+          streamedText.push(event.text);
           if (view) {
             const piece = view.push(event.text);
-            viewed += piece.shown;
-            if (holding) { if (!hold?.push(piece.visible)) yield* release(); }
+            passedByView += piece.shown;
+            if (holding) { if (!hold?.push(piece.visible)) yield* showHeldText(); }
             else if (piece.shown) { viewShown += piece.shown; yield* show(piece.shown); }
           } else if (!holding) yield* show(event.text);
-          else if (!hold?.push(event.text)) yield* release();
+          else if (!hold?.push(event.text)) yield* showHeldText();
         }
       }
     } catch (e) {
-      if (input.signal.aborted || final || !phase.aborted) {
-        // Stop, a stall or a stream error ends the turn here: held text is shown, and so saved, like any other.
-        yield* release();
+      if (input.signal.aborted || final || !toolPhase.aborted) {
+        // why: stop, a stall or a stream error ends the turn here; held text is shown, and so saved.
+        yield* showHeldText();
         input.signal.throwIfAborted();
         throw e;
       }
-      // Cut by the deadline; the final request asks for the whole answer again, as a new part.
-      // Text already shown stays shown, and saved; text still held as a possible call is not
-      // shown (if the final request then fails or comes back empty, that start of a call is lost
-      // with it). Either way the cut reply (text mode: its answer part, with the call syntax the
-      // cut left unfinished stripped too) goes to the model only.
+      // why: cut by the deadline; the final request asks for the whole answer again, as a new part.
       endPart();
-      const partial = input.native ? arrived.join("") : partialAnswer(arrived.join(""));
+      const partial = input.native ? streamedText.join("") : partialAnswer(streamedText.join(""));
       askFinal("time", partial.trim() ? partial : undefined);
       continue;
     } finally { clearTimeout(capTimer); }
-    if (!complete) yield* release();
+    if (!complete) yield* showHeldText();
     input.signal.throwIfAborted();
     if (!complete) throw new Error("The model stream ended without a done line");
     thinking += complete.thinking ?? "";
     let parsed: { items: readonly ({ call: unknown } | { error: string })[]; content: string } = input.native ? { items: complete.calls.map(call => ({ call })), content: complete.content } : parseTextCalls(complete.content);
-    // A call written as the whole reply in a JSON shape of the model's own: only when the round
-    // has no calls (native tool_calls, or text mode's by the parser's rules) and none of its text
-    // was shown. Never on the final round: it offered no tools.
     const loose = parsed.items.length === 0 && !final && holding ? looseCall(complete.content, offered) : undefined;
     if (loose) parsed = { items: [{ call: loose }], content: "" };
-    else yield* release();
+    else yield* showHeldText();
     const pending: { call?: ToolCall; error?: string; name: string }[] = parsed.items.map(item => {
       if ("error" in item) return { error: item.error, name: "invalid" };
       try { const call = repairCall(item.call); return { call, name: call.name }; }
       catch (e) { return { error: (e as Error).message, name: "invalid" }; }
     });
-    // A native reply streamed its text already; one that sent no deltas is shown whole here.
-    // Text mode showed the start of its answer; the rest of it goes on screen now.
     if (view && !loose) {
+      // why: text mode showed the start of its answer as it streamed; the rest goes on screen now.
       const rest = parsed.content.startsWith(viewShown) ? parsed.content.slice(viewShown.length) : undefined;
-      if (rest === undefined) yield* say(parsed.content);
+      if (rest === undefined) yield* showAsOwnPart(parsed.content);
       else if (rest) yield* show(rest);
-    } else if (input.native && arrived.length === 0) yield* say(parsed.content);
+    }
+    // why: a native reply streamed its text already; one that sent no deltas is shown whole here.
+    else if (input.native && streamedText.length === 0) yield* showAsOwnPart(parsed.content);
     endPart();
     if (complete.stopReason === "length") {
       for (const item of pending) {
         const step = notRun(item, "Tool call was cut short", "Output length limit reached; this call was not run.");
         tools.push(step); yield { type: "tool", step };
       }
-      if (!shown) yield* say("The reply reached its length limit. No pending tools were run.");
+      if (!shown) yield* showAsOwnPart("The reply reached its length limit. No pending tools were run.");
       yield { ...finish("length"), stats: complete.stats };
       return;
     }
@@ -299,22 +272,21 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
       return;
     }
     if (final) {
-      // Asked for its final answer, the model called tools again: none run, the turn ends.
       for (const item of pending) {
         const step = notRun(item, "Tool budget ran out", BUDGET[spent!]);
         tools.push(step); yield { type: "tool", step };
       }
-      if (!shown) yield* say("Stopped: this turn's tool budget ran out. Ask a follow-up to continue.");
+      if (!shown) yield* showAsOwnPart("Stopped: this turn's tool budget ran out. Ask a follow-up to continue.");
       yield { ...finish(), stats: complete.stats };
       return;
     }
-    // A recovered native call goes back as a real one would: tool_calls, no answer text.
+    // why: a recovered native call goes back as a real one would: tool_calls, no answer text.
     messages.push({ role: "assistant", content: loose && input.native ? "" : complete.content,
       ...(input.native ? { tool_calls: pending.flatMap(p => p.call ? [{ function: { name: p.call.name, arguments: p.call.input } }] : []) } : {}) });
     let calls = 0;
     for (const [index, item] of pending.entries()) {
       input.signal.throwIfAborted();
-      if (phase.aborted) spent ??= "time";
+      if (toolPhase.aborted) spent ??= "time";
       const callId = randomUUID();
       const started = Date.now();
       const detail = item.call ? JSON.stringify(item.call) : item.error ?? "Invalid tool call";
@@ -330,9 +302,7 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
       } else {
         const running: ToolStep = { callId, name: item.name, state: "running", summary: runningSummary(item.name), detail: clipDetail(detail) };
         yield { type: "tool", step: running };
-        // The call gets the turn's cancel and the tool-phase deadline; past either it is stopped.
-        // The deadline's timer, not the clock, spends the time budget: it can fire a millisecond before Date.now() reaches it.
-        const signal = AbortSignal.any([input.signal, phase]);
+        const signal = AbortSignal.any([input.signal, toolPhase]);
         try {
           const result = await race(input.execute(item.call, signal), signal);
           badCalls = 0;
@@ -341,38 +311,38 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
           step = { callId, name: item.name, state: "done", summary: result.summary, durationMs: Date.now() - started, links };
         } catch (e) {
           if (input.signal.aborted) {
-            // the turn's cancel cut the call short: stopped, not failed
             const cancelled: ToolStep = { ...running, state: "error", stopped: true, durationMs: Date.now() - started };
             tools.push(cancelled); yield { type: "tool", step: cancelled };
             input.signal.throwIfAborted();
           }
-          const outOfTime = phase.aborted;
+          // external: Node can fire the deadline's timer a millisecond before Date.now() reaches the deadline.
+          const outOfTime = toolPhase.aborted;
           if (outOfTime) spent ??= "time";
-          // Invalid arguments count toward the format budget too; execution failures are observations.
-          if (e instanceof TypeError && !outOfTime) badCalls++;
+          const invalidArguments = e instanceof TypeError && !outOfTime;
+          if (invalidArguments) badCalls++;
           else badCalls = 0;
           output = trimOutput(outOfTime ? STOPPED_TIME : (e as Error).message);
           step = { callId, name: item.name, state: "error", summary: outOfTime ? "Tool budget ran out" : "Tool could not finish", durationMs: Date.now() - started };
         }
       }
-      const observed = observe(item.name, output, (pending.length - index - 1) * NOTICE_MAX);
+      const callsStillUnanswered = pending.length - index - 1;
+      const observed = observe(item.name, output, callsStillUnanswered * LONGEST_NOTICE);
       const done: ToolStep = { ...step, detail: clipDetail(`${detail}\n${observed}`) };
       tools.push(done); yield { type: "tool", step: done };
       if (badCalls >= 3) {
-        yield* say("Stopped after three invalid tool calls in a row. Try rephrasing your request.");
+        yield* showAsOwnPart("Stopped after three invalid tool calls in a row. Try rephrasing your request.");
         yield finish(); return;
       }
     }
-    // An image-only batch answers through its cards. Mixed batches go back to
-    // the model so it can explain the other tools' results while the image waits.
+    // why: an image-only batch answers through its cards; a mixed one goes back to the model.
     if (pending.every(item => item.name === "image")) {
-      if (tools.slice(-pending.length).every(step => step.state !== "done")) yield* say("The image could not be queued; check image generation in Settings and try again.");
+      if (tools.slice(-pending.length).every(step => step.state !== "done")) yield* showAsOwnPart("The image could not be queued; check image generation in Settings and try again.");
       yield { ...finish(), stats: complete.stats }; return;
     }
-    if (phase.aborted) spent ??= "time";
+    if (toolPhase.aborted) spent ??= "time";
     if (spent) askFinal(spent);
   }
-  yield* say("Stopped after the tool turn limit. Ask a follow-up to continue.");
+  yield* showAsOwnPart("Stopped after the tool turn limit. Ask a follow-up to continue.");
   yield finish();
 }
 

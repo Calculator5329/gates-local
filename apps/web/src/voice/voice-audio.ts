@@ -1,18 +1,22 @@
-/** Bounded, memory-only mono PCM capture, resampled by the context to 16 kHz. */
+const SAMPLES_PER_SECOND = 16000;
+const LONGEST_CLIP_SECONDS = 60;
+const MONO = 1;
+
 export async function captureAudio(stream: MediaStream, overflow: () => void, signal: AbortSignal) {
-  const context = new AudioContext({ sampleRate: 16000 });
+  // why: the context does the resampling to this rate.
+  const context = new AudioContext({ sampleRate: SAMPLES_PER_SECOND });
   try {
     signal.throwIfAborted();
     const chunks: Float32Array[] = [];
     let samples = 0;
     const source = context.createMediaStreamSource(stream);
-    // Works in Electron and phone browsers without a separately hosted worklet.
-    const node = context.createScriptProcessor(4096, 1, 1);
+    // external: Electron and phone browsers run a ScriptProcessor from the page itself; an AudioWorklet needs its own hosted file.
+    const node = context.createScriptProcessor(4096, MONO, MONO);
     const mute = context.createGain();
     mute.gain.value = 0;
     node.onaudioprocess = (e) => {
       const data = e.inputBuffer.getChannelData(0);
-      if (samples + data.length > 16000 * 60) { overflow(); return; }
+      if (samples + data.length > SAMPLES_PER_SECOND * LONGEST_CLIP_SECONDS) { overflow(); return; }
       chunks.push(data.slice()); samples += data.length;
     };
     source.connect(node); node.connect(mute); mute.connect(context.destination);
@@ -53,7 +57,6 @@ export async function captureAudio(stream: MediaStream, overflow: () => void, si
   }
 }
 
-/** Inserting speech never replaces selected words or the existing draft. */
 export function insertTranscript(draft: string, cursor: number, transcript: string) {
   const at = Math.max(0, Math.min(draft.length, cursor));
   const before = draft.slice(0, at), after = draft.slice(at);

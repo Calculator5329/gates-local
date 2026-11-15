@@ -10,11 +10,11 @@ const pull = (o: Partial<PullProgress> & Pick<PullProgress, "name" | "state">): 
 
 describe("Settings", () => {
   it("a ready runtime: the gear alone, the shortcut in its tooltip", () => {
-    expect(settingsIcon(null)).toEqual({ dot: null, tip: "Settings · Ctrl ,", label: "Settings", runtime: false });
+    expect(settingsIcon(null)).toEqual({ dot: null, tip: "Settings · Ctrl ,", label: "Settings", opensRuntime: false });
   });
   it("a runtime that needs the person: an amber dot, the row's words first and its tooltip kept, and the click goes to Runtime", () => {
     const i = settingsIcon({ text: "Reconnecting", tip: "The Gates Local server stopped answering. Trying again.", dot: "run" });
-    expect(i).toMatchObject({ dot: "amber", runtime: true, label: "Settings · Reconnecting" });
+    expect(i).toMatchObject({ dot: "amber", opensRuntime: true, label: "Settings · Reconnecting" });
     expect(i.tip).toBe("<b>Reconnecting</b><br>The Gates Local server stopped answering. Trying again.<br>Settings · Ctrl ,");
     expect(settingsIcon({ text: "Ollama stopped", tip: "x", dot: "warn" }).dot).toBe("amber");
   });

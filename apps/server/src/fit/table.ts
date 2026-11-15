@@ -1,11 +1,3 @@
-// The fit table: every model the app shows, at every context it offers, from one GPU reading, and
-// the memory line the picker's footer shows from that same reading. The server pushes it as
-// fit.changed whenever something it depends on moves; clients show the last one they got and ask
-// for nothing else.
-//
-// One basis: every row's need is a TotalNeed (fit.ts), the whole model at that context, GPU plus
-// system memory. One reading: a row has no reading of its own; build() takes one and makes every row
-// from it, so a table that mixes two cannot be built.
 import { randomUUID } from "node:crypto";
 import { withNow, type CatalogEntry, type ContextSize, type FitMemory, type FitRow, type FitTable, type GpuOccupant, type ModelLoad } from "@gates-local/contracts";
 import type { GpuBaseline } from "./baseline.ts";
@@ -16,22 +8,14 @@ import { holdersOf } from "./gpu-status.ts";
 import { isCopyOf } from "./ollama.ts";
 import { FitError, type GpuSnapshot } from "./types.ts";
 
-/** The contexts the picker offers. */
 export const TABLE_CONTEXTS: readonly ContextSize[] = [8192, 16384, 32768, 65536];
 
-/** A row as the server builds it: its need can only come from a TotalReport. */
 type TableRow = Omit<FitRow, "needVramBytes"> & { readonly needVramBytes: TotalNeed };
 
-/** A model the table states: an installed one is planned, one offered for download is estimated from its download. */
 export type TableModel = Pick<CatalogEntry, "name" | "downloadBytes" | "installed">;
 
 const rowOf = ({ measuredAt: _theTableHoldsTheReading, ...report }: TotalReport, stops: readonly string[]): TableRow => ({ ...report, stops: [...stops] });
 
-/**
- * Who is in the way of `gapBytes` (what a load spills right now): the holders biggest first, as many
- * as it takes to cover the gap. All of them when even that does not: the card's verdict is what says
- * the model fits, and every one of them is part of why it does not right now.
- */
 export function inTheWay(holders: readonly GpuOccupant[], gapBytes: number): GpuOccupant[] {
   const named: GpuOccupant[] = [];
   let freed = 0;
@@ -47,11 +31,8 @@ export function inTheWay(holders: readonly GpuOccupant[], gapBytes: number): Gpu
 export interface FitTableDeps {
   readonly baseUrl: () => string | undefined;
   readonly fit?: Omit<FitDeps, "baseUrl">;
-  /** The models the table states: installed chat models and models offered for download. */
   readonly models: () => Promise<readonly TableModel[]>;
-  /** Models of admitted turns: a load would have to stop their chats to use their memory. */
   readonly busy: () => readonly string[];
-  /** The ComfyUI the app started: the card's own memory counts it as the app's (baseline). */
   readonly comfyPid: () => number | undefined;
   readonly push: (table: FitTable) => void;
   readonly boot?: string;
@@ -59,46 +40,28 @@ export interface FitTableDeps {
 }
 
 export interface FitTableSource {
-  /** The last table; builds one first when there is none yet. */
   get(): Promise<FitTable>;
-  /**
-   * Something the table depends on changed: build a new one (coalesced) and push it if it differs.
-   * `afterPlan`: a send just planned on a fresh GPU reading, and the build may take it.
-   */
   changed(options?: { afterPlan?: boolean }): void;
-  /** A models.load notice: no table is built while a load is running (its memory is half counted). */
   load(load: ModelLoad): void;
 }
 
-/**
- * The footer's line right now, the programs holding memory above the card's baseline (said once under
- * each list), and the whole each memory mark is drawn against: the card, or the computer's memory
- * (memTotalBytes, when it was read) with no GPU.
- */
 function memoryOf(gpu: GpuSnapshot, margin: number, baseline: GpuBaseline | undefined, own: readonly number[], memTotalBytes?: number): FitMemory {
   if (gpu.gpuCount === 0) return memTotalBytes === undefined ? { kind: "cpu" } : { kind: "cpu", totalBytes: memTotalBytes };
   const others = baseline?.others(gpu, own);
-  // every card together, less one margin on each (fit.ts cardMargins)
   const usable = gpu.freeBytes - cardMargins({ ...DEFAULT_MARGINS, vramMarginBytes: margin }, gpu, "now").margins.vramMarginBytes;
   return { kind: "gpu", freeBytes: gpu.freeBytes, usableBytes: Math.max(0, usable), totalBytes: gpu.totalBytes, ...(gpu.gpuCount > 1 ? { gpuCount: gpu.gpuCount } : {}), ...(others ? { others } : {}) };
 }
 
-/**
- * Every row from the one reading `r`. A model whose check fails gets no row; the others still do.
- * An installed model is planned right now, as a send would load it, and also carries its verdict
- * against the card (`card`: the GPU's memory and the system memory the computer has), which every
- * list and Settings show; one offered for download is judged against the card.
- */
 async function rowsFrom(deps: FitTableDeps, baseUrl: string, r: Readings, models: readonly TableModel[], own: readonly number[] = []): Promise<TableRow[]> {
   const rows: TableRow[] = [];
   const busy = deps.busy();
   const baseline = deps.fit?.baseline;
   const margins = deps.fit?.margins ? { margins: deps.fit.margins } : {};
-  // who holds the card besides the runtime, read once for every row (this app's ComfyUI by its pid)
+  // why: who holds the card besides the runtime is worked out once for every row.
   let holders: GpuOccupant[] | undefined;
   const holdersNow = () => (holders ??= holdersOf(r.gpu.tenants, r.gpu.usedBytes, { image: (t) => own.includes(t.pid) || /comfy/i.test(t.processName) }).holders);
   const cardOf = (row: TableRow): TableRow => {
-    // No card to read, but the runner's own list has this model on one: that list is the measurement.
+    // why: with no card to read, the runner's own list having this model on one is the measurement.
     const listed = r.gpu.gpuCount === 0 ? r.ps.models.filter((m) => isCopyOf(m, row.model) && m.size_vram > 0) : [];
     if (listed.some((m) => m.context_length === row.numCtx) && row.words !== undefined) {
       const { verdict, freeVramBytes, spillRamBytes, shortfallBytes } = row;
@@ -114,7 +77,7 @@ async function rowsFrom(deps: FitTableDeps, baseUrl: string, r: Readings, models
       freeVramBytes: row.freeVramBytes,
       ...margins,
     });
-    // The card holds it and right now it spills: name who is in the way.
+    // why: the card holds it and right now it spills, so name who is in the way.
     const blocking = verdict === "fits" && row.verdict === "spills" ? inTheWay(holdersNow(), row.spillRamBytes) : [];
     return {
       ...row,
@@ -128,7 +91,7 @@ async function rowsFrom(deps: FitTableDeps, baseUrl: string, r: Readings, models
       },
     };
   };
-  // With no GPU the card is the computer's own memory, judged the same way.
+  // why: with no GPU the card is the computer's own memory, judged the same way.
   const onCard = baseline !== undefined;
   for (const entry of models) {
     const sizes = new Set<number>();
@@ -150,7 +113,7 @@ async function rowsFrom(deps: FitTableDeps, baseUrl: string, r: Readings, models
               }),
               [],
             );
-        // A model that holds less than this context runs at its own size: one row for that size.
+        // why: a model that holds less than this context runs at its own size: one row for that size.
         if (sizes.has(row.numCtx)) continue;
         sizes.add(row.numCtx);
         rows.push(row);
@@ -170,12 +133,10 @@ export function createFitTable(deps: FitTableDeps): FitTableSource {
   let lastPushed: string | undefined;
   let building: Promise<FitTable> | undefined;
   let again = false;
-  /** The next build may take a GPU reading up to GPU_REUSE_MS old: only when every trigger since the last build said so. */
   let reuseNext: boolean | undefined;
-  /** The last build's failure, said once: while the app fetches its runtime the table rebuilds every second or so. */
+  // why: said once, as the table rebuilds every second or so while the app fetches its runtime.
   let lastFailure: string | undefined;
-  /** Open models.load notices by model. */
-  const loading = new Map<string, number>();
+  const openLoadNoticesByModel = new Map<string, number>();
   const now = deps.fit?.now ?? Date.now;
   const unreadable = (seqNow: number, detail: string): FitTable => ({ reading: { boot, seq: seqNow, measuredAt: now() }, memory: { kind: "unreadable", detail }, rows: [] });
 
@@ -198,9 +159,8 @@ export function createFitTable(deps: FitTableDeps): FitTableSource {
       const failure = (e as Error).message;
       if (failure !== lastFailure) deps.log?.(`fit table: ${failure}`);
       lastFailure = failure;
-      // nvidia-smi and the runtime disagree: neither line can be trusted.
+      // why: nvidia-smi and the runtime disagree, so neither the memory line nor a row can be trusted.
       if (e instanceof FitError && e.code === "gpu-unreadable") return unreadable(at, e.message);
-      // No runtime to ask: no rows, and the footer's line from the GPU alone.
       try {
         const gpu = await readGpu(deps.fit?.runNvidiaSmi ?? defaultNvidiaSmi, now, undefined, reuseGpuMs);
         return { reading: { boot, seq: at, measuredAt: gpu.measuredAt }, memory: memoryOf(gpu, margin, undefined, []), rows: [] };
@@ -211,10 +171,8 @@ export function createFitTable(deps: FitTableDeps): FitTableSource {
   };
 
   const publish = (table: FitTable) => {
-    // A load opened while this build read: GPU memory was filling under it. Drop it; the load's end
-    // builds again.
-    if (loading.size > 0) return;
-    // seq rises in build order and builds never overlap, so the last one built is the newest.
+    // why: a load opened while this build read, so memory was filling under it; its end builds again.
+    if (openLoadNoticesByModel.size > 0) return;
     last = table;
     const content = JSON.stringify([table.memory, table.rows]);
     if (content === lastPushed) return;
@@ -226,7 +184,6 @@ export function createFitTable(deps: FitTableDeps): FitTableSource {
     }
   };
 
-  /** One build at a time; a trigger during one builds once more after it. */
   const run = (): Promise<FitTable> => {
     if (building) {
       again = true;
@@ -247,9 +204,8 @@ export function createFitTable(deps: FitTableDeps): FitTableSource {
     return building;
   };
 
-  // While a load runs, a trigger waits for it: the load's end triggers once every load has ended.
   const kick = () => {
-    if (loading.size === 0) void run();
+    if (openLoadNoticesByModel.size === 0) void run();
   };
   const trigger = (reuseGpu = false) => {
     reuseNext = (reuseNext ?? true) && reuseGpu;
@@ -264,13 +220,13 @@ export function createFitTable(deps: FitTableDeps): FitTableSource {
     },
     changed: (options) => trigger(options?.afterPlan === true),
     load(load) {
-      const open = loading.get(load.model) ?? 0;
+      const open = openLoadNoticesByModel.get(load.model) ?? 0;
       if (load.state === "loading") {
-        loading.set(load.model, open + 1);
+        openLoadNoticesByModel.set(load.model, open + 1);
         return;
       }
-      if (open > 1) loading.set(load.model, open - 1);
-      else loading.delete(load.model);
+      if (open > 1) openLoadNoticesByModel.set(load.model, open - 1);
+      else openLoadNoticesByModel.delete(load.model);
       trigger();
     },
   };

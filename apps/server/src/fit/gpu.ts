@@ -1,5 +1,3 @@
-// Reads the GPU with nvidia-smi and names who holds it. Read-only: this
-// module never signals, stops or reconfigures any process it lists.
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import os from "node:os";
@@ -20,7 +18,7 @@ export const GPU_APPS_ARGS = [
 
 export const createNvidiaSmiRunner = (file = "nvidia-smi", leadingArgs: readonly string[] = []): NvidiaSmiRunner => (args, signal) =>
   new Promise((resolve, reject) => {
-    // windowsHide: the server has no console on Windows, so each run would flash one.
+    // external: Windows opens a console window for each child of a process that has none, unless windowsHide is set.
     execFile(file, [...leadingArgs, ...args], { timeout: 10_000, maxBuffer: 4 * MIB, windowsHide: true, ...(signal ? { signal } : {}) }, (error, stdout, stderr) => {
       if (error) reject(Object.assign(error, { stdout, stderr }));
       else resolve(stdout);
@@ -29,20 +27,16 @@ export const createNvidiaSmiRunner = (file = "nvidia-smi", leadingArgs: readonly
 
 export const defaultNvidiaSmi = createNvidiaSmiRunner();
 
-/**
- * /proc/meminfo on Linux. Elsewhere (Windows has no /proc) os.totalmem() and os.freemem()
- * rendered as MemTotal and MemAvailable lines, so one parser serves every platform.
- */
+// external: Windows has no /proc, so there os.totalmem() and os.freemem() are written as MemTotal and MemAvailable lines for the one parser.
 export const defaultMeminfo: MeminfoReader = (signal) =>
   process.platform === "linux"
     ? readFile("/proc/meminfo", { encoding: "utf8", ...(signal ? { signal } : {}) })
     : Promise.resolve(`MemTotal: ${Math.floor(os.totalmem() / 1024)} kB\nMemAvailable: ${Math.floor(os.freemem() / 1024)} kB\n`);
 
-/** `work`'s result, or the signal's reason as soon as it aborts (a runner that ignores the signal still lets go). */
 export function untilAborted<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (signal === undefined) return work;
   if (signal.aborted) {
-    // The work is dropped, not left unobserved: its own rejection must not reach the process.
+    // external: Node ends the process on a rejection that nothing observes.
     work.catch(() => undefined);
     return Promise.reject(signal.reason);
   }
@@ -77,11 +71,7 @@ export interface GpuTotals {
   cards?: readonly GpuCard[];
 }
 
-/**
- * Parses `--query-gpu=memory.total,memory.used,memory.free` (MiB, no units), one line per card.
- * Every card counts: Ollama splits a model that does not fit on one card across all of them, so
- * the figures are the cards together, and `cards` lists each, largest first, when there are more.
- */
+// external: Ollama splits a model that does not fit on one card across all of them, so the figures are every card together.
 export function parseGpuTotals(text: string): GpuTotals {
   const cards: GpuCard[] = [];
   for (const line of text.split(/\r?\n/)) {
@@ -95,20 +85,20 @@ export function parseGpuTotals(text: string): GpuTotals {
   }
   const sum = (pick: (c: GpuCard) => number) => cards.reduce((s, c) => s + pick(c), 0);
   const all = { totalBytes: sum((c) => c.totalBytes), usedBytes: sum((c) => c.usedBytes), freeBytes: sum((c) => c.freeBytes), gpuCount: cards.length };
-  return cards.length === 1 ? all : { ...all, cards: cards.toSorted((a, b) => b.totalBytes - a.totalBytes) };
+  const largestFirst = cards.toSorted((a, b) => b.totalBytes - a.totalBytes);
+  return cards.length === 1 ? all : { ...all, cards: largestFirst };
 }
 
-/** Last path segment of a Linux or Windows command, without its flags or ".exe". A path may hold spaces ("Program Files"). */
 export function processBasename(processName: string): string {
   const command = processName.trim().split(/\s+--?\w/)[0]?.trim() ?? processName;
   const base = command.split(/[\\/]/).pop() || command;
   return base.replace(/\.exe$/i, "");
 }
 
-/** nvidia-smi prints a bracketed note where it has no name to give ("[Insufficient Permissions]", "[N/A]", "[Not Found]"). */
+// external: nvidia-smi prints a bracketed note where it has no name to give: "[Insufficient Permissions]", "[N/A]", "[Not Found]".
 const NO_NAME = /^\[[^\]]*\]$/;
 
-/** The desktop's own processes: part of the system, never something to close. Matched on the program's name. */
+// why: the desktop's own programs are part of the system, never something to close.
 const SYSTEM_APPS: readonly [RegExp, string][] = [
   [/^(dwm|explorer|csrss|winlogon|sihost|ctfmon|ShellHost|ShellExperienceHost|StartMenuExperienceHost|SearchHost|SearchApp|TextInputHost|LockApp|ApplicationFrameHost|SystemSettings)$/i, "Windows desktop"],
   [/^kwin/i, "Desktop (KWin)"],
@@ -116,10 +106,6 @@ const SYSTEM_APPS: readonly [RegExp, string][] = [
   [/^(Xorg|Xwayland)/i, "Desktop (X server)"],
 ];
 
-/**
- * The one place a GPU process gets its display name and role. The name is the program's own
- * (no folders, no flags, no ".exe"), so a full path with a person's folder names is never shown.
- */
 function labelFor(processName: string): Pick<GpuTenant, "label" | "role" | "unnamed" | "system"> {
   const raw = processName.trim();
   if (raw === "" || NO_NAME.test(raw)) return { label: "unnamed process", role: "occupant", unnamed: true };
@@ -131,11 +117,8 @@ function labelFor(processName: string): Pick<GpuTenant, "label" | "role" | "unna
   return { label: base, role: "occupant" };
 }
 
-/**
- * One line for a refusal's detail: who holds GPU memory, largest first, at most four names, the
- * rest counted. A process whose memory nvidia-smi does not report (every process under Windows'
- * display driver model, and any it may not inspect) is counted and never given a size.
- */
+const MOST_HOLDERS_NAMED = 4;
+
 export function holdersSummary(tenants: readonly Pick<GpuTenant, "label" | "usedBytes">[], size: (bytes: number) => string): string {
   if (tenants.length === 0) return "no process listed";
   const measured = new Map<string, number>();
@@ -146,18 +129,14 @@ export function holdersSummary(tenants: readonly Pick<GpuTenant, "label" | "used
   }
   if (measured.size === 0) return `${unreported} ${unreported === 1 ? "process" : "processes"}, GPU memory not reported per process`;
   const ranked = [...measured].toSorted((a, b) => b[1] - a[1]);
-  const parts = ranked.slice(0, 4).map(([label, bytes]) => `${label} ${size(bytes)}`);
-  const rest = ranked.slice(4);
+  const parts = ranked.slice(0, MOST_HOLDERS_NAMED).map(([label, bytes]) => `${label} ${size(bytes)}`);
+  const rest = ranked.slice(MOST_HOLDERS_NAMED);
   if (rest.length > 0) parts.push(`${rest.length} more ${size(rest.reduce((sum, [, bytes]) => sum + bytes, 0))}`);
   if (unreported > 0) parts.push(`${unreported} more not reported`);
   return parts.join(", ");
 }
 
-/**
- * Parses `--query-compute-apps=pid,process_name,used_memory`. The process
- * name can itself contain commas, so the pid is the first field, the memory
- * the last, and the name everything between.
- */
+// external: nvidia-smi does not quote a process name, which can hold commas, so the pid is the first field, the memory the last and the name everything between.
 export function parseComputeApps(text: string): GpuTenant[] {
   const tenants: GpuTenant[] = [];
   for (const line of text.split(/\r?\n/)) {
@@ -186,7 +165,6 @@ function errorText(error: unknown): string {
     .filter((part): part is string => typeof part === "string").join("\n");
 }
 
-/** Only the documented unavailable-device messages qualify, never a generic NVML/read error. See gpu-failures.md. */
 function noUsableGpu(error: unknown): { kind: "none"; detail?: string } | undefined {
   let reason: string;
   if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return { kind: "none" };
@@ -204,7 +182,6 @@ type SmiRead<T> = { kind: "ok"; totals: T; apps: string } | { kind: "none"; deta
 export const gpuReadFailure = (reason: string): string =>
   `Gates Local could not read GPU memory (${reason}), so it cannot check whether a model fits. Try again. If this keeps happening, run nvidia-smi in a terminal to check the NVIDIA driver.`;
 
-/** Resident GPU bytes contradict only nvidia-smi's reported absence, never a missing executable. */
 export function gpuReadingConflict(unavailableDetail: string | undefined, residentVramBytes: readonly number[]): string | undefined {
   return unavailableDetail !== undefined && residentVramBytes.some(bytes => bytes > 0)
     ? gpuReadFailure("Ollama reports a model in GPU memory, but nvidia-smi found no usable NVIDIA GPU") : undefined;
@@ -219,18 +196,18 @@ function isSmiTimeout(error: unknown): boolean {
 function readFailure(error: unknown): string {
   if (error instanceof FitError) return "nvidia-smi printed no GPU memory line";
   if (isSmiTimeout(error)) return "nvidia-smi timed out";
-  // execFile prefixes its message with the full command. The readers query different columns;
-  // keep the diagnostic below that prefix so the same failure has the same words in both places.
+  // external: Node's execFile starts its error message with "Command failed:" and the whole command, and the two readers' commands differ.
   return errorText(error).trim().replace(/^Command failed:[^\n]*(?:\n|$)/i, "").trim().split("\n")[0] || "nvidia-smi command failed";
 }
 
-/** Confirm output-based absence and retry quick failures after 250 ms; timeouts, missing commands and aborts never retry. */
+const RETRY_PAUSE_MS = 250;
+
 export async function readNvidiaSmi<T>(run: NvidiaSmiRunner, totalsArgs: readonly string[], parse: (text: string) => T, signal?: AbortSignal): Promise<SmiRead<T>> {
   let failed = "";
   let firstAbsence: string | undefined;
   for (let attempt = 0; attempt < 2; attempt++) {
     signal?.throwIfAborted();
-    if (attempt > 0) await untilAborted(delay(250, undefined, { signal }), signal);
+    if (attempt > 0) await untilAborted(delay(RETRY_PAUSE_MS, undefined, { signal }), signal);
     const [totals, apps] = await untilAborted(Promise.allSettled([run(totalsArgs, signal), run(GPU_APPS_ARGS, signal)]), signal);
     signal?.throwIfAborted();
     const timedOut = [totals, apps].some(result => result.status === "rejected" && isSmiTimeout(result.reason));
@@ -248,7 +225,6 @@ export async function readNvidiaSmi<T>(run: NvidiaSmiRunner, totalsArgs: readonl
     try {
       if (totals.status === "rejected") throw totals.reason;
       const parsed = parse(totals.value);
-      // Readable GPU memory is evidence of a card, even if its process query says no devices.
       if (apps.status === "rejected") throw apps.reason;
       return { kind: "ok", totals: parsed, apps: apps.value };
     } catch (error) {
@@ -258,16 +234,11 @@ export async function readNvidiaSmi<T>(run: NvidiaSmiRunner, totalsArgs: readonl
   return { kind: "unreadable", detail: gpuReadFailure(failed) };
 }
 
-/** A finished GPU reading this young (ms, from when it started) is handed to a survey that asks for it instead of running nvidia-smi again. */
 export const GPU_REUSE_MS = 500;
 
-/** Bumped by forgetGpuReadings: a reading from an earlier count is never handed out again. */
+// why: bumped whenever the app knows the GPU changed, so an older reading is never handed out.
 let generation = 0;
 
-/**
- * The GPU just changed in a way this app knows of (a model loaded or unloaded, the runtime
- * stopped, the GPU watch saw memory move): no caller after this gets a reading taken before it.
- */
 export function forgetGpuReadings(): void {
   generation++;
 }
@@ -277,23 +248,14 @@ interface SharedRead {
   readonly startedAt: number;
   readonly work: Promise<GpuSnapshot>;
   readonly stop: AbortController;
-  /** Callers still waiting that could give up; at 0 after one gives up, the read stops. */
+  // why: counts only callers that could give up; at 0 after one gives up, the read stops.
   waiting: number;
-  /** A caller with no signal never gives up, so the read always finishes for it. */
+  // why: a caller with no signal never gives up, so the read always finishes for it.
   keep: boolean;
 }
-/** Per runner: the read in flight and the last good one. Keyed by the runner so each server (and each test) has its own. */
+// why: keyed by the runner so each server, and each test, has its own reads.
 const shared = new WeakMap<NvidiaSmiRunner, { live?: SharedRead; last?: { generation: number; startedAt: number; snapshot: GpuSnapshot } }>();
 
-/**
- * The GPU's memory and tenants. Callers at the same time share one pair of nvidia-smi runs (chat
- * row 33: two sends starting at once spent 40% of one core on these runs). A finished reading is
- * handed out again only to a caller that passes `reuseMs` (the fit table and the model list's
- * survey, GPU_REUSE_MS); a send plans on a reading that is in flight or starts now, since it plans
- * again after something it changed (a ComfyUI stop, a claim it waited for). A caller's abort
- * rejects it at once with its reason; the runs stop only when every caller that could give up has,
- * and no caller without a signal is waiting.
- */
 export async function readGpu(run: NvidiaSmiRunner = defaultNvidiaSmi, now: () => number = Date.now, signal?: AbortSignal, reuseMs = 0): Promise<GpuSnapshot> {
   signal?.throwIfAborted();
   const calledAt = performance.now();
@@ -324,7 +286,6 @@ export async function readGpu(run: NvidiaSmiRunner = defaultNvidiaSmi, now: () =
   }
 }
 
-/** One reading of its own: `signal` reaches both nvidia-smi runs; an abort rejects with its reason. */
 async function readGpuNow(run: NvidiaSmiRunner, now: () => number, signal: AbortSignal): Promise<GpuSnapshot> {
   const read = await sendSpan("nvidia-smi", () => readNvidiaSmi(run, GPU_TOTALS_ARGS, parseGpuTotals, signal));
   if (read.kind === "unreadable") throw new FitError("gpu-unreadable", read.detail);
@@ -332,24 +293,17 @@ async function readGpuNow(run: NvidiaSmiRunner, now: () => number, signal: Abort
   return { ...read.totals, tenants: parseComputeApps(read.apps), measuredAt: now() };
 }
 
-/** MemAvailable from /proc/meminfo, in bytes. */
 export function parseMemAvailable(text: string): number {
   const match = /^MemAvailable:\s+(\d+)\s*kB/m.exec(text);
   if (!match?.[1]) throw new FitError("meminfo-unreadable", "/proc/meminfo has no MemAvailable line");
   return Number(match[1]) * 1024;
 }
 
-/** MemTotal from /proc/meminfo (the computer's memory), in bytes; undefined without the line. */
 export function parseMemTotal(text: string): number | undefined {
   const match = /^MemTotal:\s+(\d+)\s*kB/m.exec(text);
   return match?.[1] ? Number(match[1]) * 1024 : undefined;
 }
 
-/**
- * The system memory free right now and the memory the computer has, from one reading. A model is
- * judged against the total; a reading with no MemTotal line
- * takes MemAvailable for it.
- */
 export interface MemoryReading {
   readonly availableBytes: number;
   readonly totalBytes: number;

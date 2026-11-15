@@ -7,22 +7,24 @@ import { runSnapshotQuery } from "./sql.ts";
 import { MAX_IMAGES_PER_TURN, toolDefinitions } from "./prompt.ts";
 import type { LibraryEntry, ToolCall, ToolResult } from "./types.ts";
 
+/**
+ * `queueImage` queues an image job and returns its id at once. The job needs the GPU alone
+ * and the turn holds a shared claim until it ends, so the tool never waits for the picture:
+ * it lands in the thread as its own message after the reply.
+ * `image`: the turn asked for images (`chat.send` `image: true`). The image tool exists only
+ * with this and `queueImage`.
+ * `shell: false`: the sandbox probe failed on this machine, so the shell tool is neither
+ * offered nor run.
+ * `realpath` and `fs` are for tests to inject (a realpath, and the read tool's filesystem
+ * calls to race them); the app uses the native realpath from paths.ts and node:fs/promises.
+ */
 export interface ToolsDeps {
   sources: readonly LibraryEntry[];
   platform?: NodeJS.Platform;
-  /**
-   * Queues an image job and returns its id at once. The job needs the GPU alone
-   * and the turn holds a shared claim until it ends, so the tool never waits for
-   * the picture: it lands in the thread as its own message after the reply.
-   */
   queueImage?: (prompt: string, signal: AbortSignal) => Promise<{ jobId: string }>;
-  /** The turn asked for images (`chat.send` `image: true`). The image tool exists only with this and `queueImage`. */
   image?: boolean;
-  /** false: the sandbox probe failed on this machine, so the shell tool is neither offered nor run. */
   shell?: boolean;
-  /** Tests inject a realpath; the app uses the native one from paths.ts. */
   realpath?: Realpath;
-  /** Tests inject the read tool's filesystem calls to race them; the app uses node:fs/promises. */
   fs?: Partial<LibraryFs>;
   sqlTimeoutMs?: number;
 }
@@ -46,8 +48,7 @@ const integer = (input: Record<string, unknown>, key: string, fallback: number, 
 export function createTools(deps: ToolsDeps) {
   const platform = deps.platform ?? process.platform;
   const queueImage = deps.image === true ? deps.queueImage : undefined;
-  // A turn's tools are made for that turn: this counts its images across calls.
-  let imagesQueued = 0;
+  let imagesQueuedThisTurn = 0;
   return {
     definitions: toolDefinitions(platform, { image: queueImage !== undefined, ...(deps.shell === false ? { shell: false } : {}) }),
     async execute(call: ToolCall, signal: AbortSignal): Promise<ToolResult> {
@@ -67,19 +68,18 @@ export function createTools(deps: ToolsDeps) {
         case "image": {
           if (!queueImage) throw new TypeError("The image tool is not on for this turn");
           const prompts = texts(call.input, "prompts");
-          // One job per prompt, in order; every call this turn counts toward the one limit.
-          const room = Math.max(0, MAX_IMAGES_PER_TURN - imagesQueued);
+          const roomLeftThisTurn = Math.max(0, MAX_IMAGES_PER_TURN - imagesQueuedThisTurn);
           const jobs: string[] = [];
           let failed: string | undefined;
-          for (const prompt of prompts.slice(0, room)) {
+          for (const prompt of prompts.slice(0, roomLeftThisTurn)) {
             try { jobs.push((await queueImage(prompt, signal)).jobId); }
             catch (error) {
-              // the first refusal stops the rest; the ones already queued stay and are said
               if (jobs.length === 0 || signal.aborted) throw error;
+              // why: the first refusal stops the rest; the ones already queued stay and are said.
               failed = (error as Error).message;
               break;
             }
-            imagesQueued++;
+            imagesQueuedThisTurn++;
             signal.throwIfAborted();
           }
           const left = prompts.length - jobs.length;
@@ -98,17 +98,15 @@ export function createTools(deps: ToolsDeps) {
   };
 }
 
-/**
- * Whether a path joined under a source could leave it, judged from the text alone. The parser
- * follows the computer: drive, UNC and device roots mean something only on Windows, and on
- * Linux "C:notes.txt" is a file the person may have. A ".." segment is refused everywhere,
- * split on both separators. Windows also drops trailing dots and spaces from a name, so ".. "
- * is a parent there and only an odd file name elsewhere.
- */
+// external: Windows drops trailing dots and spaces from a name, so ".. " is a parent there.
+const PARENT_ON_WINDOWS = /^\.\.[. ]*$/;
+const PARENT_ELSEWHERE = /^\.\.$/;
+const EITHER_SEPARATOR = /[\\/]/;
 function leavesByText(relative: string, platform: NodeJS.Platform): boolean {
+  // why: the parser follows the computer; on Linux "C:notes.txt" is a file the person may have.
   if ((platform === "win32" ? path.win32 : path.posix).parse(relative).root !== "") return true;
-  const parent = platform === "win32" ? /^\.\.[. ]*$/ : /^\.\.$/;
-  return relative.split(/[\\/]/).some(part => parent.test(part));
+  const parent = platform === "win32" ? PARENT_ON_WINDOWS : PARENT_ELSEWHERE;
+  return relative.split(EITHER_SEPARATOR).some(part => parent.test(part));
 }
 
 async function readLibrary(sources: readonly LibraryEntry[], input: Record<string, unknown>, signal: AbortSignal, realpath: Realpath, platform: NodeJS.Platform, fs: LibraryFs): Promise<ToolResult> {
@@ -123,8 +121,7 @@ async function readLibrary(sources: readonly LibraryEntry[], input: Record<strin
       throw new Error(`${virtual[1]} is a SQLite source; ${platform === "win32" ? `use sql with source "${virtual[1]}"` : `use shell with sqlite3 /data/${virtual[1]}.db`}`);
     if (!source) throw new Error("Path is outside your Library; use /library/<source id>");
     const relative = virtual[2] ?? "";
-    // Decided from the text, before anything below touches the disk: the model learns nothing
-    // about paths outside the source, and a UNC path never makes Windows reach out to its host.
+    // external: Windows reaches out to a UNC path's host the moment the disk is asked about it.
     const refused = libraryFsError(`/library/${source.id}${relative === "" ? "" : `/${relative}`}`, { code: "ENOENT" });
     if (leavesByText(relative, platform) || (source.kind === "file" && relative !== "")) throw refused;
     candidate = path.resolve(source.path, relative);
@@ -136,10 +133,9 @@ async function readLibrary(sources: readonly LibraryEntry[], input: Record<strin
   }
   const root = await realpath(source.path).catch((e: unknown) => { throw sourceUnavailable(source, e); });
   if (!samePath(root, source.path, platform)) throw new Error("Library source path changed; reconnect this source before using it");
-  // Every filesystem error past this point names the path as the model wrote it in Library
-  // terms; Node's own message carries the host path (the source root, the app's data dir).
   const relative = path.relative(source.path, candidate).split(path.sep).join("/");
   const shown = `/library/${source.id}${relative === "" ? "" : `/${relative}`}`;
+  // external: Node's own error message carries the host path.
   const fsCall = <T>(pending: Promise<T>): Promise<T> => pending.catch((e: unknown) => { throw libraryFsError(shown, e); });
   const canonical = await fsCall(realpath(candidate));
   if (source.kind === "file" ? !samePath(canonical, root, platform) : !contains(root, canonical)) throw new Error("Symlink leaves your Library source");
@@ -147,7 +143,7 @@ async function readLibrary(sources: readonly LibraryEntry[], input: Record<strin
   const info = await fsCall(fs.stat(canonical));
   if (info.isDirectory()) {
     const limit = integer(input, "limit", 200, 1000);
-    // opendir keeps very large folders from allocating an unbounded listing.
+    // external: Node's readdir allocates the whole listing of a very large folder; opendir reads it entry by entry.
     const names: string[] = [];
     let capped = false;
     let bytes = 0;
@@ -180,30 +176,26 @@ const FS_WORDS: Readonly<Record<string, string>> = {
   ENOENT: "no such file", EACCES: "permission denied", EPERM: "permission denied",
   ENOTDIR: "not a folder", EISDIR: "is a folder", ELOOP: "symlink not followed",
 };
-/** `/library/f/x: permission denied`: the virtual path and a short word, never Node's message. */
-function libraryFsError(shown: string, error: unknown): Error {
+function libraryFsError(virtualPath: string, error: unknown): Error {
   const code = (error as NodeJS.ErrnoException | undefined)?.code;
-  return new Error(`${shown}: ${(code !== undefined && FS_WORDS[code]) || "could not be read"}`);
+  return new Error(`${virtualPath}: ${(code !== undefined && FS_WORDS[code]) || "could not be read"}`);
 }
 
+const QUOTED_OR_COMMENT = /'(?:''|[^'])*'|"(?:""|[^"])*"|`(?:``|[^`])*`|\[[^\]]*\]|--[^\n]*|\/\*[\s\S]*?\*\//g;
+
 async function querySnapshot(sources: readonly LibraryEntry[], input: Record<string, unknown>, signal: AbortSignal, timeoutMs?: number): Promise<ToolResult> {
-  // Models also pass the file name or the Linux shell path ("books.db", "/data/books.db").
+  // why: models also pass the file name or the shell path ("books.db", "/data/books.db").
   const id = text(input, "source").replace(/^\/?data\//, "").replace(/\.db$/i, "");
   const sqlite = sources.filter(s => s.kind === "sqlite");
   const source = sqlite.find(s => s.id === id);
   if (!source?.snapshotPath) throw new Error(`SQLite snapshot was not found in your Library; ${sqlite.length ? `use source ${sqlite.map(s => `"${s.id}"`).join(" or ")}` : "no SQLite source is connected"}`);
   const query = text(input, "query");
-  // The read-only handle and PRAGMA query_only (sql.ts) stop changes to the snapshot, but
-  // neither stops VACUUM INTO from creating its destination file: with both set it still
-  // makes a zero-byte file at any path before it fails. This lexical check is what prevents
-  // that external-file creation. It allows one SELECT or WITH statement and nothing after
-  // a `;`, which keeps out ATTACH, PRAGMA and VACUUM, and refuses a second statement that
-  // prepare() would otherwise drop without a word.
-  const syntax = query.replace(/'(?:''|[^'])*'|"(?:""|[^"])*"|`(?:``|[^`])*`|\[[^\]]*\]|--[^\n]*|\/\*[\s\S]*?\*\//g, " ").trim();
+  // external: SQLite's VACUUM INTO makes a zero-byte file at any path before it fails, even on a read-only handle with query_only on.
+  const syntax = query.replace(QUOTED_OR_COMMENT, " ").trim();
   if (!/^(SELECT|WITH)\b/i.test(syntax) || /;\s*\S/.test(syntax)) throw new TypeError("sql accepts one SELECT or WITH query; no PRAGMA, ATTACH or VACUUM");
   const limit = integer(input, "limit", 100, 1000);
   const file = source.snapshotPath;
-  // Removed since the turn began: name the source; SQLite's own error says only "unable to open".
+  // external: SQLite's own error for a missing file says only "unable to open".
   const removed = () => sourceUnavailable(source, Object.assign(new Error("snapshot removed"), { code: "ENOENT" }));
   if (!existsSync(file)) throw removed();
   let rows: unknown[];

@@ -1,8 +1,8 @@
-// Byte formatting for fit messages: exact bytes plus decimal GB, the unit
-// Ollama and download pages use.
+// external: Ollama and download pages state a size in decimal GB, so a figure here reads the same as theirs.
+const BYTES_PER_DECIMAL_GB = 1e9;
 
 export function formatGb(bytes: number): string {
-  return `${(bytes / 1e9).toFixed(2)} GB`;
+  return `${(bytes / BYTES_PER_DECIMAL_GB).toFixed(2)} GB`;
 }
 
 export function formatBytes(bytes: number): string {

@@ -1,15 +1,3 @@
-// Token usage per UTC hour and model, in its own SQLite file beside the
-// thread store and written the same way: WAL, synchronous=FULL, one
-// BEGIN IMMEDIATE transaction per write, so a crash keeps every committed
-// request and never half of one. Counts and times only: no text, thread or title.
-//
-// Speed is a ratio of sums, so the times are summed with the tokens of the
-// requests that reported them: a request with no decode time adds its tokens
-// to the totals and nothing to decodeTokens, and never dilutes a speed.
-//
-// A file that will not open is moved aside as `usage.sqlite.bad-<time>`,
-// usage starts empty and the server log says so once; the app runs on.
-
 import { mkdirSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -17,30 +5,23 @@ import { DatabaseSync } from "node:sqlite";
 import { canonicalTag } from "../runtime/recommended.ts";
 
 export interface UsageRow {
-  /** Start of the UTC hour, ms. */
   readonly hour: number;
   readonly model: string;
   readonly promptTokens: number;
   readonly completionTokens: number;
-  /** Replies that began in this hour; a tool turn's later requests add tokens, not replies. */
   readonly replies: number;
-  /** Decode time, and the output tokens of the requests that reported it. */
   readonly decodeMs: number;
   readonly decodeTokens: number;
-  /** Prompt reading time, and the prompt tokens of the requests that reported it. */
   readonly readMs: number;
   readonly readTokens: number;
-  /** Wall time of the requests, load and prompt included. */
   readonly wallMs: number;
 }
 
 export interface UsageRead {
   readonly rows: UsageRow[];
-  /** Every model ever counted, in the order it was first used: colours follow this. */
   readonly models: string[];
 }
 
-/** One model request's end-of-request figures (MessageStats); any may be missing. */
 export interface UsageFigures {
   readonly promptTokens?: number | undefined;
   readonly completionTokens?: number | undefined;
@@ -55,11 +36,8 @@ export interface StoredReply extends UsageFigures {
 }
 
 export interface UsageStore {
-  /** One model request's reported figures; `reply` is true for a reply's first request. */
-  record(model: string, figures: UsageFigures, reply: boolean): void;
-  /** Rows from the hour holding `since` onwards, oldest first. */
+  record(model: string, figures: UsageFigures, firstRequest: boolean): void;
   read(since: number): UsageRead;
-  /** The one-time fill from replies stored before the file was first opened; false when it ran before. */
   fillOnce(replies: Iterable<StoredReply>): boolean;
   close(): void;
 }
@@ -73,16 +51,22 @@ export interface UsageStoreOptions {
 const HOUR = 3_600_000;
 const VERSION = 1;
 const FILLED = "filled";
-/** Until the fill succeeds: the time the file was first opened. */
 const FILL_BEFORE = "fill_before";
 
-const hourOf = (ms: number) => Math.floor(ms / HOUR) * HOUR;
+const startOfUtcHourMs = (ms: number) => Math.floor(ms / HOUR) * HOUR;
 const valid = (n: number | undefined): n is number => n !== undefined && Number.isFinite(n) && n >= 0;
 const count = (n: number | undefined) => (valid(n) ? Math.trunc(n) : 0);
-/** A filename-safe UTC stamp, as settings uses for its own bad file. */
-const stamp = (ms: number) => new Date(ms).toISOString().replace(/[:.]/g, "-");
+const filenameSafeUtcStamp = (ms: number) => new Date(ms).toISOString().replace(/[:.]/g, "-");
 
 const COLUMNS = ["prompt_tokens", "completion_tokens", "replies", "decode_ms", "decode_tokens", "read_ms", "read_tokens", "wall_ms"] as const;
+
+function renameIfThere(from: string, to: string): void {
+  try {
+    renameSync(from, to);
+  } catch {
+    return;
+  }
+}
 
 function openDb(file: string, busyTimeoutMs: number): DatabaseSync {
   const db = new DatabaseSync(file, { timeout: busyTimeoutMs });
@@ -105,7 +89,7 @@ function openDb(file: string, busyTimeoutMs: number): DatabaseSync {
     db.exec("CREATE TABLE IF NOT EXISTS usage_models (seq INTEGER PRIMARY KEY, model TEXT NOT NULL UNIQUE)");
     db.exec("CREATE TABLE IF NOT EXISTS usage_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
     db.exec(`PRAGMA user_version = ${VERSION}`);
-    // A file whose header opened but whose pages or columns do not: read every table once.
+    // why: a header can open over pages or columns that do not, so every table is read once.
     db.prepare(`SELECT count(*) AS n, ${COLUMNS.map((c) => `sum(${c})`).join(", ")} FROM usage_hours`).get();
     db.prepare("SELECT count(*) AS n FROM usage_models").get();
   } catch (err) {
@@ -120,17 +104,11 @@ function openOrStartEmpty(file: string, busyTimeoutMs: number, now: () => number
   try {
     return openDb(file, busyTimeoutMs);
   } catch (err) {
-    const aside = `${file}.bad-${stamp(now())}`;
+    const aside = `${file}.bad-${filenameSafeUtcStamp(now())}`;
     const reason = (err as Error).message;
     try {
       renameSync(file, aside);
-      for (const suffix of ["-wal", "-shm"]) {
-        try {
-          renameSync(`${file}${suffix}`, `${aside}${suffix}`);
-        } catch {
-          // not there
-        }
-      }
+      for (const suffix of ["-wal", "-shm"]) renameIfThere(`${file}${suffix}`, `${aside}${suffix}`);
       const db = openDb(file, busyTimeoutMs);
       log(`usage: ${file} unreadable (${reason}); kept as ${aside}, starting empty`);
       return db;
@@ -155,8 +133,7 @@ export function openUsageStore(file: string, options: UsageStoreOptions = {}): U
     setMeta: db.prepare("INSERT INTO usage_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"),
     delMeta: db.prepare("DELETE FROM usage_meta WHERE key = ?"),
   };
-  // The fill's cutoff is fixed the first time the file opens, and kept until a fill succeeds:
-  // replies recorded live from then on are already counted, however many starts the fill takes.
+  // why: the fill's cutoff is fixed at the first open; replies recorded live from then are counted.
   if (stmt.meta.get(FILLED) === undefined && stmt.meta.get(FILL_BEFORE) === undefined) stmt.setMeta.run(FILL_BEFORE, String(now()));
 
   const transaction = <T>(fn: () => T): T => {
@@ -173,25 +150,25 @@ export function openUsageStore(file: string, options: UsageStoreOptions = {}): U
 
   const add = (model: string, at: number, f: UsageFigures, replies: number) => {
     const key = canonicalTag(model);
-    const decoded = valid(f.evalDurationMs) && valid(f.completionTokens);
-    const read = valid(f.promptEvalDurationMs) && valid(f.promptTokens);
+    const reportedDecodeTime = valid(f.evalDurationMs) && valid(f.completionTokens);
+    const reportedReadTime = valid(f.promptEvalDurationMs) && valid(f.promptTokens);
     stmt.model.run(key);
     stmt.add.run(
-      hourOf(at), key,
+      startOfUtcHourMs(at), key,
       count(f.promptTokens), count(f.completionTokens), replies,
-      decoded ? f.evalDurationMs! : 0, decoded ? count(f.completionTokens) : 0,
-      read ? f.promptEvalDurationMs! : 0, read ? count(f.promptTokens) : 0,
+      reportedDecodeTime ? f.evalDurationMs! : 0, reportedDecodeTime ? count(f.completionTokens) : 0,
+      reportedReadTime ? f.promptEvalDurationMs! : 0, reportedReadTime ? count(f.promptTokens) : 0,
       valid(f.durationMs) ? f.durationMs : 0,
     );
   };
 
   return {
-    record(model, figures, reply) {
+    record(model, figures, firstRequest) {
       if (figures.promptTokens === undefined && figures.completionTokens === undefined) return;
-      transaction(() => add(model, now(), figures, reply ? 1 : 0));
+      transaction(() => add(model, now(), figures, firstRequest ? 1 : 0));
     },
     read(since) {
-      const rows = stmt.rows.all(hourOf(since)).map((r) => ({
+      const rows = stmt.rows.all(startOfUtcHourMs(since)).map((r) => ({
         hour: Number(r["hour"]),
         model: String(r["model"]),
         promptTokens: Number(r["prompt_tokens"]),
@@ -208,8 +185,8 @@ export function openUsageStore(file: string, options: UsageStoreOptions = {}): U
     fillOnce(replies) {
       return transaction(() => {
         if (stmt.meta.get(FILLED) !== undefined) return false;
-        const before = Number(stmt.meta.get(FILL_BEFORE)?.["value"] ?? Infinity);
-        for (const r of [...replies].filter((stored) => stored.at < before).toSorted((a, b) => a.at - b.at)) add(r.model, r.at, r, 1);
+        const countedLiveFrom = Number(stmt.meta.get(FILL_BEFORE)?.["value"] ?? Infinity);
+        for (const r of [...replies].filter((stored) => stored.at < countedLiveFrom).toSorted((a, b) => a.at - b.at)) add(r.model, r.at, r, 1);
         stmt.setMeta.run(FILLED, String(now()));
         stmt.delMeta.run(FILL_BEFORE);
         return true;

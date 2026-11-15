@@ -31,6 +31,32 @@
       }
     },
     {
+      "files": ["**/apps/*/src/**", "**/packages/*/src/**"],
+      "excludeFiles": ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx", "**/test/**"],
+      "rules": {
+        "gates/comment-is-a-kind": ["error", { "external": [
+          "/proc",
+          "browser",
+          "bwrap",
+          "Chromium",
+          "ComfyUI",
+          "Electron",
+          "Gemma",
+          "Linux",
+          "Node",
+          "nvidia-smi",
+          "Ollama",
+          "POSIX",
+          "PowerShell",
+          "SQLite",
+          "systemd",
+          "uv",
+          "Windows"
+        ] }],
+        "eslint/id-length": ["error", { "min": 1, "max": 31 }]
+      }
+    },
+    {
       "files": ["**/packages/contracts/src/**"],
       "excludeFiles": ["**/*.test.ts"],
       "rules": {

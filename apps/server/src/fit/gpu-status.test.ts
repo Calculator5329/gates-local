@@ -46,6 +46,19 @@ describe("gpu.status occupants", () => {
     expect(s.occupants.map((o) => o.bytes)).toEqual(s.occupants.map((o) => o.bytes).toSorted((a, b) => b - a));
   });
 
+  it("asks nvidia-smi its two queries and nothing else", async () => {
+    const asked: string[] = [];
+    const run: GpuStatusDeps["runNvidiaSmi"] = async (args) => {
+      asked.push(args.join(" "));
+      return args[0]?.startsWith("--query-gpu") ? "NVIDIA GeForce RTX 5070 Ti, 16303, 15600, 703\n" : MIXED;
+    };
+    await readGpuStatus(linux({ runNvidiaSmi: run, whisperPid: async () => undefined, residentModels: async () => [], listeningPids: async () => new Set() }));
+    expect(asked.toSorted()).toEqual([
+      "--query-compute-apps=pid,process_name,used_memory --format=csv,noheader,nounits",
+      "--query-gpu=name,memory.total,memory.used,memory.free --format=csv,noheader,nounits",
+    ]);
+  });
+
   it("a python not listening on 8188 is another app; a model the app did not load stays protected", async () => {
     const s = await readGpuStatus(
       linux({ runNvidiaSmi: smi(MIXED), residentModels: async () => [{ name: "gemma4:12b", sizeVramBytes: 1 }], listeningPids: async () => new Set() }),

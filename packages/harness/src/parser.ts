@@ -20,8 +20,8 @@ export const FENCE = "```";
 export const CALL_FENCE_LANGUAGES = ["json", "tool_code"] as const;
 const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const CALL_BLOCK = new RegExp(`${literal(CALL_OPEN)}([\\s\\S]*?)(?:${literal(CALL_CLOSE)}|$)`, "gi");
-// \r\n too: a model may answer with Windows line endings.
-const CALL_FENCE_HEADER = `${literal(FENCE)}(?:${CALL_FENCE_LANGUAGES.join("|")})[ \\t]*\\r?\\n`;
+const LF_OR_CRLF = "\\r?\\n";
+const CALL_FENCE_HEADER = `${literal(FENCE)}(?:${CALL_FENCE_LANGUAGES.join("|")})[ \\t]*${LF_OR_CRLF}`;
 const CALL_FENCE = new RegExp(`${CALL_FENCE_HEADER}([\\s\\S]*?)${literal(FENCE)}`, "gi");
 const CALL_FENCE_OPEN = new RegExp(CALL_FENCE_HEADER, "i");
 
@@ -31,40 +31,35 @@ export function isCallShape(value: unknown): boolean {
     && ("arguments" in value || "parameters" in value);
 }
 
-/**
- * Where a call fence opens that the cut left unfinished, or undefined. Fences are found as
- * parseTextCalls finds them, by the same expression: after the last complete call fence, a
- * call fence header with no closing fence (the parser cannot close it, or it would have
- * matched), or a trailing fence cut inside its header. A body that is already complete JSON
- * of another shape is answer text, as the parser would treat it once closed.
- */
-function unfinishedCallFence(visible: string): number | undefined {
+function startOfUnfinishedCallFence(visible: string): number | undefined {
   let from = 0;
   for (const match of visible.matchAll(CALL_FENCE)) from = match.index + match[0].length;
   const rest = visible.slice(from);
   const open = CALL_FENCE_OPEN.exec(rest);
   if (open) {
+    const start = from + open.index;
     let value: unknown;
-    try { value = JSON.parse(rest.slice(open.index + open[0].length).trim()); } catch { return from + open.index; }
-    return isCallShape(value) ? from + open.index : undefined;
+    try { value = JSON.parse(rest.slice(open.index + open[0].length).trim()); } catch { return start; }
+    // why: complete JSON of another shape is answer text, as the parser treats it once closed.
+    return isCallShape(value) ? start : undefined;
   }
-  const at = rest.lastIndexOf(FENCE);
-  if (at < 0) return undefined;
-  const header = rest.slice(at + FENCE.length).toLowerCase();
+  const lastFence = rest.lastIndexOf(FENCE);
+  if (lastFence < 0) return undefined;
+  const header = rest.slice(lastFence + FENCE.length).toLowerCase();
   const cutInHeader = CALL_FENCE_LANGUAGES.some(language => header.startsWith(language) ? /^[ \t]*\r?$/.test(header.slice(language.length)) : language.startsWith(header));
-  return cutInHeader ? from + at : undefined;
+  return cutInHeader ? from + lastFence : undefined;
 }
 
 /**
  * The visible answer part of a reply cut off mid-stream: what parseTextCalls keeps of it,
  * less the call syntax the cut left unfinished. That is a trailing start of the opening tag
  * (`<`, `<tool`, `<tool_call` with no `>`) and everything from a call fence that never
- * closed (see unfinishedCallFence). An unclosed opening tag and everything after it the
- * parser drops already.
+ * closed, found by the expression parseTextCalls finds fences with. An unclosed opening tag
+ * and everything after it the parser drops already.
  */
 export function partialAnswer(text: string): string {
   let visible = outsideThinking(text);
-  const fence = unfinishedCallFence(visible);
+  const fence = startOfUnfinishedCallFence(visible);
   if (fence !== undefined) visible = visible.slice(0, fence);
   const tail = visible.toLowerCase();
   for (let n = Math.min(CALL_OPEN.length - 1, tail.length); n > 0; n--) {
@@ -75,18 +70,17 @@ export function partialAnswer(text: string): string {
 
 const THINK_TAG = /<\/?think>/i;
 const THINK_TAGS = ["<think>", "</think>"] as const;
-/** How many characters at the end of `text` could be the start of one of `words` (compared in lower case). */
 function partialEnd(text: string, words: readonly string[]): number {
   const tail = text.slice(-Math.max(...words.map(w => w.length))).toLowerCase();
   for (let n = tail.length; n > 0; n--) if (words.some(w => n < w.length && w.startsWith(tail.slice(-n)))) return n;
   return 0;
 }
 
+/**
+ * `push` reads the reply's next piece. `visible` is the new text outside thinking (what looseCall
+ * reads); `shown` is the new text that can go on screen now: it can no longer be call syntax.
+ */
 export interface TextView {
-  /**
-   * Reads the reply's next piece. `visible` is the new text outside thinking (what looseCall
-   * reads); `shown` is the new text that can go on screen now: it can no longer be call syntax.
-   */
   push(text: string): { visible: string; shown: string };
 }
 
@@ -98,9 +92,10 @@ export interface TextView {
  * always the start of parseTextCalls' content for the whole reply.
  */
 export function createTextView(): TextView {
-  let raw = ""; // the end of the reply that might still be a think tag
+  // why: raw keeps only the end of the reply that might still be a think tag.
+  let raw = "";
   let depth = 0;
-  let visible = ""; // text outside thinking not yet judged
+  let visible = "";
   let blocked = false;
   let started = false;
   let space = "";
@@ -117,7 +112,7 @@ export function createTextView(): TextView {
     raw = raw.slice(raw.length - keep);
     return out;
   };
-  /** The part of `visible` that can no longer be call syntax; it stops for good at a call's start. */
+  // why: judge takes what can no longer be call syntax, and stops for good where a call starts.
   const judge = (): string => {
     let out = "";
     while (!blocked) {
@@ -172,9 +167,7 @@ export function parseTextCalls(text: string): { calls: unknown[]; errors: string
     return "";
   });
   if (items.length > 0) return { calls, errors, items, content: content.trim() };
-  // Gemma-style models answer in a fence instead. Exactly one ```json or ```tool_code
-  // block holding {name, arguments|parameters} is a call; more than one, or JSON of
-  // another shape, is ordinary answer text. A fence that does not parse is a bad call.
+  // external: Gemma-style models write their call in a fence instead of the tags.
   const fences = [...content.matchAll(CALL_FENCE)];
   if (fences.length !== 1) return { calls, errors, items, content: content.trim() };
   const [fence, body] = fences[0]!;
@@ -189,19 +182,19 @@ export function parseTextCalls(text: string): { calls: unknown[]; errors: string
   return { calls, errors, items, content: content.replace(fence, "").trim() };
 }
 
-/**
- * The JSON shapes, [name key, arguments key], a model writes a call in when it puts the call
- * in its reply text instead of the runtime's tool_calls or the text-mode syntax. The last two
- * are ReAct/LangChain-style agent formats; Gemma 4 wrote `action` (2026-11-11). `{function:
- * {name, arguments}}` is accepted around the first.
- */
-const LOOSE_SHAPES = [["name", "arguments"], ["name", "parameters"], ["action", "action_input"], ["tool", "tool_input"]] as const;
-const WHOLE_FENCE = new RegExp(`^${literal(FENCE)}[\\w-]*[ \\t]*\\r?\\n([\\s\\S]*?)${literal(FENCE)}$`);
+type LooseShape = readonly [nameKey: string, argumentsKey: string];
+// external: the last two shapes are what ReAct and LangChain agents write; Gemma 4 wrote `action` (2026-11-11).
+const LOOSE_SHAPES = [["name", "arguments"], ["name", "parameters"], ["action", "action_input"], ["tool", "tool_input"]] as const satisfies readonly LooseShape[];
+// why: {function: {...}} is accepted around the first shape only.
+const WRAPPED_SHAPES = LOOSE_SHAPES.slice(0, 1);
+const WHOLE_FENCE = new RegExp(`^${literal(FENCE)}[\\w-]*[ \\t]*${LF_OR_CRLF}([\\s\\S]*?)${literal(FENCE)}$`);
 type LooseCall = { name: string; arguments: Record<string, unknown> };
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+const parseObject = (text: string): Record<string, unknown> | undefined => {
+  try { const parsed: unknown = JSON.parse(text); return isObject(parsed) ? parsed : undefined; } catch { return undefined; }
+};
 
 type Property = { type?: string; minimum?: number; minItems?: number; items?: Property };
-/** Whether one value fits one property: strings not empty, numbers finite, integers at their minimum, arrays of fitting items. */
 function fitsProperty(property: Property | undefined, value: unknown): boolean {
   if (property?.type === "string") return typeof value === "string" && value.trim() !== "";
   if (property?.type === "number") return typeof value === "number" && Number.isFinite(value);
@@ -210,37 +203,35 @@ function fitsProperty(property: Property | undefined, value: unknown): boolean {
   return false;
 }
 
-/** Whether `input` fits the tool's offered schema: required fields present, no others, types right, strings not empty. */
 function fitsDefinition(definition: ToolDefinition, input: Record<string, unknown>): boolean {
   const { properties, required } = definition.function.parameters;
   if (!required.every(key => key in input)) return false;
   return Object.entries(input).every(([key, value]) => fitsProperty(properties[key] as Property | undefined, value));
 }
 
-/** Whether a property takes text: a string, or a list of strings (one bare string is then a list of one). */
 const takesText = (property: Property | undefined) => property?.type === "string" || (property?.type === "array" && property.items?.type === "string");
 
-/** One parsed JSON value as a call to an offered tool, or undefined. */
 function callFrom(value: unknown, offered: readonly ToolDefinition[]): LooseCall | undefined {
   if (!isObject(value)) return undefined;
   const keys = Object.keys(value);
   const wrapped = keys.length === 1 && keys[0] === "function";
   const object = wrapped ? value.function : value;
   if (!isObject(object)) return undefined;
-  const shape = (wrapped ? LOOSE_SHAPES.slice(0, 1) : LOOSE_SHAPES).find(([name, args]) => Object.keys(object).length === 2 && name in object && args in object);
+  const shape = (wrapped ? WRAPPED_SHAPES : LOOSE_SHAPES).find(([name, args]) => Object.keys(object).length === 2 && name in object && args in object);
   if (!shape || typeof object[shape[0]] !== "string") return undefined;
   let args = object[shape[1]];
-  if (typeof args === "string") { try { const parsed: unknown = JSON.parse(args); if (isObject(parsed)) args = parsed; } catch { /* a bare string */ } }
+  if (typeof args === "string") args = parseObject(args) ?? args;
+  const bareString = typeof args === "string" ? args : undefined;
   let call: ToolCall;
-  try { call = repairCall({ name: object[shape[0]], arguments: typeof args === "string" ? {} : args }); } catch { return undefined; }
+  try { call = repairCall({ name: object[shape[0]], arguments: bareString === undefined ? args : {} }); } catch { return undefined; }
   const definition = offered.find(d => d.function.name === call.name);
   if (!definition) return undefined;
-  if (typeof args === "string") {
-    // A bare string is the tool's one required text field (a list of one for a list), or not a call.
+  if (bareString !== undefined) {
     const { required, properties } = definition.function.parameters;
     const property = properties[required[0]!] as Property | undefined;
+    // why: a bare string is the tool's one required text field (a list of one), or not a call.
     if (required.length !== 1 || !takesText(property)) return undefined;
-    call.input = { [required[0]!]: property?.type === "array" ? [args] : args };
+    call.input = { [required[0]!]: property?.type === "array" ? [bareString] : bareString };
   }
   return fitsDefinition(definition, call.input) ? { name: call.name, arguments: call.input } : undefined;
 }
@@ -263,10 +254,13 @@ export function looseCall(text: string, offered: readonly ToolDefinition[]): Loo
 /** Held text longer than this is shown, and is then never a call (createCallHold, looseCall). */
 export const HOLD_LIMIT = 8000;
 
+/**
+ * `push` reads the reply's next piece: whether the reply so far could still be a looseCall. Once
+ * false, false for good. `scanned` is the characters read so far; each is read once, so holding
+ * costs time linear in the reply.
+ */
 export interface CallHold {
-  /** Reads the reply's next piece: whether the reply so far could still be a looseCall. Once false, false for good. */
   push(text: string): boolean;
-  /** Characters read so far. Each is read once, so holding costs time linear in the reply. */
   readonly scanned: number;
 }
 
@@ -283,27 +277,28 @@ export function createCallHold(offered: readonly ToolDefinition[]): CallHold {
   let alive = offered.length > 0;
   let scanned = 0;
   let phase: "lead" | "ticks" | "header" | "open" | "object" | "after" = "lead";
-  let ticks = 0; // backticks of the opening fence, then of the closing one
+  // why: ticks counts the opening fence's backticks, then starts again for the closing one's.
+  let ticks = 0;
   let fenced = false;
   let header: "word" | "space" | "cr" = "word";
   let closingDone = false;
-  let text = ""; // the object, parsed once when it closes
+  let objectText = "";
   let depth = 0;
   let inString = false;
   let escaped = false;
-  // The call's own keys live at depth 1, or at depth 2 inside {"function": {...}}.
+  // why: the call's own keys live at depth 1, or at depth 2 inside {"function": {...}}.
   let keyDepth = 1;
-  let shapes: readonly (readonly [string, string])[] = LOOSE_SHAPES;
+  let shapes: readonly LooseShape[] = LOOSE_SHAPES;
   let keys: string[] = [];
   let keyNext = false;
   let valueNext = false;
-  let wrapClosed = false;
+  let functionWrapClosed = false;
   let capture: "key" | "name" | undefined;
   let captured = "";
 
   const open = (c: string) => {
     if (c !== "{") return false;
-    phase = "object"; text = c; depth = 1; keyNext = true;
+    phase = "object"; objectText = c; depth = 1; keyNext = true;
     return true;
   };
   const capturedString = (kind: "key" | "name") => {
@@ -318,12 +313,12 @@ export function createCallHold(offered: readonly ToolDefinition[]): CallHold {
   };
   const closed = () => {
     let value: unknown;
-    try { value = JSON.parse(text); } catch { return false; }
+    try { value = JSON.parse(objectText); } catch { return false; }
     phase = "after"; ticks = 0;
     return callFrom(value, offered) !== undefined;
   };
   const inObject = (c: string): boolean => {
-    text += c;
+    objectText += c;
     if (inString) {
       if (escaped) escaped = false;
       else if (c === "\\") escaped = true;
@@ -337,11 +332,10 @@ export function createCallHold(offered: readonly ToolDefinition[]): CallHold {
       return true;
     }
     if (isSpace(c)) return true;
-    // After {"function": {...}} only its closing brace may come.
-    if (wrapClosed) return c === "}" && closed();
+    if (functionWrapClosed) return c === "}" && closed();
     const level = depth === keyDepth;
     if (level && keyNext) {
-      // A call's object opens with a key, as does each part after a comma: `{}`, `{\frac` and `{{ name }}` are not calls.
+      // why: a call's object opens with a key, so {}, {\frac and {{ name }} are not calls.
       if (c !== '"') return false;
       keyNext = false; inString = true; capture = "key"; captured = "";
       return true;
@@ -356,7 +350,7 @@ export function createCallHold(offered: readonly ToolDefinition[]): CallHold {
       }
       if (key === "function") {
         if (c !== "{") return false;
-        depth = 2; keyDepth = 2; shapes = LOOSE_SHAPES.slice(0, 1); keys = []; keyNext = true;
+        depth = 2; keyDepth = 2; shapes = WRAPPED_SHAPES; keys = []; keyNext = true;
         return true;
       }
     }
@@ -366,7 +360,7 @@ export function createCallHold(offered: readonly ToolDefinition[]): CallHold {
     else if (c === "{" || c === "[") depth++;
     else if (c === "}" || c === "]") {
       if (--depth === 0) return closed();
-      if (keyDepth === 2 && depth === 1) wrapClosed = true;
+      if (keyDepth === 2 && depth === 1) functionWrapClosed = true;
     }
     return true;
   };
@@ -381,7 +375,6 @@ export function createCallHold(offered: readonly ToolDefinition[]): CallHold {
         if (++ticks === FENCE.length) { phase = "header"; fenced = true; }
         return true;
       case "header":
-        // The fence's info line: a word, spaces, a carriage return, then the line ends.
         if (c === "\n") { phase = "open"; return true; }
         if (header === "cr") return false;
         if (c === "\r") { header = "cr"; return true; }
@@ -392,7 +385,6 @@ export function createCallHold(offered: readonly ToolDefinition[]): CallHold {
       case "object":
         return inObject(c);
       case "after":
-        // Only white space, and a fenced call's closing fence, may follow the call.
         if (isSpace(c)) { closingDone = ticks > 0; return true; }
         return fenced && c === FENCE[0] && !closingDone && ++ticks <= FENCE.length;
     }
@@ -423,8 +415,7 @@ export function repairCall(raw: unknown): ToolCall {
     if (typeof v === "string" && /^\d+$/.test(v)) input[key] = Number(v);
   }
   const name = repairName(value.name);
-  // The image tool takes a list of prompts; a model that writes one prompt (the tool's older form,
-  // or a habit) means a list of one.
+  // why: a model that writes one prompt, the image tool's older form, means a list of one.
   if (name === "image") {
     if (input.prompts === undefined && typeof input.prompt === "string") { input.prompts = [input.prompt]; delete input.prompt; }
     else if (typeof input.prompts === "string") input.prompts = [input.prompts];
@@ -432,7 +423,7 @@ export function repairCall(raw: unknown): ToolCall {
   return { name, input };
 }
 
-/** The tool a model's name for it means: models trained on other harnesses say bash for shell. */
 function repairName(name: string): string {
+  // why: models trained on other harnesses say bash for shell.
   return name === "bash" ? "shell" : name;
 }

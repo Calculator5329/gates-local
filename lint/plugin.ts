@@ -1,4 +1,5 @@
 import closedPackage from "./rules/closed-package.ts";
+import commentIsAKind from "./rules/comment-is-a-kind.ts";
 import disableNeedsReason from "./rules/disable-needs-reason.ts";
 import effectNeedsReason from "./rules/effect-needs-reason.ts";
 import noRelativeImportAcrossPackages from "./rules/no-relative-import-across-packages.ts";
@@ -10,6 +11,7 @@ export default {
   meta: { name: "gates" },
   rules: {
     "closed-package": closedPackage,
+    "comment-is-a-kind": commentIsAKind,
     "disable-needs-reason": disableNeedsReason,
     "effect-needs-reason": effectNeedsReason,
     "no-relative-import-across-packages": noRelativeImportAcrossPackages,

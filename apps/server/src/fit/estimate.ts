@@ -1,31 +1,16 @@
-// Estimates what a model needs at a given num_ctx: weights + KV cache + a
-// stated runtime overhead. The estimate is replaced by a measured report
-// from /api/ps after a real load.
-//
-// KV cache per layer = head_count_kv * (key_length + value_length) * tokens
-// * bytes per element. Per-layer head_count_kv arrays (gemma4, qwen35)
-// carry 0 for layers with no KV (recurrent/SSM layers); a scalar
-// head_count_kv with full_attention_interval N counts one layer in N.
-// Sliding-window layers keep min(num_ctx, window + one batch) tokens with
-// their *_swa key/value lengths. Recurrent state of hybrid models (a few
-// MiB) sits inside the overhead. Layers that share an earlier layer's cache
-// (gemma4's shared_kv_layers, the last ones) carry none.
 import { KV_BYTES_PER_ELEMENT, RUNTIME_OVERHEAD_BYTES, SWA_BATCH_TOKENS, UNREPORTED_MAX_CONTEXT } from "./constants.ts";
 import { FitError, type NeedEstimate } from "./types.ts";
 
 export interface ArchInfo {
   architecture: string;
   blockCount: number;
-  /** The most the model takes; absent when /api/show does not say. */
   contextLength?: number;
-  /** One entry per layer. */
   headCountKv: number[];
   keyLength: number;
   valueLength: number;
   keyLengthSwa?: number;
   valueLengthSwa?: number;
   slidingWindow?: number;
-  /** true where the layer uses the sliding window. */
   swaPattern?: boolean[];
 }
 
@@ -39,7 +24,6 @@ function numArray(value: unknown): number[] | undefined {
   return out.every((v) => v !== undefined) ? (out as number[]) : undefined;
 }
 
-/** Reads the attention geometry out of /api/show's model_info. */
 export function parseArchInfo(model: string, modelInfo: Readonly<Record<string, unknown>> | undefined): ArchInfo {
   const info = modelInfo ?? {};
   const arch = info["general.architecture"];
@@ -57,20 +41,20 @@ export function parseArchInfo(model: string, modelInfo: Readonly<Record<string, 
 
   const kvRaw = get("attention.head_count_kv");
   let headCountKv: number[];
-  const kvList = numArray(kvRaw);
-  if (kvList) {
-    headCountKv = Array.from({ length: blockCount }, (_, i) => kvList[i] ?? 0);
+  // external: Ollama lists head_count_kv per layer for a hybrid model (gemma4, qwen35), with 0 for a recurrent layer, whose few MiB of state sit inside the runtime overhead.
+  const kvPerLayer = numArray(kvRaw);
+  if (kvPerLayer) {
+    headCountKv = Array.from({ length: blockCount }, (_, i) => kvPerLayer[i] ?? 0);
   } else {
     const scalar = num(kvRaw) ?? headCount;
     if (scalar === undefined) {
       throw new FitError("model-info-incomplete", `${model}: /api/show lacks ${arch}.attention.head_count_kv and head_count`);
     }
     const interval = num(get("full_attention_interval"));
-    headCountKv = Array.from({ length: blockCount }, (_, i) =>
-      interval !== undefined && interval > 1 && (i + 1) % interval !== 0 ? 0 : scalar,
-    );
+    // external: Ollama reports full_attention_interval N when only every Nth layer keeps a KV cache.
+    headCountKv = Array.from({ length: blockCount }, (_, i) => (interval !== undefined && interval > 1 && (i + 1) % interval !== 0 ? 0 : scalar));
   }
-  // gemma4's last shared_kv_layers layers read the cache of an earlier layer and keep none of their own.
+  // external: Gemma 4's last shared_kv_layers layers read the cache of an earlier layer and keep none of their own.
   const shared = num(get("attention.shared_kv_layers")) ?? 0;
   if (shared > 0) headCountKv = headCountKv.map((heads, i) => (i >= blockCount - shared ? 0 : heads));
 
@@ -116,13 +100,13 @@ export function estimateKvCache(arch: ArchInfo, numCtx: number, bytesPerElement 
     const swa = arch.slidingWindow !== undefined && arch.swaPattern?.[i] === true;
     const k = swa ? (arch.keyLengthSwa ?? arch.keyLength) : arch.keyLength;
     const v = swa ? (arch.valueLengthSwa ?? arch.valueLength) : arch.valueLength;
-    const tokens = swa ? Math.min(numCtx, (arch.slidingWindow ?? 0) + SWA_BATCH_TOKENS) : numCtx;
+    const windowAndOneBatch = (arch.slidingWindow ?? 0) + SWA_BATCH_TOKENS;
+    const tokens = swa ? Math.min(numCtx, windowAndOneBatch) : numCtx;
     bytes += heads * (k + v) * tokens * bytesPerElement;
   }
   return { bytes, layers };
 }
 
-/** The most this model takes, from /api/show's model_info; undefined when it does not say. */
 export function reportedContextLength(modelInfo: Readonly<Record<string, unknown>> | undefined): number | undefined {
   const arch = modelInfo?.["general.architecture"];
   if (typeof arch !== "string" || arch === "") return undefined;
@@ -130,10 +114,6 @@ export function reportedContextLength(modelInfo: Readonly<Record<string, unknown
   return typeof length === "number" && Number.isInteger(length) && length > 0 ? length : undefined;
 }
 
-/**
- * The context a model actually runs at: what was asked for, never past what
- * it takes. A model that does not say gets the safe fallback.
- */
 export function effectiveNumCtx(requested: number, contextLength: number | undefined): number {
   return Math.min(requested, contextLength ?? UNREPORTED_MAX_CONTEXT);
 }

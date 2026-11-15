@@ -1,7 +1,3 @@
-// Keeps gpu.changed current without burning CPU: polls every 3 s only while
-// at least one client is connected, reads once more right after a model load
-// or unload the app caused (poke), and pushes only when the occupants or the
-// free memory moved by more than 64 MiB since the last push.
 import type { GpuStatus } from "@gates-local/contracts";
 import { MIB } from "./constants.ts";
 import { forgetGpuReadings } from "./gpu.ts";
@@ -11,11 +7,8 @@ export const GPU_CHANGE_BYTES = 64 * MIB;
 
 export interface GpuWatcher {
   current(): GpuStatus | undefined;
-  /** A fresh reading now; pushes gpu.changed when it moved enough. */
   read(): Promise<GpuStatus>;
-  /** The socket's client count; polling runs only while it is above zero. */
   clientsChanged(count: number): void;
-  /** One reading soon, after a load or unload this app caused. */
   poke(): void;
   stop(): void;
 }
@@ -30,7 +23,6 @@ export interface GpuWatcherOptions {
 
 const key = (o: GpuStatus["occupants"][number]) => `${o.kind}\0${o.label}`;
 
-/** True when the occupants or free memory moved by more than the threshold. */
 export function gpuChanged(prev: GpuStatus | undefined, next: GpuStatus, thresholdBytes = GPU_CHANGE_BYTES): boolean {
   if (prev === undefined) return true;
   if (prev.vendor !== next.vendor || prev.detail !== next.detail) return true;
@@ -41,7 +33,7 @@ export function gpuChanged(prev: GpuStatus | undefined, next: GpuStatus, thresho
     const p = before.get(key(o));
     if (p === undefined || p.protected !== o.protected || Math.abs(p.bytes - o.bytes) > thresholdBytes) return true;
   }
-  // No GPU: system memory is what models run in, so it is the number to follow.
+  // why: with no GPU, system memory is what models run in, so it is the number to follow.
   return next.vendor !== "nvidia" && Math.abs(prev.systemMemoryAvailableBytes - next.systemMemoryAvailableBytes) > thresholdBytes;
 }
 
@@ -63,7 +55,7 @@ export function createGpuWatcher(options: GpuWatcherOptions): GpuWatcher {
       .then((status) => {
         last = status;
         if (gpuChanged(pushed, status, threshold)) {
-          // memory moved: the fit and table read again rather than reuse a reading from before
+          // why: memory moved, so the fit and the table read again instead of reusing a reading.
           forgetGpuReadings();
           pushed = status;
           options.push(status);

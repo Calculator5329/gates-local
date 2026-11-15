@@ -23,7 +23,7 @@ export function VoiceSettings() {
   // oxlint-disable-next-line gates/effect-needs-reason -- on unmount a connect still on its way must not write into a card that is gone
   useEffect(() => () => { attempt.current++; }, []);
   if (settings === NA) return null;
-  // Settings arrive before Settings can open on a healthy start; the card keeps its shape when they do not.
+  // why: settings normally arrive before Settings can open; if not, the card keeps its shape.
   if (settings === undefined) return <Grp title="Voice to text" busy>
     <Row label="Speech server" desc={<Skel w="22em" />}><Skel w="18em" /></Row>
   </Grp>;

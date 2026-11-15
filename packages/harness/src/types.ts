@@ -7,16 +7,18 @@ export interface LibraryEntry {
 }
 export interface ToolCall { name: string; input: Record<string, unknown>; }
 export interface ToolResult { output: string; summary: string; }
+/**
+ * `stopped`, with state "error": the turn's cancel cut the call short, it did not fail.
+ * `links` is server-owned provenance, taken from the tool's successful output only.
+ */
 export interface ToolStep {
   callId: string;
   name: string;
   state: "running" | "done" | "error";
-  /** With "error": the turn's cancel cut the call short, it did not fail (contracts ToolStep.stopped). */
   stopped?: true;
   summary: string;
   detail?: string;
   durationMs?: number;
-  /** Server-owned provenance from the tool's successful output only. */
   links?: readonly string[];
 }
 export interface ModelMessage {

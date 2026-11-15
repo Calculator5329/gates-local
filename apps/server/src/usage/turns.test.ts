@@ -155,7 +155,9 @@ describe("the one-time fill", () => {
     const store = openThreadStore(path.join(root, "threads.sqlite"));
     seed(store);
     const lines: string[] = [];
-    const open = (): Usage => createUsage({ file: path.join(root, "usage.sqlite"), push: () => {}, log: (line) => lines.push(line), replies: () => store.replyUsage() });
+    let timesTheStoredRepliesWereRead = 0;
+    const replies = () => { timesTheStoredRepliesWereRead++; return store.replyUsage(); };
+    const open = (): Usage => createUsage({ file: path.join(root, "usage.sqlite"), push: () => {}, log: (line) => lines.push(line), replies });
     let usage = open();
     try {
       const first = usage.handlers["usage.read"]({ since: 0 }, { clientId: 1 });
@@ -171,9 +173,23 @@ describe("the one-time fill", () => {
       usage = open();
       expect(usage.handlers["usage.read"]({ since: 0 }, { clientId: 1 })).toEqual(first);
       expect(lines).toHaveLength(1);
+      expect(timesTheStoredRepliesWereRead).toBe(1);
     } finally {
       usage.close();
       store.close();
     }
+  });
+});
+
+describe("a usage write that fails", () => {
+  it("is logged and dropped: the reply's turn gets no error and no window is told of a change", () => {
+    const lines: string[] = [];
+    const pushed: string[] = [];
+    const usage = createUsage({ file: path.join(scratch(), "usage.sqlite"), push: (channel) => pushed.push(channel), log: (line) => lines.push(line) });
+    usage.close();
+    expect(() => usage.record("m", { promptTokens: 4, completionTokens: 2 }, true)).not.toThrow();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/^usage: could not record a request \(/);
+    expect(pushed).toEqual([]);
   });
 });

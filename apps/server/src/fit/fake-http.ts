@@ -1,5 +1,3 @@
-// A fake HTTP server on port 0 for tests of the Ollama clients (fit and
-// chat). Routes are "METHOD /path"; every request body is logged.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -22,19 +20,21 @@ export function json(res: ServerResponse, status: number, value: unknown): void 
   res.end(JSON.stringify(value));
 }
 
+function jsonOrText(text: string): unknown {
+  try {
+    return text ? JSON.parse(text) : undefined;
+  } catch {
+    return text;
+  }
+}
+
 export async function startFakeServer(routes: Record<string, Route>): Promise<FakeServer> {
   const requests: LoggedRequest[] = [];
   const server = createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on("data", (c: Buffer) => chunks.push(c));
     req.on("end", () => {
-      const text = Buffer.concat(chunks).toString("utf8");
-      let body: unknown = text;
-      try {
-        body = text ? JSON.parse(text) : undefined;
-      } catch {
-        // keep the raw text
-      }
+      const body = jsonOrText(Buffer.concat(chunks).toString("utf8"));
       const path = new URL(req.url ?? "/", "http://x").pathname;
       requests.push({ method: req.method ?? "GET", path, body });
       const route = routes[`${req.method} ${path}`];

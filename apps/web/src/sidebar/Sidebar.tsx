@@ -1,6 +1,4 @@
 // Layout adapts T3 Code (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt.
-// The sidebar (shell.md F05, F33): thread list grouped by day with search, or
-// the Settings section nav, and the footer's row of icons (Settings, Models, Usage, the update icon).
 import type { PullProgress } from "@gates-local/contracts";
 import { Fragment, type KeyboardEvent, type MouseEvent, type ReactNode, isValidElement, useEffect, useLayoutEffect, useRef } from "react";
 import { requestFocus } from "../lib/ui/kit/focus.ts";
@@ -34,11 +32,7 @@ export function goNew(): void {
   }, true);
 }
 
-// ---------------------------------------------------------------- the drawer (below 1024 px)
-// Opening pushes one history entry, so the back gesture closes it. Every other close pops that
-// entry first and acts once it is gone: an action that rewrites the hash (openThread) must not
-// rewrite the drawer's entry, or going back would land on the old thread.
-
+const DRAWER_BELOW_PX = 1024;
 const DRAWER_ENTRY = "gl-drawer";
 let afterClose: (() => void) | null = null;
 let closeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -49,15 +43,14 @@ export function openDrawer(): void {
   cancelPendingSettings();
   if (getState().drawer) return;
   setState({ drawer: true, pop: null, search: "" });
-  // a screen just closed for this (search) leaves its entry: the drawer takes it over rather than stacking on it
+  // why: a screen just closed for this leaves its history entry, which the drawer takes over.
   if (spareScreenEntry()) history.replaceState({ [DRAWER_ENTRY]: true }, "");
   else if (!onDrawerEntry()) history.pushState({ [DRAWER_ENTRY]: true }, "");
-  // the first thing in the drawer, as the row's Search button was: the Search field, or in Settings Back to chat.
-  // On touch focus takes New thread beside the field instead, so the keyboard stays down, as in the phone picker.
+  // why: on touch, focus takes a button, not the Search field, so the keyboard stays down.
   requestFocus(() => document.querySelector<HTMLElement>(isTouch() ? ".sb .sb-tools button, .sb .snav .sb-act" : ".sb #searchIn, .sb .snav .sb-act"));
 }
 
-/** After the drawer closes, focus goes to the top bar's first visible control: never a row sliding off screen. */
+// why: focus goes to the top bar's first visible control, never to a row sliding off screen.
 function focusShell(): void {
   requestFocus(() => [...document.querySelectorAll<HTMLElement>(".hdr .bk, #menuBtn, .set-bar .set-done")].find((el) => el.getClientRects().length > 0));
 }
@@ -71,7 +64,6 @@ function drawerClosed(refocus: boolean): void {
   then?.();
 }
 
-/** Close the drawer (when open), then run then(). With no drawer open, then() runs at once. */
 export function closeDrawer(then?: () => void, refocus = then === undefined): void {
   if (!getState().drawer) return then?.();
   if (!onDrawerEntry()) {
@@ -87,21 +79,20 @@ export function closeDrawer(then?: () => void, refocus = then === undefined): vo
   closeTimer = setTimeout(() => drawerClosed(false), 400);
 }
 
-/** The back gesture or a history.back() left the drawer's entry. */
 export function onDrawerPop(): void {
   if (getState().drawer && !onDrawerEntry()) {
-    if (afterClose === null) cancelPendingSettings();
-    drawerClosed(afterClose === null);
+    const backGesture = afterClose === null;
+    if (backGesture) cancelPendingSettings();
+    drawerClosed(backGesture);
   }
 }
 
-/** Ctrl K: focus the search field (leaving Settings first). */
 export function openSearch(): void {
   const s = getState();
   if (s.view === "firstrun") return;
   cancelPendingSettings();
-  // below 1024 px the search field lives in the drawer, which takes over the screen's history entry
-  const narrow = window.innerWidth < 1024;
+  // why: this narrow, the Search field is in the drawer, which takes the screen's history entry.
+  const narrow = window.innerWidth < DRAWER_BELOW_PX;
   if (s.panel !== null) closeUsage(false, narrow);
   else if (overChat(s.view) && narrow) closeSettings();
   else if (s.view === "settings") leaveSettings();
@@ -112,7 +103,6 @@ export function openSearch(): void {
 
 const clearSearch = () => setState({ search: "" });
 
-/** The row's thread actions, anchored to its button or to a context-menu point. */
 function openThreadMenu(thread: string, at: { x: number; y: number } | undefined, kb: boolean): void {
   preloadThread(null);
   closeTip();
@@ -129,52 +119,43 @@ function rowMenuKey(e: KeyboardEvent<HTMLButtonElement>, thread: string): void {
 function rowMenuClick(e: MouseEvent<HTMLElement>, thread: string): void {
   e.preventDefault();
   const p = getState().pop;
-  // the context-menu key also sends this event after its keydown opened the menu
+  // external: a browser sends contextmenu after the keydown of the context-menu key, which has opened the menu by then
   if (p?.id === "thread" && p.thread === thread && p.kb) return;
   openThreadMenu(thread, { x: e.clientX, y: e.clientY }, false);
 }
 
-/** The title with each match of q (already lower case) in a <mark>: a plain string split rendered as
- *  text nodes, never HTML. A title whose lower case changes its length keeps no marks. */
-function marked(title: string, q: string): ReactNode {
+function marked(title: string, lowerCaseQuery: string): ReactNode {
   const lower = title.toLowerCase();
-  if (q === "" || lower.length !== title.length) return title;
+  // why: a title whose lower case changes its length keeps no marks, as their places would be off.
+  if (lowerCaseQuery === "" || lower.length !== title.length) return title;
   const parts: ReactNode[] = [];
   let at = 0;
-  for (let i = lower.indexOf(q); i !== -1; i = lower.indexOf(q, at)) {
+  for (let i = lower.indexOf(lowerCaseQuery); i !== -1; i = lower.indexOf(lowerCaseQuery, at)) {
     if (i > at) parts.push(title.slice(at, i));
-    parts.push(<mark key={i}>{title.slice(i, i + q.length)}</mark>);
-    at = i + q.length;
+    parts.push(<mark key={i}>{title.slice(i, i + lowerCaseQuery.length)}</mark>);
+    at = i + lowerCaseQuery.length;
   }
   if (at < title.length) parts.push(title.slice(at));
   return parts;
 }
 
-/** Widths of the placeholder rows: varied like titles, never a full-width block. */
+// why: widths vary as titles do, never a full-width block.
 const SKEL_ROWS = ["72%", "56%", "80%", "64%", "48%", "70%"] as const;
 
-/**
- * Threads with a reply asked for and nothing of it shown yet (no word, thought or tool call),
- * each with when it was asked: a new thread holding only a queued message counts from when it
- * was typed. "id@at" joined, so the selector's value compares equal until it changes.
- */
+// why: joined as "id@at", so the selector's value compares equal until it changes.
 const notStarted = (s: ReturnType<typeof getState>): string => {
   const out: string[] = [];
   for (const t of Object.values(s.turns)) {
     if (t.end !== undefined || t.listed === true || t.image === true) continue;
     if (t.text === "" && t.thinking === "" && t.tools.length === 0) out.push(`${t.threadId}@${t.startedAt}`);
   }
+  // why: a new thread holding only a queued message counts from when the message was typed.
   for (const q of s.queued) if (s.turns[q.threadId] === undefined && s.messages[q.threadId]?.length === 0) out.push(`${q.threadId}@${q.at}`);
   return out.join(" ");
 };
 const waitingSince = (joined: string): ReadonlyMap<string, number> =>
   new Map(joined.split(" ").filter((e) => e !== "").map((e) => [e.slice(0, e.lastIndexOf("@")), Number(e.slice(e.lastIndexOf("@") + 1))]));
 
-/**
- * Newest first, except that a thread whose reply has shown nothing yet sits under every
- * running thread that has, or that was asked before it (the thread that
- * is working stays on top). Once its reply shows something it takes its place by date.
- */
 export function listOrder<T extends { id: string }>(threads: readonly T[], running: ReadonlySet<string>, waiting: ReadonlyMap<string, number>): readonly T[] {
   const ahead = (r: T, w: T) => r.id !== w.id && running.has(r.id) && (!waiting.has(r.id) || (waiting.get(r.id) ?? 0) < (waiting.get(w.id) ?? 0));
   const out = [...threads];
@@ -186,14 +167,12 @@ export function listOrder<T extends { id: string }>(threads: readonly T[], runni
   return out;
 }
 
-/** How far the list runs past each edge, for its fade (styles.css .sb-list): px above the view and below it. */
 function measureFade(el: HTMLElement): void {
   const end = Math.max(0, el.scrollHeight - el.clientHeight - el.scrollTop);
   el.style.setProperty("--fade-top", `${Math.max(0, el.scrollTop)}px`);
   el.style.setProperty("--fade-end", `${end}px`);
 }
 
-/** Keeps the thread list's edge fades true while it scrolls or resizes; a ref callback, so it follows the node. */
 function fadeEdges(el: HTMLElement | null): (() => void) | undefined {
   if (!el) return undefined;
   const update = () => measureFade(el);
@@ -209,12 +188,11 @@ function fadeEdges(el: HTMLElement | null): (() => void) | undefined {
 
 function ThreadList() {
   const list = useRef<HTMLElement | null>(null);
-  // threads arriving, leaving or filtered change how far the list runs without a scroll or a resize
-  // oxlint-disable-next-line gates/effect-needs-reason -- keeps the list's edge fades in step with its laid-out height after each commit
+  // oxlint-disable-next-line gates/effect-needs-reason -- threads arriving, leaving or filtered change how far the list runs with no scroll or resize, so its edge fades are measured after each commit
   useLayoutEffect(() => {
     if (list.current) measureFade(list.current);
   });
-  // one callback for the list's life: a new one each render would re-attach the listeners every render
+  // why: one callback for the list's life; a new one each render would re-attach the listeners.
   const ref = useRef((el: HTMLElement | null) => {
     list.current = el;
     return fadeEdges(el);
@@ -223,19 +201,18 @@ function ThreadList() {
   useEffect(() => () => preloadThread(null), []);
   const threads = useStore((s) => s.threads);
   const q = useStore((s) => s.search.trim().toLowerCase());
+  const searching = q !== "";
   const on = useStore((s) => (s.view === "thread" ? s.threadId : null));
-  // a send waiting for the server's answer counts: its dot shows before the start event
   const running = useStore(runningThreads);
-  // the row whose thread menu is open stays marked while the menu acts on it
   const menuFor = useStore((s) => (s.pop?.id === "thread" ? s.pop.thread : null));
   const now = useNow(30_000);
   const drawerWidth = useMedia("(max-width: 1023px)");
   const boot = useStore(booting);
   const waiting = useStore(notStarted);
   const ordered = listOrder(threads, running, waitingSince(waiting));
-  const shown = q === "" ? ordered : ordered.filter((t) => t.title.toLowerCase().includes(q));
+  const shown = searching ? ordered.filter((t) => t.title.toLowerCase().includes(q)) : ordered;
+  // why: row-shaped placeholders until the first read lands, so the list keeps its shape.
   if (boot && threads.length === 0) {
-    // the list's shape is the data's: row-shaped placeholders until the first read lands
     return (
       <nav className="sb-list" aria-busy="true" ref={ref}>
         <div className="sb-skel" data-skel="" aria-hidden="true">
@@ -252,16 +229,15 @@ function ThreadList() {
   let last = "";
   return (
     <nav className="sb-list" ref={ref}>
-      {/* while searching, one heading counts the matches in place of the date groups */}
-      {q === "" ? null : <div className="sb-group">{shown.length} {shown.length === 1 ? "thread" : "threads"}</div>}
+      {searching ? <div className="sb-group">{shown.length} {shown.length === 1 ? "thread" : "threads"}</div> : null}
       {shown.map((t) => {
         const w = when(t.updatedAt, now);
-        const head = q === "" && w.group !== last ? <div className="sb-group">{w.group}</div> : null;
+        const dateGroup = !searching && w.group !== last ? <div className="sb-group">{w.group}</div> : null;
         last = w.group;
-        // a Fragment, not a wrapper: .sb-group:first-child must match only the list's first heading
+        // why: a Fragment, as a wrapper would make .sb-group:first-child match every heading.
         return (
           <Fragment key={t.id}>
-            {head}
+            {dateGroup}
             <div
               className={`sb-row${on === t.id ? " on" : ""}${menuFor === t.id ? " menu-open" : ""}`}
               data-thread={t.id}
@@ -273,10 +249,10 @@ function ThreadList() {
               onContextMenu={(e) => rowMenuClick(e, t.id)}
             >
               <button type="button" className="sb-thread" data-testid="sidebar.thread.open" onClick={() => closeDrawer(() => openThread(t.id), true)} onKeyDown={(e) => rowMenuKey(e, t.id)}
-                // a keyboard pause on a row reads it ahead, as a mouse pause does
+                // why: a keyboard pause on a row reads it ahead, as a mouse pause does.
                 onFocus={(e) => { if (e.currentTarget.matches(":focus-visible")) preloadThread(t.id); }}
                 onBlur={() => preloadThread(null)}>
-                <span className="t">{q === "" ? t.title : marked(t.title, q)}</span>
+                <span className="t">{searching ? marked(t.title, q) : t.title}</span>
                 <span className="sb-status">
                   {running.has(t.id) ?<span className="live" aria-label="Reply in progress" /> : <span className="ago">{drawerWidth ? shortAge(t.updatedAt, now) : w.ago}</span>}
                 </span>
@@ -306,7 +282,6 @@ function ChatNav() {
   const search = useStore((s) => s.search);
   return (
     <div className="sb-body">
-      {/* one row: an always-there Search field at the left (nothing swaps, so nothing jumps); icon buttons sit at the right end */}
       <div className="sb-top">
         <label className="sb-search">
           <Icon id="search" />
@@ -322,7 +297,7 @@ function ChatNav() {
             onChange={(e) => setState({ search: e.target.value })}
             onKeyDown={(e) => {
               if (e.key === "Escape") {
-                // an empty field has nothing to clear: the same Escape goes on and closes the drawer
+                // why: an empty field has nothing to clear, so the same Escape goes on and closes the drawer.
                 if (search !== "") e.stopPropagation();
                 clearSearch();
                 e.currentTarget.blur();
@@ -338,7 +313,7 @@ function ChatNav() {
               data-testid="sidebar.search.clear"
               aria-label="Clear search"
               data-tip="Clear · Esc"
-              // the field keeps its focus through the press
+              // why: the field keeps its focus through the press.
               onPointerDown={(e) => e.preventDefault()}
               onClick={() => {
                 clearSearch();
@@ -360,22 +335,25 @@ function ChatNav() {
   );
 }
 
-/** Settings' sections: on a phone in the drawer under Back to chat; wider, at the left of the Settings pop-up (App.tsx), without Models, which is a pop-up of its own (the footer's bot). */
 export function SettingsNav({ inDialog = false }: { inDialog?: boolean }) {
   const section = useStore((s) => s.section);
+  // why: Models is a pop-up of its own, so the Settings pop-up leaves it out.
+  const sections = inDialog ? SECTIONS.filter(([id]) => id !== "models") : SECTIONS;
+  // why: no Back to chat in the pop-up, which has its own Close.
   const list = (
     <div className="snav">
-      {/* the pop-up has its own Close */}
       {inDialog ? null : (
         <button type="button" className="sb-act back" data-testid="settings.nav.back-to-chat" data-tip="Back to chat · Esc" onClick={() => closeDrawer(leaveSettings, true)}>
           <Icon id="left" />
           <span className="grow">Back to chat</span>
         </button>
       )}
-      {SECTIONS.filter(([id]) => !inDialog || id !== "models").map(([id, label, icon]) => (
-        <button key={id} type="button" className={`sb-act${section === id ? " on" : ""}${id === "runtime" ? " gap" : ""}`} data-testid={`settings.nav.open-${id}`} data-tipt={inDialog ? label : undefined} onClick={() => closeDrawer(() => openSettings(id), true)}>
+      {sections.map(([id, label, icon]) => (
+        <button key={id} type="button" className={`sb-act${section === id ? " on" : ""}${id === "runtime" ? " gap" : ""}`} data-testid={`settings.nav.open-${id}`}
+          // why: a narrow pop-up shows the sections as icons only, so the hidden name is the tip.
+          data-tipt={inDialog ? label : undefined}
+          onClick={() => closeDrawer(() => openSettings(id), true)}>
           <Icon id={icon} />
-          {/* in a narrow pop-up the sections are an icon rail (panel.css): the hidden name shows as the tip */}
           <span className="grow t">{label}</span>
         </button>
       ))}
@@ -384,11 +362,6 @@ export function SettingsNav({ inDialog = false }: { inDialog?: boolean }) {
   return inDialog ? <nav className="dlg-nav" aria-label="Settings sections">{list}</nav> : <nav className="sb-body">{list}</nav>;
 }
 
-// One row of 32 px icon buttons, the same in chat and Settings and the same height in every
-// state: Settings and Models at the left, the update icon at the far right. No words in the
-// row; they live in each button's tooltip and aria-label.
-
-/** The words of a node rtInfo builds (<><b>Port 11434</b> · busy</>), for a tooltip and an aria-label. */
 function plain(n: ReactNode): string {
   if (n === null || n === undefined || typeof n === "boolean") return "";
   if (typeof n === "string" || typeof n === "number") return String(n);
@@ -396,16 +369,17 @@ function plain(n: ReactNode): string {
   return isValidElement<{ children?: ReactNode }>(n) ? plain(n.props.children) : "";
 }
 
-/** The gear. While the runtime is not ready it carries what the runtime row said, and a click opens Settings › Runtime as the row did. */
+// why: Models is a pop-up of its own, with the bot lit for it, not the gear.
+const gearLit = (s: ReturnType<typeof getState>) => s.view === "settings" && s.section !== "models";
+
 function SettingsButton() {
-  // Models is a pop-up of its own: the bot is lit for it, not the gear
-  const inSettings = useStore((s) => s.view === "settings" && s.section !== "models");
+  const lit = useStore(gearLit);
   const conn = useStore((s) => s.conn);
   const runtime = useStore((s) => s.runtime);
   const settings = useStore((s) => s.settings);
-  // before the runtime's first answer the gear claims nothing about it, past the boot bound too
   const boot = useStore(booting);
   const none = useStore(unread);
+  // why: before the runtime's first answer the gear claims nothing about it, past the boot bound too.
   const info = boot || none || rtOf({ conn, runtime, settings }) === "ready" ? null : rtInfo({ conn, runtime, settings });
   const g = settingsIcon(info && { text: plain(info.text), tip: info.tip, dot: info.dot });
   return (
@@ -414,16 +388,14 @@ function SettingsButton() {
       icon="gear"
       label={g.label}
       tip={g.tip}
-      {...(inSettings ? { tone: "on" as const } : {})}
-      pressed={inSettings}
+      {...(lit ? { tone: "on" as const } : {})}
+      pressed={lit}
       dot={g.dot}
       onClick={() =>
         closeDrawer(() => {
-          // closes only what it lights: from Models (a Settings section, its own pop-up) it opens Settings
-          const s = getState();
-          if (s.view === "settings" && s.section !== "models") return leaveSettings();
-          if (g.runtime) return openSettings("runtime");
-          // a phone opens Settings on its section list
+          if (gearLit(getState())) return leaveSettings();
+          if (g.opensRuntime) return openSettings("runtime");
+          // why: a phone opens Settings on its section list.
           setState({ setList: true });
           openSettings();
         }, true)
@@ -432,19 +404,17 @@ function SettingsButton() {
   );
 }
 
-/** Failed downloads already seen in Settings › Models. A new attempt's failure is a new store object, so it shows again. Memory only. */
+// why: a WeakSet, as a new attempt's failure is a new store object and so shows again.
 const seenFailures = new WeakSet<PullProgress>();
 const running = (p: PullProgress) => p.state === "queued" || p.state === "downloading" || p.state === "verifying";
 
-/** The bot: a ring while models download, red with a dot after a failure until Settings › Models is opened. */
 function ModelsButton() {
   const pulls = useStore((s) => s.pulls);
   const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
   const inModels = useStore((s) => s.view === "settings" && s.section === "models");
   const all = Object.values(pulls);
-  // a failure on show in Settings › Models is seen: the icon draws it seen in the same render
+  // why: a failure on show in Settings › Models is seen, and the icon draws it seen in this render.
   if (inModels) for (const p of all) if (p.state === "error") seenFailures.add(p);
-  // downloads that finished in this burst stay in the ring's total, so it never goes backwards
   const burst = useRef<readonly PullProgress[]>([]);
   burst.current = finishedInBurst(burst.current, all);
   const m = modelsIcon(all.filter((p) => p.state !== "error" || !seenFailures.has(p)), (tag) => describeModel(tag, catalog).name, burst.current);
@@ -462,7 +432,6 @@ function ModelsButton() {
   );
 }
 
-/** Usage: a pop-up over the chat, lit while it is open. No badge: nothing about it needs attention. */
 function UsageButton() {
   const open = useStore((s) => s.panel === "usage");
   return (
@@ -479,7 +448,6 @@ function UsageButton() {
   );
 }
 
-/** Pictures: the screen of every finished picture, pressed while it is on show (Ctrl Shift P). */
 function PicturesButton() {
   const open = useStore((s) => s.view === "pictures");
   return (
@@ -497,12 +465,11 @@ function PicturesButton() {
 }
 
 export function Sidebar() {
-  // wider than a phone Settings is a pop-up, and the sidebar under it keeps its threads
   const phone = useMedia(PHONE);
+  // why: wider than a phone Settings is a pop-up, and the sidebar under it keeps its threads.
   const inSettings = useStore((s) => s.view === "settings") && phone;
   return (
     <aside className="sb">
-      {/* the same head in chat and Settings, so the first row below it never moves between the two */}
       <div className="sb-head">
         <svg className="mark" aria-hidden="true">
           <use href="#i-mark" />

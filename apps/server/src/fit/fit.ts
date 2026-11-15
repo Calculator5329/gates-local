@@ -1,12 +1,3 @@
-// The fit check: measured free VRAM (with whisper and every other tenant
-// already counted by nvidia-smi) against a model's need at a num_ctx.
-//
-// fits    need <= free VRAM - VRAM margin
-// spills  the overflow fits in MemAvailable - RAM margin; spillRamBytes shown
-// refuse  otherwise, with shortfallBytes and a message naming the numbers
-//
-// A download size alone never proves a fit: the estimate adds KV cache and
-// overhead, and a measured /api/ps report replaces it after a real load.
 import { fitWords, type FitWords } from "@gates-local/contracts";
 import {
   KV_REFERENCE_CONTEXT,
@@ -33,38 +24,25 @@ import {
 } from "./types.ts";
 
 declare const totalNeed: unique symbol;
-/**
- * What a model needs at a context in all, GPU plus system memory: the one basis the fit table
- * states. Only estimatedNeed, preDownloadNeed and measuredNeed make one.
- */
+// why: branded so a fit table row can only hold a GPU plus system memory total.
 export type TotalNeed = number & { readonly [totalNeed]: true };
-/** A report whose need is a TotalNeed: the only kind a fit table row is made from. */
 export type TotalReport = Omit<FitReport, "needVramBytes"> & { readonly needVramBytes: TotalNeed };
 
 export const estimatedNeed = (need: NeedEstimate): TotalNeed => need.totalBytes as TotalNeed;
 
-/**
- * The estimate on a loaded model's basis: moved by `offset` (its copy's measurement minus the
- * estimate at the copy's context, or 0 when it has none), and never below the weights. Every context
- * of one model moves by the same offset, so a larger context never needs less.
- */
+// why: every context of one model moves by the same offset, so a larger one never needs less.
 export const offsetNeed = (need: NeedEstimate, offset: number): TotalNeed => Math.max(need.weightsBytes, need.totalBytes + offset) as TotalNeed;
 
-/**
- * A loaded copy's measurement on the estimate's basis, or undefined when it measures something
- * else. It counts only when the copy is wholly on the GPU: /api/ps says nothing is in system memory
- * (size_vram >= size), and what it holds on the GPU (size_vram, or the runner's nvidia-smi memory
- * when larger) is at least the model's weights. A runtime that maps the CPU part of the weights
- * from disk can leave them out of `size`, so size_vram alone does not prove that.
- */
+// external: Ollama can leave weights it maps from disk for the processor out of /api/ps size, so size_vram >= size alone does not prove a copy is wholly on the GPU.
 export function measuredNeed(entry: PsEntry, runnerBytes: number | undefined, weightsBytes: number): TotalNeed | undefined {
   const held = Math.max(entry.size_vram, runnerBytes ?? 0);
-  return entry.size_vram >= entry.size && held >= weightsBytes ? (held as TotalNeed) : undefined;
+  const whollyOnGpu = entry.size_vram >= entry.size && held >= weightsBytes;
+  return whollyOnGpu ? (held as TotalNeed) : undefined;
 }
 
-/** The runner processes' nvidia-smi memory, when exactly one model is loaded and so owns it. */
 function runnerBytesOf(gpu: GpuSnapshot, loadedCount: number): number | undefined {
   const runners = gpu.tenants.filter((t) => t.role === "ollama" && t.usedBytes !== undefined);
+  // why: the runners' memory is one model's only when exactly one is loaded.
   return loadedCount === 1 && runners.length > 0 ? runners.reduce((sum, t) => sum + (t.usedBytes ?? 0), 0) : undefined;
 }
 
@@ -86,69 +64,39 @@ export interface DecideInput {
   memAvailableBytes: number;
   margins?: Margins;
   measuredAt: number;
-  /** Prefix for the message, e.g. why free VRAM was adjusted. */
   note?: string;
 }
 
-/**
- * What a verdict is judged against. "card": the card's own memory and the system memory the
- * computer has, whatever other programs hold right now (every list and Settings). "now": what a
- * load would have right now (a send, the composer).
- */
 export type FitBasis = FitWords["basis"];
 
-/** What a verdict needs of a GPU reading. */
 export type CardReading = Pick<GpuSnapshot, "gpuCount" | "freeBytes" | "totalBytes" | "measuredAt" | "cards">;
 
-/**
- * The margins for a reading of more than one card. The fit judges the cards together, since
- * Ollama splits a model that does not fit on one across all of them; but every extra card it uses
- * holds its own CUDA context and runner scratch, Ollama keeps a minimum free on each, and a layer
- * never splits across two cards. So each card after the largest gives up the VRAM margin too, and
- * never more than it has (its size on the card basis, what is free on the now basis): a small
- * display card beside a large one adds what it has beyond its margin, or nothing.
- */
+// external: Ollama splits a model that does not fit on one card across all of them, keeps a minimum free on each and never splits a layer across two, and each card it uses holds its own CUDA context and runner scratch.
 export function cardMargins(margins: Margins, gpu: Pick<GpuSnapshot, "cards">, basis: FitBasis): { margins: Margins; extraBytes: number; extraCards: number } {
+  // why: each card after the largest gives up the margin too, never more than it has.
   const extra = (gpu.cards ?? []).slice(1).map((c) => Math.min(margins.vramMarginBytes, basis === "card" ? c.totalBytes : c.freeBytes));
   const extraBytes = extra.reduce((sum, b) => sum + b, 0);
   return { margins: extraBytes === 0 ? margins : { ...margins, vramMarginBytes: margins.vramMarginBytes + extraBytes }, extraBytes, extraCards: extra.length };
 }
 
-/** The card's own GPU memory, whatever other programs hold: the whole card; with no GPU, what is free. */
 export const cardFreeBytes = (gpu: CardReading): number => (gpu.gpuCount === 0 ? gpu.freeBytes : Math.max(gpu.freeBytes, gpu.totalBytes));
 
-/**
- * A report with its words, on the basis it was judged on. `onCard`: the runner's own list (/api/ps
- * size_vram) says the model is loaded on a card, so the words follow that measurement even when
- * the app cannot read the card itself; only a model that is not loaded there runs in system memory.
- */
+// why: a model the runner lists on a card is worded as on it, even when the app cannot read it.
 export const worded = <R extends FitReport>(report: R, basis: FitBasis, gpu: Pick<GpuSnapshot, "gpuCount">, onCard = false): R => ({ ...report, words: fitWords(report, basis, gpu.gpuCount === 0 && !onCard) });
 
 export interface JudgeInput {
   model: string;
   numCtx: number;
   needBytes: number;
-  /** The reading: the card's size and the computer's memory come from it. */
   gpu: CardReading;
   memTotalBytes: number;
-  /** GPU memory a load would have right now: free plus what leaves for it. Absent: what is free. */
   freeVramBytes?: number;
-  /** System memory a load would have right now: available plus what leaves with it. The "now" basis needs it. */
   memAvailableBytes?: number;
   margins?: Margins;
   note?: string;
-  /** The runner's own list has this model loaded on a card (worded): its words say the card, read or not. */
   onCard?: boolean;
 }
 
-/**
- * The one place the server judges a fit, on either basis, from one reading, with its words.
- * now: GPU memory free plus what leaves for the load; system memory never below what the computer
- * has (cardRamBytes): memory other programs hold at this instant is the system's to page out, and
- * refusing on it kept every model that runs partly in system memory from loading on a 16 GB
- * computer (WIN-MEM-01 and 02). card: the whole card, or more when what leaves for the load is
- * more (no GPU), and the system memory the computer has.
- */
 export function judge(basis: FitBasis, input: JudgeInput): FitReport {
   const nowVram = input.freeVramBytes ?? input.gpu.freeBytes;
   const ram = cardRamBytes(input.memTotalBytes);
@@ -160,6 +108,7 @@ export function judge(basis: FitBasis, input: JudgeInput): FitReport {
     numCtx: input.numCtx,
     needBytes: input.needBytes,
     freeVramBytes: basis === "card" ? Math.max(cardFreeBytes(input.gpu), nowVram) : nowVram,
+    // why: what others hold now is the system's to page out, so never less than the computer has.
     memAvailableBytes: basis === "card" ? ram : Math.max(input.memAvailableBytes ?? 0, ram),
     measuredAt: input.gpu.measuredAt,
     ...(input.margins || cards.extraBytes > 0 ? { margins: cards.margins } : {}),
@@ -168,7 +117,6 @@ export function judge(basis: FitBasis, input: JudgeInput): FitReport {
   return worded(report, basis, input.gpu, input.onCard === true);
 }
 
-/** Pure verdict from an estimated need and measured free memory: judge's arithmetic, with no words. */
 export function decideFit(input: DecideInput): FitReport {
   const margins = input.margins ?? DEFAULT_MARGINS;
   const usableVram = Math.max(0, input.freeVramBytes - margins.vramMarginBytes);
@@ -208,13 +156,7 @@ export function decideFit(input: DecideInput): FitReport {
   };
 }
 
-/**
- * A measured report from an /api/ps entry plus the GPU reading taken after
- * the load. /api/ps leaves out the runner's CUDA context and scratch (on
- * this machine qwen3.5:9b showed size_vram 5.92 GB while nvidia-smi showed
- * the runner at 6926 MiB), so when exactly one model is loaded the runner
- * processes' nvidia-smi memory counts as its VRAM if larger.
- */
+// external: Ollama's /api/ps leaves the runner's CUDA context and scratch out of size_vram: a 9B model it listed at 5.92 GB held 6926 MiB by nvidia-smi.
 export function measuredReport(model: string, entry: PsEntry, numCtx: number, gpu: GpuSnapshot, loadedCount = 1): FitReport {
   const spill = Math.max(0, entry.size - entry.size_vram);
   const ctx = entry.context_length ?? numCtx;
@@ -225,7 +167,6 @@ export function measuredReport(model: string, entry: PsEntry, numCtx: number, gp
       ? "runner VRAM not attributable (nvidia-smi shows no single runner)"
       : `runner holds ${formatGb(runnerBytes)} on the GPU per nvidia-smi`;
   return worded({
-    // The model asked about: /api/ps may list the copy under another name for it.
     model,
     numCtx: ctx,
     freeVramBytes: gpu.freeBytes,
@@ -248,45 +189,25 @@ export interface FitDeps {
   now?: () => number;
   margins?: Margins;
   estimate?: EstimateOptions;
-  /** Ends the check early: every Ollama request, both nvidia-smi runs and the meminfo read. */
   signal?: AbortSignal;
-  /** A survey (the fit table) may take a GPU reading this many ms old (gpu.ts GPU_REUSE_MS); a send never does. */
   reuseGpuMs?: number;
-  /**
-   * Resident models no turn of this app is using (or whose turn was just stopped for this load):
-   * Ollama unloads a model it is not serving to make room, so the VRAM /api/ps says they hold
-   * counts as reclaimable for a cold plan. Their activity is unknown: another client of the same
-   * Ollama may be using one, and Ollama then queues the load until it is done.
-   */
+  // external: Ollama unloads a model it is not serving to make room, and queues the load while another of its clients uses one.
   reclaim?: readonly string[];
-  /**
-   * The Ollama at `baseUrl` holds one model at a time and replaces it itself when another loads
-   * (RuntimeStatus.holdsOne). Absent: as one-model.ts holdsOneAt answers for `baseUrl`.
-   */
   holdsOne?: boolean;
-  /**
-   * The card's own memory, and who uses it right now (baseline.ts): every list judges against
-   * it. A send never reads it; absent, the lists judge right now too.
-   */
   baseline?: GpuBaseline;
 }
 
 export interface FitCheck {
   report: TotalReport;
-  /** The model is loaded at this num_ctx: it runs as it is, and a send needs no load. */
   resident?: boolean;
-  /** The GPU reading the verdict used, tenants named (whisper permanent). */
   gpu?: GpuSnapshot;
   memAvailableBytes?: number;
   estimate?: NeedEstimate;
 }
 
-/** One GPU, memory and runtime reading. Every fit computed from it shares its /api/show answers. */
 export interface Readings {
   gpu: GpuSnapshot;
-  /** System memory free right now: what a send judges by. */
   memAvailableBytes: number;
-  /** The system memory this computer has: what every list judges a model against. */
   memTotalBytes: number;
   ps: PsResponse;
   tags: TagsResponse;
@@ -310,13 +231,13 @@ export async function takeReadings(deps: FitDeps): Promise<Readings> {
   return { gpu, memAvailableBytes, memTotalBytes, ps, tags, shows: new Map() };
 }
 
-/** /api/show for `model`, asked once per reading. A failed answer is not kept. */
 export function showOf(deps: FitDeps, r: Readings, model: string): Promise<ShowResponse> {
   const key = r.tags.models.find((m) => sameModel(m.name, model))?.name ?? model;
   let show = r.shows.get(key);
   if (show === undefined) {
     show = untilAborted(fetchShow(deps.baseUrl, model, deps.signal), deps.signal);
     r.shows.set(key, show);
+    // why: a failed answer is not kept, so the next call asks again.
     show.catch(() => r.shows.delete(key));
   }
   return show;
@@ -325,12 +246,10 @@ export function showOf(deps: FitDeps, r: Readings, model: string): Promise<ShowR
 export async function fitWithReadings(deps: FitDeps, model: string, requested: number, r: Readings): Promise<FitCheck> {
   const loaded = findLoaded(r.ps, model);
   const tag = r.tags.models.find((m) => sameModel(m.name, model));
-  // Measured only when /api/ps proves the resident copy runs at this num_ctx (an Ollama that leaves
-  // context_length out may hold it at a smaller one, so that copy is estimated like a cold one),
-  // and only when the measurement is on the estimate's basis (measuredNeed). A copy /api/tags does
-  // not list has no known weights; /api/ps saying nothing spilled is then the only proof.
+  // external: an Ollama that leaves context_length out of /api/ps may hold the copy at a smaller context, so only a copy listed at this num_ctx is measured.
   const measured = (numCtx: number, weights = tag?.size ?? 0): FitCheck | undefined => {
     if (!loaded || loaded.context_length !== numCtx) return undefined;
+    // why: a copy /api/tags does not list has weights 0, so nothing spilled is the only proof.
     const need = measuredNeed(loaded, runnerBytesOf(r.gpu, r.ps.models.length), weights);
     if (need === undefined) return undefined;
     return { report: { ...measuredReport(model, loaded, numCtx, r.gpu, r.ps.models.length), needVramBytes: need }, resident: true, gpu: r.gpu, memAvailableBytes: r.memAvailableBytes };
@@ -340,16 +259,13 @@ export async function fitWithReadings(deps: FitDeps, model: string, requested: n
   if (!tag) throw new FitError("model-not-found", `${model} is not in /api/tags`);
 
   const show = await showOf(deps, r, model);
-  // The one place the size a model runs at is decided; the report carries it to every caller.
   const numCtx = effectiveNumCtx(requested, reportedContextLength(show.model_info));
-  // On a card, the weights are the file less what the runtime keeps in system memory (off-card.ts).
-  // With no card everything is in system memory, so the whole file counts.
-  const offCard = r.gpu.gpuCount > 0 && hasPerLayerTable(show.model_info) ? await untilAborted(offCardBytes(deps.baseUrl, model, tag.digest ?? tag.name, deps.signal), deps.signal) : undefined;
+  const onCard = r.gpu.gpuCount > 0;
+  const offCard = onCard && hasPerLayerTable(show.model_info) ? await untilAborted(offCardBytes(deps.baseUrl, model, tag.digest ?? tag.name, deps.signal), deps.signal) : undefined;
   const weights = Math.max(0, tag.size - (offCard ?? 0));
   const atMax = numCtx === requested && offCard === undefined ? undefined : measured(numCtx, weights);
   if (atMax) return atMax;
   const estimate = needAt(model, numCtx, weights, show.model_info, deps.estimate);
-  // One basis per model: a copy wholly on the GPU moves every context by its measurement's offset.
   const runnerBytes = runnerBytesOf(r.gpu, r.ps.models.length);
   const loadedCtx = loaded?.context_length;
   const held = loaded ? Math.max(loaded.size_vram, runnerBytes ?? 0) : 0;
@@ -358,8 +274,7 @@ export async function fitWithReadings(deps: FitDeps, model: string, requested: n
   const offset = measuredLoaded === undefined || atLoaded === undefined ? 0 : measuredLoaded - atLoaded.totalBytes;
   const need = offsetNeed(estimate.need, offset);
 
-  // Loaded at this num_ctx but partly in system memory: it runs as it is, so it is never refused.
-  // Its need stays the estimate's total; what it holds on the GPU is what it does not spill.
+  // why: loaded at this num_ctx it runs as it is, partly in system memory, so it is never refused.
   if (loaded && loaded.context_length === numCtx) {
     const spill = Math.max(0, need - held);
     return {
@@ -372,17 +287,12 @@ export async function fitWithReadings(deps: FitDeps, model: string, requested: n
     };
   }
 
-  // A copy loaded at another num_ctx is replaced by Ollama on the next
-  // request, so the VRAM it holds counts as free for this plan. At an unknown
-  // context it is either replaced or reused as is; either way the question is
-  // whether the model at this num_ctx fits in what it holds plus what is free.
+  // external: Ollama replaces a copy loaded at another num_ctx on the next request, and replaces or reuses one whose context it does not state, so what the copy holds counts as free.
   const reclaim = loaded ? loaded.size_vram : 0;
-  // Its system-memory part frees with it: what /api/ps counts outside the GPU. At a context no larger
-  // than the loaded one, also what its own row says it holds there, so a smaller context is never
-  // refused while the loaded one runs. Above it, no more: weights mapped from disk are page cache.
+  // external: weights Ollama maps from disk are page cache, so above the loaded context only what /api/ps counts outside the GPU frees with the copy.
   const smaller = loadedCtx !== undefined && numCtx <= loadedCtx && atLoaded !== undefined;
+  // why: up to the loaded context its own row's share frees too, so a smaller one is never refused.
   const ramReclaim = loaded ? Math.max(loaded.size - loaded.size_vram, smaller ? offsetNeed(atLoaded, offset) - held : 0, 0) : 0;
-  // judge() never counts system memory below what this computer has (docs/evidence/windows-low-memory-bug-report.md).
   const ramNow = r.memAvailableBytes + ramReclaim;
   const atCtx = loaded?.context_length === undefined ? "an unknown num_ctx (Ollama did not say)" : `num_ctx ${loaded.context_length}`;
   const freedFrom = r.ps.models.filter((m) => !isCopyOf(m, model) && (deps.reclaim ?? []).some((n) => sameModel(n, m.name)));
@@ -406,19 +316,16 @@ export async function fitWithReadings(deps: FitDeps, model: string, requested: n
     ...(notes.length > 0 ? { note: notes.join("; ") } : {}),
     ...((loaded?.size_vram ?? 0) > 0 ? { onCard: true } : {}),
   });
-  // A refusal carries the system memory of the reading it was decided from, beside its free VRAM.
+  // why: a refusal carries the system memory it was decided from, beside its free VRAM.
   const reading = report.verdict === "refuse" ? { memAvailableBytes: r.memAvailableBytes } : {};
   return { report: { ...report, needVramBytes: need, ...reading }, gpu: r.gpu, memAvailableBytes: r.memAvailableBytes, estimate: estimate.need };
 }
 
-/**
- * What a model needs at `numCtx`. A model whose /api/show gives no geometry is sized the way a
- * download is, and `rough` says so: a missing field is no reason to keep it from chatting.
- */
 function needAt(model: string, numCtx: number, weightsBytes: number, modelInfo: Readonly<Record<string, unknown>> | undefined, options: EstimateOptions | undefined): { need: NeedEstimate; rough?: string } {
   try {
     return { need: estimateNeed(model, numCtx, weightsBytes, parseArchInfo(model, modelInfo), options) };
   } catch (e) {
+    // why: a missing field is no reason to keep a model from chatting; it is sized as a download is.
     if (!(e instanceof FitError) || e.code !== "model-info-incomplete") throw e;
     const kvCacheBytes = roughKvBytes(weightsBytes, numCtx);
     return {
@@ -430,42 +337,19 @@ function needAt(model: string, numCtx: number, weightsBytes: number, modelInfo: 
 
 const roughKvBytes = (weightsBytes: number, numCtx: number) => Math.round(weightsBytes * PREDOWNLOAD_KV_FRACTION_PER_16K * (numCtx / KV_REFERENCE_CONTEXT));
 
-/** Fit check for one model at one num_ctx; `report.numCtx` is the size it would run at. */
 export async function checkFit(deps: FitDeps & { model: string; numCtx: number }): Promise<FitCheck> {
   return fitWithReadings(deps, deps.model, deps.numCtx, await takeReadings(deps));
 }
 
 export interface LoadPlan {
-  /**
-   * The fit as the load will run: with the `stop` models gone when there are any (the load waits
-   * for them), else with no busy turn stopped. Before a handoff (the fit table, a question about a send),
-   * every other idle resident model's VRAM counts as reclaimable, since the handoff asks those to
-   * leave; after it (`measured`), only what the reading shows free.
-   */
   report: TotalReport;
-  /** The busy models whose turns must stop for the load (only chat.send stopOthers stops them, once the person agreed). */
   stop: string[];
 }
 
-/**
- * The one fit planner for a load of `model` at `numCtx`: the fit table's rows, preloads and
- * chat.send. From one reading. Resident models not in `busy` (no running reply uses them) are what
- * a handoff (gpu/memory.ts) asks to leave: a plan before the handoff counts their memory, a plan
- * after it (`measured`) counts only what the reading shows free, so a model that was asked and
- * stayed is measured as it is. Busy models are reclaimable only by stopping their turns, which only
- * chat.send's stopOthers does. The image engine's memory is never counted: the handoff frees it, or
- * it stays.
- *
- * No model is planned beside a busy one, on any runner (one thing in memory): `stop` is every busy
- * resident model, largest first, unless this one is resident at this num_ctx or refuses even with
- * them gone (stopping them would not help). The same model in `busy` never counts. Reads only;
- * never loads or stops anything.
- */
 export async function planLoad(deps: FitDeps & { model: string; numCtx: number; busy: readonly string[]; measured?: boolean }): Promise<LoadPlan> {
   return planWith(deps, await takeReadings(deps));
 }
 
-/** planLoad from a reading already taken: the fit table plans every row from one. */
 export async function planWith(deps: FitDeps & { model: string; numCtx: number; busy: readonly string[]; measured?: boolean }, r: Readings): Promise<LoadPlan> {
   const others = r.ps.models.filter((m) => !isCopyOf(m, deps.model));
   const busy = deps.busy.filter((b) => !sameModel(b, deps.model));
@@ -474,35 +358,22 @@ export async function planWith(deps: FitDeps & { model: string; numCtx: number; 
     .filter((m) => isBusy(m.name))
     .toSorted((a, b) => b.size_vram - a.size_vram)
     .map((m) => m.name);
-  // An Ollama that holds one model (RuntimeStatus.holdsOne) never runs this model beside another:
-  // it unloads the idle ones itself at this load, and waits for a busy one's reply to end, so every
-  // busy one is in the way whatever is free, on a card or not.
-  const one = deps.holdsOne ?? holdsOneAt(deps.baseUrl);
-  // The handoff asked nothing to leave from an Ollama that holds one model, so even after it
-  // (`measured`) what the idle ones hold counts as leaving. With no GPU there is no VRAM to reclaim.
+  // external: an Ollama that holds one model unloads the idle ones itself at a load and waits for a busy one's reply to end.
+  const holdsOneModel = deps.holdsOne ?? holdsOneAt(deps.baseUrl);
   const onCard = r.gpu.gpuCount > 0;
-  const leaving = !onCard || (deps.measured === true && !one) ? [] : others.filter((m) => !isBusy(m.name)).map((m) => m.name);
+  // why: nothing leaves with no GPU, or once a handoff has already asked the idle ones to go.
+  const leaving = !onCard || (deps.measured === true && !holdsOneModel) ? [] : others.filter((m) => !isBusy(m.name)).map((m) => m.name);
   const fit = (stop: readonly string[]) => fitWithReadings(onCard ? { ...deps, reclaim: [...leaving, ...stop] } : deps, deps.model, deps.numCtx, r);
   const first = await fit([]);
   if (first.resident === true || candidates.length === 0) return { report: first.report, stop: [] };
-  // One thing in memory, on every runner: no model is planned beside a busy reply, however much is
-  // free. An Ollama the person runs would load it beside; the app's own would wait for the reply.
-  // So every busy one is in the way.
   const gone = (await fit(candidates)).report;
-  // Refused even with every busy reply gone: stopping them would not help, so none is in the way.
+  // why: refused even with every busy reply gone, so stopping them would not help.
   if (gone.verdict === "refuse") return { report: first.report, stop: [] };
-  // The load comes after those replies stop (asked first, or the app's own Ollama waits for them):
-  // it is judged as it will run then, never as if it ran beside them.
   return { report: gone, stop: candidates };
 }
 
-/** planLoad's `stop`: the busy models a load would push out. */
 export const blockingModels = async (deps: FitDeps & { model: string; numCtx: number; busy: readonly string[] }): Promise<string[]> => (await planLoad(deps)).stop;
 
-/**
- * After a real load: what /api/ps and nvidia-smi say the copy holds (the real-machine check). Its
- * need is the measured report's, not a TotalNeed: the fit table never shows it.
- */
 export async function measuredFit(deps: FitDeps & { model: string; numCtx: number }): Promise<{ report: FitReport; gpu: GpuSnapshot }> {
   const [ps, gpu] = await untilAborted(
     Promise.all([fetchPs(deps.baseUrl, deps.signal), readGpu(deps.runNvidiaSmi ?? defaultNvidiaSmi, deps.now ?? Date.now, deps.signal)]),
@@ -517,18 +388,11 @@ export async function measuredFit(deps: FitDeps & { model: string; numCtx: numbe
 
 export interface ModelsFit {
   checks: FitCheck[];
-  /** Models that run (fits or spills), best first: fits before spills, then least spill. */
   runnable: FitReport[];
-  /** Set when nothing runs: names the closest model's shortfall in bytes and GB. */
   refusal?: string;
   gpu: GpuSnapshot;
 }
 
-/**
- * Fits every chat model in /api/tags at one num_ctx from a single GPU and
- * RAM reading. Models whose /api/show lists no "completion" capability
- * (embedding models) are skipped.
- */
 export async function checkModels(deps: FitDeps & { numCtx: number; models?: readonly string[] }): Promise<ModelsFit> {
   const readings = await takeReadings(deps);
   const names = deps.models ?? readings.tags.models.map((m) => m.name);
@@ -536,7 +400,8 @@ export async function checkModels(deps: FitDeps & { numCtx: number; models?: rea
   for (const name of names) {
     if (deps.models === undefined) {
       const show = await untilAborted(fetchShow(deps.baseUrl, name, deps.signal), deps.signal);
-      if (show.capabilities && !show.capabilities.includes("completion")) continue;
+      const embeddingOnly = show.capabilities && !show.capabilities.includes("completion");
+      if (embeddingOnly) continue;
     }
     checks.push(await fitWithReadings(deps, name, deps.numCtx, readings));
   }
@@ -549,20 +414,15 @@ export async function checkModels(deps: FitDeps & { numCtx: number; models?: rea
   return result;
 }
 
-/**
- * One GPU and RAM reading, then a fit function that checks models one at a
- * time against it, for callers that stop early (the chat pick). A model
- * whose check fails gives undefined; the reading itself failing throws.
- */
 export async function fitEach(deps: FitDeps & { numCtx: number }): Promise<(model: string) => Promise<FitReport | undefined>> {
   const readings = await takeReadings(deps);
-  // The pick asks whether a model can run, not whether it runs beside what happens to be loaded:
-  // a load unloads those first (planLoad), and the pick is cached without looking at what is loaded.
+  // why: the pick asks whether a model can run at all; a load unloads the loaded ones first.
   const reclaim = readings.ps.models.map((m) => m.name);
   return async (model) => {
     try {
       return (await fitWithReadings({ ...deps, reclaim }, model, deps.numCtx, readings)).report;
     } catch {
+      // why: a model whose check fails has no report.
       return undefined;
     }
   };
@@ -572,41 +432,26 @@ export interface FitSurvey {
   gpu: GpuSnapshot;
   memAvailableBytes: number;
   memTotalBytes: number;
-  /** One report per model whose check ran; a model whose check failed (no /api/show geometry, say) is absent. */
   reports: Map<string, FitReport>;
 }
 
-/**
- * The system memory a model is judged against: what the computer has, less the system's own share
- * (SYSTEM_RAM_RESERVE_BYTES). decideFit then keeps its usual RAM margin back from it as well.
- */
 export const cardRamBytes = (memTotalBytes: number): number => Math.max(0, memTotalBytes - SYSTEM_RAM_RESERVE_BYTES);
 
-/** Fits each named installed model at one num_ctx from a single GPU and RAM reading, skipping failures. */
 export async function surveyFit(deps: FitDeps & { numCtx: number; models: readonly string[] }): Promise<FitSurvey> {
   const readings = await takeReadings(deps);
   const reports = new Map<string, FitReport>();
   for (const name of deps.models) {
-    try {
-      reports.set(name, (await fitWithReadings(deps, name, deps.numCtx, readings)).report);
-    } catch {
-      // This model gets no verdict; the others still do.
-    }
+    // why: a model whose check fails gets no verdict; the others still do.
+    const report = await fitWithReadings(deps, name, deps.numCtx, readings).then((check) => check.report, () => undefined);
+    if (report !== undefined) reports.set(name, report);
   }
   return { gpu: readings.gpu, memAvailableBytes: readings.memAvailableBytes, memTotalBytes: readings.memTotalBytes, reports };
 }
 
-/**
- * A rough fit for a model that is not downloaded yet, so there is no
- * /api/show geometry: weights are the download size, the KV cache is taken
- * as PREDOWNLOAD_KV_FRACTION_PER_16K of it per 16k tokens, plus the usual
- * overhead. Always source "estimate"; the message says it is pre-download.
- */
 export function estimateBeforeDownload(input: {
   model: string;
   numCtx: number;
   downloadBytes: number;
-  /** The reading it is judged on, against the card (judge "card"). */
   gpu: CardReading;
   memTotalBytes: number;
   margins?: Margins;
@@ -625,7 +470,6 @@ export function estimateBeforeDownload(input: {
   return { ...report, needVramBytes: need };
 }
 
-/** A not-downloaded model's total need: the download as weights, a rough KV cache, the overhead. */
 export const preDownloadNeed = (downloadBytes: number, numCtx: number): TotalNeed =>
   (downloadBytes + roughKvBytes(downloadBytes, numCtx) + RUNTIME_OVERHEAD_BYTES) as TotalNeed;
 

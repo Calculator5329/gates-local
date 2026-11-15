@@ -262,6 +262,24 @@ describe("history", () => {
     });
   }
 
+  it("picking a thread in the drawer opens it only once the drawer's own entry is gone, so the thread's address never lands on that entry", async () => {
+    const { closeDrawer, onDrawerPop, openDrawer } = await import("./Sidebar.tsx");
+    browser.history.onPop(onDrawerPop);
+    const start = browser.history.index();
+    openDrawer();
+    expect(browser.history.index()).toBe(start + 1);
+    let entryItOpenedOn: { index: number; state: unknown } | undefined;
+    closeDrawer(() => {
+      entryItOpenedOn = { index: browser.history.index(), state: history.state };
+      session.openThread("t2");
+    }, true);
+    expect(entryItOpenedOn, "not while the drawer's entry is the current one").toBeUndefined();
+    await until(() => store.getState().threadId === "t2");
+    expect(entryItOpenedOn).toEqual({ index: start, state: null });
+    expect(store.getState().drawer).toBe(false);
+    expect(browser.location.hash).toBe("#thread=t2");
+  });
+
   it("Search from Settings on a wide window takes the screen's entry away", async () => {
     const { openSearch } = await import("./Sidebar.tsx");
     const start = browser.history.index();

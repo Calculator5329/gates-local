@@ -3,7 +3,7 @@ import { chmodSync, closeSync, constants, mkdirSync, mkdtempSync, openSync, read
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { ARCH_OFF, createProbe, PROBE_RETRY_MS, probeSandbox, probeSandboxWith, runSandbox, SCOPE_LIMITS, SCOPE_OFF, type SandboxHost } from "./index.ts";
+import { ARCH_OFF, cgroupOfScope, createProbe, PROBE_RETRY_MS, probeSandbox, probeSandboxWith, runSandbox, SCOPE_LIMITS, SCOPE_OFF, type SandboxHost } from "./index.ts";
 import type { LibraryEntry } from "../types.ts";
 
 const fakeHost = (over: Partial<SandboxHost>): SandboxHost => ({
@@ -80,6 +80,22 @@ const fresh = () => {
 };
 const outcome = (input: Parameters<typeof runSandbox>[0]) => runSandbox(input).then(output => `ran: ${output}`, (e: Error) => e.message);
 const noHostPath = (message: string, hostPaths: readonly string[]) => { for (const host of hostPaths) expect(message, host).not.toContain(host); };
+
+describe("the scope a stopped command's kill is written to", () => {
+  const unit = "gates-shell-1f0e";
+  it("is the scope this call created", () => {
+    expect(cgroupOfScope(`0::/user.slice/user-1000.slice/user@1000.service/app.slice/${unit}.scope\n`, unit))
+      .toBe(`/user.slice/user-1000.slice/user@1000.service/app.slice/${unit}.scope`);
+  });
+  it.each([
+    ["the server's own cgroup", "0::/user.slice/user-1000.slice/user@1000.service/app.slice/server.service\n"],
+    ["another call's scope", "0::/user.slice/user-1000.slice/user@1000.service/app.slice/gates-shell-9a7b.scope\n"],
+    ["a cgroup under the scope", `0::/user.slice/${unit}.scope/inner\n`],
+    ["a file with no unified line", "1:name=systemd:/\n"],
+  ])("is never %s", (_what, procCgroup) => {
+    expect(cgroupOfScope(procCgroup, unit)).toBeUndefined();
+  });
+});
 
 const probe = await probeSandbox();
 // Off by design anywhere but Linux (the shell tool is Linux only); on Linux

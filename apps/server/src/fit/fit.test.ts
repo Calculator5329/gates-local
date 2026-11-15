@@ -764,6 +764,15 @@ describe("blockingModels: which busy resident models a load would push out", () 
     expect((await planLoad({ ...base, busy: [], holdsOne: true })).stop).toEqual([]);
   });
 
+  it("a plan only reads, and counts nothing the image engine holds as room", async () => {
+    const s = await fakeOllama(resident([{ name: QWEN27, vram: 2e9 }]));
+    const run = smi("16303, 15303, 1000\n", "5700, /opt/ComfyUI/.venv/bin/python, 3110\n");
+    const plan = await planLoad({ baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, busy: [], holdsOne: false, runNvidiaSmi: run, readMeminfo: plenty });
+    expect(plan.report.freeVramBytes).toBe(1000 * MIB + 2e9);
+    expect(s.requests.map((r) => `${r.method} ${r.path}`).toSorted()).toEqual(["GET /api/ps", "GET /api/tags", "POST /api/show"]);
+    expect(run.calls.map((c) => c.join(" ")).toSorted()).toEqual([GPU_APPS_ARGS.join(" "), GPU_TOTALS_ARGS.join(" ")].toSorted());
+  });
+
   it("an Ollama that holds one model, on a computer with no card: the busy reply is still in the way", async () => {
     const s = await fakeOllama({ models: [{ name: QWEN27, size: 2e9, size_vram: 0, context_length: 16384 }] });
     const base = { baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, busy: [QWEN27], readMeminfo: plenty, now: () => 1,

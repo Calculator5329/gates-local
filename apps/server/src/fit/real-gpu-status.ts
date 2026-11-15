@@ -1,10 +1,5 @@
-// One real, read-only gpu.status reading of this machine, and the measured
-// CPU cost of the 3 s poll (not part of vitest; the coordinator runs it):
-//   node apps/server/src/fit/real-gpu-status.ts [reads=20]
-// Reads only: nvidia-smi queries, /proc (meminfo, net/tcp, fds, cmdline),
-// `systemctl --user show -p MainPID --value whisper-server.service`, and
-// GET /api/ps on the Ollama discovery finds. It loads, unloads, starts and
-// stops nothing.
+// Run by hand, never by the test runner. It only reads (nvidia-smi queries, /proc, systemctl show,
+// GET /api/ps): it loads, unloads, starts and stops nothing.
 import { readFileSync } from "node:fs";
 import { listLoaded } from "../runtime/models.ts";
 import { canonicalTag, modelLabel } from "../runtime/recommended.ts";
@@ -21,7 +16,7 @@ const deps: GpuStatusDeps = {
   whisperPid: () => systemdMainPid("whisper-server.service"),
   listeningPids: procListeningPids,
   modelLabel,
-  // This script loaded nothing and started no Ollama, so every chat model shows as protected.
+  // why: this script loaded nothing and started no Ollama, so every chat model shows as protected.
   mayUnload: () => [],
   residentModels: async () => (baseUrl ? (await listLoaded(baseUrl)).map((m) => ({ name: canonicalTag(m.name), sizeVramBytes: m.sizeVramBytes })) : []),
 };
@@ -33,18 +28,20 @@ console.log("gpu.status:", JSON.stringify(status));
 console.log(`${status.vendor} ${status.name ?? ""}  total ${gib(status.totalBytes)}  free ${gib(status.freeBytes)}  RAM available ${gib(status.systemMemoryAvailableBytes)}`);
 for (const o of status.occupants) console.log(`  ${o.label.padEnd(30)} ${gib(o.bytes).padStart(10)}  ${o.kind}${o.protected ? "  protected" : ""}`);
 
-/** utime + stime of this process's waited-for children (nvidia-smi, systemctl), in clock ticks. Linux only. */
+// external: /proc/self/stat lists cutime and cstime, the CPU ticks of waited-for children, as fields 16 and 17: 13 and 14 after the comm.
+const CUTIME_FIELD = 13;
+const CSTIME_FIELD = 14;
+
 function childTicks(): number | undefined {
   try {
     const stat = readFileSync("/proc/self/stat", "utf8");
-    const f = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-    // Fields 16 and 17 (cutime, cstime) are at 13 and 14 after the comm.
-    return Number(f[13]) + Number(f[14]);
+    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    return Number(fields[CUTIME_FIELD]) + Number(fields[CSTIME_FIELD]);
   } catch {
     return undefined;
   }
 }
-// Linux USER_HZ is 100 on every mainstream kernel; stated, not read (no getconf call).
+// external: Linux counts these ticks in USER_HZ, which is 100 on every mainstream kernel.
 const TICK_MS = 10;
 
 const cpu0 = process.cpuUsage();

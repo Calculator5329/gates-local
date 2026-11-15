@@ -1,6 +1,3 @@
-// Where the app keeps its own files, and where Ollama keeps models.
-// Functions that differ on Windows take the platform so tests can inject it;
-// they then use path.win32 rules whatever machine the test runs on.
 import { accessSync, constants, existsSync, readdirSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9,7 +6,6 @@ export type Env = Readonly<Record<string, string | undefined>>;
 
 const pathFor = (platform: NodeJS.Platform) => (platform === "win32" ? path.win32 : path.posix);
 
-/** %LOCALAPPDATA% (falling back to <home>\AppData\Local) on Windows. */
 function localAppData(env: Env, home: string): string {
   const local = env.LOCALAPPDATA;
   return local && path.win32.isAbsolute(local) ? local : path.win32.join(home, "AppData", "Local");
@@ -72,10 +68,10 @@ export function serveLogFile(appDataDir: string): string {
   return path.join(runtimeDir(appDataDir), "ollama-serve.log");
 }
 
+/** A folder Ollama keeps models in. `hasModels`: its `manifests/` holds at least one entry. */
 export type ModelsDir = {
   path: string;
   writable: boolean;
-  /** `manifests/` holds at least one entry. */
   hasModels: boolean;
   source: "OLLAMA_MODELS" | "home-default" | "system";
 };

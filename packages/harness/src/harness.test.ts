@@ -262,6 +262,11 @@ async function* slowFirstByte() {
   yield { type: "complete" as const, content: "Done reading.", calls: [], stopReason: "stop" };
 }
 /** Sends some words, then nothing until stopped. */
+async function* twoPromptChunks() {
+  yield { type: "delta" as const, text: "One " };
+  yield { type: "delta" as const, text: "two." };
+  yield { type: "complete" as const, content: "One two.", calls: [], stopReason: "stop" };
+}
 async function* stallsMidReply(_messages: readonly ModelMessage[], options?: { tools: boolean; signal?: AbortSignal }) {
   yield { type: "delta" as const, text: "The answer " };
   await untilAborted(options?.signal);
@@ -349,6 +354,14 @@ describe("tool-phase deadline and stall guard (T-03)", () => {
     const events: LoopEvent[] = [];
     for await (const event of runLoop({ messages: [], native: true, signal: new AbortController().signal, stream: slowFirstByte, numCtx: 1000, stallMs: 50, execute: vi.fn() })) events.push(event);
     expect(events.at(-1)).toMatchObject({ type: "complete", content: "Done reading." });
+  });
+  it("a reader that takes longer than the stall limit to handle a chunk is not a stalled model", async () => {
+    const events: LoopEvent[] = [];
+    for await (const event of runLoop({ messages: [], native: true, signal: new AbortController().signal, stream: twoPromptChunks, numCtx: 1000, stallMs: 40, execute: vi.fn() })) {
+      events.push(event);
+      if (event.type === "delta") await sleep(120);
+    }
+    expect(events.at(-1)).toMatchObject({ type: "complete", content: "One two." });
   });
   it("a model that sends some words and then nothing for the stall limit is stopped, and the words say so", async () => {
     const outcome = await (async () => { for await (const _ of runLoop({ messages: [], native: true, signal: new AbortController().signal, stream: stallsMidReply, numCtx: 1000, stallMs: 40, execute: vi.fn() })) { /* drain */ } return "finished"; })().catch((e: Error) => e);

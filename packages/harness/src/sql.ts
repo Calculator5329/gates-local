@@ -2,14 +2,7 @@ import { spawn } from "node:child_process";
 
 export const SQL_TIMEOUT_MS = 10000;
 
-// Runs in a child Node process. A worker_thread cannot do this job: terminate()
-// only stops JavaScript, and a running sqlite3_step (a recursive CTE, a huge
-// cross join) never returns to JavaScript, so the thread spins on and even
-// process.exit() waits for it. A child process can always be killed.
-//
-// The child also guards itself: its main thread may be stuck in sqlite3_step,
-// so a watchdog worker kills the process at the timer (plus a second) or as
-// soon as its parent is gone, so a crashed server never leaves a query spinning.
+// external: Node's worker terminate() only stops JavaScript, and a running sqlite3_step never returns to it; a child process can always be killed.
 const CHILD = String.raw`
 const { Worker } = require("node:worker_threads");
 new Worker("const { workerData: w } = require('node:worker_threads');" +
@@ -46,7 +39,7 @@ export function runSnapshotQuery(input: { file: string; query: string; limit: nu
   input.signal.throwIfAborted();
   const timeoutMs = input.timeoutMs ?? SQL_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
-    // The server runs with ELECTRON_RUN_AS_NODE=1 under Electron, so execPath is a Node here too.
+    // external: under Electron, execPath is a Node only with ELECTRON_RUN_AS_NODE=1.
     const child = spawn(process.execPath, ["-e", CHILD, String(timeoutMs), String(process.pid)], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" } });
     let stdout = "";
     let stderr = "";

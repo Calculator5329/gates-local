@@ -1,4 +1,3 @@
-// gpu.status answers with a fresh reading; the watcher pushes gpu.changed.
 import type { Handlers } from "../ws/server.ts";
 import type { GpuWatcher } from "./gpu-watch.ts";
 

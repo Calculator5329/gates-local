@@ -9,19 +9,19 @@ import { hush, setTalk, useLocalVoice, useTalk } from "./talk.ts";
 
 type Phase = "idle" | "asking" | "listening" | "transcribing";
 type Dictation = { id: string; draftVersion: number };
-/** A press shorter than this is a tap, not a talk: nothing is sent. */
+// why: a press shorter than this is a tap, not a talk, and nothing is sent.
 const HOLD_MS = 300;
 const HOLD_NOTE = "Hold the microphone or Space while you talk.";
-/**
- * Dictate. `held` is set while Stop holds this square (a queued message edited during a reply): the button is gone,
- * the component stays, and the shortcut says why it does not start. In talk mode (a try-out) the same
- * button is held to talk, as is Space in an empty message box, and letting go sends with `send`.
- */
+const DOUBLE_CLICK_MS = 400;
+const chatOnTop = (s: { view: Parameters<typeof overChat>[0]; panel: unknown }) => !overChat(s.view) && s.panel === null;
+
+// why: `held` is the notice the shortcut shows while Stop has this square and the button is gone.
 export function Voice({ textarea, held = null, send }: { textarea: RefObject<HTMLTextAreaElement | null>; held?: string | null; send?: () => void }) {
   const settings = useStore((s) => s.settings);
   const conn = useStore((s) => s.conn);
   const draftVersion = useDraft(d => d.version);
-  const covered = useStore((s) => overChat(s.view) || s.panel !== null);
+  // why: a dictation into a hidden composer would type unseen and take Esc from the screen on top.
+  const covered = useStore((s) => !chatOnTop(s));
   const enabled = settings !== NA && !!settings?.whisperUrl;
   const [phase, show] = useState<Phase>("idle");
   const [seconds, time] = useState(0);
@@ -50,11 +50,9 @@ export function Voice({ textarea, held = null, send }: { textarea: RefObject<HTM
     window.addEventListener("pagehide", leave);
     return () => { window.removeEventListener("pagehide", leave); cancel(); };
   }, [enabled, conn, draftVersion]);
-  // Settings or a pop-up over the chat keeps the composer mounted but hidden: a dictation
-  // running into it would type where nobody sees and take Esc from the screen on top.
   // oxlint-disable-next-line gates/effect-needs-reason -- the cover comes from screens this folder does not own; stopping releases the microphone, which a render must not do
   useEffect(() => { if (covered) cancel(); }, [covered]);
-  // The square was Stop's a moment ago: the rest of a double-click on Stop must not land here (useActionPress guards Send the same way).
+  // why: the square was Stop's a moment ago; the rest of a double-click on Stop must not land here.
   const shownAt = useRef(-Infinity);
   const wasHeld = useRef(held !== null);
   // oxlint-disable-next-line gates/effect-needs-reason -- Stop showing ends a recording (the microphone) and stamps when the square came back, both outside render
@@ -76,7 +74,6 @@ export function Voice({ textarea, held = null, send }: { textarea: RefObject<HTM
     return () => clearInterval(timer);
   }, [phase]);
 
-  /** Stop listening and transcribe into the draft at the cursor; in talk mode the draft is then sent. */
   const finish = async (then: "draft" | "send") => {
     const current = dictation.current;
     if (!current) return;
@@ -92,10 +89,7 @@ export function Voice({ textarea, held = null, send }: { textarea: RefObject<HTM
       const cursor = el?.selectionStart ?? 0;
       const next = insertTranscript(el?.value ?? "", cursor, text);
       const inserted = el !== null && insertAtCursor(el, next.draft.slice(cursor, next.cursor));
-      // A drawer can make the composer inert. Keep the words as selectable
-      // plain text, visible when the drawer closes, instead of discarding them.
       setState({ notice: inserted ? null : `Transcript kept. Copy it into your draft: ${text}` });
-      // sent once the composer has drawn the words, so Send judges the draft as it is now
       // oxlint-disable-next-line gates/timer-needs-reason -- one task later, so the composer has drawn the inserted words before Send reads the draft
       if (inserted && then === "send") setTimeout(() => send?.(), 0);
     } catch (e) {
@@ -117,8 +111,7 @@ export function Voice({ textarea, held = null, send }: { textarea: RefObject<HTM
     let recorderFailed = false;
     const release = () => stream?.getTracks().forEach((track) => track.stop());
     try {
-      // Ask for permission on this press while the small capture chunk loads.
-      // A cancelled or failed import still releases a late microphone stream.
+      // why: permission is asked on this press while the capture chunk loads; a late stream is released.
       const microphone = navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }, video: false }).then((mic) => {
         if (!valid(current)) mic.getTracks().forEach((track) => track.stop());
         else { stream = mic; controller.signal.addEventListener("abort", release, { once: true }); }
@@ -134,16 +127,15 @@ export function Voice({ textarea, held = null, send }: { textarea: RefObject<HTM
       recording.current = audio; time(0); state("listening");
     } catch (e) {
       controller.signal.removeEventListener("abort", release);
-      stream?.getTracks().forEach((track) => track.stop());
+      release();
       if (!valid(current)) return;
       dictation.current = null;
       capture.current = null;
       state("idle");
       const name = e instanceof DOMException ? e.name : "";
-      setState({ notice: name === "NotAllowedError" ? "Microphone permission was denied. Allow microphone access for Gates Local, then retry." : name === "NotFoundError" ? "No microphone found. Connect one, then retry." : recorderFailed ? "Dictation could not load. Reload Gates Local, then retry." : "The microphone could not start. Check that it is connected and available, then retry." });
+      setState({ notice: name === "NotAllowedError" ? "Microphone permission was denied. Allow microphone access for Gates Local, then retry." : name === "NotFoundError" ? "No microphone found. Connect one, then retry." : recorderFailed ?"Dictation could not load. Reload Gates Local, then retry." : "The microphone could not start. Check that it is connected and available, then retry." });
     }
   };
-  // Talk mode: a hold talks, letting go sends; the reply being read stops at once
   const holdStart = (how: "pointer" | "space") => {
     if (phaseRef.current !== "idle") return;
     holding.current = how; pressedAt.current = performance.now();
@@ -157,42 +149,35 @@ export function Voice({ textarea, held = null, send }: { textarea: RefObject<HTM
     else if (phaseRef.current === "listening") void finish("send");
     else cancel();
   };
-  /** Space talks from an empty message box, or with nothing else focused, while the chat is on top. */
   const spaceTalks = () => {
-    const s = getState();
     const at = document.activeElement;
-    return getDraft().text === "" && (at === textarea.current || at === document.body) && !overChat(s.view) && s.panel === null;
+    return getDraft().text === "" && (at === textarea.current || at === document.body) && chatOnTop(getState());
   };
   // oxlint-disable-next-line gates/effect-needs-reason -- window key listeners for hold-to-talk, put back after each render so they stay last in the capture order, as they always have
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       const plain = !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey;
       if (e.key === "Escape" && phaseRef.current !== "idle") { e.preventDefault(); e.stopImmediatePropagation(); cancel(); }
-      // held Space repeats: none of them types a space
+      // why: a held Space repeats, and none of the repeats types a space.
       else if (e.code === "Space" && holding.current === "space") e.preventDefault();
       else if (talking && held === null && e.code === "Space" && plain && !e.repeat && phaseRef.current === "idle" && spaceTalks()) { e.preventDefault(); holdStart("space"); }
-      // under Settings or a pop-up the chat is kept but hidden: dictation would type into a draft nobody sees
-      else if (e.code === "Space" && e.ctrlKey && e.shiftKey && !e.repeat && !overChat(getState().view) && getState().panel === null) {
+      else if (e.code === "Space" && e.ctrlKey && e.shiftKey && !e.repeat && chatOnTop(getState())) {
         e.preventDefault();
         if (held === null) void toggle();
         else setState({ notice: held });
       }
     };
     const up = (e: KeyboardEvent) => { if (e.code === "Space" && holding.current === "space") { e.preventDefault(); holdEnd(); } };
-    // the window lost focus mid-hold: its key-up never comes here, so nothing is sent
+    // external: a browser sends the key-up of a held key to whichever window has focus by then, so a hold the window lost is never let go here.
     const away = () => { if (holding.current !== null) cancel(); };
     window.addEventListener("keydown", key, true);
     window.addEventListener("keyup", up, true);
     window.addEventListener("blur", away);
     return () => { window.removeEventListener("keydown", key, true); window.removeEventListener("keyup", up, true); window.removeEventListener("blur", away); };
   });
-  // Only the microphone shows; the state is its colour (amber asking, green
-  // listening) or a spinner, and the words live in the tooltip, the label and
-  // a hidden status line. Seconds stay out of data-tip: a changing tip closes.
   const status = phase === "listening" ? "Listening" : phase === "transcribing" ? "Transcribing" : phase === "asking" ? "Waiting for microphone permission" : "";
-  // The tip names the button and its key, as the app's other tips do. Not set up, the click opens Settings;
-  // a browser that cannot record says so in the notice the click shows.
-  const tip = talking ? (phase === "listening" ? "Listening · Esc"
+  // why: the seconds stay out of the tip, as a tip that changes closes.
+  const tip =talking ? (phase === "listening" ? "Listening · Esc"
     : phase === "transcribing" ? "Transcribing · Esc"
     : phase === "asking" ? "Allow the microphone · Esc"
     : "Hold to talk · Space")
@@ -203,11 +188,11 @@ export function Voice({ textarea, held = null, send }: { textarea: RefObject<HTM
   const name = talking ? (phase === "listening" ? "Talk, listening" : phase === "transcribing" ? "Talk, transcribing" : phase === "asking" ? "Talk, waiting for microphone permission" : "Talk")
     : phase === "listening" ? "Stop dictation" : phase === "transcribing" ? "Dictate, transcribing" : phase === "asking" ? "Dictate, waiting for microphone permission" : "Dictate";
   const click = (e?: { detail?: number }) => {
-    // detail 0 (or none) is a keyboard press, never the tail of a double-click
+    // external: a browser counts the clicks of a pointer in `detail` (2 for the second of a double-click) and gives a keyboard press 0.
     const detail = e?.detail ?? 0;
-    // talk mode: a pointer press was the hold itself; a keyboard press starts and then sends
+    // why: in talk mode a pointer press was the hold itself; a keyboard press starts and then sends.
     if (talking && detail > 0) return;
-    if (detail > 1 || (detail === 1 && performance.now() - shownAt.current < 400)) return;
+    if (detail > 1 || (detail === 1 && performance.now() - shownAt.current < DOUBLE_CLICK_MS)) return;
     void toggle();
   };
   if (held !== null) return null;
@@ -227,7 +212,6 @@ export function Voice({ textarea, held = null, send }: { textarea: RefObject<HTM
   </button>;
 }
 
-/** Talk mode's speaker, beside the microphone: replies are read aloud while it is on, and turning it off stops the voice now. */
 export function Speaker() {
   const { speak } = useTalk();
   const voice = useLocalVoice();
