@@ -26,6 +26,7 @@ import { type Answerer, LIVE_QUESTION, modelChanges } from "./model-change.ts";
 import { ModelChange } from "./ModelChange.tsx";
 import { useNow } from "../lib/ui/kit/now.ts";
 import { whenIdle } from "../lib/ui/kit/idle.ts";
+import { frameLoop } from "../lib/ui/kit/frame.ts";
 
 const EMPTY: readonly Message[] = [];
 const NO_TOOLS: readonly ToolStep[] = [];
@@ -794,22 +795,15 @@ export function Timeline({ threadId }: { threadId: string }) {
     });
   };
 
-  // oxlint-disable-next-line gates/effect-needs-reason -- the view's scroll position, set to the end before the opened thread first paints
-  useLayoutEffect(() => {
-    const el = tl.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-      own.current = el.scrollTop;
-    }
+  // why: a thread opens at its end before it paints; each thread mounts its own view
+  const follow = useRef((el: HTMLDivElement | null) => {
+    tl.current = el;
+    const c = col.current;
+    if (el === null || c === null) return undefined;
+    el.scrollTop = el.scrollHeight;
+    own.current = el.scrollTop;
     stick.current = true;
     toggled.current = false;
-  }, [threadId]);
-
-  // oxlint-disable-next-line gates/effect-needs-reason -- the view's scroll, its size and the reader's disclosures, kept in step with following the end
-  useEffect(() => {
-    const el = tl.current;
-    const c = col.current;
-    if (!el || !c) return;
     const atEnd = () => el.scrollHeight - el.scrollTop - el.clientHeight < (toggled.current ? 2 : 120);
     const onScroll = () => {
       if (Math.abs(el.scrollTop - own.current) > 1) {
@@ -821,13 +815,14 @@ export function Timeline({ threadId }: { threadId: string }) {
       if (el.scrollTop < el.clientHeight) grow(SLICE_TURNS);
     };
     let held: { at: Element; top: number; until: number } | null = null;
-    const keep = () => {
-      if (held === null) return;
-      if (performance.now() > held.until || !held.at.isConnected) { held = null; stick.current = atEnd(); return; }
+    let ease: (() => void) | undefined;
+    // why: each frame of a disclosure's ease holds the page under it still
+    const keep = (): boolean => {
+      if (held === null) return false;
+      if (performance.now() > held.until || !held.at.isConnected) { held = null; stick.current = atEnd(); return false; }
       el.scrollTop += held.at.getBoundingClientRect().top - held.top;
       own.current = el.scrollTop;
-      // oxlint-disable-next-line gates/timer-needs-reason -- every frame of the disclosure's ease, so the page under it does not shift
-      requestAnimationFrame(keep);
+      return true;
     };
     const onToggle = (e: Event) => {
       if (e instanceof KeyboardEvent && e.key !== "Enter" && e.key !== " ") return;
@@ -838,8 +833,7 @@ export function Timeline({ threadId }: { threadId: string }) {
       stick.current = atEnd();
       own.current = el.scrollTop;
       held = { at: disclosure, top: disclosure.getBoundingClientRect().top, until: performance.now() + 400 };
-      // oxlint-disable-next-line gates/timer-needs-reason -- the first frame of the disclosure's ease
-      if (start) requestAnimationFrame(keep);
+      if (start) ease = frameLoop(keep);
     };
     const ro = new ResizeObserver(() => {
       if (!stick.current || held !== null) return;
@@ -852,15 +846,17 @@ export function Timeline({ threadId }: { threadId: string }) {
     c.addEventListener("click", onToggle, true);
     c.addEventListener("keydown", onToggle, true);
     return () => {
+      tl.current = null;
+      ease?.();
       ro.disconnect();
       el.removeEventListener("scroll", onScroll);
       c.removeEventListener("click", onToggle, true);
       c.removeEventListener("keydown", onToggle, true);
     };
-  }, [grow, note]);
+  }).current;
 
   return (
-    <div className="tl" ref={tl} aria-busy={loading && loadError === undefined}>
+    <div className="tl" ref={follow} aria-busy={loading && loadError === undefined}>
       <div className={messages.length >= LONG_THREAD ? "col long" : "col"} ref={col}>
         {loading && loadError === undefined ? <TurnSkel /> : null}
         {before > 0 ? (

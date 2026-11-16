@@ -1,5 +1,6 @@
-import { type ReactNode, memo, useEffect, useRef } from "react";
+import { type ReactNode, memo, useCallback, useRef } from "react";
 import { useCopy } from "../lib/ui/copy.ts";
+import { observeBox } from "../lib/ui/kit/events.ts";
 import { isPageDoc, linkKey, mayBePage } from "@gates-local/contracts";
 import { Icon } from "../lib/ui/icons.tsx";
 import { PageChip, WritingChip } from "../pages/PageChip.tsx";
@@ -160,27 +161,19 @@ export function inline(text: string, partial = false, allowedLinks?: ReadonlySet
   return out;
 }
 
+function markEdges(el: HTMLElement): void {
+  const sides = [el.scrollLeft > 1 ? "start" : "", el.scrollLeft < el.scrollWidth - el.clientWidth - 1 ? "end" : ""].filter((x) => x !== "").join(" ");
+  if (sides === "") delete el.dataset.more;
+  else el.dataset.more = sides;
+}
+
+// why: a new callback per content, so a block whose content changes is read again
 function useEdges<T extends HTMLElement>(content: unknown) {
-  const ref = useRef<T>(null);
-  // oxlint-disable-next-line gates/effect-needs-reason -- the block's sideways scroll and size, kept in step with its edge marks
-  useEffect(() => {
-    const el = ref.current;
+  return useCallback((el: T | null) => {
     // why: reading the size here would lay out every block of a long thread at once
-    if (el === null || !window.matchMedia("(max-width: 1023px)").matches) return;
-    const mark = () => {
-      const sides = [el.scrollLeft > 1 ? "start" : "", el.scrollLeft < el.scrollWidth - el.clientWidth - 1 ? "end" : ""].filter((x) => x !== "").join(" ");
-      if (sides === "") delete el.dataset.more;
-      else el.dataset.more = sides;
-    };
-    el.addEventListener("scroll", mark, { passive: true });
-    const seen = new ResizeObserver(mark);
-    seen.observe(el);
-    return () => {
-      el.removeEventListener("scroll", mark);
-      seen.disconnect();
-    };
+    if (el === null || !window.matchMedia("(max-width: 1023px)").matches) return undefined;
+    return observeBox(el, () => markEdges(el), { atOnce: false });
   }, [content]);
-  return ref;
 }
 
 function CodeBlock({ lang, code }: { lang: string; code: string }) {

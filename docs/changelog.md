@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-16: the thread, its reveal and Pictures follow the store instead of their effects
+
+- A thread opens at its end before it paints and follows the end from
+  its view's ref. A disclosure's ease stops when the thread goes, where
+  it could run on for up to 400 ms.
+- A reply's reveal runs on animation frames only while words are held
+  back, and one that starts after a pause no longer jumps ahead by the
+  pause.
+- Code blocks and tables on a narrow window read their sideways edges
+  from their ref, first through their size observer.
+- Pictures reads its sheet from its ref, asks for the next page as you
+  scroll near the end, and keeps the pick in view.
+- Window effects and timers: 40 to 27.
+
 ## 2026-11-16: settings, sidebar, pages and Measure follow the store instead of their effects
 
 - The sidebar's thread list reads its fade edges again on scroll, resize

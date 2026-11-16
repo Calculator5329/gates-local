@@ -44,3 +44,12 @@ it("a box watched without content takes no content watcher", () => {
   observeBox(new EventTarget() as unknown as HTMLElement, vi.fn())();
   expect(made.map((m) => m.kind)).toEqual(["size"]);
 });
+
+it("a box watched not at once is first read by its size observer", () => {
+  const made = watchers();
+  const changed = vi.fn();
+  observeBox(new EventTarget() as unknown as HTMLElement, changed, { atOnce: false });
+  expect(changed).not.toHaveBeenCalled();
+  made[0]!.call();
+  expect(changed).toHaveBeenCalledTimes(1);
+});

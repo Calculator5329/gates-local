@@ -65,6 +65,11 @@ beforeAll(async () => {
     removeEventListener: (type: string, fn: (e: unknown) => void) => { const i = keyListeners.indexOf(fn); if (type === "keydown" && i >= 0) keyListeners.splice(i, 1); },
   });
   Object.assign(FakeElement.prototype, { closest });
+  // The sheet listens for its own scroll, as a browser element does; scrollTo fires it.
+  Object.assign(FakeElement.prototype, {
+    addEventListener(this: FakeElement, type: string, fn: () => void) { if (type === "scroll") scrollers.set(this, fn); },
+    removeEventListener(this: FakeElement, type: string) { if (type === "scroll") scrollers.delete(this); },
+  });
   const create = doc.createElement.bind(doc);
   doc.createElement = (tag: string) => Object.assign(create(tag), { clientHeight: h.height });
   Object.defineProperty(FakeElement.prototype, "clientWidth", { configurable: true, get: () => h.width });
@@ -88,11 +93,14 @@ beforeAll(async () => {
 afterAll(() => {
   act(() => root.unmount());
   delete (FakeElement.prototype as Partial<{ closest: unknown }>).closest;
+  delete (FakeElement.prototype as Partial<{ addEventListener: unknown }>).addEventListener;
+  delete (FakeElement.prototype as Partial<{ removeEventListener: unknown }>).removeEventListener;
   delete (FakeElement.prototype as Partial<{ clientWidth: unknown }>).clientWidth;
   Object.defineProperty(FakeElement.prototype, "classList", classes);
   vi.unstubAllGlobals();
 });
 
+const scrollers = new Map<FakeElement, () => void>();
 const settle = async () => { for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); }); };
 /** Opens the screen on these pictures, the newest picked. */
 async function open(list: readonly Picture[], more: Partial<PictureList> = {}) {
@@ -157,7 +165,7 @@ const scrollTo = async (top: number) => {
   const el = scroller();
   if (el === null) throw new Error("no sheet");
   el.scrollTop = top;
-  await act(async () => { (props(el)["onScroll"] as (e: unknown) => void)({ currentTarget: el }); });
+  await act(async () => { scrollers.get(el)?.(); });
   await settle();
 };
 const topOf = (el: FakeElement | null) => Number.parseFloat(String(el?.style["top"]));
@@ -338,6 +346,14 @@ describe("picking tiles", () => {
     await click(tile("p1"), { ctrlKey: true });
     expect(sel()).toEqual(["p1"]);
   });
+});
+
+it("the pictures list hears the screen is on show while it is drawn, and not once it goes", async () => {
+  const shown = vi.spyOn(pictures, "shown");
+  await open(many(3));
+  expect(shown.mock.calls).toEqual([[true]]);
+  act(() => root.render(null));
+  expect(shown.mock.calls).toEqual([[true], [false]]);
 });
 
 describe("where the sheet scrolls", () => {

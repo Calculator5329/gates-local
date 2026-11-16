@@ -31,11 +31,13 @@ export function useDismiss(ref: RefObject<HTMLElement | null>, open: boolean, cl
 export interface BoxOptions {
   readonly also?: readonly Element[];
   readonly content?: boolean;
+  readonly atOnce?: boolean;
 }
 
 // why: a ref callback's body; content changes a box's scroll length with no resize
 export function observeBox(el: HTMLElement, changed: () => void, options: BoxOptions = {}): () => void {
-  changed();
+  // why: a box whose first read would lay out a long page waits for its size observer
+  if (options.atOnce !== false) changed();
   el.addEventListener("scroll", changed, { passive: true });
   const sizes = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => changed());
   for (const box of [el, ...(options.also ?? [])]) sizes?.observe(box);

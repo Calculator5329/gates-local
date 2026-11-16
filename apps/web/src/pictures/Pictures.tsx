@@ -1,6 +1,6 @@
 import "./pictures.css";
 import type { ImageChoice, Picture } from "@gates-local/contracts";
-import { type MouseEvent, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { type MouseEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { replaceDraft } from "../lib/store/drafts.ts";
 import { clock } from "../lib/words/format.ts";
 import { Icon, type IconId } from "../lib/ui/icons.tsx";
@@ -14,7 +14,7 @@ import { openDrawer } from "../sidebar/Sidebar.tsx";
 import { NA, getState, setState, useStore } from "../lib/store/store.ts";
 import { PHONE, useMedia } from "../lib/ui/ui.tsx";
 import { downloadBlob } from "../lib/ui/kit/async.ts";
-import { useDocumentEvent } from "../lib/ui/kit/events.ts";
+import { observeBox, useDocumentEvent } from "../lib/ui/kit/events.ts";
 import { useFlash } from "../lib/ui/kit/flash.ts";
 import { requestFocus } from "../lib/ui/kit/focus.ts";
 
@@ -281,74 +281,76 @@ function TileRow({ row, list, sel, multi, onPick }: { row: Extract<Row, { kind: 
   );
 }
 
+// why: asks for the next page while the window is within MORE_AT of the sheet's end
+function askNearEnd(el: HTMLElement, height: number, next: string | undefined): void {
+  if (next !== undefined && el.clientHeight > 0 && el.scrollTop + el.clientHeight > height - MORE_AT) void pictures.more();
+}
+
+// why: a page joining the top keeps the rows on screen where they were
+function holdPlace(el: HTMLElement, before: { list: readonly Picture[]; sheet: Sheet }, list: readonly Picture[], sheet: Sheet): void {
+  if (before.list === list || before.list[0]?.jobId === list[0]?.jobId || el.scrollTop === 0) return;
+  const top = el.scrollTop;
+  const row = before.sheet.rows.find((r) => r.kind === "tiles" && r.y >= top);
+  if (row === undefined || row.kind !== "tiles") return;
+  const id = before.list[row.tiles[0]!.index]?.jobId;
+  const y = yOf(sheet, list.findIndex((p) => p.jobId === id));
+  if (y !== undefined) el.scrollTop = top + (y - row.y);
+}
+
+function showPick(el: HTMLElement, list: readonly Picture[], sheet: Sheet, last: string | undefined): void {
+  if (last === undefined) return;
+  const at = list.findIndex((p) => p.jobId === last);
+  const row = sheet.rows.find((r) => r.kind === "tiles" && r.tiles.some((t) => t.index === at));
+  if (row === undefined) return;
+  if (row.y < el.scrollTop) el.scrollTop = Math.max(0, row.y - DAY_H);
+  else if (row.y + row.h > el.scrollTop + el.clientHeight) el.scrollTop = row.y + row.h - el.clientHeight + GAP;
+}
+
+type Drawn = { list: readonly Picture[]; sheet: Sheet; q: string; last: string | undefined; next: string | undefined };
+
 function SheetView({ list, sel, phone, q, next }: { list: readonly Picture[]; sel: readonly string[]; phone: boolean; q: string; next: string | undefined }) {
-  const scroller = useRef<HTMLDivElement>(null);
   const rowsBox = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
   const anchor = useRef<string | null>(null);
+  const prev = useRef<Drawn | null>(null);
   const [width, setWidth] = useState(0);
   const [win, setWin] = useState({ top: 0, h: 0 });
-  // oxlint-disable-next-line gates/effect-needs-reason -- measures the drawn sheet and follows its size with an observer for as long as it is mounted
-  useLayoutEffect(() => {
-    const el = scroller.current;
+  // why: read as the sheet is drawn, then on scroll and resize; the rows box, a child, is set first
+  const watch = useRef((el: HTMLDivElement | null) => {
+    scroller.current = el;
     const box = rowsBox.current;
-    if (el === null || box === null) return;
-    const measure = () => {
+    if (el === null || box === null) return undefined;
+    return observeBox(el, () => {
       setWidth(box.clientWidth);
       setWin({ top: el.scrollTop, h: el.clientHeight });
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(box);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+      const drawn = prev.current;
+      if (drawn !== null) askNearEnd(el, drawn.sheet.height, drawn.next);
+    }, { also: [box] });
+  }).current;
   const sheet: Sheet = useMemo(
     () => layoutSheet(list, { width, target: phone ? Math.max(90, Math.floor(width / 3)) : ROW_H, gap: GAP, dayH: phone ? PHONE_DAY_H : DAY_H }),
     [list, width, phone],
   );
 
-  const prev = useRef<{ list: readonly Picture[]; sheet: Sheet; q: string } | null>(null);
-  // oxlint-disable-next-line gates/effect-needs-reason -- corrects the scroll offset against the new layout before the browser paints it
+  const last = sel.at(-1);
+  // oxlint-disable-next-line gates/effect-needs-reason -- corrects the scroll against the new layout before paint, then keeps the pick in view and asks for more near the end
   useLayoutEffect(() => {
     const el = scroller.current;
     const before = prev.current;
-    prev.current = { list, sheet, q };
-    if (el === null || before === null) return;
-    if (before.q !== q) {
-      el.scrollTop = 0;
-      return;
-    }
-    if (before.list === list || before.list[0]?.jobId === list[0]?.jobId || el.scrollTop === 0) return;
-    const top = el.scrollTop;
-    const row = before.sheet.rows.find((r) => r.kind === "tiles" && r.y >= top);
-    if (row === undefined || row.kind !== "tiles") return;
-    const id = before.list[row.tiles[0]!.index]?.jobId;
-    const y = yOf(sheet, list.findIndex((p) => p.jobId === id));
-    if (y !== undefined) el.scrollTop = top + (y - row.y);
-  }, [list, sheet, q]);
-
-  // oxlint-disable-next-line gates/effect-needs-reason -- the window's place comes from scrolling and resizing as well as from new pages; asks once per change
-  useEffect(() => {
-    if (next !== undefined && win.h > 0 && win.top + win.h > sheet.height - MORE_AT) void pictures.more();
-  }, [next, win, sheet.height]);
-
-  const last = sel.at(-1);
-  // oxlint-disable-next-line gates/effect-needs-reason -- scrolls the drawn sheet to the pick, which moves from keys, clicks and a page landing alike
-  useEffect(() => {
-    const el = scroller.current;
-    if (el === null || last === undefined) return;
-    const at = list.findIndex((p) => p.jobId === last);
-    const row = sheet.rows.find((r) => r.kind === "tiles" && r.tiles.some((t) => t.index === at));
-    if (row === undefined) return;
-    if (row.y < el.scrollTop) el.scrollTop = Math.max(0, row.y - DAY_H);
-    else if (row.y + row.h > el.scrollTop + el.clientHeight) el.scrollTop = row.y + row.h - el.clientHeight + GAP;
-  }, [last, list, sheet]);
+    prev.current = { list, sheet, q, last, next };
+    if (el === null) return;
+    if (before !== null && before.q !== q) el.scrollTop = 0;
+    else if (before !== null) holdPlace(el, before, list, sheet);
+    if (before === null || before.last !== last || before.list !== list || before.sheet !== sheet) showPick(el, list, sheet, last);
+    // why: a sheet laid out before its width is read has no true height to ask against
+    if (width > 0 && (before === null || before.next !== next || before.sheet.height !== sheet.height)) askNearEnd(el, sheet.height, next);
+  }, [list, sheet, q, last, next]);
 
   const selected = useMemo(() => new Set(sel), [sel]);
   const shown = rowsIn(sheet, win.top - OVERDRAW, win.top + win.h + OVERDRAW);
   const onPick = (id: string, e: MouseEvent) => pick(list, id, e, anchor, phone);
   return (
-    <div className="pics-sheet" ref={scroller} onScroll={(e) => setWin({ top: e.currentTarget.scrollTop, h: e.currentTarget.clientHeight })}>
+    <div className="pics-sheet" ref={watch}>
       <div className="pics-rows" ref={rowsBox} style={{ height: sheet.height }}>
         {shown.map((r) =>
           r.kind === "day" ? (
@@ -426,6 +428,13 @@ function Empty({ status, q }: { status: PicturesView["status"]; q: string }) {
   );
 }
 
+// why: the pictures list knows the screen is on show for exactly as long as its root is drawn
+function onShow(el: HTMLDivElement | null): (() => void) | undefined {
+  if (el === null) return undefined;
+  pictures.shown(true);
+  return () => pictures.shown(false);
+}
+
 export function Pictures() {
   const phone = useMedia(PHONE);
   const list = usePictures((v) => v.pictures);
@@ -437,12 +446,6 @@ export function Pictures() {
   const byId = useMemo(() => new Map(list.map((p) => [p.jobId, p])), [list]);
   const picked = useMemo(() => sel.map((id) => byId.get(id)).filter((p) => p !== undefined), [sel, byId]);
   const one = picked.length === 1 ? picked[0] : undefined;
-
-  // oxlint-disable-next-line gates/effect-needs-reason -- tells the pictures list the screen is on show for exactly as long as it is mounted
-  useEffect(() => {
-    pictures.shown(true);
-    return () => pictures.shown(false);
-  }, []);
 
   useDocumentEvent("keydown", (e) => {
     const t = e.target instanceof HTMLElement ? e.target : null;
@@ -460,7 +463,7 @@ export function Pictures() {
   });
 
   return (
-    <div className="pics">
+    <div className="pics" ref={onShow}>
       <Bar phone={phone} />
       <div className="pics-body">
         <div className="pics-main">

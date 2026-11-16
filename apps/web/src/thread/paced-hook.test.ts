@@ -22,6 +22,12 @@ const hooks = vi.hoisted(() => {
       if (!(i in slots)) slots[i] = subscribe(() => {});
       return snapshot();
     },
+    useEffectEvent(fn: (...args: unknown[]) => unknown) {
+      const i = cursor++;
+      const slot = (slots[i] ??= { fn, call: (...args: unknown[]) => slot.fn(...args) }) as { fn: typeof fn; call: typeof fn };
+      slot.fn = fn;
+      return slot.call;
+    },
     useEffect(setup: () => void | (() => void), deps: unknown[]) {
       const i = cursor++;
       const old = effects[i];
@@ -151,4 +157,16 @@ it("one change of the reduced-motion setting reaches every reply that paces", as
   } finally {
     act(() => root.unmount());
   }
+});
+
+it("a reveal that starts after a pause counts its time from then, not from its last frame", () => {
+  const said = "A first reply. ";
+  expect(render(said, false)).toBe(said);
+  vi.mocked(performance.now).mockReturnValue(5000);
+  const more = said + "Then a long second part that keeps arriving.";
+  expect(render(more)).toBe(said);
+  frame(5016);
+  const added = render(more).length - said.length;
+  expect(added, "one frame's worth, not five seconds'").toBeGreaterThan(0);
+  expect(added).toBeLessThan(10);
 });

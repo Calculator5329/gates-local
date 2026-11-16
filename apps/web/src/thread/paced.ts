@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
+import { useAnimationFrame } from "../lib/ui/kit/frame.ts";
+import { useChange } from "../lib/ui/kit/popover.ts";
 
 export interface Pace {
   shown: number;
@@ -69,33 +71,19 @@ export function usePacedText(text: string, streaming: boolean): string {
   const pace = useRef<Pace | null>(null);
   pace.current ??= createPace(text.length, performance.now());
   const state = pace.current;
-  const latest = useRef({ text, streaming });
-  latest.current = { text, streaming };
-  const raf = useRef(0);
-  // oxlint-disable-next-line gates/effect-needs-reason -- the reveal's frame loop, kept in step with the words received and the reduced-motion setting
-  useEffect(() => {
-    if (reduced) {
-      cancelAnimationFrame(raf.current);
-      raf.current = 0;
-      Object.assign(state, createPace(text.length, performance.now()), { finish: undefined });
-      setShown(text);
-      return;
-    }
-    const tick = (now: number) => {
-      raf.current = 0;
-      const value = latest.current;
-      const cut = graphemeCut(value.text, advancePace(state, value.text.length, value.streaming, now));
-      setShown(value.text.slice(0, cut));
-      // oxlint-disable-next-line gates/timer-needs-reason -- the next frame of the reveal, while words are still held back
-      if (cut < value.text.length) raf.current = requestAnimationFrame(tick);
-    };
-    if (raf.current === 0 && state.shown !== text.length) {
-      state.at = performance.now();
-      // oxlint-disable-next-line gates/timer-needs-reason -- the reveal starts on the next frame once new words wait
-      raf.current = requestAnimationFrame(tick);
-    }
-  }, [text, streaming, reduced]);
-  // oxlint-disable-next-line gates/effect-needs-reason -- stops the reveal's frame loop when the reply unmounts
-  useEffect(() => () => { cancelAnimationFrame(raf.current); raf.current = 0; }, []);
+  const active = !reduced && state.shown !== text.length;
+  // why: each arrival under reduced motion is shown whole, and the pace starts again from it
+  useChange(reduced ? text : null, (now) => {
+    if (now === null) return;
+    Object.assign(state, createPace(now.length, performance.now()), { finish: undefined });
+    setShown(now);
+  });
+  // why: a reveal that starts after a pause counts its time from now, not from its last frame
+  useChange(active, (on) => { if (on) state.at = performance.now(); });
+  // why: the reveal's frames while words are held back; a render with all of them shown ends it
+  useAnimationFrame((now) => {
+    setShown(text.slice(0, graphemeCut(text, advancePace(state, text.length, streaming, now))));
+    return true;
+  }, active);
   return reduced ? text : text.startsWith(shown) ? shown : "";
 }
