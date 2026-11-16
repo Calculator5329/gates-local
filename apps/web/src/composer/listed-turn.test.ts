@@ -206,3 +206,26 @@ it("a list that no longer names a reply on its way drops it and its turn, with n
   expect(store.getState().turns, "no longer listed: it goes").toEqual({});
   expect(store.getState().replies.size).toBe(0);
 });
+
+it("a list of replies that fails to read leaves the words to come in as they arrive, not held for a list that will not come", async () => {
+  const b = installBrowser();
+  b.server.answer("reply.list", () => { throw { code: "internal", message: "the list failed" }; });
+  b.server.answer("threads.get", ({ threadId }) => ({ thread: { id: threadId, title: threadId, createdAt: 1, updatedAt: 1 }, messages: [] }));
+  vi.resetModules();
+  const session = await import("../lib/session/index.ts");
+  const store = await import("../lib/store/store.ts");
+  const disconnect = session.connect();
+  try {
+    await until(() => store.getState().imageStatus !== undefined);
+    session.openThread("A");
+    await tick();
+    b.server.push("reply.changed", { kind: "is", reply: { id: "other", threadId: "A", rev: 2, questionId: "q", model: "qwen3.5:9b", startedAt: 1, workMs: 0, toolMs: 0, try: 1, spans: [], callsAt: {}, stage: "writing" } });
+    b.server.push("reply.words", { id: "other", part: { type: "text", from: 0, text: "First words" } });
+    await tick(); b.frame();
+    expect(store.getState().turns.A?.text).toBe("First words");
+  } finally {
+    disconnect(); b.server.accepting = false;
+    for (const socket of b.server.sockets) socket.close();
+    await tick();
+  }
+});

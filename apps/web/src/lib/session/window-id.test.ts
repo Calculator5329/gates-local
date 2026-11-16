@@ -66,3 +66,10 @@ it.each([["has no Web Locks", undefined], ["refuses the lock request", refused]]
   const own = await claimWindow(fakeStorage("a"), locks, copy, make);
   expect(own).not.toBe("a");
 });
+
+it.each([["has no Web Locks", undefined], ["refuses the lock request", refused]])("two tabs on a page that %s, opened at once with the same copied window, end with one each", async (_, locks) => {
+  const [one, two] = tabs(2);
+  const ids = await Promise.all([claimWindow(fakeStorage("a"), locks, one, make), claimWindow(fakeStorage("a"), locks, two, make)]);
+  expect(ids).toContain("a");
+  expect(new Set(ids).size).toBe(2);
+});

@@ -7,7 +7,7 @@ export interface Locks {
 
 export type Tabs = Pick<BroadcastChannel, "postMessage" | "addEventListener" | "removeEventListener">;
 
-type Said = { readonly ask?: string; readonly taken?: string };
+type Said = { readonly ask?: string; readonly by?: string; readonly taken?: string; readonly to?: string };
 const said = (data: unknown): Said => (typeof data === "object" && data !== null ? data : {});
 
 function hold(locks: Locks, id: string): Promise<boolean | undefined> {
@@ -23,14 +23,22 @@ function hold(locks: Locks, id: string): Promise<boolean | undefined> {
 // why: without a lock, a tab that holds the window answers when asked
 function unclaimed(tabs: Tabs | undefined, id: string): Promise<boolean> {
   if (tabs === undefined) return Promise.resolve(true);
+  const me = crypto.randomUUID();
   return new Promise((answered) => {
-    const heard = (e: MessageEvent) => { if (said(e.data).taken === id) done(false); };
+    const heard = (e: MessageEvent) => {
+      const m = said(e.data);
+      if (m.taken === id && m.to === me) return done(false);
+      // why: two tabs asking for one window at once: the lower ask keeps it, so exactly one does
+      const lower = m.ask === id && m.by !== undefined && m.by > me;
+      // oxlint-disable-next-line unicorn/require-post-message-target-origin -- a BroadcastChannel reaches only this origin and takes no target
+      if (lower) tabs.postMessage({ taken: id, to: m.by });
+    };
     const done = (open: boolean) => { clearTimeout(timer); tabs.removeEventListener("message", heard); answered(open); };
     // oxlint-disable-next-line gates/timer-needs-reason -- a limit on a real wait: an open tab answers within a few ms, silence means none holds it
     const timer = setTimeout(() => done(true), ASK_MS);
     tabs.addEventListener("message", heard);
     // oxlint-disable-next-line unicorn/require-post-message-target-origin -- a BroadcastChannel reaches only this origin and takes no target
-    tabs.postMessage({ ask: id });
+    tabs.postMessage({ ask: id, by: me });
   });
 }
 
@@ -48,8 +56,9 @@ export async function claimWindow(storage: Pick<Storage, "getItem" | "setItem"> 
   if (id !== kept && !await free(locks, undefined, id)) id = make();
   const mine = id;
   tabs?.addEventListener("message", (e) => {
+    const m = said(e.data);
     // oxlint-disable-next-line unicorn/require-post-message-target-origin -- a BroadcastChannel reaches only this origin and takes no target
-    if (said(e.data).ask === mine) tabs.postMessage({ taken: mine });
+    if (m.ask === mine) tabs.postMessage({ taken: mine, to: m.by });
   });
   try { storage?.setItem(KEY, id); } catch {}
   return id;

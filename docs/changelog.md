@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-16: two tabs opened at once keep separate windows, and a failed list of replies no longer stops the words
+
+- On a page without Web Locks, two tabs that start at the same moment with the same copied window settle it between them: one keeps the window and the other takes its own.
+- When the list of replies cannot be read after a connect, a reply's words come in as they arrive instead of waiting for a list that will not come.
+
 ## 2026-11-16: two roadmap items from the 0.2.5 release review
 
 - The fit check's offer that never reaches the window, and Pictures scrolling back to the pick when a new picture arrives, are on the roadmap. Both were already in 0.2.4.

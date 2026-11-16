@@ -120,7 +120,7 @@ const chat = createChat({ applyServerEvent,
   openThread: (threadId) => openThread(threadId), blockingFor,
 });
 export const { send, confirmStopAsk, stop, retry, sendQueuedNow, cancelQueuedEdit } = chat;
-const { onWords, lostTurn, catchUp, connected, recordChanged, replyListed, editEnded } = chat;
+const { onWords, lostTurn, catchUp, connected, recordChanged, replyListed, listMissed, editEnded } = chat;
 
 const modelsSession = createModels({ applyServerEvent,
   call, probe, act, isNA, restoreSaved,
@@ -239,6 +239,7 @@ async function hydrateWith(
   });
   if (settings !== NA && settings !== undefined) settingsSession.seedContext();
   if (replies !== undefined && replies !== NA) replyListed(replies);
+  else listMissed();
   restoreSaved();
   applyTheme(settings === NA || settings === undefined ? "system" : settings.theme);
   applyAccent(settings === NA || settings === undefined ? undefined : settings.accent);

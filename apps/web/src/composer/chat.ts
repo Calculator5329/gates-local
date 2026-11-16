@@ -632,12 +632,16 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
         void loadThread(t.threadId, true).then(leaves, leaves);
       }
     }
+    takeHeld();
+    moveOldQueue();
+  }
+
+  // why: a reply the list gave no newer words for, or a list that failed, takes what came as it came
+  function takeHeld(): void {
     listedHere = true;
     const rest = [...ahead];
     ahead.clear();
-    // why: a reply the list gave no newer words for takes what came before the list as they are
     for (const [id, parts] of rest) for (const part of parts) onWords({ id, part });
-    moveOldQueue();
   }
 
   function editEnded(id: string): void {
@@ -1060,6 +1064,6 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
 
   return {
     send, confirmStopAsk, stop, retry, sendQueuedNow, cancelQueuedEdit,
-    onWords, lostTurn, catchUp, connected, recordChanged, replyListed, editEnded,
+    onWords, lostTurn, catchUp, connected, recordChanged, replyListed, listMissed: takeHeld, editEnded,
   };
 }
