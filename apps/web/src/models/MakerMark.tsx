@@ -27,7 +27,6 @@ const paths: Partial<Record<Maker, readonly string[]>> = {
   ]
 };
 
-/** Shared monochrome treatment for the rail, model rows and composer. */
 export function MakerMark({ tag, busy = false, fallbackLabel = false }: { tag: string; busy?: boolean; fallbackLabel?: boolean }) {
  const makers = useStore(s => suggestedOf(s)?.makers);
  const maker = makerOf(tag, makers), marks = paths[maker];

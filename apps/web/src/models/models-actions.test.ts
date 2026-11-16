@@ -72,3 +72,31 @@ describe("removing a model and moving the default (MR-02)", () => {
     expect(store.set).not.toHaveBeenCalled();
   });
 });
+
+const reset = () => {
+  session.removeModel.mockReset().mockResolvedValue(null);
+  session.updateSettings.mockReset().mockResolvedValue(null);
+  store.set.mockReset();
+  store.state = { threadId: "t1", model: "alpha" };
+};
+
+describe("removing the default when nothing can take over", () => {
+  beforeEach(reset);
+
+  it("clears the saved default once the removal worked, and moves no chat", async () => {
+    expect(await removeModelAndMoveDefault("alpha", null)).toEqual({ removeErr: null, defaultErr: null });
+    expect(session.updateSettings).toHaveBeenCalledWith({ defaultModel: null });
+    expect(store.set).not.toHaveBeenCalled();
+  });
+});
+
+describe("removing the default while the open chat is on another model", () => {
+  beforeEach(reset);
+
+  it("leaves that chat on its own model", async () => {
+    store.state = { threadId: "t1", model: "gamma" };
+    await removeModelAndMoveDefault("alpha", "beta");
+    expect(session.updateSettings).toHaveBeenCalledWith({ defaultModel: "beta" });
+    expect(store.set).not.toHaveBeenCalled();
+  });
+});

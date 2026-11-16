@@ -1,7 +1,3 @@
-// How a model downloads: the bar and its detail line, the catalog rows with
-// their fit and Download or Cancel download, and any other name typed in. The
-// Models page's Download tab shows these as they are, and first run and the
-// Installed tab share the progress bar and timing words.
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { CatalogEntry, FitReport, ModelEstimate, PullProgress } from "@gates-local/contracts";
 import { suggestedOf } from "../picker/picker-models.ts";
@@ -29,15 +25,11 @@ function Progress({ p, name }: { p: PullProgress; name: string }) {
 
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
 
-/** The phone watches a download; only the computer can cancel one. */
 export const canCancelPull = (s: State): boolean => s.unavailable["models.cancelPull"] !== true;
 
-/** Completed pulls bridge the interval until the installed list arrives. */
 export function usePendingDownloads() {
   const pulls = useStore((s) => s.pulls);
   const models = useStore((s) => s.models);
-  // A completed pull stays here until the installed list arrives. Otherwise
-  // the row briefly vanishes between the two independent push messages.
   return Object.values(pulls).filter((p) => pendingDownload(p, models));
 }
 
@@ -99,16 +91,10 @@ interface DownloadActions {
   error(name: string): ActionResult;
 }
 
-/** A download's percent, 0 until Ollama has named a size. */
+// external: Ollama's pull progress has no total until it knows a layer's size
 const pctOf = (p: PullProgress) => (p.totalBytes ? Math.min(100, Math.round((p.completedBytes / p.totalBytes) * 100)) : 0);
 
-/**
- * The download button every model row shares, and first run: idle, its label is
- * the download's size; running, the same box fills with the percent and the × beside it cancels.
- * Both boxes keep their size in every state, so nothing beside them moves.
- */
 export function DlButton({ size, label, p, installed = false, disabled = false, onStart, onCancel, side }: {
-  /** The download's size as it is shown ("6.1 GB"); undefined while it is not known. */
   size: string | undefined;
   label: string;
   p?: PullProgress | undefined;
@@ -116,7 +102,6 @@ export function DlButton({ size, label, p, installed = false, disabled = false, 
   disabled?: boolean;
   onStart?: () => void;
   onCancel?: (() => void) | undefined;
-  /** What takes the × box while nothing downloads (a row menu); empty by default. */
   side?: ReactNode;
 }) {
   const pct = p ? pctOf(p) : 0;
@@ -196,7 +181,6 @@ function DlRow({ c, report, actions }: { c: CatalogEntry; report: FitReport | un
   );
 }
 
-/** A row that cannot run here: what it needs, and no button. */
 function BigRow({ c, report }: { c: CatalogEntry; report: FitReport }) {
   const name = labelOf(c);
   return (
@@ -211,7 +195,6 @@ function BigRow({ c, report }: { c: CatalogEntry; report: FitReport }) {
   );
 }
 
-/** The typed name's answer: what the server said for which name, at which context. */
 type Typed = { key: string; numCtx: number; estimate: ModelEstimate | undefined };
 
 export function CustomPull({ actions, numCtx }: { actions: DownloadActions; numCtx: number }) {
@@ -222,7 +205,6 @@ export function CustomPull({ actions, numCtx }: { actions: DownloadActions; numC
   const typedExample = useStore((s) => suggestedOf(s)?.typedExample);
   const box = useRef<HTMLDivElement>(null);
   useOutside(box, menu, () => setMenu(false));
-  // the row menu keys as the Installed menu's do: focus goes in, Escape closes the menu and not the pop-up
   // oxlint-disable-next-line gates/effect-needs-reason -- focus goes in when the menu opens, not each time a new lookup draws it again
   useEffect(() => {
     if (menu) box.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
@@ -236,8 +218,6 @@ export function CustomPull({ actions, numCtx }: { actions: DownloadActions; numC
   const answer = typed?.key === key && typed.numCtx === numCtx && tag !== "" ? typed.estimate : undefined;
   const v = answer?.fit ? verdictOf(answer.fit) : undefined;
   const big = v?.k === "no";
-  // The registry hears a typed name only on Enter or Download, never while it is typed (README,
-  // Privacy). The answer is kept for the name and context it was asked for.
   const lookUp = async (): Promise<ModelEstimate | undefined> => {
     const estimate = await estimateModel(tag, numCtx);
     setTyped({ key, numCtx, estimate });
@@ -245,18 +225,14 @@ export function CustomPull({ actions, numCtx }: { actions: DownloadActions; numC
   };
   const start = () => {
     setMenu(false);
-    // the typed name stays until the download starts (W-07)
     void actions.start(tag).then(ok => { if (ok) setName(current => current === name ? "" : current); });
   };
-  // Download asks first when the name has no answer yet: a name the library lacks, or one too big
-  // for this computer, stops at its line (and the ⋯ menu) as it would after Enter.
   const download = async () => {
     if (tag === "") return;
     const a = answer ?? await lookUp();
     if (a?.found === "no" || (a?.fit !== undefined && verdictOf(a.fit).k === "no")) return;
     start();
   };
-  // the line under the field: the typed name's verdict, said once, before any download
   const said = tag === "" || answer === undefined ? undefined
     : answer.found === "no" ? "Not in the Ollama library. Check the name."
     : answer.found === "unknown" ? "Couldn't read this model's size, so it is not checked."
@@ -308,11 +284,6 @@ export function CustomPull({ actions, numCtx }: { actions: DownloadActions; numC
 const installation = (s: State, key: string) => (s.models ?? []).find(m => downloadKey(m.name) === key) ??
   (s.catalog !== NA && s.catalog?.some(c => c.installed && downloadKey(c.name) === key) ? true : undefined);
 
-/**
- * While the groups wait for fit answers: one placeholder over the place both
- * groups will take, split as the server recommends, with rows shaped like
- * DlRow, so the groups land inside it and what is below stays put.
- */
 function GroupsPlaceholder({ rows, first }: { rows: number; first: number }) {
   const sizes = [first, rows - first].filter(n => n > 0);
   return (
@@ -337,14 +308,8 @@ function GroupsPlaceholder({ rows, first }: { rows: number; first: number }) {
   );
 }
 
-/** What other programs hold on the GPU right now, from the table's reading; undefined when nothing or no GPU. */
 export const othersOf = (s: Pick<State, "fitTable">) => (s.fitTable?.memory.kind === "gpu" ? s.fitTable.memory.others : undefined);
 
-/**
- * Who holds GPU memory above the card's steady baseline right now, said once under each list, never
- * in a row's mark. It is information: the rows are judged against the card's own memory, and
- * a send still judges right now.
- */
 export function othersLine(others: { programs: readonly string[]; bytes: number }): string {
   const [first, second] = others.programs;
   const who = first === undefined ? "Other programs" : others.programs.length === 1 ? first : others.programs.length === 2 ? `${first} and ${second}` : `${first} and ${others.programs.length - 1} other programs`;
@@ -354,8 +319,6 @@ export function othersLine(others: { programs: readonly string[]; bytes: number 
 export function DownloadTab() {
   const [attempts, setAttempts] = useState<Record<string, { error: ActionResult | undefined; pulls: State["pulls"]; installed: ReturnType<typeof installation>; start: boolean }>>({});
   const run = async (name: string, action: Promise<ActionResult>, start = false) => {
-    // Only the newest attempt may publish an answer, including when Cancel
-    // follows an unresolved pull.
     const key = downloadKey(name), snapshot = getState();
     const attempt: (typeof attempts)[string] = { error: undefined, pulls: snapshot.pulls, installed: installation(snapshot, key), start };
     setAttempts(s => ({ ...s, [key]: attempt }));
@@ -368,11 +331,8 @@ export function DownloadTab() {
   const numCtx = useStore((s) => s.numCtx);
   const table = useStore((s) => s.fitTable);
   const list =catalog === NA || catalog === undefined ? [] : catalog;
-  // Only a changed installation or successful progress confirms a start.
-  // Existing files and late terminal/queued pushes do not retire a new error.
-  // A failed cancel still matters while that download continues.
   const retired = (key: string, attempt: (typeof attempts)[string]) => {
-    if (attempt.error === undefined) return false; // Its RPC still owns the answer; prior progress cannot settle it.
+    if (attempt.error === undefined) return false;
     const s = getState(), now = installation(s, key), before = attempt.installed;
     return (now !== undefined && (before === undefined || (now !== true && before !== true && (now.digest !== before.digest || now.modifiedAt !== before.modifiedAt)))) ||
       (attempt.start && Object.entries(s.pulls).some(([name, p]) => downloadKey(name) === key && attempt.pulls[name] !== p &&
@@ -398,22 +358,11 @@ export function DownloadTab() {
       return attempt && !retired(key, attempt) ? attempt.error ?? null : null;
     },
   };
-  // the table's row at this context: the one source, never the catalog's own fit; judged against
-  // the card's own memory (rowOf), whatever the line above the groups says is in use
   const report = (c: CatalogEntry) => rowOf({ fitTable: table, models, numCtx }, c.name);
-  // What this context has answered for a row: the table's row, "none" when the
-  // table is in without one, undefined until a table that answers comes (an
-  // empty or unreadable one does not).
   const answer = (c: CatalogEntry): FitReport | "none" | undefined => !answers(table) ? undefined : report(c) ?? "none";
   const verdict = (c: CatalogEntry) => { const a = answer(c); return a === "none" ? undefined : a?.verdict; };
-  // Grouped once per visit and context, when every row has an answer at this
-  // context or a second has passed (a row with none is then not recommended).
-  // After that only one move happens: a row whose verdict becomes "does not
-  // fit" leaves Recommended for the rest of the visit (docs/design.md). Each
-  // row's verdict stays live.
   const runs = (c: CatalogEntry) => verdict(c) === "fits" || verdict(c) === "spills";
   const group = () => {
-    // the server's picks for this computer's tier, in the tier's order
     const rec = list.filter(c => c.recommended && runs(c)).toSorted((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
     const more = list.filter(c => !rec.includes(c));
     return { context: numCtx, recommended: rec.map(c => c.name), other: more.map(c => c.name) };
@@ -432,8 +381,6 @@ export function DownloadTab() {
   const fresh = saved !== savedGroups;
   const holding = fresh && list.length > 0 && !settled && waited !== numCtx;
   const entries = new Map(list.map(c => [c.name, c]));
-  // A row that cannot run here shows in the last group, Too big for this computer. One
-  // that leaves Recommended so never comes back this visit: should it run again, it is with the rest.
   const refuses = (c: CatalogEntry) => verdict(c) === "refuse";
   const refused = saved.recommended.filter(name => { const c = entries.get(name); return c !== undefined && refuses(c); });
   const groups = refused.length === 0 ? saved : { ...saved, recommended: saved.recommended.filter(n => !refused.includes(n)), other: [...refused, ...saved.other] };
@@ -444,17 +391,12 @@ export function DownloadTab() {
   });
   const known = new Set([...groups.recommended, ...groups.other]);
   const rec = rows(groups.recommended);
-  // Recommended had a place this visit (the placeholder drew its header, or it showed):
-  // once empty it keeps that header's height, hidden, so what is below stays put
   const [slot, setSlot] = useState<number>();
   const drewTwo = holding && list.some(c => c.recommended) && list.some(c => !c.recommended);
   if ((drewTwo || (!holding && rec.length > 0)) && slot !== numCtx) setSlot(numCtx);
   const keep = !holding && rec.length === 0 && slot === numCtx;
-  // A newly discovered model appears at the end without moving existing rows.
   const more = [...rows(groups.other), ...list.filter(c => !known.has(c.name) && !refuses(c))];
   const big = holding ? [] : list.filter(refuses);
-  // Slower is said by each row's mark alone, its orange bar and "22 / 16 GB": no line
-  // above the list, no words beside the bar.
   const others = table?.memory.kind === "gpu" ? table.memory.others : undefined;
   return (
     <>
@@ -479,7 +421,6 @@ export function DownloadTab() {
           ))}
         </Grp>
       ) : null}
-      {/* what other programs hold, said once under the models and never in a row's mark */}
       {others && list.length > 0 ? <p className="na dl-others">{othersLine(others)}</p> : null}
       <Grp title="Something else"><CustomPull actions={actions} numCtx={numCtx} /></Grp>
       {big.length > 0 ? (

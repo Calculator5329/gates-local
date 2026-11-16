@@ -1,10 +1,3 @@
-// Settings › Models: what is installed, which one is the default, and
-// downloading another. The design is the models-a4 mockup with the M3
-// council rows on top: two tabs under a sticky title, the Default card inside
-// Installed, one row menu (Use as default, Copy Ollama name, Remove…), a
-// remove dialog that says what happens, and a Download tab that is the
-// download flow as it was (ModelDownloads.tsx). The rules live in
-// models-rules.ts and the session calls in models-actions.ts.
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { ModelInfo, PullProgress } from "@gates-local/contracts";
 import { copyText } from "../lib/ui/copy.ts";
@@ -40,13 +33,11 @@ import { NA, type State, setState, useStore } from "../lib/store/store.ts";
 import { FitSkel, PHONE, closeTip, useMedia } from "../lib/ui/ui.tsx";
 import { focusFirstOf } from "../lib/ui/kit/focus.ts";
 
-/** A row's menu, as it opens: its first item takes focus. */
 const focusFirstItem = focusFirstOf("[role=menuitem]");
 
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
 const cannotSaveDefault = (s: State) => s.settings === NA || s.unavailable["settings.update"] === true;
 
-/** The memory mark against the card; the verdict's words are its name and its tip, the number says the rest. */
 function Fit({ report }: { report: TableFit | undefined }) {
   const tabled = useStore((s) => s.fitTable !== undefined);
   if (report === undefined) return tabled ? <span className="mp-fit none">–</span> : <span className="mp-fit none" aria-busy="true"><FitSkel w="120px" /></span>;
@@ -140,7 +131,6 @@ export function ModelsPage() {
       {tab === "installed" ? <Installed /> : <DownloadTab />}
     </div>
   );
-  // Wider than a phone Models is its own pop-up (App.tsx): the tabs are its header's controls, the list scrolls below.
   if (!phone) {
     return (
       <>
@@ -172,7 +162,6 @@ function Installed() {
   const settingsNA = useStore(cannotSaveDefault);
   const saved = useStore(savedDefault);
   const others = useStore(othersOf);
-  // A removal that worked but could not save the next default. Ends for good once a default is saved.
   const [note, setNote] = useState<{ removed: string; text: string } | null>(null);
   if (note !== null && noteSettled(note.removed, saved)) setNote(null);
   const notice =
@@ -191,7 +180,6 @@ function Installed() {
     );
   }
   const q = filter.trim().toLowerCase();
-  // A download starts in the same sorted slot its installed row will use.
   type ListedRow = InstalledRow | (Row & { readonly progress: PullProgress });
   const listed = sortRows<ListedRow>([...rows, ...downloads.map((progress) => ({ name: progress.name, display: nameOf(progress.name, catalog).text, chat: true, verdict: undefined, progress }))], def);
   const shown = q === "" ? listed : listed.filter((r) => r.display.toLowerCase().includes(q) || r.name.toLowerCase().includes(q));
@@ -223,7 +211,6 @@ function Installed() {
         ) : <ModelRowView key={r.name} r={r} def={shownDef} saved={saved} onRemove={(back) => setRemoving({ row: r, back })} />)}
         {shown.length === 0 ? <div className="mp-none">No installed model matches “{filter.trim()}”.</div> : null}
       </div>
-      {/* what other programs hold, said once under the list and never in a row's mark */}
       {others ? <p className="mp-others">{othersLine(others)}</p> : null}
       <div className="mp-foot">{sizeText(total)} on disk</div>
       {removing ? (
@@ -269,10 +256,8 @@ function ModelRowView({ r, def, saved, onRemove }: { r: InstalledRow; def: strin
           <MakerMark tag={r.name} />
           <span className="mp-nmn">{r.label.text}</span>
           {chip}
-          {/* the measured speed says it once, in its own column */}
           {measured ? null : <ModelSpeed tag={r.name} />}
         </div>
-        {/* a model with no purpose has no second line: its Ollama name is in the row menu (Copy Ollama name) */}
         {r.label.purpose ? <div className="mp-p">{r.label.purpose}</div> : null}
         <div className="mp-meta">
           <span>{sizeText(r.info.sizeBytes)}</span>
@@ -281,11 +266,9 @@ function ModelRowView({ r, def, saved, onRemove }: { r: InstalledRow; def: strin
         </div>
         <MeasureMeta name={r.name} label={r.label.text} />
         <MeasureFail name={r.name} />
-        {/* the card holds it and right now it is slower: who is in the way (its speed is the row's own Speed) */}
         {r.chat ? <SlowLine fit={r.report} listed /> : null}
       </div>
       <span className="mp-sz">{sizeText(r.info.sizeBytes)}</span>
-      {/* A fit check is long by nature: its words may change, its box does not (docs/design.md). */}
       <span className="mp-fitc" data-wait="">{fit}</span>
       {measureShown ? r.chat ? <MeasureCells name={r.name} label={r.label.text} /> : <span className="mp-meas" /> : null}
       <RowMenu r={r} saved={saved} onRemove={onRemove} />
@@ -375,7 +358,6 @@ function RowMenu({ r, saved, onRemove }: { r: InstalledRow; saved: string | unde
               {measureItem.text}
             </button>
           ) : null}
-          {/* the destructive item last, under its own line */}
           {canRemove ? (
             <>
               <div className="mp-sep" role="separator" />
@@ -407,7 +389,7 @@ function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: Inst
   const [busy, setBusy] = useState(false);
   const cancel = useRef<HTMLButtonElement>(null);
   const box = useRef<HTMLDivElement>(null);
-  // On open, and after a removal that failed. While one runs both buttons are disabled and the dialog holds focus.
+  // external: a browser moves the focus off a button that turns disabled
   // oxlint-disable-next-line gates/effect-needs-reason -- Cancel takes focus back when a removal's answer re-enables it, which lands after an await
   useEffect(() => {
     if (!busy) cancel.current?.focus();
@@ -420,7 +402,6 @@ function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: Inst
       e.stopPropagation();
       if (!busy) onClose();
     } else if (e.key === "Tab") {
-      // keep focus inside the dialog
       const els = [...(box.current?.querySelectorAll<HTMLElement>("button:not(:disabled)") ?? [])];
       const at = els.indexOf(document.activeElement as HTMLElement);
       e.preventDefault();
@@ -472,14 +453,9 @@ function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: Inst
   );
 }
 
-/**
- * The chip marks the saved default and a row's menu sets it. When the saved default
- * cannot run here, new chats start on another model; without this line the chip would be untrue.
- */
 function Fallback({ rows }: { rows: readonly InstalledRow[] }) {
   const saved = useStore(savedDefault);
   const models = useStore((s) => s.models);
-  // the server's pick (runtime/pick.ts) is the model new chats really start on
   const picked = pickedModel(models);
   if (saved === undefined || picked === undefined || picked.name === saved) return null;
   const name = (tag: string) => rows.find((r) => r.name === tag)?.label.text ?? tag;
@@ -495,7 +471,6 @@ function NoModels() {
   const pullNA = useStore((s) => s.unavailable["models.pull"] === true);
   const cpu = useStore((s) => noGpu(s.gpu));
   const [err, run] = useAct();
-  // the suggestion's verdict is the table's row for it, never the catalog's own estimate
   const want = cpu ? "spills" : "fits";
   const pick = useStore(s => catalogOf(s)?.find((c) => c.recommended && rowOf(s, c.name)?.verdict === want));
   const pickRow = useStore(s => (pick === undefined ? undefined : rowOf(s, pick.name)));

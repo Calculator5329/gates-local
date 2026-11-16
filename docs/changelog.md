@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-11-16: the models folder holds to the six comment kinds
+
+- Models, Download, the memory mark, the speed gauge and the session's
+  model code pass the comment rule: 135 offenders went, and the
+  folder's comment lines fell from 269 to 11. Five outside facts stay,
+  each cut to one line: Ollama gives no total until it knows a layer's
+  size, it queues a load behind a running reply, its /api/show lists
+  completion only for chat models, an older Ollama leaves out
+  capabilities, and a browser moves the focus off a button that turns
+  disabled.
+- Three comments were stale and went: memoryRefusal's words are shown
+  nowhere (a send's own words differ), hydration no longer holds
+  pushes, and the first model is the server's pick, not the smallest.
+- Rules the browser specs and the unit tests already held went with
+  their comment. One in five was broken in the source and watched
+  fail, among them the card's whole size, a finished pull that waits
+  for the installed list, the too-big row's mark, Recommended's kept
+  slot, the fallback line's model, tok/s, MB under 1 GB, the quant
+  tail, the next default, Image mode loading nothing, and the other
+  programs line under Installed.
+- Sixty-six tests are new, each watched fail with its rule broken:
+  the download rows' buttons, percent and typed name, the memory
+  mark's colours and slower-now line, the Models page's focus, menus,
+  remove dialog and notes, the session's list, memory, typed-load and
+  pull answers, and the picks that cannot chat.
+
 ## 2026-11-16: the settings folder holds to the six comment kinds
 
 - Settings, its Library and Instructions pages, and the session's

@@ -4,6 +4,7 @@
 import type { CatalogEntry, FitReport, FitVerdict } from "@gates-local/contracts";
 import { describe, expect, it } from "vitest";
 import {
+  FIT_DOT,
   type Row,
   about,
   canBeDefault,
@@ -11,6 +12,7 @@ import {
   labelOf,
   nameOf,
   nextDefault,
+  noteSettled,
   pullName,
   shortTag,
   sizeText,
@@ -137,5 +139,26 @@ describe("the name typed under Any model from the Ollama library", () => {
     expect(pullName(" qwen3.5:9b ")).toBe("qwen3.5:9b");
     expect(pullName("ollama")).toBe("ollama");
     expect(pullName("   ")).toBe("");
+  });
+});
+
+describe("the fit dot", () => {
+  it("is ok for a model that fits, a warning for one that spills, and off, a limit and not a failure, for one too big", () => {
+    expect(FIT_DOT).toEqual({ fits: "ok", spills: "warn", refuse: "off" });
+  });
+});
+
+describe("a long name with no separator near its end", () => {
+  it("cuts at the last 10 characters", () => {
+    expect(splitTail("abcdefghijklmnopqrstuvwxyz0123")).toEqual(["abcdefghijklmnopqrst", "uvwxyz0123"]);
+    expect(splitTail("abcdefghijklmnopq-rstuvwxyz012")).toEqual(["abcdefghijklmnopq-rs", "tuvwxyz012"]);
+  });
+});
+
+describe("the note that the next default could not be saved", () => {
+  it("is settled once any default other than the removed model is saved, not by saving the removed one again", () => {
+    expect(noteSettled("alpha", undefined)).toBe(false);
+    expect(noteSettled("alpha", "alpha")).toBe(false);
+    expect(noteSettled("alpha", "beta")).toBe(true);
   });
 });

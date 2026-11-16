@@ -105,6 +105,15 @@ describe("client model choice", () => {
     expect(firstChatPull([embed], {})).toBeUndefined();
   });
 
+  it("a server pick on a model that cannot chat is not followed", () => {
+    const pickedEmbed = m("nomic-embed-text:latest", 274_000_000, ["embedding"], { numCtx: 16384, verdict: "fits" });
+    expect(modelChoice([pickedEmbed, small, gemma], undefined, undefined)).toEqual(set("qwen3.5:4b"));
+  });
+
+  it("with no pick and a current model that cannot chat, the first chat model is chosen", () => {
+    expect(modelChoice([embed, small, gemma], "nomic-embed-text:latest", undefined)).toEqual(set("qwen3.5:4b"));
+  });
+
   it("filters chat models and reads thinking from capabilities", () => {
     expect(chatModels([embed, small, gemma]).map((x) => x.name)).toEqual(["qwen3.5:4b", "gemma4:12b"]);
     expect(canChat(embed)).toBe(false);

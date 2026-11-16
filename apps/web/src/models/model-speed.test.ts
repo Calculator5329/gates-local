@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 const store = vi.hoisted(() => ({ state: undefined as unknown }));
 vi.mock("../lib/store/store.ts", () => ({ NA: "na", useStore: (select: (s: unknown) => unknown) => select(store.state) }));
-const { ModelSpeed, tpsText } = await import("./model-speed.tsx");
+const { ModelSpeed, speedWords, tpsText } = await import("./model-speed.tsx");
 
 describe("tpsText: whole numbers from 10 up, one decimal below", () => {
   it.each([
@@ -50,5 +50,21 @@ describe("ModelSpeed", () => {
     ["an older server without the read", "qwen3.5:9b", "na"],
   ])("renders nothing, so it takes no width, for %s", (_why, tag, speeds) => {
     expect(render(tag, speeds)).toBe("");
+  });
+});
+
+describe("speedWords", () => {
+  const speeds = { "qwen3.5:9b": { model: "qwen3.5:9b", tokensPerSecond: 101.6, replies: 8 } };
+
+  it("says a measured speed in words", () => {
+    expect(speedWords(speeds, "qwen3.5:9b")).toBe("102 tokens per second");
+  });
+
+  it.each([
+    ["a model never measured", "gemma3:4b", speeds],
+    ["before the first read lands", "qwen3.5:9b", undefined],
+    ["an older server without the read", "qwen3.5:9b", "na"],
+  ])("says nothing for %s", (_why, tag, given) => {
+    expect(speedWords(given as Parameters<typeof speedWords>[0], tag)).toBeUndefined();
   });
 });
