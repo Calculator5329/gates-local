@@ -1,55 +1,3 @@
-// Models moving into memory, and which of them this app put there.
-//
-// models.load reads /api/ps first: a model already resident that the app
-// did not load (a terminal `ollama run`, another app) reports "ready" and is
-// not preloaded again or counted in appLoadedModels(). It is still the one
-// thing in memory, and the memory owner asks it to leave, as it asks any
-// model, when something else is wanted (gpu/memory.ts). An /api/ps that
-// cannot be read is not "nothing loaded": the load refuses rather than claim
-// a model that may be someone else's. Otherwise it runs the fit check and,
-// unless it refuses or is already resident at that context, preloads with an empty /api/generate.
-// A chat turn reserves its model synchronously (so models.remove sees it at
-// once), then admit() decides, before the chat request goes out, whether the
-// turn is a cold load: "loading" is pushed then and "ready" at the first
-// content or thinking token. A cold load joins appLoadedModels(), pruned
-// against /api/ps whenever this module reads it (the GPU poll reads it here
-// too, via residentModels()), so a model Ollama let go of leaves it with an
-// "unloaded" push. A reading of a runtime switched away from prunes nothing.
-// A preload takes the same per-model reservation as a turn, so models.remove
-// refuses while either runs. A preload is a hint: while a reply runs on another
-// model (or on this one at another context) it is refused inside the gate
-// (model-in-use, nothing pushed), so it never waits behind that reply holding
-// the gate, and a send never waits behind a preload for more than its load.
-//
-// One thing in memory (gpu/memory.ts): with a memory owner, the load gate is
-// its gate, and every load and admission first runs its handoff inside it
-// (everything but the model wanted is asked to leave, bounded), then reads
-// /api/ps, then fits from that one reading. replying() names the models a
-// running reply uses: the handoff never asks those to leave.
-//
-// One load gate per loader: the residency read, the fit and the load run
-// inside it, so a second load measures the memory the first one took. A
-// preload holds it until /api/generate completes; a cold turn holds it until
-// its first token or its end. A models.load for a model already loading at
-// the same context joins that load and gets its one answer, so two chats
-// asking for one model never queue a second residency read, fit or
-// /api/generate behind the first. A turn releases it after its fit only when
-// /api/ps proves the model resident at the turn's num_ctx; anything less
-// (unreadable, absent, another context: Ollama may reload) holds it too.
-//
-// Every load and reservation captures the runtime once: its generation and
-// base URL. Its fit, residency read and generate all go to that URL, and
-// after every await a changed generation stops it (no request, nothing
-// owned). A runtime switch (runtimeChanged .. runtimeSettled) refuses new
-// work, clears the owned list without pushes (models left in an external
-// Ollama are not the app's any more), aborts the old runtime's preloads and
-// waiting admissions, and ends every open "loading" notice with an error.
-// A switch that is then refused (runtimeKept) puts the owned list back: the
-// old runtime stays, and so does what the app loaded in it.
-// The owned list is the memory owner's one record of what is loaded
-// (gpu/memory.ts LoadedRecord): this module writes it, the GPU status reads it.
-// close() refuses new work and aborts and drains every preload, so a
-// shutdown never waits on a cold load holding its GPU claim.
 import type { FitOffer, FitReport, ModelLoad } from "@gates-local/contracts";
 import { createFifoGate, type LoadGate } from "../gpu/gate.ts";
 import type { GpuLease } from "../gpu/lease.ts";
@@ -59,17 +7,13 @@ import { sendMark, sendSpan } from "../chat/send-times.ts";
 import { GenerateResponse, decode, parseJson } from "./schemas.ts";
 import type { LoadedModel } from "./types.ts";
 
-/**
- * keep_alive for a preload: Ollama's own default, so a preloaded model stays
- * exactly as long as one a turn started (each turn's request resets it).
- */
+// external: 5m is Ollama's own keep_alive default, so a preload stays as long as a turn's load
 export const PRELOAD_KEEP_ALIVE = "5m";
-/** A cold load of a large model from disk can take minutes. */
+// why: a cold load of a large model from disk can take minutes
 const PRELOAD_TIMEOUT_MS = 10 * 60_000;
 
 export type ModelErrorCode = "model-in-use" | "model-removing" | "runtime-not-ready" | "runtime-switching" | "shutting-down" | "remove-failed";
 
-/** A refused models.* action; the ws layer sends `code` to the client. */
 export class ModelActionError extends Error {
   override readonly name = "ModelActionError";
   readonly code: ModelErrorCode;
@@ -79,141 +23,61 @@ export class ModelActionError extends Error {
   }
 }
 
-/** admit() gave up because the caller's signal aborted while it waited. */
 export class AdmitCancelled extends Error {
   override readonly name = "AdmitCancelled";
 }
 
 export interface TurnLoad {
-  /** The turn's first content or thinking token: the model answered. */
   firstToken(): void;
-  /** The turn is over, however it ended (also releases a reservation that never streamed). */
   end(): void;
 }
 
-/** What an admission's fit is told about the handoff that ran before it. */
 export interface AdmitContext {
-  /** What left and what stayed; undefined without a memory owner. */
   readonly handoff: Handoff | undefined;
-  /** Hand off again (turns the fit stopped have ended, so their models may leave now); then measure again. */
   leave(): Promise<Handoff | undefined>;
 }
 
 export interface AdmitOptions {
-  /**
-   * The fit check for this turn; default the loader's own `fit` against
-   * `baseUrl`. `signal` aborts when the turn stops waiting, the runtime
-   * switches or the loader closes.
-   */
   readonly fit?: (signal: AbortSignal, context: AdmitContext) => Promise<FitReport>;
-  /** Abort stops waiting for the gate; admit rejects with AdmitCancelled. */
   readonly signal?: AbortSignal;
 }
 
-/** A chat turn's hold on its model, from reply.send's first line to the turn's end. */
 export interface TurnReservation extends TurnLoad {
-  /** The runtime captured at reserve(): the turn's fit and chat go here (undefined: none ready). */
   readonly baseUrl: string | undefined;
-  /**
-   * Aborts once that runtime is gone (a switch began, or the loader closed)
-   * and stays aborted until end(): at admission, the capability lookup,
-   * streaming and tool rounds alike. reply.send ties it to the turn.
-   */
   readonly signal: AbortSignal;
-  /**
-   * After admit: /api/ps proved the model absent, so this turn loads it and it is ready at the
-   * turn's first token (models.load says "loading" until then). False when it was resident, or
-   * when residency could not be read.
-   */
   readonly cold: boolean;
-  /**
-   * Inside the load gate: read /api/ps (is this a cold load?), then fit.
-   * Resolves with the fit report once the residency decision is made, before
-   * any chat request. A refused or failed admit releases the reservation.
-   * Rejects with ModelActionError("runtime-switching") once the runtime
-   * captured at reserve() is gone, including while it waits for the gate.
-   */
   admit(numCtx: number, options?: AdmitOptions): Promise<FitReport>;
 }
 
 export interface ModelLoader {
-  /** Throws ModelActionError while the model is removed, the runtime switches or the loader closed. */
   load(model: string, numCtx: number): Promise<ModelLoad>;
-  /**
-   * Synchronous so the turn counts toward inUse() before reply.send's first
-   * await. Throws ModelActionError("model-removing") while the model's DELETE
-   * runs, "runtime-switching" during a switch, "shutting-down" after close().
-   */
   reserve(model: string): TurnReservation;
-  /** A turn or a preload holds this model (reserved, queued, fitting, loading or streaming). */
   inUse(model: string): boolean;
-  /** Every model inUse() is true for, by tag: the busy ones a preload's fit plan never reclaims. */
   busyModels(): string[];
-  /**
-   * models.remove: refuses (model-in-use) while a reservation exists, else
-   * marks the model as removing until the returned function is called.
-   */
   beginRemove(model: string): () => void;
-  /**
-   * A switch began (before the old runtime stops): forget what the app
-   * owned, drop the old runtime's work, refuse new work until runtimeSettled().
-   */
   runtimeChanged(): void;
-  /**
-   * The switch was refused and the old runtime stays (after runtimeChanged, before
-   * runtimeSettled): what the app loaded in it is the app's again, less what left meanwhile.
-   * The turns and loads runtimeChanged ended stay ended.
-   */
   runtimeKept(): void;
-  /**
-   * Resolves once every turn whose runtime is gone (aborted by
-   * runtimeChanged() or close()) has called end(). A switch waits on this
-   * before it stops the old runtime.
-   */
   turnsEnded(): Promise<void>;
-  /** The new runtime's ensure settled: loads and turns may start again. */
   runtimeSettled(): void;
-  /** Shutdown: refuse new work, abort every preload, resolve once all have settled. */
   close(): Promise<void>;
-  /** Models this app loaded that are still resident, by tag. */
   appLoadedModels(): readonly string[];
-  /** Models an admitted turn is using until it ends, by tag: a handoff never asks them to leave. */
   replying(): readonly string[];
-  /** A handoff unloaded `model` (keep_alive 0): it is not loaded by the app any more. */
   unloaded(model: string): void;
-  /**
-   * The GPU poll's /api/ps of the current runtime, pruning the owned list on the way. Empty
-   * when no runtime is ready, the read fails, or the runtime changed while it was in flight:
-   * a reading of the old runtime says nothing about the GPU or what the app owns now.
-   */
   residentModels(): Promise<readonly LoadedModel[]>;
-  /** Drops models not in `resident`; the image module's unloads land here (not /api/ps readings). */
   prune(resident: readonly string[]): void;
 }
 
 export interface ModelLoaderDeps {
   readonly baseUrl: () => string | undefined;
   readonly push: (load: ModelLoad) => void;
-  /** /api/ps; `signal` ends the read (shutdown, a runtime switch). */
   readonly listLoaded: (baseUrl: string, signal: AbortSignal) => Promise<readonly LoadedModel[]>;
-  /**
-   * The fit check for models.load (and a turn's admit unless it brings its
-   * own), against the captured runtime; `signal` ends every request and
-   * child process it runs.
-   */
   readonly fit: (model: string, numCtx: number, baseUrl: string, signal: AbortSignal) => Promise<FitReport>;
-  /** For a refusal: what runs instead (fit/alternatives.ts), carried on the error as `offer`. */
   readonly offer?: (refused: FitReport, baseUrl: string) => Promise<FitOffer | undefined>;
-  /** The load gate; default the memory owner's, else an in-process FIFO mutex (see LoadGate). */
   readonly gate?: LoadGate;
-  /** The one owner of memory: its handoff runs before every residency read and fit. */
   readonly memory?: MemoryOwner;
-  /** models.load holds a shared chat claim, so it never loads beside an image job. */
   readonly lease?: Pick<GpuLease, "run">;
-  /** After a load the app caused, so the GPU status refreshes (gpu watcher poke). */
   readonly onLoaded?: () => void;
   readonly log?: (line: string) => void;
-  /** Tests only (gpu/rules.test.ts): turns one guard off, so the test that needs it is seen failing. */
   readonly faultForTest?: "gate-before-lease" | "gate-let-go-at-send" | "record-without-generation-check" | "fit-from-the-first-reading" | "refusal-names-nothing" | "forget-on-refused-switch";
 }
 
@@ -224,12 +88,10 @@ export const PS_UNREADABLE_MESSAGE = "Could not read which models Ollama has loa
 const SHUTTING_DOWN_MESSAGE = "The app is shutting down, so no model can be loaded.";
 const SHUTDOWN_STOPPED_MESSAGE = "The app is shutting down, so this model's load was stopped.";
 const switched = () => new ModelActionError("runtime-switching", RUNTIME_SWITCHING_MESSAGE);
-/** A preload refused because a reply is running: the model loads at the send, behind its warning. */
 const behindReply = (model: string) => new ModelActionError("model-in-use", `A reply is running in another chat, so ${model} loads when you send.`);
 const withBusyNote = (report: FitReport, handoff: Handoff | undefined): FitReport =>
   report.verdict === "refuse" && handoff?.engine === "busy" ? { ...report, message: `${report.message ?? `${report.model} does not fit.`} ${ENGINE_BUSY_NOTE}` } : report;
 
-/** POST /api/generate with an empty prompt; throws with Ollama's words unless it says done. */
 async function preload(baseUrl: string, model: string, numCtx: number, signal: AbortSignal): Promise<void> {
   const res = await fetch(new URL("/api/generate", baseUrl), {
     method: "POST",
@@ -248,14 +110,12 @@ async function preload(baseUrl: string, model: string, numCtx: number, signal: A
 
 type Residency = { readonly ok: true; readonly models: ReadonlyMap<string, LoadedModel> } | { readonly ok: false };
 
-/** A pushed "loading" waiting for its one terminal state. */
 interface Notice {
   readonly model: string;
   readonly numCtx: number;
   end?: ModelLoad;
 }
 
-/** A per-tag counter: `by` up or down, gone at zero. */
 function count(counts: Map<string, number>, tag: string, by: 1 | -1): void {
   const left = (counts.get(tag) ?? 0) + by;
   if (left > 0) counts.set(tag, left);
@@ -266,27 +126,19 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
   const log = deps.log ?? (() => undefined);
   const memory = deps.memory;
   const gate = memory?.gate ?? deps.gate ?? createFifoGate();
-  /** What is loaded and which of it is the app's: the memory owner's one record (a loader with no owner keeps its own). */
   const record = memory?.loaded ?? createLoadedRecord();
-  /** A refusal says what was not asked to leave. */
   const noted: typeof withBusyNote = deps.faultForTest === "refusal-names-nothing" ? (report) => report : withBusyNote;
-  /** Tag -> reservations (turns and preloads) on it. */
   const reservations = new Map<string, number>();
-  /** Tag -> admitted turns on it that have not ended: their replies keep the model in memory. */
   const replying = new Map<string, number>();
   const removing = new Set<string>();
   const notices = new Set<Notice>();
   const pendingLoads = new Set<Promise<ModelLoad>>();
-  /** Tag -> the load running for it: a request at the same context and runtime joins it and gets its answer. */
   const running = new Map<string, { readonly numCtx: number; readonly gen: number; readonly run: Promise<ModelLoad> }>();
   let generation = 0;
-  /** What the record held when a switch began, until the switch settles: a refused switch restores it. */
   let forgotten: LoadedSnapshot | undefined;
   let switching = false;
   let closed = false;
-  /** Aborted when the current generation ends (switch) or the loader closes. */
   let current = new AbortController();
-  /** Turns from reserve() to end(): `gone` aborts with their runtime; `ended` settles at end(). */
   const turns = new Set<{ readonly gone: AbortController; readonly ended: Promise<void> }>();
 
   const send = (load: ModelLoad) => {
@@ -303,7 +155,6 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
     send({ model, numCtx, state: "loading" });
     return notice;
   };
-  /** Ends `notice` with `end` unless it already ended; returns the state it ended with. */
   const closeNotice = (notice: Notice, end: ModelLoad): ModelLoad => {
     if (notice.end !== undefined) return notice.end;
     notice.end = end;
@@ -318,23 +169,16 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
   const prune = (resident: readonly string[]) => {
     for (const [tag, numCtx] of record.observe(resident.map((name) => ({ name })))) send({ model: tag, numCtx, state: "unloaded" });
   };
-  /** The record takes the load; in an Ollama that holds one model, the app's other models left with it. */
   const recordLoaded = (model: string, numCtx: number) => {
     for (const [tag, at] of record.loaded(model, numCtx)) send({ model: tag, numCtx: at, state: "unloaded" });
   };
 
-  /** The GPU poll's last logged /api/ps failure; cleared when a read succeeds. */
   let pollFailure: string | undefined;
 
-  /**
-   * /api/ps by tag, pruning the owned list on the way when `gen` is still current. A `poll` read
-   * (every 3 s) logs nothing when cancelled and a failure only when it is not the one last logged.
-   */
   const residency = async (baseUrl: string, gen: number, signal: AbortSignal, poll = false): Promise<Residency> => {
     try {
       const loaded = await deps.listLoaded(baseUrl, signal);
       pollFailure = undefined;
-      // A reading of the old runtime says nothing about what the app owns, or what is in memory, now.
       if (gen === generation) {
         prune(loaded.map((m) => m.name));
         memory?.observe(loaded);
@@ -349,7 +193,6 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
     }
   };
 
-  /** New work is refused while closed, switching or removing this model. */
   const refuseNew = (model: string) => {
     if (closed) throw new ModelActionError("shutting-down", SHUTTING_DOWN_MESSAGE);
     if (switching) throw new ModelActionError("runtime-switching", RUNTIME_SWITCHING_MESSAGE);
@@ -359,14 +202,12 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
   const loadModel = async (model: string, requested: number, baseUrl: string, gen: number, signal: AbortSignal): Promise<ModelLoad> => {
     const tag = canonicalTag(model);
     let notice: Notice | undefined;
-    // The size the model takes, once the fit has said so; what was asked for until then.
     let numCtx = requested;
     const finish = (end: ModelLoad): ModelLoad => {
       if (notice !== undefined) return closeNotice(notice, end);
       send(end);
       return end;
     };
-    /** Why this load must stop now, if it must: the runtime it captured is gone, or the loader closed. */
     const stopped = (): ModelLoad | undefined => {
       if (gen !== generation) return { model, numCtx, state: "error", message: RUNTIME_CHANGED_MESSAGE };
       if (signal.aborted) return { model, numCtx, state: "error", message: SHUTDOWN_STOPPED_MESSAGE };
@@ -377,12 +218,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       const before = stopped();
       if (before) return finish(before);
       if (removing.has(tag)) return finish({ model, numCtx, state: "error", message: removingMessage(model) });
-      // A preload is a hint. Beside a running reply on another model its plan names that reply in
-      // the way (fit.ts planWith), and the app's own Ollama would queue it behind the reply while it
-      // held this gate, so every send waited too. Asked here, inside the gate, so a reply that began
-      // after the client looked is seen. Refused with nothing pushed: the send loads it, and asks.
       if ([...replying.keys()].some((t) => t !== tag)) throw behindReply(model);
-      // One thing in memory: everything else is asked to leave, then this load measures.
       const handoff = await memory?.handoff(want(requested), signal);
       const afterHandoff = stopped();
       if (afterHandoff) return finish(afterHandoff);
@@ -391,8 +227,6 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       if (afterPs) return finish(afterPs);
       if (!here.ok) return finish({ model, numCtx, state: "error", message: PS_UNREADABLE_MESSAGE });
       if (here.models.has(tag) && record.oursAt(tag) === undefined) {
-        // Another program's: ready as it is, not preloaded again and not counted as the app's own load.
-        // The owner still asks it to leave for the next thing (gpu/memory.ts), so the answer promises nothing more.
         return finish({ model, numCtx, state: "ready", message: `${model} is already in memory, loaded by another program.` });
       }
       const report = noted(await deps.fit(model, numCtx, baseUrl, signal), handoff);
@@ -403,10 +237,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
         const offer = await deps.offer?.(report, baseUrl).catch(() => undefined);
         return finish({ model, numCtx, state: "error", message: report.message ?? `${model} at num_ctx ${numCtx} does not fit.`, ...(offer === undefined ? {} : { offer }) });
       }
-      // Empty generate uses a runner slot too. A redundant preload could wait
-      // behind its reply while holding the load gate needed by another chat.
       if (here.models.get(tag)?.contextLength === numCtx) return finish({ model, numCtx, state: "ready" });
-      // Its own reply runs at another context: Ollama would reload it under that reply, after it.
       if (replying.has(tag)) throw behindReply(model);
       memory?.stage(want(numCtx), "loading");
       notice = openNotice(model, numCtx);
@@ -422,7 +253,6 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       deps.onLoaded?.();
       return ready;
     };
-    /** The handoff ends with the load: in memory when it is ready, nothing new otherwise. */
     const owning = async (): Promise<ModelLoad> => {
       try {
         const end = await inGate();
@@ -434,14 +264,11 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
         throw e;
       }
     };
-    /** The claim on the card first, the gate inside it: a picture that holds the claim finds the gate free. */
     const claimed = <T>(job: () => Promise<T>) => (deps.lease ? deps.lease.run("chat", signal, job) : job());
     try {
       return await (deps.faultForTest === "gate-before-lease" ? gate(() => claimed(owning)) : claimed(() => gate(owning)));
     } catch (e) {
-      // Refused behind a running reply: the caller hears it, no client is told of a load.
       if (e instanceof ModelActionError && e.code === "model-in-use") throw e;
-      // The GPU claim was given up before it was granted (switch or shutdown), or the fit threw.
       return finish(stopped() ?? { model, numCtx, state: "error", message: `Could not load ${model}: ${(e as Error).message}` });
     }
   };
@@ -464,10 +291,8 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       const baseUrl = deps.baseUrl();
       if (baseUrl === undefined) return Promise.reject(new ModelActionError("runtime-not-ready", "Ollama is not running, so no model can be loaded."));
       const tag = canonicalTag(model);
-      // One model, one load: a second request (another chat, another window) never queues a second one behind it.
       const joined = running.get(tag);
       if (joined !== undefined && joined.numCtx === numCtx && joined.gen === generation) return joined.run;
-      // Reserved before the first await, so models.remove refuses from here to the end.
       hold(tag);
       const run = loadModel(model, numCtx, baseUrl, generation, current.signal).finally(() => {
         letGoOf(tag);
@@ -484,7 +309,6 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       const tag = canonicalTag(model);
       const baseUrl = deps.baseUrl();
       const gen = generation;
-      // The turn's own: aborted by runtimeChanged() or close(), and never re-armed.
       const turnGone = new AbortController();
       let markEnded: (() => void) | undefined;
       const live = { gone: turnGone, ended: new Promise<void>((r) => (markEnded = r)) };
@@ -496,9 +320,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       let notice: Notice | undefined;
       let answered = false;
       let ended = false;
-      /** Admitted and not ended: replying() names the model. */
       let counted = false;
-      /** The handoff this turn began is still open: it ends at the first token (in memory) or the turn's end. */
       let handing = false;
       let releaseGate: (() => void) | undefined;
       const wanted = (): Want => ({ kind: "chat", model, numCtx });
@@ -550,16 +372,13 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
             }
             signal?.addEventListener("abort", onAbort, { once: true });
             runtimeGone.addEventListener("abort", onRuntimeGone, { once: true });
-            // One signal ends the residency read and the fit: the turn's own abort or the runtime's.
             const reads = signal === undefined ? runtimeGone : AbortSignal.any([signal, runtimeGone]);
             const fit = options.fit ?? ((s: AbortSignal) => deps.fit(model, ctx, baseUrl, s));
             gate(async () => {
               if (gone) return;
               try {
-                // One thing in memory: everything else is asked to leave before this turn measures.
                 if (memory !== undefined) handing = true;
                 sendMark("gate");
-                // The fit is decided from a reading taken after the handoff, never one from before it.
                 const early = deps.faultForTest === "fit-from-the-first-reading" ? await fit(reads, { handoff: undefined, leave: async () => undefined }) : undefined;
                 let handoff = await memory?.handoff(wanted(), reads);
                 if (gone) return handed(false);
@@ -578,8 +397,6 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
                   return reject(switched());
                 }
                 const entry = here.ok ? here.models.get(tag) : undefined;
-                // Released after the fit only when /api/ps proves no load is coming:
-                // resident, at this context. Unknown residency or context holds the gate.
                 numCtx = report.numCtx;
                 if (report.verdict === "refuse") {
                   handed(false);
@@ -592,12 +409,9 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
                   return resolve(report);
                 }
                 memory?.stage(wanted(), "loading");
-                // Proven absent: a cold load this turn causes and the app owns. Resident at
-                // another context, or /api/ps unreadable: held, but nothing claimed.
                 if (here.ok && entry === undefined) notice = openNotice(model, report.numCtx);
                 const held = new Promise<void>((r) => (releaseGate = r));
                 resolve(report);
-                // The gate is this turn's until its first token or its end: the next load measures what this one took.
                 if (deps.faultForTest !== "gate-let-go-at-send") await held;
               } catch (e) {
                 handed(false);
@@ -627,7 +441,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
         end() {
           if (ended) return;
           ended = true;
-          // Ended before a token: whatever it began loading is measured by the next handoff.
+          // why: ended before a token, so what it began loading is the next handoff's to measure
           handed(false);
           letGo();
           letGoOf(tag);
@@ -636,7 +450,6 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
           markEnded?.();
           const open = notice;
           if (answered || open === undefined || baseUrl === undefined || gen !== generation) return;
-          // Ended before a token (an error or a cancel mid-load): report what is true now.
           void residency(baseUrl, gen, current.signal).then((here) => {
             if (gen !== generation) return;
             if (here.ok && here.models.has(tag)) loaded(model, numCtx, open);
@@ -662,15 +475,13 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
 
     runtimeChanged() {
       generation++;
-      // Kept until the switch is known to happen: a refused one puts it back (runtimeKept).
       forgotten = record.clear();
-      // Whatever the old runtime held is not in this app's memory any more.
       memory?.observe([]);
       switching = true;
       current.abort(switched());
       if (!closed) current = new AbortController();
       for (const turn of turns) turn.gone.abort(switched());
-      // Deleting the visited entry while iterating a Set is safe.
+      // why: closeNotice deletes the visited entry, which is safe while iterating a Set
       for (const notice of notices) closeNotice(notice, { model: notice.model, numCtx: notice.numCtx, state: "error", message: RUNTIME_CHANGED_MESSAGE });
     },
 
@@ -686,7 +497,6 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
 
     runtimeSettled() {
       switching = false;
-      // The switch happened (or its refusal already put the record back): nothing to put back now.
       forgotten = undefined;
     },
 
@@ -700,7 +510,6 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
     appLoadedModels: () => record.ours(),
     replying: () => [...replying.keys()],
     unloaded(model) {
-      // Left while a switch decides: a refused switch does not put it back.
       if (forgotten !== undefined) forgotten = snapshotWithout(forgotten, model);
       const numCtx = record.left(model);
       if (numCtx !== undefined) send({ model: canonicalTag(model), numCtx, state: "unloaded" });
@@ -709,7 +518,6 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       const baseUrl = deps.baseUrl();
       if (baseUrl === undefined) return [];
       const gen = generation;
-      // A switch aborts `current`, so a read of the old runtime ends then rather than late.
       const here = await residency(baseUrl, gen, current.signal, true);
       return here.ok && gen === generation ? [...here.models.values()] : [];
     },

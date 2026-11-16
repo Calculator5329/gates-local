@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-16: the runtime folder's model loader holds to the six comment kinds
+
+- The model loader passes the comment rule: 88 offenders went, the
+  last in the runtime folder, and its comment lines fell from 228 to
+  36. The compiled code is unchanged.
+
 ## 2026-11-16: the runtime folder's install and discovery hold to the six comment kinds
 
 - The Ollama install and the runtime's discovery and start pass the
