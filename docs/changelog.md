@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-16: the performance history has a 0.2.5 column
+
+- Measured on the test machine against 0.2.4 at 4e6cb911: no journey over a second; opening a 2,000-message thread is faster (111 to 95 ms, 157 to 110 ms with 200 mounted); hovering a 200-message thread with every turn mounted, Show earlier, a cold composer and the queue's next token are slower by 9 to 28 ms.
+
 ## 2026-11-16: two tabs opened at once keep separate windows, and a failed list of replies no longer stops the words
 
 - On a page without Web Locks, two tabs that start at the same moment with the same copied window settle it between them: one keeps the window and the other takes its own.
