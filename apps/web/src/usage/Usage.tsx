@@ -1,7 +1,3 @@
-// The Usage pop-up's content (App puts it in Panel.tsx's Dialog), its own chunk: the
-// header row with the range and Tokens / Speed switches, five numbers, a hand-drawn line per model from a zero baseline,
-// and one row per model that follows the point in focus. The rows are the
-// chart's text for screen readers. Figures change in place when a turn ends.
 import { type KeyboardEvent, type PointerEvent, useMemo, useState, useSyncExternalStore } from "react";
 import { DialogHead } from "../lib/ui/Panel.tsx";
 import { pickerLabels } from "../picker/picker-models.ts";
@@ -22,7 +18,6 @@ const storage = () => {
 };
 const memory = { getItem: () => null, setItem: () => {} };
 
-/** The chart's drawing box; the SVG stretches to the panel and its strokes keep their width. */
 const W = 1000;
 const H = 160;
 
@@ -32,7 +27,6 @@ const hourFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numer
 const exact = (n: number) => Math.round(n).toLocaleString();
 const speedText = (v: number | null) => (v === null ? "–" : String(Math.round(v)));
 
-/** 1, 2, 2.5 or 5 times a power of ten at or above v: the chart's top line. */
 function niceCeil(v: number): number {
   if (v <= 0) return 0;
   const p = 10 ** Math.floor(Math.log10(v));
@@ -56,7 +50,6 @@ function values(l: UsageLine, metric: UsageMetric): (number | null)[] {
   return metric === "speed" ? l.speed : l.prompt.map((p, i) => p + l.completion[i]!);
 }
 
-/** One path per run of points with a value; a lone point is a dot. A null breaks the line. */
 function pathOf(ys: readonly (number | null)[], top: number): { line: string; dots: string } {
   const n = ys.length;
   const x = (i: number) => (n === 1 ? W / 2 : (i / (n - 1)) * W);
@@ -88,7 +81,6 @@ function Seg<T extends string>({ value, options, onPick, label }: { value: T; op
   );
 }
 
-/** A total as its face shows it ("19.1k"); a value has no tooltip (docs/design.md). */
 function Num({ value, label, ph }: { value: string; label: string; ph: boolean }) {
   return (
     <div className="us-num">
@@ -145,7 +137,6 @@ export function Usage() {
       </div>
     </DialogHead>
     <div className="dlg-body">
-    {/* the same centred column as Models */}
     <div className="us">
       <div className="us-nums">
         <Num ph={ph} value={compact(t.promptTokens + t.completionTokens)} label="tokens" />
@@ -202,7 +193,6 @@ export function Usage() {
             return (
               <tr key={l.model ?? "other"}>
                 <th scope="row">
-                  {/* a name cut by its row reads in full in a tip, and only then (data-tipt measures the .t) */}
                   <span className="us-name" data-tipt={name}>
                     <i className="us-key" style={{ background: l.colour === "other" ? "var(--muted-foreground)" : `var(--u${l.colour})` }} />
                     <span className="us-label t">{name}</span>

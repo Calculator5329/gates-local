@@ -71,6 +71,26 @@ describe("the Usage pop-up opens complete", () => {
     expect(store.getState().panel).toBeNull();
   });
 
+  it("says it was asked for before the read answers, so a Settings still loading never lands on top", async () => {
+    const { read, answer } = held();
+    const asked = vi.fn();
+    const u = usage.createUsage({ read, ...quiet, asked });
+    const opened = u.openUsage();
+    expect(asked).toHaveBeenCalledOnce();
+    answer(row(5));
+    await opened;
+  });
+
+  it("an open still waiting when somewhere else is picked never shows", async () => {
+    const { read, answer } = held();
+    const u = usage.createUsage({ read, ...quiet });
+    const opened = u.openUsage();
+    u.dropPendingOpen();
+    answer(row(5));
+    await opened;
+    expect(store.getState().panel).toBeNull();
+  });
+
   it("leaves Settings, which the pop-up replaces", async () => {
     const { read, answer } = held();
     const beforeOpen = vi.fn();

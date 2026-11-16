@@ -1,8 +1,3 @@
-// The Usage panel's arithmetic, apart from the drawing: which hours a range
-// reads, the points (hours for 24 h, the viewer's local days otherwise, so a
-// day with a clock change is still one point), six models and one Other,
-// colours by first use, speed as a ratio of sums, and the short numbers.
-
 export type UsageRange = "24h" | "7d" | "30d" | "all";
 export type UsageMetric = "tokens" | "speed";
 export const RANGES: readonly (readonly [UsageRange, string])[] = [["24h", "24 h"], ["7d", "7 d"], ["30d", "30 d"], ["all", "All"]];
@@ -26,9 +21,7 @@ export interface UsageRead {
 }
 
 export interface UsageLine {
-  /** null is Other: every model past the sixth. */
   readonly model: string | null;
-  /** A palette slot (0 to 7) kept by first use, or Other's neutral. */
   readonly colour: number | "other";
   readonly prompt: number[];
   readonly completion: number[];
@@ -37,7 +30,6 @@ export interface UsageLine {
   readonly decodeTokens: number[];
   readonly readMs: number[];
   readonly readTokens: number[];
-  /** tok/s per point; null where nothing reported a decode time (a gap), and always for Other. */
   readonly speed: (number | null)[];
   readonly promptTotal: number;
   readonly completionTotal: number;
@@ -48,9 +40,7 @@ export interface UsageLine {
 
 export interface UsageView {
   readonly hourly: boolean;
-  /** Each point's start: a UTC hour, or a local midnight. */
   readonly periods: { readonly start: number }[];
-  /** Drawn models by tokens in the range, then Other. */
   readonly lines: UsageLine[];
   readonly totals: { promptTokens: number; completionTokens: number; replies: number; decodeMs: number };
 }
@@ -71,7 +61,6 @@ const dayKey = (ms: number) => {
 };
 const ratio = (tokens: number, ms: number) => (ms > 0 ? tokens / (ms / 1000) : null);
 
-/** Where a range's read starts: the first hour of its first point; All reads everything. */
 export function rangeStart(range: UsageRange, now: number, _rows: readonly UsageRow[]): number {
   if (range === "all") return 0;
   if (range === "24h") return hourOf(now) - 23 * HOUR;
@@ -91,11 +80,6 @@ function periodsFor(range: UsageRange, now: number, rows: readonly UsageRow[]): 
   return Array.from({ length: count }, (_, i) => midnight(now, count - 1 - i));
 }
 
-/**
- * Palette slots for the drawn models: each model's first-use place, taken
- * round the palette, so a model keeps its colour when ranks change; two drawn
- * models that land on one slot (the ninth model used and the first) part.
- */
 export function colourSlots(order: readonly string[], drawn: readonly string[]): Map<string, number> {
   const rank = (m: string) => {
     const i = order.indexOf(m);
@@ -176,7 +160,6 @@ export function usageView(read: UsageRead, range: UsageRange, now: number): Usag
   };
 }
 
-/** A line's figures for the range, or for one point in focus. */
 export function figuresAt(l: UsageLine, at: number | null) {
   if (at === null) return { prompt: l.promptTotal, completion: l.completionTotal, replies: l.repliesTotal, speed: l.speedTotal, readSpeed: l.readSpeedTotal };
   const speedless = l.model === null;
@@ -189,7 +172,6 @@ export function figuresAt(l: UsageLine, at: number | null) {
   };
 }
 
-/** 1.84M, 402k, 999: three significant figures, never "1000k". */
 export function compact(n: number): string {
   if (n < 1000) return String(Math.round(n));
   const units = ["k", "M", "B", "T"];
@@ -202,7 +184,6 @@ export function compact(n: number): string {
   return `${Number(value.toPrecision(3))}${units[u]}`;
 }
 
-/** Time generating: "3 h 12 min", "48 min", "45 s". */
 export function duration(ms: number): string {
   if (ms <= 0) return "0 min";
   if (ms < 60_000) return `${Math.round(ms / 1000)} s`;
@@ -221,7 +202,6 @@ const PREFS_KEY = "gates-local.usage";
 const DEFAULTS: UsagePrefs = { range: "7d", metric: "tokens" };
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem">;
 
-/** The range and the Tokens / Speed switch as the panel was last left; defaults when storage refuses. */
 export function readPrefs(storage: Storage): UsagePrefs {
   try {
     const value: unknown = JSON.parse(storage.getItem(PREFS_KEY) ?? "null");
@@ -235,9 +215,8 @@ export function readPrefs(storage: Storage): UsagePrefs {
 }
 
 export function writePrefs(storage: Storage, prefs: UsagePrefs): void {
+  // external: a private browser window may refuse the write, so the choice lasts until reload
   try {
     storage.setItem(PREFS_KEY, JSON.stringify(prefs));
-  } catch {
-    // a private window may refuse; the panel keeps the choice until reload
-  }
+  } catch {}
 }

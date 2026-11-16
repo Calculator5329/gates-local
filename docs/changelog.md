@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-16: the web usage folder holds to the six comment kinds
+
+- The Usage pop-up passes the comment rule: 30 offenders went, and the
+  folder's comment lines fell from 41 to 1, an outside fact. Rules a
+  named test already held went with the comment; one in five was
+  broken in the source and watched fail.
+- Two rules no test held now have one: opening Usage says so at once,
+  so a Settings still loading never lands on top, and an open still
+  waiting when something else is picked never shows.
+
 ## 2026-11-16: the web fit folder holds to the six comment kinds
 
 - The memory panel and fit table pass the comment rule: 32 offenders

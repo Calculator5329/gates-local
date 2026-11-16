@@ -1,7 +1,3 @@
-// The Usage pop-up's data and its open and close. The first read gets a
-// short wait so the panel opens complete; a slower read shows the panel's
-// placeholders in the same boxes. While open, each usage.changed reads again
-// and the figures change in place; reads never overlap.
 import type { UsageRead } from "./usage-data.ts";
 import { usageScreen } from "../app/screen-loaders.ts";
 import { getState, setState } from "../lib/store/store.ts";
@@ -10,20 +6,15 @@ import { requestFocus } from "../lib/ui/kit/focus.ts";
 
 export interface UsageData {
   readonly read: UsageRead | null;
-  /** The last read failed and there is nothing older to show. */
   readonly failed: boolean;
 }
 
-/** How long opening waits for the first read before it shows placeholders. */
 export const FIRST_READ_WAIT_MS = 250;
 
 interface UsageEffects {
   readonly read: () => Promise<UsageRead>;
-  /** Called just before the panel shows: leaves Settings, which the pop-up replaces, keeping its history entry. */
   readonly beforeOpen: () => void;
-  /** Called as soon as the open is asked for: a Settings still waiting for its chunk must not land on top later. */
   readonly asked: () => void;
-  /** The history entry a screen opens on, and its plain close (navigation.ts). */
   readonly enter: () => void;
   readonly exit: () => void;
 }
@@ -33,7 +24,6 @@ export function createUsage({ read, beforeOpen, asked, enter, exit }: UsageEffec
   const listeners = new Set<() => void>();
   let reading: Promise<void> | null = null;
   let again = false;
-  /** Bumped by every open and close: an open that a close overtook while it waited does nothing. */
   let gen = 0;
 
   const publish = (next: UsageData) => {
@@ -72,7 +62,6 @@ export function createUsage({ read, beforeOpen, asked, enter, exit }: UsageEffec
     enter();
   }
 
-  /** Close the pop-up; focus goes back to the footer icon when it is on screen. keepEntry: Back has already taken the history entry, or the drawer takes it over. */
   function closeUsage(refocus = true, keepEntry = false): void {
     gen++;
     if (getState().panel === null) return;
@@ -85,7 +74,6 @@ export function createUsage({ read, beforeOpen, asked, enter, exit }: UsageEffec
     });
   }
 
-  /** Somewhere else was picked while the pop-up still waited to open: it must not pop in over it. */
   function dropPendingOpen(): void {
     gen++;
   }
@@ -95,7 +83,6 @@ export function createUsage({ read, beforeOpen, asked, enter, exit }: UsageEffec
     else void openUsage();
   }
 
-  /** A turn ended somewhere: read again only while someone is looking. */
   function usageChanged(): void {
     if (getState().panel === "usage") void refresh();
   }
