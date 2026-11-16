@@ -129,6 +129,22 @@ describe("a stalled engine download is one reading: the first window, the banner
     for (const where of ["banner", "first", "settings"]) expect(p[where], where).toContain("Retry");
   });
 
+  it("a stalled download drops the time left, and the gear's tip names where to act and never the figures", async () => {
+    const { rtInfo } = await import("./words.tsx");
+    const now = { ...installing(500_000_000), install: { receivedBytes: 500_000_000, totalBytes: 1_543_547_172, bytesPerSecond: 10e6 } };
+    const moving = await places(now);
+    for (const where of ["banner", "first"]) expect(moving[where], where).toMatch(/left/);
+    expect(rtInfo({ conn: { kind: "open" }, runtime: now }).tip).toBe("");
+    const stuck = { ...now, install: { ...now.install, stalled: true as const } };
+    const p = await places(stuck);
+    for (const [where, words] of Object.entries(p)) expect(words, where).not.toMatch(/left/);
+    for (const where of ["banner", "first"]) expect(p[where], where).toMatch(/0\.5\sof\s1\.4\sGB/);
+    expect(rtInfo({ conn: { kind: "open" }, runtime: stuck }).tip).toBe("Open Settings › Runtime to retry.");
+    const failed = rtInfo({ conn: { kind: "open" }, runtime: stopped });
+    expect(failed.tip).toBe("Open Settings › Runtime for details and Retry.");
+    expect(failed.tip).not.toMatch(/download|didn't/i);
+  });
+
   it("the stall arrives as the server's status and wakes whatever reads the runtime; held figures wake nothing", async () => {
     vi.useFakeTimers();
     try {

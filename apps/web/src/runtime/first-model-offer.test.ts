@@ -50,3 +50,25 @@ it("a failure of some other model is not said on this model's offer", async () =
   const words = text(await offer({ "other:1b": { name: "other:1b", state: "error", completedBytes: 0 } }));
   expect(words).not.toMatch(/did not finish/);
 });
+
+it("first run, the two-second boot and a runtime not read yet each keep the banner empty", async () => {
+  const { Banner } = await import("./Banner.tsx");
+  const render = (extra: Partial<State>) => {
+    setState({ ...initial, conn: { kind: "open" }, runtime: methodSamples["runtime.status"].result, models: [], catalog, pulls: {}, view: "new", threadId: null, ...extra });
+    return renderToStaticMarkup(createElement(Banner));
+  };
+  expect(text(render({})), "the offer shows on a new chat").toContain("Download your first model");
+  expect(render({ view: "firstrun" }), "first run").toBe("");
+  expect(render({ runtime: undefined, hydrationSettled: false, bootWaited: false }), "booting").toBe("");
+  expect(render({ runtime: undefined, hydrationSettled: true, bootWaited: true }), "nothing read").toBe("");
+});
+
+const at = (extra: Partial<State>) => ({ ...initial, conn: { kind: "open" }, runtime: methodSamples["runtime.status"].result, models: [], catalog, pulls: {}, view: "new", threadId: null, ...extra }) as State;
+
+it("no first model is offered by an Ollama too old to say which models chat, or by a build that cannot download", async () => {
+  const { firstModelOffer } = await import("./Banner.tsx");
+  expect(firstModelOffer(at({}))?.name).toBe(offered.name);
+  const unreported = { name: "qwen3.5:9b", digest: "q", sizeBytes: 1, modifiedAt: "", capabilities: ["unknown", "unreported"] } as const;
+  expect(firstModelOffer(at({ models: [unreported] })), "too old").toBeUndefined();
+  expect(firstModelOffer(at({ unavailable: { "models.pull": true } })), "cannot download").toBeUndefined();
+});

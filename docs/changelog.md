@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-16: the web runtime folder holds to the six comment kinds
+
+- The runtime banner and its words pass the comment rule: 34 offenders
+  went, and the folder's comment lines fell from 84 to 2, the license
+  line and the file's one-line summary. Rules a named test already
+  held went with the comment; one in five was broken in the source and
+  watched fail.
+- Four rules no test held now have one: the sentence that says Gates
+  Local runs its own Ollama names the right ports; the banner stays
+  empty under first run and before the first read; no first model is
+  offered where it could not be kept; and a stalled download drops the
+  time left while the gear's tip says where to act.
+
 ## 2026-11-16: the web usage folder holds to the six comment kinds
 
 - The Usage pop-up passes the comment rule: 30 offenders went, and the
