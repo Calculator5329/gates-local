@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-16: the perf runs measure 0.2.4 again
+
+- The thread journey read the "earlier" button's label by keeping every
+  digit. 0.2.4's button reads "200 earlier of 1,800", so the journey
+  waited for 2,001,800 turns and every timing pair with 0.2.4 in it
+  stopped at the five-minute limit. It now reads the first number.
+
 ## 2026-11-16: the last fixed waits in browser tests
 
 - Three browser tests waited a fixed time and then checked. Each now waits

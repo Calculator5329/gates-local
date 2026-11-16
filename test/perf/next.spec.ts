@@ -14,7 +14,7 @@ import { CONTROL_URL, FAKE_URL, appUrl } from "../e2e/env.ts";
 import { holds } from "../e2e/waits.ts";
 import { browserReactHook, costRows, counterRows, emptyNetwork, frameBytes, hotSpots, snapshot, type HotSpot, type MetricSnapshot, type NetworkCounts, type ReactCounts, type Row } from "./counters.ts";
 import type { FixtureIds } from "./fixture.ts";
-import { EARLIER_BUTTON, install, measure, REPLY_TEXT_SELECTOR, type LaterEnd, type Observation } from "./probe.ts";
+import { EARLIER_BUTTON, earlierAdds, install, measure, REPLY_TEXT_SELECTOR, type LaterEnd, type Observation } from "./probe.ts";
 import { COUNTER_REPETITIONS, NEXT_DEFAULT, nextJourneys, repetitionPlan, type RepetitionKind } from "./next-journeys.ts";
 import type { Journey } from "./selection.ts";
 import { metric, type Run } from "./stats.ts";
@@ -323,7 +323,7 @@ test("priority journeys with costs", async ({ browser }) => {
           const earlier = page.locator(`.tl ${EARLIER_BUTTON}`);
           if (await earlier.count() > 0) {
             await earlier.scrollIntoViewIfNeeded();
-            const adds = Number((await earlier.innerText()).replace(/\D/g, ""));
+            const adds = earlierAdds(await earlier.innerText());
             await timing("thread-2000-show-earlier", await clicking(earlier), "click", "turn", String(mountedLast + adds), "class-count");
             await expect(page.locator(".tl .turn")).toHaveCount(mountedLast + adds);
           }

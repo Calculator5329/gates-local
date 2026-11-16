@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { browserProbe, EARLIER_BUTTON, REPLY_TEXT_SELECTOR } from "./probe.ts";
+import { browserProbe, EARLIER_BUTTON, earlierAdds, REPLY_TEXT_SELECTOR } from "./probe.ts";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const noop = () => {};
@@ -117,4 +117,13 @@ test("reconnect observes a replaced socket even when loss and recovery happen be
   expect(initial.readyState).toBe(3); expect(replacement).not.toBe(initial);
   f.tick(); await Promise.resolve();
   expect(finished).toBe(true);
+});
+
+test.each([
+  ["200", 200],
+  ["200 earlier of 1,800", 200],
+  ["1,000", 1000],
+  ["", 0],
+])("the earlier button labelled %j mounts %i more turns", (label, adds) => {
+  expect(earlierAdds(label)).toBe(adds);
 });

@@ -19,6 +19,8 @@ export interface LaterEnd { selector: string; text: string; mode: string }
  * class `selector` mounted equal `text` (the thread's turns) less that count.
  */
 export const EARLIER_BUTTON = '[data-testid="chat.thread.earlier"]';
+/** The turns the earlier button mounts: the first number it shows ("200", or "200 earlier of 1,800" before 0.2.5). */
+export const earlierAdds = (label: string): number => Number(/\d[\d,]*/.exec(label)?.[0].replaceAll(",", "") ?? 0);
 interface Probe {
   arm(event: string, selector: string, text: string, mode: string, later?: LaterEnd): void;
   result: Promise<Observation>;
