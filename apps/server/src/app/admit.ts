@@ -269,7 +269,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, said
         const append = () => {
           if (!still()) throw stoppedEarly();
           const question = store.appendMessage({ ...(messageId === undefined ? {} : { id: messageId }), threadId, role: "user", content, ...(savedImages.length ? { images: savedImages } : {}), ...(files.length ? { files } : {}) }, replaced);
-          replies.started(turn.turnId, turn.attempt, question, model, { cold: load?.cold === true, drawing: false });
+          replies.started(turn.turnId, turn.attempt, question, model, { cold: load?.cold === true, drawing: false, ...(replaced.length === 0 ? { chat: store.numbers.chat(threadId) } : {}) });
           return question;
         };
         const stopFirst = (wrap: (error: unknown) => never) => (error: unknown): never => { if (!still() && replies.question(turn.turnId) === undefined) throw stoppedEarly(); return wrap(error); };
@@ -277,7 +277,6 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, said
         // A file removed since the check above (its day ran out) is said, not saved as a dead reference.
         const userMessage = attachedFiles && files.length ? await attachedFiles.save(files, withImages, threadId).catch(stopFirst(attachError)) : await withImages();
         sendMark("saved");
-        push(...threadChanged(store, threadId));
         started = userMessage;
         turn.inMemory = true;
         // a model it loads is ready at its first token; one already in memory, now
@@ -288,6 +287,8 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, said
         pushReply(turn);
         // after the start: the list every window shows no longer has this message
         replies.notify();
+        // why: after the rows' change, so a window that took their number reads nothing for this push
+        push(...threadChanged(store, threadId));
         // the plan read the GPU a moment ago: the table takes that reading
         fitTable.changed({ afterPlan: true });
         void runTurn(turn, ending, baseUrl, model, report.numCtx, modelHistory, load, { tools, think, settings, files: [...fileEntries.values()] });

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-16: a reply's own rows no longer read the chat again
+
+- The saved question and reply come with the reply's record, and now
+  so does the chat's number once they were written. A window whose
+  copy of the chat was current takes the number and reads nothing:
+  each turn used to read the open chat twice in every window showing
+  it, once when the question was saved and once when the reply ended.
+- The server tells windows of the saved rows before it pushes the
+  chat's row, so the push finds the number already held. A Retry,
+  which replaces rows, sends no number and reads as before.
+
 ## 2026-11-16: the empty "turns" sync domain is gone
 
 - Nothing the server sends is in it any more: a reply record carries

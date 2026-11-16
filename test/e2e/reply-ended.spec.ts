@@ -10,6 +10,8 @@ import type { Locator, Page, TestInfo } from "@playwright/test";
 import { appUrl } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 import { pick } from "./threads-support.ts";
+import { tap } from "./socket-tap.ts";
+import { holds } from "./waits.ts";
 
 const MODEL = "qwen3.5:9b";
 
@@ -156,4 +158,27 @@ test("with tools off, an attached file's wrench opens Settings on Tools", async 
   await wrench.click();
   await expect(page.locator(".set h1").first()).toHaveText("Tools");
   await shot(page, info, "settings-tools", { title: page.locator(".set h1").first() });
+});
+
+// Guards the chat's rows arriving once: the saved question and reply come with the record, so no window reads the chat again for them.
+test("a reply sent and finished reads its chat no more, in the window that sent it or one watching", async ({ page, open, context }, info) => {
+  test.setTimeout(60_000);
+  const here = await tap(page);
+  await open(); await waitReady(page);
+  await sendMessage(page, "First, so the chat exists");
+  await expect(page.locator(".turn.a").first()).toHaveClass(/\bdone\b/, { timeout: 30_000 });
+  const other = await context.newPage();
+  const there = await tap(other);
+  await other.goto(appUrl(`#thread=${encodeURIComponent(threadOf(page))}`));
+  await waitReady(other);
+  await expect(other.locator(".turn.a")).toHaveCount(1);
+  const reads = () => [here.calls.get("threads.get") ?? 0, there.calls.get("threads.get") ?? 0];
+  const before = reads();
+  await sendMessage(page, "Second, watched by both");
+  await expect(page.locator(".turn.a").last()).toHaveClass(/\bdone\b/, { timeout: 30_000 });
+  await expect(other.locator(".turn.a")).toHaveCount(2);
+  await expect(other.locator(".turn.a").last()).toHaveClass(/\bdone\b/, { timeout: 30_000 });
+  writeFileSync(info.outputPath("reads.json"), JSON.stringify({ before, after: reads() }));
+  await holds(page, 1000, async () => reads().map((n, i) => n - (before[i] ?? 0)), [0, 0], { message: "threads.get in the sending window and the watching one" });
+  await other.close();
 });

@@ -748,6 +748,8 @@ export const ReplyChange = S.Union([
     reply: Reply,
     // why: the saved rows come with the change, so no window reads the chat again to show them
     saved: S.optional(S.Array(Message)),
+    // why: the chat's number once they were written; a window current before them is current at it
+    chatNumber: S.optional(Count),
   }),
   S.Struct({ kind: S.Literal("left"), id: ReplyId, threadId: S.String, rev: Count, why: S.Literals(["removed", "chat-deleted", "settled"]) }),
 ]);

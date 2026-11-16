@@ -152,12 +152,14 @@ export function createTurnRunner({ deps, store, log, push, said, pushReply, draf
       const event: TurnEnd = { ...saved, ended };
       // The record ends with its last event: a window that reads now is told of no reply on its way.
       const rows = event.type === "done" ? [event.message] : event.partial !== undefined ? [event.partial] : event.question !== undefined ? [event.question] : [];
-      replies.ended(turnId, endOf(turn, event, ended), now, rows);
+      const wrote = event.type === "done" || event.partial !== undefined;
+      replies.ended(turnId, endOf(turn, event, ended), now, rows, wrote ? store.numbers.chat(threadId) : undefined);
       said({ turnId, threadId, event });
-      if (event.type === "done" || event.partial !== undefined) push(...threadChanged(store, threadId));
       if (event.type === "done") pushSpeeds();
       // after its last event: the windows hear what became of the messages that waited behind it
       replies.notify();
+      // why: after the rows' change, so a window that took their number reads nothing for this push
+      if (wrote) push(...threadChanged(store, threadId));
     };
     /** `work`, or HALTED as soon as halt() runs; the dropped work finishes in the background. */
     const untilHalted = <T>(work: Promise<T>): Promise<T | typeof HALTED> => {

@@ -125,7 +125,7 @@ const threadSession = createThreads({ applyServerEvent,
   pendingSettings: () => navigation.pendingSettings,
 });
 export const { reloadThread, renameThread, deleteThread, waitForThreadDeletion, preloadThread, loadEarlier, earlierOf, onEarlier } = threadSession;
-const { noteMessage, loadThread, restoreSaved, loading, createThread, untrackedDone, imageSaved } = threadSession;
+const { noteMessage, rowsSaved, loadThread, restoreSaved, loading, createThread, untrackedDone, imageSaved } = threadSession;
 
 
 const chat = createChat({ applyServerEvent,
@@ -134,7 +134,7 @@ const chat = createChat({ applyServerEvent,
   creatingDraft: threadSession.creatingDraft,
   loadThread,
   loading,
-  noteMessage, withMessage,
+  noteMessage, rowsSaved, withMessage,
   untrackedDone,
   openThread: (threadId) => openThread(threadId), blockingFor,
 });

@@ -254,6 +254,13 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     });
   }
 
+  // why: the rows came with their record; a copy current before them is current at their number
+  function rowsSaved(threadId: string, chatNumber: number): void {
+    if (!numbers.ordered() || getState().messages[threadId] === undefined || loading(threadId) || !numbers.current(threadId)) return;
+    numbers.announce(threadId, chatNumber);
+    numbers.hold(threadId, chatNumber);
+  }
+
   /** A message this client learned outside a thread load: the loads in flight for its thread replay it. */
   function noteMessage(threadId: string, msg: Message): void {
     previews.delete(threadId);
@@ -497,7 +504,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
       earlierListeners.add(listener);
       return () => { earlierListeners.delete(listener); };
     },
-    rowPushed, listArrived, rowAnswered,
+    rowPushed, listArrived, rowAnswered, rowsSaved,
     renameThread, deleteThread, waitForThreadDeletion, createThread, untrackedDone, imageSaved,
     creatingDraft: (version: number) => creatingDrafts.has(version),
     /**

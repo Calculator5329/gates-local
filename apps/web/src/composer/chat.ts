@@ -35,6 +35,7 @@ interface ChatEffects {
   readonly loadThread: (threadId: string, force?: boolean) => Promise<void>;
   readonly loading: (threadId: string) => boolean;
   readonly noteMessage: (threadId: string, message: Message) => void;
+  readonly rowsSaved: (threadId: string, chatNumber: number) => void;
   readonly withMessage: (state: State, threadId: string, message: Message) => State["messages"];
   readonly untrackedDone: (threadId: string, message: Message) => void;
   readonly openThread: (threadId: string) => void;
@@ -418,7 +419,7 @@ function handedOver(id: string, restored: boolean): void {
 const shownTurn = (id: string) => Object.values(getState().turns).find((t) => t.turnId === id);
 
 /** History, navigation, fit and RPC operations are wired by session.ts. `rules` is given only by the test that turns one off (records.test.ts). */
-export function createChat({ applyServerEvent, reply: askOne, codeOf, createThread, creatingDraft, loadThread, loading, noteMessage, withMessage, untrackedDone, openThread, blockingFor }: ChatEffects, rules?: WindowRules) {
+export function createChat({ applyServerEvent, reply: askOne, codeOf, createThread, creatingDraft, loadThread, loading, noteMessage, rowsSaved, withMessage, untrackedDone, openThread, blockingFor }: ChatEffects, rules?: WindowRules) {
   askServer = askOne;
   const records = createRecords(rules);
   /** Image sends that open a new chat, by record id, until the server saves their question. */
@@ -443,9 +444,10 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     else if (r.stage !== "editing") editsHere.delete(r.id);
     if (isWaiting(r)) return waits(r, listed);
     if (r.stage === "starting") return starts(r);
-    if (r.stage === "done") return done(r, saved);
-    if (r.stage === "stopped" || r.stage === "failed") return over(r, saved);
-    answers(r, saved);
+    if (r.stage === "done") done(r, saved);
+    else if (r.stage === "stopped" || r.stage === "failed") over(r, saved);
+    else answers(r, saved);
+    if (change.chatNumber !== undefined) rowsSaved(r.threadId, change.chatNumber);
   }
 
   /**

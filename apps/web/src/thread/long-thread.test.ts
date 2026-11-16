@@ -212,6 +212,7 @@ async function realChat() {
     loadThread: async () => {},
     loading: () => true,
     noteMessage: () => {},
+    rowsSaved: () => {},
     withMessage,
     untrackedDone: () => {},
     openThread: () => {},

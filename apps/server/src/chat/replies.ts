@@ -104,7 +104,7 @@ export interface Replies {
   /** Its model is loading before its start. True when the record changed. */
   loading(turnId: string): boolean;
   /** Its question was saved, in this same step. False when the record had moved on. Told to the windows at `notify`. */
-  started(turnId: string, attempt: number, question: Message, model: string, how: { readonly cold: boolean; readonly drawing: boolean; readonly jobs?: readonly string[] }): boolean;
+  started(turnId: string, attempt: number, question: Message, model: string, how: { readonly cold: boolean; readonly drawing: boolean; readonly jobs?: readonly string[]; readonly chat?: number }): boolean;
   /** Its start was refused, or cut before anything was saved. Told to the windows at `notify`. */
   refused(turnId: string, attempt: number, why: Refusal): void;
   /** The turn's stream sent this. The stage its record now shows; none when the record is not being written. */
@@ -112,7 +112,7 @@ export interface Replies {
   /** The reply failed and runs once more. The stage its record now shows. */
   retrying(turnId: string): ReplyStage | undefined;
   /** The reply ended. `saved`: the rows its end wrote to the chat. Told to the windows at `notify`, after its last event. */
-  ended(turnId: string, end: End, at: number, saved?: readonly Message[]): void;
+  ended(turnId: string, end: End, at: number, saved?: readonly Message[], chat?: number): void;
   clocked(turnId: string): void;
   /** The work of this turn has given back everything it took. */
   left(turnId: string): void;
@@ -215,7 +215,7 @@ export function createReplies({ file, log, told, saved, deleting, closing, cut, 
   let counter = 0;
   /** The list changed since the windows last heard. */
   let dirty = false;
-  const pending = new Map<string, { readonly last: Rec; readonly saved: readonly Message[] }>();
+  const pending = new Map<string, { readonly last: Rec; readonly saved: readonly Message[]; readonly chat?: number }>();
   // why: a clock that a cut stops is told once every cut of the step is done
   let cutting = false;
 
@@ -238,7 +238,8 @@ export function createReplies({ file, log, told, saved, deleting, closing, cut, 
     if (next === undefined || next === prev) return prev;
     const rec: Rec = { ...next, rev: ++counter };
     recs.set(rec.id, rec);
-    pending.set(rec.id, { last: rec, saved: pending.get(rec.id)?.saved ?? NO_ROWS });
+    const was = pending.get(rec.id);
+    pending.set(rec.id, { last: rec, saved: was?.saved ?? NO_ROWS, ...(was?.chat === undefined ? {} : { chat: was.chat }) });
     // a start that is over, however it ended, is shown as the record says
     const taken = untold.get(rec.id);
     if (taken !== undefined && !(rec.stage === "starting" && rec.turnId === taken.turnId)) untold.delete(rec.id);
@@ -383,13 +384,13 @@ export function createReplies({ file, log, told, saved, deleting, closing, cut, 
     return { ...words, stage: "queued", ...(wait === undefined ? {} : { waitFor: wait }) };
   }
 
-  function changeOf(r: Rec, rows: readonly Message[]): ReplyChange | undefined {
+  function changeOf(r: Rec, rows: readonly Message[], chat: number | undefined): ReplyChange | undefined {
     const left = (why: "removed" | "chat-deleted" | "settled"): ReplyChange => ({ kind: "left", id: r.id, threadId: r.threadId, rev: r.rev, why });
     if (r.stage === "removed") return left(r.why);
     if (keptBySender(r)) return left("settled");
     const reply = isEnded(r) ? over(r, rows) : wire(r, r.id);
     if (reply === undefined) return isEnded(r) ? left("settled") : undefined;
-    return { kind: "is", reply, ...(rows.length === 0 ? {} : { saved: rows }) };
+    return { kind: "is", reply, ...(rows.length === 0 ? {} : { saved: rows, ...(chat === undefined ? {} : { chatNumber: chat }) }) };
   }
 
   function tellWindows(): void {
@@ -398,14 +399,15 @@ export function createReplies({ file, log, told, saved, deleting, closing, cut, 
     for (const [id, p] of pending) {
       if (untold.has(id)) continue;
       pending.delete(id);
-      const change = changeOf(recs.get(id) ?? p.last, p.saved);
+      const change = changeOf(recs.get(id) ?? p.last, p.saved, p.chat);
       if (change !== undefined) changes.push(change);
     }
     for (const c of changes.toSorted((a, b) => revOf(a) - revOf(b))) told(c);
   }
-  const savedWith = (id: string, rows: readonly Message[]) => {
+  // why: rows saved without the chat's number leave the change with none, so every window reads
+  const savedWith = (id: string, rows: readonly Message[], chat: number | undefined) => {
     const p = pending.get(id);
-    if (p !== undefined && rows.length > 0) pending.set(id, { last: p.last, saved: [...p.saved, ...rows] });
+    if (p !== undefined && rows.length > 0) pending.set(id, { last: p.last, saved: [...p.saved, ...rows], ...(chat === undefined ? {} : { chat }) });
   };
 
   const gone = (why: "sent" | "removed" | "chat-deleted" | "unknown", questionId?: string): ReplyAnswer => {
@@ -567,12 +569,12 @@ export function createReplies({ file, log, told, saved, deleting, closing, cut, 
       const rec = ofTurn(turnId);
       return apply(rec, { event: "load", turnId }).next !== rec;
     },
-    started(turnId, attempt, question, model, { cold, drawing, jobs }) {
+    started(turnId, attempt, question, model, { cold, drawing, jobs, chat }) {
       const rec = ofTurn(turnId);
       const next = apply(rec, { event: "start", turnId, attempt, question, model, cold, drawing, ...(jobs === undefined ? {} : { jobs }) }).next;
       const ok = next !== rec && isAsked(next);
       if (ok) {
-        savedWith(next.id, [question]);
+        savedWith(next.id, [question], chat);
         // why: a window's own copy of the same message has been asked too
         for (const r of waitingWith(question.id, next.id)) apply(r, { event: "saved" });
       }
@@ -595,10 +597,10 @@ export function createReplies({ file, log, told, saved, deleting, closing, cut, 
       settle();
       return isLive(next) && next.turnId === turnId ? shownStage(next) : undefined;
     },
-    ended(turnId, end, at, rows = NO_ROWS) {
+    ended(turnId, end, at, rows = NO_ROWS, chat) {
       const rec = ofTurn(turnId);
       const next = apply(rec, { event: "end", turnId, at, end }).next;
-      if (next !== undefined && next !== rec) savedWith(next.id, rows);
+      if (next !== undefined && next !== rec) savedWith(next.id, rows, chat);
       settle(true);
     },
     clocked(turnId) {
