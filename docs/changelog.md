@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-16: one table holds the window's sentences
+
+- apps/web/src/lib/words/window-words.test.ts pins 72 sentences the
+  window builds, one row each: file sizes, counts, the card line,
+  every Ollama failure title and next step, the message box's
+  placeholder in each state, install progress, the own-copy note, the
+  runtime gear's dot, label and tip, the note about images a model
+  cannot see, and the fixed sentences for no GPU and skipped pages.
+- A changed word, a dropped branch or a wrong number in any of them now
+  fails a row. Before, most of these were read only in part, or not at
+  all: a 500-byte refused file could have read "0 KB" with every test
+  green.
+
 ## 2026-11-16: a class a component names must style something
 
 - A new lint rule, gates/class-in-css, refuses a className in the web
