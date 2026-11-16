@@ -826,6 +826,23 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     expect((await f.module.status()).state).toBe("busy");
     f.module.cancel(active.jobId); await f.module.wait(active.jobId);
   });
+  it("a queued image that runs out its wait while another image runs leaves the engine busy", async () => {
+    const f = await fixture({ queueTimeoutMs: 50 }); f.configure({ hold: true });
+    const active = await f.module.generate({ prompt: "a tree" });
+    await vi.waitFor(() => expect(f.events.some((e) => e.progress === 0.5)).toBe(true));
+    const queued = await f.module.generate({ prompt: "a tree" }); await f.module.wait(queued.jobId);
+    expect(f.events.find((e) => e.jobId === queued.jobId && e.state === "error")?.errorKind).toBe("timeout");
+    expect(f.module.current().state).toBe("busy");
+    f.module.cancel(active.jobId); await f.module.wait(active.jobId);
+  });
+  it("image generation turned off while an image runs: the status says off at once", async () => {
+    const f = await fixture(); f.configure({ hold: true });
+    const active = await f.module.generate({ prompt: "a tree" });
+    await vi.waitFor(() => expect(f.events.some((e) => e.progress === 0.5)).toBe(true));
+    f.configure({ enabled: false });
+    expect((await f.module.status()).state).toBe("off");
+    f.module.cancel(active.jobId); await f.module.wait(active.jobId);
+  });
   it("rechecks MainPID after the idle queue read", async () => {
     const f = await fixture(); f.configure({ answering: false });
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
@@ -1407,6 +1424,27 @@ describe("image presets (fake ComfyUI file lists)", () => {
     ended!(77);
     expect(f.module.engine()).toMatchObject({ owner: "none", state: "stopped" });
     expect(f.module.engine().pid).toBeUndefined();
+  });
+
+  it("the app's own engine runs and Settings points at another ComfyUI: that one is named outside, an image on it too", async () => {
+    const own = { active: false };
+    let f!: Awaited<ReturnType<typeof fixture>>;
+    f = await fixture({ own: {
+      installed: () => true, address: () => "http://127.0.0.1:41234",
+      inspect: async () => ({ present: true, active: own.active, activeState: own.active ? "active" : "inactive", pid: own.active ? 77 : 0 }),
+      start: async () => { own.active = true; f.configure({ answering: true }); },
+      stop: async () => { own.active = false; },
+      onExit: () => undefined,
+    } });
+    f.configure({ answering: false });
+    await f.module.start();
+    expect(f.module.current()).toMatchObject({ owner: "app", state: "ready" });
+    f.configure({ comfyUrl: "http://127.0.0.1:8188", hold: true });
+    expect(await f.module.status()).toMatchObject({ owner: "external", state: "ready", baseUrl: "http://127.0.0.1:8188" });
+    const { jobId } = await f.module.generate({ prompt: "a tree" });
+    await vi.waitFor(() => expect(f.events.some((e) => e.progress === 0.5)).toBe(true));
+    expect(f.module.current()).toMatchObject({ owner: "external", state: "busy" });
+    f.module.cancel(jobId); await f.module.wait(jobId);
   });
 
   it("WIN-MEM-04: an address set in Settings that does not answer is not running there, never not set up, and is left alone", async () => {

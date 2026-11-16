@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-11-16: the picture engine's status has one writer
+
+- The server set the picture engine's status from sixteen places, each
+  building the whole status by hand and each guarding itself with its
+  own check on the running jobs. Now one function sets it
+  (image/module.ts `move`), and every caller says who it is: a read of
+  the engine, a job, or a fact no job knows better. A read gives way
+  while a picture is queued or running; a job gives way to the job
+  that holds the card; turning images off, the app stopping the
+  engine, and a failed idle stop always land.
+- The owner is worked out in one place (image/engine-status.ts): the
+  app's when the app started the engine at the status's address,
+  outside when something answers there, none otherwise. Two writes
+  used to call the engine the app's whenever the app ran one anywhere,
+  so a picture on an outside ComfyUI briefly read as the app's own.
+  Every status with an address now carries the address marks too.
+- A status read during a picture now asks the engine like any other
+  read, and the write guard decides; before, a read returned early and
+  the guard was never tested. The guard, the off case and the owner
+  are held by 20 new tests, each watched fail with its rule broken.
+
 ## 2026-11-16: the server's app folder holds to the six comment kinds
 
 - apps/server/src/app passes the comment rule: all 202 offenders went,

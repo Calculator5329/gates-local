@@ -22,6 +22,7 @@ import { downloadFile, haveFile, partBytes, sizeOf, volumeFree, volumeOf, type D
 import { isLocalComfy } from "./installed.ts";
 import { appPreset, cardBytes, DEFAULT_CHOICE, defaultChoice, describeChoice, isDefaultChoice, judgeRow, listPresets, liveChoice, MIN_ROOM, NO_GPU, presetFiles, resolveChoice, sameRow, SLOW, smallerFit, tiersFor, workflowPreset, type ComfyLists, type KnownWorkflow, type Preset } from "./presets.ts";
 import { createComfyService, type ComfyService } from "./service.ts";
+import { engineStatus, mayWrite, type Seen, type StatusWriter } from "./engine-status.ts";
 import { extraModelPathsLine, MODEL_KINDS, type OwnComfy } from "./own.ts";
 
 /** The deepest folder every one of `dirs` is in (the first itself, when there is one). */
@@ -352,6 +353,8 @@ export function imageRoom(gpu: GpuStatus | undefined, cpuOnly: boolean | undefin
 const roomWords = (room: number | undefined): { noGpu?: string; slow?: string; unloadsChat?: boolean } =>
   room === 0 ? { slow: SLOW } : room === undefined ? {} : room < MIN_ROOM ? { noGpu: NO_GPU } : { unloadsChat: true };
 
+const READ: StatusWriter = { kind: "read" };
+
 export function createImageModule(deps: ImageDeps): ImageModule {
   const log = deps.log ?? ((line: string) => console.error(`[image] ${line}`));
   for (const job of deps.store.interruptImageJobs()) log(`job ${job.jobId} failed kind=restarted`);
@@ -372,10 +375,11 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   const emit: Push = (channel, payload, changes) => { try { deps.push(channel, payload, changes); } catch { /* a disconnected client cannot strand a GPU job */ } };
   /** The engine state the presets were last read again for: ComfyUI coming up or turning off changes the list, a job's busy and ready again does not. */
   let presetsFor: ImageStatus["state"] | undefined;
-  const update = (next: ImageStatus): ImageStatus => {
-    status = next;
+  const move = (writer: StatusWriter, seen: Seen, baseUrl?: string): ImageStatus => {
+    if (!mayWrite(writer, jobs.size, activeJob)) return status;
+    status = engineStatus(seen, baseUrl === undefined ? { startedByApp: owned !== undefined } : { baseUrl, startedByApp: owned?.baseUrl === baseUrl, ...marked(baseUrl), ...ownMark(baseUrl) });
     emit("image.status", status);
-    if ((next.state === "ready" || next.state === "off") && next.state !== presetsFor) { presetsFor = next.state; republish(); }
+    if ((status.state === "ready" || status.state === "off") && status.state !== presetsFor) { presetsFor = status.state; republish(); }
     return status;
   };
   /** Read the presets again for every window: presets() pushes what it read. */
@@ -444,7 +448,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     clearIdle();
     if (!owned || closed) return;
     idleTimer = setTimeout(() => { void module.stopIdle().catch((error: unknown) => {
-      update({ ...status, state: "error", detail: `ComfyUI idle stop failed: ${detail(error)}` });
+      move({ kind: "fact" }, { state: "error", answering: status.owner !== "none", detail: `ComfyUI idle stop failed: ${detail(error)}` }, status.baseUrl);
       if (owned) armIdle();
     }); }, deps.idleMs ?? 300_000);
     idleTimer.unref();
@@ -462,23 +466,19 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   };
   const discover = async (): Promise<ImageStatus> => {
     const cfg = config();
-    if (!cfg.enabled) return update({ state: "off", owner: owned ? "app" : "none", ...await nowhere(cfg) ? { nowhere: true } : {} });
-    if (jobs.size > 0) return status;
+    if (!cfg.enabled) return move({ kind: "fact" }, { state: "off", nowhere: await nowhere(cfg) });
     if (await client(cfg.baseUrl).healthy()) {
-      if (jobs.size > 0) return status;
       if (owned && cfg.managed) {
         const unit = await serviceAt(cfg.baseUrl).inspect();
         if (unit.pid !== owned.pid || !unit.active) owned = undefined;
       }
-      if (jobs.size > 0) return status;
-      return update({ state: "ready", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl, ...marked(cfg.baseUrl) });
+      return move(READ, { state: "ready" }, cfg.baseUrl);
     }
     const unit = cfg.managed ? await serviceAt(cfg.baseUrl).inspect() : { present: false, active: false, activeState: "unknown", pid: 0 };
     const starting =unit.present && !["inactive", "failed"].includes(unit.activeState);
-    if (jobs.size > 0) return status;
     if (owned?.baseUrl === cfg.baseUrl && (!unit.active || unit.pid !== owned.pid)) owned = undefined;
-    return update({ state: starting ? "starting" : unit.present ? "stopped" : "missing", owner: owned?.baseUrl === cfg.baseUrl ? "app" : starting ? "external" : "none", baseUrl: cfg.baseUrl, ...marked(cfg.baseUrl), ...ownMark(cfg.baseUrl),
-      detail: starting ? "ComfyUI is running or changing state but its HTTP interface is not ready yet." : unit.present ? "ComfyUI will start when you make an image." : missingWords(cfg.baseUrl, true) });
+    return move(READ, starting ? { state: "starting", answering: true, detail: "ComfyUI is running or changing state but its HTTP interface is not ready yet." }
+      : unit.present ? { state: "stopped", detail: "ComfyUI will start when you make an image." } : { state: "missing", detail: missingWords(cfg.baseUrl, true) }, cfg.baseUrl);
   };
   const measure = deps.readGpu ?? (async () => {
     const gpu = await readGpu(deps.runNvidiaSmi);
@@ -537,7 +537,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       return want;
     });
   };
-  const ensure = async (baseUrl: string, managed: boolean, signal: AbortSignal) => {
+  const ensure = async (writer: StatusWriter, baseUrl: string, managed: boolean, signal: AbortSignal) => {
     const comfy = client(baseUrl);
     const service = serviceAt(baseUrl);
     if (await comfy.healthy()) {
@@ -547,7 +547,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     const before = managed ? await service.inspect() : { present: false, active: false, activeState: "unknown", pid: 0 };
     if (!before.present) throw imageError("image-missing", missingWords(baseUrl));
     const canStart = ["inactive", "failed"].includes(before.activeState);
-    update({ state: "starting", owner: owned ? "app" : canStart ? "none" : "external", baseUrl });
+    move(writer, { state: "starting", answering: !canStart }, baseUrl);
     signal.throwIfAborted();
     // Active and transitional units belong to their existing owner. Wait, never adopt.
     const up = async () => {
@@ -727,13 +727,13 @@ export function createImageModule(deps: ImageDeps): ImageModule {
    * memory is free. One the app did not start is never stopped: the card is given back with the
    * warning, and the next load is decided by a reading of the card.
    */
-  const heldWhileStuck = async (onCard: () => boolean, at: () => string, job: () => Promise<void>): Promise<void> => {
+  const heldWhileStuck = async (writer: StatusWriter, onCard: () => boolean, at: () => string, job: () => Promise<void>): Promise<void> => {
     try { await job(); }
     catch (error) {
       const promptId = error instanceof Error && "stuckPromptId" in error && typeof error.stuckPromptId === "string" ? error.stuckPromptId : undefined;
       if (promptId === undefined || !onCard() || deps.faultForTest === "stuck-picture-gives-the-card-back") throw error;
       const baseUrl = at(), comfy = client(baseUrl);
-      update({ state: "busy", owner: owned?.baseUrl === baseUrl ? "app" : "external", baseUrl, detail: STUCK_HOLD_NOTE });
+      move(writer, { state: "busy", answering: true, detail: STUCK_HOLD_NOTE }, baseUrl);
       const until = Date.now() + (deps.stuckHoldMs ?? STUCK_HOLD_MS);
       let ended: "left" | "gone" | "limit" | "closing" | undefined;
       let unanswered = 0;
@@ -788,7 +788,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     owned = undefined;
     clearIdle();
     deps.memory?.engineGone();
-    if (jobs.size === 0) update({ state: "stopped", owner: "none", baseUrl, ...ownMark(baseUrl), detail: "ComfyUI stopped on its own. It starts again when you make an image; its log says why." });
+    move(READ, { state: "stopped", detail: "ComfyUI stopped on its own. It starts again when you make an image; its log says why." }, baseUrl);
   });
   /** presets() reads begun, and the last one whose list went out. */
   let presetsBegun = 0, presetsSent = 0;
@@ -862,8 +862,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       if (!cfg.enabled) throw imageError("image-off", "Image generation is off. Turn it on in Settings first.");
       // A job starts it anyway, and owns the status while it runs.
       if (jobs.size === 0) {
-        await ensure(cfg.baseUrl, cfg.managed, AbortSignal.timeout((deps.startupTimeoutMs ?? 60_000) + 5_000));
-        if (jobs.size === 0) update({ state: "ready", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
+        await ensure(READ, cfg.baseUrl, cfg.managed, AbortSignal.timeout((deps.startupTimeoutMs ?? 60_000) + 5_000));
+        move(READ, { state: "ready" }, cfg.baseUrl);
         armIdle();
       }
       return module.presets();
@@ -876,6 +876,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       // A saved one this build no longer has (an older build's pick) counts as none (liveChoice).
       const kept = liveChoice(params.threadId ? deps.store.imageChoiceOf(params.threadId) : undefined);
       const jobId = randomUUID();
+      const writer: StatusWriter = { kind: "job", jobId };
       let prompt = params.prompt;
       // Unset: nothing saved in the thread or Settings, and the choice sent (or a retry's stored one)
       // is absent or one of the defaults. The picker saves every pick, so with nothing saved a default
@@ -942,7 +943,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       // Begin after registering the promise; generate returns before any running event.
       const ended = Promise.resolve().then(async () => {
         try {
-          await claimed(signal, () => heldWhileStuck(() => staged !== undefined, () => cfg.baseUrl, async () => {
+          await claimed(signal, () => heldWhileStuck(writer, () => staged !== undefined, () => cfg.baseUrl, async () => {
             runFrom = Date.now();
             armRun(runLimitMs());
             const latest = config();
@@ -950,7 +951,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             cfg = latest;
             activeJob = jobId;
             event("running", { progress: 0 });
-            update({ state: "busy", owner: owned ? "app" : "none", baseUrl: cfg.baseUrl });
+            move(writer, { state: "busy", answering: false }, cfg.baseUrl);
             // Inside the job: a retry's stored choice a newer table no longer has fails its card in words.
             let { size } = resolveChoice(choice, extras());
             const freeing = (on: boolean) => event("running", on ? { progress: 0, phase: "freeing" } : { progress: 0 });
@@ -973,14 +974,14 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             };
             // Never read: ComfyUI is started (or found) and its list read before the first fit.
             stage = "image-missing";
-            const early = unset && knownFiles() === undefined ? await ensure(cfg.baseUrl, cfg.managed, signal) : undefined;
+            const early = unset && knownFiles() === undefined ? await ensure(writer, cfg.baseUrl, cfg.managed, signal) : undefined;
             if (early) await read(early);
             if (unset) await settle();
             // One answer, before ComfyUI starts: everything else leaves, then the reading decides.
             stage = "image-fit";
             staged = await fit(cfg, size.bytes, { kind: "image", setup: imageSetup(choice) }, signal, freeing);
             stage = "image-missing";
-            const comfy = early ?? await ensure(cfg.baseUrl, cfg.managed, signal);
+            const comfy = early ?? await ensure(writer, cfg.baseUrl, cfg.managed, signal);
             // read before: the read now ComfyUI is up catches files gone since
             if (unset && !early) {
               await read(comfy);
@@ -1008,7 +1009,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             }
             if (earlier) stuck.delete(cfg.baseUrl);
             if (runLimitMs() !== runLimit) armRun(runLimitMs());
-            update({ state: "busy", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
+            move(writer, { state: "busy", answering: true }, cfg.baseUrl);
             // The run time is ComfyUI's time making the picture, not the wait before it.
             const started = performance.now();
             const { bytes, seed, steps } = await comfy.render(prompt, jobId, signal, (progress, said) => { shown = progress; event("running", { progress, ...said }); }, () => {
@@ -1036,7 +1037,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             staged = undefined;
             event("done", { progress: 1, imagePath, runMs }, { width: made.width, height: made.height, seed, ...steps === undefined ? {} : { steps }, runMs, bytes: bytes.length });
             if (params.threadId) emit(...threadChanged(deps.store, params.threadId));
-            update({ state: "ready", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
+            move(writer, { state: "ready" }, cfg.baseUrl);
           }));
         } catch (error) {
           // a load that did not finish: what the engine holds is unknown, and the next handoff asks it to free
@@ -1072,18 +1073,19 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             : errorKind === "wont-fit" && error instanceof Error && "said" in error && typeof error.said === "string" ? error.said : reasons[errorKind];
           log(`job ${jobId} failed kind=${errorKind}`);
           event(controller.signal.aborted ? "cancelled" : "error", { message: reason, errorKind });
-          if (cancelDetail && activeJob === jobId) {
+          const ran = activeJob === jobId;
+          if (cancelDetail && ran) {
             // Only a prompt that outlived the deadline means ComfyUI is still up; a failed cleanup alone does not.
-            update({ state: "error", owner: owned?.baseUrl === cfg.baseUrl ? "app" : stuckPromptId ? "external" : "none", baseUrl: cfg.baseUrl, detail: `${message} ${cancelDetail}` });
-          } else if ((controller.signal.aborted || timedOut === "run") && activeJob === jobId) {
+            move(writer, { state: "error", answering: stuckPromptId !== undefined, detail: `${message} ${cancelDetail}` }, cfg.baseUrl);
+          } else if ((controller.signal.aborted || timedOut === "run") && ran) {
             // a picture stopped at its limit, like one cancelled: the engine that stopped it is ready for the next
             const healthy = await client(cfg.baseUrl).healthy();
-            if (activeJob === jobId) update({ state: healthy ? "ready" : "stopped", owner: owned?.baseUrl === cfg.baseUrl ? "app" : healthy ? "external" : "none", baseUrl: cfg.baseUrl });
-          } else if (!controller.signal.aborted && noComfy && (activeJob === jobId || activeJob === undefined)) {
+            move(writer, healthy ? { state: "ready" } : { state: "stopped" }, cfg.baseUrl);
+          } else if (!controller.signal.aborted && noComfy) {
             // nothing to draw with is the state, not a fault: the Image button reads it and stays out of Image mode
-            update({ state: "missing", owner: "none", baseUrl: cfg.baseUrl, ...marked(cfg.baseUrl), detail: missingWords(cfg.baseUrl, true) });
-          } else if (!controller.signal.aborted && (activeJob === jobId || activeJob === undefined)) {
-            update({ state: "error", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "none", baseUrl: cfg.baseUrl, detail: message });
+            move(writer, { state: "missing", detail: missingWords(cfg.baseUrl, true) }, cfg.baseUrl);
+          } else if (!controller.signal.aborted) {
+            move(writer, { state: "error", answering: false, detail: message }, cfg.baseUrl);
           }
         } finally {
           clearTimeout(timeout);
@@ -1130,7 +1132,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
         const baseUrl = owned.baseUrl; owned = undefined;
         stuck.delete(baseUrl);
         deps.memory?.engineGone();
-        update({ state: "stopped", owner: "none", baseUrl, ...ownMark(baseUrl) });
+        move({ kind: "fact" }, { state: "stopped" }, baseUrl);
       }).catch((error: unknown) => {
         // A cancelled reclaim leaves ComfyUI to its idle timer.
         if (signal?.aborted) armIdle();
