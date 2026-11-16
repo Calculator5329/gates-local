@@ -5,7 +5,7 @@
 // Global keys follow the design's Escape order: popover, drawer, the
 // runtime confirm, the download page, then Settings itself.
 import type { Message } from "@gates-local/contracts";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Banner } from "../runtime/Banner.tsx";
 import { type Rt, failWords, installStep, rtOf } from "../runtime/words.tsx";
 import { Composer, CountMenu, OptsMenu, PlusMenu } from "../composer/Composer.tsx";
@@ -15,7 +15,7 @@ import { FirstRunLoading, NoServer } from "../first-run/FirstRunShell.tsx";
 import { describeModel } from "../lib/words/format.ts";
 import { Icon, type IconId, Sprite } from "../lib/ui/icons.tsx";
 import { imageMode } from "../image/image-choice.ts";
-import { ScreenError, firstRunScreen, imagePickerScreen, pickerScreen, preloadScreens, settingsScreen, threadScreen, useScreen } from "./screens.tsx";
+import { ScreenError, firstRunScreen, imagePickerScreen, pickerScreen, settingsScreen, threadScreen, useScreen } from "./screens.tsx";
 import { SECTIONS, SettingsNav, Sidebar, closeDrawer, goNew, onDrawerPop, openDrawer, openSearch } from "../sidebar/Sidebar.tsx";
 import { UpdateNote } from "../updates/UpdateNote.tsx";
 import { Dialog, DialogHead } from "../lib/ui/Panel.tsx";
@@ -31,6 +31,8 @@ import { PHONE, POP_EL, SheetHead, Tip, TurnSkel, anchorOf, closePop, isPhone, i
 import { downloadBlob, withTimeout } from "../lib/ui/kit/async.ts";
 import { CommitJobs } from "../lib/ui/kit/focus.ts";
 import { usePopover } from "../lib/ui/kit/popover.ts";
+import { useDocumentEvent } from "../lib/ui/kit/events.ts";
+import { watch } from "../lib/ui/kit/watch.ts";
 
 interface Unset { readonly lib: boolean; readonly img: boolean }
 
@@ -55,20 +57,43 @@ function unsetNow(s: State, saved: Unset): Unset & { readonly known: boolean } {
   };
 }
 
+const shapeNow = (s: State): string | null => {
+  const now = unsetNow(s, NEW_UNSET);
+  return now.known ? JSON.stringify({ libLink: now.lib, imgLink: now.img }) : null;
+};
+
+function keepShape(shape: string | null): void {
+  if (shape === null) return;
+  try {
+    localStorage.setItem(SHAPE_KEY, shape);
+  } catch {
+    // external: a browser's private window may refuse storage
+  }
+}
+
+const titleNow = (s: State): string | null => (s.view === "new" || s.threadId === null ? null : s.threads.find((t) => t.id === s.threadId)?.title ?? "");
+
+function forgetSectionList(view: State["view"]): void {
+  if (view !== "settings" && getState().setList) setState({ setList: false });
+}
+
+// why: started once by the entry, so a change from any path in lib/session is heard
+export function watchApp(): () => void {
+  const stops = [watch(shapeNow, keepShape), watch(titleNow, syncWindowTitle), watch((s) => s.view, forgetSectionList)];
+  return () => {
+    for (const stop of stops) stop();
+  };
+}
+
+// why: one identity at module level, so the text is selected only on the commit that draws it
+const selectOnDraw = (el: HTMLInputElement | null): void => {
+  el?.select();
+};
+
 function SetupIcons() {
   const [saved] = useState(savedUnset);
   const lib = useStore((s) => unsetNow(s, saved).lib);
   const img = useStore((s) => unsetNow(s, saved).img);
-  const known = useStore((s) => unsetNow(s, saved).known);
-  // oxlint-disable-next-line gates/effect-needs-reason -- keeps the last known shape in storage for the next start, whichever read changed it
-  useEffect(() => {
-    if (!known) return;
-    try {
-      localStorage.setItem(SHAPE_KEY, JSON.stringify({ libLink: lib, imgLink: img }));
-    } catch {
-      // external: a browser's private window may refuse storage
-    }
-  }, [known, lib, img]);
   const icons: [Section, IconId, string][] = [];
   if (lib) icons.push(["library", "book", "Library search"]);
   if (img) icons.push(["images", "image", "Image generation"]);
@@ -211,14 +236,8 @@ function Header({ isNew }: { isNew: boolean }) {
   const emptyDraft = useDraft(d => d.text === "");
   const title = useStore((s) => s.threads.find((t) => t.id === s.threadId)?.title ?? "");
   const renaming = useStore((s) => s.renaming);
-  const input = useRef<HTMLInputElement>(null);
-  // oxlint-disable-next-line gates/effect-needs-reason -- the window's title is outside React, and the rename field's text is selected on the commit that draws it
-  useLayoutEffect(() => {
-    syncWindowTitle(isNew ? null : title);
-    if (renaming) input.current?.select();
-  }, [renaming, isNew, title]);
-  const done = (save: boolean) => {
-    const value = input.current?.value.trim() ?? "";
+  const done = (save: boolean, field: HTMLInputElement) => {
+    const value = field.value.trim();
     if (save && threadId !== null && value !== "" && value !== title) void renameThread(threadId, value);
     setState({ renaming: false });
   };
@@ -227,17 +246,17 @@ function Header({ isNew }: { isNew: boolean }) {
       <MenuButton />
       {renaming && !isNew ? (
         <input
-          ref={input}
+          ref={selectOnDraw}
           className="inp hdr-in"
           data-testid="chat.header.title"
           aria-label="Thread title"
           defaultValue={title}
-          onBlur={() => done(true)}
+          onBlur={(e) => done(true, e.currentTarget)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") done(true);
+            if (e.key === "Enter") done(true, e.currentTarget);
             if (e.key === "Escape") {
               e.stopPropagation();
-              done(false);
+              done(false, e.currentTarget);
             }
           }}
         />
@@ -462,8 +481,6 @@ export function App() {
   const pics = useScreen(picturesScreen, view === "pictures");
   const panel = useStore((s) => s.panel);
   const usage = useScreen(usageScreen, panel === "usage");
-  // oxlint-disable-next-line gates/effect-needs-reason -- fetches the other screens' code once the first paint is out of the way
-  useEffect(preloadScreens, []);
   const phone = useMedia(PHONE);
   // oxlint-disable-next-line gates/effect-needs-reason -- a focus trap on the open sheet's node, held for as long as the sheet is drawn
   useEffect(() => {
@@ -471,36 +488,20 @@ export function App() {
     const sheet = document.getElementById(POP_EL[popId]);
     if (sheet !== null) return keepSheetFocus(sheet);
   }, [popId, popOpen]);
-  // oxlint-disable-next-line gates/effect-needs-reason -- the app's keyboard, touch, resize and history listeners, attached for the app's whole life
-  useEffect(() => {
-    document.addEventListener("keydown", onKey);
-    document.addEventListener("touchstart", onTouchStart, { passive: true });
-    document.addEventListener("touchend", onTouchEnd, { passive: true });
-    document.addEventListener("mousedown", onMouseDown);
-    window.addEventListener("resize", onResize);
-    window.addEventListener("hashchange", onHash);
-    window.addEventListener("popstate", onDrawerPop);
-    window.addEventListener("popstate", onScreenPop);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("touchstart", onTouchStart);
-      document.removeEventListener("touchend", onTouchEnd);
-      document.removeEventListener("mousedown", onMouseDown);
-      window.removeEventListener("resize", onResize);
-      window.removeEventListener("hashchange", onHash);
-      window.removeEventListener("popstate", onDrawerPop);
-      window.removeEventListener("popstate", onScreenPop);
-    };
-  }, []);
+  useDocumentEvent("keydown", onKey);
+  useDocumentEvent("touchstart", onTouchStart, { passive: true });
+  useDocumentEvent("touchend", onTouchEnd, { passive: true });
+  useDocumentEvent("mousedown", onMouseDown);
+  useDocumentEvent("resize", onResize, { on: "window" });
+  useDocumentEvent("hashchange", onHash, { on: "window" });
+  // why: the drawer hears a Back before the screens do
+  useDocumentEvent("popstate", onDrawerPop, { on: "window" });
+  useDocumentEvent("popstate", onScreenPop, { on: "window" });
   const dialog = useStore((s) => settingsDialog(s, phone));
   const section = useStore((s) => s.section);
   const isSet = view === "settings" && !dialog;
   const isPics = view === "pictures";
   const under = isSet || isPics;
-  // oxlint-disable-next-line gates/effect-needs-reason -- Settings is left by several paths in lib/session (back, Escape, a link); the reset follows the view whichever ran
-  useEffect(() => {
-    if (view !== "settings" && getState().setList) setState({ setList: false });
-  }, [view]);
   const isNew = view === "new" || threadId === null;
   const covered = noServer || view === "firstrun";
   return (

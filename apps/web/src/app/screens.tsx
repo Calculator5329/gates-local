@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import { afterFirstPaint, type deferred } from "../lib/session/deferred.ts";
 import { firstRunScreen, settingsScreen } from "./screen-loaders.ts";
 export { firstRunScreen, imagePickerScreen, pickerScreen, settingsScreen, threadScreen } from "./screen-loaders.ts";
@@ -6,12 +6,7 @@ export { firstRunScreen, imagePickerScreen, pickerScreen, settingsScreen, thread
 const unwatched = () => () => {};
 
 export function useScreen<T>(screen: ReturnType<typeof deferred<T>>, needed: boolean) {
-  const state = useSyncExternalStore(needed ? screen.subscribe : unwatched, screen.get, screen.get);
-  // oxlint-disable-next-line gates/effect-needs-reason -- starts a screen's code fetch once a commit needs it; the store change that needs it has many senders
-  useEffect(() => {
-    if (needed) void screen.load();
-  }, [screen, needed]);
-  return state;
+  return useSyncExternalStore(needed ? screen.need : unwatched, screen.get, screen.get);
 }
 
 export function preloadScreens(): () => void {

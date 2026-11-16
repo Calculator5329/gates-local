@@ -1,12 +1,6 @@
 // Drive the actual tooltip listeners and observer; no browser or replacement
 // tooltip implementation. The fixture supplies its DOM boundary only.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-const p = vi.hoisted(() => ({ tip: undefined as unknown, effects: [] as (() => void | (() => void))[] }));
-vi.mock("react", async original => ({
-  ...await original<typeof import("react")>(),
-  useRef: () => ({ current: p.tip }),
-  useEffect: (effect: () => void | (() => void)) => { p.effects.push(effect); },
-}));
 import { Tip, closeTip, openTip } from "./ui.tsx";
 import { setState } from "../store/store.ts";
 
@@ -33,7 +27,7 @@ let cleanups: (() => void)[];
 let anchor: ElementFixture, tip: ElementFixture;
 beforeEach(() => {
   vi.useFakeTimers(); listeners = new Map(); observers = new Set(); cleanups = [];
-  anchor = new ElementFixture(); tip = new ElementFixture(); p.tip = tip; p.effects.length = 0;
+  anchor = new ElementFixture(); tip = new ElementFixture();
   vi.stubGlobal("window", globalThis);
   vi.stubGlobal("innerWidth", 1440); vi.stubGlobal("innerHeight", 900);
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
@@ -49,10 +43,9 @@ beforeEach(() => {
     addEventListener: (name: string, listener: (event: { target: ElementFixture }) => void) => { listeners.set(name, listener); },
     removeEventListener: (name: string) => { listeners.delete(name); },
   });
-  setState({ pop: null }); Tip();
-  for (const effect of p.effects.splice(0)) {
-    const cleanup = effect(); if (cleanup) cleanups.push(cleanup);
-  }
+  setState({ pop: null });
+  const cleanup = (Tip().props as { ref: (el: unknown) => (() => void) | undefined }).ref(tip);
+  if (cleanup) cleanups.push(cleanup);
 });
 afterEach(() => { for (const cleanup of cleanups) cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 

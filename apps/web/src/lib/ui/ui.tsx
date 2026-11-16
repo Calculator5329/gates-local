@@ -1,8 +1,9 @@
-import { type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { type KeyboardEvent as ReactKeyboardEvent, useCallback, useSyncExternalStore } from "react";
 import type { Verdict } from "../words/format.ts";
 import { Icon } from "./icons.tsx";
 import { type State, getState, setState } from "../store/store.ts";
 import { requestFocus } from "./kit/focus.ts";
+import { debounce } from "./kit/async.ts";
 
 type PopId = NonNullable<State["pop"]>["id"];
 type FixedPopId = Exclude<PopId, "thread">;
@@ -129,152 +130,150 @@ export function openTip(anchor: Element | null | undefined): void {
   if (anchor) showTipAt(anchor);
 }
 
-export function Tip() {
-  const ref = useRef<HTMLDivElement>(null);
-  // oxlint-disable-next-line gates/effect-needs-reason -- the one tooltip's document listeners and the observer that follows its anchor while React rewrites it
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    let tipFor: Element | null = null;
-    let waitingFor: Element | null = null;
-    let timer: number | undefined;
-    let closedAt = -Infinity;
-    let source: string | null = null, at: DOMRect | undefined;
-    const remember = (target: Element) => {
-      source = target.getAttribute("data-tip") || target.getAttribute("data-tipt");
-      at = target.getBoundingClientRect();
-    };
-    const cancelWait = () => {
-      window.clearTimeout(timer);
-      timer = undefined;
-      waitingFor = null;
-    };
-    const hide = () => {
-      cancelWait();
-      if (tipFor !== null) closedAt = performance.now();
-      el.classList.remove("open");
-      tipFor = null;
-    };
-    hideTip = within => {
-      if (!within || tipFor?.closest(within) || waitingFor?.closest(within)) hide();
-    };
-    const over = (e: Event) => {
-      if (isTouch()) return;
-      const target = e.target instanceof Element ? e.target : null;
-      const t = target?.closest("[data-tip],[data-tipt]") ?? null;
-      if (!t) {
-        hide();
-        return;
-      }
-      if (t === tipFor || t === waitingFor) return;
-      const warm = tipFor !== null || performance.now() - closedAt <= TIP_WARM_MS;
+// why: one identity at module level, so the listeners attach when #tip is drawn and go with it
+const holdTip = (el: HTMLDivElement | null): (() => void) | undefined => {
+  if (!el) return;
+  let tipFor: Element | null = null;
+  let waitingFor: Element | null = null;
+  let closedAt = -Infinity;
+  let source: string | null = null, at: DOMRect | undefined;
+  const remember = (target: Element) => {
+    source = target.getAttribute("data-tip") || target.getAttribute("data-tipt");
+    at = target.getBoundingClientRect();
+  };
+  // why: a tooltip opens after the pointer rests on its anchor for the hover delay
+  const wait = debounce((t: Element) => show(t), TIP_DELAY_MS);
+  const cancelWait = () => {
+    wait.cancel();
+    waitingFor = null;
+  };
+  const hide = () => {
+    cancelWait();
+    if (tipFor !== null) closedAt = performance.now();
+    el.classList.remove("open");
+    tipFor = null;
+  };
+  hideTip = within => {
+    if (!within || tipFor?.closest(within) || waitingFor?.closest(within)) hide();
+  };
+  const over = (e: Event) => {
+    if (isTouch()) return;
+    const target = e.target instanceof Element ? e.target : null;
+    const t = target?.closest("[data-tip],[data-tipt]") ?? null;
+    if (!t) {
       hide();
-      if (warm) show(t);
-      else {
-        waitingFor = t;
-        remember(t);
-        // oxlint-disable-next-line gates/timer-needs-reason -- a tooltip opens after the pointer rests on its anchor for the hover delay
-        timer = window.setTimeout(() => show(t), TIP_DELAY_MS);
-      }
-    };
-    const out = (e: MouseEvent) => {
-      const next = e.relatedTarget instanceof Element ? e.relatedTarget.closest("[data-tip],[data-tipt]") : null;
-      if (next !== null && (next === tipFor || next === waitingFor)) return;
-      hide();
-    };
-    const show = (t: Element, stay = false) => {
-      const was = stay ? parseFloat(el.style.left) : NaN;
-      cancelWait();
-      const pop = getState().pop;
-      if (!t.isConnected || (pop !== null && t.closest(`#${POP_EL[pop.id]}`) === null)) return hide();
-      if (t.getAttribute("aria-expanded") === "true" && t.closest(".cf, .hdr")) return hide();
-      let html = t.getAttribute("data-tip");
-      if (!html) {
-        const tt = t.querySelector(".t, .pk-nm");
-        if (!tt || tt.scrollWidth <= tt.clientWidth) return hide();
-        html = esc(t.getAttribute("data-tipt") ?? "");
-      }
-      tipFor = t;
+      return;
+    }
+    if (t === tipFor || t === waitingFor) return;
+    const warm = tipFor !== null || performance.now() - closedAt <= TIP_WARM_MS;
+    hide();
+    if (warm) show(t);
+    else {
+      waitingFor = t;
       remember(t);
-      el.innerHTML = html;
-      el.classList.add("open");
-      const r = t.getBoundingClientRect();
-      // external: a browser shrinks a fixed box near the window's right edge to fit
-      el.style.left = "0px";
-      const w = el.offsetWidth;
-      const h = el.offsetHeight;
-      let top = r.top - h - 6;
-      let left = r.left + r.width / 2 - w / 2;
-      const picker = t.closest(".pk-foot") ? null : t.closest("#picker");
-      if (picker || (t.closest(".sb") && t.classList.contains("sb-row"))) {
-        const side = picker?.getBoundingClientRect() ?? r;
-        top = r.top + r.height / 2 - h / 2;
-        left = side.right + 8;
-        if (left + w > window.innerWidth - 6) left = side.left - w - 8;
-        if (picker && left < 6) {
-          const p = picker.getBoundingClientRect();
-          left = p.left;
-          top = p.top - h - 6 >= 6 ? p.top - h - 6 : p.bottom + 6;
-        }
+      wait(t);
+    }
+  };
+  const out = (e: MouseEvent) => {
+    const next = e.relatedTarget instanceof Element ? e.relatedTarget.closest("[data-tip],[data-tipt]") : null;
+    if (next !== null && (next === tipFor || next === waitingFor)) return;
+    hide();
+  };
+  const show = (t: Element, stay = false) => {
+    const was = stay ? parseFloat(el.style.left) : NaN;
+    cancelWait();
+    const pop = getState().pop;
+    if (!t.isConnected || (pop !== null && t.closest(`#${POP_EL[pop.id]}`) === null)) return hide();
+    if (t.getAttribute("aria-expanded") === "true" && t.closest(".cf, .hdr")) return hide();
+    let html = t.getAttribute("data-tip");
+    if (!html) {
+      const tt = t.querySelector(".t, .pk-nm");
+      if (!tt || tt.scrollWidth <= tt.clientWidth) return hide();
+      html = esc(t.getAttribute("data-tipt") ?? "");
+    }
+    tipFor = t;
+    remember(t);
+    el.innerHTML = html;
+    el.classList.add("open");
+    const r = t.getBoundingClientRect();
+    // external: a browser shrinks a fixed box near the window's right edge to fit
+    el.style.left = "0px";
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    let top = r.top - h - 6;
+    let left = r.left + r.width / 2 - w / 2;
+    const picker = t.closest(".pk-foot") ? null : t.closest("#picker");
+    if (picker || (t.closest(".sb") && t.classList.contains("sb-row"))) {
+      const side = picker?.getBoundingClientRect() ?? r;
+      top = r.top + r.height / 2 - h / 2;
+      left = side.right + 8;
+      if (left + w > window.innerWidth - 6) left = side.left - w - 8;
+      if (picker && left < 6) {
+        const p = picker.getBoundingClientRect();
+        left = p.left;
+        top = p.top - h - 6 >= 6 ? p.top - h - 6 : p.bottom + 6;
       }
-      if (top < 6) top = r.bottom + 6;
-      el.style.top = `${top}px`;
-      el.style.left = `${was >= 6 && was + w <= window.innerWidth - 6 ? was : clamp(left, 6, window.innerWidth - w - 6)}px`;
-    };
-    const focusIn = (e: FocusEvent) => {
-      const target = e.target instanceof Element ? e.target : null;
-      if (isTouch() || !target?.matches(":focus-visible") || target.matches("input,textarea")) return;
-      const t = target.closest("[data-tip]");
-      if (t) show(t);
-    };
-    const tap = (e: MouseEvent) => {
-      if (!isTouch()) return;
-      const target = e.target instanceof Element ? e.target : null;
-      const t = target?.closest("[data-tip]") ?? null;
-      if (!t || t.matches(CONTROL) || target?.closest(CONTROL)?.contains(t) === false) return;
-      show(t);
-    };
-    const scrolled = () => {
-      if (isTouch()) hide();
-    };
-    const changes = new MutationObserver(records => {
-      const target = tipFor ?? waitingFor;
-      if (!target) return;
-      const now = target.getAttribute("data-tip") || target.getAttribute("data-tipt");
-      if (!target.isConnected || !now) return hide();
-      if (source !== now) {
-        const box = target.getBoundingClientRect();
-        if (box.width === 0 || box.height === 0) return hide();
-        return target === tipFor ? show(target, true) : remember(target);
-      }
-      if (!records.some(record => record.target.contains(target) || target.contains(record.target))) return;
+    }
+    if (top < 6) top = r.bottom + 6;
+    el.style.top = `${top}px`;
+    el.style.left = `${was >= 6 && was + w <= window.innerWidth - 6 ? was : clamp(left, 6, window.innerWidth - w - 6)}px`;
+  };
+  const focusIn = (e: FocusEvent) => {
+    const target = e.target instanceof Element ? e.target : null;
+    if (isTouch() || !target?.matches(":focus-visible") || target.matches("input,textarea")) return;
+    const t = target.closest("[data-tip]");
+    if (t) show(t);
+  };
+  const tap = (e: MouseEvent) => {
+    if (!isTouch()) return;
+    const target = e.target instanceof Element ? e.target : null;
+    const t = target?.closest("[data-tip]") ?? null;
+    if (!t || t.matches(CONTROL) || target?.closest(CONTROL)?.contains(t) === false) return;
+    show(t);
+  };
+  const scrolled = () => {
+    if (isTouch()) hide();
+  };
+  const changes = new MutationObserver(records => {
+    const target = tipFor ?? waitingFor;
+    if (!target) return;
+    const now = target.getAttribute("data-tip") || target.getAttribute("data-tipt");
+    if (!target.isConnected || !now) return hide();
+    if (source !== now) {
       const box = target.getBoundingClientRect();
-      if (!at || box.x !== at.x || box.y !== at.y || box.width !== at.width || box.height !== at.height) hide();
-    });
-    changes.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-tip", "data-tipt"] });
-    showTipAt = t => show(t);
-    document.addEventListener("mouseover", over);
-    document.addEventListener("mouseout", out);
-    document.addEventListener("focusin", focusIn);
-    document.addEventListener("focusout", hide);
-    document.addEventListener("mousedown", hide);
-    document.addEventListener("click", tap);
-    document.addEventListener("scroll", scrolled, true);
-    return () => {
-      changes.disconnect();
-      hide();
-      hideTip = () => undefined;
-      showTipAt = () => undefined;
-      document.removeEventListener("mouseover", over);
-      document.removeEventListener("mouseout", out);
-      document.removeEventListener("focusin", focusIn);
-      document.removeEventListener("focusout", hide);
-      document.removeEventListener("mousedown", hide);
-      document.removeEventListener("click", tap);
-      document.removeEventListener("scroll", scrolled, true);
-    };
-  }, []);
-  return <div className="tip" id="tip" ref={ref} />;
+      if (box.width === 0 || box.height === 0) return hide();
+      return target === tipFor ? show(target, true) : remember(target);
+    }
+    if (!records.some(record => record.target.contains(target) || target.contains(record.target))) return;
+    const box = target.getBoundingClientRect();
+    if (!at || box.x !== at.x || box.y !== at.y || box.width !== at.width || box.height !== at.height) hide();
+  });
+  changes.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-tip", "data-tipt"] });
+  showTipAt = t => show(t);
+  document.addEventListener("mouseover", over);
+  document.addEventListener("mouseout", out);
+  document.addEventListener("focusin", focusIn);
+  document.addEventListener("focusout", hide);
+  document.addEventListener("mousedown", hide);
+  document.addEventListener("click", tap);
+  document.addEventListener("scroll", scrolled, true);
+  return () => {
+    changes.disconnect();
+    hide();
+    hideTip = () => undefined;
+    showTipAt = () => undefined;
+    document.removeEventListener("mouseover", over);
+    document.removeEventListener("mouseout", out);
+    document.removeEventListener("focusin", focusIn);
+    document.removeEventListener("focusout", hide);
+    document.removeEventListener("mousedown", hide);
+    document.removeEventListener("click", tap);
+    document.removeEventListener("scroll", scrolled, true);
+  };
+};
+
+export function Tip() {
+  return <div className="tip" id="tip" ref={holdTip} />;
 }
 
 export function place(pop: HTMLElement, anchor: HTMLElement, align: "start" | "end", dir?: "below"): void {

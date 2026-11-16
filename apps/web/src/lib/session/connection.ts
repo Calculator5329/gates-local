@@ -1,6 +1,7 @@
 import { type CallOptions, type Client, type MethodName, type Params, type ReplyCall, type ReplyOutcome, type ResultOf, WireError, createClient } from "@gates-local/contracts";
 import { NA, setState } from "../store/store.ts";
 import { pinFramePolicy } from "../../pages/frame-policy.ts";
+import { withTimeout } from "../ui/kit/async.ts";
 
 interface ConnectionEffects {
   readonly applyServerEvent: typeof setState;
@@ -51,20 +52,15 @@ function reasonOf(message: string): string {
 }
 
 export function createConnection({ applyServerEvent, serverUrl, webServerUrl, desktopBridge, hydrate, afterDisconnect }: ConnectionEffects) {
+  // why: ms is the longest a retry waits for the desktop app to say its server is ready
   function nextChance(ms: number): Promise<void> {
-    return new Promise((resolve) => {
-      const bridge = desktopBridge();
-      // oxlint-disable-next-line gates/timer-needs-reason -- the longest a retry waits for the desktop app to say its server is ready
-      const timer = setTimeout(done, ms);
-      const off = bridge?.onState((s) => {
-        if (s.status === "ready") done();
+    let off: (() => void) | undefined;
+    const ready = new Promise<void>((resolve) => {
+      off = desktopBridge()?.onState((s) => {
+        if (s.status === "ready") resolve();
       });
-      function done() {
-        clearTimeout(timer);
-        off?.();
-        resolve();
-      }
     });
+    return withTimeout(ready, ms, () => undefined).finally(() => off?.());
   }
 
   let client: Client | null = null;
@@ -72,12 +68,13 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
 
   function connect(): () => void {
     stopped = false;
-    // oxlint-disable-next-line gates/timer-needs-reason -- the two seconds the window shows placeholders before it says it is connecting
-    const boot = setTimeout(() => applyServerEvent({ bootWaited: true }), 2000);
+    let stop: (() => void) | undefined;
+    // why: the two seconds the window shows placeholders before it says it is connecting
+    void withTimeout(new Promise<void>((resolve) => { stop = resolve; }), 2000, () => applyServerEvent({ bootWaited: true }));
     if (!desktopBridge() && webServerUrl() === null) applyServerEvent({ conn: { kind: "no-server" } });
     else void loop();
     return () => {
-      clearTimeout(boot);
+      stop?.();
       stopped = true;
       stopDrafts?.();
       stopDrafts = undefined;

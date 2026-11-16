@@ -1,10 +1,4 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-const p = vi.hoisted(() => ({ tip: undefined as unknown, effects: [] as (() => void | (() => void))[] }));
-vi.mock("react", async original => ({
-  ...await original<typeof import("react")>(),
-  useRef: () => ({ current: p.tip }),
-  useEffect: (effect: () => void | (() => void)) => { p.effects.push(effect); },
-}));
 import { Tip, openTip } from "./ui.tsx";
 import { setState } from "../store/store.ts";
 
@@ -46,17 +40,16 @@ class TipFixture extends Fixture {
 let tip: TipFixture;
 let cleanups: (() => void)[];
 beforeEach(() => {
-  tip = new TipFixture(); p.tip = tip; p.effects.length = 0; cleanups = [];
+  tip = new TipFixture(); cleanups = [];
   vi.stubGlobal("window", globalThis);
   vi.stubGlobal("innerWidth", 1440); vi.stubGlobal("innerHeight", 900);
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   vi.stubGlobal("Element", Fixture);
   vi.stubGlobal("MutationObserver", class { observe() { return undefined; } disconnect() { return undefined; } });
   vi.stubGlobal("document", { body: new Fixture(), addEventListener: () => undefined, removeEventListener: () => undefined });
-  setState({ pop: null }); Tip();
-  for (const effect of p.effects.splice(0)) {
-    const cleanup = effect(); if (cleanup) cleanups.push(cleanup);
-  }
+  setState({ pop: null });
+  const cleanup = (Tip().props as { ref: (el: unknown) => (() => void) | undefined }).ref(tip);
+  if (cleanup) cleanups.push(cleanup);
 });
 afterEach(() => { for (const cleanup of cleanups) cleanup(); vi.unstubAllGlobals(); });
 

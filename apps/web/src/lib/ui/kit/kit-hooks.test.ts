@@ -17,6 +17,7 @@ let kit: {
   events: typeof import("./events.ts");
   popover: typeof import("./popover.ts");
   focus: typeof import("./focus.ts");
+  watch: typeof import("./watch.ts");
 };
 let store: typeof import("../../store/store.ts");
 let frames: FrameRequestCallback[] = [];
@@ -42,6 +43,7 @@ beforeAll(async () => {
     events: await import("./events.ts"),
     popover: await import("./popover.ts"),
     focus: await import("./focus.ts"),
+    watch: await import("./watch.ts"),
   };
   store = await import("../../store/store.ts");
   root = createRoot(doc.body.appendChild(doc.createElement("div")) as unknown as Element);
@@ -289,4 +291,30 @@ it("a frame loop asks for one frame at a time, stops when its step says so, and 
   stop();
   runFrames(4);
   expect(other).toHaveBeenCalledTimes(1);
+});
+
+it("a watch hears each new value once with the one before it, never a write that leaves it the same, and nothing after its stop", () => {
+  store.setState({ view: "new" });
+  const heard: string[] = [];
+  const stop = kit.watch.watch((s) => s.view, (now, before) => heard.push(`${before}>${now}`));
+  store.setState({ view: "new", setList: true });
+  store.setState({ view: "settings" });
+  store.setState({ setList: false });
+  store.setState({ view: "thread" });
+  expect(heard).toEqual(["new>settings", "settings>thread"]);
+  stop();
+  store.setState({ view: "new" });
+  expect(heard).toEqual(["new>settings", "settings>thread"]);
+});
+
+it("every puts a plain function on the shared clock, and its stop takes it off", () => {
+  const ticks = vi.fn();
+  const stop = kit.now.every(6_000, ticks);
+  expect(kit.now.clockCount()).toBe(1);
+  vi.advanceTimersByTime(12_000);
+  expect(ticks).toHaveBeenCalledTimes(2);
+  stop();
+  expect(kit.now.clockCount()).toBe(0);
+  vi.advanceTimersByTime(12_000);
+  expect(ticks).toHaveBeenCalledTimes(2);
 });

@@ -32,6 +32,7 @@ import { setPageReads } from "../../pages/pages.ts";
 import { createUsage } from "../../usage/usage.ts";
 import { createPictures } from "../../pictures/pictures.ts";
 import { type ActionResult, codeOf, createConnection, failure, isNA } from "./connection.ts";
+import { every } from "../ui/kit/now.ts";
 
 // why: re-exports keep the UI's imports while the session moves into modules
 export { threadMarkdown } from "../../thread/threads.ts";
@@ -53,7 +54,7 @@ const connection = createConnection({ applyServerEvent,
 export const { connect, call, libraryRequest } = connection;
 const { probe, act, reply } = connection;
 setFileCalls(call);
-let keeping: ReturnType<typeof setInterval> | undefined;
+let keeping: (() => void) | undefined;
 
 const ordering = applyServerEvent.ordering;
 function rowOf(row: SyncRow | undefined): SyncRow {
@@ -187,8 +188,8 @@ async function hydrate(c: Client): Promise<void> {
     settingsReads.end();
   }
   void keepHeldFiles();
-  // oxlint-disable-next-line gates/timer-needs-reason -- the server forgets an unsent file after a day; every six hours this window says again which ones its drafts and queue still hold
-  keeping ??= setInterval(() => void keepHeldFiles(), KEEP_EVERY_MS);
+  // why: the server forgets an unsent file after a day, so the held ones are named every six hours
+  keeping ??= every(KEEP_EVERY_MS, () => void keepHeldFiles());
 }
 
 async function hydrateWith(

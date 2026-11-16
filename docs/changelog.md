@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-11-16: the app shell follows the store instead of its effects
+
+- A new kit piece, `watch`, follows one store value outside render and
+  hears each new value once. The entry starts three of them beside
+  connect(): the saved setup shape, the window's title and the phone's
+  Settings list reset. Each now follows its value whichever path in
+  lib/session changed it.
+- The shell's eight keyboard, touch, resize and history listeners go
+  through `useDocumentEvent`, which now takes window-only events. The
+  drawer still hears a Back before the screens do.
+- A screen's code is fetched by the listening a commit does when it needs
+  the screen, and the entry warms Settings and first run after it draws.
+- The rename field selects its text on the commit that draws it, through
+  a ref.
+- The connection's two waits use `withTimeout`. The six-hourly reminder
+  of held files runs on the shared clock through the new `every`.
+- The one tooltip attaches through a ref on `#tip`, and its hover delay is
+  a `debounce`. Three tooltip test files now mount it through that ref,
+  not through a faked effect.
+- The phone sheet's focus trap stays an effect: a picker whose code fails
+  to load changes no store value a watch could follow.
+- Window effects and timers: 97 to 86. 2 new tests, each watched fail
+  twice.
+
 ## 2026-11-16: the speed check can time 0.2.4 and the releases before it again
 
 - The thread journey's mounted-window reading took the turns held back

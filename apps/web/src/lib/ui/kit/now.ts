@@ -26,6 +26,10 @@ function join(ms: number, reader: (now: number) => void): () => void {
   };
 }
 
+export function every(ms: number, fn: (now: number) => void): () => void {
+  return join(ms, fn);
+}
+
 export function useNow(ms: number, when = true): number {
   const [now, setNow] = useState(Date.now);
   // oxlint-disable-next-line gates/effect-needs-reason -- keeps this reader on the shared clock while it is mounted and on

@@ -19,7 +19,7 @@ vi.mock("../composer/Composer.tsx", () => ({ Composer: () => null, CountMenu: ()
 vi.mock("../lib/ui/ui.tsx", async (original) => ({ ...await original<typeof import("../lib/ui/ui.tsx")>(), Tip: () => null }));
 vi.mock("./screen-loaders.ts", () => {
   const error = { kind: "error" };
-  const failed = () => ({ get: () => error, subscribe: () => () => undefined, load: () => Promise.resolve() });
+  const failed = () => ({ get: () => error, subscribe: () => () => undefined, need: () => () => undefined, load: () => Promise.resolve() });
   return { settingsScreen: failed(), firstRunScreen: failed(), pickerScreen: failed(), imagePickerScreen: failed(), threadScreen: failed(), usageScreen: failed(), picturesScreen: failed() };
 });
 vi.mock("./sheet-focus.ts", () => ({ keepSheetFocus: (sheet: HTMLElement) => { fakes.kept.push(sheet.id); return () => { fakes.kept.push(`-${sheet.id}`); }; } }));
@@ -72,7 +72,10 @@ beforeEach(async () => {
   if (store === undefined) {
     ({ createRoot } = await import("react-dom/client"));
     store = await import("../lib/store/store.ts");
-    ({ App } = await import("./App.tsx"));
+    const shell = await import("./App.tsx");
+    App = shell.App;
+    // why: the entry starts the shell's store followers once; this file keeps them for all its tests
+    shell.watchApp();
     initial = store.getState();
   }
   store.setState(initial);

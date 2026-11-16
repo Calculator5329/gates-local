@@ -3,12 +3,6 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const probe = vi.hoisted(() => ({
   state: { pop: null } as { pop: { id: string; kb: boolean } | null },
-  root: undefined as unknown, effects: [] as (() => unknown)[],
-}));
-vi.mock("react", async original => ({
-  ...await original<typeof import("react")>(),
-  useRef: () => ({ current: probe.root }),
-  useEffect: (effect: () => unknown) => { probe.effects.push(effect); },
 }));
 vi.mock("../store/store.ts", () => ({
   getState: () => probe.state,
@@ -19,10 +13,10 @@ vi.mock("../store/store.ts", () => ({
 const { Tip, togglePop } = await import("./ui.tsx");
 
 beforeEach(() => {
-  probe.state = { pop: { id: "picker", kb: false } }; probe.effects = [];
+  probe.state = { pop: { id: "picker", kb: false } };
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 it("the trigger closes an open picker", () => {
   togglePop("picker");
@@ -52,16 +46,14 @@ function mountTip() {
   const classes = new Set<string>();
   const root = { classList: { add: (s: string) => classes.add(s), remove: (s: string) => classes.delete(s) }, innerHTML: "", style: {}, offsetWidth: 180, offsetHeight: 40 };
   const listeners = new Map<string, (e: { target: Target }) => void>();
-  const timers: (() => void)[] = [];
-  probe.root = root;
   vi.stubGlobal("Element", Target);
   vi.stubGlobal("MutationObserver", class { observe() {} disconnect() {} });
-  vi.stubGlobal("window", { innerWidth: 1440, setTimeout: (fn: () => void) => { timers.push(fn); return timers.length; }, clearTimeout: vi.fn() });
+  vi.stubGlobal("window", { innerWidth: 1440 });
+  vi.useFakeTimers();
   vi.stubGlobal("document", { addEventListener: (name: string, fn: (e: { target: Target }) => void) => listeners.set(name, fn), removeEventListener: vi.fn() });
-  Tip();
-  const cleanup = probe.effects[0]?.();
+  const cleanup = (Tip().props as { ref: (el: unknown) => (() => void) | undefined }).ref(root);
   return {
-    hover: (target: Target) => { listeners.get("mouseover")?.({ target }); for (const timer of timers.splice(0)) timer(); },
+    hover: (target: Target) => { listeners.get("mouseover")?.({ target }); vi.runOnlyPendingTimers(); },
     open: () => classes.has("open"),
     cleanup: () => { if (typeof cleanup === "function") cleanup(); },
   };

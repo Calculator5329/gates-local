@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { App } from "./App.tsx";
+import { App, watchApp } from "./App.tsx";
+import { preloadScreens } from "./screens.tsx";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
 import { connect, initialView, threadFromHash } from "../lib/session/index.ts";
 import { computerOnlyMethods } from "../lib/session/platform.ts";
@@ -15,6 +16,7 @@ syncTitleBar();
 
 setState({ ...initialView(threadFromHash()), unavailable: computerOnlyMethods() });
 connect();
+watchApp();
 
 const root = document.getElementById("root");
 if (root === null) throw new Error("missing #root");
@@ -23,3 +25,4 @@ createRoot(root).render(
     <ErrorBoundary scope="app"><App /></ErrorBoundary>
   </StrictMode>,
 );
+preloadScreens();
