@@ -1,15 +1,3 @@
-// The server's app: every contracts method wired onto the thread store, the Ollama runtime,
-// the model catalog, the fit check and the streamed turn. main.ts only parses flags and owns
-// the process; tests drive this directly.
-//
-// A chat turn: one active turn per thread, a ready runtime, a fit verdict
-// other than refuse; then the user message persists and the reply streams on
-// reply.words. A finished reply is saved complete; any other end keeps the words
-// sent so far, marked interrupted (app/run-turn.ts finish).
-//
-// This file builds the state the app's jobs share and wires them together; each job is a
-// file in app/: the request handlers (handlers.ts), taking a send in (admit.ts), running a
-// reply (run-turn.ts), pictures in a chat (drawing.ts) and the queue (queue-pump.ts).
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { suggestedList, type Payload } from "@gates-local/contracts";
@@ -38,20 +26,14 @@ export { AppError, RUNTIME_CHANGED_TURN_MESSAGE, type AppErrorCode } from "./app
 export type { Push } from "./app/push.ts";
 export type { App, AppDeps, AppHandlers } from "./app/types.ts";
 
-/**
- * `rules`: only a test passes them, to turn one rule of the reply table off and see the test
- * that guards it fail (chat/reply.ts Rules). No caller in the product passes a second argument.
- */
 export function createApp(deps: AppDeps, rules?: Rules): App {
   const { store, runtime, catalog } = deps;
   const log = deps.log ?? ((line: string) => console.error(`[app] ${line}`));
   const newId = deps.newId ?? randomUUID;
   const imageFiles = deps.dataDir ? imageLifecycle(deps.dataDir, store) : undefined;
-  // A failed start-up sweep only leaves old pasted files behind; it must not fail every later send and delete that waits for it.
+  // why: a failed sweep only leaves old pasted files behind
   const imageReady = (imageFiles?.sweep() ?? Promise.resolve()).catch((error: unknown) => log(`image sweep at start-up failed: ${String(error)}`));
-  // Attached files' copies: the same rules as pasted images, in their own queue.
-  // Ten minutes after start-up, so open windows first say what their saved drafts keep (files.keep),
-  // then hourly: a server that runs for days still drops a copy whose day ran out.
+  // why: the first sweep waits so open windows can say what their drafts keep (files.keep)
   const attachedFiles = deps.dataDir ? fileLifecycle(deps.dataDir, store, { firstSweepAfterMs: 10 * 60 * 1000, sweepEveryMs: 60 * 60 * 1000, log }) : undefined;
   const draftEveryMs = deps.draftEveryMs ?? 1000;
   const turns = new Map<string, Turn>();
@@ -73,11 +55,9 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
     }
   };
 
-  /** Threads whose threads.delete is running: marked before its first await, cleared when it ends. */
   const deleting = new Set<string>();
 
-  // Every message's record, kept here and moved only by its table (chat/reply.ts, chat/replies.ts).
-  // The waiting ones are the queue every window shows; the pump (app/queue-pump.ts) starts them.
+  // why: one table moves every record, so the wiring never sets a stage itself
   const replies: Replies = createReplies({
     file: deps.dataDir === undefined ? undefined : path.join(deps.dataDir, "queue.json"),
     log,
@@ -85,12 +65,9 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
     saved: (messageId) => store.getMessage(messageId),
     deleting: (threadId) => deleting.has(threadId),
     closing: () => closing,
-    // The record has moved already. The work's clock stands at the Stop, every window hears so
-    // (started or not: none keeps a clock of its own), and the work is cut.
     cut(turnId, at) {
       const turn = turns.get(turnId);
       if (turn === undefined || turn.controller.signal.aborted) return;
-      // words already on their way when the Stop landed change no time on the row
       turn.clock.stop(at, turn.thinking);
       pushReply(turn);
       turn.controller.abort();
@@ -100,25 +77,20 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
   });
   const queue = createQueuePump({
     replies, turns, byThread, closing: () => closing, catalog, runtime, store, settings: deps.settings, newId,
-    // bound late: the handlers are built last
+    // why: the handlers are built last
     begin: (params, taken) => begin(params, taken),
   });
   const { pump } = queue;
 
-  /** The turn's times changed: its record as it is now, to every window. */
   const pushReply = (turn: Turn) => {
     said({ turnId: turn.turnId, threadId: turn.threadId, event: { type: "reply", reply: turn.clock.record(Date.now()) } });
     replies.clocked(turn.turnId);
   };
 
-  /** Models a models.load says are loading now (a preload the first key started, or another window's). */
   const loadingModels = new Set<string>();
-  /** Works whose start was answered: a record of theirs may be pushed before the start. */
   const answeredTurns = new WeakSet<Turn>();
-  /** A start that waits while its own model loads says "loading", not "waiting". */
   const waitsOnLoad = (turn: Turn) => {
     if (!answeredTurns.has(turn) || ![...loadingModels].some((m) => sameModel(m, turn.model))) return;
-    // only a record still starting takes it: the clock shows what the record says
     if (replies.loading(turn.turnId) && turn.clock.loading()) pushReply(turn);
   };
   const answered = (turn: Turn) => {
@@ -134,7 +106,6 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
   const refreshModels = () => {
     catalog.refresh().catch((e: unknown) => log(`model refresh failed: ${(e as Error).message}`));
   };
-  // Every model at every offered context from one reading, pushed when what it reads changes.
   const fitTable = createFitTable({
     baseUrl: () => runtime.baseUrl(),
     ...(deps.fit ? { fit: deps.fit } : {}),
@@ -144,7 +115,6 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
     push: (table) => push("fit.changed", table),
     log,
   });
-  // Measure (Settings › Models): only on its RPC, holding the GPU alone, at the chat's window.
   const measure = deps.dataDir === undefined ? undefined : createMeasure({
     ...(deps.settings ? { settings: deps.settings } : {}),
     ...(deps.shellStatus ? { shellStatus: deps.shellStatus } : {}),
@@ -155,7 +125,6 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
     push,
     ...(deps.lease ? { lease: deps.lease } : {}),
     ...(deps.memory ? { memory: deps.memory } : {}),
-    // a runtime switch stops a running measure as it ends a chat turn, and waits for its end
     ...(deps.models?.loader ? { loader: deps.models.loader } : {}),
   });
   const offRuntime = runtime.onChange((status) => {
@@ -166,16 +135,13 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
   });
   const offCatalog = catalog.onChange((models) => {
     push("models.changed", models);
-    // the first model's download finished: what was typed behind it goes
     pump();
     fitTable.changed();
   });
-  // A newer chat list from the release page: the clients read the catalog again, the fit table lists its models.
   const offChatList = onChatList((list) => {
     push("models.suggested", suggestedList(list));
     fitTable.changed();
   });
-  /** Measured speeds change only when a finished reply is saved or replies are deleted; one read then, never per word. */
   const pushSpeeds = () => {
     try {
       push("models.speed", store.modelSpeeds());
@@ -187,7 +153,6 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
   const offSources = library?.onChange(sources => push("sources.changed", sources, [library.stamp(sources)]));
   const offImports = libraryImports?.onChange(value => push("sources.imports", value, [libraryImports.stamp(value)]));
 
-  /** Claims the thread synchronously so a second send cannot slip in during the fit check. */
   const reserve = (threadId: string, model: string, taken: Taken): { turn: Turn; end: () => void } => {
     let end!: () => void;
     const ended = new Promise<void>((resolve) => (end = resolve));
@@ -205,7 +170,6 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
       halt(reason) {
         if (turn.halted !== undefined) return;
         turn.halted = reason;
-        // A turn a Stop already aborted keeps that reason on its signal; halted still wins.
         turn.controller.abort(reason);
         wake(HALTED);
       },
@@ -219,9 +183,6 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
     };
     turns.set(turn.turnId, turn);
     byThread.set(threadId, turn);
-    // Whatever cuts a start (a halt, a delete, the app closing), its record hears first: the
-    // start is refused there, so the work's own check before it saves is the only one it needs.
-    // A Stop has moved the record already and this changes nothing.
     turn.controller.signal.addEventListener("abort", () => {
       if (replies.of(turn.turnId)?.stage === "starting") replies.refused(turn.turnId, turn.attempt, refusalOf(turn.halted ?? cancelledBeforeStart()));
     }, { once: true });
@@ -232,9 +193,7 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
         if (byThread.get(threadId) === turn) byThread.delete(threadId);
         replies.left(turn.turnId);
         end();
-        // Its model was busy in every row's plan; now it is not.
         if (turn.inMemory) fitTable.changed();
-        // the queue sends one reply at a time: this one's end may be what the next waits for
         pump();
       },
     };

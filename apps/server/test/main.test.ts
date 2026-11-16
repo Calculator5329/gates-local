@@ -187,7 +187,7 @@ describe("server CLI", () => {
 
   // Windows cannot deliver SIGTERM (kill() there is TerminateProcess); the
   // desktop app stops the server through stdin EOF, tested above.
-  it.skipIf(process.platform === "win32").each(["SIGTERM", "SIGHUP"] as const)("exits on %s within 3 s", async signal => {
+  it.skipIf(process.platform === "win32").each(["SIGTERM", "SIGHUP", "SIGINT"] as const)("exits on %s within 3 s", async signal => {
     const fake = await fakeOllama();
     const tmp = cacheTmp();
     const s = launch(

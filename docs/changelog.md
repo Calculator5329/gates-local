@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-11-16: the server's entry and app files hold to the six comment kinds
+
+- The comment rule now has no recorded offenders anywhere: the last 64
+  comments in apps/server/src/main.ts and app.ts are gone. main.ts went
+  from 127 comment lines to 2, app.ts from 45 to 4.
+- main.ts's long header, the process contract and every environment
+  knob, is now docs/server-env.md. A new check fails when the server
+  reads a `GATES_LOCAL_*` knob the page has no row for, or the page
+  lists one the server never reads. The header had gone stale: it cited
+  a test file that was renamed, and it left out that the server also
+  exits on SIGHUP.
+- The exit on SIGINT is now tested beside SIGTERM and SIGHUP.
+- 10 rules gained 12 tests, each watched fail with its rule broken:
+  pictures made before the index are in the first pictures list; the
+  test-build marker path meets the file the packager writes; a send
+  after a failed start-up image sweep still goes; a model whose load
+  ended no longer says loading, and another model's load leaves a start
+  waiting; a newer chat model list gives its new model rows in the fit
+  table; a halt after a Stop ends the turn as the halt's; and a halt or
+  the app closing moves a start that has not begun to refused first.
+- Rules the tests already held went with their comment. 38 cites were
+  broken in the source and watched fail, three of them in browser runs.
+  Two browser cites stayed green with their wiring broken: the image
+  module reads the GPU, and the image fit reads the tests' fake
+  nvidia-smi, the way the chat fits do. No test holds that wiring now;
+  those two comments only restated the line under them.
+- `REPO_ROOT` in main.ts is now `CLONE_ROOT`, the clone Settings ›
+  Updates works on.
+
 ## 2026-11-16: the perf runs measure 0.2.4 again
 
 - The thread journey read the "earlier" button's label by keeping every

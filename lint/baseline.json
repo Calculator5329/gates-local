@@ -6,10 +6,7 @@
     "eslint/no-warning-comments": {},
     "gates/class-in-css": {},
     "gates/closed-package": {},
-    "gates/comment-is-a-kind": {
-      "apps/server/src/app.ts": 25,
-      "apps/server/src/main.ts": 39
-    },
+    "gates/comment-is-a-kind": {},
     "gates/disable-needs-reason": {
       "test/finder/page.ts": 1,
       "test/finder/walk.spec.ts": 1
