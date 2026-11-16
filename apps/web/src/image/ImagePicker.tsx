@@ -1,6 +1,6 @@
 import "../picker/picker.css";
 import "./image-picker.css";
-import { type KeyboardEvent, type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useRef, useState } from "react";
 import type { ImageChoice, ImageDownload, ImagePreset } from "@gates-local/contracts";
 import { cardGb, gb, noGpu, timeLeft } from "../lib/words/format.ts";
 import { Icon } from "../lib/ui/icons.tsx";
@@ -10,9 +10,10 @@ import { memoryRuler } from "../picker/picker-models.ts";
 import { focusComposer } from "../composer/focus.ts";
 import { downloadImageSetup, folderDialog, pickImage, saveImageFolder, startImage, stopImageDownload } from "../lib/session/index.ts";
 import { NA, useStore } from "../lib/store/store.ts";
-import { PHONE, closePop, closeTip, isTouch, tabStops, useMedia } from "../lib/ui/ui.tsx";
+import { PHONE, closePop, closeTip, tabStops, useMedia } from "../lib/ui/ui.tsx";
 import { requestFocus } from "../lib/ui/kit/focus.ts";
 import { usePopover } from "../lib/ui/kit/popover.ts";
+import { pickerEntry } from "../picker/picker-entry.ts";
 
 // why: below this much room above the button the list and the sizes stop being usable
 const CRAMPED = 280;
@@ -131,12 +132,8 @@ export function ImagePicker() {
   const same = active !== undefined && active.sizes.length > 1 && active.sizes.every((z) => z.bytes === active.sizes[0]!.bytes) ? active.sizes[0]!.bytes : undefined;
 
   if (pop === null && menu !== null) setMenu(null);
-  // oxlint-disable-next-line gates/effect-needs-reason -- moves focus into the picker on the commit that first draws it
-  useLayoutEffect(() => {
-    if (pop === null) return;
-    if (isTouch() && !pop.kb) ref.current?.querySelector<HTMLButtonElement>(".pk-close")?.focus({ preventScroll: true });
-    else (ref.current?.querySelector<HTMLButtonElement>(".pk-menu:not([inert]) .pk-r.sel .pk-select") ?? ref.current?.querySelector<HTMLButtonElement>(".pk-menu:not([inert]) .pk-select, .pk-blank button"))?.focus({ preventScroll: true });
-  }, [pop]);
+  const [entry] = useState(() => pickerEntry(ref, (root) =>
+    root.querySelector<HTMLButtonElement>(".pk-menu:not([inert]) .pk-r.sel .pk-select") ?? root.querySelector<HTMLButtonElement>(".pk-menu:not([inert]) .pk-select, .pk-blank button")));
   usePopover(ref, pop !== null, (root) => {
     const anchor = document.getElementById("modelBtn");
     if (!anchor) return;
@@ -299,7 +296,7 @@ export function ImagePicker() {
     const state = status === undefined || status === NA ? undefined : status.state;
     const as = state === "stopped" ? "start" : "check";
     const label = starting === "start" || state === "starting" ? "Starting ComfyUI…" : starting === "check" ? "Checking…" : as === "start" ? "Start ComfyUI" : "Check again";
-    return <div ref={ref} id="imagePicker" className="model-picker image-picker open" role="dialog" data-testid="image.picker.blank" aria-label="Choose an image model" aria-modal={phone} onKeyDown={keys}>
+    return <div ref={entry} id="imagePicker" className="model-picker image-picker open" role="dialog" data-testid="image.picker.blank" aria-label="Choose an image model" aria-modal={phone} onKeyDown={keys}>
       <div className="pk-blank">
         <p>{empty}{startError === null ? null : <span className="pk-blank-error" role="status">{startError}</span>}</p>
         {known === undefined || !canStart ? null : <button type="button" className="btn outline" data-testid="image.picker.start-comfy" disabled={starting !== null || state === "starting"} onClick={() => void start(as)}>{label}</button>}
@@ -307,7 +304,7 @@ export function ImagePicker() {
       </div>
     </div>;
   }
-  return <div ref={ref} id="imagePicker" className={`model-picker image-picker open${step === "sizes" ? " step-context" : ""}`} role="dialog" data-testid="image.picker.dialog" aria-label="Choose an image model" aria-modal={phone} aria-busy={saving || undefined} onKeyDown={keys}>
+  return <div ref={entry} id="imagePicker" className={`model-picker image-picker open${step === "sizes" ? " step-context" : ""}`} role="dialog" data-testid="image.picker.dialog" aria-label="Choose an image model" aria-modal={phone} aria-busy={saving || undefined} onKeyDown={keys}>
     <div className="pk-layout">
       <nav className="pk-rail" aria-label="Image model menus" inert={phone && step === "sizes"}>
         <button className="pk-fam" data-testid="image.picker.defaults" aria-label="Defaults" data-tip="Defaults" aria-pressed={shown === "defaults"} onClick={() => switchTo("defaults")}><Icon id="star" /></button>

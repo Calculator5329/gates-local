@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useState } from "react";
 import type { CatalogEntry } from "@gates-local/contracts";
 import { suggestedOf } from "../picker/picker-models.ts";
 import { recommendedEntry } from "../runtime/Banner.tsx";
@@ -13,6 +13,7 @@ import { canChat, chatBlockedReason, chatModels, pickedModel } from "../models/p
 import { focusComposer } from "../composer/focus.ts";
 import { VLabel } from "../lib/ui/ui.tsx";
 import { FirstRunLoading, Shell } from "./FirstRunShell.tsx";
+import { useAfter } from "../lib/ui/kit/flash.ts";
 
 function Cta({ label, onGo, link, onLink }: { label: string; onGo: () => void; link?: string; onLink?: () => void }) {
   return (
@@ -316,19 +317,13 @@ export function FirstRun() {
   const models = useStore((s) => s.models);
   const ready = useStore(inHand);
   const known = !boot && rt === "ready" && models !== undefined;
-  const [waited, setWaited] = useState(false);
+  // why: after this long the screen shows without the slow read; shown and left keep what it drew
+  const waited = useAfter(WHOLE_WAIT_MS, known && !ready ? "wait" : null);
   const [shown, setShown] = useState(false);
   const [left, setLeft] = useState(false);
   if (known && (ready || waited) && !shown) setShown(true);
   const placeholders = !left && (boot || (known && !shown && !ready && !waited));
   if (!placeholders && !left) setLeft(true);
-  // oxlint-disable-next-line gates/effect-needs-reason -- the bound on waiting for the screen's words, started when the runtime is known and dropped once they are in
-  useEffect(() => {
-    if (!known || ready) return;
-    // oxlint-disable-next-line gates/timer-needs-reason -- after this long the screen shows without the slow read
-    const t = setTimeout(() => setWaited(true), WHOLE_WAIT_MS);
-    return () => clearTimeout(t);
-  }, [known, ready]);
   if (placeholders) return <FirstRunLoading />;
   if (known) return !shown && !ready && !waited ? <Connecting /> : models.some(canChat) ? <Found /> : <NoModels />;
   if (rt === "missing" || rt === "stopped" || rt === "wrong" || rt === "error") return <NoOllama />;

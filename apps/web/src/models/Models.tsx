@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useRef, useState } from "react";
 import type { ModelInfo, PullProgress } from "@gates-local/contracts";
 import { copyText } from "../lib/ui/copy.ts";
 import { noGpu, verdictOf } from "../lib/words/format.ts";
@@ -31,7 +31,7 @@ import { leaveSettings, pull } from "../lib/session/index.ts";
 import { COMPUTER_ONLY, Fail, useAct, useOutside, walk } from "../lib/ui/settings-ui.tsx";
 import { NA, type State, setState, useStore } from "../lib/store/store.ts";
 import { FitSkel, PHONE, closeTip, useMedia } from "../lib/ui/ui.tsx";
-import { focusFirstOf } from "../lib/ui/kit/focus.ts";
+import { focusFirstOf, requestFocus } from "../lib/ui/kit/focus.ts";
 
 const focusFirstItem = focusFirstOf("[role=menuitem]");
 
@@ -389,11 +389,7 @@ function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: Inst
   const [busy, setBusy] = useState(false);
   const cancel = useRef<HTMLButtonElement>(null);
   const box = useRef<HTMLDivElement>(null);
-  // external: a browser moves the focus off a button that turns disabled
-  // oxlint-disable-next-line gates/effect-needs-reason -- Cancel takes focus back when a removal's answer re-enables it, which lands after an await
-  useEffect(() => {
-    if (!busy) cancel.current?.focus();
-  }, [busy]);
+  const [cancelRef] = useState(() => (el: HTMLButtonElement | null) => { cancel.current = el; el?.focus(); });
   const name = row.label.text;
   const nextName = next ? (rows.find((r) => r.name === next)?.label.text ?? next) : null;
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -424,7 +420,7 @@ function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: Inst
         )}
         <Fail err={err} />
         <div className="mp-r2">
-          <button ref={cancel} type="button" className="btn outline" data-testid="models.remove.cancel" disabled={busy} onClick={onClose}>
+          <button ref={cancelRef} type="button" className="btn outline" data-testid="models.remove.cancel" disabled={busy} onClick={onClose}>
             Cancel
           </button>
           <button
@@ -438,6 +434,8 @@ function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: Inst
               const done = removeModelAndMoveDefault(row.name, next);
               void run(done.then((d) => d.removeErr)).then(async (removed) => {
                 setBusy(false);
+                // external: a browser moves the focus off a button that turns disabled; Cancel takes it back
+                requestFocus(() => cancel.current);
                 if (!removed) return;
                 const { defaultErr } = await done;
                 if (defaultErr !== null) onDefaultFailed(`${name} was removed. ${defaultErr}${nextName ? " Set one from a row's menu." : ""}`);

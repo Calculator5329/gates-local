@@ -30,6 +30,7 @@ beforeEach(async () => {
   store = await import("../lib/store/store.ts");
   store.setState({ models: undefined, model: undefined, chosen: undefined, gpu: undefined, runtime: undefined, catalog: undefined, fitTable: undefined, pulls: {}, pop: null, numCtx: 16384, hydrationSettled: false });
   Picker = (await import("./Picker.tsx")).Picker;
+  (await import("./picker-entry.ts")).watchPickerReady();
   browser.server.answer("fit.table", () => { throw { code: "internal", message: "No fit reading" }; });
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 });

@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import type { CatalogEntry, FitReport, ModelEstimate, PullProgress } from "@gates-local/contracts";
 import { suggestedOf } from "../picker/picker-models.ts";
 import { etaText, gb, noGpu, verdictOf } from "../lib/words/format.ts";
@@ -13,6 +13,9 @@ import { PathText } from "../lib/ui/settings-controls.tsx";
 import { Grp, Row, useAct, useOutside, walk } from "../lib/ui/settings-ui.tsx";
 import { NA, type State, getState, useStore } from "../lib/store/store.ts";
 import { Skel, closeTip } from "../lib/ui/ui.tsx";
+import { useAfter } from "../lib/ui/kit/flash.ts";
+import { requestFocus } from "../lib/ui/kit/focus.ts";
+import { useChange } from "../lib/ui/kit/popover.ts";
 
 function Progress({ p, name }: { p: PullProgress; name: string }) {
   const pct = p.totalBytes ? Math.round((p.completedBytes / p.totalBytes) * 100) : 0;
@@ -205,10 +208,6 @@ export function CustomPull({ actions, numCtx }: { actions: DownloadActions; numC
   const typedExample = useStore((s) => suggestedOf(s)?.typedExample);
   const box = useRef<HTMLDivElement>(null);
   useOutside(box, menu, () => setMenu(false));
-  // oxlint-disable-next-line gates/effect-needs-reason -- focus goes in when the menu opens, not each time a new lookup draws it again
-  useEffect(() => {
-    if (menu) box.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
-  }, [menu]);
   const closeMenu = () => {
     setMenu(false);
     box.current?.querySelector<HTMLElement>(".dl-x")?.focus();
@@ -262,7 +261,11 @@ export function CustomPull({ actions, numCtx }: { actions: DownloadActions; numC
           disabled={tag === "" || big || answer?.found === "no"}
           onStart={() => void download()}
           side={big ? (
-            <button type="button" className={`dl-x${menu ? " on" : ""}`} data-testid="models.custom.more" aria-label={`More for ${tag}`} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(m => !m)}>
+            <button type="button" className={`dl-x${menu ? " on" : ""}`} data-testid="models.custom.more" aria-label={`More for ${tag}`} aria-haspopup="menu" aria-expanded={menu} onClick={() => {
+              // why: focus goes in when the menu opens, not each time a new lookup draws it again
+              if (!menu) requestFocus(() => box.current?.querySelector<HTMLElement>("[role=menuitem]"));
+              setMenu(!menu);
+            }}>
               <Icon id="more" />
             </button>
           ) : undefined}
@@ -338,13 +341,14 @@ export function DownloadTab() {
       (attempt.start && Object.entries(s.pulls).some(([name, p]) => downloadKey(name) === key && attempt.pulls[name] !== p &&
         (p.state === "downloading" || p.state === "verifying" || p.state === "done")));
   };
-  // oxlint-disable-next-line gates/effect-needs-reason -- an attempt retires on pushed installs and progress from the server; the push handlers are lib/session's
-  useEffect(() => {
-    setAttempts(previous => {
-      const next = Object.fromEntries(Object.entries(previous).filter(([key, attempt]) => !retired(key, attempt)));
-      return Object.keys(next).length === Object.keys(previous).length ? previous : next;
-    });
-  }, [models, pulls, catalog]);
+  // why: an attempt retires on pushed installs and progress; the push handlers are lib/session's
+  const retire = () => setAttempts(previous => {
+    const next = Object.fromEntries(Object.entries(previous).filter(([key, attempt]) => !retired(key, attempt)));
+    return Object.keys(next).length === Object.keys(previous).length ? previous : next;
+  });
+  useChange(models, retire);
+  useChange(pulls, retire);
+  useChange(catalog, retire);
   const actions: DownloadActions = {
     start: name => {
       const tag = list.find(c => downloadKey(c.name) === downloadKey(name))?.name ?? name.trim();
@@ -368,18 +372,12 @@ export function DownloadTab() {
     return { context: numCtx, recommended: rec.map(c => c.name), other: more.map(c => c.name) };
   };
   const [savedGroups, setGroups] = useState<ReturnType<typeof group>>();
-  const [waited, setWaited] = useState<number>();
   const settled = list.every(c => answer(c) !== undefined);
-  // oxlint-disable-next-line gates/effect-needs-reason -- the bound on waiting for every fit answer before the rows group, restarted per context size
-  useEffect(() => {
-    if (settled || list.length === 0) return;
-    // oxlint-disable-next-line gates/timer-needs-reason -- design.md: rows group once every answer is in or a second has passed
-    const t = setTimeout(() => setWaited(numCtx), 1000);
-    return () => clearTimeout(t);
-  }, [settled, numCtx, list.length]);
+  // why: design.md: rows group once every answer is in or a second has passed, per context size
+  const waited = useAfter(1000, settled || list.length === 0 ? null : numCtx);
   const saved = savedGroups?.context === numCtx ? savedGroups : group();
   const fresh = saved !== savedGroups;
-  const holding = fresh && list.length > 0 && !settled && waited !== numCtx;
+  const holding = fresh && list.length > 0 && !settled && !waited;
   const entries = new Map(list.map(c => [c.name, c]));
   const refuses = (c: CatalogEntry) => verdict(c) === "refuse";
   const refused = saved.recommended.filter(name => { const c = entries.get(name); return c !== undefined && refuses(c); });

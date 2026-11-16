@@ -35,6 +35,7 @@ beforeAll(async () => {
   vi.stubGlobal("HTMLElement", FakeElement);
   vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
   vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (X11; Linux x86_64)" });
+  vi.stubGlobal("requestAnimationFrame", (f: () => void) => setTimeout(f, 0));
   const { createRoot } = await import("react-dom/client");
   store = await import("../lib/store/store.ts");
   view = await import("./ModelDownloads.tsx");

@@ -1,7 +1,7 @@
 // Structure follows T3 Code ModelPickerContent/Sidebar at d137c5081ac5efb2b8ea9aec8b334e1bb4d0182a (MIT).
 // The approved local-model adaptation keeps a fixed rail/list/context layout. LICENSES/T3-Code-MIT.txt.
 import "./picker.css";
-import { type KeyboardEvent, useLayoutEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useRef, useState } from "react";
 import type { ContextSize, FitTable, ModelInfo } from "@gates-local/contracts";
 import { CONTEXT_SIZES, type SlowReason, type Verdict, ctxFor, gb, k, noGpu, slowReason, verdictOf } from "../lib/words/format.ts";
 import { markWhole } from "../models/MemoryMark.tsx";
@@ -12,10 +12,11 @@ import { ModelSpeed, speedWords } from "../models/model-speed.tsx";
 import { Icon } from "../lib/ui/icons.tsx";
 import { afterCommit, requestFocus } from "../lib/ui/kit/focus.ts";
 import { usePopover } from "../lib/ui/kit/popover.ts";
+import { pickerEntry } from "./picker-entry.ts";
 import { activeEntry, contextRuler, makerGroups, makerOf, pickerEntries, suggestedOf, type Maker } from "./picker-models.ts";
 import { focusComposer } from "../composer/focus.ts";
 import { openSettings, pickModel, setContext, updateSettings } from "../lib/session/index.ts";
-import { NA, type State, chatReady, getState, setState, useStore } from "../lib/store/store.ts";
+import { NA, type State, getState, useStore } from "../lib/store/store.ts";
 import { FitSkel, PHONE, closePop, closeTip, esc, isTouch, openTip, tabStops, useMedia } from "../lib/ui/ui.tsx";
 
 const FAVORITES = "gates-local.model-favorites";
@@ -68,7 +69,6 @@ export function Picker() {
   const speeds = useStore(s => s.speeds);
   const gpu = useStore(s => s.gpu);
   const whole = useStore(markWhole);
-  const settled = useStore(s => s.hydrationSettled), readyForFits = useStore(chatReady);
   const phone = useMedia(PHONE), cpu = table ? table.memory.kind === "cpu" : noGpu(gpu);
   const catalog = catalogRaw === NA ? undefined : catalogRaw;
   const [query, setQuery] = useState("");
@@ -95,17 +95,8 @@ export function Picker() {
   const activeMax = active?.info?.maxContext;
   const actual = active ? ctxFor(numCtx, models, active.tag) : numCtx;
   const present = new Set([...rows.map(r => makerOf(r.tag, makers)), ...(catalog ?? []).map(c => makerOf(c.name, makers))]);
-  const prepared = !readyForFits || models !== undefined || settled;
-  // oxlint-disable-next-line gates/effect-needs-reason -- opens the picker in the store once its first view's data is in; the store's pop is what App and the scrim read
-  useLayoutEffect(() => {
-    if (pop && !pop.ready && prepared && getState().pop === pop) setState({ pop: { ...pop, ready: true } });
-  }, [pop, prepared]);
-  // oxlint-disable-next-line gates/effect-needs-reason -- moves focus into the picker on the commit that first draws it, which waits for the model list
-  useLayoutEffect(() => {
-    if (!pop?.ready) return;
-    if (isTouch() && !pop.kb) ref.current?.querySelector<HTMLButtonElement>(".pk-close")?.focus({ preventScroll: true });
-    else input.current?.focus({ preventScroll: true });
-  }, [pop]);
+  // why: the root draws only once the model list is in, and focus goes in as it does
+  const [entry] = useState(() => pickerEntry(ref, () => input.current));
   usePopover(ref, pop !== null, (root) => {
     const anchor = document.getElementById("modelBtn");
     if (!anchor) return;
@@ -191,7 +182,7 @@ export function Picker() {
     return row.downloading === undefined ? said : `Downloading, ${row.downloading}%. ${said}`;
   };
   if (!pop?.ready) return null;
-  return <div ref={ref} id="picker" className={`model-picker${pop ? " open" : ""}${step === "context" ? " step-context" : ""}`} role="dialog" aria-label="Choose a model" aria-modal={phone} data-testid="models.picker.dialog" onKeyDown={keys}>
+  return <div ref={entry} id="picker" className={`model-picker${pop ? " open" : ""}${step === "context" ? " step-context" : ""}`} role="dialog" aria-label="Choose a model" aria-modal={phone} data-testid="models.picker.dialog" onKeyDown={keys}>
     <div className="pk-layout">
       <nav className="pk-rail" aria-label="Model makers" inert={phone && step === "context"}>
         <button className="pk-fam" data-testid="models.picker.favorites" aria-label="Favorites" aria-pressed={group === "favorites"} data-tip="Favorites" onClick={() => { setGroup("favorites"); setQuery(""); setHighlight(null); setExpanded(false); }}><Icon id="star" /></button>

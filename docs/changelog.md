@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-16: models, pickers and first run follow the store instead of their effects
+
+- The entry starts `watchPickerReady()`: an open model picker is marked
+  ready the moment its first view's data is in, whether or not the
+  picker has drawn yet.
+- Both pickers take the focus as their root is drawn, through one shared
+  ref: the first control, or Close on a touch screen with no keyboard.
+- The remove dialog's Cancel takes the focus as it is drawn and again
+  after a failed removal. The typed name's More menu puts the focus on
+  its first item when it opens.
+- Download attempts retire as models, downloads and the catalog change,
+  and the rows' one-second wait for fit answers and first run's wait for
+  the screen's words both go through `useAfter`.
+
 ## 2026-11-16: voice and updates follow the store instead of their effects
 
 - Two new kit pieces. `useLoad(key, load)` reads once per key and keeps
