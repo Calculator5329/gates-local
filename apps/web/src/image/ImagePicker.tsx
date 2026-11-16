@@ -1,14 +1,3 @@
-// The composer's model picker while Image is on: two menus on the rail, Defaults (one row per
-// style, named by the style alone, running the setup this card's level gets for it) and Other
-// models (the rest in their groups, with family marks), the highlighted one's sizes on the
-// right, the GPU memory line below. Both menus are laid in one cell with the other hidden, and
-// the sizes never set the height, so the picker is as tall on either menu and nothing moves on a
-// click. The same shape and parts as Picker.tsx; what a chat model needs (search, favorites,
-// context lengths) is not here. A setup ComfyUI lacks files or nodes for is listed greyed out
-// with its reason, and a Download button when the app can fetch every missing file
-// (image.download). The download is said once, at the start of the one footer row: where the files
-// go, what is left to fetch and free there, one bar with Stop; the GPU figure ends the row. With nothing to list the picker is one row that says why, with
-// Start ComfyUI or Check again: nothing starts on open.
 import "../picker/picker.css";
 import "./image-picker.css";
 import { type KeyboardEvent, type ReactNode, useLayoutEffect, useRef, useState } from "react";
@@ -25,17 +14,10 @@ import { PHONE, closePop, closeTip, isTouch, tabStops, useMedia } from "../lib/u
 import { requestFocus } from "../lib/ui/kit/focus.ts";
 import { usePopover } from "../lib/ui/kit/popover.ts";
 
-/** Below this height the list and the sizes stop being usable. */
+// why: below this much room above the button the list and the sizes stop being usable
 const CRAMPED = 280;
-/** The server's tier labels in their order (presets.ts TIERS); one setup can be two tiers' pick. */
 const TIER_ORDER = ["Fast", "Fast and balanced", "Balanced", "Best"];
-/** The server's groups, theme defaults first (presets.ts GROUPS); one it names that is not here goes last. */
 const GROUP_ORDER = ["General", "Portraits and people", "Characters", "Pixel art", "Game sprites", "Backgrounds", "Icons", "Text and logos", "Painterly and concept art", "ComfyUI templates", "Your workflows", "Your models"];
-/**
- * Defaults' styles, named and ordered as the style bench names them, each with the server's key
- * for it (ImagePreset.style, styles.ts). The server lists one setup per style, the bench's
- * winner at this machine's level; a style it lists none for has no row.
- */
 const STYLES: readonly { readonly name: string; readonly key: string }[] = [
   { name: "General", key: "general" },
   { name: "People", key: "portraits" },
@@ -51,17 +33,12 @@ const STYLES: readonly { readonly name: string; readonly key: string }[] = [
 type Row = ImagePreset & { readonly ready: boolean };
 type Menu = "defaults" | "other";
 
-/** A file by its name, without the folder a setup lists it under; the download fetches by this name. */
 const baseName = (file: string) => file.slice(Math.max(file.lastIndexOf("/"), file.lastIndexOf("\\")) + 1);
 
 const rank = (group: string) => { const i = GROUP_ORDER.indexOf(group); return i < 0 ? GROUP_ORDER.length : i; };
 
 const tierRank = (r: Row) => { const i = TIER_ORDER.indexOf(r.tier ?? ""); return r.tier === undefined ? TIER_ORDER.length + 1 : i < 0 ? TIER_ORDER.length : i; };
 
-/**
- * Rows in their groups: groups in GROUP_ORDER, then as first seen; in each, this GPU's tier rows
- * first in tier order (ready or still to download), then ready rows, then the rest.
- */
 function grouped(rows: readonly Row[]): { name: string; rows: Row[] }[] {
   const by = new Map<string, Row[]>();
   for (const r of rows) by.set(r.group ?? "", [...by.get(r.group ?? "") ?? [], r]);
@@ -69,7 +46,6 @@ function grouped(rows: readonly Row[]): { name: string; rows: Row[] }[] {
   return [...by.entries()].toSorted(([a], [b]) => rank(a) - rank(b)).map(([name, list]) => ({ name, rows: order(list) }));
 }
 
-/** Defaults: one row per style the server lists a setup for, the one this machine's level runs. */
 function defaultsOf(rows: readonly Row[]): { style: string; row: Row }[] {
   const out: { style: string; row: Row }[] = [];
   for (const s of STYLES) {
@@ -79,14 +55,8 @@ function defaultsOf(rows: readonly Row[]): { style: string; row: Row }[] {
   return out;
 }
 
-/** A tier row's quiet label after its name, as the chat picker shows a variant. */
 const tierTag = (p: Row) => p.tier === undefined ? null : <span className="pk-variant">{p.tier}</span>;
 
-/**
- * Why a greyed row cannot run: what ComfyUI lacks, in words, or what is left of its files to fetch.
- * Where the row has its download button, that mark already says it needs fetching, so a known size
- * is said alone; without the button, or while the size is unknown, the words say it.
- */
 export function needsText(p: ImagePreset, button: boolean): string {
   if (p.why !== undefined) return p.why;
   const bytes = p.needs?.leftBytes ?? p.needs?.bytes;
@@ -95,17 +65,10 @@ export function needsText(p: ImagePreset, button: boolean): string {
   return `Needs ${n} ${n === 1 ? "file" : "files"}${bytes === undefined ? "" : ` · ${gb(bytes)}`}`;
 }
 
-/** The size a preset runs at when its row is picked: the chosen size when it has it, else its first. */
 function sizeFor(preset: ImagePreset, width: number, height: number) {
   return preset.sizes.find((z) => z.width === width && z.height === height) ?? preset.sizes[0]!;
 }
 
-/**
- * A size row's memory: the chat picker's ruler against the card's size, green when the size fits
- * the card, red past its edge when it does not. Judged by the card, never by what is free this
- * second: the chat model leaves before an image loads. The number is on the row only when the
- * sizes differ; else the head says it once. Its words are its name for a screen reader, no tip.
- */
 function SizeMemory({ bytes, card, cpu, number }: { bytes: number; card: number | undefined; cpu: boolean; number: boolean }) {
   const fits = card === undefined ? undefined : bytes <= card;
   const k = fits === undefined ? "pending" : fits ? "gpu" : "no";
@@ -117,17 +80,12 @@ function SizeMemory({ bytes, card, cpu, number }: { bytes: number; card: number 
   </span>;
 }
 
-/** A long path loses its middle first: the drive and the last folders say where it is. */
 export function middle(path: string, max = 34): string {
   if (path.length <= max) return path;
   const tail = Math.ceil((max - 1) * 0.6);
   return `${path.slice(0, max - 1 - tail)}…${path.slice(-tail)}`;
 }
 
-/**
- * The one download, said once for the whole picker: bytes in of all, and the time left. The
- * setup's bytes when the server knows every file's size, else this file's.
- */
 function amounts(d: ImageDownload): { done: number; total: number | undefined; pct: number } {
   const done = d.setupTotalBytes === undefined ? d.completedBytes : d.setupCompletedBytes ?? d.completedBytes;
   const total = d.setupTotalBytes ?? d.totalBytes;
@@ -139,30 +97,24 @@ export function ImagePicker() {
   const presets = useStore((s) => s.imagePresets);
   const status = useStore((s) => s.imageStatus);
   const pushed = useStore((s) => s.imageDownload);
-  // the picked setup; a default the server says this GPU cannot run is not shown as one
   const view = useStore(chosenImage), chosen = view?.listed === true ? view : undefined;
   const gpu = useStore((s) => s.gpu);
   const phone = useMedia(PHONE), cpu = noGpu(gpu);
-  // the menu pressed on the rail since the picker opened; until then the one holding the pick
   const [menu, setMenu] = useState<Menu | null>(null);
   const [highlight, setHighlight] = useState<string | null>(null);
   const [step, setStep] = useState<"models" | "sizes">("models");
   const [error, setError] = useState<string | null>(null);
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
-  // what the empty picker's button was pressed as: its words stay until the start or the look ends
   const [starting, setStarting] = useState<"start" | "check" | null>(null);
-  // what this listener refuses (the phone's): its controls are not shown
   const canDownload = useStore((s) => s.unavailable["image.download"] !== true);
   const canStop = useStore((s) => s.unavailable["image.stopDownload"] !== true);
   const canStart = useStore((s) => s.unavailable["image.start"] !== true);
   const [startError, setStartError] = useState<string | null>(null);
-  // the download folder: the path field while it is open (no folder dialog here), and a save's refusal
   const [folderField, setFolderField] = useState<string | null>(null);
   const [folderError, setFolderError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const known = presets === undefined || presets === NA ? undefined : presets;
-  // the server's word on this machine: no default on too small a GPU, or how slow the CPU is
   const note = known?.noGpu ?? known?.slow;
   const listed: Row[] = known === undefined ? [] : [...known.presets.map((p) => ({ ...p, ready: true })), ...(known.others ?? []).map((p) => ({ ...p, ready: false }))];
   const defaults = defaultsOf(listed);
@@ -172,16 +124,12 @@ export function ImagePicker() {
   const rows = shown === "defaults" ? defaults.map((d) => d.row) : others.flatMap((g) => g.rows);
   const active = rows.find((p) => p.id === highlight) ?? rows.find((p) => p.id === chosen?.preset.id) ?? rows.find((p) => p.ready) ?? rows[0];
   const width = chosen?.width ?? 0, height = chosen?.height ?? 0;
-  // the newest word on a download: a push, else what the list said when it was read
   const download = pushed ?? known?.download;
   const downloading = download !== undefined && download.ended !== true;
-  // the running setup's files, by name: a row that needs one of them waits on that download
   const fetching = new Set(downloading ? (listed.find((p) => p.id === download.preset)?.needs?.files ?? []).map(baseName) : []);
   const firstReady = rows.find((p) => p.ready)?.id;
-  // a number the same at every size is said once, in the head
   const same = active !== undefined && active.sizes.length > 1 && active.sizes.every((z) => z.bytes === active.sizes[0]!.bytes) ? active.sizes[0]!.bytes : undefined;
 
-  // the server sends the list whenever it changes, so opening reads nothing; a closed picker forgets its menu
   if (pop === null && menu !== null) setMenu(null);
   // oxlint-disable-next-line gates/effect-needs-reason -- moves focus into the picker on the commit that first draws it
   useLayoutEffect(() => {
@@ -194,7 +142,6 @@ export function ImagePicker() {
     if (!anchor) return;
     root.style.maxHeight = "";
     if (phone) { root.style.left = `${Math.max(8, (window.innerWidth - root.offsetWidth) / 2)}px`; root.style.top = ""; return; }
-    // Placed as the chat picker is: right edge on the button's, above it unless that is cramped.
     const r = anchor.getBoundingClientRect(), pw = root.offsetWidth, ph = root.offsetHeight;
     const above = r.top - 6 - 8, below = window.innerHeight - r.bottom - 6 - 8;
     const up = ph <= above || above >= CRAMPED || above >= below;
@@ -218,7 +165,6 @@ export function ImagePicker() {
   function choose(preset: Row) {
     setHighlight(preset.id);
     if (phone) { setStep("sizes"); requestFocus(() => ref.current?.querySelector<HTMLButtonElement>(".pk-back"), { preventScroll: true }); return; }
-    // a greyed row shows its sizes and picks nothing
     if (!preset.ready) return;
     const size = sizeFor(preset, width, height);
     void pick({ preset: preset.id, width: size.width, height: size.height });
@@ -278,28 +224,20 @@ export function ImagePicker() {
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
   }
 
-  /** What a row shows first: a Defaults row the style alone (its setup is in the size pane, no tip); any other row its mark and name. */
   function rowLabel(p: Row, style: string | undefined) {
     return style === undefined ? <><ImageMark family={p.family} /><span className="pk-name"><span className="pk-nm">{p.name}</span>{tierTag(p)}{check(p)}</span></>
       : <span className="pk-name"><span className="pk-nm">{style}</span>{check(p)}</span>;
   }
   const check = (p: Row) => p.ready && p.id === chosen?.preset.id ? <Icon id="check" cls="s12" /> : null;
 
-  /** A row that runs now: picked by a press. */
   function readyRow(p: Row, style?: string) {
     return <div key={p.id} className={`pk-r${style === undefined ? "" : " style"}${p.id === chosen?.preset.id ? " sel" : ""}${p.id === active?.id ? " hl" : ""}`} role="option" data-testid="image.picker.option" aria-selected={p.id === chosen?.preset.id} data-preset={p.id} onMouseMove={() => setHighlight(p.id)}>
       <button type="button" className="pk-select" data-testid="image.picker.select" tabIndex={p.id === (chosen?.preset.id ?? firstReady) ? 0 : -1} aria-label={style ?? p.name} onClick={() => choose(p)}>{rowLabel(p, style)}</button>
     </div>;
   }
 
-  /**
-   * A row ComfyUI cannot run yet: greyed, and on its second line one of three things: what it
-   * needs, that it waits on the download running now (its own or another setup's with the same
-   * files), or why a download of it failed. The transfer itself is said once, in the disk row.
-   */
   function offRow(p: Row, style?: string) {
     const mine = download?.preset === p.id ? download : undefined;
-    // a stop keeps the part fetched: the row's button then resumes it
     const kept = mine !== undefined && mine.ended === true && mine.state === "cancelled";
     const failed = mine !== undefined && mine.ended === true && mine.state === "error";
     const waits = downloading && (mine !== undefined || (p.needs?.files ?? []).some((f) => fetching.has(baseName(f))));
@@ -314,12 +252,6 @@ export function ImagePicker() {
     </div>;
   }
 
-  /**
-   * Where the downloads go, said once under the lists at one height: the folder (its middle
-   * shortened, the whole path in its tip) with the one control that changes it, then what the
-   * highlighted setup has left to fetch and what is free there. While a download runs: its one
-   * bar, bytes in of all and the time left, with Stop; a stopped one's bar stays at the part kept.
-   */
   function diskRow() {
     const disk = known?.disk;
     if (disk === undefined || !canDownload) return null;
@@ -338,11 +270,8 @@ export function ImagePicker() {
         {downloading && canStop ? <button type="button" className="pk-act" data-testid="image.picker.stop-download" aria-label={`Stop downloading ${name}`} data-tip="Stop" onClick={() => void stopImageDownload(run.preset).then((failed) => { if (failed !== null) setRowError({ id: run.preset, message: failed }); })}><Icon id="x" /></button> : null}
       </>;
     } else if (download?.ended === true && download.state === "done" && download.message !== undefined && left === undefined) {
-      // the download's last word, where its bar was: a file already under its name was moved aside, and to where.
-      // A highlighted setup with files left to fetch shows those numbers instead.
       numbers = <span className="pk-disk-n pk-disk-note" role="status" data-testid="image.picker.download-note">{download.message}</span>;
     } else {
-      // the dot only between two parts, never after the last
       numbers = <span className="pk-disk-n">
         {left === undefined ? null : <span data-testid="image.picker.disk-left">{gb(left)} to fetch{disk.freeBytes === undefined ? "" : " · "}</span>}
         {disk.freeBytes === undefined ? null : <span className={short ? "short" : undefined} data-testid="image.picker.disk-free">{gb(disk.freeBytes)} free on disk</span>}
@@ -368,8 +297,6 @@ export function ImagePicker() {
       : known.readAt === undefined ? "Image models show here once ComfyUI has run."
       : "ComfyUI has none of the files these image models load.";
     const state = status === undefined || status === NA ? undefined : status.state;
-    // the app's own ComfyUI is stopped: Start it; otherwise there is nothing the app can start, so look again
-    // a start keeps saying so while ComfyUI comes up, though its state is then "starting", not "stopped"
     const as = state === "stopped" ? "start" : "check";
     const label = starting === "start" || state === "starting" ? "Starting ComfyUI…" : starting === "check" ? "Checking…" : as === "start" ? "Start ComfyUI" : "Check again";
     return <div ref={ref} id="imagePicker" className="model-picker image-picker open blank" role="dialog" data-testid="image.picker.blank" aria-label="Choose an image model" aria-modal={phone} onKeyDown={keys}>
@@ -387,10 +314,8 @@ export function ImagePicker() {
         <button className="pk-fam" data-testid="image.picker.other" aria-label="Other models" data-tip="Other models" aria-pressed={shown === "other"} onClick={() => switchTo("other")}><Icon id="box" /></button>
       </nav>
       <div className="pk-main" inert={phone && step === "sizes"}>
-        {/* a phone's Close; the button that opened the picker already names it */}
         <div className="pk-search">{close}</div>
         <div className="pk-list-scroll">
-          {/* both menus in one cell, the other hidden: the list is as tall on either */}
           <div className="pk-menus">
             <div className="pk-menu" role="listbox" data-testid="image.picker.defaults-list" aria-label="Defaults" inert={shown !== "defaults"} onKeyDown={listKeys}>
               {defaults.length === 0 ? <p className="pk-empty">No style has a setup here yet.</p> : defaults.map(({ style, row }) => row.ready ? readyRow(row, style) : offRow(row, style))}
@@ -405,7 +330,6 @@ export function ImagePicker() {
         </div>
       </div>
       <section className="pk-context" aria-label="Size" inert={phone && step !== "sizes"}>
-        {/* the model alone: the row and the composer button already say the style */}
         <header className="pk-context-head"><button className="pk-back" data-testid="image.picker.back" aria-label="Back to image models" onClick={back}><Icon id="left" /></button><span data-testid="image.picker.model">{active?.model ?? active?.name}</span>{same === undefined ? null : <small>{gb(same)}</small>}</header>
         <div className="pk-context-rows" role="radiogroup" aria-label="Size" data-testid="image.picker.sizes" onKeyDown={(e) => {
           if (e.key === "ArrowLeft") { e.preventDefault(); back(); return; }
@@ -426,7 +350,6 @@ export function ImagePicker() {
         {error === null ? null : <p className="pk-help pk-choice" role="status">{error}</p>}
       </section>
     </div>
-    {/* one footer row, as the chat picker's: where downloads go, under 4 GB no default or on the CPU how slow (said once), and the card the sizes are judged by at the end */}
     <footer className="pk-bottom">
       {disk}
       {disk === null || note !== undefined ? <span className="pk-nogpu" role={note === undefined ? undefined : "status"}>{note}</span> : null}

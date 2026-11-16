@@ -3,28 +3,34 @@
 // that refuses their methods (the phone's) offers, and the empty picker's button.
 import { isValidElement, type ReactElement } from "react";
 import type { ImageDownload, ImagePreset } from "@gates-local/contracts";
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const probe = vi.hoisted(() => ({ state: {} as Record<string, unknown>, calls: [] as string[] }));
+const probe = vi.hoisted(() => ({
+  state: {} as Record<string, unknown>, calls: [] as string[], args: [] as [string, unknown[]][],
+  // useState by call order: a slot set here starts at that value, and every setter call is kept
+  slots: {} as Record<number, unknown>, sets: [] as [number, unknown][], slot: 0,
+  chosen: undefined as unknown, ruler: undefined as unknown, place: undefined as ((root: unknown) => void) | undefined,
+}));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
   // an effect runs at once: what opening the picker does is what the tree's first expansion does
   useEffect: (run: () => void) => { run(); },
   useLayoutEffect: () => undefined,
   useRef: () => ({ current: null }),
-  useState: (initial: unknown) => [initial, () => undefined],
+  useState: (initial: unknown) => { const i = probe.slot++; return [i in probe.slots ? probe.slots[i] : initial, (v: unknown) => { probe.sets.push([i, v]); }]; },
 }));
 vi.mock("../lib/store/store.ts", () => ({ NA: "na", useStore: (fn: (s: unknown) => unknown) => fn(probe.state) }));
 vi.mock("../lib/session/index.ts", () => ({
   ...Object.fromEntries(["downloadImageSetup", "pickImage", "saveImageFolder", "startImage", "stopImageDownload"]
-    .map((name) => [name, async () => { probe.calls.push(name); return null; }])),
+    .map((name) => [name, async (...args: unknown[]) => { probe.calls.push(name); probe.args.push([name, args]); return null; }])),
   folderDialog: () => undefined,
 }));
 vi.mock("../composer/focus.ts", () => ({ focusComposer: () => undefined }));
 vi.mock("../lib/ui/icons.tsx", () => ({ Icon: () => null }));
 vi.mock("./ImageMark.tsx", () => ({ ImageMark: () => null }));
-vi.mock("../picker/picker-models.ts", () => ({ memoryRuler: () => undefined }));
-vi.mock("./image-choice.ts", () => ({ chosenImage: () => undefined, imageCard: (gpu?: { totalBytes?: number }) => gpu?.totalBytes, sizeLabel: (w: number, h: number) => `${w}×${h}` }));
+vi.mock("../picker/picker-models.ts", () => ({ memoryRuler: () => probe.ruler }));
+vi.mock("../lib/ui/kit/popover.ts", () => ({ usePopover: (_ref: unknown, _open: boolean, place: (root: unknown) => void) => { probe.place = place; } }));
+vi.mock("./image-choice.ts", () => ({ chosenImage: () => probe.chosen, imageCard: (gpu?: { totalBytes?: number }) => gpu?.totalBytes, sizeLabel: (w: number, h: number) => `${w}×${h}` }));
 vi.mock("../lib/ui/ui.tsx", () => ({ PHONE: "", closePop: () => undefined, closeTip: () => undefined, isTouch: () => false, tabStops: () => [], useMedia: () => false }));
 
 const { ImagePicker, middle, needsText } = await import("./ImagePicker.tsx");
@@ -42,7 +48,7 @@ const text = (node: Node): string => nodes(node).flatMap((n) => {
   const c = n.props["children"];
   return (Array.isArray(c) ? c : [c]).filter((x) => typeof x === "string" || typeof x === "number");
 }).join("");
-const tree = () => nodes(ImagePicker());
+const tree = () => { probe.slot = 0; return nodes(ImagePicker()); };
 const row = (id: string) => {
   const found = tree().find((n) => n.props["data-preset"] === id);
   if (!found) throw new Error(`no row ${id}`);
@@ -65,7 +71,7 @@ const running: ImageDownload = { preset: "flux2-klein-4b", name: "qwen_3_4b.safe
 function picker(over: Record<string, unknown> = {}) {
   probe.state = { pop: { id: "images" }, imagePresets: { presets: [ready], others, readAt: 1 }, imageStatus: { state: "ready" }, imageDownload: undefined, gpu: undefined, unavailable: {}, ...over };
 }
-beforeEach(() => { probe.calls = []; });
+beforeEach(() => { probe.calls = []; probe.args = []; probe.slots = {}; probe.sets = []; probe.chosen = undefined; probe.ruler = undefined; });
 
 const disk = () => {
   const found = tree().find((n) => n.props["data-testid"] === "image.picker.disk");
@@ -198,4 +204,183 @@ it("setups that cannot run are listed greyed out, closed to a pick, each saying 
   const { readFileSync } = await import("node:fs");
   const css = readFileSync(new URL("./image-picker.css", import.meta.url), "utf8");
   expect(css).toContain(".image-picker .pk-r.off .pk-nm{color:var(--muted-foreground)}");
+});
+
+const tiered = (id: string, tier: string | undefined, group = "General", isReady = true): ImagePreset => ({ id, name: id, family: "flux", group, measured: false, sizes, ...(tier === undefined ? {} : { tier }), ...(isReady ? {} : { needs: { files: [`${id}.safetensors`], download: false } }) });
+const otherList = () => tree().find((n) => n.props["data-testid"] === "image.picker.other-list")!;
+const groupOrder = () => nodes(otherList().props["children"]).filter((n) => n.props["role"] === "group").map((n) => n.props["aria-label"]);
+const rowOrder = () => nodes(otherList().props["children"]).map((n) => n.props["data-preset"]).filter((id): id is string => typeof id === "string");
+
+it("Other models lists the server's groups in its order (presets.ts GROUPS), a group it does not name after them in the order first seen", async () => {
+  const { readFileSync } = await import("node:fs");
+  const server = readFileSync(new URL("../../../server/src/image/presets.ts", import.meta.url), "utf8");
+  const groups = [...(/export const GROUPS = \{([^}]*)\}/.exec(server)?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]!);
+  expect(groups.length).toBeGreaterThan(5);
+  const presets = ["Zeta", ...groups.toReversed(), "Alpha"].map((g, i) => tiered(`p${i}`, undefined, g));
+  picker({ imagePresets: { presets, others: [], readAt: 1 } });
+  expect(groupOrder()).toEqual([...groups, "Zeta", "Alpha"]);
+});
+
+it("in a group the tier rows come first in the server's tier order (presets.ts TIERS, two tiers' pick between them), then ready rows, then the rest", async () => {
+  const { readFileSync } = await import("node:fs");
+  const server = readFileSync(new URL("../../../server/src/image/presets.ts", import.meta.url), "utf8");
+  const tiers = [...(/export const TIERS[^=]*= \[([\s\S]*?)\];/.exec(server)?.[1] ?? "").matchAll(/name: "([^"]+)"/g)].map((m) => m[1]!);
+  expect(tiers.length).toBe(3);
+  const two = `${tiers[0]} and ${tiers[1]!.toLowerCase()}`;
+  const wanted = [tiers[0]!, two, tiers[1]!, tiers[2]!];
+  picker({ imagePresets: { presets: [tiered("plain", undefined), ...wanted.toReversed().map((t) => tiered(t, t))], others: [tiered("unready", undefined, "General", false)], readAt: 1 } });
+  expect(rowOrder()).toEqual([...wanted, "plain", "unready"]);
+});
+
+it("a row waits on the running download when it needs one of its files, whatever folder either lists the file under", () => {
+  const a = { ...off("a", "A", ["diffusion_models/shared.safetensors", "vae/a-vae.safetensors"]) };
+  const b = { ...off("b", "B", ["unet\\shared.safetensors"]) };
+  const c = { ...off("c", "C", ["checkpoints/c.safetensors"]) };
+  picker({ imagePresets: { presets: [ready], others: [a, b, c], readAt: 1 }, imageDownload: { ...running, preset: "a" } });
+  expect(text(row("b").node)).toContain("Waiting on the download");
+  expect(text(row("c").node)).not.toContain("Waiting");
+});
+
+it("a picked row keeps the size picked now when it has it, else runs at its first", async () => {
+  const two = [{ width: 1024, height: 1024, bytes: GIB }, { width: 512, height: 512, bytes: GIB }];
+  const b: ImagePreset = { ...ready, id: "b", name: "B", sizes: two };
+  const c: ImagePreset = { ...ready, id: "c", name: "C", sizes: [sizes[0]!] };
+  probe.chosen = { preset: ready, width: 512, height: 512, listed: true };
+  picker({ imagePresets: { presets: [ready, b, c], others: [], readAt: 1 } });
+  (row("b").all.find((n) => n.props["className"] === "pk-select")!.props["onClick"] as () => void)();
+  (row("c").all.find((n) => n.props["className"] === "pk-select")!.props["onClick"] as () => void)();
+  await Promise.resolve();
+  expect(probe.args.filter(([n]) => n === "pickImage").map(([, a]) => a[0])).toEqual([{ preset: "b", width: 512, height: 512 }, { preset: "c", width: 1024, height: 1024 }]);
+});
+
+it("a size past the card's memory shows the ruler's overflow past the edge, in red, and says by how much", async () => {
+  probe.ruler = { fill: 80, overflow: 20, continues: false };
+  picker({ gpu: { vendor: "nvidia", totalBytes: 8 * GIB, freeBytes: GIB } });
+  const cost = tree().find((n) => typeof n.props["className"] === "string" && (n.props["className"] as string).startsWith("pk-cost "))!;
+  expect(cost.props["className"]).toBe("pk-cost no");
+  expect(cost.props["aria-label"]).toBe(`${gb(10 * GIB)} estimated; ${gb(2 * GIB)} more than the GPU has`);
+  expect(nodes(cost.props["children"]).find((n) => n.props["className"] === "pk-cost-over")?.props["style"]).toEqual({ width: "20%" });
+  const { readFileSync } = await import("node:fs");
+  expect(readFileSync(new URL("../picker/picker.css", import.meta.url), "utf8")).toContain(".pk-cost.no .pk-cost-over{background:var(--red)}");
+});
+
+it("a long folder keeps its drive and its last folders, its middle cut", () => {
+  const short = middle("F:\\ComfyUI_windows_portable\\ComfyUI\\models\\diffusion_models");
+  expect(short).toHaveLength(34);
+  expect(short.startsWith("F:\\ComfyUI")).toBe(true);
+  expect(short.endsWith("\\diffusion_models")).toBe(true);
+  expect(short).toContain("…");
+});
+
+it("a download whose setup total is not known counts this file's bytes", () => {
+  const { setupCompletedBytes: _a, setupTotalBytes: _b, ...file } = running;
+  picker({ imagePresets: { presets: [ready], others, readAt: 1, disk: { folder: "F:\\models", picked: false } }, imageDownload: { ...file, completedBytes: 5 * GIB, totalBytes: 10 * GIB, bytesPerSecond: undefined } });
+  expect(bar(disk().all)?.props["aria-valuenow"]).toBe(50);
+  expect(text(disk().node)).toContain(`${gb(5 * GIB)} of ${gb(10 * GIB)}`);
+});
+
+it("the empty picker's button keeps the words it was pressed as until the start or the look ends", () => {
+  probe.slots = { 6: "check" };
+  picker({ imagePresets: { presets: [], readAt: 1 }, imageStatus: { state: "missing" } });
+  expect(text(blankButton()!)).toBe("Checking…");
+  expect(blankButton()?.props["disabled"]).toBe(true);
+  probe.slots = { 6: "start" };
+  expect(text(blankButton()!)).toBe("Starting ComfyUI…");
+});
+
+it("with no folder dialog, Change folder opens a path field at the folder; Enter saves it, and a refusal shows in place of the numbers", async () => {
+  const folders = { presets: [ready], others, readAt: 1, disk: { folder: "F:\\models", freeBytes: 876 * GIB, picked: false } };
+  picker({ imagePresets: folders });
+  (disk().all.find((n) => n.props["data-testid"] === "image.picker.change-folder")!.props["onClick"] as () => void)();
+  await Promise.resolve();
+  expect(probe.sets).toContainEqual([8, "F:\\models"]);
+  probe.slots = { 8: "G:\\pictures" };
+  const field = disk().all.find((n) => n.props["data-testid"] === "image.picker.folder-field")!;
+  expect(field.props["value"]).toBe("G:\\pictures");
+  (field.props["onKeyDown"] as (e: unknown) => void)({ key: "Enter", preventDefault: () => undefined });
+  await Promise.resolve();
+  expect(probe.args).toContainEqual(["saveImageFolder", ["G:\\pictures"]]);
+  probe.slots = { 9: "That folder cannot be written." };
+  expect(text(disk().node)).toContain("That folder cannot be written.");
+  expect(text(disk().node)).not.toContain("free on disk");
+});
+
+it("the newest word on a download wins: a push over the copy the list was read with, the list's copy with no push", () => {
+  const listed = { presets: [ready], others, readAt: 1, disk: { folder: "F:\\models", picked: false }, download: { ...running, setupCompletedBytes: 60 } };
+  picker({ imagePresets: listed });
+  expect(bar(disk().all)?.props["aria-valuenow"]).toBe(50);
+  picker({ imagePresets: listed, imageDownload: running });
+  expect(bar(disk().all)?.props["aria-valuenow"]).toBe(25);
+});
+
+it("a closed picker forgets the menu pressed on its rail", () => {
+  probe.slots = { 0: "other" };
+  picker({ pop: null });
+  probe.slot = 0;
+  expect(ImagePicker()).toBeNull();
+  expect(probe.sets).toContainEqual([0, null]);
+});
+
+it("a download that failed says why on its row, or that it failed", () => {
+  const failed: ImageDownload = { ...running, state: "error", ended: true, message: "The disk is full." };
+  picker({ imageDownload: failed });
+  expect(text(row("flux2-klein-4b").node)).toContain("The disk is full.");
+  picker({ imageDownload: { ...failed, message: undefined } });
+  expect(text(row("flux2-klein-4b").node)).toContain("The download failed.");
+});
+
+it("a highlighted setup with files left to fetch shows those numbers in place of the last download's note", () => {
+  const klein = { ...others[0]!, needs: { files: KLEIN_FILES, download: true, bytes: 8 * GIB, leftBytes: 8 * GIB } };
+  const done: ImageDownload = { ...running, preset: "other", state: "done", ended: true, message: "A file was kept as x.replaced-1." };
+  probe.slots = { 1: klein.id };
+  picker({ imagePresets: { presets: [ready], others: [klein], readAt: 1, disk: { folder: "F:\\models", freeBytes: 876 * GIB, picked: false } }, imageDownload: done });
+  expect(text(disk().node)).toContain(`${gb(8 * GIB)} to fetch`);
+  expect(text(disk().node)).not.toContain("replaced");
+});
+
+it("the picker's own Close shows on the phone only: the button that opened it already names it", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("./image-picker.css", import.meta.url), "utf8");
+  const phone = css.indexOf("@media (max-width:640px)") >= 0 ? css.indexOf("@media (max-width:640px)") : css.indexOf("@media(max-width:640px)");
+  expect(css.indexOf(".image-picker .pk-search{display:none}")).toBeGreaterThanOrEqual(0);
+  expect(css.indexOf(".image-picker .pk-search{display:none}")).toBeLessThan(phone);
+  expect(css.indexOf(".image-picker .pk-search{display:flex", phone)).toBeGreaterThan(phone);
+});
+
+it("the footer is one row as the chat picker's: the download first, the card the sizes are judged by last; no favorites and no context lengths", () => {
+  picker({ imagePresets: { presets: [ready], others, readAt: 1, disk: { folder: "F:\\models", freeBytes: 876 * GIB, picked: false } }, gpu: { vendor: "nvidia", totalBytes: 16 * GIB, freeBytes: 2 * GIB } });
+  const footer = tree().find((n) => n.type === "footer")!;
+  const parts = (footer.props["children"] as unknown[]).filter(isValidElement) as Node[];
+  expect(parts[0]?.props["data-testid"]).toBe("image.picker.disk");
+  expect(parts.at(-1)?.props["data-testid"]).toBe("image.picker.card");
+  expect(tree().filter((n) => /favorite|ctx-len|context-length/i.test(String(n.props["data-testid"] ?? "") + String(n.props["className"] ?? "")))).toEqual([]);
+});
+
+const placedAt = (rect: { top: number; bottom: number; right: number }, ph: number) => {
+  vi.stubGlobal("document", { getElementById: (id: string) => id === "modelBtn" ? { getBoundingClientRect: () => rect } : null });
+  vi.stubGlobal("window", { innerWidth: 1200, innerHeight: 800 });
+  picker();
+  tree();
+  const root = { style: {} as Record<string, string>, offsetWidth: 300, offsetHeight: ph };
+  probe.place!(root);
+  vi.unstubAllGlobals();
+  return root.style;
+};
+
+describe("where the picker sits", () => {
+  it("right edge on the button's, above it when it fits there", () => {
+    expect(placedAt({ top: 500, bottom: 530, right: 900 }, 400)).toEqual({ maxHeight: "", left: "600px", top: `${500 - 6 - 400}px` });
+  });
+  it("above, shortened, when the room above is not cramped though below has more", () => {
+    expect(placedAt({ top: 300, bottom: 330, right: 900 }, 600)).toEqual({ maxHeight: `${300 - 14}px`, left: "600px", top: "8px" });
+  });
+  it("below when the room above is cramped and below has more", () => {
+    expect(placedAt({ top: 200, bottom: 230, right: 900 }, 600)).toEqual({ maxHeight: `${800 - 230 - 14}px`, left: "600px", top: "236px" });
+  });
+});
+
+it("the download row keeps one height whatever it says: the footer row is fixed and the disk row fills it", async () => {
+  const { readFileSync } = await import("node:fs");
+  expect(readFileSync(new URL("../picker/picker.css", import.meta.url), "utf8")).toContain(".pk-bottom{height:44px;min-height:44px;");
+  expect(readFileSync(new URL("./image-picker.css", import.meta.url), "utf8")).toMatch(/\.image-picker \.pk-disk\{[^}]*;height:100%;/);
 });

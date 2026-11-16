@@ -25,11 +25,7 @@
       "apps/server/src/image/setup.ts": 45,
       "apps/server/src/image/sources.ts": 8,
       "apps/server/src/image/styles.ts": 17,
-      "apps/server/src/main.ts": 39,
-      "apps/web/src/image/ImageMark.tsx": 1,
-      "apps/web/src/image/ImagePicker.tsx": 38,
-      "apps/web/src/image/ImageUnset.tsx": 6,
-      "apps/web/src/image/image-choice.ts": 15
+      "apps/server/src/main.ts": 39
     },
     "gates/disable-needs-reason": {
       "test/finder/page.ts": 1,

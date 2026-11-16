@@ -2,7 +2,7 @@
 // cannot write Settings) a new thread's own pick, else the app's last pick.
 import type { ImageChoice, ImagePreset } from "@gates-local/contracts";
 import { expect, it } from "vitest";
-import { chosenImage, imagesUnset, setupHeld } from "./image-choice.ts";
+import { chosenImage, imageCount, imagesUnset, noImageEngine, setupHeld } from "./image-choice.ts";
 import type { State } from "../lib/store/store.ts";
 
 const sizes = [{ width: 1024, height: 1024, bytes: 1 }, { width: 768, height: 512, bytes: 1 }];
@@ -29,4 +29,15 @@ it("a setup building the card's engine beside the processor's holds nothing: pic
     expect(setupHeld(toCard as never), step).toBe(false);
     expect(imagesUnset(toCard as never), step).toBe(false);
   }
+});
+
+it("an open thread with no count of its own makes one picture, not a new thread's pick", () => {
+  expect(imageCount(state({ threadId: "t1", threads: [{ id: "t1" }], imageCountNew: 3 }))).toBe(1);
+  expect(imageCount(state({ threadId: "t1", threads: [{ id: "t1", imageCount: 2 }], imageCountNew: 3 }))).toBe(2);
+  expect(imageCount(state({ imageCountNew: 3 }))).toBe(3);
+});
+
+it("an address of one's own that does not answer is not no engine anywhere: Settings keeps its Generate images switch", () => {
+  expect(noImageEngine({ imageStatus: { state: "missing", owner: "none", addressSet: true }, imageSetup: undefined } as never)).toBe(false);
+  expect(noImageEngine({ imageStatus: { state: "missing", owner: "none" }, imageSetup: undefined } as never)).toBe(true);
 });

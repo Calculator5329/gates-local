@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-16: the web app's image folder holds to the six comment kinds
+
+- apps/web/src/image passes the comment rule: all 60 offenders went,
+  and the folder's comment lines fell from 122 to 2. What stays is two
+  `why:` lines: why the image mark shows letters, and why the picker
+  opens below the button when the room above is cramped.
+- Three comments were wrong. The disk row's said the folder's whole
+  path is in a tip, where by design it has none; the setup pop-up's
+  said Settings and Check again always stay, where Check again shows
+  only when nothing is offered; and one sat over the pop-up's Check
+  again but described what the session does when a setup ends.
+- 27 rules gained 30 unit tests, each watched fail with its rule
+  broken: where the picker sits beside the model button, the order of
+  groups and tiers checked against the server's own lists, the
+  download folder field, the pop-up's buttons and plan, and the
+  picture count of an open thread.
+
 ## 2026-11-16: the picture engine's status has one writer
 
 - The server set the picture engine's status from sixteen places, each

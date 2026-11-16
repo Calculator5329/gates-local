@@ -1,9 +1,3 @@
-// Images not set up: no ComfyUI answered and the app has none to start. The Image button (and the
-// menus' Image rows) open this in place of Image mode, whose Send could not work. Where the app can
-// set images up here, it shows the one download (the app's own ComfyUI and the recommended setup)
-// and Set up images starts it; where it cannot, one sentence says why. Settings and Check again
-// stay for a ComfyUI the person runs. An address set in Settings that does not answer is said as
-// that: not running, the address, Check again, and the app's own engine only as a choice pressed.
 import { useRef, useState } from "react";
 import { usePopover } from "../lib/ui/kit/popover.ts";
 import type { ImageSetup, ImageSetupProgress } from "@gates-local/contracts";
@@ -21,7 +15,6 @@ const STEP: Record<ImageSetupProgress["step"], string> = {
   error: "Setup stopped",
 };
 
-/** The download, before it starts: one row, its size, and what the drive has. */
 function Plan({ s }: { s: ImageSetup }) {
   const engine = s.engine !== undefined && !s.engine.installed ? s.engine.bytes : 0;
   const total = engine + (s.model?.bytes ?? 0);
@@ -64,14 +57,12 @@ export function ImageUnset() {
   const ref = useRef<HTMLDivElement>(null);
   const progress = setup?.progress;
   const running = progress !== undefined && progress.step !== "done" && progress.step !== "error";
-  // a closed card keeps no note
   if (!open && note !== null) setNote(null);
   usePopover(ref, open, (el) => {
     const anchor = document.getElementById("imageBtn");
     if (anchor) place(el, anchor, "start");
     if (kb) el.querySelector<HTMLElement>("button.btn")?.focus();
   }, [kb, setup?.why, setup?.model?.preset]);
-  // the setup's end closes this card and turns Image on where its push lands (the session's setupSaid)
   const check = async () => {
     setChecking(true);
     setNote(null);
@@ -86,7 +77,6 @@ export function ImageUnset() {
     const error = await startImageSetup();
     if (error !== null) setNote(error);
   };
-  // the app's own engine instead of the address set: an explicit choice, never a fallback the app takes
   const useOwn = async () => {
     setNote(null);
     const error = await updateSettings({ comfyUrl: null });
@@ -95,7 +85,6 @@ export function ImageUnset() {
   };
   const offer = canSetUp && setup !== undefined && setup.why === undefined && setup.model !== undefined;
   if (notRunning) {
-    // an address the person set that does not answer: it is not running, not uninstalled (WIN-MEM-04)
     return (
       <div className={`pop unset-pop${open ? " open" : ""}`} id="imageUnset" role="dialog" aria-labelledby="imageUnsetT" ref={ref} data-state="not-running">
         <SheetHead title="Image" />

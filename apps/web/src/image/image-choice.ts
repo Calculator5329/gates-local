@@ -1,8 +1,3 @@
-// The image choice as the composer shows and sends it: the open thread's own (Thread.imageChoice,
-// its last pick or image send), else the app's last pick anywhere (Settings.imageChoice), which a
-// new thread starts from; on the phone, which cannot write Settings, a new thread's own pick first. The server's image.presets lists the presets ComfyUI has every file for
-// and names what a send runs now; a choice saved since that read wins, so the button follows a
-// pick at once.
 import { cardBytes, type GpuStatus, type ImageChoice, type ImagePreset, type ImagePresets } from "@gates-local/contracts";
 import { type Maybe, NA, type State } from "../lib/store/store.ts";
 
@@ -10,38 +5,21 @@ export interface ImageView {
   readonly preset: ImagePreset;
   readonly width: number;
   readonly height: number;
-  /**
-   * A saved pick, or a default ComfyUI's last file list has: the button names only these. Never a
-   * default when the server says this GPU has none (ImagePresets.noGpu).
-   */
   readonly listed: boolean;
 }
 
-/** Image is on and image generation is on: Send goes to the image model. */
 export const imageMode = (s: State): boolean => s.image && s.settings !== NA && s.settings?.imageGen === true;
 
-/**
- * Set up images is under way, or stopped partway, and no address of one's own was set since. Its
- * engine step installs the app's own engine, so from the model step on the status reads as that
- * engine, stopped: the setup's own state, not the engine's, says its view stays until it ends well.
- */
 export const setupHeld = (s: Pick<State, "imageSetup" | "imageStatus">): boolean => {
   const step = s.imageSetup?.progress?.step;
   if (step === undefined || step === "done") return false;
-  // the card's engine built beside the processor's, which keeps making pictures until it is in
   if (s.imageSetup?.progress?.toCard === true) return false;
   const st = s.imageStatus;
   return st === undefined || st === NA || st.addressSet !== true;
 };
 
-/** No ComfyUI answered and the app has none to start, or a setup has not ended well: Image mode is not reachable until one does. */
 export const imagesUnset = (s: State): boolean => (s.imageStatus !== undefined && s.imageStatus !== NA && s.imageStatus.state === "missing") || setupHeld(s);
 
-/**
- * No image engine anywhere: with generation on, none answered, there is none to start and no
- * address is set; with it off, the server's look found none. Or a setup has not ended well
- * (setupHeld). Settings then offers Set up images and no Generate images switch.
- */
 export const noImageEngine = (s: Pick<State, "imageStatus" | "imageSetup">): boolean => {
   if (setupHeld(s)) return true;
   const st = s.imageStatus;
@@ -49,10 +27,8 @@ export const noImageEngine = (s: Pick<State, "imageStatus" | "imageSetup">): boo
   return st.state === "off" ? st.nowhere === true : st.state === "missing" && st.addressSet !== true;
 };
 
-/** The last answer, so a store selector gets the same object back until its inputs change. */
 let lastView: { presets: ImagePresets; saved: ImageChoice | undefined; view: ImageView } | undefined;
 
-/** What an Image send runs now; undefined until image.presets has answered once. Stable for the same inputs. */
 export function chosenImage(s: State): ImageView | undefined {
   const presets = s.imagePresets;
   if (presets === undefined || presets === NA) return undefined;
@@ -68,14 +44,12 @@ export function chosenImage(s: State): ImageView | undefined {
   return view;
 }
 
-/** The choice an Image send carries, or undefined when this send goes to a chat model. */
 export function drawChoice(s: State): ImageChoice | undefined {
   if (!imageMode(s)) return undefined;
   const view = chosenImage(s);
   return view === undefined ? undefined : { preset: view.preset.id, width: view.width, height: view.height };
 }
 
-/** How many pictures an Image send makes: the open thread's count, a new thread's pick, else 1. */
 export function imageCount(s: State): number {
   const open = s.view === "thread" && s.threadId !== null ? s.threads.find((t) => t.id === s.threadId) : undefined;
   return open === undefined ? s.imageCountNew : open.imageCount ?? 1;
@@ -83,26 +57,17 @@ export function imageCount(s: State): number {
 
 export const sizeLabel = (width: number, height: number): string => `${width}×${height}`;
 
-/** A setup and size as one key: what the store's picture times (State.imageRuns) are kept under. */
 export const runKey = (c: ImageChoice): string => `${c.preset}:${c.width}x${c.height}`;
 
-/** A setup's full name as the server last listed it, else its id (a setup ComfyUI no longer has). */
 export function presetName(s: State, id: string): string {
   return presetOf(s, id)?.name ?? id;
 }
 
-/** A preset the server listed, by id; undefined before the list or for one it no longer has. */
 export function presetOf(s: State, id: string) {
   const listed = s.imagePresets === undefined || s.imagePresets === NA ? undefined : s.imagePresets;
   return [...listed?.presets ?? [], ...listed?.others ?? [], ...listed ? [listed.current.preset] : []].find((p) => p.id === id);
 }
 
-/**
- * The card image sizes are judged by: its memory to the nearest GB (contracts/image-fit.ts), never
- * what is free this second, since the chat model leaves the GPU before an image loads (one thing
- * in memory at a time). A size fits when its estimate is at most this. Undefined without a
- * reading of the card's size.
- */
 export function imageCard(gpu: Maybe<GpuStatus>): number | undefined {
   return gpu === undefined || gpu === NA || gpu.totalBytes === undefined ? undefined : cardBytes(gpu.totalBytes);
 }
