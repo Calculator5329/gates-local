@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-16: the empty "turns" sync domain is gone
+
+- Nothing the server sends is in it any more: a reply record carries
+  its own rev and streamed words say where they start. The "turns"
+  domain and its "active-turns" scope leave the contract instead of
+  joining the ordered domains.
+
 ## 2026-11-16: a page from another version asks for a reload
 
 - The contract goes to version 2. The server says its version when a

@@ -233,9 +233,9 @@ describe("createClient", () => {
     expect(socket.readyState).toBe(3);
   });
 
-  it.each([{ epoch: "process-a", ordered: ["turns"] }, { epoch: "", ordered: [] }])("refuses unsolicited capabilities or a malformed epoch: %j", async result => {
+  it.each([{ epoch: "process-a", ordered: ["threads"] }, { epoch: "", ordered: [] }])("refuses unsolicited capabilities or a malformed epoch: %j", async result => {
     const socket = new FakeSocket(); socket.open();
-    const client = createClient(socket, { onProtocolError: () => {} });
+    const client = createClient(socket, { ordered: ["settings"], onProtocolError: () => {} });
     const pending = client.negotiate();
     socket.reply(JSON.stringify({ type: "response", id: socket.lastRequest().id, ok: true, result }));
     await expect(pending).rejects.toMatchObject({ code: "bad-result" });

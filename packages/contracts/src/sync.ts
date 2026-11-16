@@ -4,11 +4,11 @@
 // socket server refuses an answer or push of that kind without a number, and so does the client.
 import * as S from "effect/Schema";
 
-export const SyncDomain = S.Literals(["settings", "models", "threads", "turns", "sources", "images", "updates"]);
+export const SyncDomain = S.Literals(["settings", "models", "threads", "sources", "images", "updates"]);
 export type SyncDomain = typeof SyncDomain.Type;
 
 /** The things that have one number each, and the families (`thread:<id>`) that have one per member. */
-const FIXED_SCOPES = ["settings", "runtime", "models", "catalog", "threads", "gpu", "fit-inputs", "active-turns", "sources", "source-imports", "image-status", "update",
+const FIXED_SCOPES = ["settings", "runtime", "models", "catalog", "threads", "gpu", "fit-inputs", "sources", "source-imports", "image-status", "update",
   "suggested", "fit-table", "pulls", "loads", "memory", "speeds", "measures", "image-presets", "image-download", "image-setup", "image-jobs"] as const;
 export type FixedScope = typeof FIXED_SCOPES[number];
 /** A family's members: one chat (`thread:<id>`). */
