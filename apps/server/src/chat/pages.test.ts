@@ -103,3 +103,7 @@ it("the standing rule keeps a question in the chat and has a page say what it ma
   // a reply carrying a page still says what it is, before the code
   expect(PAGE_RULE).toMatch(/say in one sentence what you made, then send one complete HTML document/);
 });
+
+it("the standing rule has a changed page sent whole again, not as a patch", () => {
+  expect(PAGE_RULE).toMatch(/To change a page, send it whole again\.$/);
+});

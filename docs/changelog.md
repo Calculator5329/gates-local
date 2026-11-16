@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-11-16: the server's chat folder holds to the six comment kinds
+
+- apps/server/src/chat passes the comment rule: all 271 offenders went,
+  and the folder's comment lines fell from 407 to 42. What stays is
+  fifteen one-line `external:` facts about Ollama and Node, nine `why:`
+  lines, and a licence header on the image-only prompt taken from
+  T3 Code.
+- Six comments were stale and two inexact. Among them: a note that the
+  window says where a message goes, where the server works it out; a
+  claim that an uploader is recorded; and a note that the work clock
+  starts at ready, where it starts at the first thought or call. The
+  carried mark from a send keeps an attached copy safe, not the queue
+  alone, as one comment said.
+- 57 rules gained 60 unit tests, each watched fail with its rule broken.
+- Follow-ups found on the way: a reply-table test title says "too late,
+  never as done" but asserts done, and six names would carry what their
+  comment said (dirty, REMOVED_KEPT, ENDED_KEPT, left, now and the
+  stream line limit).
+
 ## 2026-11-16: the message box holds to the six comment kinds
 
 - apps/web/src/composer passes the comment rule: all 261 offenders went,

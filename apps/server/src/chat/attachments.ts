@@ -1,3 +1,4 @@
+// Image-only prompt from T3 Code ChatView.tsx at d137c5081ac5efb2b8ea9aec8b334e1bb4d0182a (MIT).
 import { constants } from "node:fs";
 import { mkdir, open, realpath, unlink, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -9,14 +10,12 @@ import { OMITTED_IMAGE } from "./window.ts";
 const MAX_BYTES = 10 * 1024 * 1024;
 const IMAGE_PATH = /^images\/paste-[a-f0-9-]+\.(png|jpeg|webp|gif)$/;
 
-/** T3 Code ChatView.tsx image-only prompt at d137c5081ac5efb2b8ea9aec8b334e1bb4d0182a (MIT). */
 export function imagePrompt(message: TurnMessage): TurnMessage {
   return message.role === "user" && message.images?.length && !message.content.trim()
     ? { ...message, content: "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]" }
     : message;
 }
 
-/** Validate before any load or save. Saved paths are confined to random pasted-image names. */
 export function checkAttachments(images: readonly string[]): void {
   if (images.length > 8) throw new Error("Attach up to 8 images per message.");
   for (const image of images) {
@@ -29,7 +28,7 @@ export function checkAttachments(images: readonly string[]): void {
   }
 }
 
-/** Image bytes live on disk, keeping thread replies and reloads below the socket's message limit. */
+// why: inline base64 in replies and reloads would pass the socket's message size limit
 export async function saveAttachments(dataDir: string, images: readonly string[]): Promise<string[]> {
   await mkdir(path.join(dataDir, "images"), { recursive: true });
   const root = path.join(await realpath(dataDir), "images");
@@ -65,7 +64,6 @@ async function readAttachment(dataDir: string, image: string): Promise<Buffer> {
   } finally { await handle.close(); }
 }
 
-/** The initial window bounds this read. Parse input dimensions before final context admission. */
 export async function accountImages(dataDir: string, messages: readonly TurnMessage[], info: Readonly<Record<string, unknown>> = {}): Promise<{ messages: TurnMessage[]; omitted: boolean }> {
   const output: TurnMessage[] = [];
   let omitted = false;
@@ -90,7 +88,6 @@ export async function accountImages(dataDir: string, messages: readonly TurnMess
   return { messages: output, omitted };
 }
 
-/** Only images in the fitted window are read and resent. Generated assistant images never become vision input. */
 export async function visionHistory(dataDir: string, history: readonly TurnMessage[]): Promise<TurnMessage[]> {
   return Promise.all(history.map(async m => {
     if (!m.images?.length) return m;

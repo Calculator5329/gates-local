@@ -1,7 +1,3 @@
-// Plain shapes for the streamed turn. Message mirrors the shared shape
-// packages/contracts carries as a Schema; the done event adds `stopReason` so a
-// length stop is reported, not hidden.
-
 export type Role = "user" | "assistant" | "system";
 
 export interface MessageStats {
@@ -9,7 +5,7 @@ export interface MessageStats {
   completionTokens?: number;
   durationMs?: number;
   numCtx?: number;
-  /** Decode time only (Ollama's eval_duration); speed is completionTokens over this. */
+  // external: Ollama's eval_duration covers decode only
   evalDurationMs?: number;
   promptEvalDurationMs?: number;
 }
@@ -28,7 +24,6 @@ export interface Message {
   contextNotice?: string;
 }
 
-/** What the model is sent. Thinking from earlier turns is not resent. */
 export interface TurnMessage {
   role: Role;
   content: string;
@@ -47,7 +42,7 @@ export type ChatErrorCode =
   | "malformed-stream"
   | "stream-ended-early";
 
-/** Ollama's done_reason: "stop" normally, "length" when num_predict or num_ctx cut the reply. */
+// external: Ollama's done_reason is length when num_predict or num_ctx cut the reply
 export type StopReason = "stop" | "length" | (string & {});
 
 export type ChatEvent =

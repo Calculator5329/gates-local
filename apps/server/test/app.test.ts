@@ -2401,3 +2401,26 @@ describe("attached files (chat row 3: the model reads a copy by its label, never
     expect(existsSync(path.join(dataDir, linked))).toBe(false);
   });
 });
+
+describe("a reply's turn as it ends", () => {
+  it("a finished reply's turn is still running while it gives back its model reservation, and leaves only after", async () => {
+    const r = await rig({ loader: true });
+    const loader = r.loader!;
+    const reserve = loader.reserve.bind(loader);
+    const runningAtEnd: number[] = [];
+    loader.reserve = (model) => {
+      const held = reserve(model);
+      const end = held.end.bind(held);
+      held.end = () => {
+        runningAtEnd.push(r.app.activeTurns());
+        end();
+      };
+      return held;
+    };
+    const t = await r.client.call("threads.create", {});
+    const sent = await sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    await r.waitFor("turn", (p) => p.turnId === sent.turnId && p.event.type === "done");
+    await until(() => r.app.activeTurns() === 0);
+    expect(runningAtEnd).toEqual([1]);
+  });
+});

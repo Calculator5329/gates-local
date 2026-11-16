@@ -1,9 +1,3 @@
-// One streamed turn against Ollama POST /api/chat. Every request carries an
-// explicit options.num_ctx, the size the fit check settled on for this model.
-// What does not fit that window is dropped oldest first (chat/window.ts).
-//
-// Nothing persists here: the caller owns the thread store and feeds the
-// deltas to its turn buffer. Ends with exactly one done or one error event.
 import * as S from "effect/Schema";
 import type { ChatErrorCode, ChatEvent, Message, TurnMessage } from "./types.ts";
 import { fitToWindow } from "./window.ts";
@@ -15,21 +9,17 @@ export interface StreamTurnInput {
   model: string;
   messages: readonly TurnMessage[];
   numCtx: number;
-  /** Ollama's think flag; omitted from the request when undefined. */
+  // external: Ollama's /api/chat takes a top-level boolean think flag
   think?: boolean;
-  /** Immutable settings chosen when this turn was accepted. */
   settings?: TurnSettings;
   signal?: AbortSignal;
-  /** Stamped on the done message; the caller's thread. */
   threadId?: string;
   newId?: () => string;
   now?: () => number;
   fetch?: typeof fetch;
-  /** Each model request's reported figures, once, as its done line arrives (usage). */
   onUsage?: (figures: UsageFigures) => void;
 }
 
-/** A request's end-of-request figures for usage, the times in ms like MessageStats. */
 export interface UsageFigures {
   readonly promptTokens: number | undefined;
   readonly completionTokens: number | undefined;
@@ -38,7 +28,7 @@ export interface UsageFigures {
   readonly durationMs: number | undefined;
 }
 
-/** From a done line's counts and nanosecond durations. */
+// external: Ollama reports a done line's *_duration fields in nanoseconds
 export const usageFigures = (done: { prompt_eval_count?: number | undefined; eval_count?: number | undefined; eval_duration?: number | undefined; prompt_eval_duration?: number | undefined; total_duration?: number | undefined }): UsageFigures => ({
   promptTokens: done.prompt_eval_count,
   completionTokens: done.eval_count,
@@ -47,11 +37,7 @@ export const usageFigures = (done: { prompt_eval_count?: number | undefined; eva
   durationMs: done.total_duration === undefined ? undefined : done.total_duration / 1e6,
 });
 
-/**
- * The longest stream line either chat path reads, in characters. A page comes in a reply, and a
- * runtime may send a whole reply as one line, so this sits well above the largest page served
- * (PAGE_MAX_BYTES, 2 MiB), with room for JSON escaping.
- */
+// external: Ollama may send a whole reply, page and all, as one stream line
 export const STREAM_LINE_LIMIT = 8 * 1024 * 1024;
 export const STREAM_LINE_TOO_LONG = "Model stream line exceeded its size limit";
 
@@ -76,7 +62,6 @@ const ChatChunk = S.Struct({
 type ChatChunk = typeof ChatChunk.Type;
 const decodeChunk = S.decodeUnknownSync(ChatChunk);
 
-/** The exact /api/chat request body. Exported so tests and callers can see it. */
 export function chatRequestBody(input: Pick<StreamTurnInput, "model" | "messages" | "numCtx" | "think" | "settings">): Record<string, unknown> {
   return {
     model: input.model,
@@ -141,18 +126,15 @@ export async function* streamTurn(input: StreamTurnInput): AsyncGenerator<ChatEv
 
   if (!response.ok) {
     let text = "";
+    // why: a body that cannot be read leaves the HTTP status to report the error
     try {
       text = await response.text();
-    } catch {
-      // the status is enough
-    }
+    } catch {}
     let detail = text.slice(0, 500);
     try {
       const parsed = JSON.parse(text) as { error?: unknown };
       if (typeof parsed.error === "string") detail = parsed.error;
-    } catch {
-      // not JSON; keep the raw text
-    }
+    } catch {}
     yield fail(response.status === 404 ? "model-not-found" : "http-error", `HTTP ${response.status}: ${detail}`);
     return;
   }
@@ -221,7 +203,7 @@ export async function* streamTurn(input: StreamTurnInput): AsyncGenerator<ChatEv
               ...(parsed.prompt_eval_count === undefined ? {} : { promptTokens: parsed.prompt_eval_count }),
               ...(parsed.eval_count === undefined ? {} : { completionTokens: parsed.eval_count }),
               ...(parsed.total_duration === undefined ? {} : { durationMs: parsed.total_duration / 1e6 }),
-              // Decode time alone: speed is eval_count over this, never over total_duration (load and prompt included).
+              // external: Ollama's total_duration adds load and prompt time to eval_duration
               ...(parsed.eval_duration === undefined ? {} : { evalDurationMs: parsed.eval_duration / 1e6 }),
               ...(parsed.prompt_eval_duration === undefined ? {} : { promptEvalDurationMs: parsed.prompt_eval_duration / 1e6 }),
               numCtx: input.numCtx,
@@ -237,8 +219,7 @@ export async function* streamTurn(input: StreamTurnInput): AsyncGenerator<ChatEv
       }
     }
   } finally {
-    // Also runs when the consumer stops early (break, return): release the
-    // socket either way. Cancelling an ended body is a no-op.
+    // external: in Node, a stream reader's cancel() on an ended body does nothing
     reader.cancel().catch(() => undefined);
   }
 }

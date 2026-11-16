@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { createProbe, PROBE_RETRY_MS, SCOPE_LIMITS, type SandboxHost } from "@gates-local/harness/sandbox";
+import { createProbe, PROBE_RETRY_MS, SCOPE_LIMITS, type SandboxHost, type SandboxProbe } from "@gates-local/harness/sandbox";
 import { createShellStatus } from "./shell.ts";
 
 it("ready with sqlite3 is plain ready; without it the status says what cannot be done", async () => {
@@ -48,4 +48,28 @@ it("on Windows Run commands is off as Linux only, and the probe runs no command"
   const status = createShellStatus(createProbe(windows), () => undefined);
   expect(await status()).toEqual({ state: "off", word: "Linux only", reason: "The shell tool runs only on Linux." });
   expect(runs).toEqual([]);
+});
+
+it("asking for the status again with nothing changed logs the probe once, and logs again when it changes", async () => {
+  const lines: string[] = [];
+  let probe: SandboxProbe = { available: false, word: "Off", reason: "The sandbox could not start.", detail: "bwrap: no permissions to create new namespace" };
+  const status = createShellStatus(async () => probe, (l) => lines.push(l));
+  await status();
+  await status();
+  await status();
+  expect(lines).toEqual(["shell sandbox: off, The sandbox could not start. (bwrap: no permissions to create new namespace)"]);
+  probe = { available: true, arch: "x64", sqlite: true };
+  await status();
+  await status();
+  expect(lines).toHaveLength(2);
+  expect(lines[1]).toBe("shell sandbox: ready");
+});
+
+it("when Run commands is off the probe's own words go to the log and never into the status the screen shows", async () => {
+  const lines: string[] = [];
+  const detail = "Failed to start transient scope unit: Access denied";
+  const status = await createShellStatus(async () => ({ available: false, word: "Off", reason: "The sandbox could not start.", detail }), (l) => lines.push(l))();
+  expect(status).toEqual({ state: "off", word: "Off", reason: "The sandbox could not start." });
+  expect(JSON.stringify(status)).not.toContain(detail);
+  expect(lines.join("\n")).toContain(detail);
 });

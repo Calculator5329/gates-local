@@ -118,3 +118,11 @@ it("reserves more than Mistral's 3025 positions and budgets unreported Qwen resi
   expect(visionTokens({ width: 7000, height: 5000, frames: 1 }, { "clip.vision.max_image_size": 1540 })).toBe(4096);
   expect(visionTokens({ width: 7000, height: 5000, frames: 1 }, { "clip.vision.image_size": 224 })).toBeGreaterThan(40_000);
 });
+
+it("an image's estimate is a token per merged patch plus one per patch row and 64 for its boundaries, never under 4096 a frame", () => {
+  expect(visionTokens({ width: 2800, height: 1960, frames: 1 })).toBe(100 * 70 + 70 + 64);
+  expect(visionTokens({ width: 1960, height: 2800, frames: 1 })).toBe(70 * 100 + 100 + 64);
+  expect(visionTokens({ width: 2800, height: 1960, frames: 2 })).toBe(2 * (100 * 70 + 70 + 64));
+  expect(visionTokens({ width: 1, height: 1, frames: 1 })).toBe(4096);
+  expect(visionTokens({ width: 1, height: 1, frames: 3 })).toBe(3 * 4096);
+});

@@ -1,5 +1,3 @@
-// For tests and the crash server: a message sent with reply.send, then its start. A refusal
-// before or after the start rejects; a chat that is busy rejects as turn-active and keeps nothing.
 import type { Message, Params } from "@gates-local/contracts";
 import type { App } from "../app.ts";
 import { AppError, type AppErrorCode } from "../app/errors.ts";
@@ -18,7 +16,6 @@ export function replySend({ id = `send-${++sends}`, threadId, content, messageId
   } as Params<"reply.send">;
 }
 
-/** The send, answered once its start is taken: before the question is saved, as a window's send is. */
 export async function sendTaken(app: Pick<App, "handlers" | "started">, params: Sending, ctx: Ctx = { clientId: 1 }): Promise<{ id: string; turnId: string; admission: Promise<Message>; replayed?: true }> {
   const send = replySend(params);
   const answer = await app.handlers["reply.send"](send, ctx);

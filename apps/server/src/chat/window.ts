@@ -1,37 +1,25 @@
-// What a model can be sent. A small context window (some models take about
-// 2,000 tokens) cannot hold a long chat, so the oldest turns go first; a new
-// message that alone will not fit gets a plain sentence instead of a request
-// Ollama would cut without saying so. Tokens are estimated: Ollama counts
-// them only after the request, and four characters a token is close enough
-// to leave the model room to answer.
+// external: Ollama counts tokens after the request and silently cuts a prompt too long
 import { observationBody, type ModelMessage } from "@gates-local/harness";
 import type { TurnMessage } from "./types.ts";
 
 const MESSAGE_FRAMING_TOKENS = 4;
-/** Room kept for the reply: a quarter of the window, at most this many tokens. */
 const REPLY_ROOM_MAX_TOKENS = 2048;
 const replyRoom = (numCtx: number) => Math.min(Math.ceil(numCtx / 4), REPLY_ROOM_MAX_TOKENS);
-/** A tool result is not cut below this many characters: less tells the model nothing. */
+// why: a cut shorter than this tells the model nothing
 const MIN_OBSERVATION_CHARS = 200;
 const WINDOW_FULL = "\n[cut: this model's context window is full]";
 export const OMITTED_IMAGE = "[An image was here and is unavailable to this reply.]";
 
 export const estimateTokens = (text: string): number => Math.ceil(text.length / 4) + MESSAGE_FRAMING_TOKENS;
-/** Conservative reservation, not a measured tokenizer count; Ollama reports actual usage after the turn. */
+// external: Ollama reports a turn's actual prompt tokens only after the turn
 const imageTokens = (m: { images?: readonly string[]; imageTokens?: readonly number[] }) => m.imageTokens?.reduce((sum, cost) => sum + cost, 0) ?? (m.images?.length ?? 0) * 4096;
 const imageCount = (m: { images?: readonly string[]; imageTokens?: readonly number[] }) => Math.max(m.images?.length ?? 0, m.imageTokens?.length ?? 0);
 const turnTokens = (m: TurnMessage) => estimateTokens(m.content) + imageTokens(m);
 
-/** 2048 → "2k", 512 → "512". */
 export const contextWords = (numCtx: number): string => (numCtx < 1024 ? String(numCtx) : `${Math.round(numCtx / 1024)}k`);
 
 export type Windowed = { ok: true; messages: TurnMessage[]; omittedImages?: number } | { ok: false; message: string };
 
-/**
- * The newest messages that fit in `numCtx`, system messages always kept.
- * `overhead` is the tokens the turn spends outside `messages` (tool
- * definitions, a system block added later).
- */
 export function fitToWindow(messages: readonly TurnMessage[], numCtx: number, overhead = 0): Windowed {
   const markerRoom = messages.slice(0, -1).some(m => imageCount(m) > 0) ? estimateTokens(OMITTED_IMAGE) : 0;
   const budget = numCtx - replyRoom(numCtx) - overhead - markerRoom;
@@ -52,7 +40,6 @@ export function fitToWindow(messages: readonly TurnMessage[], numCtx: number, ov
     used += cost;
     first -= 1;
   }
-  // A chat the model sees starts with what was asked, never with a reply to something it cannot see.
   while (first < talk.length - 1 && talk[first]?.role === "assistant") first += 1;
   const omittedImages = talk.slice(0, first).reduce((sum, m) => sum + imageCount(m), 0);
   return { ok: true, messages: [...system, ...(omittedImages ? [{ role: "user" as const, content: OMITTED_IMAGE, imageTokens: [0] }] : []), ...talk.slice(first)], ...(omittedImages ? { omittedImages } : {}) };
@@ -61,13 +48,6 @@ export function fitToWindow(messages: readonly TurnMessage[], numCtx: number, ov
 const messageTokens = (m: ModelMessage) => estimateTokens(m.content) + imageTokens(m) + (m.tool_calls ? Math.ceil(JSON.stringify(m.tool_calls).length / 4) : 0);
 const tokensOf = (messages: readonly ModelMessage[]) => messages.reduce((sum, m) => sum + messageTokens(m), 0);
 
-/**
- * One request of a tool turn, inside `numCtx`: `history` as it stands when it fits. Otherwise
- * the oldest turns before this one go, then tool results are cut, oldest first, down to a
- * floor. Undefined when even that does not fit. `turnStart` is where the messages the loop
- * added begin; the message before it, what was asked, always stays. `overhead` is the tokens
- * spent outside `history` (tool definitions).
- */
 export function fitRound(history: readonly ModelMessage[], turnStart: number, numCtx: number, overhead = 0): readonly ModelMessage[] | undefined {
   const markerRoom = history.slice(0, turnStart - 1).some(m => imageCount(m) > 0) ? estimateTokens(OMITTED_IMAGE) : 0;
   const budget = numCtx - replyRoom(numCtx) - overhead - markerRoom;
@@ -81,7 +61,6 @@ export function fitRound(history: readonly ModelMessage[], turnStart: number, nu
   let used = tokensOf(system) + tokensOf(talk) + tokensOf(turn);
   let first = 0;
   while (first < older.length && used > budget) used -= messageTokens(older[first++]!);
-  // A chat the model sees starts with what was asked, never with a reply to something it cannot see.
   while (first < older.length && older[first]!.role === "assistant") used -= messageTokens(older[first++]!);
   for (const [index, message] of turn.entries()) {
     if (used <= budget) break;

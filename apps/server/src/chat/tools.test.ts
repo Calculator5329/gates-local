@@ -163,6 +163,56 @@ describe("tool chat transport", () => {
       }
     }
   });
+  it("offers the image tool only when images are on and there is a queue to send the job to", async () => {
+    const offered: string[][] = [];
+    for (const queueImage of [undefined, async () => ({ jobId: "job" })]) {
+      const bodies: Record<string, unknown>[] = [];
+      for await (const _ of streamToolTurn({ baseUrl: "http://fake", model: "m", messages: [{ role: "user", content: "draw" }], numCtx: 16384, sources: [], fetch: answering(bodies), execute: noRun, image: true, ...(queueImage ? { queueImage } : {}) })) { /* drain */ }
+      offered.push((bodies[0]!["tools"] as { function: { name: string } }[]).map(t => t.function.name));
+    }
+    expect(offered[0]).not.toContain("image");
+    expect(offered[1]).toContain("image");
+  });
+  it("tells the model the Library is empty instead of sending an empty list", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    for await (const _ of streamToolTurn({ baseUrl: "http://fake", model: "m", messages: [{ role: "user", content: "hi" }], numCtx: 16384, sources: [], fetch: answering(bodies), execute: noRun })) { /* drain */ }
+    const prompt = sentMessages(bodies)[0]!.content;
+    expect(prompt).toMatch(/\nThe Library is empty\.$/);
+    expect(prompt).not.toContain("Library sources");
+  });
+  it("does not send the model the thinking of an earlier reply", async () => {
+    const root = scratch("gl-app-thinking-");
+    const sources = createSources({ dataDir: path.join(root, "data") });
+    const file = path.join(root, "notes.txt"); writeFileSync(file, "hello library");
+    await sources.add({ kind: "file", path: file });
+    const store = openThreadStore(path.join(root, "threads.db"));
+    const chatBodies: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const pathname = new URL(String(url)).pathname;
+      if (pathname === "/api/show") return Response.json({ capabilities: ["tools", "thinking"] });
+      if (pathname === "/api/ps") return Response.json({ models: [{ name: "m", model: "m", size: 1000, size_vram: 1000, context_length: 16384, expires_at: "later", digest: "d" }] });
+      if (pathname === "/api/tags") return Response.json({ models: [] });
+      chatBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return ndjson([{ message: { thinking: `private plan ${chatBodies.length}` } }, { message: { content: `answer ${chatBodies.length}` }, done: true }]);
+    }));
+    const app = createApp({ store, sources, toolsEnabled: () => true,
+      runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
+      catalog: chatCatalog(),
+      push: () => {},
+      fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
+    });
+    try {
+      const thread = store.createThread();
+      for (const content of ["first", "second"]) {
+        await sendStarted(app, { threadId: thread.id, content, model: "m", numCtx: 16384, think: true }, { clientId: 1 });
+        await vi.waitFor(() => expect(app.activeTurns()).toBe(0));
+      }
+      expect(store.getThread(thread.id).messages[1]).toMatchObject({ content: "answer 1", thinking: "private plan 1" });
+      expect(sentMessages(chatBodies.slice(1)).map(m => m.content)).toContain("answer 1");
+      expect(chatBodies[1]).toHaveProperty("tools");
+      expect(JSON.stringify(chatBodies[1])).not.toContain("private plan");
+    } finally { await app.shutdown(); store.close(); vi.unstubAllGlobals(); }
+  });
   it("the stall guard aborts a hung /api/chat request through its fetch signal", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {

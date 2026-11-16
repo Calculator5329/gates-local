@@ -38,4 +38,35 @@ describe("the real-runtime check at a model's maximum context (R-03)", () => {
     expect(lines[measured + 1]).toContain("num_ctx 2048");
     expect(code).toBe(0);
   });
+
+  it("unloads a model it loaded itself and leaves one that was already loaded as it found it", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const unloads: (boolean | undefined)[] = [];
+    for (const residentBefore of [false, true]) {
+      const generated: unknown[] = [];
+      const chats = fakeOllama();
+      const fetcher = vi.mocked(fetch).getMockImplementation()!;
+      vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        const pathname = new URL(String(url)).pathname;
+        if (pathname === "/api/ps" && residentBefore) return Response.json({ models: [entry] });
+        if (pathname === "/api/generate") generated.push(JSON.parse(String(init?.body)));
+        return fetcher(url, init);
+      }));
+      expect(await realCheck({ baseUrl: "http://fake", model: "tiny", numCtx: 2048 }, probes)).toBe(0);
+      expect(chats).toHaveLength(1);
+      unloads.push(generated.length > 0);
+      if (!residentBefore) expect(generated).toEqual([{ model: "tiny", keep_alive: 0 }]);
+    }
+    expect(unloads).toEqual([true, false]);
+  });
+
+  it("fails when whisper-server is not the same process after the turn", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const chats = fakeOllama();
+    const restarted = { ...probes, runNvidiaSmi: async (args: readonly string[]) => (args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : `${chats.length > 0 ? 5200 : 5100}, /usr/bin/whisper-server, 2202\n`) };
+    expect(await realCheck({ baseUrl: "http://fake", model: "tiny", numCtx: 2048 }, restarted)).toBe(1);
+    expect(chats).toHaveLength(1);
+  });
 });

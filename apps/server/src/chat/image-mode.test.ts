@@ -7,7 +7,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ImageChoice, ImageEvent } from "@gates-local/contracts";
 import { createApp } from "../app.ts";
-import { sendStarted } from "./send-started.ts";
+import { replySend, sendStarted } from "./send-started.ts";
 import { createGpuLease } from "../gpu/lease.ts";
 import type { ImageModule } from "../image/module.ts";
 import { createSources } from "../sources/index.ts";
@@ -239,6 +239,33 @@ describe("Image mode: the typed words go straight to the image model", () => {
       await expect(t.send({ draw: { preset: "nope", width: 1, height: 1 } })).rejects.toMatchObject({ code: "image-model" });
       expect(t.store.getThread(t.thread.id).messages).toEqual([]);
       expect(t.app.activeTurns()).toBe(0);
+    } finally { await t.close(); }
+  });
+});
+
+describe("a chat turn's end", () => {
+  it("a finished reply keeps its chat busy until it has given back its GPU claim: a message sent in that moment waits, then goes", async () => {
+    const t = await rig();
+    try {
+      const acquire = t.lease.acquire.bind(t.lease);
+      let sentAtRelease: unknown;
+      let activeAtRelease: number | undefined;
+      t.lease.acquire = async (kind, signal) => {
+        const release = await acquire(kind, signal);
+        return () => {
+          if (kind === "chat" && sentAtRelease === undefined) {
+            activeAtRelease = t.app.activeTurns();
+            sentAtRelease = t.app.handlers["reply.send"](replySend({ id: "second", threadId: t.thread.id, content: "second", model: "m", numCtx: 16384 }), { clientId: 1 });
+          }
+          release();
+        };
+      };
+      await t.send();
+      await vi.waitFor(() => expect(sentAtRelease).toBeDefined());
+      expect(activeAtRelease).toBe(1);
+      expect(await sentAtRelease).toMatchObject({ answer: "done", reply: { id: "second", stage: "queued" } });
+      await vi.waitFor(() => expect(t.store.getThread(t.thread.id).messages.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["a lighthouse at dusk", "second"]));
+      await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
     } finally { await t.close(); }
   });
 });

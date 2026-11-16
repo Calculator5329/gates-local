@@ -1,10 +1,3 @@
-// Real-runtime check for the first turn (not part of vitest or pnpm verify).
-//   node apps/server/src/chat/real-check.ts [model] [numCtx]
-// Records whisper-server's PID and VRAM and the /api/ps list, runs the fit
-// check, streams one short reply at an explicit num_ctx, reads the measured
-// fit from /api/ps, unloads only a model this script loaded, and checks
-// whisper again. Loads nothing when the fit refuses. Exits 1 if whisper
-// changed or the turn did not finish.
 import { pathToFileURL } from "node:url";
 import { CHAT_MODELS } from "@gates-local/contracts";
 import { checkFit, fetchPs, findLoaded, formatBytes, measuredFit, readGpu, type FitDeps, type GpuSnapshot } from "../fit/index.ts";
@@ -37,7 +30,6 @@ async function unload(baseUrl: string, name: string): Promise<void> {
   console.log(`[${stamp()}] unload ${name}: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
 }
 
-/** The check itself; `probes` stand in for nvidia-smi and /proc/meminfo in the test. */
 export async function realCheck({ baseUrl, model, numCtx }: { baseUrl: string; model: string; numCtx: number }, probes: Pick<FitDeps, "runNvidiaSmi" | "readMeminfo"> = {}): Promise<number> {
   console.log(`== real check: ${model} at num_ctx ${numCtx} against ${baseUrl}`);
   const gpuBefore = await readGpu(probes.runNvidiaSmi);
@@ -65,7 +57,6 @@ export async function realCheck({ baseUrl, model, numCtx }: { baseUrl: string; m
     console.log("Refused: nothing loaded.");
     return 0;
   }
-  // The size the model runs at: what was asked for, never past the model's maximum.
   const effective = fit.report.numCtx;
   if (effective !== numCtx) console.log(`[${stamp()}] ${model} runs at num_ctx ${effective}, not the ${numCtx} asked for.`);
 

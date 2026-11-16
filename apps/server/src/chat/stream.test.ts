@@ -153,6 +153,35 @@ describe("streamTurn against a fake Ollama", () => {
     expect((await collect({ baseUrl: s.baseUrl })).at(-1)).toEqual({ type: "error", code: "http-error", message: "HTTP 500: server busy" });
   });
 
+  it("keeps an error page that is not JSON as its raw text, cut at 500 characters", async () => {
+    const page = `<html>${"gateway down ".repeat(60)}</html>`;
+    const s = await fakeChat((res) => {
+      res.writeHead(502, { "content-type": "text/html" });
+      res.end(page);
+    });
+    expect((await collect({ baseUrl: s.baseUrl })).at(-1)).toEqual({ type: "error", code: "http-error", message: `HTTP 502: ${page.slice(0, 500)}` });
+  });
+
+  it("a caller that stops reading early still closes the socket", async () => {
+    let serverSawClose = false;
+    const s = await fakeChat(async (res) => {
+      res.on("close", () => {
+        serverSawClose = true;
+      });
+      res.writeHead(200, { "content-type": "application/x-ndjson" });
+      for (let i = 0; i < 200 && !res.destroyed; i++) {
+        res.write(content(`tok${i} `));
+        await sleep(20);
+      }
+      if (!res.destroyed) res.end(doneLine());
+    });
+    for await (const event of streamTurn({ baseUrl: s.baseUrl, model: "m", messages: [{ role: "user", content: "hi" }], numCtx: 16384 })) {
+      if (event.type === "delta") break;
+    }
+    await sleep(100);
+    expect(serverSawClose).toBe(true);
+  });
+
   it("an unreachable runtime is connection-failed", async () => {
     const events = await collect({ baseUrl: "http://127.0.0.1:1" });
     expect(events).toEqual([expect.objectContaining({ type: "error", code: "connection-failed" })]);

@@ -1,8 +1,14 @@
+import { randomUUID } from "node:crypto";
+import { existsSync, readdirSync } from "node:fs";
 import { mkdtemp, readFile, symlink, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { expect, it } from "vitest";
+import { crc32 } from "node:zlib";
+import { expect, it, vi } from "vitest";
+import { MODEL, rig, until, type Rig } from "../../test/send-rig.ts";
 import { checkAttachments, saveAttachments, visionHistory } from "./attachments.ts";
+import { sendStarted } from "./send-started.ts";
+import { OMITTED_IMAGE } from "./window.ts";
 
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOor6//DwAFewJ94ITM6gAAAABJRU5ErkJggg==";
 const DATA = `data:image/png;base64,${PNG}`;
@@ -39,4 +45,85 @@ it("refuses traversal and symlinks when hydrating model input", async () => {
   await symlink(path.join(outside, images[0]!), path.join(dir, images[0]!));
   await expect(visionHistory(dir, [{ role: "user", content: "look", images }])).rejects.toThrow("not available");
   await expect(visionHistory(dir, [{ role: "user", content: "look", images: ["images/../outside.png"] }])).rejects.toThrow("not available");
+});
+
+type ChatBody = { messages: { role: string; content: string; images?: string[] }[] };
+
+function watchModel(): { chats: ChatBody[]; asked: string[] } {
+  const inner = globalThis.fetch;
+  const chats: ChatBody[] = [];
+  const asked: string[] = [];
+  vi.stubGlobal("fetch", async (url: string | URL | Request, init?: RequestInit) => {
+    const where = new URL(String(url)).pathname;
+    asked.push(where);
+    if (where === "/api/chat") chats.push(JSON.parse(String(init?.body)) as ChatBody);
+    return inner(url, init);
+  });
+  return { chats, asked };
+}
+
+function declaring(width: number, height: number): string {
+  const bytes = Buffer.from(PNG, "base64");
+  bytes.writeUInt32BE(width, 16);
+  bytes.writeUInt32BE(height, 20);
+  bytes.writeUInt32BE(crc32(bytes.subarray(12, 29)), 29);
+  return `data:image/png;base64,${bytes.toString("base64")}`;
+}
+
+const dataDirOf = (r: Rig) => path.dirname(r.db.dbPath);
+const savedImages = (r: Rig) => existsSync(path.join(dataDirOf(r), "images")) ? readdirSync(path.join(dataDirOf(r), "images")) : [];
+
+it("a pasted image that is malformed or over 10 MB is refused at send, before any model is asked or anything is saved", async () => {
+  const r = rig();
+  const seen = watchModel();
+  r.open();
+  for (const [n, image] of ["data:image/png;base64,aGVsbG8=", `data:image/png;base64,${"A".repeat(14 * 1024 * 1024)}`].entries()) {
+    await expect(r.h["reply.send"]({ ...r.entry(`bad-${n}`, "look"), images: [image] }, { clientId: 1 })).rejects.toMatchObject({ code: "image-input" });
+  }
+  expect(seen.asked.filter(where => where === "/api/show" || where === "/api/chat")).toEqual([]);
+  expect(await r.h["reply.list"]({}, { clientId: 1 })).toEqual([]);
+  expect(r.db.getThread(r.thread.id).messages).toEqual([]);
+  expect(savedImages(r)).toEqual([]);
+});
+
+it("a pasted image is costed by the size its header declares, so one too big for the context is refused before it is saved", async () => {
+  const r = rig();
+  const seen = watchModel();
+  r.open();
+  await expect(sendStarted(r.app, { threadId: r.thread.id, content: "look", model: MODEL, numCtx: 16384, images: [declaring(4096, 4096)] })).rejects.toMatchObject({ code: "image-input", message: expect.stringContaining("do not fit") });
+  expect(seen.chats).toEqual([]);
+  expect(r.db.getThread(r.thread.id).messages).toEqual([]);
+  expect(savedImages(r)).toEqual([]);
+});
+
+async function askPastOldImage(r: Rig, image: string): Promise<ChatBody> {
+  const seen = watchModel();
+  r.open();
+  r.db.appendMessage({ threadId: r.thread.id, role: "user", content: "the old chart", images: [image] });
+  r.db.appendMessage({ threadId: r.thread.id, role: "assistant", content: "a".repeat(12_000) });
+  await sendStarted(r.app, { threadId: r.thread.id, content: "and now?", model: MODEL, numCtx: 8192 });
+  await until(() => seen.chats.length === 1, "the model asked");
+  return seen.chats[0]!;
+}
+
+it("an earlier image too old for the window is never read: a missing one there changes nothing the model is sent", async () => {
+  const r = rig();
+  const body = await askPastOldImage(r, `images/paste-${randomUUID()}.png`);
+  expect(body.messages.map(m => m.content)).toEqual([OMITTED_IMAGE, "and now?"]);
+});
+
+it("an image on an assistant's message is never sent back to the model as something to look at", async () => {
+  const r = rig();
+  const seen = watchModel();
+  r.open();
+  const [image] = await saveAttachments(dataDirOf(r), [DATA]);
+  r.db.appendMessage({ threadId: r.thread.id, role: "user", content: "draw a dot" });
+  r.db.appendMessage({ threadId: r.thread.id, role: "assistant", content: "here it is", images: [image!] });
+  await sendStarted(r.app, { threadId: r.thread.id, content: "what colour is it?", model: MODEL, numCtx: 16384 });
+  await until(() => seen.chats.length === 1, "the model asked");
+  expect(seen.chats[0]!.messages).toEqual([
+    { role: "user", content: "draw a dot" },
+    { role: "assistant", content: `here it is\n${OMITTED_IMAGE}` },
+    { role: "user", content: "what colour is it?" },
+  ]);
 });

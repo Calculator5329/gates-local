@@ -1,4 +1,4 @@
-// Container/header validation only: no image decoder, native library or pixel allocation.
+// why: no decoder, native library or pixel allocation touches untrusted pasted bytes
 import { crc32 } from "node:zlib";
 export interface ImageDimensions { width: number; height: number; frames: number; }
 export const MAX_IMAGE_PIXELS = 40_000_000;
@@ -192,16 +192,16 @@ export function imageDimensions(bytes: Buffer, mime: string): ImageDimensions {
   }
 }
 
-/** GGUF vision metadata is preferred. Without a reported resize cap, budget the full input. */
+// external: Ollama's model_info carries a vision model's clip.vision patch, merge and max sizes
 export function visionTokens(size: ImageDimensions, info: Readonly<Record<string, unknown>> = {}): number {
   const positive = (key: string, fallback: number) => typeof info[key] === "number" && Number.isFinite(info[key]) && info[key] > 0 ? info[key] : fallback;
   const patch = Math.min(14, positive("clip.vision.patch_size", 14));
   const merge = Math.min(2, positive("clip.vision.spatial_merge_size", 2));
-  // image_size can be a nominal crop size for dynamic encoders, so only explicit maxima cap the estimate.
+  // external: Ollama's clip.vision.image_size can be a nominal crop size for a dynamic encoder
   const edge = positive("clip.vision.max_image_size", Infinity);
   const pixels = positive("clip.vision.max_pixels", Infinity);
   const scale = Math.min(1, edge / Math.max(size.width, size.height), Math.sqrt(pixels / (size.width * size.height)));
   const columns = Math.ceil(size.width * scale / (patch * merge)), rows = Math.ceil(size.height * scale / (patch * merge));
-  // A floor covers fixed-size encoders and minimum-size upscaling; row markers and boundaries get room too.
+  // external: Ollama vision encoders may spend a fixed token count per image, upscaling small ones
   return Math.max(4096, columns * rows + rows + 64) * size.frames;
 }

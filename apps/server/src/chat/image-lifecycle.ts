@@ -6,7 +6,6 @@ interface References {
 }
 const safeImage = (image: string) => /^images\/[a-zA-Z0-9_-]+\.(png|jpeg|gif|webp)$/.test(image);
 
-/** Saved messages own files. Unreferenced uploads get a full day for drafts and queues. */
 export function imageLifecycle(dataDir: string, store: References) {
   let tail: Promise<unknown> = Promise.resolve();
   const serial = <T>(work: () => Promise<T>): Promise<T> => {
@@ -20,7 +19,6 @@ export function imageLifecycle(dataDir: string, store: References) {
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
     for (const image of new Set(images)) {
       if (!safeImage(image) || (store.imageReferences().get(image) ?? 0) > 0) continue;
-      // A picture's thumbnail (pictures/thumbs.ts) goes with it.
       const base = path.basename(image);
       for (const file of [base, `thumbs/${base.replace(/\.[a-z]+$/, "")}.webp`]) {
         try { await unlink(path.join(root, file)); }
@@ -29,10 +27,8 @@ export function imageLifecycle(dataDir: string, store: References) {
     }
   };
   return {
-    /** The one queue collection runs in: work here cannot pass a collect. */
     queue: serial,
     collect: (images: readonly string[]) => serial(() => collect(images)),
-    // Collection and the synchronous row insert cannot pass one another.
     save: <T>(images: readonly string[], append: () => T): Promise<T> => serial(async () => {
       for (const image of images) {
         const filename = path.join(dataDir, image);

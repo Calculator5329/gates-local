@@ -175,3 +175,27 @@ it("a message moved from a page's own older queue waits on hold, even with its c
   await r.h["reply.now"]({ id: "q1" }, { clientId: 1 });
   await until(() => r.starts().length === 1, "Send now sent it");
 });
+
+it("a send into a chat with a reply on its way is refused as busy and leaves nothing waiting behind that reply", async () => {
+  const r = rig();
+  const first = await sendTaken(r.app, { threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+  await expect(sendTaken(r.app, { id: "q-busy", threadId: r.thread.id, content: "second", model: MODEL, numCtx: 16384 }, { clientId: 1 })).rejects.toMatchObject({ code: "turn-active" });
+  expect((await r.h["reply.list"]({}, { clientId: 1 })).map((l) => l.reply.id)).toEqual([first.id]);
+  r.open();
+  await until(() => r.starts().length === 1, "the first reply");
+  await settle();
+  expect(r.starts(), "the refused send never goes on its own").toEqual(["first"]);
+});
+
+it("a start cut before anything of it is saved, by a delete in its chat, is back on hold at once and never asked", async () => {
+  const r = rig();
+  const earlier = r.db.appendMessage({ threadId: r.thread.id, role: "user", content: "earlier" });
+  const { id } = await sendTaken(r.app, { threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+  const deleting = r.h["messages.delete"]({ threadId: r.thread.id, messageId: earlier.id }, { clientId: 1 });
+  expect(await r.h["reply.list"]({}, { clientId: 1 })).toMatchObject([{ reply: { id, stage: "held", held: { why: "refused", code: "cancelled" } } }]);
+  r.open();
+  await deleting;
+  await settle();
+  expect(r.starts(), "a cut start is not asked").toEqual([]);
+  expect(r.latest(id)).toMatchObject({ stage: "held", held: { why: "refused", code: "cancelled" } });
+});

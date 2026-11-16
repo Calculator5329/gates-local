@@ -1,7 +1,4 @@
-// Non-image files a person attaches: all of a file's content might not fit in the
-// context window. The server keeps its own copy
-// under files/ in the data folder, the message names it, and only that thread's turns may
-// read it, with the read tool, by its label. Its contents never go into the prompt.
+// why: a file's whole content may not fit the context window, so the model reads it by tool
 import { constants } from "node:fs";
 import { lstat, mkdir, open, readdir, realpath, unlink, utimes, type FileHandle } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -18,7 +15,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 const unavailable = (name: string) => new Error(`${name} is no longer attached. Attach it again; your words are kept.`);
 
-/** The copy's folder, made if missing, refused when it is a link out of the data folder. */
 async function folder(dataDir: string): Promise<string> {
   await mkdir(path.join(dataDir, "files"), { recursive: true, mode: 0o700 });
   const root = path.join(await realpath(dataDir), "files");
@@ -29,12 +25,7 @@ async function folder(dataDir: string): Promise<string> {
 type Writer = (handle: FileHandle, bytes: Buffer) => Promise<void>;
 const writeAll: Writer = async (handle, bytes) => { await handle.writeFile(bytes); };
 
-/**
- * files.attach: the bytes go to a generated name; the person's file name is only ever the label.
- * A write that fails part way removes its copy (`write` is for tests).
- */
 export async function saveFile(dataDir: string, input: { name: string; type: string; data: string }, write: Writer = writeAll): Promise<AttachedFile> {
-  // Base64 is 4 characters per 3 bytes: refuse an oversized upload before decoding it.
   if (input.data.length > Math.ceil(MAX_FILE_BYTES / 3) * 4) throw new Error(`${input.name} is over 50 MB, so it was not attached.`);
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(input.data)) throw new Error(`${input.name} could not be read, so it was not attached.`);
   const bytes = Buffer.from(input.data, "base64");
@@ -52,13 +43,8 @@ export async function saveFile(dataDir: string, input: { name: string; type: str
   return { path: `files/${name}`, name: input.name, size: bytes.length, type: input.type };
 }
 
-/** A file belongs to the first thread that saves a message with it; until then, to whoever uploaded it. */
 export interface Holder { threadId: string; owners: ReadonlyMap<string, string>; }
 
-/**
- * a send: every file is a regular file under files/ (never a link), sized as stored, and
- * not one another thread's message holds.
- */
 export async function checkFiles(dataDir: string, files: readonly AttachedFile[], holder?: Holder): Promise<AttachedFile[]> {
   if (!files.length) return [];
   const root = await folder(dataDir);
@@ -72,17 +58,12 @@ export async function checkFiles(dataDir: string, files: readonly AttachedFile[]
   }));
 }
 
-/**
- * The one line the model gets for each file in the message that carries it: label, size and
- * type, and where to read it. With tools off it is told it cannot open the file.
- */
 export function fileLine(file: AttachedFile, entry: LibraryEntry | undefined): string {
   const facts = [sizeWords(file.size), file.type || undefined].filter(Boolean).join(", ");
   const where = entry ? `read it with the read tool at /library/${entry.id}` : "you cannot open it in this reply, because tools are off";
   return `[Attached file "${file.name}" (${facts}): ${where}.]`;
 }
 
-/** A label as a Library id ([\w-]+, as the sandbox needs), unique beside the ids already taken. */
 function idFor(name: string, taken: Set<string>): string {
   const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "file";
   let id = base;
@@ -91,7 +72,6 @@ function idFor(name: string, taken: Set<string>): string {
   return id;
 }
 
-/** The thread's files as read-only Library entries for one turn: the read tool and the shell's read-only binds take them. */
 export async function fileSources(dataDir: string, files: readonly AttachedFile[], library: readonly LibraryEntry[]): Promise<Map<string, LibraryEntry>> {
   const entries = new Map<string, LibraryEntry>();
   if (!files.length) return entries;
@@ -106,11 +86,6 @@ export async function fileSources(dataDir: string, files: readonly AttachedFile[
 
 interface References { fileReferences(): ReadonlyMap<string, number>; fileOwners?(): ReadonlyMap<string, string>; }
 
-/**
- * Saved messages own the copies. A copy no message holds is removed with its last message, or after a day (a draft or queue may still send it).
- * `firstSweepAfterMs` and `sweepEveryMs`: the sweep runs once that long after start-up, then this
- * often until stop(). Copies a window's saved drafts name are spared: it calls keep.
- */
 export function fileLifecycle(dataDir: string, store: References, options: { firstSweepAfterMs?: number; sweepEveryMs?: number; log?: (line: string) => void } = {}) {
   let tail: Promise<unknown> = Promise.resolve();
   const serial = <T>(work: () => Promise<T>): Promise<T> => {
@@ -118,14 +93,12 @@ export function fileLifecycle(dataDir: string, store: References, options: { fir
     tail = result.catch(() => undefined);
     return result;
   };
-  /** Copies a send names whose admission has not settled: its row may be about to hold them. */
   const carried = new Map<string, number>();
   const collect = async (paths: readonly string[]) => {
     let root: string;
     try { root = await folder(dataDir); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
     const refs = store.fileReferences();
     for (const file of new Set(paths)) {
-      // Only a generated name, joined under this folder: a stored path cannot reach anywhere else.
       if (!FILE_PATH.test(file) || (refs.get(file) ?? 0) > 0 || carried.has(file)) continue;
       try { await unlink(path.join(root, path.basename(file))); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
@@ -140,7 +113,7 @@ export function fileLifecycle(dataDir: string, store: References, options: { fir
     }
   });
   const sweepNow = () => { sweep().catch((error: unknown) => options.log?.(`attached-file sweep failed: ${String(error)}`)); };
-  // The first sweep waits a while after start-up, so open windows can say what their drafts keep first.
+  // why: open windows need time to say which copies their drafts keep before the first sweep
   const first = options.firstSweepAfterMs === undefined ? undefined : setTimeout(sweepNow, options.firstSweepAfterMs);
   first?.unref();
   const timer = options.sweepEveryMs === undefined ? undefined : setInterval(sweepNow, options.sweepEveryMs);
@@ -148,9 +121,7 @@ export function fileLifecycle(dataDir: string, store: References, options: { fir
   return {
     stop: () => { clearTimeout(first); clearInterval(timer); },
     collect: (paths: readonly string[]) => serial(() => collect(paths)),
-    /** files.release: chips removed from a draft or queued message. */
     release: (paths: readonly string[]) => serial(() => collect(paths)),
-    /** files.keep: a saved draft or queued message still names these; their day starts again. Answers the ones gone. */
     keep: (paths: readonly string[]) => serial(async () => {
       const missing: string[] = [];
       const root = await folder(dataDir);
@@ -164,7 +135,6 @@ export function fileLifecycle(dataDir: string, store: References, options: { fir
       }
       return { missing };
     }),
-    /** A send carries these until its admission settles: no release or sweep removes them meanwhile. Call the answer when it has. */
     sending: (paths: readonly string[]): (() => void) => {
       for (const file of paths) carried.set(file, (carried.get(file) ?? 0) + 1);
       let done = false;
@@ -177,9 +147,7 @@ export function fileLifecycle(dataDir: string, store: References, options: { fir
         }
       };
     },
-    /** The message row goes in inside the queue, so a collect cannot remove a copy it is about to hold. */
     save: <T>(files: readonly AttachedFile[], append: () => T, threadId?: string): Promise<T> => serial(async () => {
-      // Read inside the queue: two threads sending one unsent copy at once cannot both keep it.
       await checkFiles(dataDir, files, threadId === undefined || !store.fileOwners ? undefined : { threadId, owners: store.fileOwners() });
       return append();
     }),
