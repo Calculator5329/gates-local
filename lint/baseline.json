@@ -10,7 +10,7 @@
       "apps/server/src/app/admit.ts": 43,
       "apps/server/src/app/drawing.ts": 27,
       "apps/server/src/app/errors.ts": 23,
-      "apps/server/src/app/handlers.ts": 24,
+      "apps/server/src/app/handlers.ts": 23,
       "apps/server/src/app/push.ts": 1,
       "apps/server/src/app/queue-pump.ts": 8,
       "apps/server/src/app/run-turn.ts": 31,

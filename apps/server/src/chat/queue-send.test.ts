@@ -114,31 +114,33 @@ it("a Stop long after the reply ended still holds what waits in its chat, and le
   expect(r.queued().map((q) => [q.id, q.held, q.sending])).toEqual([["q1", true, undefined], ["q2", true, undefined]]);
 });
 
-it("a row left open in a composer goes on once that window's connection closes", async () => {
+it("a row left open in a composer stays open through a dropped connection, and goes on once its window is gone", async () => {
   const r = rig();
   r.open();
-  const closed = new AbortController();
+  const dropped = new AbortController();
   await r.h["queue.add"](r.entry("q1", "second"), { clientId: 1 });
   // queued with no reply running would go at once: hold it open in window 3 first
-  await r.h["queue.update"]({ id: "q1", editing: true }, { clientId: 3, signal: closed.signal });
-  const { turnId } = await r.h["chat.send"]({ threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
-  void turnId;
+  await r.h["queue.update"]({ id: "q1", editing: true }, { clientId: 5, window: 3, signal: dropped.signal });
+  await r.h["chat.send"]({ threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
   await until(() => r.starts().includes("first"), "the reply");
+  dropped.abort();
+  r.finish();
   await settle();
-  expect(r.starts(), "a row open in a composer waits").toEqual(["first"]);
+  expect(r.starts(), "a row open in a composer waits, its socket gone").toEqual(["first"]);
   expect(r.queued()[0]).toMatchObject({ id: "q1", editing: true });
-  closed.abort();
-  await until(() => r.starts().length === 2, "the row sent once its editor left");
+  // the window's next socket still holds the edit as its own
+  expect(await r.h["reply.edit"]({ id: "q1", open: true }, { clientId: 6, window: 3 })).toMatchObject({ answer: "done" });
+  r.app.windowGone(3);
+  await until(() => r.starts().length === 2, "the row sent once its window was gone");
   expect(r.starts()).toEqual(["first", "second"]);
 });
 
-it("another window's edit of the same row does not end when the first editor's connection closes", async () => {
+it("another window's edit of the same row does not end when the first editor's window is gone", async () => {
   const r = rig();
-  const first = new AbortController();
   await r.h["queue.add"](r.entry("q1", "second"), { clientId: 1 });
-  await r.h["queue.update"]({ id: "q1", editing: true }, { clientId: 3, signal: first.signal });
-  await r.h["queue.update"]({ id: "q1", editing: true }, { clientId: 4, signal: new AbortController().signal });
-  first.abort();
+  await r.h["queue.update"]({ id: "q1", editing: true }, { clientId: 5, window: 3 });
+  await r.h["queue.update"]({ id: "q1", editing: true }, { clientId: 6, window: 4 });
+  r.app.windowGone(3);
   r.open();
   await settle();
   expect(r.queued()[0]).toMatchObject({ id: "q1", editing: true });

@@ -93,6 +93,7 @@ export interface App {
   readonly handlers: AppHandlers;
   /** Turns streaming now (or reserved and starting). */
   activeTurns(): number;
+  windowGone(window: number): void;
   /**
    * For in-process callers (tests, the crash server): the saved question of a turn chat.send has
    * just answered, once it starts, or its refusal. Undefined once the turn has ended.

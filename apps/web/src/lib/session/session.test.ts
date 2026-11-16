@@ -46,11 +46,19 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+/** Each socket's address without its window id, which every one carries. */
+const openedAt = (): string[] => FakeSocket.opened.map((w) => {
+  const u = new URL(w.url);
+  expect(u.searchParams.get("window")).toMatch(/^[\w-]{8,64}$/);
+  u.searchParams.delete("window");
+  return u.href;
+});
+
 describe("same-origin server discovery", () => {
   it("with the meta and no bridge, an https page opens wss://<host>/ws and image URLs are https with no token", async () => {
     page("https://hub.example.ts.net:8456/", true);
     const s = await boot();
-    expect(FakeSocket.opened.map((w) => w.url)).toEqual(["wss://hub.example.ts.net:8456/ws"]);
+    expect(openedAt()).toEqual(["wss://hub.example.ts.net:8456/ws"]);
     const st = s.store.getState();
     expect(st.serverOrigin).toBe("https://hub.example.ts.net:8456");
     expect(st.fileToken).toBeNull();
@@ -60,7 +68,7 @@ describe("same-origin server discovery", () => {
   it("an http page opens ws://<host>/ws", async () => {
     page("http://127.0.0.1:40123/#thread=t1", true);
     const s = await boot();
-    expect(FakeSocket.opened.map((w) => w.url)).toEqual(["ws://127.0.0.1:40123/ws"]);
+    expect(openedAt()).toEqual(["ws://127.0.0.1:40123/ws"]);
     expect(s.store.getState().serverOrigin).toBe("http://127.0.0.1:40123");
   });
 
@@ -75,7 +83,7 @@ describe("same-origin server discovery", () => {
     const server = "ws://127.0.0.1:5286/?token=abc";
     page(`http://127.0.0.1:5287/?server=${encodeURIComponent(server)}`, true);
     const s = await boot();
-    expect(FakeSocket.opened.map((w) => w.url)).toEqual([server]);
+    expect(openedAt()).toEqual([server]);
     const st = s.store.getState();
     expect(st.serverOrigin).toBe("http://127.0.0.1:5286");
     expect(st.fileToken).toBe("abc");

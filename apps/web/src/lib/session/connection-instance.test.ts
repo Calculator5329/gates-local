@@ -75,7 +75,7 @@ it("stopping one connection leaves another instance's pending and subsequent RPC
   const stopSecond = second.connect();
   try {
     await until(() => hydrated.length === 2);
-    expect(browser.server.sockets.map(socket => socket.url)).toEqual(["ws://first.invalid/ws", "ws://second.invalid/ws"]);
+    expect(browser.server.sockets.map(socket => socket.url.replace(/\?window=[\w-]+$/, ""))).toEqual(["ws://first.invalid/ws", "ws://second.invalid/ws"]);
     const outstanding = browser.server.hold("models.list");
     const request = second.call("models.list", {});
     const held = await outstanding;

@@ -84,8 +84,8 @@ export interface Replies {
   direct(turnId: string, threadId: string, words: Words, retry: boolean, at: number): void;
   /** The older queue.update. Undefined when there is no such waiting message; "sending" when it is on its way. */
   update(id: string, patch: QueuePatch, by: number): "ok" | "sending" | undefined;
-  /** The edit a window had open is over: with `by`, only if the edit is still that window's. */
-  release(id: string, by?: number): void;
+  /** A window is gone for good: the messages it had open to edit go back to where they were. */
+  windowGone(by: number): void;
   change(params: Params<"reply.change">, by: number): ReplyAnswer;
   edit(params: Params<"reply.edit">, by: number): ReplyAnswer;
   remove(params: Params<"reply.remove">): ReplyAnswer;
@@ -542,10 +542,8 @@ export function createReplies({ file, log, changed, told, saved, deleting, closi
       settle();
       return "ok";
     },
-    release(id, by) {
-      const rec = recs.get(id);
-      if (rec?.stage !== "editing" || (by !== undefined && rec.by !== by)) return;
-      apply(rec, { call: "edit", open: false, by: rec.by, older: true });
+    windowGone(by) {
+      for (const rec of recs.values()) if (rec.stage === "editing" && rec.by === by) apply(rec, { call: "edit", open: false, by, older: true });
       settle();
     },
     change({ id, base, messageId, ...words }, by) {

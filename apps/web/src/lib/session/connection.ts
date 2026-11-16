@@ -12,6 +12,19 @@ interface ConnectionEffects {
   readonly afterDisconnect: () => void;
 }
 
+let thisWindow: string | undefined;
+function windowId(): string {
+  if (thisWindow !== undefined) return thisWindow;
+  const made = crypto.randomUUID();
+  try {
+    thisWindow = sessionStorage.getItem("gates-local-window") ?? made;
+    sessionStorage.setItem("gates-local-window", thisWindow);
+  } catch {
+    thisWindow = made;
+  }
+  return thisWindow;
+}
+
 export const isNA = (e: unknown): boolean => e instanceof WireError && e.code === "not-implemented";
 export const codeOf = (e: unknown): string => (e instanceof WireError ? e.code : "internal");
 
@@ -106,7 +119,8 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
         catch { setState({ notice: "Image drafts cannot be saved on this device. Keep this window open until you send them." }); }
         if (stopped) { stopDrafts?.(); stopDrafts = undefined; return; }
       }
-      const ws = new WebSocket(url);
+      parsed.searchParams.set("window", windowId());
+      const ws = new WebSocket(parsed.href);
       const c = createClient(ws, { onProtocolError: (e) => console.warn(`[gates-local] ${e.code}`) });
       const opened = await new Promise<boolean>((resolve) => {
         ws.addEventListener("open", () => resolve(true));

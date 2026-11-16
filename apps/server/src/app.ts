@@ -255,6 +255,10 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
     },
     thumbnail: async (jobId) => (deps.dataDir && imageFiles ? readThumbnail(deps.dataDir, jobId, imageFiles.queue) : undefined),
     activeTurns: () => turns.size,
+    windowGone(window) {
+      replies.windowGone(window);
+      pump();
+    },
     admission: (turnId) => turns.get(turnId)?.admission,
     async shutdown() {
       closing = true;

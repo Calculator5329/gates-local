@@ -49,6 +49,7 @@ const epoch = randomUUID();
 export interface HandlerContext {
   /** Stable per connection, for handlers that track who started what. */
   readonly clientId: number;
+  readonly window?: number;
   readonly listener?: "desktop" | "phone";
   readonly signal?: AbortSignal;
   /** Called by the state owner while capturing the result, before any await. */
@@ -78,6 +79,8 @@ export interface WsServerOptions {
   readonly maxPayloadBytes?: number;
   /** Called with the number of open clients after each connect and close (the GPU poll runs only while it is above 0). */
   readonly onClientCount?: (count: number) => void;
+  readonly onWindowGone?: (window: number) => void;
+  readonly windowGraceMs?: number;
   readonly dataDir?: string;
   /** A picture's thumbnail by job id (pictures/thumbs.ts), served at /files/thumbs/<jobId>.webp; 404 when absent. */
   readonly thumbnails?: (jobId: string) => Promise<Buffer | undefined>;
@@ -104,6 +107,13 @@ export interface WsServer {
   readonly phoneSocket?: string;
   push<C extends Channel>(channel: C, payload: Payload<C>, changes?: readonly SyncChange[]): void;
   close(): Promise<void>;
+}
+
+export const WINDOW_GRACE_MS = 120_000;
+
+function windowKey(req: IncomingMessage | undefined): string | undefined {
+  const key = new URL(req?.url ?? "/", "http://loopback").searchParams.get("window");
+  return key !== null && /^[\w-]{8,64}$/.test(key) ? key : undefined;
 }
 
 export function isLoopbackHost(host: string): boolean {
@@ -193,6 +203,11 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
   // why: streamed words start at a socket's first request (reply.list has them before); idle sockets keep no backlog
   const chatClients = new WeakSet<WebSocket>();
   let nextClientId = 1;
+  const windowNumbers = new Map<string, number>();
+  const windowSockets = new Map<number, Set<WebSocket>>();
+  const windowsLeaving = new Map<number, ReturnType<typeof setTimeout>>();
+  const windowGrace = options.windowGraceMs ?? WINDOW_GRACE_MS;
+  let closing = false;
 
   const admits = (req: IncomingMessage): { ok: true } | { ok: false; status: 401 | 403; reason: string } => {
     const url = new URL(req.url ?? "/", "http://loopback");
@@ -295,11 +310,18 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     send(ws, frame.value);
   };
 
-  wss.on("connection", (ws: WebSocket) => {
+  wss.on("connection", (ws: WebSocket, req?: IncomingMessage) => {
     clients.add(ws);
     options.onClientCount?.(clients.size);
     const controller = new AbortController();
-    const ctx: HandlerContext = { clientId: nextClientId++, listener: phoneClients.has(ws) ? "phone" : "desktop", signal: controller.signal };
+    const clientId = nextClientId++;
+    const named = windowKey(req);
+    const window = named === undefined ? clientId : windowNumbers.get(named) ?? nextClientId++;
+    if (named !== undefined) windowNumbers.set(named, window);
+    clearTimeout(windowsLeaving.get(window));
+    windowsLeaving.delete(window);
+    windowSockets.set(window, (windowSockets.get(window) ?? new Set()).add(ws));
+    const ctx: HandlerContext = { clientId, window, listener: phoneClients.has(ws) ? "phone" : "desktop", signal: controller.signal };
     ws.on("message", (data, isBinary) => {
       chatClients.add(ws);
       // Binary frames fail the text check in decodeRequest and are dropped with a log.
@@ -310,6 +332,17 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     ws.on("close", () => {
       controller.abort();
       if (clients.delete(ws)) options.onClientCount?.(clients.size);
+      const open = windowSockets.get(window);
+      open?.delete(ws);
+      if (open !== undefined && open.size > 0) return;
+      windowSockets.delete(window);
+      if (closing) return;
+      if (named === undefined) return options.onWindowGone?.(window);
+      windowsLeaving.set(window, setTimeout(() => {
+        windowsLeaving.delete(window);
+        windowNumbers.delete(named);
+        options.onWindowGone?.(window);
+      }, windowGrace));
     });
   });
 
@@ -351,6 +384,9 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
       }
     },
     async close() {
+      closing = true;
+      for (const timer of windowsLeaving.values()) clearTimeout(timer);
+      windowsLeaving.clear();
       for (const ws of clients) ws.terminate();
       clients.clear();
       options.onClientCount?.(0);

@@ -79,7 +79,10 @@ test("a phone loads the client through Serve's stand-in, sends a message and see
   // the drawer is closed, so match the mounted gear by its label rather than by role
   await expect(page.locator('.sb-foot button[aria-label="Settings"]')).toHaveCount(1);
   await expect(page.locator(".sb-foot .fdot")).toHaveCount(0);
-  expect(sockets).toEqual([`ws://127.0.0.1:${port}/ws`]);
+  // the one socket, to the page's own address, naming its window
+  const opened = sockets.map((u) => new URL(u));
+  expect(opened.map((u) => `${u.origin}${u.pathname}`)).toEqual([`ws://127.0.0.1:${port}/ws`]);
+  expect(opened[0]?.searchParams.get("window")).toMatch(/^[\w-]{8,64}$/);
 
   await sendMessage(page, "Hello from the phone");
   await expect(page.locator(".turn.a .md").last()).toContainText("You asked: Hello from the phone", { timeout: 10_000 });

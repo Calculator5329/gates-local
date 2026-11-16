@@ -485,7 +485,7 @@ export function createChat({ applyServerEvent, call, reply: askOne, codeOf, crea
       ...(unstarted(st.turns[r.threadId], r.id) ? { turns: withTurn(st.turns, r.threadId, null) } : {}),
       ...said,
     }));
-    // an edit open here that the server no longer keeps for this window (it started again): asked again
+    // an edit open here the server let go (the window was gone past its grace): asked again
     if (listed && s.editingQueued === r.id && r.stage !== "editing") openEdit(r.id, r.threadId, edited?.id === r.id ? edited.text : r.text);
   }
 

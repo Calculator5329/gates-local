@@ -1,9 +1,12 @@
 // Queueing and interrupting a reply, against the fake Ollama. Enter while a
 // reply runs never stops it: the message waits in a tray above the composer,
 // where it can be edited, removed or sent now.
-import { type Page } from "@playwright/test";
+import { type Page, type WebSocketRoute } from "@playwright/test";
+import { createClient } from "@gates-local/contracts";
+import { FAKE_URL } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 import { tap } from "./socket-tap.ts";
+import { holds } from "./waits.ts";
 
 const rows = (page: Page) => page.locator(".qt-r");
 const stop = (page: Page) => page.getByRole("button", { name: "Stop" });
@@ -135,4 +138,49 @@ test("saving an edit to a message a second window removed keeps the typed words 
   await expect(page.locator("#ta")).toHaveValue("Waiting message, reworded with care");
   await expect(page.locator(".turn.u"), "nothing was sent").toHaveCount(1);
   await other.close();
+});
+
+// BUILD.md step 8: an edit belongs to the window, so a moment offline does not give the message back.
+test("a message open for editing stays open and unsent, with the typed words, through three seconds offline while the reply ends", async ({ page, open }) => {
+  const sockets = new Set<WebSocketRoute>();
+  let offline = false;
+  await page.routeWebSocket(/.*/, (ws) => {
+    // an offline window's new connections fail, as with no network
+    if (offline) return void ws.close();
+    ws.connectToServer();
+    sockets.add(ws);
+  });
+  await open();
+  await waitReady(page);
+  const server = new URL(page.url()).searchParams.get("server");
+  if (!server) throw new Error("No test server URL");
+  const other = createClient(new WebSocket(server));
+  try {
+    await answering(page);
+    const threadId = await page.locator(".sb-row.on").getAttribute("data-thread") ?? "";
+    await sendMessage(page, "First thought");
+    await expect(rows(page)).toHaveCount(1);
+    await rows(page).first().locator("[data-edit-queued]").click();
+    await expect(page.locator("#ta")).toHaveValue("First thought");
+    await page.locator("#ta").fill("First thought, reworded");
+    const edited = async () => (await other.call("reply.list", {})).find((l) => "text" in l.reply && l.reply.text === "First thought")?.reply.stage;
+    await expect.poll(edited, { message: "the server keeps the message for this window's edit" }).toBe("editing");
+
+    offline = true;
+    for (const ws of sockets) await ws.close();
+    sockets.clear();
+    await expect(page.getByText("Reconnecting to Gates Local")).toBeVisible();
+    expect((await fetch(`${FAKE_URL}/__fake/release`, { method: "POST", body: "{}" })).ok).toBe(true);
+    const answered = async () => (await other.call("threads.get", { threadId })).messages.filter((m) => m.role === "assistant").length;
+    await expect.poll(answered, { message: "the reply ended on the server while this window was offline" }).toBe(1);
+    await holds(page, 3_000, edited, "editing", { message: "the message stays open for the offline window", every: 250 });
+
+    offline = false;
+    await expect(page.getByText("Reconnecting to Gates Local")).toHaveCount(0, { timeout: 15_000 });
+    await expect(rows(page)).toHaveCount(1);
+    await expect(rows(page).first().getByTestId("chat.queue.cancel-edit-1")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator("#ta")).toHaveValue("First thought, reworded");
+    await expect(page.locator(".turn.u"), "the message was not sent").toHaveCount(1);
+    expect(await edited()).toBe("editing");
+  } finally { other.close(); }
 });

@@ -175,6 +175,64 @@ describe("round trip over a real socket", () => {
   });
 });
 
+/** A server that records each call's window and each window let go. */
+async function windows(graceMs: number) {
+  const seen: (number | undefined)[] = [];
+  const gone: number[] = [];
+  const server = await startWsServer({
+    port: 0, token: TOKEN, allowedOrigins: [], log: () => {}, windowGraceMs: graceMs,
+    handlers: { "models.refresh": (_p, ctx) => { seen.push(ctx.window); return methodSamples["models.refresh"].result; } },
+    onWindowGone: (w) => gone.push(w),
+  });
+  open.push(server);
+  const join = async (id?: string) => {
+    const ws = new WebSocket(`${url(server)}${id === undefined ? "" : `&window=${id}`}`);
+    open.push({ close: () => ws.terminate() });
+    const c = createClient(ws as unknown as SocketLike, { timeoutMs: 2000 });
+    await new Promise<void>((resolve, reject) => { ws.once("open", () => resolve()); ws.once("error", reject); });
+    await c.call("models.refresh", methodSamples["models.refresh"].params);
+    return ws;
+  };
+  return { seen, gone, join };
+}
+
+const leave = (ws: WebSocket) => new Promise<void>((resolve) => { ws.once("close", () => resolve()); ws.close(); });
+const later = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+describe("a window across its connections", () => {
+  it("a window that comes back inside the grace is the same window, and nothing is let go", async () => {
+    const w = await windows(300);
+    await leave(await w.join("window-aaaa"));
+    await later(50);
+    await w.join("window-aaaa");
+    await later(400);
+    expect(w.seen[0]).toBeDefined();
+    expect(w.seen).toEqual([w.seen[0], w.seen[0]]);
+    expect(w.gone).toEqual([]);
+  });
+
+  it("a window away past the grace is let go once; a page with no id is let go at its close", async () => {
+    const w = await windows(100);
+    await leave(await w.join("window-bbbb"));
+    await leave(await w.join());
+    expect(w.gone).toEqual([w.seen[1]]);
+    await later(250);
+    expect(w.gone).toEqual([w.seen[1], w.seen[0]]);
+    // its next connection is a new window
+    await w.join("window-bbbb");
+    expect(w.seen[2]).not.toBe(w.seen[0]);
+  });
+
+  it("two tabs of one window: the window stays while either is open", async () => {
+    const w = await windows(100);
+    const one = await w.join("window-cccc");
+    await w.join("window-cccc");
+    await leave(one);
+    await later(250);
+    expect(w.gone).toEqual([]);
+  });
+});
+
 describe("refused at the boundary, connection stays usable", () => {
   it("answers each malformed frame with its named code and keeps serving", async () => {
     const logs: string[] = [];

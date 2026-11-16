@@ -475,11 +475,8 @@ export class FakeServer {
   /** A window's connection closed: the messages it had open in its composer are free again. */
   left(socket: FakeSocket): void {
     const by = this.sockets.indexOf(socket) + 1;
-    for (const [id, who] of this.editing) {
-      if (who !== by) continue;
-      this.editing.delete(id);
-      this.store.release(id, by);
-    }
+    for (const [id, who] of this.editing) if (who === by) this.editing.delete(id);
+    this.store.windowGone(by);
     this.pump();
   }
 

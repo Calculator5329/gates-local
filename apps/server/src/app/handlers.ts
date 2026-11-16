@@ -40,19 +40,14 @@ export interface HandlersDeps extends Pick<AppContext,
   readonly newId: () => string;
 }
 
+const editor = (ctx: HandlerContext): number => ctx.window ?? ctx.clientId;
+
 export function createHandlers({
   deps, store, runtime, catalog, log, push, turns, byThread, deleting, closing, imageReady, imageFiles, attachedFiles,
   replies, fitTable, reserve, pump, pushSpeeds, measure, threadImages, drawTurn, admission, queue, newId,
 }: HandlersDeps) {
   const { queueImage, cancelThreadImages } = threadImages;
   const { admitTurn, admitting, blockingTurns, planBeside, notReady } = admission;
-  /** A message open in one window's composer goes on when that window's connection closes. */
-  const leftOpen = (id: string, ctx: HandlerContext) => {
-    ctx.signal?.addEventListener("abort", () => {
-      replies.release(id, ctx.clientId);
-      pump();
-    }, { once: true });
-  };
   /** A call on a waiting message may have freed the next one to go. */
   const moved = (answer: ReplyAnswer): ReplyAnswer => {
     pump();
@@ -273,8 +268,7 @@ export function createHandlers({
     // queue.update and queue.remove are the older calls, for a page from before reply.*: the same
     // records and the same edit locks, answered with the whole list whatever happened
     "queue.update": ({ id, ...patch }, ctx) => {
-      if (replies.update(id, patch, ctx.clientId) === "sending") throw new AppError("queue-sending", "This message is already being sent.");
-      if (patch.editing === true) leftOpen(id, ctx);
+      if (replies.update(id, patch, editor(ctx)) === "sending") throw new AppError("queue-sending", "This message is already being sent.");
       pump();
       return replies.list();
     },
@@ -306,10 +300,9 @@ export function createHandlers({
       if (asked !== undefined) return { answer: "gone" as const, why: "sent" as const, question: asked };
       return sent.answer();
     },
-    "reply.change": (params, ctx) => moved(replies.change(params, ctx.clientId)),
+    "reply.change": (params, ctx) => moved(replies.change(params, editor(ctx))),
     "reply.edit": (params, ctx) => {
-      const answer = replies.edit(params, ctx.clientId);
-      if (params.open && answer.answer === "done") leftOpen(params.id, ctx);
+      const answer = replies.edit(params, editor(ctx));
       return moved(answer);
     },
     "reply.remove": (params) => moved(replies.remove(params)),
