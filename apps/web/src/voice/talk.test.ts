@@ -10,7 +10,7 @@ afterEach(() => { vi.unstubAllGlobals(); setState({ turns: {}, messages: {}, thr
 
 /** A reply being written in `threadId`, with its words so far and its private thinking. */
 const live = (threadId: string, gen: number, text: string): LiveTurn =>
-  ({ gen, threadId, turnId: `turn-${gen}`, model: "m", startedAt: 1, thinking: "Private reasoning. Never read.", text, tools: [], pendingUser: null }) as LiveTurn;
+  ({ threadId, turnId: `turn-${gen}`, model: "m", startedAt: 1, thinking: "Private reasoning. Never read.", text, tools: [] }) as LiveTurn;
 /** What the device was asked to say, and how often it was told to stop. */
 function speaker() {
   const heard: string[] = [];

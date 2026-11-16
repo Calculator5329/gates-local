@@ -32,10 +32,10 @@ const BLOCKING: BlockingTurn[] = [{ threadId: "A", title: "First chat", model: "
 const MODEL = "gemma3:4b";
 const sends = () => b.server.calls("chat.send").map((r) => r.params as { threadId: string; content: string; model: string; stopOthers?: boolean });
 
-it("CO-06 replay: a refused GPU send shows the server explanation and restores its words", async () => {
+it("CO-06 replay: a refused GPU send is held with the server explanation, not put back in the box", async () => {
   const sentence = gpuReadFailure("nvidia-smi timed out");
   await replay({
-    name: "GPU read refusal returns the message to the composer",
+    name: "GPU read refusal holds the message with its reason",
     create: async () => {
       type("keep these words");
       const waiting = b.server.hold("chat.send");
@@ -48,7 +48,8 @@ it("CO-06 replay: a refused GPU send shows the server explanation and restores i
     } }],
     check(_w, _order, complete) {
       if (!complete) return;
-      expect(st()).toMatchObject({ draft: "keep these words", queued: [], notice: `${sentence} Your message is back in the box.` });
+      expect(st().draft).toBe("");
+      expect(st().queued).toMatchObject([{ text: "keep these words", held: true, why: { code: "gpu-unreadable", message: sentence } }]);
       expect(st().turns, "the refused send leaves no turn behind").toEqual({});
     },
     dispose: async () => {},
@@ -60,7 +61,7 @@ it.each(["Settings", "another thread"])("round 4: a refused send's retry keeps i
   const load = vi.spyOn(settingsScreen, "load").mockResolvedValue();
   try {
     type("same recovered words");
-    const waiting = b.server.hold("chat.send");
+    const waiting = b.server.hold("reply.send");
     const sent = session.send(st().draft);
     const request = await waiting;
     const original = request.params.messageId;
@@ -84,7 +85,7 @@ it.each(["Settings", "another thread"])("round 4: a refused send's retry keeps i
 it("round 4: sending the recovered words in B never uses A's identity", async () => {
   const drafts = await import("../lib/store/drafts.ts");
   drafts.editDraft("recovered words");
-  const waiting = b.server.hold("chat.send");
+  const waiting = b.server.hold("reply.send");
   const sent = session.send(drafts.getDraft().text);
   const original = await waiting;
   original.fail("timeout", "not confirmed");
@@ -107,7 +108,7 @@ it("round 4: sending the recovered words in B never uses A's identity", async ()
 
 it("round 4: a late confirmation retires the unchanged copy after A to B to A", async () => {
   type("recovered words");
-  const waiting = b.server.hold("chat.send");
+  const waiting = b.server.hold("reply.send");
   const sent = session.send(st().draft);
   const original = await waiting;
   original.fail("timeout", "not confirmed");
@@ -121,7 +122,7 @@ it("round 4: a late confirmation retires the unchanged copy after A to B to A", 
 
 it("round 4: editing recovered words after navigation creates a new identity", async () => {
   type("recovered words");
-  const waiting = b.server.hold("chat.send");
+  const waiting = b.server.hold("reply.send");
   const sent = session.send(st().draft);
   const original = await waiting;
   original.fail("timeout", "not confirmed");
@@ -159,7 +160,7 @@ it("PC-04: failed thread creation keeps newer draft attachments", async () => {
 
 it("PC-03: reconnect retry keeps the identity of the unacknowledged send", async () => {
   type("saved before socket loss");
-  const waiting = b.server.hold("chat.send");
+  const waiting = b.server.hold("reply.send");
   const sent = session.send(st().draft);
   const request = await waiting;
   const id = (request.params as { messageId?: string }).messageId;
@@ -176,8 +177,11 @@ it("chat row 32: Send answers at once; the words wait as the question until the 
   b.server.answer("chat.send", () => ({ turnId: "turn-A-1" }));
   type("slow admission");
   await session.send(st().draft);
-  // answered with the turn id while the server still admits it: no timer, no words back in the box
-  expect(live()).toMatchObject({ turnId: "turn-A-1", pendingUser: "slow admission" });
+  // answered while the server still admits it: no timer, no words back in the box; the record names the question
+  const rid = (b.server.calls("reply.send")[0]!.params as { id: string }).id;
+  expect(live()).toMatchObject({ turnId: rid });
+  expect(live()?.userMessageId).toBeUndefined();
+  expect(store.unsavedQuestion(store.getState(), live() ?? undefined)?.text).toBe("slow admission");
   expect(st().draft).toBe("");
   type("next words");
   await session.send(st().draft);
@@ -185,79 +189,89 @@ it("chat row 32: Send answers at once; the words wait as the question until the 
   const id = (b.server.calls("chat.send")[0]!.params as { messageId: string }).messageId;
   chat("turn-A-1", "A", { type: "start", model: MODEL, userMessage: userMsg(id, "A", "slow admission") });
   await tick();
-  expect(live()).toMatchObject({ turnId: "turn-A-1", userMessageId: id, pendingUser: null });
+  expect(live()).toMatchObject({ turnId: rid, userMessageId: id });
   expect(st().messages["A"]?.map(m => m.content)).toEqual(["slow admission"]);
   expect(sends()).toHaveLength(1);
 });
 
-it("chat row 32: a refusal after the answer puts the words back with the server's reason", async () => {
+it("chat row 32: a refusal after the answer holds the message with the server's reason", async () => {
   b.server.answer("chat.send", () => ({ turnId: "turn-A-1" }));
   draftSource.replaceDraft(st().threadId, { text: "keep these", images: ["data:image/png;base64,cGl4ZWw="] });
   await session.send(st().draft);
   const sentence = gpuReadFailure("nvidia-smi timed out");
   chat("turn-A-1", "A", { type: "error", code: "gpu-unreadable", message: sentence, ended: { reason: "failed", at: 1 } });
   await tick();
-  expect(st()).toMatchObject({ draft: "keep these", draftImages: ["data:image/png;base64,cGl4ZWw="], notice: `${sentence} Your message is back in the box.` });
+  expect(st()).toMatchObject({ draft: "", draftImages: [] });
+  expect(st().queued).toMatchObject([{ text: "keep these", images: ["data:image/png;base64,cGl4ZWw="], held: true, why: { code: "gpu-unreadable", message: sentence } }]);
   expect(st().turns, "the refused turn leaves nothing behind").toEqual({});
   expect(st().messages["A"] ?? []).toEqual([]);
 });
 
-it("chat row 32: a dropped connection before the start puts the words back and keeps their identity", async () => {
+it("chat row 32: a dropped connection before the start leaves the message with the server, sent once", async () => {
   b.server.answer("chat.send", () => ({ turnId: "turn-A-1" }));
   type("not started yet");
   await session.send(st().draft);
-  const id = (b.server.calls("chat.send")[0]!.params as { messageId: string }).messageId;
+  const rid = (b.server.calls("reply.send")[0]!.params as { id: string }).id;
   b.server.socket.close();
-  await until(() => st().draft === "not started yet", 2000, "words back");
   await until(() => st().conn.kind === "open", 2000, "reconnected");
-  await session.send(st().draft);
-  expect(b.server.calls("chat.send").at(-1)?.params).toHaveProperty("messageId", id);
+  await tick();
+  // the server took it: nothing comes back to the box, and the record is still its own
+  expect(st().draft).toBe("");
+  expect(st().replies.has(rid)).toBe(true);
+  expect(sends()).toHaveLength(1);
 });
 
-it.each(["timeout", "closed", "image-input"])("returns an unconfirmed %s send to view with its images", async code => {
+it.each(["timeout", "closed"])("returns an unconfirmed %s send to view with its images", async code => {
   const images = ["data:image/png;base64,cGl4ZWw="];
   draftSource.replaceDraft(st().threadId, { text: "keep my words", images });
-  const waiting = b.server.hold("chat.send");
+  const waiting = b.server.hold("reply.send");
   const sent = session.send("keep my words");
   (await waiting).fail(code, "Not confirmed");
   await sent;
   expect(st()).toMatchObject({ draft: "keep my words", draftImages: images });
 });
 
-it("keeps newer typing and puts an unconfirmed timeout in a visible held queue", async () => {
+it("holds a send the model cannot take pictures for, with its images and the reason", async () => {
+  const images = ["data:image/png;base64,cGl4ZWw="];
+  draftSource.replaceDraft(st().threadId, { text: "keep my words", images });
+  const waiting = b.server.hold("chat.send");
+  const sent = session.send("keep my words");
+  (await waiting).fail("image-input", "This model cannot read images");
+  await sent;
+  expect(st()).toMatchObject({ draft: "", draftImages: [] });
+  expect(st().queued).toMatchObject([{ text: "keep my words", images, held: true, why: { code: "image-input" } }]);
+});
+
+it("keeps newer typing and puts unconfirmed words back in the box before it", async () => {
   const images = ["data:image/png;base64,cGl4ZWw="];
   draftSource.replaceDraft(st().threadId, { text: "earlier words", images });
-  const waiting = b.server.hold("chat.send");
+  const waiting = b.server.hold("reply.send");
   const sent = session.send("earlier words");
   const request = await waiting;
   type("newer words");
   request.fail("timeout", "Not confirmed");
   await sent;
-  expect(st().draft).toBe("newer words");
-  expect(st().queued).toContainEqual(expect.objectContaining({ text: "earlier words", images, held: true }));
+  // the server never had it, so there is no row to hold it: nothing typed is lost
+  expect(st()).toMatchObject({ draft: "earlier words\nnewer words", draftImages: images, queued: [] });
 });
 
-it.each([false, true])("late confirmation retires only the matching recovered copy (new draft: %s)", async newer => {
-  {
-    const images = ["data:image/png;base64,cGl4ZWw="];
-    draftSource.replaceDraft(st().threadId, { text: "slow admission", images });
-    const waiting = b.server.hold("chat.send");
-    const sent = session.send("slow admission");
-    const request = await waiting;
-    const id = request.params.messageId!;
-    if (newer) type("newer words");
-    request.fail("timeout", "not confirmed");
-    await sent;
-    expect(newer ? st().queued[0]?.text : st().draft).toBe("slow admission");
-    chat("turn-A-1", "A", { type: "start", model: MODEL, userMessage: userMsg(id, "A", "slow admission") });
-    await tick();
-    expect(st().draft).toBe(newer ? "newer words" : "");
-    expect(st().queued).toEqual([]);
-    expect(st().messages["A"]?.filter(m => m.content === "slow admission")).toHaveLength(1);
-    expect(sends()).toHaveLength(1);
-    expect(b.server.calls("reply.stop")).toHaveLength(0);
-    expect(live()?.turnId).toBe("turn-A-1");
-  }
+it.each([false, true])("a late confirmation retires the recovered copy, and leaves a box typed into since alone (new draft: %s)", async newer => {
+  const images = ["data:image/png;base64,cGl4ZWw="];
+  draftSource.replaceDraft(st().threadId, { text: "slow admission", images });
+  const waiting = b.server.hold("reply.send");
+  const sent = session.send("slow admission");
+  const request = await waiting;
+  const id = request.params.messageId!;
+  if (newer) type("newer words");
+  request.fail("timeout", "not confirmed");
+  await sent;
+  expect(st().draft).toBe(newer ? "slow admission\nnewer words" : "slow admission");
+  chat("turn-A-1", "A", { type: "start", model: MODEL, userMessage: userMsg(id, "A", "slow admission") });
+  await tick();
+  expect(st().draft).toBe(newer ? "slow admission\nnewer words" : "");
+  expect(st().queued).toEqual([]);
+  expect(st().messages["A"]?.filter(m => m.content === "slow admission")).toHaveLength(1);
+  expect(b.server.calls("reply.stop")).toHaveLength(0);
 });
 
 let created: string[];
@@ -292,8 +306,8 @@ afterEach(async () => {
 
 it("snapshots attached images into a queued send and restores them for editing", async () => {
   await answering("A");
-  draftSource.replaceDraft(st().threadId, { images: ["data:image/png;base64,cGl4ZWw="] });
-  await session.send("queued image");
+  draftSource.replaceDraft(st().threadId, { text: "queued image", images: ["data:image/png;base64,cGl4ZWw="] });
+  await session.send(st().draft);
   const q = st().queued[0]!;
   expect(q).toMatchObject({ images: ["data:image/png;base64,cGl4ZWw="] });
   expect(st().draftImages).toEqual([]);
@@ -317,7 +331,7 @@ it("sends an image-only first message with a usable thread title", async () => {
 async function answering(id: string): Promise<string> {
   session.newThread();
   void session.send(`hello ${id}`);
-  await until(() => live()?.threadId === id && live()?.turnId !== null && live()?.pendingUser === null, 2000, `the turn in ${id}`);
+  await until(() => live()?.threadId === id && live()?.userMessageId !== undefined, 2000, `the turn in ${id}`);
   return live()?.turnId ?? "";
 }
 
@@ -427,7 +441,7 @@ describe("a send that would stop another chat", () => {
   it("confirming without the tick asks again next time", async () => {
     await warned();
     session.confirmStopAsk(false);
-    await until(() => live()?.threadId === "B" && live()?.pendingUser === null, 2000, "turn B");
+    await until(() => live()?.threadId === "B" && live()?.userMessageId !== undefined, 2000, "turn B");
     session.newThread();
     await session.send("for C");
     expect(st().stopAsk?.blocking).toEqual(BLOCKING);
@@ -440,7 +454,7 @@ describe("a send that would stop another chat", () => {
     expect(localStorage.getItem("gates-local.stop-others-ok")).toBeNull();
     await session.send("for B");
     session.confirmStopAsk(true);
-    await until(() => live()?.threadId === "B" && live()?.pendingUser === null, 2000, "turn B");
+    await until(() => live()?.threadId === "B" && live()?.userMessageId !== undefined, 2000, "turn B");
     expect(localStorage.getItem("gates-local.stop-others-ok")).toBe("1");
     session.newThread();
     await session.send("for C");
@@ -502,7 +516,7 @@ describe("the chat that got stopped", () => {
   it("keeps its partial reply and one plain sentence while another chat is open", async () => {
     await warned();
     session.confirmStopAsk(false);
-    await until(() => live()?.threadId === "B" && live()?.pendingUser === null, 2000, "turn B");
+    await until(() => live()?.threadId === "B" && live()?.userMessageId !== undefined, 2000, "turn B");
     chat("turn-A-1", "A", preempted(asstMsg("p1", "A", "so far")));
     await tick();
     expect(st().messages["A"]?.map((m) => m.id)).toContain("p1");
@@ -533,7 +547,7 @@ describe("the chat that got stopped", () => {
       expect(h.params).toMatchObject({ retryOf: question, content: "hello A" });
       expect((st().messages["A"] ?? []).map((m) => m.id)).toEqual([question, "p8"]);
       h.respond({ turnId: "turn-retry", userMessage: userMsg("u-again", "A", "hello A") });
-      await until(() => live()?.turnId === "turn-retry" && live()?.userMessageId === "u-again", 2000, "the retry, its question saved");
+      await until(() => live()?.turnId === b.server.replyOf("turn-retry") && live()?.userMessageId === "u-again", 2000, "the retry, its question saved");
       expect((st().messages["A"] ?? []).map((m) => m.id)).toEqual(["u-again"]);
     });
 
@@ -632,7 +646,7 @@ describe("the chat that got stopped", () => {
   it("stopped before a word behind another chat: the sentence hangs on the question it did not answer", async () => {
     await warned();
     session.confirmStopAsk(false);
-    await until(() => live()?.threadId === "B" && live()?.pendingUser === null, 2000, "turn B");
+    await until(() => live()?.threadId === "B" && live()?.userMessageId !== undefined, 2000, "turn B");
     const question = st().messages["A"]?.find((m) => m.id === "u-A-1");
     expect(question).toBeDefined();
     chat("turn-A-1", "A", preempted(undefined, question));
@@ -804,7 +818,7 @@ describe("messages typed while a reply is being written", () => {
     expect(one).toBeDefined();
     chat(turn, "A", { type: "done", message: asstMsg("a1", "A"), stopReason: "stop" });
     await until(() => sends().length === 2, 2000, "the first");
-    await until(() => live()?.turnId === one && live()?.pendingUser === null, 2000, "turn 2");
+    await until(() => live()?.turnId === one && live()?.userMessageId !== undefined, 2000, "turn 2");
     expect(sends().map((s) => s.content)).toEqual(["hello A", "one"]);
     expect(st().queued.map((q) => q.text)).toEqual(["two"]);
     chat("turn-A-2", "A", { type: "done", message: asstMsg("a2", "A"), stopReason: "stop" });
@@ -907,7 +921,7 @@ describe("messages typed while a reply is being written", () => {
     });
   });
 
-  it("a queued message that fails to send goes back in the queue, the box untouched", async () => {
+  it("a queued message that fails to send goes back in the queue with the reason, the box untouched", async () => {
     const turn = await answering("A");
     await session.send("next");
     b.server.answer("chat.send", () => {
@@ -915,8 +929,8 @@ describe("messages typed while a reply is being written", () => {
     });
     type("still typing");
     chat(turn, "A", { type: "done", message: asstMsg("a1", "A"), stopReason: "stop" });
-    await until(() => st().notice !== null, 2000, "the notice");
-    expect(st().queued.map((q) => q.text)).toEqual(["next"]);
+    await until(() => st().queued[0]?.why !== undefined, 2000, "the reason on its row");
+    expect(st().queued).toMatchObject([{ text: "next", held: true, why: { code: "internal" } }]);
     expect(st().draft).toBe("still typing");
   });
 
@@ -1070,7 +1084,7 @@ async function admitting(): Promise<{ fail(code: string, message: string): void 
   const held = b.server.hold("chat.send");
   chat(turn, "A", done("a1", "A"));
   (await held).respond({ turnId: "turn-next" });
-  await until(() => live()?.pendingUser === "next", 2000, "the queued message on its way");
+  await until(() => store.unsavedQuestion(store.getState(), live() ?? undefined)?.text === "next", 2000, "the queued message on its way");
   expect(st().queued).toEqual([]);
   return { fail: (code, message) => chat("turn-next", "A", { type: "error", code, message }) };
 }
@@ -1104,9 +1118,10 @@ async function stoppedThenReplaced(): Promise<Held<"chat.send">> {
   session.stop();
   await answering("B");
   session.openThread("A");
-  // B's reply runs in its own chat; A's send still waits for the server's answer, and its Stop is asked once that names the turn
+  // B's reply runs in its own chat; the Stop put A's message on hold at once
   expect(store.runningThreads(st()).has("B")).toBe(true);
-  expect(st().turns["A"]).toMatchObject({ turnId: null, pendingUser: "typed" });
+  expect(st().turns["A"] ?? null).toBeNull();
+  expect(st().queued).toMatchObject([{ threadId: "A", text: "typed", held: true }]);
   return h;
 }
 
@@ -1133,7 +1148,7 @@ function stoppedWords(threadId = "A"): void {
 
 describe("a message the person typed is never lost", () => {
   describe("a Send now that fails (CFS-01)", () => {
-    it("goes back at its own place, on hold, and the box keeps what is in it", async () => {
+    it("goes back at its own place, on hold with the reason, and the box keeps what is in it", async () => {
       const ids = await onHold("one", "two", "three");
       type("something else");
       const held = b.server.hold("chat.send");
@@ -1142,25 +1157,24 @@ describe("a message the person typed is never lost", () => {
       // the server sends it; until its turn is taken it waits first in line
       await until(() => texts()[0] === "two", 2000, "Send now first");
       h.fail("internal", "no");
-      await until(() => st().queued.length === 3, 2000, "the message back");
+      await until(() => st().queued.length === 3 && texts()[1] === "two", 2000, "the message back");
       expect(texts()).toEqual(["one", "two", "three"]);
-      expect(st().queued[1]).toMatchObject({ id: ids[1], held: true });
+      expect(st().queued[1]).toMatchObject({ id: ids[1], held: true, why: { code: "internal" } });
       expect(st().draft).toBe("something else");
-      expect(st().notice).not.toBeNull();
     });
 
-    it("says the queue has it, not the box", async () => {
+    it("the row says why, and nothing says the box has it", async () => {
       const ids = await onHold("one");
       const held = b.server.hold("chat.send");
       session.sendQueuedNow(ids[0] ?? "");
       (await held).fail("closed", "gone");
-      await until(() => st().queued.length === 1, 2000, "the message back");
-      expect(st().notice).toMatch(/queue/);
-      expect(st().notice).not.toMatch(/box/);
+      await until(() => st().queued[0]?.why !== undefined, 2000, "the message back");
+      expect(st().queued[0]).toMatchObject({ held: true, why: { code: "closed" } });
+      expect(st().notice ?? "").not.toMatch(/box/);
     });
   });
 
-  it("a Regenerate that fails leaves the box alone: its words are already in the chat", async () => {
+  it("a Regenerate that fails leaves the box alone: it is held with the reason", async () => {
     const turn = await answering("A");
     chat(turn, "A", done("a1", "A"));
     await until(() => live() === null, 2000, "A done");
@@ -1168,9 +1182,10 @@ describe("a message the person typed is never lost", () => {
     const held = b.server.hold("chat.send");
     session.retry();
     (await held).fail("internal", "no");
-    await until(() => st().notice !== null, 2000, "the notice");
+    // a finished reply's Regenerate is a new question: refused, it is held with the reason like any other
+    await until(() => st().queued[0]?.why !== undefined, 2000, "the reason on its row");
     expect(st().draft).toBe("half a thought");
-    expect(st().queued).toEqual([]);
+    expect(st().queued).toMatchObject([{ text: "hello A", held: true, why: { code: "internal" } }]);
   });
 
   describe("a queued message whose send is refused", () => {
@@ -1186,14 +1201,14 @@ describe("a message the person typed is never lost", () => {
       expect(live()).toBeNull();
     });
 
-    it("while another chat owns the live slot is back in its own chat's queue, and the notice says where (CFS-03)", async () => {
+    it("while another chat owns the live slot is back in its own chat's queue, with the reason on its row (CFS-03)", async () => {
       const h = await admitting();
       const other = await answering("B");
       h.fail("wont-fit", "no");
       await until(() => st().queued.length === 1, 2000, "the message back");
       expect(st().queued).toMatchObject([{ threadId: "A", text: "next", held: true }]);
       expect(live()?.turnId).toBe(other);
-      expect(st().notice).toMatch(/hello A/);
+      expect(st().queued[0]?.why).toMatchObject({ code: "wont-fit" });
     });
 
     it("holds what was waiting behind it, so nothing overtakes it", async () => {
@@ -1226,7 +1241,7 @@ describe("a message the person typed is never lost", () => {
   });
 
   describe("a typed message whose send is refused after the person moved on", () => {
-    it("behind another chat, it restores its source draft and leaves the open chat alone", async () => {
+    it("behind another chat, it is held in its own chat with the reason, and the open chat is left alone", async () => {
       const drafts = await import("../lib/store/drafts.ts");
       session.newThread();
       const held = b.server.hold("chat.send");
@@ -1234,9 +1249,9 @@ describe("a message the person typed is never lost", () => {
       const h = await held;
       await answering("B");
       h.fail("wont-fit", "no");
-      await until(() => drafts.getDraft("A").text === "typed", 2000, "A's draft restored");
-      expect(drafts.getDraft("A").text).toBe("typed");
-      expect(st().queued).toEqual([]);
+      await until(() => st().queued.length === 1, 2000, "the message held");
+      expect(st().queued).toMatchObject([{ threadId: "A", text: "typed", held: true, why: { code: "wont-fit" } }]);
+      expect(drafts.getDraft("A").text).toBe("");
       expect(drafts.getDraft("B").text).toBe("");
       expect(st().messages["B"]?.some(m => m.content === "typed")).not.toBe(true);
     });
@@ -1250,13 +1265,15 @@ describe("a message the person typed is never lost", () => {
       expect(st().queued).toMatchObject([{ threadId: "A", text: "typed", held: true }]);
     });
 
-    it("stopped during admission with an empty box, it is back in the box", async () => {
+    it("stopped during admission, it is on hold at once and a late refusal changes nothing", async () => {
       const h = await typed();
       session.stop();
+      await until(() => st().queued.length === 1, 2000, "the message held");
       h.fail("wont-fit", "no");
-      await until(() => st().draft !== "", 2000, "the text back");
-      expect(st().draft).toBe("typed");
-      expect(st().queued).toEqual([]);
+      await tick();
+      expect(st().draft).toBe("");
+      expect(st().queued).toMatchObject([{ threadId: "A", text: "typed", held: true }]);
+      expect(sends()).toHaveLength(1);
     });
   });
 
@@ -1405,61 +1422,75 @@ describe("a message the person typed is never lost", () => {
       expect(sends()[1]).not.toHaveProperty("stopOthers");
     });
 
-    it("shows the warning with the text still in the box, and confirm retries with stopOthers in the same chat", async () => {
+    it("holds the message with the turns in the way, and Send now on its row asks, then sends with stopOthers in the same chat", async () => {
       await answering("A");
       session.newThread();
       type("for B");
       refusedOnce();
       await session.send("for B");
-      await until(() => st().stopAsk !== null, 2000, "the warning");
-      expect(st().stopAsk?.blocking).toEqual(BLOCKING);
-      expect(st().draft).toBe("for B");
-      expect(st().notice).toBeNull();
+      await until(() => st().queued.length === 1, 2000, "the message held");
+      expect(st().queued).toMatchObject([{ threadId: "B", text: "for B", held: true, why: { code: "would-stop" } }]);
+      expect(st().replies.get(st().queued[0]?.id ?? "")).toMatchObject({ stage: "held", held: { why: "refused", code: "would-stop", blocking: BLOCKING } });
+      expect(st().draft).toBe("");
+      expect(st().stopAsk).toBeNull();
       expect(b.server.calls("reply.stop")).toHaveLength(0);
       expect(sends()).toHaveLength(2);
+      b.server.answer("turns.blocking", () => BLOCKING);
+      session.sendQueuedNow(st().queued[0]?.id ?? "");
+      await until(() => st().stopAsk !== null, 2000, "the warning");
+      expect(st().stopAsk?.blocking).toEqual(BLOCKING);
       session.confirmStopAsk(false);
       await until(() => sends().length === 3, 2000, "the retry");
       expect(sends()[2]).toMatchObject({ threadId: "B", content: "for B", stopOthers: true });
-      expect(sends()[2]).not.toHaveProperty("askFirst");
       expect(b.server.calls("threads.create")).toHaveLength(2);
-      expect(st().draft).toBe("");
+      await until(() => st().queued.length === 0, 2000, "the row gone");
     });
 
-    it("cancelled, sends nothing more and keeps the text", async () => {
+    it("cancelled, sends nothing more and the message stays on hold", async () => {
       await answering("A");
       session.newThread();
-      type("for B");
       refusedOnce();
       await session.send("for B");
+      await until(() => st().queued.length === 1, 2000, "the message held");
+      b.server.answer("turns.blocking", () => BLOCKING);
+      session.sendQueuedNow(st().queued[0]?.id ?? "");
       await until(() => st().stopAsk !== null, 2000, "the warning");
       session.cancelStopAsk();
       await tick();
       expect(sends()).toHaveLength(2);
-      expect(st().draft).toBe("for B");
+      expect(st().queued).toMatchObject([{ text: "for B", held: true }]);
     });
 
-    it("with 'Don't show this again' saved, retries without asking", async () => {
+    it("with 'Don't show this again' saved, Send now on the held row sends without asking", async () => {
       localStorage.setItem("gates-local.stop-others-ok", "1");
       await answering("A");
       session.newThread();
       refusedOnce();
       await session.send("for B");
+      await until(() => st().queued.length === 1, 2000, "the message held");
+      b.server.answer("turns.blocking", () => BLOCKING);
+      session.sendQueuedNow(st().queued[0]?.id ?? "");
       await until(() => sends().length === 3, 2000, "the retry");
       expect(st().stopAsk).toBeNull();
       expect(sends()[2]).toMatchObject({ content: "for B", stopOthers: true });
     });
 
-    it("a Send now goes back at its place, and confirm sends it and takes it out", async () => {
+    it("a Send now goes back at its place with the reason, and the next Send now asks, sends it and takes it out", async () => {
       const ids = await onHold("one", "two");
       type("something else");
       refusedOnce();
       session.sendQueuedNow(ids[0] ?? "");
-      await until(() => st().stopAsk !== null, 2000, "the warning");
+      await until(() => st().queued[0]?.why !== undefined, 2000, "the message back");
       expect(texts()).toEqual(["one", "two"]);
+      expect(st().queued[0]).toMatchObject({ id: ids[0], why: { code: "would-stop" } });
       expect(st().draft).toBe("something else");
+      b.server.answer("turns.blocking", () => BLOCKING);
+      session.sendQueuedNow(ids[0] ?? "");
+      await until(() => st().stopAsk !== null, 2000, "the warning");
       session.confirmStopAsk(false);
       await until(() => sends().length === 3, 2000, "the retry");
       expect(sends()[2]).toMatchObject({ content: "one", stopOthers: true });
+      await until(() => texts().length === 1, 2000, "the row gone");
       expect(texts()).toEqual(["two"]);
       expect(st().draft).toBe("something else");
     });
@@ -1478,7 +1509,7 @@ describe("a message the person typed is never lost", () => {
       expect(st().queued).toMatchObject([{ threadId: "B", text: "for B", held: true }]);
     });
 
-    it("after the person left the chat, no warning opens on the wrong screen: the message returns to its source draft", async () => {
+    it("after the person left the chat, no warning opens on the wrong screen: the message is held in its own chat", async () => {
       const drafts = await import("../lib/store/drafts.ts");
       await answering("A");
       session.newThread();
@@ -1487,43 +1518,45 @@ describe("a message the person typed is never lost", () => {
       const h = await held;
       session.openThread("A");
       h.fail(WOULD_STOP.code, WOULD_STOP.message, WOULD_STOP.blocking);
-      await until(() => drafts.getDraft("B").text === "for B", 2000, "B's draft restored");
+      await until(() => st().queued.length === 1, 2000, "the message held");
       expect(st().stopAsk).toBeNull();
-      expect(drafts.getDraft("B").text).toBe("for B");
-      expect(st().queued).toEqual([]);
+      expect(st().queued).toMatchObject([{ threadId: "B", text: "for B", held: true }]);
+      expect(drafts.getDraft("B").text).toBe("");
       expect(drafts.getDraft("A").text).toBe("");
       expect(st().messages["A"]?.some(m => m.content === "for B")).not.toBe(true);
     });
   });
 
   describe("Stop means stop", () => {
-    it("a typed message refused after Stop keeps what was queued behind it on hold (CFT-01)", async () => {
+    it("a typed message stopped at admission is held, and so is what was queued behind it (CFT-01)", async () => {
       const h = await typed();
       await session.send("behind it");
       expect(texts()).toEqual(["behind it"]);
       session.stop();
+      await until(() => texts().length === 2, 2000, "both held");
       h.fail("wont-fit", "no");
-      await until(() => st().draft === "typed", 2000, "the text back");
       await tick();
       expect(sends().map((s) => s.content)).toEqual(["typed"]);
-      expect(st().queued).toMatchObject([{ threadId: "A", text: "behind it", held: true }]);
+      expect(st().draft).toBe("");
+      expect(st().queued).toMatchObject([{ threadId: "A", text: "typed", held: true }, { threadId: "A", text: "behind it", held: true }]);
     });
 
     it("a stopped send never retries once another chat has taken the slot, with standing consent (CFT-02)", async () => {
       localStorage.setItem("gates-local.stop-others-ok", "1");
       const h = await stoppedThenReplaced();
       h.fail("would-stop", WOULD_STOP_MESSAGE, BLOCKING);
-      await until(() => st().draft === "typed", 2000, "the text back");
       await tick();
       expect(sends().map((s) => s.content)).toEqual(["typed", "hello B"]);
       expect(sends().some((s) => s.stopOthers === true)).toBe(false);
+      expect(st().queued).toMatchObject([{ threadId: "A", text: "typed", held: true }]);
     });
 
     it("a stopped send opens no warning either once another chat has taken the slot (CFT-02)", async () => {
       const h = await stoppedThenReplaced();
       h.fail("would-stop", WOULD_STOP_MESSAGE, BLOCKING);
-      await until(() => st().draft === "typed", 2000, "the text back");
+      await tick();
       expect(st().stopAsk).toBeNull();
+      expect(st().queued).toMatchObject([{ threadId: "A", text: "typed", held: true }]);
     });
 
     it("what queued behind a stopped send stays on hold once another chat has taken the slot (CFT-01, CFT-02)", async () => {
@@ -1537,16 +1570,13 @@ describe("a message the person typed is never lost", () => {
       const turnB = await answering("B");
       chat(turnB, "B", done("b1", "B"));
       await until(() => live() === null, 2000, "B done");
-      expect(texts()).toEqual(["behind it"]);
       h.fail("wont-fit", "no");
-      await until(() => drafts.getDraft("A").text === "typed", 2000, "A's draft restored");
-      expect(drafts.getDraft("A").text).toBe("typed");
+      await tick();
+      expect(drafts.getDraft("A").text).toBe("");
       expect(drafts.getDraft("B").text).toBe("");
       expect(st().messages["B"]?.some(m => m.content === "typed")).not.toBe(true);
-      expect(st().queued).toMatchObject([{ threadId: "A", text: "behind it", held: true }]);
-      await tick();
+      expect(st().queued).toMatchObject([{ threadId: "A", text: "typed", held: true }, { threadId: "A", text: "behind it", held: true }]);
       expect(sends().map((s) => s.content)).toEqual(["typed", "hello B"]);
-      expect(st().queued.every((q) => q.held === true)).toBe(true);
     });
   });
 
@@ -1575,14 +1605,17 @@ describe("a message the person typed is never lost", () => {
       expect(sends()[1]).toMatchObject({ stopOthers: true, stopTurns: ["turn-A-1"] });
     });
 
-    it("a different turn in the way by then brings the warning back, naming it, and the next yes carries its id", async () => {
+    it("a different turn in the way by then holds the message naming it, and the next yes carries its id", async () => {
       await warned();
       const held = b.server.hold("chat.send");
       session.confirmStopAsk(false);
       (await held).fail("would-stop", WOULD_STOP_MESSAGE, OTHER);
+      await until(() => st().queued.length === 1, 2000, "the message held");
+      expect(st().replies.get(st().queued[0]?.id ?? "")).toMatchObject({ text: "for B", stage: "held", held: { why: "refused", code: "would-stop", blocking: OTHER } });
+      b.server.answer("turns.blocking", () => OTHER);
+      session.sendQueuedNow(st().queued[0]?.id ?? "");
       await until(() => st().stopAsk !== null, 2000, "the second warning");
       expect(st().stopAsk?.blocking).toEqual(OTHER);
-      expect(st().draft).toBe("for B");
       session.confirmStopAsk(false);
       await until(() => sends().length === 3, 2000, "the retry");
       expect(sends()[2]).toMatchObject({ threadId: "B", content: "for B", stopOthers: true, stopTurns: ["turn-C-1"] });

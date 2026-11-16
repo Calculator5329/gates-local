@@ -3,7 +3,7 @@
 // module touches window at load, so each test stubs the browser globals and
 // imports a fresh copy. Kept apart from session.test.ts, whose discovery
 // tests need the real createClient this file mocks.
-import { type CallOptions, type Channel, type ClientSync, type MethodName, type ModelInfo, type SyncMetadata, type SyncRow, methodNames, methodSync, phoneMay, pushSync, scopesOf } from "@gates-local/contracts";
+import { type CallOptions, type Channel, type ClientSync, type MethodName, type ModelInfo, type Params, type SyncMetadata, type SyncRow, methodNames, methodSync, phoneMay, pushSync, scopesOf } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -88,6 +88,8 @@ async function boot(answers: Record<string, (params?: unknown) => Promise<unknow
         return value;
       });
     },
+    // As the real client: a reply call answers with the server's outcome, or throws what the server threw.
+    reply: (method: MethodName, params?: unknown) => (fake.client as { call: (m: MethodName, p?: unknown) => Promise<unknown> }).call(method, params),
   };
   vi.stubGlobal("window", {});
   vi.stubGlobal("location", { search: "?server=ws://localhost:1", hash: "", pathname: "/" });
@@ -256,26 +258,26 @@ it("a new default is the latest choice: a new chat follows the pick that honours
 });
 
 it("sending is using: after a send in a thread restored on its saved model, a new chat starts on that model, not an older pick", async () => {
-  const { session, store, calls, hydrated } = await boot({ "threads.get": async () => savedReply(GEMMA), "chat.send": () => new Promise(noop) });
+  const { session, store, calls, hydrated } = await boot({ "threads.get": async () => savedReply(GEMMA), "reply.send": () => new Promise(noop) });
   await hydrated();
   session.pickModel(QWEN); // picked in the new chat, never sent
   session.openThread("A");
   await vi.waitFor(() => expect(store.getState().model).toBe(GEMMA)); // A reopens on its saved model
   void session.send("Hello again").catch(noop);
-  await vi.waitFor(() => expect(calls).toContain("chat.send"));
+  await vi.waitFor(() => expect(calls).toContain("reply.send"));
   session.newThread();
   expect(store.getState().model).toBe(GEMMA);
 });
 
 it("Retry and Regenerate are using: a new chat starts on the model the thread was answered again with", async () => {
-  const { session, store, calls, hydrated } = await boot({ "threads.get": async () => askedAndAnswered(GEMMA), "chat.send": () => new Promise(noop) });
+  const { session, store, calls, hydrated } = await boot({ "threads.get": async () => askedAndAnswered(GEMMA), "reply.send": () => new Promise(noop) });
   await hydrated();
   session.pickModel(QWEN); // picked in the new chat, never sent
   session.openThread("A");
   await vi.waitFor(() => expect(store.getState().messages.A).toHaveLength(2));
   expect(store.getState().model).toBe(GEMMA);
   session.retry();
-  await vi.waitFor(() => expect(calls).toContain("chat.send"));
+  await vi.waitFor(() => expect(calls).toContain("reply.send"));
   session.newThread();
   expect(store.getState().model).toBe(GEMMA);
 });
@@ -296,7 +298,7 @@ it("a send cancelled at the stop-other-chats warning is not using: a new chat ke
   session.cancelStopAsk();
   session.newThread();
   expect(store.getState().model).toBe(QWEN);
-  expect(calls).not.toContain("chat.send");
+  expect(calls).not.toContain("reply.send");
 });
 
 const askedAndAnswered = (model: string) => ({
@@ -673,22 +675,24 @@ describe("the phone's image pick, which cannot write Settings (IR3-62, IR3-63)",
   it("a new chat's first Image send carries the pick, then the next new chat starts from Settings again", async () => {
     const sent = defer<unknown>();
     const draws: unknown[] = [];
+    let asked: Params<"reply.send"> | undefined;
     const { session, store, push } = await onPhone({
       "threads.create": async () => methodSamples["threads.create"].result,
-      "chat.send": (params) => { draws.push((params as { draw?: unknown }).draw); return sent.promise; },
+      "reply.send": (params) => { asked = params as Params<"reply.send">; draws.push(asked.draw); return sent.promise; },
     });
     store.setState({ image: true });
     await session.pickImage(moss);
     void session.send("a lighthouse").catch(noop);
     await vi.waitFor(() => expect(draws).toEqual([moss]));
-    const { turnId, userMessage } = methodSamples["chat.send"].result;
-    sent.resolve({ turnId });
+    const { userMessage } = methodSamples["chat.send"].result;
+    const id = asked!.id;
+    sent.resolve({ answer: "done", reply: { id, threadId: asked!.threadId, rev: 1, messageId: asked!.messageId, text: asked!.text, at: 1, draw: moss, stage: "starting", attempt: 1, startedAt: 1 } });
     await settled();
     expect(store.getState().imagePick, "the pick stays until the server saved the send that carries it").toEqual(moss);
     // the turn's start, on its record with the saved question (chat row 32): the thread now keeps the pick
     const threadId = methodSamples["threads.create"].result.id;
     const question = { ...userMessage!, threadId };
-    push("reply.changed", { kind: "is", reply: { id: turnId, threadId, rev: 2, stage: "drawing", questionId: question.id, preset: moss.preset, startedAt: 1, jobs: [] }, saved: [question] });
+    push("reply.changed", { kind: "is", reply: { id, threadId, rev: 2, stage: "drawing", questionId: question.id, preset: moss.preset, startedAt: 1, jobs: [] }, saved: [question] });
     await vi.waitFor(() => expect(store.getState().imagePick).toBeUndefined());
     session.newThread();
     expect(store.getState().imagePick).toBeUndefined();
@@ -697,12 +701,12 @@ describe("the phone's image pick, which cannot write Settings (IR3-62, IR3-63)",
   it("a refused first send leaves the pick for the next try", async () => {
     const { session, store, calls } = await onPhone({
       "threads.create": async () => methodSamples["threads.create"].result,
-      "chat.send": async () => { throw new Error("refused"); },
+      "reply.send": async () => { throw new Error("refused"); },
     });
     store.setState({ image: true });
     await session.pickImage(moss);
     void session.send("a lighthouse").catch(noop);
-    await vi.waitFor(() => expect(calls).toContain("chat.send"));
+    await vi.waitFor(() => expect(calls).toContain("reply.send"));
     await settled();
     expect(store.getState().imagePick).toEqual(moss);
   });

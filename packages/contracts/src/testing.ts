@@ -209,6 +209,10 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   },
   "queue.update": { params: { id: "q-1", editing: true }, result: [] },
   "queue.remove": { params: { id: "q-1" }, result: [] },
+  "reply.send": {
+    params: { id: "q-2", threadId: "t1", messageId: "m-q3", text: "one more thing", model: "qwen3:14b", numCtx: 8192, think: true, askFirst: true },
+    result: { answer: "done", reply: { id: "q-2", threadId: "t1", rev: 2, messageId: "m-q3", text: "one more thing", model: "qwen3:14b", numCtx: 8192, think: true, at: 1_700_000_000_000, stage: "held", held: { why: "refused", code: "wont-fit", message: "it does not fit" } } },
+  },
   "reply.change": { params: { id: "q-1", base: "m-q1", messageId: "m-q2", text: "and after that?" }, result: { answer: "done", reply: { id: "q-1", threadId: "t1", rev: 3, messageId: "m-q2", text: "and after that?", at: 1_700_000_000_000, stage: "queued" } } },
   "reply.edit": { params: { id: "q-1", open: true }, result: { answer: "elsewhere", reply: { id: "q-1", threadId: "t1", rev: 4, messageId: "m-q1", text: "and then?", at: 1_700_000_000_000, stage: "editing", by: "2", back: { stage: "held", held: { why: "stopped" } } } } },
   "reply.remove": { params: { id: "q-1" }, result: { answer: "gone", why: "removed" } },

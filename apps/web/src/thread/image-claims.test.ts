@@ -27,7 +27,7 @@ describe("fabricated mixed-image follow-ups", () => {
     const image: Message = { id: "ship", threadId, role: "assistant", createdAt: 1, content: "a ship", imageJob: { jobId: "ship", threadId, state: "queued" } };
     const tools: ToolStep[] = [{ callId: "image", name: "image", state: "done", summary: "Image queued", links: [] }];
     const text = "The report total is 42. [Download](https://invented.example/ship.png) **more";
-    const live = { gen: 1, threadId, turnId: "turn", model: "model", startedAt: 1, thinking: "", text, tools, pendingUser: null };
+    const live = { threadId, turnId: "turn", model: "model", startedAt: 1, thinking: "", text, tools };
     const saved: Message = { id: "answer", threadId, role: "assistant", createdAt: 2, content: text, tools };
     const check = () => {
       const html = renderToStaticMarkup(createElement(Timeline, { threadId }));
@@ -117,7 +117,7 @@ describe("fabricated mixed-image follow-ups", () => {
         if (event.type === "tool") { const i = steps.findIndex(s => s.callId === event.step.callId); if (i < 0) steps.push(event.step); else steps[i] = event.step; }
         if (event.type === "delta") {
           text += event.text;
-          setState({ threadId: thread.id, messages: { [thread.id]: store.getThread(thread.id).messages }, turns: { [thread.id]: { gen: 1, threadId: thread.id, turnId: "turn", model: "model", startedAt: 1, thinking: "", text, tools: [...steps], pendingUser: null } } });
+          setState({ threadId: thread.id, messages: { [thread.id]: store.getThread(thread.id).messages }, turns: { [thread.id]: { threadId: thread.id, turnId: "turn", model: "model", startedAt: 1, thinking: "", text, tools: [...steps] } } });
           if (text.includes("[Echo]")) { check(); liveChecks++; }
         }
         if (event.type === "complete") store.appendMessage({ threadId: thread.id, role: "assistant", content: event.content, tools: event.tools });

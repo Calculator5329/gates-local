@@ -14,7 +14,7 @@ beforeAll(async () => {
 
 /** The server's record of a waiting message, as the window holds it. */
 const q = (over: Partial<QueuedRow> = {}): WaitingReply => repliesOf([{ id: "q1", threadId: "t1", text: "hello", at: 1, waitFor: "setup", ...over }]).get("q1") as WaitingReply;
-const turn = (threadId: string, end?: { kind: "stopped"; secs: number }) => ({ gen: 1, threadId, turnId: `turn-${threadId}`, model: "m", startedAt: 0, thinking: "", text: "", tools: [], pendingUser: null, ...(end ? { end } : {}) });
+const turn = (threadId: string, end?: { kind: "stopped"; secs: number }) => ({ threadId, turnId: `turn-${threadId}`, model: "m", startedAt: 0, thinking: "", text: "", tools: [], ...(end ? { end } : {}) });
 
 it("a message waiting for setup says so while setup runs", () => {
   expect(queueWords(q(), false, undefined, undefined, true)).toBe(AFTER_SETUP);

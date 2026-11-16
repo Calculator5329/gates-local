@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { methodSamples } from "@gates-local/contracts/testing";
 import { installBrowser, tick, until } from "../../../test/harness.ts";
 import { answerSends, heldOnServer, queuedOf } from "../../../test/queue.ts";
 
@@ -42,7 +43,7 @@ it.each([
   }
   expect(store.getState().editingQueued).toBeNull();
   expect(drafts.getDraft("A")).toMatchObject({ text: "queued words, edited", sendId: null, beforeEdit: backup });
-  if (queued) store.setState({ runtime: { state: "installing", owner: "app", baseUrl: "http://runtime.invalid" } });
+  if (queued) { browser.server.push("runtime.changed", { ...methodSamples["runtime.status"].result, state: "installing" }); await tick(); }
   await session.send("queued words, edited");
   if (queued) expect(queuedOf(store.getState())).toMatchObject([{ threadId: "A", text: "queued words, edited" }]);
   else expect(browser.server.calls("chat.send").at(-1)?.params).toMatchObject({ threadId: "A", content: "queued words, edited" });

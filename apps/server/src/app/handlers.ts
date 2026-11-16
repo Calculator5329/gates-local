@@ -17,6 +17,7 @@ import type { HandlerContext } from "../ws/server.ts";
 import type { Admission } from "./admit.ts";
 import type { DrawTurn, ThreadImages } from "./drawing.ts";
 import { AppError, refusalOf, threadGoing } from "./errors.ts";
+import type { QueuePump } from "./queue-pump.ts";
 import type { AppContext, Taken, Turn } from "./turn.ts";
 import type { AppHandlers } from "./types.ts";
 
@@ -35,11 +36,13 @@ export interface HandlersDeps extends Pick<AppContext,
   readonly threadImages: ThreadImages;
   readonly drawTurn: DrawTurn;
   readonly admission: Admission;
+  readonly queue: Pick<QueuePump, "start" | "behind">;
+  readonly newId: () => string;
 }
 
 export function createHandlers({
   deps, store, runtime, catalog, log, push, turns, byThread, deleting, closing, imageReady, imageFiles, attachedFiles,
-  replies, fitTable, reserve, pump, pushSpeeds, measure, threadImages, drawTurn, admission,
+  replies, fitTable, reserve, pump, pushSpeeds, measure, threadImages, drawTurn, admission, queue, newId,
 }: HandlersDeps) {
   const { queueImage, cancelThreadImages } = threadImages;
   const { admitTurn, admitting, blockingTurns, planBeside, notReady } = admission;
@@ -99,6 +102,7 @@ export function createHandlers({
         ...(model === "" ? {} : { model }),
         ...(draw === undefined ? { numCtx } : { draw, ...(drawCount === undefined ? {} : { drawCount }) }),
         ...(think === undefined ? {} : { think }),
+        ...(retryOf === undefined ? {} : { retryOf }),
       }, retryOf !== undefined, at);
     };
     if (draw !== undefined) {
@@ -279,6 +283,29 @@ export function createHandlers({
       return replies.list();
     },
 
+    "reply.send": async (params) => {
+      const { threadId, draw, images = [] } = params;
+      // why: an unknown chat or pictures that are not pictures are errors and make no record
+      store.getThread(threadId);
+      if (draw === undefined) {
+        try { checkAttachments(images); }
+        catch (e) { throw new AppError("image-input", e instanceof Error ? e.message : "Could not attach these images."); }
+      }
+      const turnId = newId();
+      // why: a picture needs no chat model, so it waits only for its own chat
+      const sent = replies.send(params, { at: Date.now(), behind: draw === undefined ? queue.behind() : "reply", busy: byThread.has(threadId), turnId });
+      if (sent.kind === "cannot") {
+        if (closing()) throw new AppError("shutting-down", "the server is stopping; no new turns");
+        throw new AppError("turn-active", `thread ${threadId} has a reply on its way or a message waiting; a Retry does not wait`);
+      }
+      if (sent.kind === "answer") return moved(sent.answer);
+      const { asked, refused } = await queue.start(sent.picked, turnId, sent.attempt);
+      pump();
+      // why: a Retry has no row to hold its refusal, so the window that pressed it is told here
+      if (refused !== undefined && params.retryOf !== undefined) throw refused;
+      if (asked !== undefined) return { answer: "gone" as const, why: "sent" as const, question: asked };
+      return sent.answer();
+    },
     "reply.change": (params, ctx) => moved(replies.change(params, ctx.clientId)),
     "reply.edit": (params, ctx) => {
       const answer = replies.edit(params, ctx.clientId);

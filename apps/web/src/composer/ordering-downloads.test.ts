@@ -108,7 +108,7 @@ function ended(outcome: "done" | "error" | "cancelled", firstModel: boolean, ava
         expect(state.pulls[NAME], "disconnect and unavailable reads must preserve the download row").toEqual(w.initial);
       } else {
         expect(state.pulls[NAME], "a job that ended offline cannot remain Downloading").toBeUndefined();
-        expect(w.wire.a.session.queueReason(state), "first-model messages cannot wait for a nonexistent download").toBeNull();
+        expect(w.wire.a.session.sendsBeforeReady(state), "first-model messages cannot wait for a nonexistent download").toBe(false);
         if (firstModel && outcome === "done") {
           expect(waiting(w.wire.a), "a first-model send resumes after the installed snapshot").toEqual([]);
           expect(w.wire.server.calls("chat.send")).toHaveLength(1);
@@ -213,7 +213,7 @@ it.each(["error", "cancelled"] as const)("RS-01: connected %s keeps the message 
     void client.session.pull(NAME); await drain();
     expect(tray()).toContain(WAITING);
     client.socket.close(); await drain();
-    expect(client.session.queueReason(client.store.getState())).toBeNull();
+    expect(client.session.sendsBeforeReady(client.store.getState())).toBe(false);
     expect(tray(), "a disconnect retains the live download and must not say stopped").toContain(WAITING);
     client.session.removeQueued(q.id); await drain();
     expect(tray(), "a Remove the server never heard changes nothing").toContain(MESSAGE);

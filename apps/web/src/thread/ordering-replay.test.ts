@@ -323,8 +323,8 @@ export function sendReconnect(): ReplayScenario<World> {
     ],
     check(w, order) {
       const state = draftView(w.a.store, w.a.drafts);
-      expect(w.server.calls("chat.send"), "one user action must send once").toHaveLength(1);
-      const visible = state.draft === "one message" || state.turns["t1"]?.pendingUser === "one message" ||
+      expect(w.server.calls("reply.send"), "one user action must send once").toHaveLength(1);
+      const visible = state.draft === "one message" || [...state.replies.values()].some((r) => r.stage === "starting" && r.text === "one message") ||
         state.queued.some((queued) => queued.text === "one message") || (state.messages["t1"] ?? []).some((message) => message.content === "one message");
       expect(visible, "message must remain visible after " + order.at(-1)).toBe(true);
       if (w.server.admissions.has("turn-1") || w.server.turns.has("turn-1")) expect(state.queued.filter((queued) => queued.text === "one message"), "active admission must never return to queue").toEqual([]);
@@ -340,12 +340,15 @@ export function stopSend(): ReplayScenario<World> {
       event("A.first-send.request", [], (w) => w.step(() => {
         w.a.store.setState({ view: "thread", threadId: "t1" }); w.a.drafts.replaceDraft("t1", { text: "first" }); void w.a.session.send("first");
       })),
-      // Selected input script targets the first admission with Stop, then sends
-      // in another chat. Neither press waits for a server acknowledgement.
+      // Stop on the first chat, then a send in another. Neither press waits for a server answer;
+      // a Stop has a reply to name only once the server has begun the first.
       event("A.Stop", ["A.first-send.request"], (w) => w.step(() => {
         const turnId = w.a.store.getState().turns["t1"]?.turnId;
-        if (turnId !== null && turnId !== undefined) expect(turnId).toBe("turn-1");
-        w.expectedCancelled.add("turn-1"); w.a.session.stop();
+        if (turnId !== undefined) {
+          expect(turnId).toBe(w.server.rid("turn-1"));
+          w.expectedCancelled.add("turn-1");
+        }
+        w.a.session.stop();
       })),
       event("A.next-send.request", ["A.Stop"], (w) => w.step(() => {
         w.a.store.setState({ view: "thread", threadId: "t2" }); w.a.drafts.replaceDraft("t2", { text: "second" }); void w.a.session.send("second");
@@ -363,8 +366,8 @@ export function stopSend(): ReplayScenario<World> {
       expect(w.server.cancelled.every((turn) => w.expectedCancelled.has(turn)), "Stop may cancel only the reply it named").toBe(true);
       expect(w.server.cancelled, "the newer reply must not receive an old Stop").not.toContain("turn-2");
       if (complete) {
-        expect(w.server.cancelled).toContain("turn-1");
-        expect(w.a.store.getState().turns["t2"]).toMatchObject({ turnId: "turn-2", threadId: "t2", pendingUser: null });
+        if (w.expectedCancelled.has("turn-1")) expect(w.server.cancelled).toContain("turn-1");
+        expect(w.a.store.getState().turns["t2"]).toMatchObject({ turnId: w.server.rid("turn-2"), threadId: "t2" });
         expect(w.a.store.getState().turns["t2"]?.end).toBeUndefined();
       }
     },
@@ -404,7 +407,7 @@ export function stopSavedPartial(): ReplayScenario<World> {
       expect(w.server.cancelled.every((turn) => w.expectedCancelled.has(turn)), "Stop may cancel only the reply it named").toBe(true);
       if (complete) {
         expect(replies).toMatchObject([{ id: "reply-turn-1", content: "so far", interrupted: true }]);
-        expect(state.turns["t2"]).toMatchObject({ turnId: "turn-2", threadId: "t2", pendingUser: null });
+        expect(state.turns["t2"]).toMatchObject({ turnId: w.server.rid("turn-2"), threadId: "t2" });
         expect(state.turns["t2"]?.end).toBeUndefined();
       }
     },
@@ -467,7 +470,7 @@ export function retryThroughHistory(): ReplayScenario<World> {
     ],
     check(w, _order, complete) {
       if (!complete) return;
-      const asked = (w.server.calls("chat.send").at(-1)!.params as { messageId: string }).messageId;
+      const asked = (w.server.calls("reply.send").at(-1)!.params as { messageId: string }).messageId;
       expect(w.a.store.getState().messages["t1"]?.map((m) => m.id)).toEqual([asked]);
     },
   };

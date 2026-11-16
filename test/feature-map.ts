@@ -300,7 +300,7 @@ export const FEATURES: readonly Feature[] = [
     where: "The right end of the composer, or Enter.",
     window: ["composer/Composer.tsx", "composer/composer-press.ts", "composer/chat.ts"],
     server: ["app/admit.ts", "app/handlers.ts", "chat"],
-    calls: ["chat.send"],
+    calls: ["chat.send", "reply.send"],
     pushes: [],
     specs: ["composer-action.spec.ts", "composer-panel.spec.ts"],
     testIds: ["chat.composer.send"],

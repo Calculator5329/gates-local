@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { methodSamples } from "@gates-local/contracts/testing";
 import { installBrowser, tick, until } from "../../../test/harness.ts";
 import { queuedOf } from "../../../test/queue.ts";
 
@@ -17,7 +18,7 @@ afterEach(async () => { disconnect(); browser.server.accepting = false; for (con
 
 it.each([false, true])("R4: newer words follow the created thread (queued: %s)", async queued => {
   session.newThread();
-  if (queued) store.setState({ runtime: { state: "installing", owner: "app", baseUrl: "http://runtime.invalid" } });
+  if (queued) { browser.server.push("runtime.changed", { ...methodSamples["runtime.status"].result, state: "installing" }); await tick(); }
   drafts.editDraft("first");
   const creating = browser.server.hold("threads.create"), sent = session.send("first");
   const request = await creating;
@@ -33,7 +34,7 @@ it.each([false, true])("R4: newer words follow the created thread (queued: %s)",
 
 it.each([false, true])("New thread pressed while the first chat is being created leaves no second copy of the words (queued: %s)", async queued => {
   session.newThread();
-  if (queued) store.setState({ runtime: { state: "installing", owner: "app", baseUrl: "http://runtime.invalid" } });
+  if (queued) { browser.server.push("runtime.changed", { ...methodSamples["runtime.status"].result, state: "installing" }); await tick(); }
   drafts.editDraft("only once");
   const creating = browser.server.hold("threads.create"), sent = session.send("only once");
   const request = await creating;

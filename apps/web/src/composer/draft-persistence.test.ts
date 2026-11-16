@@ -41,7 +41,7 @@ it("TD-10: the active text is stored once and both slots reload", async () => {
 it.each([{ key: 42, draft: { text: "bad", images: [], sendId: null } }, { key: "bad", draft: { text: 42, images: [], sendId: null } }, { key: "bad", draft: { text: "bad", images: [], sendId: null, beforeEdit: { text: 42 } } }])("TD-12: a malformed slot does not discard other drafts or the queue: %j", invalid => {
   const recovered = recoverDraft({ draft: "A", images: [], queued: [{ id: "q", threadId: "A", text: "queued words", at: 1 }], slots: [savedSlot("A"), invalid, savedSlot("B")] });
   expect(recovered?.slots?.map(s => s.key)).toEqual(["A", "B"]);
-  expect(recovered?.queued).toMatchObject([{ id: "q", text: "queued words", held: true }]);
+  expect(recovered?.queued).toMatchObject([{ id: "q", text: "queued words" }]);
 });
 
 it("reload keeps both threads' words and deletion removes the saved draft", async () => {
@@ -136,7 +136,7 @@ it("keeps a restored draft or queued copy's saved-message identity for a safe re
 it("restores image drafts and queued attachments on hold without losing their model or order", () => {
   const images = ["data:image/png;base64,eA=="];
   expect(recoverDraft({ draft: "look", images, editing: "q-first", queued: [{ id: "q-first", threadId: "t", text: "first", images, at: 1, model: "vision", waitFor: "reply", now: true }, { id: "q-second", threadId: "t", text: "second", at: 2, waitFor: "download" }] })).toEqual({
-    draft: "look", images, editing: "q-first", queued: [{ id: "q-first", threadId: "t", text: "first", images, at: 1, model: "vision", waitFor: "reply", held: true }, { id: "q-second", threadId: "t", text: "second", images: [], at: 2, waitFor: "reply", held: true }],
+    draft: "look", images, editing: "q-first", queued: [{ id: "q-first", threadId: "t", text: "first", images, at: 1, model: "vision" }, { id: "q-second", threadId: "t", text: "second", images: [], at: 2 }],
   });
 });
 
@@ -149,7 +149,7 @@ it("skips one queued row it cannot read and keeps the words, the other rows and 
   const slots = [{ key: "t", draft: { text: "another chat's words", images: [], sendId: null } }];
   expect(recoverDraft({ draft: "typed words", images: [], queued: [{ text: "a row from an older version" }, good], slots })).toEqual({
     draft: "typed words", images: [], editing: null, slots,
-    queued: [{ ...good, waitFor: "reply", held: true }],
+    queued: [{ ...good }],
   });
 });
 
@@ -214,7 +214,7 @@ it("legacy drafts migrate atomically, and the old queue stays saved as it was un
   expect(observed()).toMatchObject({ draft: "old", draftImages: [image], draftSendId: "retry", editingQueued: "q" });
   // no row yet: the server shows it once it has it. Until then it is owed, on hold, as it was saved
   expect(observed().queued).toEqual([]);
-  expect(oldQueueOwed()).toEqual([expect.objectContaining({ images: [image], held: true, model: "vision" })]);
+  expect(oldQueueOwed()).toEqual([expect.objectContaining({ images: [image], model: "vision" })]);
   editDraft("new");
   fixture.pending[0]!.finish(); await settled();
   const count = fixture.writes.length;
@@ -227,7 +227,7 @@ it("legacy drafts migrate atomically, and the old queue stays saved as it was un
   const resume = await watchDraft("legacy");
   // what is owed is still the saved row, with its image
   expect(observed()).toMatchObject({ draft: "new", draftImages: [image], editingQueued: "q" });
-  expect(oldQueueOwed()).toEqual([expect.objectContaining({ text: "queued", images: [image], held: true })]);
+  expect(oldQueueOwed()).toEqual([expect.objectContaining({ text: "queued", images: [image] })]);
   resume();
 });
 
@@ -355,7 +355,7 @@ it("a saved queue the server has yet to take is read back even once the browser 
   fixture.records.set(JSON.stringify("owed"), { draft: "", images: [], queued: [waiting], owed: true, editing: null });
   const a = await freshWatcher(); a.setState({ threadId: "A" });
   const stop = await a.watchDraft("owed");
-  expect((await import("./chat.ts")).oldQueueOwed()).toMatchObject([{ id: "w", held: true }]);
+  expect((await import("./chat.ts")).oldQueueOwed()).toMatchObject([{ id: "w" }]);
   // no connection yet: still owed, so still saved
   a.editDraft("words");
   while (fixture.pending.length) { fixture.pending[0]!.finish(); await settled(); }

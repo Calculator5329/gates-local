@@ -148,13 +148,11 @@ it("a queue add the server refuses as removed shows no row, is owed no longer, a
   expect(getState().notice).toBeNull();
 });
 
-it("a queued message refused for memory in view shows what runs instead, and the choice taken goes to the server's entry", async () => {
+it("a queued message refused for memory says what runs instead on its row alone, and the choice taken goes to the server's entry", async () => {
   const offer = { context: { numCtx: 8192, verdict: "fits" as const }, short: { needBytes: 2, gpuBytes: 1, ramBytes: 0, shortBytes: 1 } };
   setState(waiting("q1"));
   chat.recordChanged({ kind: "is", reply: record("q1", { model: "qwen3.5:9b", numCtx: 16384, stage: "held", held: { why: "refused", code: "wont-fit", message: "too big", offer } }) });
-  const s = getState();
-  expect(s.notice).not.toBeNull();
-  expect(s.noticeOffer).toEqual({ notice: s.notice, model: "qwen3.5:9b", numCtx: 16384, offer });
+  expect(getState().notice, "the row carries the offer: nothing under the box says it again").toBeNull();
   expect(await chooseForQueued("q1", "qwen3.5:9b", 8192), "the server has the choice").toBe(true);
   expect(calls.at(-1)).toEqual({ method: "reply.change", params: { id: "q1", base: "m-q1", messageId: "m-q1", model: "qwen3.5:9b", numCtx: 8192 } });
 });

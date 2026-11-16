@@ -16,7 +16,7 @@ it("names image generation while a chat is waiting to be admitted behind it", as
   vi.stubGlobal("window", {});
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   const { Timeline } = await import("./Thread.tsx");
-  setState({ threadId: "chat", turns: { chat: { gen: 1, threadId: "chat", turnId: null, model: "tiny-chat:2k", startedAt: Date.now(), thinking: "", text: "", tools: [], pendingUser: "hello" } },
+  setState({ threadId: "chat", turns: { chat: { threadId: "chat", turnId: "q-1", model: "tiny-chat:2k", startedAt: Date.now(), thinking: "", text: "", tools: [] } },
     imageStatus: { state: "busy", owner: "external" } });
   expect(renderToStaticMarkup(createElement(Timeline, { threadId: "chat" }))).toContain("<span>Waiting for an image</span>");
 });

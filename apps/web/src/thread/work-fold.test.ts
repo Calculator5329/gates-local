@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, ReplyRecord, ReplyTimes, ToolStep } from "@gates-local/contracts";
 import { type LiveTurn, setState, type State } from "../lib/store/store.ts";
-import { reduceTurn, type TurnEvent } from "./turn.ts";
+import { reduceTurn, type ChatEvent } from "./turn.ts";
 
 vi.mock("../lib/store/store.ts", async (original) => {
   const actual = await original<typeof import("../lib/store/store.ts")>();
@@ -22,13 +22,13 @@ const step = (callId: string, state: ToolStep["state"], durationMs?: number): To
   ({ callId, name: "shell", state, summary: "Searching your library", ...(durationMs === undefined ? {} : { durationMs }) });
 const record = (patch: Partial<ReplyRecord>): ReplyRecord => ({ stage: "waiting", startedAt: 0, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {}, ...patch });
 /** A turn this client sent at 0. */
-const sent = (): LiveTurn => ({ gen: 1, threadId: T, turnId: "turn", model: "m", startedAt: 0, thinking: "", text: "", tools: [], pendingUser: null });
+const sent = (): LiveTurn => ({ threadId: T, turnId: "turn", model: "m", startedAt: 0, thinking: "", text: "", tools: [] });
 /** The server's saved times for a reply that ended at `secs` with `workMs` of work. */
 const stamped = (reason: ReplyTimes["ended"]["reason"], secs: number, workMs?: number, why?: ReplyTimes["why"]): ReplyTimes =>
   ({ startedAt: 0, spans: [], callsAt: {}, ended: { reason, at: secs * 1000 }, ...(workMs === undefined ? {} : { workMs }), ...(why === undefined ? {} : { why }) });
 
 /** The turn after each event at its time, as chat.ts applies them. */
-function play(turn: LiveTurn, events: readonly (readonly [number, TurnEvent])[]): LiveTurn {
+function play(turn: LiveTurn, events: readonly (readonly [number, ChatEvent])[]): LiveTurn {
   return events.reduce<LiveTurn>((t, [at, e]) => reduceTurn(t, e, at) ?? t, turn);
 }
 /** A record pushed at `at`. */

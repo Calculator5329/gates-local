@@ -108,15 +108,20 @@ export class OrderingServer extends FakeServer {
     } else if (request.method === "threads.get") {
       this.log.push(request);
       respond({ thread: methodSamples["threads.create"].result, messages: this.messages });
-    } else if (request.method === "chat.send") {
+    } else if (request.method === "reply.send" && this.modelsSnapshot.length === 0) {
+      // no model yet: the server keeps it waiting for the download, as the base server's queue does
+      super.handle(socket, request);
+    } else if (request.method === "chat.send" || request.method === "reply.send") {
       this.log.push(request);
-      const { threadId, content, messageId } = request.params as { threadId: string; content: string; messageId?: string };
+      const { threadId, content, text, messageId, id, retryOf } = request.params as { threadId: string; content?: string; text?: string; messageId?: string; id?: string; retryOf?: string };
       const turnId = `turn-${++this.nextTurn}`;
       // saved under the id the send asked for, as app.ts saves it
-      const userMessage: Message = { id: messageId ?? `user-${this.nextTurn}`, threadId, role: "user", content, createdAt: this.nextTurn };
+      const userMessage: Message = { id: messageId ?? `user-${this.nextTurn}`, threadId, role: "user", content: content ?? text ?? "", createdAt: this.nextTurn };
       this.admissions.set(turnId, userMessage);
-      // answered with the turn id once it is taken (chat row 32); the start brings the saved question
-      save(turnId, { turnId });
+      if (id !== undefined) this.recordOf.set(turnId, id);
+      if (retryOf !== undefined) this.retries.set(turnId, retryOf);
+      // answered once it is taken (chat row 32); the start brings the saved question
+      save(turnId, id === undefined ? { turnId } : { answer: "done", reply: this.startingRecord(turnId, userMessage) });
       if (!this.holdChat) this.response(turnId);
       if (!this.deferAdmission) this.admit(turnId);
     } else if (request.method === "reply.list") {
@@ -124,8 +129,13 @@ export class OrderingServer extends FakeServer {
       respond(this.listed());
     } else if (request.method === "reply.stop") {
       this.log.push(request);
-      this.cancelled.push((request.params as { id: string }).id);
-      respond(methodSamples["reply.stop"].result);
+      const { id } = request.params as { id: string };
+      // by the turn it stopped, whichever id the window named it by
+      const turnId = [...this.recordOf].find(([, record]) => record === id)?.[0] ?? id;
+      this.cancelled.push(turnId);
+      // answered with the record it stopped, at a rev between its live one and its end
+      const question = this.turns.get(turnId);
+      respond(question === undefined ? methodSamples["reply.stop"].result : { answer: "done", reply: { ...this.live(turnId, question), rev: 3, stage: "stopping", stoppedAt: Date.now() } });
     } else super.handle(socket, request);
   }
 
@@ -153,16 +163,28 @@ export class OrderingServer extends FakeServer {
     target.frame({ type: "push", channel: "settings.changed", payload: tagged ? payload : settings, ...(delivery.sync ? { sync: delivery.sync } : {}) });
   }
 
+  /** The record each turn of a window's reply.send works for: the id the window made. */
+  private readonly recordOf = new Map<string, string>();
+  rid(turnId: string): string {
+    return this.recordOf.get(turnId) ?? turnId;
+  }
+  /** The row each Retry's turn replaces. */
+  private readonly retries = new Map<string, string>();
+  private startingRecord(turnId: string, m: Message): Reply {
+    const retryOf = this.retries.get(turnId);
+    return { id: this.rid(turnId), threadId: m.threadId, rev: 1, messageId: m.id, text: m.content, at: m.createdAt, stage: "starting", attempt: 1, startedAt: 1, ...(retryOf === undefined ? {} : { retryOf }) };
+  }
+
   /** A turn's record while its reply is written, as every window is told once its question is saved. */
   private live(turnId: string, question: Message): Reply {
-    return { id: turnId, threadId: question.threadId, rev: 2, questionId: question.id, model: "gemma3:4b", startedAt: 1, workMs: 0, toolMs: 0, try: 1, spans: [], callsAt: {}, stage: "thinking" };
+    return { id: this.rid(turnId), threadId: question.threadId, rev: 2, questionId: question.id, model: "gemma3:4b", startedAt: 1, workMs: 0, toolMs: 0, try: 1, spans: [], callsAt: {}, stage: "thinking" };
   }
 
   /** What a window reads at connect: the messages that wait; and of this server's own turns, a send taken and not yet saved is on its way, a saved one is being written, an ended one is on no list. */
   private listed(): readonly ReplyListed[] {
     return [
       ...this.listing(),
-      ...[...this.admissions].map(([turnId, m]): ReplyListed => ({ reply: { id: turnId, threadId: m.threadId, rev: 1, messageId: m.id, text: m.content, at: m.createdAt, stage: "starting", attempt: 1, startedAt: 1 } })),
+      ...[...this.admissions].map(([turnId, m]): ReplyListed => ({ reply: this.startingRecord(turnId, m) })),
       ...[...this.turns].filter(([turnId]) => !this.ended.has(turnId)).map(([turnId, m]): ReplyListed => ({ reply: this.live(turnId, m) })),
     ];
   }
@@ -179,8 +201,8 @@ export class OrderingServer extends FakeServer {
     const event: Payload<"chat.event">["event"] = done
       ? { type: "done", message, stopReason: "stop" }
       : { type: "start", model: "gemma3:4b", userMessage };
-    target.frame({ type: "push", channel: "chat.event", payload: { turnId, threadId: userMessage.threadId, event } });
-    if (done) this.record(target, { id: turnId, threadId: userMessage.threadId, rev: 3, stage: "done", at: Date.now(), questionId: userMessage.id, replyId: message.id }, [message]);
+    target.frame({ type: "push", channel: "chat.event", payload: { turnId, replyId: this.rid(turnId), threadId: userMessage.threadId, event } });
+    if (done) this.record(target, { id: this.rid(turnId), threadId: userMessage.threadId, rev: 4, stage: "done", at: Date.now(), questionId: userMessage.id, replyId: message.id }, [message]);
     else this.record(target, this.live(turnId, userMessage), [userMessage]);
   }
 
@@ -191,8 +213,8 @@ export class OrderingServer extends FakeServer {
     const event: Payload<"chat.event">["event"] = ended
       ? { type: "error", code: "cancelled", message: "stopped", partial: { id: `reply-${turnId}`, threadId: userMessage.threadId, role: "assistant", content: text, interrupted: true, createdAt: 1_000 }, ended: { reason: "stopped", at: Date.now() } }
       : { type: "delta", text };
-    target.frame({ type: "push", channel: "chat.event", payload: { turnId, threadId: userMessage.threadId, event } });
-    if (event.type === "error" && event.partial !== undefined) this.record(target, { id: turnId, threadId: userMessage.threadId, rev: 3, stage: "stopped", at: event.ended?.at ?? Date.now(), questionId: userMessage.id, replyId: event.partial.id, by: { who: "person" } }, [event.partial]);
+    target.frame({ type: "push", channel: "chat.event", payload: { turnId, replyId: this.rid(turnId), threadId: userMessage.threadId, event } });
+    if (event.type === "error" && event.partial !== undefined) this.record(target, { id: this.rid(turnId), threadId: userMessage.threadId, rev: 4, stage: "stopped", at: event.ended?.at ?? Date.now(), questionId: userMessage.id, replyId: event.partial.id, by: { who: "person" } }, [event.partial]);
   }
 
   /** A runtime error after some words: the terminal event carries the saved row and the server's reason. */
@@ -203,8 +225,8 @@ export class OrderingServer extends FakeServer {
     // the row carries how its turn ended, as the server stamps it (chat row 32)
     const partial: Message = { id: `reply-${turnId}`, threadId: userMessage.threadId, role: "assistant", content: text, interrupted: true, createdAt: 1_000,
       times: { startedAt: 1_000, spans: [], callsAt: {}, ended, why: { code: "runtime-error", message } } };
-    target.frame({ type: "push", channel: "chat.event", payload: { turnId, threadId: userMessage.threadId, event: { type: "error", code: "runtime-error", message, partial, ended } } });
-    this.record(target, { id: turnId, threadId: userMessage.threadId, rev: 3, stage: "failed", at: ended.at, questionId: userMessage.id, code: "runtime-error", message }, [partial]);
+    target.frame({ type: "push", channel: "chat.event", payload: { turnId, replyId: this.rid(turnId), threadId: userMessage.threadId, event: { type: "error", code: "runtime-error", message, partial, ended } } });
+    this.record(target, { id: this.rid(turnId), threadId: userMessage.threadId, rev: 4, stage: "failed", at: ended.at, questionId: userMessage.id, code: "runtime-error", message }, [partial]);
   }
 
   admittedPush(turnId: string, label: string): void {

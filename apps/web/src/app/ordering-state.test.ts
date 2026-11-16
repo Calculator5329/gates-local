@@ -110,7 +110,7 @@ function offscreenReconnect(): ReplayScenario<World> {
       w.wire.server.admittedPush("turn-1", "A"); w.wire.server.admittedPush("turn-1", "B");
       w.wire.server.response("turn-1"); await drain();
       expect(openTurn(w.wire.a.store)).toBeNull();
-      expect(runningIds(w.wire.a.store)).toEqual({ t1: "turn-1" });
+      expect(runningIds(w.wire.a.store)).toEqual({ t1: w.wire.server.rid("turn-1") });
       return w;
     },
     witnesses: [
@@ -142,8 +142,8 @@ function offscreenReconnect(): ReplayScenario<World> {
       // after a drop the mark is the server's to give back: the list read at the reconnect names the reply only while it is still written
       const listed = at("hydration.release") !== -1 && (at("server.done") === -1 || at("server.done") > at("socket.reconnect"));
       const running = at("done.push-A") === -1 && (at("socket.drop") === -1 || listed);
-      expect(runningIds(w.wire.a.store), "an off-screen reply is marked as running only while the server says it is").toEqual(running ? { t1: "turn-1" } : {});
-      expect(runningIds(w.wire.b.store)).toEqual(order.includes("done.push-B") ? {} : { t1: "turn-1" });
+      expect(runningIds(w.wire.a.store), "an off-screen reply is marked as running only while the server says it is").toEqual(running ? { t1: w.wire.server.rid("turn-1") } : {});
+      expect(runningIds(w.wire.b.store)).toEqual(order.includes("done.push-B") ? {} : { t1: w.wire.server.rid("turn-1") });
       if (complete) expect(w.wire.a.store.getState().conn.kind).toBe("open");
     },
   };

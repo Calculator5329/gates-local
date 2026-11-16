@@ -13,7 +13,7 @@ import { ctxFor, describeModel, k, noGpu, slowReason, timeLeft, verdictOf } from
 import { DownloadBar, LoadRing } from "./LoadBar.tsx";
 import { loadGuess } from "../lib/store/load-times.ts";
 import { MakerMark } from "../models/MakerMark.tsx";
-import { RefusalNote } from "./RefusalNote.tsx";
+import { RefusalNote, Slower } from "./RefusalNote.tsx";
 import { pickerLabels } from "../picker/picker-models.ts";
 import { imagePickerScreen, pickerScreen, threadScreen } from "../app/screen-loaders.ts";
 import { chosenImage, imageCount, imageMode, imagesUnset, runKey, sizeLabel } from "../image/image-choice.ts";
@@ -31,6 +31,7 @@ import { useRefused } from "./refused-files.ts";
 import {
   cancelQueuedEdit,
   cancelStopAsk,
+  chooseForQueued,
   confirmStopAsk,
   editQueued,
   editedElsewhere,
@@ -38,7 +39,7 @@ import {
   readImageRun,
   openSettings,
   pickImageCount,
-  queueReason,
+  sendsBeforeReady,
   removeQueued,
   send,
   sendQueuedNow,
@@ -131,12 +132,12 @@ export function Composer() {
   const isStreaming = useStore(streamingHere);
   const editingId = useStore((s) => s.editingQueued);
   const editing = editingId !== null;
-  const running = useStore((s) => runningTurn(s, s.threadId)?.gen ?? null);
+  const running = useStore((s) => runningTurn(s, s.threadId)?.turnId ?? null);
   const drawingNow = useStore(runningKind) === "image";
   // Enter adds a new line only on a phone-sized touch screen; with no hover over a remote desktop it still sends
   const touch = useMedia(PHONE_TOUCH);
   const freed = stopsChat(fit);
-  const wait = useStore(queueReason);
+  const early = useStore(sendsBeforeReady);
   const first = useStore(firstPull);
   const firstProgress = useStore((s) => {
     const p = first === undefined ? undefined : s.pulls[first];
@@ -183,7 +184,7 @@ export function Composer() {
   useEffect(() => {
     if (!blocked && !isTouch() && document.activeElement === document.body) ta.current?.focus({ preventScroll: true });
   }, [blocked]);
-  const queueable = wait !== null;
+  const queueable = early;
   const shownTag = first ?? model;
   const name = shownTag === undefined ? "No model" : pickerLabels([...chatModels(models ?? []).map(m => m.name), shownTag], catalog).get(shownTag) ?? shownTag;
   const loading = loadState === "loading";
@@ -295,7 +296,7 @@ export function Composer() {
   const talk = useTalk().on;
   const stopThisReply = () => {
     const s = getState();
-    if (runningTurn(s, s.threadId)?.gen === running) stop();
+    if (runningTurn(s, s.threadId)?.turnId === running) stop();
   };
   const action = showStop ? `stop:${running}` : editing ? `edit:${editingId}` : memRefused ? `memory:${model}:${numCtx}` : isStreaming ? `queue:${running}` : "send";
   // oxlint-disable-next-line gates/effect-needs-reason -- the shared tooltip, drawn outside React, closed before paint once the button it describes does something else
@@ -550,7 +551,7 @@ export function queueWords(q: WaitingReply, editing: boolean, first: string | un
   // setup has ended: a download that runs is what it waits for now; with none, the offer above the composer says a model is needed
   if (wait?.what === "setup") return installing ? AFTER_SETUP : first !== undefined ? AFTER_DOWNLOAD : null;
   if (wait?.what === "retry") return RETRYING;
-  if (at.stage === "held") return at.held.why === "failed" ? RETRY_FAILED : "On hold";
+  if (at.stage === "held") return at.held.why === "failed" ? RETRY_FAILED : at.held.why === "refused" ? HELD_FOR[at.held.code] ?? "On hold" : "On hold";
   // why: Send now waits only for its own chat: the server's record says it goes next
   return elsewhere && at.stage === "queued" ? AFTER_OTHER_REPLY : null;
 }
@@ -568,6 +569,7 @@ const AFTER_OTHER_REPLY = "Sends when another chat's reply ends";
 /** The words for a queue behind a failed reply the server runs once more. */
 const RETRYING = "Retrying the reply before it";
 const RETRY_FAILED = "On hold: the reply before it didn't finish";
+const HELD_FOR: Partial<Record<string, string>> = { "wont-fit": "On hold: not enough memory", "would-stop": "On hold: another chat's reply is using the memory" };
 /** A message waiting for the first download: the row shows a clock, and this is its tip and its spoken words. */
 export const AFTER_DOWNLOAD = "Sends when the download finishes";
 /** The same clock for a message waiting for setup. */
@@ -624,6 +626,33 @@ const andFocus = (act: () => void) => () => {
   focusComposer();
 };
 
+function QueueOffer({ q, n }: { q: WaitingReply; n: number }) {
+  const fallback = useStore((s) => s.model);
+  const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
+  if (q.stage !== "held" || q.held.why !== "refused" || q.held.code !== "wont-fit" || q.held.offer === undefined) return null;
+  const { context, model } = q.held.offer;
+  const tag = q.model ?? fallback ?? "";
+  return (
+    <>
+      {context === undefined ? null : (
+        <button type="button" className="co-act" data-testid={`chat.queue.offer-context-${n}`} aria-pressed={q.numCtx === context.numCtx && q.model === tag}
+          data-tip={`Run at ${k(context.numCtx)} context`} onClick={andFocus(() => void chooseForQueued(q.id, tag, context.numCtx))}>
+          <span>{k(context.numCtx)}</span>
+          <Slower words={context.words} />
+        </button>
+      )}
+      {model === undefined ? null : (
+        <button type="button" className="co-act" data-testid={`chat.queue.offer-model-${n}`} aria-pressed={q.model === model.model && q.numCtx === model.numCtx}
+          data-tip={`Run on ${describeModel(model.model, catalog).name}`} onClick={andFocus(() => void chooseForQueued(q.id, model.model, model.numCtx))}>
+          <MakerMark tag={model.model} />
+          <small>{k(model.numCtx)}</small>
+          <Slower words={model.words} />
+        </button>
+      )}
+    </>
+  );
+}
+
 /** More queued than this fold to the next two and a count. */
 const SHELF_ROWS = 3;
 
@@ -666,6 +695,7 @@ function QueueTray() {
             <span className="qt-s" role="status" data-tip={CLOCKED.has(words) ? words ?? undefined : undefined}>
               {CLOCKED.has(words) ? <><Icon id="clock" cls="s14" /><span className="vh">{words}</span><WaitNumbers value={words === AFTER_SETUP ? setupAt : downloadAt} /></> : words ?? ""}
             </span>
+            {editing ? null : <QueueOffer q={q} n={i + 1} />}
             {!behindSetup(q) && !editing ? (
               <button type="button" className="ibtn xs" data-testid={`chat.queue.send-now-${i + 1}`} aria-label="Send now" data-send-now data-tip={nowTip} onClick={andFocus(() => sendQueuedNow(q.id))}>
                 <SendArrow />

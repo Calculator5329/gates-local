@@ -126,6 +126,11 @@ export class FakeServer {
     });
   }
 
+  /** The record a server turn works for: a window keys its live reply by this id, made at the press for its own reply.send. */
+  replyOf(turnId: string): string {
+    return this.alias.get(turnId) ?? turnId;
+  }
+
   calls(method: MethodName): Request[] {
     return this.log.filter((r) => r.method === method);
   }
@@ -133,7 +138,7 @@ export class FakeServer {
   handle(socket: FakeSocket, req: Request): void {
     this.log.push(req);
     this.caller = this.sockets.indexOf(socket) + 1;
-    if (req.method === "chat.cancel") this.store.stop({ id: (req.params as Params<"chat.cancel">).turnId });
+    if (req.method === "chat.cancel") this.store.stop({ id: this.replyOf((req.params as Params<"chat.cancel">).turnId) });
     const answer = (result: unknown) => socket.frame({ type: "response", id: req.id, ok: true, result });
     const send = req.params as Params<"chat.send">;
     const start = (payload: Payload<"chat.event">) => {
@@ -156,7 +161,100 @@ export class FakeServer {
       if (this.asked.delete(req.id)) this.pump();
       socket.frame({ type: "response", id: req.id, ok: false, error: { code, message, ...(blocking === undefined ? {} : { blocking }) } });
     };
+    if (req.method === "reply.send" && !this.holds.get(req.method)?.length && !this.answers.has(req.method)) return this.replySend(req, answer, err);
     this.route(req, ok, err);
+  }
+
+  /**
+   * reply.send as the server answers it (app/handlers.ts): the record is made at once under the
+   * window's id. One with nothing in its way starts now, as a chat.send the server makes itself,
+   * held or answered by the test; the turn the test names is another name for that record.
+   */
+  private replySend(req: Request, answer: (result: unknown) => void, fail: (code: string, message?: string, blocking?: unknown) => void): void {
+    const p = req.params as Params<"reply.send">;
+    const behind = p.draw !== undefined || (this.runtimeReady && this.hasModels) ? "reply" as const : !this.runtimeReady ? "setup" as const : "download" as const;
+    const busy = [...this.replies.values(), ...this.asked.values()].includes(p.threadId);
+    const sent = this.store.send(p, { at: Date.now(), behind, busy, turnId: p.id });
+    if (sent.kind === "cannot") return fail("turn-active", `thread ${p.threadId} has a reply on its way or a message waiting; a Retry does not wait`);
+    if (sent.kind === "answer") {
+      this.pump();
+      return answer(sent.answer);
+    }
+    const { words } = sent.picked;
+    const params: Params<"chat.send"> = {
+      threadId: p.threadId, content: words.text, messageId: words.messageId, model: words.model ?? "", numCtx: words.numCtx ?? 4096,
+      ...(words.images?.length ? { images: words.images } : {}),
+      ...(words.files?.length ? { files: words.files } : {}),
+      ...(words.think === undefined ? {} : { think: words.think }),
+      ...(words.retryOf === undefined ? {} : { retryOf: words.retryOf }),
+      ...(words.draw === undefined ? {} : { draw: words.draw, ...(words.drawCount === undefined ? {} : { drawCount: words.drawCount }) }),
+      ...(sent.picked.now ? (sent.picked.consent !== undefined ? { stopOthers: true, ...(sent.picked.consent.kind === "named" ? { stopTurns: [...sent.picked.consent.replies] } : {}) } : { askFirst: true }) : {}),
+    };
+    const call: Request = { id: `server-${++this.serverCalls}`, method: "chat.send", params };
+    this.log.push(call);
+    // until it is answered, the send is in its chat's way
+    this.asked.set(call.id, p.threadId);
+    this.starting.set(p.id, { threadId: p.threadId, messageId: words.messageId });
+    const settle = () => {
+      this.asked.delete(call.id);
+      this.starting.delete(p.id);
+    };
+    const ok = (result: unknown) => {
+      settle();
+      const r = result as { turnId?: string; userMessage?: Message; replayed?: boolean };
+      if (r.replayed === true) {
+        this.store.refused(p.id, sent.attempt, { code: "internal", message: "this message was already sent" });
+        this.store.sent(words.messageId);
+        this.pump();
+        return answer({ answer: "gone", why: "sent", ...(r.userMessage === undefined ? {} : { question: r.userMessage }) });
+      }
+      if (typeof r.turnId === "string") this.alias.set(r.turnId, p.id);
+      // a Stop took it back while it started: its work saves nothing
+      if (!this.store.starting(p.id, sent.attempt)) {
+        this.pump();
+        return answer(sent.answer());
+      }
+      this.running(p.threadId, { turnId: p.id });
+      this.made.add(p.id);
+      this.store.begun(p.id);
+      answer(sent.answer());
+      sendAnswer((payload) => this.broadcast("chat.event", payload), params, { ...r, turnId: p.id }, () => undefined);
+      this.pump();
+    };
+    const err = (code: string, message = code, blocking?: unknown) => {
+      settle();
+      this.store.refused(p.id, sent.attempt, { code, message, ...(blocking === undefined ? {} : { blocking: blocking as never }) });
+      this.pump();
+      // a Retry has no row to hold its refusal: the window that pressed it is told
+      if (p.retryOf !== undefined) return fail(code, message, blocking);
+      answer(sent.answer());
+    };
+    this.route(call, ok, err);
+  }
+  /** The windows' reply.send records still waiting for the test's chat.send answer, by record id. */
+  private readonly starting = new Map<string, { readonly threadId: string; readonly messageId: string }>();
+  /** A turn id a test named, for the record it works for. */
+  private readonly alias = new Map<string, string>();
+
+  /**
+   * A chat event a test pushed under the turn id it named, under the record's id. A start that
+   * saved the question of a send still waiting for its answer is that send's: it began.
+   */
+  private aliased<C extends Channel>(channel: C, payload: Payload<C>): Payload<C> {
+    if (channel !== "chat.event") return payload;
+    const p = payload as Payload<"chat.event">;
+    if (!this.alias.has(p.turnId) && p.event.type === "start" && !this.made.has(p.turnId) && this.store.of(p.turnId) === undefined) {
+      const question = p.event.userMessage.id;
+      const mine = [...this.starting].find(([, s]) => s.threadId === p.threadId && s.messageId === question)?.[0];
+      if (mine !== undefined) {
+        this.alias.set(p.turnId, mine);
+        this.running(p.threadId, { turnId: mine });
+        this.made.add(mine);
+        this.store.begun(mine);
+      }
+    }
+    const to = this.alias.get(p.turnId);
+    return (to === undefined ? payload : { ...p, turnId: to }) as Payload<C>;
   }
 
   /** A test's hold or answer for the method, else the queue's own answer, else the contract sample. */
@@ -177,13 +275,15 @@ export class FakeServer {
   }
 
   /** `sync`: the number an ordered push carries (numbered-server.ts gives it). */
-  push<C extends Channel>(channel: C, payload: Payload<C>, sync?: SyncMetadata): void {
+  push<C extends Channel>(channel: C, given: Payload<C>, sync?: SyncMetadata): void {
+    const payload = this.aliased(channel, given);
     if (!this.muted) this.socket.frame({ type: "push", channel, payload: this.named(channel, payload), ...(sync === undefined ? {} : { sync }) });
     this.pushed(channel, payload);
   }
 
   /** A push to every open socket, as the real server sends it to each connected client. */
-  broadcast<C extends Channel>(channel: C, payload: Payload<C>): void {
+  broadcast<C extends Channel>(channel: C, given: Payload<C>): void {
+    const payload = this.aliased(channel, given);
     const named = this.named(channel, payload);
     if (!this.muted) for (const s of this.sockets) s.frame({ type: "push", channel, payload: named });
     this.pushed(channel, payload);

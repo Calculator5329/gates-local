@@ -1,8 +1,9 @@
 // The pump: it asks the records (chat/replies.ts) which waiting message goes next, takes it,
 // and begins its start. It listens to nothing: what happens to a start or a reply is said to
 // the record by the work itself.
-import type { Params, ResultOf } from "@gates-local/contracts";
-import type { Replies } from "../chat/replies.ts";
+import type { Message, Params, ResultOf } from "@gates-local/contracts";
+import type { Picked, Replies } from "../chat/replies.ts";
+import type { Behind } from "../chat/reply.ts";
 import { rankChatModels } from "../runtime/pick.ts";
 import { refusalOf } from "./errors.ts";
 import type { AppContext, Taken } from "./turn.ts";
@@ -18,6 +19,9 @@ export interface QueuePumpDeps extends Pick<AppContext, "turns" | "byThread" | "
 export interface QueuePump {
   /** Look at the waiting messages once the current work settles: after a turn ends, the runtime or models change, or a message does. */
   pump(): void;
+  // why: `asked` is a question saved before any work began, `refused` a refusal before any work
+  start(q: Picked, turnId: string, attempt: number): Promise<{ readonly asked?: Message | undefined; readonly refused?: unknown }>;
+  behind(): Behind;
 }
 
 export function createQueuePump({ replies, turns, byThread, closing, catalog, runtime, store, settings, newId, begin }: QueuePumpDeps): QueuePump {
@@ -46,13 +50,24 @@ export function createQueuePump({ replies, turns, byThread, closing, catalog, ru
     if (attempt === undefined) return;
     pumping = true;
     try {
+      await start(q, turnId, attempt);
+    } finally {
+      pumping = false;
+      pump();
+    }
+  }
+  const start: QueuePump["start"] = async (q, turnId, attempt) => {
+    const { words } = q;
+    try {
       const r = await begin({
         threadId: q.threadId, content: words.text, messageId: words.messageId,
-        model: words.model ?? (words.draw === undefined ? best ?? "" : ""),
+        model: words.model ?? (words.draw === undefined ? rankChatModels(catalog.current() ?? [])[0]?.name ?? "" : ""),
         numCtx: words.numCtx ?? settings?.get().defaultNumCtx ?? 4096,
         ...(words.images?.length ? { images: words.images } : {}),
         ...(words.files?.length ? { files: words.files } : {}),
         ...(words.think === undefined ? {} : { think: words.think }),
+        ...(words.tools === undefined ? {} : { tools: words.tools }),
+        ...(words.retryOf === undefined ? {} : { retryOf: words.retryOf }),
         ...(words.draw === undefined ? {} : { draw: words.draw, ...(words.drawCount === undefined ? {} : { drawCount: words.drawCount }) }),
         // Send now: a person is waiting on it, so a reply in another chat is not stopped without a yes
         ...(q.now ? (q.consent !== undefined ? { stopOthers: true, ...(q.consent.kind === "named" ? { stopTurns: q.consent.replies } : {}) } : { askFirst: true }) : {}),
@@ -61,15 +76,22 @@ export function createQueuePump({ replies, turns, byThread, closing, catalog, ru
       if ("replayed" in r) {
         replies.refused(turnId, attempt, { code: "internal", message: "this message was already sent" });
         replies.sent(words.messageId);
-      } else replies.begun(turnId);
+        return { asked: r.userMessage };
+      }
+      replies.begun(turnId);
+      return {};
     } catch (e) {
       // refused before any work began (a reply already running there, a chat being deleted)
       replies.refused(turnId, attempt, refusalOf(e));
+      return { refused: e };
     } finally {
       replies.notify();
-      pumping = false;
-      pump();
     }
-  }
-  return { pump };
+  };
+  const behind: QueuePump["behind"] = () => {
+    const { state } = runtime.status();
+    if (state === "installing") return "setup";
+    return state === "ready" && rankChatModels(catalog.current() ?? [])[0] === undefined ? "download" : "reply";
+  };
+  return { pump, start, behind };
 }

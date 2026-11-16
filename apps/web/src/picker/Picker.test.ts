@@ -5,7 +5,7 @@ import { fitWords, withNow, type FitRow } from "@gates-local/contracts";
 
 const mock = vi.hoisted(() => ({ state: undefined as unknown }));
 vi.mock("../lib/store/store.ts", () => ({ NA: "na", chatReady: () => true, useStore: (fn: (s: unknown) => unknown) => fn(mock.state), getState: () => mock.state, setState: () => undefined, streamingHere: () => false }));
-vi.mock("../lib/session/index.ts", () => Object.fromEntries(["pickModel", "pull", "openSettings", "setContext", "firstPull", "queueReason"].map(name => [name, () => undefined])));
+vi.mock("../lib/session/index.ts", () => Object.fromEntries(["pickModel", "pull", "openSettings", "setContext", "firstPull", "sendsBeforeReady"].map(name => [name, () => undefined])));
 const { Picker, ContextMemory } = await import("./Picker.tsx");
 
 /** The picker for one installed model; `tabled`: the first fit table has arrived. */

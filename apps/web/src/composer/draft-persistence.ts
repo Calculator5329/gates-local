@@ -1,12 +1,12 @@
 // IndexedDB can hold image drafts larger than localStorage's small text quota.
 import type { AttachedFile } from "@gates-local/contracts";
-import { getState, setState, subscribe, type Queued } from "../lib/store/store.ts";
+import { getState, setState, subscribe } from "../lib/store/store.ts";
 import { type DraftKey, type DraftWords, cancelQueuedDraft, draftRevision, restoreDrafts, savedDrafts, subscribeDrafts } from "../lib/store/drafts.ts";
-import { oldQueueOwed, oldQueueRead } from "./chat.ts";
+import { type SavedQueued, oldQueueOwed, oldQueueRead } from "./chat.ts";
 
 interface Slot { key: DraftKey; draft: DraftWords & { beforeEdit?: DraftWords }; }
 /** `owed`: the queue saved is one the server has yet to take, kept only until it does. */
-interface Saved { draft: string; images: readonly string[]; queued: readonly Queued[]; owed?: true; editing: string | null; sendId?: string; sendThreadId?: string; threadId?: DraftKey; slots?: readonly Slot[]; }
+interface Saved { draft: string; images: readonly string[]; queued: readonly SavedQueued[]; owed?: true; editing: string | null; sendId?: string; sendThreadId?: string; threadId?: DraftKey; slots?: readonly Slot[]; }
 const record = (v: unknown): Record<string, unknown> | undefined => typeof v === "object" && v !== null ? v as Record<string, unknown> : undefined;
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.length <= 8 && v.every(i => typeof i === "string" && i.length <= 14 * 1024 * 1024);
 /** Attached files are small references to the server's copies; anything malformed is dropped, never sent. */
@@ -26,11 +26,11 @@ const attachmentRevision = (value: unknown): string | undefined => {
 export function recoverDraft(value: unknown): Saved | undefined {
   const saved = record(value);
   if (!saved || typeof saved["draft"] !== "string" || !strings(saved["images"]) || !Array.isArray(saved["queued"])) return;
-  const queued: Queued[] = [];
+  const queued: SavedQueued[] = [];
   for (const item of saved["queued"]) {
     const q = record(item);
     if (!q || typeof q["id"] !== "string" || typeof q["threadId"] !== "string" || typeof q["text"] !== "string" || typeof q["at"] !== "number" || !Number.isFinite(q["at"]) || (q["images"] !== undefined && !strings(q["images"]))) continue;
-    queued.push({ id: q["id"], threadId: q["threadId"], text: q["text"], at: q["at"], images: q["images"] ?? [], ...withFiles(q["files"]), waitFor: "reply", held: true, ...(typeof q["messageId"] === "string" ? { messageId: q["messageId"] } : {}), ...(typeof q["model"] === "string" ? { model: q["model"] } : {}) });
+    queued.push({ id: q["id"], threadId: q["threadId"], text: q["text"], at: q["at"], images: q["images"] ?? [], ...withFiles(q["files"]), ...(typeof q["messageId"] === "string" ? { messageId: q["messageId"] } : {}), ...(typeof q["model"] === "string" ? { model: q["model"] } : {}) });
   }
   // the queue is the server's: an edit open at the reload names its row, which this save need not hold
   const editing = typeof saved["editing"] === "string" ? saved["editing"] : null;

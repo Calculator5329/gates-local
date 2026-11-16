@@ -92,11 +92,12 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
     clock: (turnId, now) => turns.get(turnId)?.clock.record(now),
     ...(rules === undefined ? {} : { rules }),
   });
-  const { pump } = createQueuePump({
+  const queue = createQueuePump({
     replies, turns, byThread, closing: () => closing, catalog, runtime, store, settings: deps.settings, newId,
     // bound late: the handlers are built last
     begin: (params, taken) => begin(params, taken),
   });
+  const { pump } = queue;
 
   /** The turn's times changed: its record as it is now, to every window (and, for the older pages, the older record). */
   const pushReply = (turn: Turn) => {
@@ -241,7 +242,7 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
   const runTurn = createTurnRunner({ ...context, queueImageFor: threadImages.queueImageFor });
   const admission: Admission = createAdmission({ ...context, runTurn });
   const drawTurn = createDrawTurn({ ...context, queueImage: threadImages.queueImage, admitting: admission.admitting, refused: admission.refused });
-  const { handlers, begin } = createHandlers({ ...context, measure, threadImages, drawTurn, admission });
+  const { handlers, begin } = createHandlers({ ...context, measure, threadImages, drawTurn, admission, queue, newId });
 
   return {
     handlers,

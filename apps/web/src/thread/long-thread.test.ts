@@ -154,7 +154,7 @@ it("keeps the live reply's element when it saves, and asks about reduced motion 
   const { Timeline } = await import("./Thread.tsx");
   const thread = longThread("live", 100);
   const user: Message = { id: "ask", threadId: "live", role: "user", content: "Last question", createdAt: 3 };
-  const live = { gen: 1, threadId: "live", turnId: "turn", userMessageId: "ask", model: "qwen3.5:9b", startedAt: 1, thinking: "", text: "The answer so far", tools: [], pendingUser: null };
+  const live = { threadId: "live", turnId: "turn", userMessageId: "ask", model: "qwen3.5:9b", startedAt: 1, thinking: "", text: "The answer so far", tools: [] };
   act(() => store.setState({ messages: { live: [...thread, user] }, turns: { live } }));
   media.length = 0;
   act(() => root.render(createElement(Timeline, { threadId: "live", key: "live" })));
@@ -224,8 +224,8 @@ async function realChat() {
 const savedAs = (threadId: string, questionId: string, answer: Message): ReplyChange =>
   ({ kind: "is", reply: { id: "running", threadId, rev: 1, stage: "done", at: answer.createdAt, questionId, replyId: answer.id }, saved: [answer] });
 
-const liveIn = (threadId: string, userMessageId: string | undefined, gen: number) =>
-  ({ gen, threadId, turnId: "running", ...(userMessageId === undefined ? {} : { userMessageId }), model: "qwen3.5:9b", startedAt: 1, thinking: "", text: "Still writing", tools: [], pendingUser: null });
+const liveIn = (threadId: string, userMessageId: string | undefined) =>
+  ({ threadId, turnId: "running", ...(userMessageId === undefined ? {} : { userMessageId }), model: "qwen3.5:9b", startedAt: 1, thinking: "", text: "Still writing", tools: [] });
 
 it("holds back the history that arrives in front of a reply that finished before it", async () => {
   const { Timeline } = await import("./Thread.tsx");
@@ -234,7 +234,7 @@ it("holds back the history that arrives in front of a reply that finished before
   const answer = thread.at(-1);
   if (answer === undefined) throw new Error("no answer");
   // the thread opens on a running reply with no history cached yet
-  act(() => store.setState({ messages: {}, turns: { "late-history": liveIn("late-history", "m1998", 30) }, threadId: "late-history", view: "thread" }));
+  act(() => store.setState({ messages: {}, turns: { "late-history": liveIn("late-history", "m1998") }, threadId: "late-history", view: "thread" }));
   idle.length = 0;
   act(() => root.render(createElement(Timeline, { threadId: "late-history", key: "late-history" })));
   expect(turns()).toHaveLength(1);
@@ -257,7 +257,7 @@ it("keeps the reply on screen, the same element in the same place, when the hist
   const [question, answer] = thread.slice(-2);
   if (question === undefined || answer === undefined) throw new Error("no last turn");
   // the admitted question is cached on its own (session/chat.ts), and its reply is running
-  act(() => store.setState({ messages: { partial: [question] }, turns: { partial: liveIn("partial", question.id, 31) }, threadId: "partial", view: "thread" }));
+  act(() => store.setState({ messages: { partial: [question] }, turns: { partial: liveIn("partial", question.id) }, threadId: "partial", view: "thread" }));
   idle.length = 0;
   act(() => root.render(createElement(Timeline, { threadId: "partial", key: "partial" })));
   const tl = doc.body.querySelector(".tl");
@@ -288,7 +288,7 @@ it("keeps one reduced-motion listener for the module, however many replies were 
   for (let i = 0; i < 3; i++) {
     const user: Message = { id: `user-${i}`, threadId: "session", role: "user", content: `Ask ${i}`, createdAt: i };
     thread = [...thread, user];
-    act(() => store.setState({ messages: { session: thread }, turns: { session: { ...liveIn("session", user.id, 40 + i), text: "Written" } } }));
+    act(() => store.setState({ messages: { session: thread }, turns: { session: { ...liveIn("session", user.id), text: "Written" } } }));
     thread = [...thread, { id: `answer-${i}`, threadId: "session", role: "assistant", content: "Written", createdAt: i }];
     act(() => store.setState({ messages: { session: thread }, turns: {} }));
   }

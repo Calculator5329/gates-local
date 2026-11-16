@@ -186,7 +186,7 @@ it.each([true, false])("X19: main's single-draft format migrates into its own sl
   expect(a.getDraft("A").beforeEdit).toEqual(editing ? { text: "", images: [], sendId: null } : undefined);
   // the old saved message is owed to the server, on hold, with its image; the server shows its row once it has it
   const { oldQueueOwed } = await import("./chat.ts");
-  if (editing) expect(oldQueueOwed()).toMatchObject([{ id: "q", images: ["queued image"], held: true }]);
+  if (editing) expect(oldQueueOwed()).toMatchObject([{ id: "q", images: ["queued image"] }]);
   else expect(oldQueueOwed()).toEqual([]);
   expect(queuedOf(a.getState())).toEqual([]);
   stop();

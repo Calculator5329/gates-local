@@ -99,7 +99,7 @@ it("keeps a reason under a question with no reply as words alone: there is no re
 it("draws the saved reply's row the moment Stop ends a reply: the mark, then Regenerate, off until the server has ended the turn", () => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
-  const turn = { threadId: "proof", gen: 1, model: "m", startedAt: 1, text: "Words so far", thinking: "", tools: [], pendingUser: null, end: { kind: "stopped", secs: 187 } };
+  const turn = { threadId: "proof", model: "m", startedAt: 1, text: "Words so far", thinking: "", tools: [], end: { kind: "stopped", secs: 187 } };
   // the server's record: stopping until its last event ends the turn
   const record = { startedAt: 1, readyAt: 1, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {}, stoppedAt: 187_001 };
   for (const ending of [true, false]) {
@@ -118,7 +118,7 @@ it("a reply stopped while thinking keeps Stop's seconds on the thought's pill, n
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   // the server's record held still where Stop ended it (decision 33)
   const reply = { stage: "ended", startedAt: 1, readyAt: 1, workMs: 4_000, toolMs: 0, attempt: 1, spans: [], callsAt: {} };
-  const live = { threadId: "proof", gen: 1, model: "m", startedAt: 1, text: "", thinking: "The question is short", tools: [], pendingUser: null, end: { kind: "stopped", secs: 4 }, reply, replyAt: 5_000 };
+  const live = { threadId: "proof", model: "m", startedAt: 1, text: "", thinking: "The question is short", tools: [], end: { kind: "stopped", secs: 4 }, reply, replyAt: 5_000 };
   setState({ messages: { proof: [] }, turns: { proof: live as never } });
   const liveHtml = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
   setState({ turns: {}, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "", thinking: "The question is short", createdAt: 1, interrupted: true, times: times("stopped", 4, { thoughtMs: 4_000, spans: [{ from: 0, ms: 4_000 }] }) }] } });
@@ -185,7 +185,7 @@ it("keeps the live reply's owning-user key when an image card arrives and the re
   vi.stubGlobal("window", {});
   const user = { id: "user", threadId: "proof", role: "user" as const, content: "A ship and a report", createdAt: 1 };
   const image = { id: "image", threadId: "proof", role: "assistant" as const, content: "a ship", createdAt: 2, imageJob: { jobId: "image", threadId: "proof", state: "queued" as const } };
-  const live = { gen: 1, threadId: "proof", turnId: "turn", userMessageId: "user", model: "model", startedAt: 1, thinking: "Checking the report", text: "The report total is 42.", tools: [], pendingUser: null };
+  const live = { threadId: "proof", turnId: "turn", userMessageId: "user", model: "model", startedAt: 1, thinking: "Checking the report", text: "The report total is 42.", tools: [] };
   setState({ messages: { proof: [user] }, turns: { proof: live } });
   const before = keys().at(-1);
   setState({ messages: { proof: [user, image] } });
@@ -195,7 +195,7 @@ it("keeps the live reply's owning-user key when an image card arrives and the re
   const answer = { id: "answer", threadId: "proof", role: "assistant" as const, content: live.text, createdAt: 3 };
   setState({ turns: {}, messages: { proof: [user, image, answer] } });
   expect(keys().at(-1)).toBe(before);
-  setState({ turns: { proof: { ...live, gen: 2, userMessageId: undefined, pendingUser: "Next report" } } });
+  setState({ turns: { proof: { threadId: "proof", turnId: "q-2", model: "model", startedAt: 1, thinking: "", text: "", tools: [] } } });
   const pending = keys();
   expect(new Set(pending).size, "a new unadmitted send needs its own pending slot").toBe(pending.length);
 });
@@ -204,15 +204,15 @@ it("keeps an unadmitted stopped reply's generation key after its pending user is
   vi.stubGlobal("window", {});
   const user = { id: "user1", threadId: "proof", role: "user" as const, content: "First question", createdAt: 1 };
   const answer = { id: "answer1", threadId: "proof", role: "assistant" as const, content: "First answer", createdAt: 2 };
-  const live = { gen: 2, threadId: "proof", turnId: null, model: "model", startedAt: 3, thinking: "", text: "", tools: [], pendingUser: "Second question" };
+  const live = { threadId: "proof", turnId: "q-2", model: "model", startedAt: 3, thinking: "", text: "", tools: [] };
   setState({ messages: { proof: [user, answer] }, turns: { proof: live } });
   const pending = keys();
-  const stopped = { ...live, pendingUser: null, end: { kind: "stopped" as const, secs: 1 } };
+  const stopped = { ...live, end: { kind: "stopped" as const, secs: 1 } };
   setState({ turns: { proof: stopped } });
   const refused = keys();
   expect(refused.at(-1), "admission failure must not reuse the previous user's reply key").toBe(pending.at(-1));
   expect(new Set(refused).size).toBe(refused.length);
   expect(refused.slice(0, 2)).toEqual(pending.slice(0, 2));
-  setState({ turns: { proof: { ...stopped, gen: 3 } } });
+  setState({ turns: { proof: { ...stopped, turnId: "q-3" } } });
   expect(keys().at(-1)).not.toBe(refused.at(-1));
 });

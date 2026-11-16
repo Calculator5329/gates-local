@@ -17,7 +17,7 @@ import { usePacedText } from "./paced.ts";
 import { focusComposer } from "../composer/focus.ts";
 import { cancelImage, earlierOf, fileUrl, loadEarlier, onEarlier, reloadThread, retry, retryImage } from "../lib/session/index.ts";
 import { AttachedFiles, AttachmentImages } from "../composer/attachment-images.tsx";
-import { type LiveTurn, NA, type State, type StopNote, getState, turnOf, useStore } from "../lib/store/store.ts";
+import { type LiveTurn, NA, type State, type StopNote, getState, turnOf, unsavedQuestion, useStore } from "../lib/store/store.ts";
 import { stopping, workMsAt } from "./turn.ts";
 import { type Drawn, type Rounds, drawTimes } from "./times.ts";
 import { currentDraftKey, replaceDraft } from "../lib/store/drafts.ts";
@@ -157,7 +157,7 @@ function LiveLine({ turn, tools }: { turn: LiveTurn; tools: readonly ToolStep[] 
   const now = useNow(250, stage === "waiting" || stage === "thinking" || stage === "tool");
   const cpu = useStore((s) => noGpu(s.gpu));
   // the send is answered at once, so the turn has its id while it waits behind a picture
-  const imageBusy = useStore((s) => turn.pendingUser != null && s.imageStatus !== NA && s.imageStatus?.state === "busy");
+  const imageBusy = useStore((s) => turn.userMessageId === undefined && s.imageStatus !== NA && s.imageStatus?.state === "busy");
   const t = Math.max(now, Date.now());
   const r = turn.reply;
   const clocked = stage === "thinking" || stage === "tool" || tools.length > 0 || turn.thinking !== ""
@@ -737,6 +737,7 @@ interface RowProps extends Files {
  */
 const LiveReply = memo(function LiveReply({ threadId, msg, last, origin, token }: { threadId: string; msg: Message | undefined; last: boolean } & Files) {
   const live = useStore((s) => (msg === undefined ? turnOf(s, threadId) ?? null : null));
+  const asked = useStore((s) => (live === null ? undefined : unsavedQuestion(s, live)));
   const catalog = useStore(catalogOf);
   // the saved row's times are the server's, the same in every window and after a reload
   const saved = msg === undefined ? undefined : drawTimes(msg, catalog);
@@ -755,11 +756,11 @@ const LiveReply = memo(function LiveReply({ threadId, msg, last, origin, token }
   if (msg === undefined && live === null) return null;
   // An Image turn's reply is its picture card, a row of its own with its progress and Cancel:
   // the turn shows its question until that is saved, and nothing of a chat reply.
-  if (msg === undefined && live?.image === true) return live.pendingUser != null ? <UserBubble text={live.pendingUser} images={live.pendingImages} files={live.pendingFiles} time={turnTime(live.startedAt)} /> : null;
+  if (msg === undefined && live?.image === true) return asked !== undefined ? <UserBubble text={asked.text} images={asked.images ?? []} files={asked.files} time={turnTime(live.startedAt)} /> : null;
   if (msg !== undefined) countRender(msg.id);
   return (
     <>
-      {live?.pendingUser != null ? <UserBubble text={live.pendingUser} images={live.pendingImages} files={live.pendingFiles} time={turnTime(live.startedAt)} /> : null}
+      {live !== null && asked !== undefined ? <UserBubble text={asked.text} images={asked.images ?? []} files={asked.files} time={turnTime(live.startedAt)} /> : null}
       <Reply msg={msg} live={live} text={text} paced={paced} thinking={msg?.thinking ?? live?.thinking ?? ""} tools={tools} rounds={rounds} secs={workSecs(workMs)}
         allowedLinks={allowedLinks} note={note} meta={replyMeta(msg ?? {}, workMs)} wait={replyWait(waitMs)} slot={msg === undefined || msg.times !== undefined}
         regen={msg === undefined ? live?.end?.kind === "stopped" : last} thread={messages} origin={origin} token={token} />
@@ -851,10 +852,10 @@ export function Timeline({ threadId }: { threadId: string }) {
   const messages = useStore((s) => s.messages[threadId] ?? EMPTY);
   const loading = useStore((s) => s.messages[threadId] === undefined && turnOf(s, threadId) === undefined);
   const loadError = useStore((s) => s.loadErrors[threadId]);
-  // A refused admission can clear pendingUser without assigning a user ID.
+  // why: a reply whose question is not saved yet has no user ID; its record names it
   const liveOwner = useStore((s) => {
     const turn = turnOf(s, threadId);
-    return turn === undefined ? null : turn.userMessageId ?? `pending:${turn.gen}`;
+    return turn === undefined ? null : turn.userMessageId ?? `pending:${turn.turnId}`;
   });
   // 0 unless the perf spec's negative control is on (window.glRows.bustMemo)
   const bust = useStore((s) => (window.glRows?.bustMemo === true ? (s.turns[threadId]?.text.length ?? 0) : 0));

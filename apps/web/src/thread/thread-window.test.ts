@@ -52,7 +52,7 @@ async function renderLive(n: number): Promise<string> {
   const { Timeline } = await import("./Thread.tsx");
   const saved = thread(n + 1).slice(1);
   const ask = saved.at(-1)!;
-  const live = { gen: 1, threadId: T, turnId: "turn", userMessageId: ask.id, model: "m", startedAt: 1, thinking: "", text: "So far", tools: [], pendingUser: null };
+  const live = { threadId: T, turnId: "turn", userMessageId: ask.id, model: "m", startedAt: 1, thinking: "", text: "So far", tools: [] };
   setState({ threadId: T, turns: { [T]: live }, messages: { [T]: saved } });
   return renderToStaticMarkup(createElement(Timeline, { threadId: T }));
 }

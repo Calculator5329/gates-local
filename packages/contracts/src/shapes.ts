@@ -717,8 +717,8 @@ const ReplyCommon = {
   /** The number of the change that made the record what it is: a larger one is newer. */
   rev: Count,
 };
-/** The message itself: carried only until its question is saved. */
-const ReplyWords = {
+/** The message as the window that typed it sends it (reply.send). */
+export const ReplySaid = {
   /** Names these words. A change of words makes a new one. Saved in the chat means asked. */
   messageId: S.String.check(S.isMinLength(1), S.isMaxLength(200)),
   text: S.String,
@@ -733,8 +733,9 @@ const ReplyWords = {
   drawCount: S.optional(ImageCount),
   /** A Retry: the question this send repeats. */
   retryOf: S.optional(S.String.check(S.isMaxLength(200))),
-  at: Millis,
 };
+/** The message itself, with when the server took it: carried only until its question is saved. */
+const ReplyWords = { ...ReplySaid, at: Millis };
 
 /** What is in the way of a queued message right now. The server works it out; a window never does. */
 export const WaitFor = S.Union([

@@ -54,12 +54,9 @@ export type Section = "general" | "models" | "instructions" | "library" | "tools
 
 /** A chat's reply being written now, or its last one that stopped before it finished. */
 export interface LiveTurn {
-  /** The client's own count of turns started this session; a response or event for an older one never touches this turn. */
-  readonly gen: number;
   readonly threadId: string;
-  // why: null for a send of this window's that the server has not named yet
-  readonly turnId: string | null;
-  /** The saved user message, once the turn's start came: reconnect drops this turn when the server saved its reply. */
+  readonly turnId: string;
+  /** The saved user message, once the record says it is saved; until then the question shown is the record's own words (`unsavedQuestion`). */
   readonly userMessageId?: string;
   readonly model: string;
   readonly startedAt: number;
@@ -74,10 +71,6 @@ export interface LiveTurn {
   readonly thinking: string;
   readonly text: string;
   readonly tools: readonly ToolStep[];
-  /** The user's text, shown until the turn's start brings the saved message. */
-  readonly pendingUser: string | null;
-  readonly pendingImages?: readonly string[];
-  readonly pendingFiles?: readonly AttachedFile[];
   /** Set once the turn ended without a saved message, or the server's record says a Stop was taken (`secs` from that record). */
   readonly end?: { readonly kind: "stopped"; readonly secs: number } | { readonly kind: "error"; readonly code: string; readonly message: string };
   /** An Image turn: the words went to the image model and the reply is its picture card; nothing of a chat reply shows. */
@@ -85,29 +78,6 @@ export interface LiveTurn {
 }
 
 export type WaitingReply = Extract<Reply, { readonly stage: "queued" | "held" | "next" | "editing" }>;
-
-export interface Queued {
-  readonly messageId?: string;
-  readonly images?: readonly string[];
-  readonly files?: readonly AttachedFile[];
-  readonly id: string;
-  readonly threadId: string;
-  readonly text: string;
-  readonly at: number;
-  readonly waitFor: "setup" | "download" | "reply";
-  /** The model it was typed for; a queue from before any model was installed has none and takes the one chosen then. */
-  readonly model?: string;
-  /** Its reply was stopped or failed: it waits for Send now, like a queue after an interrupt in T3 Code. */
-  readonly held?: true;
-  /** Held behind a failed reply the server is running once more ("running"), or whose second attempt failed too ("failed"). */
-  readonly retry?: "running" | "failed";
-  /** Send now: it goes as soon as the reply in its way has ended. */
-  readonly now?: true;
-  /** Open in a composer, in this window or another: it waits until that edit ends. */
-  readonly editing?: true;
-  /** Typed with Image on: it goes to this image model and size, not to a chat model. */
-  readonly draw?: ImageChoice;
-}
 
 /** A send waiting for a yes, because the load it needs would stop these chats' replies. */
 export interface StopAsk {
@@ -408,6 +378,16 @@ export function runningTurn(s: State, threadId: string | null): LiveTurn | undef
 
 export function turnOf(s: State, threadId: string | null): LiveTurn | undefined {
   return threadId === null ? undefined : s.turns[threadId];
+}
+
+/**
+ * The question of a reply on its way, before it is saved: the words of the turn's own record, in
+ * every window alike. None once the saved row has taken its place, and none for a Retry, whose
+ * question is in the chat already. The same record object until the server changes it.
+ */
+export function unsavedQuestion(s: State, turn: LiveTurn | undefined): Extract<Reply, { readonly stage: "starting" }> | undefined {
+  const r = turn === undefined ? undefined : s.replies.get(turn.turnId);
+  return r?.stage === "starting" && r.retryOf === undefined ? r : undefined;
 }
 
 const WAITING: ReadonlySet<Reply["stage"]> = new Set(["queued", "held", "next", "editing"]);

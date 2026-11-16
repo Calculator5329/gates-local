@@ -11,8 +11,12 @@ import type { HeldWhy, Message, QueuedMessage, ReplyStage, StopConsent } from "@
 export type Behind = QueuedMessage["waitFor"];
 /** What a queued message waits for: what it was typed behind, or the reply before it running once more. */
 export type Waits = Behind | "retry";
-/** The message itself, carried until its question is saved. */
-export type Words = Pick<QueuedMessage, "messageId" | "text" | "at" | "images" | "files" | "model" | "numCtx" | "think" | "draw" | "drawCount">;
+/**
+ * The message itself, carried until its question is saved. `tools` and `retryOf` come only with
+ * reply.send: the older queue row has no place for them.
+ */
+export type Words = Pick<QueuedMessage, "messageId" | "text" | "at" | "images" | "files" | "model" | "numCtx" | "think" | "draw" | "drawCount">
+  & { readonly tools?: boolean; readonly retryOf?: string };
 
 interface Common {
   readonly id: string;
@@ -26,7 +30,10 @@ interface Unsaved extends Common {
   readonly behind: Behind;
   /** How many times a start was taken for it. */
   readonly starts: number;
-  /** Sent by a window that keeps the words itself (the older chat.send): the server lists no row for it. */
+  /**
+   * It never waits in the queue: sent by a window that keeps the words itself (the older
+   * chat.send), or a Retry, whose question is in the chat already. The server lists no row for it.
+   */
   readonly direct: boolean;
 }
 export interface Queued extends Unsaved { readonly stage: "queued"; readonly waitFor: Waits }
@@ -499,7 +506,8 @@ function flags(back: Back): Partial<QueuedMessage> {
 /** The record as a row of the queue every window is sent; none for a record that is on no list. */
 export function toQueued(r: Rec): QueuedMessage | undefined {
   if (!(isWaiting(r) || r.stage === "starting") || r.direct) return undefined;
-  const row = { id: r.id, threadId: r.threadId, ...r.words, waitFor: r.behind };
+  const { tools: _tools, retryOf: _retryOf, ...words } = r.words;
+  const row = { id: r.id, threadId: r.threadId, ...words, waitFor: r.behind };
   if (r.stage === "starting") return { ...row, ...(r.now ? flags({ stage: "next", ...(r.consent === undefined ? {} : { consent: r.consent }) }) : {}), sending: r.turnId };
   if (r.stage === "editing") return { ...row, ...flags(r.back), editing: true };
   return { ...row, ...flags(backOf(r)) };

@@ -58,17 +58,19 @@ function replay() {
   chat({ type: "delta", text: "one two " });
 }
 
-it("TE-03: replay revives a closed reply, replaces its snapshot once and survives the hydration history load", async () => {
+it("TE-03: replay continues a reply through a dropped connection, replaces its snapshot once and survives the hydration history load", async () => {
   const held = await dropConnection();
-  expect(openTurn()?.end).toMatchObject({ kind: "error", code: "closed" });
+  // the window does not end a reply on its own: the server's record says whether it still runs
+  expect(openTurn()).toMatchObject({ text: "one " });
+  expect(openTurn()?.end).toBeUndefined();
   replay(); // buffered behind the reconnect's first hydration batch
   held.batch.respond(methodSamples["models.list"].result);
   const reload = await held.thread;
   await tick(); browser.frame();
   expect.soft(store.streamingHere(store.getState())).toBe(true);
-  expect.soft(openTurn()).toMatchObject({ turnId: "turn-live", text: "one two ", thinking: "server thoughts", tools: [{ callId: "server-read" }] });
+  expect.soft(openTurn()).toMatchObject({ turnId: browser.server.replyOf("turn-live"), text: "one two ", thinking: "server thoughts", tools: [{ callId: "server-read" }] });
   expect.soft(openTurn()?.end).toBeUndefined();
-  expect.soft(store.getState().turns["t1"]?.turnId).toBe("turn-live");
+  expect.soft(store.getState().turns["t1"]?.turnId).toBe(browser.server.replyOf("turn-live"));
   expect.soft(store.runningThreads(store.getState()).has("t1")).toBe(true);
   // An assistant card after the question must not make savedReplyFor clear a
   // turn whose replay just proved it is still alive.
@@ -81,7 +83,7 @@ it("TE-03: replay revives a closed reply, replaces its snapshot once and survive
   expect.soft(openTurn()?.tools).toHaveLength(1);
   session.stop();
   await tick();
-  expect(browser.server.calls("reply.stop").map((call) => call.params)).toEqual([{ id: "turn-live" }]);
+  expect(browser.server.calls("reply.stop").map((call) => call.params)).toEqual([{ id: browser.server.replyOf("turn-live") }]);
 });
 
 it("TE-03: a reply the server lists as still running gets its words replaced by the snapshot, not doubled", async () => {
@@ -93,17 +95,18 @@ it("TE-03: a reply the server lists as still running gets its words replaced by 
   expect(store.runningThreads(store.getState()).has("t1")).toBe(true);
   replay();
   await tick(); browser.frame();
-  expect(openTurn()).toMatchObject({ turnId: "turn-live", text: "one two ", thinking: "server thoughts", tools: [{ callId: "server-read" }] });
+  expect(openTurn()).toMatchObject({ turnId: browser.server.replyOf("turn-live"), text: "one two ", thinking: "server thoughts", tools: [{ callId: "server-read" }] });
 });
 
-it("TE-03: a reply that ended unheard, with nothing saved, keeps its closed state and partial words", async () => {
+it("TE-03: a reply that ended unheard, with nothing saved, is running no more once the server's list leaves it out", async () => {
   // it broke as the connection went: no window heard, and the list at the reconnect names it no more
   browser.server.unheard(() => chat({ type: "error", code: "internal", message: "the runner went away", ended: { reason: "failed", at: 5 } }));
   const held = await dropConnection();
   held.batch.respond(methodSamples["models.list"].result);
   (await held.thread).respond(history([question]));
   await tick(); browser.frame();
-  expect(openTurn()).toMatchObject({ turnId: "turn-live", text: "one ", end: { kind: "error", code: "closed" } });
+  expect(openTurn()?.end === undefined && openTurn() !== null).toBe(false);
+  expect(store.getState().messages["t1"]?.map((m) => m.id)).toEqual(["question"]);
   expect(store.streamingHere(store.getState())).toBe(false);
   expect(store.runningThreads(store.getState()).size).toBe(0);
 });
@@ -117,7 +120,7 @@ it("TE-03: replay cannot revive a reply the server stopped", async () => {
   held.batch.respond(methodSamples["models.list"].result);
   (await held.thread).respond(history([question]));
   await tick(); browser.frame();
-  expect(openTurn()).toMatchObject({ turnId: "turn-live", text: "one ", end: { kind: "stopped" } });
+  expect(openTurn()).toMatchObject({ turnId: browser.server.replyOf("turn-live"), text: "one ", end: { kind: "stopped" } });
   expect(store.streamingHere(store.getState())).toBe(false);
   expect(store.runningThreads(store.getState()).size).toBe(0);
 });

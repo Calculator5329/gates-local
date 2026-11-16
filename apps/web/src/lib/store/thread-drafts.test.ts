@@ -35,7 +35,7 @@ it("keeps A and B drafts separate and sending A leaves B untouched", async () =>
 
 it("restores a refused A send to A while B is open, preserving its retry identity", async () => {
   drafts.editDraft("A refused");
-  const waiting = browser.server.hold("chat.send");
+  const waiting = browser.server.hold("reply.send");
   const sent = session.send(drafts.getDraft().text);
   const request = await waiting;
   session.openThread("B");
@@ -48,7 +48,7 @@ it("restores a refused A send to A while B is open, preserving its retry identit
   expect(drafts.getDraft().text).toBe("A refused");
   expect(drafts.getDraft().sendId).toBe(request.params.messageId);
   await session.send(drafts.getDraft().text);
-  expect(browser.server.calls("chat.send").at(-1)?.params).toHaveProperty("messageId", request.params.messageId);
+  expect(browser.server.calls("reply.send").at(-1)?.params).toHaveProperty("messageId", request.params.messageId);
 });
 
 it("one typed character runs zero global listeners and their store selectors", () => {

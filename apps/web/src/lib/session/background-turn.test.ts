@@ -45,7 +45,7 @@ afterEach(async () => {
 async function answering(id: string): Promise<string> {
   session.newThread();
   void session.send(`hello ${id}`);
-  await until(() => typeof st().turns[id]?.turnId === "string" &&st().turns[id]?.pendingUser === null, 2000, `the turn in ${id}`);
+  await until(() => st().turns[id]?.userMessageId !== undefined, 2000, `the turn in ${id}`);
   return st().turns[id]?.turnId ?? "";
 }
 

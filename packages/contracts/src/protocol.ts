@@ -16,6 +16,7 @@ import {
   ReplyChange,
   ReplyId,
   ReplyListed,
+  ReplySaid,
   StopConsent,
   type FitOffer,
   FitTable,
@@ -367,7 +368,24 @@ export const methods = {
     phone: "allow",
   },
   "queue.remove": { params: S.Struct({ id: S.String }), result: S.Array(QueuedMessage), phone: "allow" },
-  // ---- one waiting message, by its id: each call is answered with what happened to it (ReplyAnswer)
+  /**
+   * Send. The window makes `id` and keeps it from the press to the saved reply. The server decides
+   * whether it starts or waits, and a start it then refuses puts the message on hold with the
+   * reason, in every window. A request that is wrong in itself (images that are not images) is an
+   * error and makes no record. `retryOf`: a Retry, which never waits: with its chat busy it is an error.
+   */
+  "reply.send": {
+    params: S.Struct({
+      id: ReplyId,
+      threadId: S.String,
+      ...ReplySaid,
+      // why: a person is waiting, so refuse rather than wait behind another chat's reply
+      askFirst: S.optional(S.Boolean),
+      consent: S.optional(StopConsent),
+    }),
+    result: ReplyAnswer,
+    phone: "allow",
+  },
   /**
    * New words, a new model or a new context for a waiting message. `base`: the messageId this
    * change started from, so words another window changed meanwhile are not overwritten;

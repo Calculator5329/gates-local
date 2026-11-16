@@ -22,7 +22,7 @@ vi.mock("../lib/store/store.ts", async (original) => {
 vi.mock("../lib/session/index.ts", () => ({
   ...Object.fromEntries(["cancelQueuedEdit", "cancelStopAsk", "confirmStopAsk", "editQueued", "openSettings", "pickModel", "pull", "removeQueued", "send", "sendQueuedNow", "setContext", "stop", "recheckRuntime"].map((name) => [name, vi.fn()])),
   firstPull: () => undefined,
-  queueReason: () => null,
+  sendsBeforeReady: () => false,
 }));
 vi.mock("../fit/FitPanel.tsx", () => ({ openFit: vi.fn() }));
 vi.mock("./focus.ts", () => ({ focusComposer: vi.fn() }));
@@ -35,7 +35,7 @@ const { clearDraft, replaceDraft } = await import("../lib/store/drafts.ts");
 const initial = getState();
 afterEach(() => { clearDraft("thread"); setState(initial); probe.touch = false; vi.mocked(stop).mockClear(); });
 
-const live: LiveTurn = { gen: 1, threadId: "thread", turnId: "turn", model: "qwen3.5:9b", startedAt: 0, thinking: "", text: "Reply", tools: [], pendingUser: null };
+const live: LiveTurn = { threadId: "thread", turnId: "turn", model: "qwen3.5:9b", startedAt: 0, thinking: "", text: "Reply", tools: [] };
 const running: State = {
   ...initial,
   conn: { kind: "open" },

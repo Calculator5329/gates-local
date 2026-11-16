@@ -10,24 +10,8 @@
 import type { Payload, ReplyRecord, ToolStep, TurnEnded } from "@gates-local/contracts";
 import type { LiveTurn, State } from "../lib/store/store.ts";
 
+/** Every event a turn takes is the server's: this window has none of its own. */
 export type ChatEvent = Payload<"chat.event">["event"];
-
-/** The server's events for a turn, and this client's own. */
-export type TurnEvent =
-  | ChatEvent
-  /** chat.send answered: the turn has its id; its start brings the saved question. */
-  | { readonly type: "sent"; readonly turnId: string }
-  /** chat.send was refused after the turn had ended here: it stays as it ended, without the question it was waiting to save. */
-  | { readonly type: "refused" }
-  /** The connection dropped: a reply still being written is cut off here, and one the server was stopping stops waiting for it. */
-  | { readonly type: "lost" }
-  /** Its record after a reconnect: the server is still writing this reply. */
-  | { readonly type: "running" };
-
-const CLOSED = { kind: "error", code: "closed", message: "The connection dropped while this reply was being written." } as const;
-
-/** Cut off by a dropped connection; the server may still be writing it. */
-const closed = (turn: LiveTurn) => turn.end?.kind === "error" && turn.end.code === "closed";
 
 /** A stopped reply's seconds: both ends are the server's times, so every window and the saved row agree. */
 const stoppedSecs = (reply: ReplyRecord | undefined, at: number | undefined): number =>
@@ -49,15 +33,6 @@ export function workMsAt(turn: Pick<LiveTurn, "reply" | "replyAt" | "end">, now:
   return r.workMs + (growing ? Math.max(0, now - (turn.replyAt ?? now)) : 0);
 }
 
-/**
- * The connection dropped at `now`, so no record can say where the reply stands: here it is over,
- * its work counted up to the drop. The only time this client's clock ends a record.
- */
-function cutOff(turn: LiveTurn, now: number): Pick<LiveTurn, "reply" | "replyAt"> {
-  const work = workMsAt(turn, now);
-  return turn.reply === undefined || work === undefined ? {} : { reply: { ...turn.reply, stage: "ended", workMs: Math.round(work) }, replyAt: now };
-}
-
 type TurnEnd = Extract<ChatEvent, { type: "done" | "error" }>;
 
 /** How the server says the turn ended; an end without the word, from an older server, counts as a failure, which is said. */
@@ -73,15 +48,15 @@ function upsertStep(steps: readonly ToolStep[], step: ToolStep): ToolStep[] {
  * saved row takes its place. Words that come after the turn ended here are
  * dropped (W-05); a tool step still lands.
  */
-export function reduceTurn(turn: LiveTurn, event: TurnEvent, now: number): LiveTurn | null {
+export function reduceTurn(turn: LiveTurn, event: ChatEvent, now: number): LiveTurn | null {
   switch (event.type) {
     case "start":
-      // the mark that the reply's words so far follow: a reply the connection cut off comes back
-      // with the server's snapshot of them. Its question and model are its record's to say.
-      return turn.end === undefined || closed(turn) ? { ...turn, end: undefined, text: "", thinking: "", tools: [] } : turn;
+      // the mark that the reply's words so far follow, after a reconnect: the server's snapshot of
+      // them takes the place of what was heard before. Its question and model are its record's to say.
+      return turn.end === undefined ? { ...turn, text: "", thinking: "", tools: [] } : turn;
     case "reply": {
-      // a reply that failed here keeps how it ended; a stopped one, or one the connection cut off, takes the server's record
-      if (turn.end?.kind === "error" && !closed(turn)) return turn;
+      // a reply that failed here keeps how it ended; a stopped one takes the server's record
+      if (turn.end?.kind === "error") return turn;
       // the server runs a failed reply once more: the second attempt starts over in the same place
       const again = turn.reply !== undefined && event.reply.attempt > turn.reply.attempt;
       const next = { ...turn, reply: event.reply, replyAt: now, ...(again ? { text: "", thinking: "", tools: [] } : {}) };
@@ -106,16 +81,6 @@ export function reduceTurn(turn: LiveTurn, event: TurnEvent, now: number): LiveT
       if (endReason(event) !== "stopped") return { ...ended, end: { kind: "error", code: event.code, message: event.message } };
       return { ...ended, end: turn.end?.kind === "stopped" ? turn.end : { kind: "stopped", secs: stoppedSecs(turn.reply, event.ended?.at) } };
     }
-    case "sent":
-      return { ...turn, turnId: event.turnId };
-    case "refused":
-      // the refusal was the turn's last event: a record the server was stopping is over
-      return { ...turn, pendingUser: null, ...(turn.reply?.stage === "stopping" ? { reply: { ...turn.reply, stage: "ended" as const } } : {}) };
-    case "lost":
-      if (turn.end === undefined) return { ...turn, end: CLOSED, ...cutOff(turn, now) };
-      return stopping(turn) ? { ...turn, ...cutOff(turn, now) } : turn;
-    case "running":
-      return closed(turn) ? { ...turn, end: undefined } : turn;
   }
 }
 

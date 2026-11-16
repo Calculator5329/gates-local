@@ -103,7 +103,8 @@ it("a listed turn that fails before its start puts the sidebar's dot out, holds 
     disconnect = session.connect();
     await until(() => store.getState().imageStatus !== undefined);
     expect(store.runningThreads(store.getState()).has(a.id), "the sidebar shows A running").toBe(true);
-    expect.soft(store.runningTurn(store.getState(), a.id), "A's reply on its way, with no question saved yet").toMatchObject({ turnId: theirs, pendingUser: "A" });
+    expect.soft(store.runningTurn(store.getState(), a.id), "A's reply on its way, with no question saved yet").toMatchObject({ turnId: theirs });
+    expect.soft(store.unsavedQuestion(store.getState(), store.runningTurn(store.getState(), a.id))?.text).toBe("A");
     // saving the question fails: the server ends the turn and says so to every client (chat row 32)
     const told = pushes.length;
     gate.resolve();
@@ -163,7 +164,8 @@ it("a listed reply draws the server's record: the one reply.list gave, then each
     await until(() => store.getState().imageStatus !== undefined);
     session.openThread("A");
     await tick();
-    expect(store.getState().turns.A).toMatchObject({ turnId: "other", pendingUser: "theirs", reply: { stage: "loading" } });
+    expect(store.getState().turns.A).toMatchObject({ turnId: "other", reply: { stage: "loading" } });
+    expect(store.unsavedQuestion(store.getState(), store.getState().turns.A ?? undefined)?.text).toBe("theirs");
     // another client's question waits 20 s before the model starts on it
     skew += 20_000;
     chat({ type: "start", model: "qwen3.5:9b", userMessage: question });

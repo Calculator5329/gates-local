@@ -175,7 +175,7 @@ it.each([
 /** Send "hi" from a new thread and wait until chat.send answered turn-1. */
 async function startFirstTurn(): Promise<void> {
   void session.send("hi");
-  await until(() => openTurn(store.getState())?.turnId === "turn-1", 2000, "turn-1");
+  await until(() => openTurn(store.getState())?.turnId === b.server.replyOf("turn-1"), 2000, "turn-1");
 }
 
 /** Drop the socket and wait until the client has hydrated again on a new one. */
@@ -262,7 +262,7 @@ describe("Stop then Retry (W-02)", () => {
     chat("turn-2", { type: "delta", text: "Again" });
     await tick();
     b.frame();
-    expect(openTurn(store.getState())).toMatchObject({ turnId: "turn-2", text: "Again" });
+    expect(openTurn(store.getState())).toMatchObject({ turnId: b.server.replyOf("turn-2"), text: "Again" });
     expect(openTurn(store.getState())?.end).toBeUndefined();
     chat("turn-2", { type: "done", message: asstMsg("m4", "t1", "Again"), stopReason: "stop" });
     await tick();
@@ -278,48 +278,39 @@ describe("Stop then Retry (W-02)", () => {
     await tick();
     const held = b.server.hold("chat.send");
     void session.send("next question");
-    const h = await held;
-    // the old turn's terminal event arrives before the new send has its id
+    await tick();
+    // it waits for the stopped reply to end, then is held with the rest; Send now starts it, and the old turn's end never reaches it
     chat("turn-1", { type: "error", code: "cancelled", message: "cancelled", ended: { reason: "stopped", at: Date.now() } });
+    await tick();
+    const id = (b.server.calls("reply.send")[1]!.params as { id: string }).id;
+    expect(store.getState().replies.get(id)?.stage).toBe("held");
+    session.sendQueuedNow(id);
+    const h = await held;
     await tick();
     h.respond({ turnId: "turn-2", userMessage: userMsg("m3", "t1", "next question") });
     await tick();
     chat("turn-2", { type: "delta", text: "Fresh" });
     await tick();
     b.frame();
-    expect(openTurn(store.getState())).toMatchObject({ turnId: "turn-2", text: "Fresh" });
+    expect(openTurn(store.getState())).toMatchObject({ turnId: id, text: "Fresh" });
     expect(openTurn(store.getState())?.end).toBeUndefined();
   });
 
-  it("Stop before chat.send answers: the late answer is cancelled and Retry waits for it", async () => {
+  it("Stop before the send is answered holds the message, and its late start saves nothing", async () => {
     await boot();
     const first = b.server.hold("chat.send");
     void session.send("hi");
     const h1 = await first;
+    const id = (b.server.calls("reply.send")[0]!.params as { id: string }).id;
+    // the message shows from the press, under the id the window made
+    expect(openTurn(store.getState())?.turnId).toBe(id);
     session.stop();
-    session.retry();
     await tick();
-    expect(b.server.calls("chat.send")).toHaveLength(1);
-    // nothing is stopped here until the server says so: the send still waits for its answer
-    expect(openTurn(store.getState())).toMatchObject({ turnId: null, pendingUser: "hi" });
-    expect(openTurn(store.getState())?.end).toBeUndefined();
-    expect(b.server.calls("reply.stop")).toHaveLength(0);
-    expect(session.canRetry(store.getState())).toBe(false);
+    expect(b.server.calls("reply.stop").map((c) => c.params)).toEqual([{ id }]);
     h1.respond({ turnId: "turn-1", userMessage: userMsg("m1") });
     await tick();
-    expect(b.server.calls("reply.stop").map((c) => c.params)).toEqual([{ id: "turn-1" }]);
-    // the server took the Stop before the question was saved: its work is cut, and says so when it ends
-    session.retry(); // still waiting for turn-1's terminal event
-    await tick();
-    expect(b.server.calls("chat.send")).toHaveLength(1);
-    expect(session.canRetry(store.getState())).toBe(false);
-    chat("turn-1", { type: "error", code: "cancelled", message: "cancelled", ended: { reason: "stopped", at: Date.now() } });
-    await tick();
-    // nothing was saved, so nothing is left to retry: the words are back in the composer, and no refusal is said
     expect(openTurn(store.getState())).toBeNull();
-    expect(draftView(store, await import("../lib/store/drafts.ts"))).toMatchObject({ draft: "hi", notice: null });
-    session.retry();
-    await tick();
+    expect(store.getState().replies.get(id)?.stage).toBe("held");
     expect(b.server.calls("chat.send")).toHaveLength(1);
   });
 });
@@ -432,13 +423,14 @@ describe("reconnect reconciles cached threads (W-04)", () => {
     expect(store.getState().messages["t1"]?.map((m) => m.id)).toEqual(["m1", "m2"]);
   });
 
-  it("keeps the failed partial when the server saved nothing for it", async () => {
+  it("a reply that ended unheard leaves once its chat's saved rows are read again", async () => {
     await boot();
     await startFirstTurn();
     b.server.unheard(() => chat("turn-1", GONE));
     b.server.answer("threads.get", () => ({ thread: methodSamples["threads.create"].result, messages: [userMsg("m1", "t1", "hi")] }));
     await reconnect();
-    expect(openTurn(store.getState())?.end).toMatchObject({ kind: "error", code: "closed" });
+    await until(() => openTurn(store.getState()) === null, 2000, "the ended reply gone");
+    expect(store.getState().messages["t1"]?.map((m) => m.id)).toEqual(["m1"]);
   });
 
   it("a reply the server is still writing after the reconnect is the chat's turn again, and its words and its end land", async () => {
@@ -447,7 +439,7 @@ describe("reconnect reconciles cached threads (W-04)", () => {
     b.server.answer("threads.get", () => ({ thread: methodSamples["threads.create"].result, messages: [userMsg("m1", "t1", "hi")] }));
     await reconnect();
     // the server's record says it is being written: no Retry is offered beside it
-    expect(openTurn(store.getState())).toMatchObject({ turnId: "turn-1" });
+    expect(openTurn(store.getState())).toMatchObject({ turnId: b.server.replyOf("turn-1") });
     expect(openTurn(store.getState())?.end).toBeUndefined();
     expect(session.canRetry(store.getState())).toBe(false);
     session.retry();
@@ -499,26 +491,27 @@ describe("Retry after a reconnect (WF-01)", () => {
     // its work ended while the connection was down, with nothing saved
     b.server.unheard(() => chat("turn-1", GONE));
     (await reconnectHeld()).respond(snapshot([userMsg("m1", "t1", "hi")]));
-    await tick();
-    expect(openTurn(store.getState())?.end).toMatchObject({ kind: "error", code: "closed" });
+    await until(() => openTurn(store.getState()) === null, 2000, "the ended reply gone");
 
     const send = b.server.hold("chat.send");
     session.retry();
     const pending = await send;
-    const gen = openTurn(store.getState())?.gen;
     // events of turn-1 that were on their way come around the Retry's answer and start
     chat("turn-1", { type: "delta", text: "stale " });
     await tick();
-    expect(openTurn(store.getState())?.gen).toBe(gen);
+    b.frame();
+    // the Retry shows from the press under its own id, and the stale words are not in it
+    expect(openTurn(store.getState())?.turnId).not.toBe("turn-1");
+    expect(openTurn(store.getState())?.text ?? "").toBe("");
     pending.respond({ turnId: "turn-2", userMessage: userMsg("m3", "t1", "hi") });
     await tick();
     chat("turn-1", { type: "done", message: asstMsg("m2", "t1", "the old reply"), stopReason: "stop" });
     chat("turn-2", { type: "delta", text: "Fresh " });
     await tick();
-    expect(openTurn(store.getState())?.gen).toBe(gen);
+    expect(openTurn(store.getState())?.turnId).toBe(b.server.replyOf("turn-2"));
     expect(b.server.calls("reply.stop").map((c) => c.params)).toEqual([]);
     b.frame();
-    expect(openTurn(store.getState())).toMatchObject({ turnId: "turn-2", text: "Fresh " });
+    expect(openTurn(store.getState())).toMatchObject({ turnId: b.server.replyOf("turn-2"), text: "Fresh " });
     chat("turn-2", { type: "delta", text: "and whole" });
     await tick();
     b.frame();
@@ -531,7 +524,7 @@ describe("Retry after a reconnect (WF-01)", () => {
 });
 
 describe("events while a send waits for its id (WF-01)", () => {
-  it("another client's whole turn while this send waits is the chat's; the refusal brings the words back", async () => {
+  it("another client's whole turn while this send waits is the chat's; the refusal holds the message with its reason", async () => {
     await boot();
     session.openThread("t1");
     await until(() => store.getState().messages["t1"] !== undefined);
@@ -549,7 +542,9 @@ describe("events while a send waits for its id (WF-01)", () => {
     expect(store.getState().messages["t1"]?.map((m) => m.id)).toEqual([...before, "u9", "m9"]);
     pending.fail("turn-active", "thread t1 already has turn turn-9 streaming");
     await tick();
-    expect(draftView(store, await import("../lib/store/drafts.ts"))).toMatchObject({ draft: "mine" });
+    const id = (b.server.calls("reply.send")[0]!.params as { id: string }).id;
+    expect(store.getState().replies.get(id)).toMatchObject({ stage: "held", text: "mine" });
+    expect(draftView(store, await import("../lib/store/drafts.ts"))).toMatchObject({ draft: "" });
     expect(store.getState().turns, "no reply is left waiting in any chat").toEqual({});
   });
 });
@@ -1003,7 +998,8 @@ describe("the same thread open in two clients (PH-02)", () => {
     const send = b.server.hold("chat.send");
     void session.send("hello");
     const pending = await send;
-    const userMessage = { ...userMsg("m5", "t1", "hello"), createdAt: 5 };
+    const asked = pending.params.messageId!;
+    const userMessage = { ...userMsg(asked, "t1", "hello"), createdAt: 5 };
     // the real server pushes start before chat.send answers (apps/server/src/app.ts runTurn), naming the model sent: the server's pick
     b.server.broadcast("chat.event", { turnId: "turn-7", threadId: "t1", event: { type: "start", model: "qwen3:14b", userMessage } });
     pending.respond({ turnId: "turn-7", userMessage });
@@ -1012,9 +1008,9 @@ describe("the same thread open in two clients (PH-02)", () => {
     await tick();
     b.frame();
     for (const st of [store, other.store]) {
-      expect(openTurn(st.getState()), st === store ? "the sender" : "the other client").toMatchObject({ turnId: "turn-7", text: "Half a", model: "qwen3:14b" });
+      expect(openTurn(st.getState()), st === store ? "the sender" : "the other client").toMatchObject({ turnId: b.server.replyOf("turn-7"), text: "Half a", model: "qwen3:14b" });
       expect(openTurn(st.getState())?.end).toBeUndefined();
-      expect(st.getState().messages["t1"]?.filter((m) => m.id === "m5")).toHaveLength(1);
+      expect(st.getState().messages["t1"]?.filter((m) => m.id === asked)).toHaveLength(1);
     }
     b.server.broadcast("chat.event", { turnId: "turn-7", threadId: "t1", event: { type: "done", message: asstMsg("m6", "t1", "Half a reply"), stopReason: "stop" } });
     await tick();

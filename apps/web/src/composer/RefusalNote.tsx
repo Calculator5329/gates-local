@@ -47,7 +47,7 @@ export function takeOffer(kind: "context" | "model"): void {
  * The slower mark, where the server judged the choice to run partly in system memory: its name and tip
  * are the server's short word ("Slower", "System memory" with no supported GPU) and nothing more.
  */
-const Slower = ({ words }: { words: FitWords | undefined }) =>
+export const Slower = ({ words }: { words: FitWords | undefined }) =>
   words?.k !== "spill" ? null : <span className="co-slow" role="img" aria-label={words.short} data-tip={words.short} data-testid="chat.composer.offer-slower"><Icon id="gauge" /></span>;
 
 export function RefusalNote({ o }: { o: NoticeOffer }) {

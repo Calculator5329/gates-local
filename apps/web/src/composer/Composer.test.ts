@@ -15,7 +15,7 @@ vi.mock("../lib/store/store.ts", async (original) => {
 vi.mock("../lib/session/index.ts", () => ({
   ...Object.fromEntries(["cancelQueuedEdit", "cancelStopAsk", "confirmStopAsk", "editQueued","openSettings", "pickModel", "pull", "removeQueued", "send", "sendQueuedNow", "setContext", "stop", "recheckRuntime"].map((name) => [name, vi.fn()])),
   firstPull: () => undefined,
-  queueReason: () => null,
+  sendsBeforeReady: () => false,
   // no edit is open in this window unless the fixture says so, which the composer asks first
   editedElsewhere: (q: { stage: string }) => q.stage === "editing",
 }));
@@ -42,7 +42,7 @@ const ready: State = {
   view: "thread",
   threadId: "thread",
 };
-const live: LiveTurn = { gen: 1, threadId: "thread", turnId: "turn", model: "qwen3.5:9b", startedAt: 0, thinking: "", text: "Reply", tools: [], pendingUser: null };
+const live: LiveTurn = { threadId: "thread", turnId: "turn", model: "qwen3.5:9b", startedAt: 0, thinking: "", text: "Reply", tools: [] };
 const turns = { thread: live };
 const states: readonly [string, Partial<State> & { draft?: string }, string, string?][] = [
   ["idle", {}, "Send message"],

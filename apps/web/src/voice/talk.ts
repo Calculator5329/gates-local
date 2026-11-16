@@ -111,7 +111,7 @@ export function hush(): void {
 
 export function startReading(out: Speaker): () => void {
   let threadId = getState().threadId;
-  let gen: number | null = null;
+  let gen: string | null = null;
   let text = "";
   let said = 0;
   let quiet = hushes;
@@ -121,7 +121,7 @@ export function startReading(out: Speaker): () => void {
   // why: a reply already under way is read from its next sentence, not from its start.
   const join = (thread: string | null) => {
     const live = runningTurn(getState(), thread);
-    gen = live?.gen ?? null; text = live?.text ?? ""; said = sentencesFrom(text, 0, false).next;
+    gen = live?.turnId ?? null; text = live?.text ?? ""; said = sentencesFrom(text, 0, false).next;
   };
   const finish = () => {
     const saved = threadId === null ? undefined : getState().messages[threadId]?.findLast((m) => m.role === "assistant");
@@ -142,13 +142,13 @@ export function startReading(out: Speaker): () => void {
       if (gen === null) return;
       const ended = turnOf(s, threadId);
       // why: on Stop, what waits in the voice is pulled back and nothing more of the reply is read.
-      if (ended?.gen === gen && ended.end?.kind === "stopped") { out.cancel(); gen = null; }
+      if (ended?.turnId === gen && ended.end?.kind === "stopped") { out.cancel(); gen = null; }
       else finish();
       return;
     }
-    if (live.gen !== gen) {
+    if (live.turnId !== gen) {
       if (gen !== null) finish();
-      gen = live.gen; text = ""; said = 0; quiet = hushes;
+      gen = live.turnId; text = ""; said = 0; quiet = hushes;
     }
     text = live.text;
     const next = sentencesFrom(text, said, false);

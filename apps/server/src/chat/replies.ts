@@ -11,7 +11,7 @@ import * as S from "effect/Schema";
 import { QueuedMessage, type Message, type Params, type Reply, type ReplyAnswer, type ReplyChange, type ReplyListed, type ReplyRecord, type ReplyStage, type StopConsent, type WaitFor } from "@gates-local/contracts";
 import {
   SOUND, fromQueued, heardAs, isAsked, isEnded, isInFlight, isLive, isWaiting, move, shownStage, stillStarting, toQueued,
-  type Ahead, type Back, type Drawing, type End, type Ended, type Heard, type InFlight, type Input, type Live, type Moved, type Queued, type Rec, type Refusal, type Rules, type Stopping, type Waiting, type Words,
+  type Ahead, type Back, type Behind, type Drawing, type End, type Ended, type Heard, type InFlight, type Input, type Live, type Moved, type Next, type Queued, type Rec, type Refusal, type Rules, type Stopping, type Waiting, type Words,
 } from "./reply.ts";
 
 export type Entry = QueuedMessage;
@@ -36,6 +36,21 @@ export interface Picked {
   readonly now: boolean;
   readonly consent?: StopConsent;
 }
+
+export interface SendNow {
+  readonly at: number;
+  readonly behind: Behind;
+  // why: busy also while an ended start still gives back what it took
+  readonly busy: boolean;
+  readonly turnId: string;
+}
+
+export type Sent =
+  | { readonly kind: "answer"; readonly answer: ReplyAnswer }
+  // why: windows hear nothing of a start until `begun`, or only the refusal if refused first
+  | { readonly kind: "start"; readonly attempt: number; readonly picked: Picked; readonly answer: () => ReplyAnswer }
+  // why: a Retry never waits, so one that would have to is refused and makes no record
+  | { readonly kind: "cannot" };
 
 export interface RepliesDeps {
   /** Where the waiting messages are kept; none keeps them in memory only (tests, a server with no data folder). */
@@ -63,7 +78,9 @@ export interface Replies {
   records(): readonly ReplyListed[];
   /** A window's message, to wait its turn. "removed" for an id removed before, which never comes back. */
   add(entry: Entry): "ok" | "removed";
-  /** A message a window sent itself (chat.send), taken at once for `turnId`: the window keeps its words. */
+  // why: the same send again is answered as the message now is, never taken twice
+  send(params: Params<"reply.send">, now: SendNow): Sent;
+  /** A message an older page sent itself (chat.send), taken at once for `turnId`: that page keeps its words. */
   direct(turnId: string, threadId: string, words: Words, retry: boolean, at: number): void;
   /** The older queue.update. Undefined when there is no such waiting message; "sending" when it is on its way. */
   update(id: string, patch: QueuePatch, by: number): "ok" | "sending" | undefined;
@@ -470,6 +487,34 @@ export function createReplies({ file, log, changed, told, saved, deleting, closi
       });
       settle();
       return m.answer?.answer === "gone" && m.answer.why === "removed" ? "removed" : "ok";
+    },
+    send({ id, threadId, askFirst, consent, ...said }, { at, behind, busy, turnId }) {
+      const retry = said.retryOf !== undefined;
+      const known = recs.get(id) ?? [...recs.values()].find((r) => (isWaiting(r) || r.stage === "starting") && r.words.messageId === said.messageId);
+      // why: behind what already waits in its chat, so the order they were typed in is kept
+      const waits = behind !== "reply" || busy || going(threadId) !== undefined
+        || inChat(threadId).some((r) => goes(r, { ...rules, pickSkipsEditing: false }) !== undefined);
+      if (known === undefined && retry && (waits || closing())) return { kind: "cannot" };
+      const starts = known === undefined && !waits;
+      const part = { id, threadId, rev: 0, words: { ...said, at }, behind, starts: 0, direct: retry };
+      // why: a person waits on a send that starts now, so it goes as Send now does, with its yes
+      const record: Queued | Next = starts && (askFirst === true || consent !== undefined)
+        ? { ...part, stage: "next", ...(consent === undefined ? {} : { consent }) }
+        : { ...part, stage: "queued", waitFor: behind };
+      const m = apply(known, {
+        call: "send", record, saved: saved(said.messageId) !== undefined,
+        chat: { deleting: deleting(threadId), closing: closing(), busy: waits },
+        ...(starts ? { start: { turnId, at, retry } } : {}),
+      });
+      const taken = m.next;
+      if (known !== undefined || taken?.stage !== "starting" || taken.turnId !== turnId) {
+        settle();
+        return { kind: "answer", answer: answered(m, id) };
+      }
+      untold.set(id, { turnId, row: undefined });
+      settle();
+      const { attempt, words, now } = taken;
+      return { kind: "start", attempt, picked: { id, threadId, words, now, ...(taken.consent === undefined ? {} : { consent: taken.consent }) }, answer: () => answered(m, id) };
     },
     direct(turnId, threadId, words, retry, at) {
       const record: Queued = { id: turnId, threadId, rev: 0, words, behind: "reply", starts: 0, direct: true, stage: "queued", waitFor: "reply" };

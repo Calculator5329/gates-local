@@ -38,7 +38,7 @@ import { type ActionResult, codeOf, createConnection, failure, isNA } from "./co
 
 // Preserve the UI's action imports while implementation moves into session modules.
 export { threadMarkdown } from "../../thread/threads.ts";
-export { queueReason, firstPull, cancelStopAsk, canRetry, removeQueued, editQueued, editedElsewhere, chooseForQueued } from "../../composer/chat.ts";
+export { sendsBeforeReady, firstPull, cancelStopAsk, canRetry, removeQueued, editQueued, editedElsewhere, chooseForQueued } from "../../composer/chat.ts";
 export { type ActionCall, type ActionResult, failure, isNA } from "./connection.ts";
 export { fileUrl, dataFolder, openDataFolder, canOpenFolder, canUpdateHere, canShowUpdate, showUpdate, folderDialog } from "./platform.ts";
 export { threadFromHash } from "../../app/navigation.ts";

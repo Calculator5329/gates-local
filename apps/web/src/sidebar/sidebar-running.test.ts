@@ -172,7 +172,7 @@ describe("sidebar running replies", () => {
       session.stop();
       await tick();
       expect(marked()).toEqual([]);
-      expect(b.server.calls("reply.stop").map((c) => c.params)).toEqual([{ id: "admitting-A" }]);
+      expect(b.server.calls("reply.stop").map((c) => c.params)).toEqual([{ id: b.server.replyOf("admitting-A") }]);
     } finally {
       await acknowledge();
     }
