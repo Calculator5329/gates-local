@@ -1,5 +1,3 @@
-// What a page in a reply becomes: one chip naming the page and its version.
-// Clicking it shows that version in the panel.
 import { pageTitle } from "@gates-local/contracts";
 import { Icon } from "../lib/ui/icons.tsx";
 import { useStore } from "../lib/store/store.ts";
@@ -10,7 +8,6 @@ export function PageChip({ code }: { code: string }) {
   const threadId = useStore((s) => s.threadId);
   const { versions, loaded } = usePages(threadId);
   const view = useView(threadId);
-  // a long chat's older pages are on their way: its number waits for them, in its place
   const version = loaded ? versions.find((v) => v.code === code) : undefined;
   const on = view?.open === true && version !== undefined && shownOf(view, versions) === version;
   return (
@@ -28,12 +25,6 @@ export function PageChip({ code }: { code: string }) {
   );
 }
 
-/**
- * A page still arriving: its name once the stream has given its whole
- * `<title>` (else "Page") and the app's working mark where the version will
- * be; no code, no word (the running line says "Writing") and no counter. The
- * panel keeps the version before it.
- */
 export function WritingChip({ code }: { code: string }) {
   return (
     <div className="pg-chip writing" data-testid="pages.writing" aria-busy="true">

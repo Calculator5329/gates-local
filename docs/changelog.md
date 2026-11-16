@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-11-16: the pages folder holds to the six comment kinds
+
+- The page chip, the page panel and what runs a page pass the comment
+  rule: 54 offenders went, and the folder's comment lines fell from 115
+  to none. One outside fact stays: a browser's private window may refuse
+  storage, so a panel's state then lasts until reload.
+- Rules the browser specs and the unit tests already held went with
+  their comment. One in five was broken in the source and watched fail:
+  the frame policy's bare origin, the frame's sandbox, the narrow
+  window's keys, Save's file and the version kept through a reload.
+- Twelve rules now have a unit test: a long chat's chip and panel wait
+  for its older pages, and those pages stay through a newer or failed
+  read; the cover width matches pages.css; the largest page is the
+  server's; a page's own window says when the server refuses the page
+  and stays empty once closed; old and overflowing saved views; the
+  desktop bridge is asked once, an older bridge runs pages, and nothing
+  runs before it answers; a refused page shows its code; each frame
+  gets an address of its own.
+
 ## 2026-11-16: the pictures folder holds to the six comment kinds
 
 - The Pictures screen, its list and its contact sheet pass the comment
