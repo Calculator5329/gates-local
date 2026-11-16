@@ -36,7 +36,7 @@ it("the real transport retains captured read/save revisions across later writers
   const h = createSettingsHandlers({ settings, push: (channel, payload, changes) => server?.push(channel, payload, changes) });
   const reads: Array<() => void> = [], saves: Array<() => void> = [];
   let holdRead = false, holdSave = false;
-  server = await startWsServer({ port: 0, token: "fixture", allowedOrigins: [], ordered: ["settings"], handlers: {
+  server = await startWsServer({ port: 0, token: "fixture", allowedOrigins: [], handlers: {
     ...h,
     "settings.get": (params, ctx) => {
       const value = h["settings.get"](params, ctx);
@@ -54,7 +54,7 @@ it("the real transport retains captured read/save revisions across later writers
   };
   const a = peer(), b = peer(), old = peer();
   const negotiated = await a.negotiate();
-  expect(negotiated.mode).toBe("ordered");
+  expect(negotiated.epoch).toEqual(expect.any(String));
   await b.negotiate();
   const snapshots: Array<{ theme: string; sync: SyncMetadata | undefined }> = [];
   const pushes: Array<{ voiceChange?: string; sync: SyncMetadata | undefined }> = [];

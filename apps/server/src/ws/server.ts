@@ -20,7 +20,6 @@ import {
   type ResultOf,
   type ScopeName,
   type SyncChange,
-  type SyncDomain,
   type SyncMetadata,
   WireError,
   ORDERED_DOMAINS,
@@ -73,8 +72,6 @@ export interface WsServerOptions {
   readonly allowedOrigins: readonly string[];
   /** Application methods without a handler answer "not-implemented". */
   readonly handlers: Partial<Handlers>;
-  /** Enable only domains whose handlers and every writer capture revisions. */
-  readonly ordered?: readonly SyncDomain[];
   readonly log?: (line: string) => void;
   /** Largest inbound frame. Default 16 MiB. */
   readonly maxPayloadBytes?: number;
@@ -196,7 +193,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
   // Eight 10 MiB pasted images expand to about 107 MiB in base64. Saved threads carry paths only.
   const wss = new WebSocketServer({ noServer: true, maxPayload: options.maxPayloadBytes ?? 128 * 1024 * 1024 });
   const clients = new Set<WebSocket>();
-  const ordered = new WeakMap<WebSocket, readonly SyncDomain[]>();
+  const negotiated = new WeakSet<WebSocket>();
   /** The last number given out for each scope of a kind this socket numbers (SENT_IN_ORDER). */
   const issued = new Map<ScopeName, number>();
   const sent = (scope: ScopeName): SyncChange => {
@@ -282,11 +279,13 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
       return send(ws, encodeErrorResponse(id, "forbidden", "That can only be done on the computer running Gates Local."));
     }
     if (method === "sync.negotiate") {
-      const domains = (options.ordered ?? []).filter(domain => ORDERED_DOMAINS.includes(domain) && decodedParams.ordered.includes(domain));
-      const frame = encodeResult(id, method, { epoch, ordered: domains, protocol: PROTOCOL_VERSION });
+      if (ORDERED_DOMAINS.some(domain => !decodedParams.ordered.includes(domain))) {
+        return send(ws, encodeErrorResponse(id, "bad-params", "This page is from another version of Gates Local. Reload it."));
+      }
+      const frame = encodeResult(id, method, { epoch, ordered: ORDERED_DOMAINS, protocol: PROTOCOL_VERSION });
       if (!frame.ok) throw frame.error;
       send(ws, frame.value);
-      ordered.set(ws, domains); // Success is enqueued before any ordered push.
+      negotiated.add(ws); // Success is enqueued before any ordered push.
       return;
     }
     const handler = handlers[method] as ((p: unknown, c: HandlerContext) => unknown) | undefined;
@@ -302,8 +301,8 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
       if (code === "internal") log(`${method} handler threw: ${message}`);
       return send(ws, encodeErrorResponse(id, code, message, blocking));
     }
-    // A method row of a kind this socket ordered answers with its numbers, or not at all.
-    const numbered = row !== undefined && ordered.get(ws)?.includes(row.domain) === true;
+    // A method row answers a negotiated socket with its numbers, or not at all.
+    const numbered = row !== undefined && negotiated.has(ws);
     const missing = numbered ? scopesOf(row, decodedParams).find(scope => revisionOf(captured, epoch, scope) === undefined) : undefined;
     if (missing !== undefined) {
       return send(ws, encodeErrorResponse(id, "bad-result", `${method} did not capture ${missing} metadata`));
@@ -373,13 +372,12 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
       // A kind the socket numbers takes the next number as it is sent.
       const row = pushSync(channel);
       const changes = given ?? (row !== undefined && SENT_IN_ORDER.includes(row.domain) ? [sent(row.scope)] : undefined);
-      const enabled = row !== undefined && ORDERED_DOMAINS.includes(row.domain) && (options.ordered ?? []).includes(row.domain);
-      const missing = enabled ? scopesOf(row, payload).find(scope => revisionOf(changes === undefined ? undefined : { epoch, changes }, epoch, scope) === undefined) : undefined;
+      const missing = row !== undefined ? scopesOf(row, payload).find(scope => revisionOf(changes === undefined ? undefined : { epoch, changes }, epoch, scope) === undefined) : undefined;
       if (missing !== undefined) throw new Error(`${channel} did not capture ${missing} metadata`);
       let versioned: string | undefined;
       for (const ws of clients) {
         if (channel === "reply.words" && !chatClients.has(ws)) continue;
-        if (row !== undefined && changes !== undefined && ordered.get(ws)?.includes(row.domain)) {
+        if (row !== undefined && changes !== undefined && negotiated.has(ws)) {
           if (versioned === undefined) {
             const encoded = encodePush(channel, payload, { epoch, changes });
             if (!encoded.ok) throw encoded.error;

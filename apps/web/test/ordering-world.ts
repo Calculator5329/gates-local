@@ -31,15 +31,14 @@ export async function drain(): Promise<void> {
 }
 
 export class OrderingServer extends FakeServer {
-  orderedSettings = false;
   private settingsRevision = 0;
-  settingsSync(): SyncMetadata | undefined {
+  settingsSync(): SyncMetadata {
     // Setup-only external writers assign settings directly. Capture their
     // commit once, before either window receives its versioned push.
     if (JSON.stringify(this.settings) !== JSON.stringify(this.stampedSettings)) {
       this.settingsRevision++; this.stampedSettings = this.settings;
     }
-    return this.orderedSettings ? { epoch: "replay-process", changes: [{ scope: "settings", kind: "snapshot", rev: this.settingsRevision }] } : undefined;
+    return { epoch: this.epoch, changes: [{ scope: "settings", kind: "snapshot", rev: this.settingsRevision }] };
   }
   settings: Settings = { ...methodSamples["settings.get"].result, whisperUrl: SPEECH_URL };
   private stampedSettings = this.settings;
@@ -63,11 +62,8 @@ export class OrderingServer extends FakeServer {
 
   override handle(socket: FakeSocket, request: Request): void {
     const label = this.labels.get(socket) ?? "A";
-    const save = (key: string, result: unknown, sync?: SyncMetadata) => this.deliveries.set(key, { socket, request, result, sync });
+    const save = (key: string, result: unknown, sync = this.numbersFor(socket, request)) => this.deliveries.set(key, { socket, request, result, sync });
     const respond = (result: unknown, sync?: SyncMetadata) => socket.frame({ type: "response", id: request.id, ok: true, result, ...(sync ? { sync } : {}) });
-    if (request.method === "sync.negotiate" && this.orderedSettings) {
-      this.log.push(request); respond({ epoch: "replay-process", ordered: ["settings"] }); return;
-    }
     if (request.method === "settings.get") {
       this.log.push(request);
       if (this.holdHydration && label === "A") save("snapshot", this.settings, this.settingsSync());
@@ -91,7 +87,7 @@ export class OrderingServer extends FakeServer {
       save(key, this.settings, this.settingsSync());
       // The sender's response and both windows' push deliveries are separate.
       this.deliveries.set(`${key}-push`, { socket, request, result: { ...this.settings, ...(voiceChange ? { voiceChange } : {}) }, sync: this.settingsSync() });
-    } else if (request.method === "settings.model.update" && this.orderedSettings) {
+    } else if (request.method === "settings.model.update") {
       this.log.push(request);
       const { model, patch } = request.params as Params<"settings.model.update">;
       const overrides = { ...this.settings.modelSettings };
@@ -143,7 +139,7 @@ export class OrderingServer extends FakeServer {
     const message = this.admissions.get(turnId);
     if (!message) throw new Error(`No pending admission: ${turnId}`);
     this.admissions.delete(turnId);
-    this.messages.push(message); this.turns.set(turnId, message);
+    this.messages.push(message); this.turns.set(turnId, message); this.chatWritten(message.threadId);
     // app.ts broadcasts start at admission, only to sockets open right then.
     this.startTargets.set(turnId, this.sockets.filter((socket) => socket.readyState === 1));
   }
@@ -264,12 +260,11 @@ export class OrderingWorld {
   get b(): WindowSession { const b = this.windows[1]; if (!b) throw new Error("Missing window B"); return b; }
 
   /** `serves`: kinds the server numbers from the first connection on (numbered-server.ts), as the real one does. */
-  static async create(twoWindows = true, orderedSettings = process.env["REPLAY_ORDERED_SETTINGS"] !== "0", serves: readonly SyncDomain[] = []): Promise<OrderingWorld> {
+  static async create(twoWindows = true, serves: readonly SyncDomain[] = []): Promise<OrderingWorld> {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     vi.setSystemTime(1_800_000_000_000);
     installBrowser();
     const world = new OrderingWorld();
-    world.server.orderedSettings = orderedSettings;
     if (serves.length > 0) world.numbering = numberServer(world.server, { serves });
     vi.stubGlobal("WebSocket", class extends FakeSocket { constructor(url: string) { super(url, world.server); } });
     for (const label of twoWindows ? ["A", "B"] : ["A"]) {

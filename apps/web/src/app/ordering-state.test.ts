@@ -44,7 +44,7 @@ class World {
   }
   async push<C extends Channel>(socket: FakeSocket, channel: C, payload: Payload<C>): Promise<void> {
     const numbered = this.wire.numbering?.stamp(channel, payload);
-    socket.frame({ type: "push", channel, payload, ...(numbered ? { sync: numbered } : channel === "settings.changed" && this.wire.server.orderedSettings ? { sync: this.wire.server.settingsSync() } : {}) }); await drain();
+    socket.frame({ type: "push", channel, payload, ...(numbered ? { sync: numbered } : channel === "settings.changed" ? { sync: this.wire.server.settingsSync() } : {}) }); await drain();
   }
 }
 
@@ -78,7 +78,7 @@ function modelRefresh(): ReplayScenario<World> {
   return {
     name: "modelsOrder: an old refresh cannot restore a removed model", dispose,
     // The server numbers the models kind, as the real one does: the old refresh carries the number it was asked with.
-    create: async () => { const w = new World(await OrderingWorld.create(true, undefined, ["models"])); w.wire.server.answer("models.refresh", () => ({ runtime: listedRuntime, models: w.models })); return w; },
+    create: async () => { const w = new World(await OrderingWorld.create(true, ["models"])); w.wire.server.answer("models.refresh", () => ({ runtime: listedRuntime, models: w.models })); return w; },
     witnesses: [["refresh.request", "remove.request", "remove.complete", "models.push-A", "models.push-B", "remove.response.ready", "remove.response", "refresh.old.ready", "refresh.old.response"]],
     events: [
       event("refresh.request", [], (w) => w.capture("refresh.old", "models.refresh", () => { void w.wire.a.session.refreshModels(); }, { runtime: listedRuntime, models: initialModels })),
@@ -156,7 +156,7 @@ function imageStatus(kind: "check" | "post-save"): ReplayScenario<World> {
     name: `image status (${kind}): a late probe cannot erase busy`, dispose,
     create: async () => {
       // the server numbers the images kind, as the real one does: the read takes its number as it starts
-      const w = new World(await OrderingWorld.create(true, undefined, ["images"]));
+      const w = new World(await OrderingWorld.create(true, ["images"]));
       if (kind === "check") {
         // A job and a ready discovery both require image generation enabled.
         w.wire.server.settings = { ...w.wire.server.settings, imageGen: true };

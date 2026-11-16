@@ -11,7 +11,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { type Channel, type Client, type ImageEvent, type Message, type Payload, type Reply, type ReplyListed, type SocketLike, ORDERED_DOMAINS, WireError, createClient } from "@gates-local/contracts";
+import { type Channel, type Client, type ImageEvent, type Message, type Payload, type Reply, type ReplyListed, type SocketLike, WireError, createClient } from "@gates-local/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { type App, type AppDeps, createApp } from "../src/app.ts";
@@ -296,7 +296,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
       return answer;
     },
   };
-  server = await startWsServer({ port: 0, token: TOKEN, allowedOrigins: [], ordered: ORDERED_DOMAINS, handlers, log: () => undefined });
+  server = await startWsServer({ port: 0, token: TOKEN, allowedOrigins: [], handlers, log: () => undefined });
   const ws = server;
   cleanups.push(() => ws.close());
 

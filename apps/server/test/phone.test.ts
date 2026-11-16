@@ -12,7 +12,7 @@ import { connect, createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { type Client, type MethodName, type SocketLike, createClient, methodNames, phoneMay } from "@gates-local/contracts";
-import { methodSamples, pushSamples } from "@gates-local/contracts/testing";
+import { methodSamples, pushSamples, sampleChanges } from "@gates-local/contracts/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { type SocketTestHooks, listenOwnerSocket } from "../src/web/socket.ts";
@@ -372,7 +372,7 @@ describe("phone listener admission (Serve's Unix-backend header shape)", () => {
     deskClient.subscribe("threads.changed", (p) => got.desk.push(p));
     phoneClient.subscribe("threads.changed", (p) => got.phone.push(p));
     const payload = pushSamples["threads.changed"][0];
-    s.push("threads.changed", payload as never);
+    s.push("threads.changed", payload as never, sampleChanges("threads.changed", payload as never));
     // A round trip on each socket after the push proves both have read it.
     await deskClient.call("threads.list", {});
     await phoneClient.call("threads.list", {});

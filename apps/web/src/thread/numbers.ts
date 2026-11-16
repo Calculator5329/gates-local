@@ -2,18 +2,16 @@
 // answer and push about the list carries the list's number, and one about a chat also carries the
 // chat's (the list's number at the last write to its messages). A row applies only when it is newer
 // than the list read and the row this window already has; a chat's copy is current while no push or
-// list has named a newer chat number than the copy's. On a legacy connection nothing is numbered:
-// every row applies, and a copy read on this connection stays current until the next connection.
+// list has named a newer chat number than the copy's.
 import { type ScopeName, type SyncMetadata, revisionOf } from "@gates-local/contracts";
 
 export interface ThreadNumbers {
   /**
-   * A new connection: an epoch the window has not seen, or legacy (undefined), forgets every number,
-   * and the chats `cached` from before are not current until read again; true when it forgot.
+   * A new connection: an epoch the window has not seen forgets every number, and the chats `cached`
+   * from before are not current until read again; true when it forgot.
    */
-  begin(epoch: string | undefined, cached: Iterable<string>): boolean;
-  readonly ordered: () => boolean;
-  /** The number an answer or push carries for `scope` on this connection; undefined in legacy or when it has none. */
+  begin(epoch: string, cached: Iterable<string>): boolean;
+  /** The number an answer or push carries for `scope` on this connection; undefined when it has none. */
   of(sync: SyncMetadata | undefined, scope: ScopeName): number | undefined;
   /** Whether a row about `threadId` at list number `list` is newer than what the window shows. */
   row(threadId: string, list: number | undefined): boolean;
@@ -22,7 +20,7 @@ export interface ThreadNumbers {
    * row the window holds from after the read, which keep their row (or stay deleted).
    */
   list(list: number | undefined): ReadonlySet<string> | undefined;
-  /** A push or a list named the chat's number (nothing in legacy). */
+  /** A push or a list named the chat's number. */
   announce(threadId: string, chat: number | undefined): void;
   /** What a read sent now is at when its answer has no number: the newest named so far. */
   asked(threadId: string): number;
@@ -49,29 +47,26 @@ export function createThreadNumbers(): ThreadNumbers {
   const doubted = new Set<string>();
   return {
     begin(next, cached) {
-      if (next !== undefined && next === epoch) return false;
+      if (next === epoch) return false;
       epoch = next;
       listAt = -1;
       rowAt.clear(); known.clear(); held.clear(); doubted.clear();
       for (const id of cached) doubted.add(id);
       return true;
     },
-    ordered: () => epoch !== undefined,
     of: (sync, scope) => epoch === undefined ? undefined : revisionOf(sync, epoch, scope),
     row(threadId, list) {
-      if (epoch === undefined) return true;
       if (list === undefined || list <= Math.max(listAt, rowAt.get(threadId) ?? -1)) return false;
       rowAt.set(threadId, list);
       return true;
     },
     list(list) {
-      if (epoch === undefined) return new Set();
       if (list === undefined || list <= listAt) return undefined;
       listAt = list;
       return new Set([...rowAt].filter(([, at]) => at > list).map(([id]) => id));
     },
     announce(threadId, chat) {
-      if (epoch !== undefined && chat !== undefined) known.set(threadId, Math.max(known.get(threadId) ?? 0, chat));
+      if (chat !== undefined) known.set(threadId, Math.max(known.get(threadId) ?? 0, chat));
     },
     asked: threadId => known.get(threadId) ?? 0,
     hold(threadId, chat) {

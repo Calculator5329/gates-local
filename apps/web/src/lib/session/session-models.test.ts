@@ -54,20 +54,23 @@ class FakeSocket extends EventTarget {
 async function boot(answers: Record<string, (params?: unknown) => Promise<unknown>> = {}, connections: Promise<void>[] = []) {
   const subs = new Map<string, (p: unknown, sync?: SyncMetadata) => void>();
   const calls: string[] = [];
-  // The models kind numbered as the real socket server numbers it: a read takes the next number for
-  // each of its scopes as it is asked (handled), a push takes the next as it is sent.
+  // Every kind numbered as the real socket server numbers it: a read takes the next number for each
+  // of its scopes as it is asked, a push takes the next as it is sent. A chat's own number moves only
+  // with its messages, and the chat list carries the number of each chat it names.
   const revs = new Map<string, number>();
-  const take = (row: SyncRow | undefined): SyncMetadata | undefined => row?.domain !== "models" ? undefined : {
+  const take = (row: SyncRow | undefined, about?: unknown): SyncMetadata | undefined => row === undefined ? undefined : {
     epoch: "fixture",
-    changes: scopesOf(row).map((scope) => {
-      const rev = (revs.get(scope) ?? 0) + 1;
+    changes: scopesOf(row, about).map((scope) => {
+      const rev = (revs.get(scope) ?? 0) + (scope.startsWith("thread:") ? 0 : 1);
       revs.set(scope, rev);
       return { scope, kind: "snapshot" as const, rev };
     }),
   };
+  const withChats = (sync: SyncMetadata | undefined, chats: unknown): SyncMetadata | undefined => sync === undefined || !Array.isArray(chats) ? sync :
+    { ...sync, changes: [...sync.changes, ...chats.map((t: { id: string }) => ({ scope: `thread:${t.id}` as const, kind: "snapshot" as const, rev: revs.get(`thread:${t.id}`) ?? 0 }))] };
   let negotiated: ClientSync | undefined;
   fake.client = {
-    negotiate: async () => (negotiated = { mode: "ordered", epoch: "fixture", domains: ["models"] }),
+    negotiate: async () => (negotiated = { epoch: "fixture" }),
     get sync() {
       return negotiated;
     },
@@ -81,10 +84,12 @@ async function boot(answers: Record<string, (params?: unknown) => Promise<unknow
     // As the real client: the accepted answer reaches onResult and onMetadata before the call settles.
     call: (method: MethodName, params?: unknown, options?: CallOptions) => {
       calls.push(method);
-      const sync = take(methodSync(method));
+      const row = methodSync(method);
+      const sync = take(row, params);
       return (answers[method]?.(params) ?? Promise.resolve(defaults[method])).then((value) => {
-        options?.onResult?.(value as never, sync);
-        options?.onMetadata?.(sync);
+        const numbered = method === "threads.list" ? withChats(sync, value) : sync;
+        options?.onResult?.(value as never, numbered);
+        options?.onMetadata?.(numbered);
         return value;
       });
     },
@@ -102,7 +107,7 @@ async function boot(answers: Record<string, (params?: unknown) => Promise<unknow
   const store = await import("../store/store.ts");
   session.connect();
   await vi.waitFor(() => expect(subs.has("models.changed")).toBe(true));
-  const push = (channel: Channel, payload: unknown) => subs.get(channel)?.(payload, take(pushSync(channel)));
+  const push = (channel: Channel, payload: unknown) => subs.get(channel)?.(payload, take(pushSync(channel), payload));
   // threads.list is answered in hydration's first batch, so its threads mark that batch as applied.
   const hydrated = () => vi.waitFor(() => expect(store.getState().threads).toHaveLength(1));
   return { session, store, push, calls, hydrated };

@@ -98,7 +98,7 @@ import { openThreadStore, type ThreadStore } from "./threads/store.ts";
 import { copyBeforeMigration } from "./threads/copies.ts";
 import { SETTINGS_FILE_NAME } from "./settings/store.ts";
 import { startWsServer, type WsServer } from "./ws/server.ts";
-import { ORDERED_DOMAINS, type Payload } from "@gates-local/contracts";
+import type { Payload } from "@gates-local/contracts";
 import { createGpuLease } from "./gpu/lease.ts";
 import { createImageModule, type ImageModule } from "./image/module.ts";
 import { engineFor, engineKnob, engineOffered, type EngineKnob } from "./image/engine.ts";
@@ -469,7 +469,6 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     server = await startWsServer({
       port,
       token,
-      ordered: ORDERED_DOMAINS,
       allowedOrigins: [...DEFAULT_ORIGINS, ...extraOrigins],
       handlers: { ...app.handlers, ...usage.handlers, ...createVoiceModule({ settings: () => services.settings.get() }).handlers, ...pictures.handlers },
       thumbnails: (jobId) => app.thumbnail(jobId),

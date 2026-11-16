@@ -51,17 +51,17 @@ it("every list the Library announces is numbered, and sources.list answers with 
   expect(() => sources.stamp(sources.list())).toThrow(/not committed/);
 });
 
-it("the socket server refuses an unnumbered Library push once the Library is ordered", async () => {
+it("the socket server refuses an unnumbered Library push", async () => {
   const root = scratch();
   const sources = createSources({ dataDir: path.join(root, "app") });
   let server: WsServer | undefined;
   sources.onChange(list => server?.push("sources.changed", list, [sources.stamp(list)]));
-  server = await startWsServer({ port: 0, token: "fixture", allowedOrigins: [], ordered: ["settings", "sources"], handlers: createSourcesHandlers({ sources }) });
+  server = await startWsServer({ port: 0, token: "fixture", allowedOrigins: [], handlers: createSourcesHandlers({ sources }) });
   cleanup.push(() => server?.close());
   const client = createClient(new WebSocket(`ws://127.0.0.1:${server.port}/?token=fixture`) as unknown as SocketLike);
   cleanup.push(() => client.close());
   const negotiated = await client.negotiate();
-  expect(negotiated).toMatchObject({ mode: "ordered", domains: ["settings", "sources"] });
+  expect(negotiated).toMatchObject({ epoch: expect.any(String) });
   const pushes: Array<{ ids: string[]; sync: SyncMetadata | undefined }> = [];
   client.subscribe("sources.changed", (list: readonly Source[], sync) => pushes.push({ ids: list.map(s => s.id), sync }));
 

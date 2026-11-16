@@ -25,7 +25,7 @@ import { KEEP_EVERY_MS, keepHeldFiles, setFileCalls } from "../../composer/file-
 import { createServerState } from "./server-state.ts";
 import { createSettings } from "../../settings/settings.ts";
 import { CATALOG, RUNTIME, answered, chooseModel, createModels, decided, memoryChanged, modelChoice, newChatModel, reconcilePulls, residentChat, settlePulls } from "../../models/models.ts";
-import { createThreads, sortThreads, withMessage } from "../../thread/threads.ts";
+import { createThreads, withMessage } from "../../thread/threads.ts";
 import { applyAccent, applyTheme, dataFolder, serverUrl, webServerUrl } from "./platform.ts";
 import { createSettingsReads } from "../../settings/settings-reads.ts";
 import { createNavigation, enterScreen, exitScreen, onScreenEntry } from "../../app/navigation.ts";
@@ -61,9 +61,8 @@ const { probe, act, reply } = connection;
 setFileCalls(call);
 let keeping: ReturnType<typeof setInterval> | undefined;
 
-// A kind in ORDERED_DOMAINS arrives numbered once the connection ordered it: an answer or a push
-// applies when its number is newer than the one the window last applied, in whatever order they
-// come. On a legacy connection, every answer applies and pushes wait behind the hydrate's reads.
+// Every kind arrives numbered: an answer or a push applies when its number is newer than the one
+// the window last applied, in whatever order they come.
 const ordering = applyServerEvent.ordering;
 function rowOf(row: SyncRow | undefined): SyncRow {
   if (row === undefined) throw new Error("This channel or method is not one of an ordered kind.");
@@ -72,16 +71,12 @@ function rowOf(row: SyncRow | undefined): SyncRow {
 const LIBRARY = rowOf(methodSync("sources.list"));
 const IMPORTS = rowOf(methodSync("sources.imports"));
 const UPDATE = rowOf(methodSync("update.status"));
-/** True when an answer of `row`'s kind should apply: always on a legacy connection, else when newer. */
-const newer = (row: SyncRow, sync: SyncMetadata | undefined) => !ordering.ordered(row.domain) || ordering.accept(row, sync);
-/** For a read of `row`'s kind made with the hydrate's others: on an ordered connection it applies on arrival when newer, and the batch leaves it out. */
-const onArrival = (row: SyncRow, apply: () => void) => (sync: SyncMetadata | undefined) => { if (ordering.ordered(row.domain) && ordering.accept(row, sync)) apply(); };
-/** Whether the hydrate's batch applies a read of `row`'s kind: always on a legacy connection; on an ordered one only a read that failed (it shows as not available). */
-const inBatch = (row: SyncRow, value: unknown) => !ordering.ordered(row.domain) || value === NA;
+const newer = (row: SyncRow, sync: SyncMetadata | undefined) => ordering.accept(row, sync);
+const onArrival = (row: SyncRow, apply: () => void) => (sync: SyncMetadata | undefined) => { if (ordering.accept(row, sync)) apply(); };
 /**
  * A read the hydrate's batch applies together with the others (the runtime dot and the chosen model
  * in one render): its number is taken as it arrives, so an older push after it is dropped, and the
- * batch applies it only while nothing newer landed since. On a legacy connection it always applies.
+ * batch applies it only while nothing newer landed since.
  */
 function batched(row: SyncRow) {
   let sync: SyncMetadata | undefined;
@@ -89,9 +84,9 @@ function batched(row: SyncRow) {
   return {
     arrived(metadata: SyncMetadata | undefined, take = true) {
       sync = metadata;
-      took = take && ordering.ordered(row.domain) && ordering.accept(row, metadata);
+      took = take && ordering.accept(row, metadata);
     },
-    lands: () => !ordering.ordered(row.domain) || (took && ordering.newest(row, sync)),
+    lands: () => took && ordering.newest(row, sync),
   };
 }
 const MEMORY = rowOf(methodSync("memory.status"));
@@ -153,40 +148,14 @@ const settingsSession = createSettings({ applyServerEvent, authority: applyServe
 export const { setContext, updateSettings, updateModelSettings, resetSettings } = settingsSession;
 const { settingsPatch } = settingsSession;
 
-/**
- * Channels whose snapshot the second hydrate batch reads (sources.list, update.status), held only on
- * a legacy connection: a numbered push of an ordered kind is never held.
- */
-const SECOND_BATCH: ReadonlySet<Channel> = new Set<Channel>(["sources.changed", "update.changed"]);
-
 async function hydrate(c: Client): Promise<void> {
   settingsSession.beginHydration();
-  // A push is newer than any snapshot whose request started before it. While
-  // a batch is in flight, its channels' pushes wait here and replay in order
-  // right after its snapshots land, so a snapshot never undoes a push (W-03).
-  // The first batch holds every channel: a ready push then publishes in the
-  // same update as the model the snapshot chose.
-  let held: ReadonlySet<Channel> | "all" | "none" = "all";
-  const waiting: Array<() => void> = [];
-  const release = (next: ReadonlySet<Channel> | "none") => {
-    held = next;
-    for (const run of waiting.splice(0)) applyServerEvent(run);
-  };
-  const dispatch = (channel: Channel, run: () => void) => {
-    if (held === "all" || (held !== "none" && held.has(channel))) waiting.push(run);
-    else applyServerEvent(run);
-  };
   const on = <C extends Channel>(channel: C, handler: (p: Payload<C>) => void) =>
-    c.subscribe(channel, (p) => applyServerEvent(() => dispatch(channel, () => handler(p))));
-  // A push of an ordered kind applies at once when newer. Unnumbered (legacy, or sent before this
-  // socket's negotiation) it waits like any other push, and is dropped if the connection is ordered:
-  // the read that follows the negotiation is newer than it.
+    c.subscribe(channel, (p) => applyServerEvent(() => handler(p)));
+  // why: one sent before this socket's negotiation has no number; the reads after it are newer
   const numbered = <C extends Channel>(channel: C, apply: (p: Payload<C>) => void) => {
     const row = rowOf(pushSync(channel));
-    c.subscribe(channel, (p, sync) => applyServerEvent(() => {
-      if (ordering.ordered(row.domain)) { if (ordering.accept(row, sync)) apply(p); return; }
-      dispatch(channel, () => { if (!ordering.ordered(row.domain)) apply(p); });
-    }));
+    c.subscribe(channel, (p, sync) => applyServerEvent(() => { if (ordering.accept(row, sync)) apply(p); }));
   };
   numbered("sources.changed", (sources) => applyServerEvent({ sources }));
   numbered("sources.imports", (sourceImports) => applyServerEvent({ sourceImports }));
@@ -213,7 +182,7 @@ async function hydrate(c: Client): Promise<void> {
     runMeasurePages(list);
   });
   numbered("models.measuring", (run) => applyServerEvent((s) => measuringChanged(s, run)));
-  c.subscribe("settings.changed", (payload, metadata) => applyServerEvent(() => settingsSession.receiveSettings(payload, (run) => dispatch("settings.changed", run), metadata)));
+  c.subscribe("settings.changed", (payload, metadata) => applyServerEvent(() => settingsSession.receiveSettings(payload, metadata)));
   // The server sends the presets to every window whenever they change (ComfyUI's state, a job
   // settling to other files, a download, image settings), so no window reads them again for that.
   numbered("image.status", (imageStatus) => applyServerEvent({ imageStatus }));
@@ -230,20 +199,14 @@ async function hydrate(c: Client): Promise<void> {
   });
   numbered("image.download", (imageDownload) => applyServerEvent({ imageDownload }));
   numbered("image.setup", setupSaid);
-  // One chat's row and its messages' number: threads.ts compares them with the ones it holds per
-  // chat, so on an ordered connection a row applies at once; legacy waits behind the hydrate's reads.
-  c.subscribe("threads.changed", (p, sync) => applyServerEvent(() => {
-    if (ordering.ordered("threads")) { threadSession.rowPushed(p, sync); return; }
-    dispatch("threads.changed", () => { if (!ordering.ordered("threads")) threadSession.rowPushed(p, sync); });
-  }));
+  c.subscribe("threads.changed", (p, sync) => applyServerEvent(() => threadSession.rowPushed(p, sync)));
   settingsReads.begin();
   // the bridge answers without the server, so the folder is in even when the hydrate never reaches its reads
   void readFolder();
   try {
-    await hydrateWith(on, release, c.negotiate);
+    await hydrateWith(on, c.negotiate);
   } finally {
     settingsSession.releasePresentation();
-    release("none");
     settingsReads.end();
   }
   // Chat row 35: the files this window's drafts and queue name stay on the server past a day.
@@ -254,7 +217,6 @@ async function hydrate(c: Client): Promise<void> {
 
 async function hydrateWith(
   on: <C extends Channel>(channel: C, handler: (p: Payload<C>) => void) => void,
-  release: (next: ReadonlySet<Channel> | "none") => void,
   negotiate: Client["negotiate"],
 ): Promise<void> {
   // why: what this window holds of the records is from before this connection, until its list
@@ -262,13 +224,10 @@ async function hydrateWith(
   on("reply.words", onWords);
   on("reply.changed", (change) => recordChanged(change));
   on("usage.changed", () => usageSession.usageChanged());
-  // Install every receipt handler first. Ordered domains stay disabled until
-  // their full migration lands; unsupported servers continue in legacy mode.
   const negotiated = await negotiate();
   if (negotiated.protocol !== undefined && negotiated.protocol !== PROTOCOL_VERSION) setState({ outdated: true });
   settingsSession.ready();
-  threadSession.connected(negotiated.mode === "ordered" && negotiated.domains.includes("threads") ? negotiated.epoch : undefined);
-  const orderedSettings = negotiated.mode === "ordered" && negotiated.domains.includes("settings");
+  threadSession.connected(negotiated.epoch);
 
   // settings.get is a local store read and the model choice needs only it and
   // the model list, so the runtime dot and a chosen model land in one render:
@@ -286,15 +245,12 @@ async function hydrateWith(
     // The list's runtime is the one it was read beside; the newer of it and the status shows.
     // Its models say what is installed only beside a ready runtime (answered).
     call("models.list", {}, { onResult: (list, sync) => { listRuntime.arrived(sync); listModels.arrived(sync, answered(list.runtime)); } }).catch(() => undefined),
-    // On an ordered connection the list applies as it lands, keeping a row pushed after it was read.
+    // The list applies as it lands, keeping a row pushed after it was read.
     call("threads.list", {}, { onResult: threadSession.listArrived }),
-    // Ordered snapshots are required; protocol rejection must fail bootstrap,
-    // rather than become an optional unavailable read and reset retry backoff.
-    orderedSettings
-      ? call("settings.get", {}, { onResult: settingsSession.acceptSettings })
-      : probe("settings.get", {}, { onResult: settingsSession.acceptSettings }),
-    // Every download's progress, a whole the models.pull pushes are parts of: on an ordered
-    // connection it applies as it lands, so a newer push after it applies on top.
+    // why: a refused settings read fails the bootstrap, so its retry backs off instead of resetting
+    call("settings.get", {}, { onResult: settingsSession.acceptSettings }),
+    // Every download's progress, a whole the models.pull pushes are parts of: it applies as it
+    // lands, so a newer push after it applies on top.
     probe("models.pulls", {}, { onResult: (pending, sync) => onArrival(PULLS, () => applyServerEvent((s) => ({ pulls: reconcilePulls(s.pulls, pending) })))(sync) }),
     // The makers and example names come with the models, so a maker mark never draws "?" first.
     probe("models.suggested", {}, { onResult: (_, sync) => suggestedRead.arrived(sync) }),
@@ -306,13 +262,11 @@ async function hydrateWith(
   const models = listed !== undefined && answered(listed.runtime) && listModels.lands() ? listed.models : undefined;
   const runtime = statusRead.lands() ? status : listed !== undefined && listRuntime.lands() ? listed.runtime : undefined;
   const settings = settingsSession.endHydration(snapshot);
-  settingsSession.noteVoiceSnapshot(settings);
   applyServerEvent((s) => {
     const withSettings = settings === NA || settings === undefined ? { settings } : settingsPatch(s, settings, true);
-    const chats = ordering.ordered("threads") ? s.threads : sortThreads(threads);
     const held = memory === NA || memory === undefined || !memoryRead.lands() ? {} : { memory, ...(s.threadId === null && !s.newChatPicked ? { newChatResident: residentChat({ memory }) } : {}) };
-    const pulls = inBatch(PULLS, pendingPulls) ? reconcilePulls(s.pulls, pendingPulls) : s.pulls;
-    const next: State = { ...s, suggested: suggestedRead.lands() || suggested === NA ? suggested ?? s.suggested : s.suggested, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(pulls, models ?? s.models), threads: chats, ...withSettings, ...held };
+    const pulls = pendingPulls === NA ? reconcilePulls(s.pulls, pendingPulls) : s.pulls;
+    const next: State = { ...s, suggested: suggestedRead.lands() || suggested === NA ? suggested ?? s.suggested : s.suggested, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(pulls, models ?? s.models), ...withSettings, ...held };
     return { ...next, ...decided(modelChoice(next)) };
   });
   if (settings !== NA && settings !== undefined) settingsSession.seedContext();
@@ -320,8 +274,6 @@ async function hydrateWith(
   restoreSaved();
   applyTheme(settings === NA || settings === undefined ? "system" : settings.theme);
   applyAccent(settings === NA || settings === undefined ? undefined : settings.accent);
-  // the pushes that came during the first batch, in order, in this same task
-  release(SECOND_BATCH);
 
   // The fit table waits for nothing and nothing waits for it: until it lands every fit value is a
   // skeleton, and of it and a pushed table the newer number wins whichever arrives first. A closed
@@ -344,7 +296,7 @@ async function hydrateWith(
     if (newer(IMAGE_PRESETS, sync)) applyServerEvent({ imagePresets });
     if (newer(IMAGE_DOWNLOAD, sync)) applyServerEvent({ imageDownload: imagePresets.download });
   }) }).then((imagePresets) => { if (imagePresets === NA) applyServerEvent({ imagePresets }); });
-  const [gpu, catalog, sources, update, speeds, measures] = await Promise.all([
+  const [gpu, catalog, , update, speeds, measures] = await Promise.all([
     probe("gpu.status", {}, { onResult: (read, sync) => onArrival(GPU, () => applyServerEvent({ gpu: read }))(sync) }),
     probe("models.catalog", {}, { onResult: (read, sync) => onArrival(CATALOG, () => applyServerEvent({ catalog: read }))(sync) }),
     probe("sources.list", {}, { onResult: (list, sync) => onArrival(LIBRARY, () => applyServerEvent({ sources: list }))(sync) }),
@@ -352,23 +304,20 @@ async function hydrateWith(
     probe("models.speed", {}, { onResult: (read, sync) => onArrival(SPEEDS, () => applyServerEvent((s) => speedsRead(s, read)))(sync) }),
     probe("models.measures", {}, { onResult: (read, sync) => onArrival(MEASURES, () => applyServerEvent(measuresRead(read)))(sync) }),
   ]);
-  // An ordered read applied itself on arrival; only "this build cannot say" is left for the batch.
+  // Each read applied itself on arrival; only "this build cannot say" is left for the batch.
   applyServerEvent((s) => ({
-    ...(inBatch(GPU, gpu) ? { gpu } : {}), ...(ordering.ordered(LIBRARY.domain) ? {} : { sources }), ...(inBatch(UPDATE, update) ? { update } : {}),
-    ...(inBatch(CATALOG, catalog) ? { catalog } : {}), ...(inBatch(SPEEDS, speeds) ? speedsRead(s, speeds) : {}), ...(inBatch(MEASURES, measures) ? measuresRead(measures) : {}),
+    ...(gpu === NA ? { gpu } : {}), ...(update === NA ? { update } : {}),
+    ...(catalog === NA ? { catalog } : {}), ...(speeds === NA ? speedsRead(s, speeds) : {}), ...(measures === NA ? measuresRead(measures) : {}),
   }));
   if (measures !== undefined && measures !== NA) runMeasurePages(measures.measures);
-  release("none");
   void settingsReads.read();
   // A model's thoughts take minutes in system memory, so Thinking starts off with no GPU; the composer's button still turns it on.
-  // Read after the release: a GPU push held behind gpu.status is the newer answer.
   settingsSession.seedThinking();
 
   const s = getState();
   if (s.view === "new" && threads.length === 0 && !firstRunDone()) setState({ view: "firstrun" });
-  // A chat cached from before this connection is read again only if its number moved (on a legacy
-  // connection, or after the server restarted, every one has): the open one now, the others on
-  // their next visit (W-04).
+  // A chat cached from before this connection is read again only if its number moved (after the
+  // server restarted, every one has): the open one now, the others on their next visit (W-04).
   if (s.threadId !== null) await loadThread(s.threadId);
   // turns may have ended while the connection was down
   usageSession.usageChanged();

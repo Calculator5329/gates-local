@@ -29,7 +29,8 @@ export function numberServer(server: FakeServer, options: { serves: readonly Syn
   const revs = new Map<string, number>();
   /** Every scope a frame of `row` carries: the next number of each when `next`, else the one it has; a chat's own number stays. */
   const numbers = (row: SyncRow, about: unknown, next: boolean): SyncMetadata => ({ epoch, changes: scopesOf(row, about).map(scope => {
-    const rev = (revs.get(scope) ?? 0) + (next && !scope.startsWith("thread:") ? 1 : 0);
+    // why: attached after a connection, it goes on from the number the server underneath gave out
+    const rev = (revs.get(scope) ?? server.at(scope).changes[0]?.rev ?? 0) + (next && !scope.startsWith("thread:") ? 1 : 0);
     revs.set(scope, rev);
     return { scope, kind: "snapshot" as const, rev };
   }) });

@@ -1,7 +1,7 @@
 // A page that opened against another version of the contract asks for a reload; one on the same
 // version, or on a server too old to say, does not.
 import { afterEach, expect, it, vi } from "vitest";
-import { PROTOCOL_VERSION } from "@gates-local/contracts";
+import { ORDERED_DOMAINS, PROTOCOL_VERSION } from "@gates-local/contracts";
 import { type Browser, installBrowser, tick, until } from "../../test/harness.ts";
 
 let browser: Browser | undefined;
@@ -25,7 +25,7 @@ it.each([
 ])("a server on contract version %s: the page asks for a reload is %s", async (protocol, asks) => {
   browser = installBrowser();
   vi.resetModules();
-  browser.server.answer("sync.negotiate", () => ({ epoch: "e", ordered: [], ...(protocol === undefined ? {} : { protocol }) }));
+  browser.server.answer("sync.negotiate", () => ({ epoch: "e", ordered: ORDERED_DOMAINS, ...(protocol === undefined ? {} : { protocol }) }));
   const session = await import("../lib/session/index.ts");
   const store = await import("../lib/store/store.ts");
   disconnect = session.connect();

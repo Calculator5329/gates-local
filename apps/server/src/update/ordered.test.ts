@@ -61,15 +61,15 @@ it("a clone's Download is refused with its reason, not answered with a status th
   await expect(createUpdateHandlers(update)["update.download"]({}, { clientId: 1 })).rejects.toThrow(/nothing to download here/);
 });
 
-it("the socket server refuses an unnumbered status push once updates are ordered", async () => {
+it("the socket server refuses an unnumbered status push", async () => {
   let server: WsServer | undefined;
   const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner: fakePnpm().runner, everyChange: () => true, changed: (status, change) => server?.push("update.changed", status, [change]) });
   cleanup.push(() => update.close());
-  server = await startWsServer({ port: 0, token: "fixture", allowedOrigins: [], ordered: ["settings", "sources", "updates"], handlers: createUpdateHandlers(update) as never });
+  server = await startWsServer({ port: 0, token: "fixture", allowedOrigins: [], handlers: createUpdateHandlers(update) as never });
   cleanup.push(() => server?.close());
   const client = createClient(new WebSocket(`ws://127.0.0.1:${server.port}/?token=fixture`) as unknown as SocketLike);
   cleanup.push(() => client.close());
-  expect(await client.negotiate()).toMatchObject({ mode: "ordered", domains: ["settings", "sources", "updates"] });
+  expect(await client.negotiate()).toMatchObject({ epoch: expect.any(String) });
   const pushes: Array<{ check: string | undefined; sync: SyncMetadata | undefined }> = [];
   client.subscribe("update.changed", (status: UpdateStatus, sync) => pushes.push({ check: status.lastCheck?.state, sync }));
 

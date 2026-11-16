@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ModelInfo } from "@gates-local/contracts";
-import { canChat, canThink, chatBlockedReason, chatModels, firstChatPull, modelChoice, newestOnly, notForChat, sendableModel } from "./pick.ts";
+import { canChat, canThink, chatBlockedReason, chatModels, firstChatPull, modelChoice, notForChat, sendableModel } from "./pick.ts";
 
 const m = (name: string, sizeBytes: number, capabilities: string[], pick?: ModelInfo["pick"]): ModelInfo => ({
   name,
@@ -77,17 +77,6 @@ describe("client model choice", () => {
     // Gone for good (removed): the app's pick, and the choice is not restored onto an embedding model.
     expect(modelChoice([small, picked], "gemma4:12b", "gemma4:12b")).toEqual(set("qwen3.5:9b"));
     expect(modelChoice([embed, picked], undefined, "nomic-embed-text:latest")).toEqual(set("qwen3.5:9b"));
-  });
-
-  it("MP2-02: an older models.refresh answer that lands late is dropped, as is one overtaken by a models.changed push", () => {
-    const order = newestOnly();
-    const older = order.next(); // window focus
-    const newer = order.next(); // a finished download
-    expect(order.current(newer)).toBe(true);
-    expect(order.current(older)).toBe(false); // lands second: dropped
-    const inFlight = order.next();
-    order.next(); // models.changed arrived while it was in flight
-    expect(order.current(inFlight)).toBe(false);
   });
 
   it("an Ollama that does not report capabilities is the reason nothing can chat, not a missing download", () => {

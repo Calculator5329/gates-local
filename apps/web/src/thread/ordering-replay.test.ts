@@ -167,12 +167,12 @@ export function foreignSpeech(theme = false, tagged = true): ReplayScenario<Worl
   });
 }
 
-function batchedSettings(orderedSettings?: boolean): ReplayScenario<World> {
+function batchedSettings(): ReplayScenario<World> {
   const themes: string[] = [];
   return {
     name: "RP-01: two broadcasts before either settings response",
     create: async () => {
-      const w = await OrderingWorld.create(true, orderedSettings);
+      const w = await OrderingWorld.create();
       themes.length = 0;
       vi.spyOn(document.documentElement, "setAttribute").mockImplementation((name, value) => {
         if (name === "data-theme") themes.push(value);
@@ -217,12 +217,12 @@ it("RP-01 ordered settings preserves the newest theme across three explicit FIFO
     ["B.disconnect.request", "B.disconnect.response.ready", "B.disconnect.push-to-A", "B.disconnect.push-to-B", "B.theme.request", "B.theme.response.ready", "B.theme.push-to-A", "B.disconnect.response", "B.theme.push-to-B", "B.theme.response"],
     ["B.disconnect.request", "B.theme.request", "B.disconnect.response.ready", "B.theme.response.ready", "B.disconnect.push-to-B", "B.disconnect.push-to-A", "B.theme.push-to-A", "B.theme.push-to-B", "B.disconnect.response", "B.theme.response"],
   ];
-  for (const order of orders) await replay(batchedSettings(true), { order: JSON.stringify(order) });
+  for (const order of orders) await replay(batchedSettings(), { order: JSON.stringify(order) });
   process.stdout.write("RP-01 ordered settings: 3 orders (explicit FIFO witnesses)\n");
 });
 
 it("ordered shared/model acknowledgements retain both commits and a no-op voice echo preserves intent", async () => {
-  const w = await OrderingWorld.create(true, true);
+  const w = await OrderingWorld.create();
   try {
     const shared = w.a.session.updateSettings({ theme: "light" }); await drain();
     const model = w.b.session.updateModelSettings("model:latest", { systemPrompt: "Keep this prompt" }); await drain();
@@ -243,7 +243,7 @@ it("ordered shared/model acknowledgements retain both commits and a no-op voice 
 });
 
 it("ordered settings accepted during bootstrap cannot roll back when the last response and socket close share a task", async () => {
-  const w = await OrderingWorld.create(true, true);
+  const w = await OrderingWorld.create();
   try {
     await w.drop(); await w.reconnect();
     const saved = w.b.session.updateSettings({ theme: "light" }); await drain();
@@ -256,7 +256,7 @@ it("ordered settings accepted during bootstrap cannot roll back when the last re
 });
 
 it("ordered bootstrap missing its required settings stamp retains failed-startup backoff", async () => {
-  const w = await OrderingWorld.create(true, true);
+  const w = await OrderingWorld.create();
   const timers = vi.spyOn(globalThis, "setTimeout");
   try {
     await w.drop(); await w.reconnect();

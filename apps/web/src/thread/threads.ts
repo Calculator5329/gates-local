@@ -227,8 +227,6 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
   function rowPushed({ threadId, thread }: Payload<"threads.changed">, sync: SyncMetadata | undefined): void {
     applyRow(threadId, thread, sync);
     if (thread === null) return;
-    // legacy: the push cannot say what changed, so a read ahead of the chat is thrown away, as before
-    if (!numbers.ordered()) { invalidatePreload(threadId); return; }
     numbers.announce(threadId, numbers.of(sync, chatScope(threadId)));
     const preview = previews.get(threadId);
     if (preview !== undefined && preview.at < numbers.known(threadId)) previews.delete(threadId);
@@ -236,13 +234,11 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
   }
 
   /**
-   * The hydrate's list read. On an ordered connection it applies as it lands when newer than the list
-   * shown, and a chat whose row came after the read keeps that row (or stays deleted); each chat's
-   * number is noted, so a cached copy is read again on its next visit only if it moved. Legacy: the
-   * hydrate's batch applies the list as read, and every cached copy is read again on its next visit.
+   * The hydrate's list read. It applies as it lands when newer than the list shown, and a chat whose
+   * row came after the read keeps that row (or stays deleted); each chat's number is noted, so a
+   * cached copy is read again on its next visit only if it moved.
    */
   function listArrived(threads: readonly Thread[], sync: SyncMetadata | undefined): void {
-    if (!numbers.ordered()) return;
     const newer = numbers.list(numbers.of(sync, "threads"));
     if (newer === undefined) return;
     for (const t of threads) if (!newer.has(t.id)) numbers.announce(t.id, numbers.of(sync, chatScope(t.id)));
@@ -256,7 +252,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
 
   // why: the rows came with their record; a copy current before them is current at their number
   function rowsSaved(threadId: string, chatNumber: number): void {
-    if (!numbers.ordered() || getState().messages[threadId] === undefined || loading(threadId) || !numbers.current(threadId)) return;
+    if (getState().messages[threadId] === undefined || loading(threadId) || !numbers.current(threadId)) return;
     numbers.announce(threadId, chatNumber);
     numbers.hold(threadId, chatNumber);
   }
@@ -299,7 +295,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     const older = () => preload?.cancelled === true || req.seq < (landed.get(threadId) ?? 0);
     let wider = false;
     let outdated = false;
-    // the chat's number this read is at: the answer's own, or (legacy, never compared) the newest named when it was sent
+    // the chat's number this read is at: the answer's own, or the newest named when it was sent
     let at = numbers.asked(threadId);
     try {
       // the newest page, or as many as are already loaded: a reload never takes back what the reader asked for
@@ -505,11 +501,11 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     creatingDraft: (version: number) => creatingDrafts.has(version),
     /**
      * A new connection. On the same server (its epoch unchanged) every number the window holds stays,
-     * and the list read that follows says which cached chats moved. A restarted server or a legacy
-     * connection forgets them: each cached chat is read again on its next visit, and a preview or a
-     * read ahead from before is not used.
+     * and the list read that follows says which cached chats moved. A restarted server forgets them:
+     * each cached chat is read again on its next visit, and a preview or a read ahead from before is
+     * not used.
      */
-    connected(epoch: string | undefined) {
+    connected(epoch: string) {
       if (!numbers.begin(epoch, Object.keys(getState().messages))) return;
       previews.clear();
       if (preloading !== null) preloading.cancelled = true;

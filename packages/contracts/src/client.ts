@@ -36,8 +36,6 @@ export interface ClientOptions {
   readonly timeoutMs?: number;
   /** Frames the client could not use (bad envelope, unknown id, bad payload). Defaults to console.warn. */
   readonly onProtocolError?: (error: WireError) => void;
-  /** The domains negotiate() offers. Default ORDERED_DOMAINS. */
-  readonly ordered?: readonly SyncDomain[];
 }
 
 export interface CallOptions<M extends MethodName = MethodName> {
@@ -48,9 +46,8 @@ export interface CallOptions<M extends MethodName = MethodName> {
   readonly onResult?: (value: ResultOf<M>, sync: SyncMetadata | undefined) => void;
 }
 
-export type ClientSync =
-  | { readonly mode: "legacy"; readonly epoch?: string; readonly protocol?: number }
-  | { readonly mode: "ordered"; readonly epoch: string; readonly domains: readonly SyncDomain[]; readonly protocol?: number };
+/** What a negotiation agreed: every kind is numbered in this server process's epoch. */
+export interface ClientSync { readonly epoch: string; readonly protocol?: number }
 
 export interface Client {
   call<M extends MethodName>(method: M, params: Params<M>, options?: CallOptions<M>): Promise<ResultOf<M>>;
@@ -61,7 +58,7 @@ export interface Client {
    */
   reply<M extends ReplyCall>(method: M, params: Params<M>, options?: CallOptions<M>): Promise<ReplyOutcome>;
   subscribe<C extends Channel>(channel: C, handler: (payload: Payload<C>, sync?: SyncMetadata) => void): () => void;
-  /** Once per socket; only an explicit unsupported-method refusal permits fallback. */
+  /** Once per socket; a server that does not number every kind is refused and the socket closed. */
   negotiate(): Promise<ClientSync>;
   readonly sync: ClientSync | undefined;
   /** Resolves when the socket has closed; every pending call is rejected with code "closed" by then. */
@@ -113,15 +110,15 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
   };
 
   const protocolError = (error: WireError) => {
-    try { report(error); } finally { if (sync?.mode === "ordered") client.close(); }
+    try { report(error); } finally { if (sync !== undefined) client.close(); }
   };
   // A row of an ordered kind must carry exactly one snapshot number for its scope in this epoch.
   // `about`: the call's params or the push's payload, which name the member a row is about.
   const metadataError = (metadata: SyncMetadata | undefined, row: SyncRow | undefined, about: unknown): WireError | undefined => {
-    if (sync?.mode !== "ordered") return;
+    if (sync === undefined) return;
     const { epoch } = sync;
     if ((metadata !== undefined && metadata.epoch !== epoch) ||
-      (row !== undefined && sync.domains.includes(row.domain) && scopesOf(row, about).some(scope => revisionOf(metadata, epoch, scope) === undefined))) {
+      (row !== undefined && scopesOf(row, about).some(scope => revisionOf(metadata, epoch, scope) === undefined))) {
       return new WireError("bad-message", `missing or invalid ${row === undefined ? "synchronization" : scopesOf(row, about).join(" and ")} metadata; reconnect required`);
     }
   };
@@ -161,8 +158,12 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
         call.reject(new WireError("bad-result", "server enabled an unrequested ordered domain"));
         client.close(); return;
       }
+      if (ORDERED_DOMAINS.some(domain => !negotiated.ordered.includes(domain))) {
+        call.reject(new WireError("bad-result", "server numbers only some kinds; it is from another version"));
+        client.close(); return;
+      }
       const { epoch, protocol } = negotiated;
-      sync = { ...(negotiated.ordered.length === 0 ? { mode: "legacy", epoch } : { mode: "ordered", epoch, domains: negotiated.ordered }), ...(protocol === undefined ? {} : { protocol }) };
+      sync = { epoch, ...(protocol === undefined ? {} : { protocol }) };
     }
     try {
       call.onResult?.(r.value as never, msg.sync);
@@ -246,11 +247,10 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
       };
     },
     negotiate() {
-      return negotiation ??= client.call("sync.negotiate", { ordered: options.ordered ?? ORDERED_DOMAINS }).then((): ClientSync => {
+      return negotiation ??= client.call("sync.negotiate", { ordered: ORDERED_DOMAINS }).then((): ClientSync => {
         if (isClosed || sync === undefined) throw new WireError("closed", "socket closed during negotiation");
         return sync;
       }).catch((error: unknown) => {
-        if (!isClosed && error instanceof WireError && (error.code === "unknown-method" || error.code === "not-implemented")) return sync = { mode: "legacy" };
         client.close();
         if (error instanceof WireError && error.code !== "closed") report(error);
         throw error;

@@ -1,9 +1,10 @@
 // Sample values for every method and push channel. The mapped types make
 // a new method or channel without a sample a type error, so round-trip
 // tests that walk these tables cover every channel by construction.
+import { ORDERED_DOMAINS, type SyncChange, scopesOf } from "./sync.ts";
 import { CHAT_MODELS, suggestedList } from "./chat-models.ts";
 import type { ImageFitAnswer, ImageFitInput } from "./image-fit.ts";
-import type { Channel, MethodName, Params, Payload, ResultOf } from "./protocol.ts";
+import { type Channel, type MethodName, type Params, type Payload, type ResultOf, pushSync } from "./protocol.ts";
 import type {
   FitTable,
   GpuStatus,
@@ -178,7 +179,7 @@ const updateStatus: UpdateStatus = {
 };
 
 export const methodSamples: { readonly [M in MethodName]: { readonly params: Params<M>; readonly result: ResultOf<M> } } = {
-  "sync.negotiate": { params: { ordered: [] }, result: { epoch: "sample-process", ordered: [] } },
+  "sync.negotiate": { params: { ordered: ORDERED_DOMAINS }, result: { epoch: "sample-process", ordered: ORDERED_DOMAINS } },
   "voice.check": { params: { url: "http://127.0.0.1:18078" }, result: { ready: true } },
   "voice.transcribe": { params: { id: "v1", audio: "UklGRg==" }, result: { text: "spoken words" } },
   "voice.cancel": { params: { id: "v1" }, result: {} },
@@ -419,3 +420,9 @@ export const imageFitEdges: readonly (ImageFitInput & { name: string; verdict: I
   { name: "a byte short and nothing the image may unload", estimateBytes: 9 * GIB, freeBytes: 9 * GIB - 1, creditedBytes: 0, freeableBytes: 0, verdict: "refuse" },
   { name: "ComfyUI's own memory makes up the rest exactly", estimateBytes: 9 * GIB, freeBytes: 5 * GIB, creditedBytes: 4 * GIB, freeableBytes: 0, verdict: "fits" },
 ];
+
+/** The numbers a test push of `channel` carries: 1 for each scope its row names. */
+export function sampleChanges<C extends Channel>(channel: C, payload: Payload<C>): readonly SyncChange[] | undefined {
+  const row = pushSync(channel);
+  return row === undefined ? undefined : scopesOf(row, payload).map((scope) => ({ scope, kind: "snapshot" as const, rev: 1 }));
+}

@@ -13,11 +13,11 @@ afterEach(async () => { for (const close of cleanup.splice(0).toReversed()) awai
 const revs = (sync: SyncMetadata | undefined) => sync?.changes.map((change: SyncChange) => [change.scope, change.kind === "snapshot" ? change.rev : -1]);
 
 async function serve(handlers: Partial<Handlers>): Promise<{ server: WsServer; client: ReturnType<typeof createClient> }> {
-  const server = await startWsServer({ port: 0, token: "fixture", allowedOrigins: [], ordered: ["settings", "models", "sources", "updates"], handlers });
+  const server = await startWsServer({ port: 0, token: "fixture", allowedOrigins: [], handlers });
   cleanup.push(() => server.close());
   const client = createClient(new WebSocket(`ws://127.0.0.1:${server.port}/?token=fixture`) as unknown as SocketLike);
   cleanup.push(() => client.close());
-  expect(await client.negotiate()).toMatchObject({ mode: "ordered", domains: ["settings", "models", "sources", "updates"] });
+  expect(await client.negotiate()).toMatchObject({ epoch: expect.any(String) });
   return { server, client };
 }
 
@@ -61,7 +61,7 @@ it("a download's progress and the read of every download share one number, in th
   expect([revs(pushed[0]), revs(readSync), revs(pushed[1])]).toEqual([[["pulls", 1]], [["pulls", 2]], [["pulls", 3]]]);
 });
 
-it("every models push and read the window applies is numbered once the kind is ordered", async () => {
+it("every models push and read the window applies is numbered", async () => {
   const { server, client } = await serve({ "gpu.status": () => samples["gpu.status"].result, "fit.table": () => samples["fit.table"].result });
   const seen: Array<SyncMetadata | undefined> = [];
   for (const channel of ["gpu.changed", "fit.changed", "memory.changed", "models.speed", "models.measures", "models.measuring", "models.load", "models.suggested", "models.changed"] as const) {

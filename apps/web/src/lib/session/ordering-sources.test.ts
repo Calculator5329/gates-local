@@ -2,13 +2,12 @@
 // lands after a push numbered n+1 must not undo the push, and an import's progress reaches the
 // window by push, with no read repeated on a timer.
 import { afterEach, expect, it, vi } from "vitest";
-import type { MethodName, Params, Source, SourceImports, SyncDomain, SyncMetadata } from "@gates-local/contracts";
+import type { MethodName, Source, SourceImports, SyncMetadata } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { installBrowser, type FakeServer, type FakeSocket } from "../../../test/harness.ts";
 import { drain } from "../../../test/ordering-world.ts";
 
 const EPOCH = "sources-process";
-const SERVES: readonly SyncDomain[] = ["settings", "sources"];
 const older: Source = { ...methodSamples["sources.list"].result[0]!, id: "s-old", label: "Read before the push" };
 const newer: Source = { ...older, id: "s-new", label: "Pushed after the read began" };
 const job = { id: "i1", key: "chinook", label: "Chinook", kind: "sample", state: "downloading", total: 2048 } as const;
@@ -18,23 +17,17 @@ type Request = Parameters<FakeServer["handle"]>[1];
 type Scope = "settings" | "sources" | "source-imports";
 interface Slow { respond(result: unknown, rev: number): void }
 const sync = (scope: Scope, rev: number): SyncMetadata => ({ epoch: EPOCH, changes: [{ scope, kind: "snapshot", rev }] });
-const domain = (scope: Scope): SyncDomain => scope === "settings" ? "settings" : "sources";
 
-/** The fake server, numbering what the real one numbers on a connection that ordered it. */
+const reply = (socket: FakeSocket, request: Request, result: unknown, scope: Scope, rev: number) =>
+  socket.frame({ type: "response", id: request.id, ok: true, result, sync: sync(scope, rev) });
+
+/** The fake server, numbering what the real one numbers. */
 function numbering(server: FakeServer) {
-  let ordered: readonly SyncDomain[] = [];
+  server.epoch = EPOCH;
   const slow = new Map<MethodName, (slow: Slow) => void>();
-  const reply = (socket: FakeSocket, request: Request, result: unknown, scope: "settings" | "sources" | "source-imports", rev: number) =>
-    socket.frame({ type: "response", id: request.id, ok: true, result, ...(ordered.includes(domain(scope)) ? { sync: sync(scope, rev) } : {}) });
   const scopes: Partial<Record<MethodName, "settings" | "sources" | "source-imports">> = { "settings.get": "settings", "sources.list": "sources", "sources.imports": "source-imports" };
   const base = server.handle.bind(server);
   server.handle = (socket, request) => {
-    if (request.method === "sync.negotiate") {
-      server.log.push(request);
-      ordered = SERVES.filter(d => (request.params as Params<"sync.negotiate">).ordered.includes(d));
-      socket.frame({ type: "response", id: request.id, ok: true, result: { epoch: EPOCH, ordered } });
-      return;
-    }
     const scope = scopes[request.method];
     if (scope === undefined) return base(socket, request);
     server.log.push(request);
@@ -49,7 +42,7 @@ function numbering(server: FakeServer) {
     hold: (method: MethodName) => new Promise<Slow>(resolve => slow.set(method, resolve)),
     push: (channel: "sources.changed" | "sources.imports", payload: unknown, rev: number) => {
       const scope = channel === "sources.changed" ? "sources" : "source-imports";
-      server.socket.frame({ type: "push", channel, payload, ...(ordered.includes(domain(scope)) ? { sync: sync(scope, rev) } : {}) });
+      server.socket.frame({ type: "push", channel, payload, sync: sync(scope, rev) });
     },
   };
 }

@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-16: every connection numbers every kind; the old mode is gone
+
+- The server refuses a page that does not ask for all six numbered
+  kinds, with "This page is from another version of Gates Local.
+  Reload it." The page refuses a server that numbers only some, and
+  closes the connection.
+- The page no longer holds pushes back while it connects. Each read
+  and push applies as it lands, and its number says whether it is
+  newer.
+- Words of a reply that land before the reconnect's list of replies
+  are kept until the list brings the words before them. They were
+  dropped, so a reply could lose a few words across a reconnect.
+- The models list's own ticket counter is gone; the numbers do its job.
+
 ## 2026-11-16: window tests run against a numbering server, and two fixes it found
 
 - The window's test server now numbers every answer and push the way

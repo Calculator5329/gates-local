@@ -4,10 +4,9 @@
 // screen when a push names a newer number for them; a reconnect reads the list once and a cached
 // chat only if its number moved.
 import { afterEach, expect, it, vi } from "vitest";
-import { type Message, type MethodName, type Params, type SyncDomain, type SyncMetadata, type Thread, chatScope } from "@gates-local/contracts";
+import { type Message, type MethodName, type Params, type SyncMetadata, type Thread, chatScope } from "@gates-local/contracts";
 import { installBrowser, tick, until, type FakeServer } from "../../../test/harness.ts";
 
-const SERVES: readonly SyncDomain[] = ["threads"];
 type Request = Parameters<FakeServer["handle"]>[1];
 const row = (id: string, title = `Chat ${id}`): Thread => ({ id, title, createdAt: 1, updatedAt: 1 });
 const said = (threadId: string, content: string, n: number): Message => ({ id: `${threadId}-${n}`, threadId, role: "user", content, createdAt: n });
@@ -19,7 +18,7 @@ const said = (threadId: string, content: string, n: number): Message => ({ id: `
  */
 function threadStore(server: FakeServer, ids: readonly string[]) {
   let epoch = "first-process";
-  let ordered: readonly SyncDomain[] = [];
+  server.epoch = epoch;
   let list = 0;
   const chat = new Map<string, number>();
   const rows = new Map<string, Thread>();
@@ -31,12 +30,6 @@ function threadStore(server: FakeServer, ids: readonly string[]) {
   const holds = new Map<MethodName, (send: () => void) => void>();
   const base = server.handle.bind(server);
   server.handle = (socket, request: Request) => {
-    if (request.method === "sync.negotiate") {
-      server.log.push(request);
-      ordered = SERVES.filter(d => (request.params as Params<"sync.negotiate">).ordered.includes(d));
-      socket.frame({ type: "response", id: request.id, ok: true, result: { epoch, ordered } });
-      return;
-    }
     let result: unknown;
     let sync: SyncMetadata;
     if (request.method === "threads.list") {
@@ -48,7 +41,7 @@ function threadStore(server: FakeServer, ids: readonly string[]) {
       sync = numbers([threadId]);
     } else return base(socket, request);
     server.log.push(request);
-    const send = () => socket.frame({ type: "response", id: request.id, ok: true, result, ...(ordered.includes("threads") ? { sync } : {}) });
+    const send = () => socket.frame({ type: "response", id: request.id, ok: true, result, sync });
     const held = holds.get(request.method);
     holds.delete(request.method);
     if (held) held(send);
@@ -56,7 +49,7 @@ function threadStore(server: FakeServer, ids: readonly string[]) {
   };
   const push = (threadId: string) => {
     const sync = numbers([threadId]);
-    server.push("threads.changed", { threadId, thread: rows.get(threadId) ?? null }, ordered.includes("threads") ? sync : undefined);
+    server.push("threads.changed", { threadId, thread: rows.get(threadId) ?? null }, sync);
   };
   const write = (threadId: string, change: (n: number) => void, toMessages: boolean) => {
     list += 1;
@@ -84,10 +77,9 @@ function threadStore(server: FakeServer, ids: readonly string[]) {
       chat.set(threadId, list);
     },
     /** The server restarted: a new epoch, every number from the start. */
-    restart: () => { epoch = "second-process"; },
+    restart: () => { epoch = "second-process"; server.epoch = epoch; },
     /** The next call of `method` is answered when the test says, with the numbers it was handled at. */
     hold: (method: "threads.list" | "threads.get") => new Promise<() => void>(resolve => holds.set(method, resolve)),
-    ordered: () => ordered,
   };
 }
 
@@ -141,7 +133,6 @@ async function reconnect(w: World): Promise<void> {
 it("a rename in another window applies its row and makes no threads.list or threads.get call here", async () => {
   const w = await boot(["a", "b"]);
   await connected(w);
-  expect(w.store.ordered()).toContain("threads");
   await open(w, "a");
   const before = { lists: reads(w, "threads.list"), gets: reads(w, "threads.get") };
   w.store.rename("b", "Renamed in window 2");

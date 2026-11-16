@@ -7,9 +7,10 @@ import {
   channelNames,
   createClient,
   methodNames,
+  ORDERED_DOMAINS,
   PROTOCOL_VERSION,
 } from "@gates-local/contracts";
-import { methodSamples, pushSamples } from "@gates-local/contracts/testing";
+import { methodSamples, pushSamples, sampleChanges } from "@gates-local/contracts/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { type Handlers, type WsServer, startWsServer } from "./server.ts";
@@ -114,7 +115,7 @@ describe("round trip over a real socket", () => {
     for (let i = 0; i < 10_000; i++) {
       server.push("reply.words", words);
     }
-    server.push("threads.changed", { threadId: "thread", thread: null });
+    server.push("threads.changed", { threadId: "thread", thread: null }, sampleChanges("threads.changed", { threadId: "thread", thread: null }));
     // Ping is not a request: the quiet client remains before the boundary.
     await new Promise<void>((resolve) => { quiet.ws.once("pong", () => resolve()); quiet.ws.ping(); });
     expect.soft(said.length).toBe(0);
@@ -134,18 +135,18 @@ describe("round trip over a real socket", () => {
     expect(seen).toEqual([[method, params]]);
   });
 
-  it("owns negotiation without an app handler and offers no incomplete ordered domain", async () => {
+  it("owns negotiation without an app handler and refuses a page that numbers only some kinds", async () => {
     const server = await start({});
     const desktop = await client(server);
     const other = await client(server, APP_ORIGIN);
-    const result = await desktop.client.call("sync.negotiate", { ordered: ["settings", "threads"] });
-    expect(result.ordered).toEqual([]);
+    await expect(desktop.client.call("sync.negotiate", { ordered: ["settings", "threads"] })).rejects.toMatchObject({ code: "bad-params" });
+    const result = await other.client.call("sync.negotiate", { ordered: ORDERED_DOMAINS });
+    expect(result.ordered).toEqual(ORDERED_DOMAINS);
     expect(result.epoch).toMatch(/^[\da-f-]{36}$/);
     expect(result.protocol).toBe(PROTOCOL_VERSION);
-    await expect(other.client.negotiate()).resolves.toEqual({ mode: "legacy", epoch: result.epoch, protocol: PROTOCOL_VERSION });
     const nextListener = await start({});
     const next = await client(nextListener);
-    await expect(next.client.negotiate()).resolves.toEqual({ mode: "legacy", epoch: result.epoch, protocol: PROTOCOL_VERSION });
+    await expect(next.client.negotiate()).resolves.toEqual({ epoch: result.epoch, protocol: PROTOCOL_VERSION });
   });
 
   it.each(channelNames)("push %s reaches every client", async (channel: Channel) => {
@@ -158,7 +159,7 @@ describe("round trip over a real socket", () => {
     const samples = pushSamples[channel];
     // streamed words reach a socket from its first request on
     for (const c of [a, b]) await expect(c.client.call("threads.list", {})).rejects.toMatchObject({ code: "not-implemented" });
-    for (const payload of samples) server.push(channel, payload as never);
+    for (const payload of samples) server.push(channel, payload as never, sampleChanges(channel, payload as never));
     // A round trip after the pushes proves they have all been read.
     await expect(a.client.call("threads.list", {})).rejects.toMatchObject({ code: "not-implemented" });
     await expect(b.client.call("threads.list", {})).rejects.toMatchObject({ code: "not-implemented" });

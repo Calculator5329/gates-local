@@ -45,16 +45,6 @@ export function modelChoice(models: readonly ModelInfo[] | undefined, current: s
   return next === current ? keep : { kind: "set", model: next };
 }
 
-/**
- * Order for model-list answers: a ticket per models.refresh call or
- * models.changed push. An answer applies only while its ticket is the newest,
- * so an older call that lands late never overwrites a newer list (MP2-02).
- */
-export function newestOnly(): { next(): number; current(ticket: number): boolean } {
-  let issued = 0;
-  return { next: () => ++issued, current: (ticket) => ticket === issued };
-}
-
 /** The model a message would go to: the current one only if it can chat. */
 export const sendableModel = (models: readonly ModelInfo[] | undefined, current: string | undefined): string | undefined =>
   models !== undefined && canChatAs(models, current) ? current : undefined;

@@ -93,7 +93,7 @@ it("the socket server refuses a threads answer or push without the list's number
   const b = store.createThread({ title: "Second" });
   let server: WsServer | undefined;
   server = await startWsServer({
-    port: 0, token: "fixture", allowedOrigins: [], ordered: ["settings", "threads"],
+    port: 0, token: "fixture", allowedOrigins: [],
     handlers: {
       "threads.list": (_params: unknown, ctx: HandlerContext) => listRead(store, ctx),
       "threads.get": ({ threadId }: { threadId: string }, ctx: HandlerContext) => {
@@ -113,7 +113,7 @@ it("the socket server refuses a threads answer or push without the list's number
   cleanup.push(() => server?.close());
   const client = createClient(new WebSocket(`ws://127.0.0.1:${server.port}/?token=fixture`) as unknown as SocketLike);
   cleanup.push(() => client.close());
-  expect(await client.negotiate()).toMatchObject({ mode: "ordered", domains: ["settings", "threads"] });
+  expect(await client.negotiate()).toMatchObject({ epoch: expect.any(String) });
   const pushes: Array<{ payload: Payload<"threads.changed">; sync: SyncMetadata | undefined }> = [];
   client.subscribe("threads.changed", (payload, sync) => pushes.push({ payload, sync }));
 

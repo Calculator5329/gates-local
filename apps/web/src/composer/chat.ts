@@ -693,6 +693,8 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
 
   // why: an old saved queue is handed over only once this connection has read the records
   let listedHere = false;
+  // why: words past this window's end that land before this connection's list follow its words so far
+  const ahead = new Map<string, Array<Payload<"reply.words">["part"]>>();
   const handing = new Set<string>();
 
   /**
@@ -731,6 +733,7 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
 
   function connected(): void {
     listedHere = false;
+    ahead.clear();
     records.connected(getState().replies.keys());
   }
 
@@ -764,6 +767,7 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
       }
     }
     listedHere = true;
+    ahead.clear();
     moveOldQueue();
   }
 
@@ -1124,6 +1128,7 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     const { threadId } = turn;
     if (part.type === "again") {
       waiting.delete(threadId);
+      ahead.delete(id);
       return applyServerEvent((s) => {
         const at = s.turns[threadId];
         return at?.turnId === id ? { turns: withTurn(s.turns, threadId, { ...at, text: "", thinking: "", tools: [] }) } : undefined;
@@ -1135,8 +1140,11 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     }
     const w = waiting.get(threadId);
     const have = turn[part.type].length + (w?.id === id ? w[part.type].length : 0);
-    // why: a part past this window's words follows ones it missed; the next connect's list has them
-    if (part.from > have) return;
+    // why: a part past this window's words follows ones it missed; a connect's list has them
+    if (part.from > have) {
+      if (!listedHere) ahead.set(id, [...ahead.get(id) ?? [], part]);
+      return;
+    }
     const fresh = part.text.slice(have - part.from);
     if (fresh !== "") queueWords(turn, part.type, fresh);
   }
@@ -1153,6 +1161,9 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
       const now = Date.now();
       return { turns: withTurn(s.turns, threadId, soFar.steps.reduce((t, step) => reduceTurn(t, { type: "tool", step }, now) ?? t, words)) };
     });
+    const parts = ahead.get(id) ?? [];
+    ahead.delete(id);
+    for (const part of parts) onWords({ id, part });
   }
 
   /** A reply that ended without a saved row while its chat was not open: its words become a row; its question already says how it ended. */

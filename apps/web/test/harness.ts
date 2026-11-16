@@ -217,6 +217,11 @@ export class FakeServer {
     this.revs.set(scope, (this.revs.get(scope) ?? 0) + 1);
   }
 
+  // why: a test that holds an answer itself gives it the number it took when it was handled
+  numbersFor(socket: FakeSocket, req: Request): SyncMetadata | undefined {
+    return this.numbers(socket, methodSync(req.method), req.params);
+  }
+
   handle(socket: FakeSocket, req: Request): void {
     this.log.push(req);
     this.caller = this.sockets.indexOf(socket) + 1;

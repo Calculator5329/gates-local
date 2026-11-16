@@ -55,6 +55,22 @@ it("a slow list refresh never undoes a models.changed that overtook it", async (
   close();
 });
 
+it("MP2-02: of two list refreshes, the one asked first and answered last never undoes the newer", async () => {
+  const { browser, session, store, close } = await hydrated();
+  const reading = browser.server.hold("models.refresh");
+  const askedFirst = session.refreshModels();
+  const slow = await reading;
+  const rereading = browser.server.hold("models.refresh");
+  const askedSecond = session.refreshModels();
+  (await rereading).respond({ runtime: ready, models: newer });
+  await askedSecond;
+  slow.respond({ runtime: ready, models: older });
+  await askedFirst;
+  await drain();
+  expect(store.getState().models?.map((m) => m.name), "the newer read stays").toEqual(newer.map((m) => m.name));
+  close();
+});
+
 it("a slow Retry answer never undoes a runtime.changed that overtook it", async () => {
   const { browser, server, session, store, close } = await hydrated();
   const reading = browser.server.hold("runtime.retry");
