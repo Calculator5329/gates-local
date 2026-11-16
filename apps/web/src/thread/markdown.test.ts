@@ -2,6 +2,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { isPageDoc, mayBePage, pageBlocks } from "@gates-local/contracts";
 import { createMarkdownParser, Markdown } from "./markdown.tsx";
 
 const html = (text: string, live = false) => renderToStaticMarkup(createElement(Markdown, { text, live }));
@@ -112,4 +113,31 @@ it("keeps incremental parsing equivalent across block boundaries and resets", ()
   }
   expect(parse("Reset").blocks).toEqual([{ t: "p", text: "Reset" }]);
   expect(parse("A replacement that is longer", false).blocks).toEqual([{ t: "p", text: "A replacement that is longer" }]);
+});
+
+const DOC = "<!doctype html>\n<html><body><p>Hi</p></body></html>";
+const FENCE_TEXTS = [
+  `Here it is:\n\n\`\`\`html\n${DOC}\n\`\`\`\n\nDone.`,
+  "A snippet:\n```html\n<p>Just a part</p>\n```",
+  `Two:\n\`\`\`HTML\n${DOC}\n\`\`\`\n\`\`\`css\nbody{}\n\`\`\`\n  \`\`\`html\n${DOC}\n  \`\`\``,
+  `Still writing:\n\`\`\`html\n${DOC.slice(0, 20)}`,
+  "Opening:\n```html\n",
+  `Windows lines:\r\n\`\`\`html\r\n${DOC.replaceAll("\n", "\r\n")}\r\n\`\`\`\r\nAfter.`,
+  `Old Mac lines:\r\`\`\`html\r${DOC.replaceAll("\n", "\r")}\r\`\`\``,
+  "No fences at all, only `inline` code.",
+];
+
+function rendererPages(text: string) {
+  return createMarkdownParser()(text, false).blocks.flatMap((b) => {
+    if (b.t !== "code" || b.lang.toLowerCase() !== "html") return [];
+    return (b.closed ? isPageDoc(b.text) : mayBePage(b.text)) ? [{ code: b.text, closed: b.closed }] : [];
+  });
+}
+
+it("the renderer and the page reader agree on every fence: the blocks drawn as pages are the blocks both sides call pages", () => {
+  for (const text of FENCE_TEXTS) {
+    const read = pageBlocks(text).map(({ code, closed }) => ({ code, closed }));
+    expect(rendererPages(text), JSON.stringify(text)).toEqual(read);
+  }
+  expect(FENCE_TEXTS.map((t) => pageBlocks(t).length)).toEqual([1, 0, 2, 1, 1, 1, 1, 0]);
 });

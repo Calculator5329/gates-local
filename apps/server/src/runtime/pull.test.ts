@@ -240,6 +240,57 @@ describe("models.pull", () => {
     await until(() => pushes.length > 0);
     expect(pushes).toEqual([{ name: "qwen3.5:9b", state: "error", completedBytes: 0, message: "Ollama is not running, so nothing can be downloaded." }]);
   });
+
+  it("checking the download is one step: Ollama's verifying, writing and removing lines push it once", async () => {
+    server = await startFakeServer({
+      "POST /api/pull": async (_b, res) => {
+        res.writeHead(200, { "content-type": "application/x-ndjson" });
+        line(res, { status: "pulling aa", digest: "sha256:aa", total: 100, completed: 100 });
+        line(res, { status: "verifying sha256 digest" });
+        line(res, { status: "writing manifest" });
+        line(res, { status: "removing any unused layers" });
+        line(res, { status: "success" });
+        res.end();
+      },
+    });
+    const pushes: PullProgress[] = [];
+    const done: string[] = [];
+    const m = createPullManager({ baseUrl: () => server?.baseUrl, push: (p) => pushes.push(p), onDone: (n) => void done.push(n), now: () => 0 });
+    m.pull("qwen3.5:9b");
+    await until(() => done.length === 1);
+    expect(pushes.filter((p) => p.state === "verifying")).toHaveLength(1);
+    expect(pushes.at(-1)?.state).toBe("done");
+  });
+
+  it("nothing is pushed after done, even when the model's size answers late", async () => {
+    let answerSize: ((n: number) => void) | undefined;
+    let finishRefresh: (() => void) | undefined;
+    server = await startFakeServer({
+      "POST /api/pull": async (_b, res) => {
+        res.writeHead(200, { "content-type": "application/x-ndjson" });
+        line(res, { status: "pulling aa", digest: "sha256:aa", total: 100, completed: 100 });
+        line(res, { status: "success" });
+        res.end();
+      },
+    });
+    const pushes: PullProgress[] = [];
+    const m = createPullManager({
+      baseUrl: () => server?.baseUrl,
+      push: (p) => pushes.push(p),
+      sizeOf: () => new Promise<number>((r) => { answerSize = r; }),
+      onDone: () => new Promise<void>((r) => { finishRefresh = r; }),
+      now: () => 0,
+    });
+    m.pull("qwen3.5:9b");
+    await until(() => pushes.at(-1)?.state === "done");
+    const atDone = pushes.length;
+    expect(answerSize).toBeDefined();
+    answerSize?.(5000);
+    await tick();
+    finishRefresh?.();
+    await tick();
+    expect(pushes).toHaveLength(atDone);
+  });
 });
 
 describe("plainPullError", () => {

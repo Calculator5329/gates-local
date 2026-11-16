@@ -244,3 +244,17 @@ describe("with the hourly check", () => {
     await module.close();
   });
 });
+
+describe("the built-in list", () => {
+  it("a malformed built-in list stops loading with the reason, never a half-read list", async () => {
+    const file = new URL("../../../../../packages/contracts/src/chat-models.json", import.meta.url).pathname;
+    vi.resetModules();
+    vi.doMock(file, () => ({ default: { ...CHAT_MODELS, example: "nowhere:1b" } }));
+    try {
+      await expect(import("@gates-local/contracts")).rejects.toThrow("chat-models.json: example nowhere:1b is not in models");
+    } finally {
+      vi.doUnmock(file);
+      vi.resetModules();
+    }
+  });
+});

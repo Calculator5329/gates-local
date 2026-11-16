@@ -12,6 +12,7 @@ const calls = vi.hoisted(() => ({
   openSettings: [] as unknown[],
   recheck: 0,
   folders: [] as (string | null)[],
+  setups: 0,
 }));
 vi.mock("../lib/session/index.ts", async (original) => ({
   ...await original<typeof import("../lib/session/index.ts")>(),
@@ -19,6 +20,7 @@ vi.mock("../lib/session/index.ts", async (original) => ({
   openSettings: (...a: unknown[]) => { calls.openSettings.push(a[0]); },
   recheckRuntime: () => { calls.recheck++; return Promise.resolve(null); },
   saveImageFolder: (folder: string | null) => { calls.folders.push(folder); return Promise.resolve(null); },
+  startImageSetup: () => { calls.setups++; return Promise.resolve(null); },
 }));
 
 const doc = new FakeDocument();
@@ -49,6 +51,7 @@ beforeEach(() => {
   calls.openSettings.length = 0;
   calls.recheck = 0;
   calls.folders.length = 0;
+  calls.setups = 0;
   doc.activeElement = null;
 });
 afterEach(() => { act(() => root.render(null)); });
@@ -97,6 +100,19 @@ it("the Make images reason's Image generation opens that section, where both fix
   await mount("tools", { settings: { ...settings, imageGen: false } });
   await fire(byTestId("settings.tools.image-setup"), "onClick");
   expect(calls.openSettings).toEqual(["images"]);
+});
+
+it("Set up images turns Make images on first and then starts the setup; a save that fails starts nothing", async () => {
+  await mount("images", { settings: { ...settings, imageGen: false }, imageSetup: methodSamples["image.setupInfo"].result, imageStatus: { state: "missing", owner: "external" } });
+  const sent: object[] = [];
+  calls.update.fn = (patch) => { sent.push(patch); return Promise.resolve("Couldn't save."); };
+  await fire(byTestId("settings.images.set-up"), "onClick");
+  expect(sent).toEqual([{ imageGen: true }]);
+  expect(calls.setups).toBe(0);
+  calls.update.fn = (patch) => { sent.push(patch); return Promise.resolve(null); };
+  await fire(byTestId("settings.images.set-up"), "onClick");
+  expect(sent).toEqual([{ imageGen: true }, { imageGen: true }]);
+  expect(calls.setups).toBe(1);
 });
 
 const heldRooms = () => all((el) => el.classList.includes("held")).length;

@@ -318,6 +318,18 @@ describe("messages", () => {
     expect(() => again.appendMessage({ threadId: t.id, role: "assistant", content: "x", times: { ...times, ended: { reason: "maybe", at: 1 } } as never })).toThrow(/times/);
   });
 
+  it("a message sent with no files is saved and read back with files absent, never an empty list", () => {
+    const path = join(dir, "no-files.db");
+    const s = store(path);
+    const t = s.createThread();
+    const m = s.appendMessage({ threadId: t.id, role: "user", content: "no attachments", files: [] });
+    expect(m).not.toHaveProperty("files");
+    expect(s.getThread(t.id).messages[0]).not.toHaveProperty("files");
+    s.close();
+    open.splice(open.indexOf(s), 1);
+    expect(store(path).getThread(t.id).messages[0]).not.toHaveProperty("files");
+  });
+
   it("returns messages in time order, ties in write order, with optional fields round-tripped", () => {
     const s = store();
     const t = s.createThread();

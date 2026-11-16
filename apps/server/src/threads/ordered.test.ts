@@ -7,6 +7,7 @@ import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { createClient, type Payload, type SocketLike, type SyncChange, type SyncMetadata } from "@gates-local/contracts";
 import { WebSocket } from "ws";
+import { rig } from "../../test/send-rig.ts";
 import { startWsServer, type HandlerContext, type WsServer } from "../ws/server.ts";
 import { openThreadStore, type ThreadStore } from "./store.ts";
 import { chatRead, listRead, threadChanged } from "./sync.ts";
@@ -85,6 +86,16 @@ it("threads.list and threads.get answer with the numbers of what they read, and 
   const [, gone, goneChanges] = threadChanged(store, b.id);
   expect(gone, "a deleted chat is a row too").toEqual({ threadId: b.id, thread: null });
   expect(revs(goneChanges)).toEqual([["threads", 5], [`thread:${b.id}`, 5]]);
+});
+
+it("threads.delete answers with the list's number of the deletion, so a list read before it cannot bring the chat back", async () => {
+  const r = rig();
+  const before = r.db.numbers.list();
+  let answered: readonly SyncChange[] | undefined;
+  await r.h["threads.delete"]({ threadId: r.thread.id }, { clientId: 1, capture: (c) => { answered = c; } });
+  const deletion = r.db.numbers.list();
+  expect(deletion).toBeGreaterThan(before);
+  expect(revs(answered)).toEqual([["threads", deletion], [`thread:${r.thread.id}`, deletion]]);
 });
 
 it("the socket server refuses a threads answer or push without the list's number or the chat's", async () => {

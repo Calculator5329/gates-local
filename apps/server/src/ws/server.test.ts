@@ -395,3 +395,19 @@ describe("open clients", () => {
     await vi.waitFor(() => expect(counts).toEqual([1, 2, 1, 0]));
   });
 });
+
+describe("a binary frame", () => {
+  it("is refused as bad-message even when it holds a well-formed request, and is never run", async () => {
+    const logs: string[] = [];
+    const seen: Array<[string, unknown]> = [];
+    const server = await start(sampleHandlers(seen), { logs });
+    const ws = connect(server);
+    const frames = rawFrames(ws);
+    await new Promise((r) => ws.once("open", r));
+    ws.send(Buffer.from(JSON.stringify({ type: "request", id: "b", method: "threads.list", params: {} })), { binary: true });
+    ws.send(JSON.stringify({ type: "request", id: "t", method: "threads.list", params: {} }));
+    expect(await frames.next()).toMatchObject({ type: "response", id: "t", ok: true });
+    expect(seen).toEqual([["threads.list", {}]]);
+    expect(logs.filter((l) => l.startsWith("dropped frame"))).toEqual(["dropped frame with no usable id: bad-message: frame is not text"]);
+  });
+});

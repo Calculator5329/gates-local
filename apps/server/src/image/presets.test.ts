@@ -1,9 +1,15 @@
 // The app's setups judged against ComfyUI's lists: ready, needing files, or refused with the reason.
-import { describe, expect, it } from "vitest";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import { APP_FILES, comfyInfo, KLEIN_COMPACT_FILES, KLEIN_FILES, MOSS_FILES, SDXL_FILES, ZIMAGE_FILES, type FakeFiles } from "../../test/comfy/info.ts";
 import { readFileSync } from "node:fs";
 import { imageFitVerdict } from "@gates-local/contracts";
 import { cardBytes, comfyLists, defaultChoice, imageOffLine, jobGraph, listPresets, presetFiles, PRESETS, resolveChoice, RETIRED, tiersFor, workflowPreset, type Preset } from "./presets.ts";
+import { createGpuLease } from "../gpu/lease.ts";
+import type { ThreadStore } from "../threads/store.ts";
+import { createImageModule } from "./module.ts";
 import { keepWorkflow } from "./sources.ts";
 import { cellsFor, STYLE_CELLS } from "./styles.ts";
 import files from "./setups/files.json" with { type: "json" };
@@ -298,5 +304,91 @@ describe("imageOffLine, the system prompt's line when the image tool is not offe
 
   it("is absent while the tool is offered", () => {
     expect(imageOffLine({ imageGen: true }, true, true)).toBeUndefined();
+  });
+});
+
+describe("the picker's groups", () => {
+  it("the app's own setups are grouped by theme: the model rows under General, each style's cell under that style's name", () => {
+    const { ready } = listPresets(lists(...APP_FILES), [], 16 * GIB);
+    expect(ready.map((p) => [p.id, p.group])).toEqual([
+      ["flux2-klein-4b", "General"], ["z-image-int8", "General"], ["moss-image", "General"],
+      ["general--r2-2a-klein-compact8", "General"], ["portraits--moss-official25", "Portraits and people"], ["characters--klein-official4", "Characters"],
+      ["pixel-art--r2-1a-klein-compact8", "Pixel art"], ["sprites--r2-1a-moss-official25", "Game sprites"], ["backgrounds--r2-1b-moss-official25", "Backgrounds"],
+      ["icons--r2-2a-moss-official25", "Icons"], ["text-logos--moss-official25", "Text and logos"], ["painterly--r2-2a-moss-official25", "Painterly and concept art"],
+    ]);
+  });
+});
+
+const sdxlGraph = (): Record<string, { class_type: string; inputs: Record<string, unknown> }> => JSON.parse(readFileSync(new URL("../../test/comfy/api/image_sdxl_simple.json", import.meta.url), "utf8"));
+const broken = (change: (graph: ReturnType<typeof sdxlGraph>) => void) => { const graph = sdxlGraph(); change(graph); return graph; };
+
+describe("a workflow Image mode cannot fill in", () => {
+  it("is listed refused when it has no single prompt, size, seed or output, each with its own reason", () => {
+    const graphs = {
+      "no output": broken((g) => { delete g["7"]; }),
+      "two prompts": broken((g) => {
+        g["20"] = { class_type: "CLIPTextEncode", inputs: { text: "second", clip: ["15", 1] } };
+        g["21"] = { class_type: "KSampler", inputs: { ...g["12"]!.inputs, positive: ["20", 0] } };
+      }),
+      "no size": broken((g) => { g["13"]!.class_type = "LatentUpscale"; }),
+      "no seed": broken((g) => { delete g["12"]!.inputs["seed"]; }),
+    };
+    const extra = Object.entries(graphs).map(([name, graph]) => workflowPreset({ id: `saved:${name}`, name, group: "Your workflows", graph }));
+    const { ready, others } = listPresets(comfyLists(comfyInfo(SDXL_FILES)), extra);
+    expect(ready.filter((p) => p.id.startsWith("saved:"))).toEqual([]);
+    expect(Object.fromEntries(others.filter((p) => p.id.startsWith("saved:")).map((p) => [p.name, p.why]))).toEqual({
+      "no output": "It saves no picture: there is no Save Image or Preview Image node.",
+      "two prompts": "It has 2 prompt boxes (nodes 10 and 20); Image mode fills in one.",
+      "no size": "It has no empty latent node, so Image mode cannot set the picture's size.",
+      "no seed": "It has no seed, so every picture would come out the same.",
+    });
+  });
+});
+
+const opened: Array<{ close(): Promise<void> }> = [];
+const made: string[] = [];
+afterEach(async () => {
+  for (const one of opened.splice(0)) await one.close();
+  await Promise.all(made.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+const comfyWithZImage = async (input: string | URL | Request): Promise<Response> => {
+  const route = new URL(String(input)).pathname;
+  if (route === "/system_stats") return Response.json({ system: { comfyui_version: "fake" }, devices: [{ type: "cuda" }] });
+  if (route === "/object_info") return Response.json(comfyInfo(ZIMAGE_FILES));
+  return new Response("not found", { status: 404 });
+};
+
+async function pickerOver(folder: string, records?: false) {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "gates-presets-left-"));
+  made.push(dataDir);
+  const module = createImageModule({
+    dataDir, lease: createGpuLease(), store: { interruptImageJobs: () => [] } as unknown as ThreadStore, push: () => {}, log: () => {},
+    settings: () => ({ imageGen: true, imageFolder: folder }),
+    defaultUrl: "http://127.0.0.1:18999",
+    localAddresses: () => ["127.0.0.1"], lookupHost: async () => ["127.0.0.1"],
+    service: { inspect: async () => ({ present: false, active: false, activeState: "inactive", pid: 0 }), start: async () => {}, stop: async () => {} },
+    fetch: comfyWithZImage,
+    download: { freeBytes: async () => 10 ** 12, ...records === false ? { records } : {} },
+  });
+  opened.push(module);
+  return module;
+}
+
+describe("what a setup has left to fetch", () => {
+  it("is its bytes less the parts already in the download folder, and absent while a file's size is unknown", async () => {
+    const folder = await mkdtemp(path.join(tmpdir(), "gates-presets-picked-"));
+    made.push(folder);
+    const vae = (files as Record<string, { url: string }>)["flux2-vae.safetensors"]!;
+    const dir = path.join(folder, "vae", "gates-local");
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, "flux2-vae.safetensors.part"), Buffer.alloc(1000));
+    await writeFile(path.join(dir, "flux2-vae.safetensors.part.json"), JSON.stringify({ url: vae.url, etag: "\"e\"", size: 336_211_292 }));
+    const whole = 4_070_624_520 + 3_848_213_998 + 336_211_292;
+    const row = async (records?: false) => (await (await pickerOver(folder, records)).presets()).others?.find((p) => p.id === "general--r2-2a-klein-compact8")?.needs;
+    expect(await row()).toEqual({ files: ["flux-2-klein-4b-fp8.safetensors", "qwen_3_4b_fp4_flux2.safetensors", "flux2-vae.safetensors"], bytes: whole, download: true, leftBytes: whole - 1000 });
+    const unknown = await row(false);
+    expect(unknown).toMatchObject({ download: true });
+    expect(unknown).not.toHaveProperty("leftBytes");
   });
 });

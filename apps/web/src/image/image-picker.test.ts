@@ -159,6 +159,15 @@ it("sizes are judged by the card, not by what a warm chat model leaves free: it 
   expect(warmRow(false, 8)).toContain("more than the GPU has");
 });
 
+const sizesHead = () => picker().match(/<span data-testid="image\.picker\.model">([^<]*)<\/span>/)?.[1];
+
+it("the sizes head names the model alone, and a setup that names no model apart from its style shows its whole name there", () => {
+  setState({ image: true, pop: { id: "images", kb: false }, imagePresets: presetsOf({ ...PIXEL, model: "FLUX.2 Klein 4B" }) });
+  expect(sizesHead()).toBe("FLUX.2 Klein 4B");
+  setState({ imagePresets: presetsOf(PIXEL) });
+  expect(sizesHead()).toBe(PIXEL.name);
+});
+
 it("the default ComfyUI lists is named, as the first row", () => {
   setState({ image: true, imagePresets: { presets: [MOSS, PLAIN, PIXEL], readAt: 1, current: { preset: MOSS, width: 1024, height: 1024 } } });
   expect(button()).toContain(`<span class="t">${MOSS.name}</span>`);

@@ -183,3 +183,19 @@ it("a listener that refuses image.start shows no Start or Check again button", (
   picker({ imagePresets: { presets: [], readAt: 1 }, imageStatus: { state: "stopped" }, unavailable: { "image.start": true } });
   expect(blankButton()).toBeUndefined();
 });
+
+it("setups that cannot run are listed greyed out, closed to a pick, each saying what it needs or why not", async () => {
+  const needing: ImagePreset = { ...others[2]!, needs: { files: ["other.safetensors"], download: false } };
+  const refused: ImagePreset = { id: "nodes", name: "Needs nodes", family: "flux", group: "General", measured: false, sizes, why: "ComfyUI lacks a node it uses" };
+  picker({ imagePresets: { presets: [ready], others: [needing, refused], readAt: 1 } });
+  for (const [p, words] of [[needing, "Needs 1 file"], [refused, "ComfyUI lacks a node it uses"]] as const) {
+    const { node, all } = row(p.id);
+    expect(String(node.props["className"]).split(" ")).toContain("off");
+    expect(all.find((n) => n.props["className"] === "pk-select")?.props["aria-disabled"]).toBe("true");
+    expect(text(node)).toContain(words);
+  }
+  expect(String(row(ready.id).node.props["className"]).split(" ")).not.toContain("off");
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("./image-picker.css", import.meta.url), "utf8");
+  expect(css).toContain(".image-picker .pk-r.off .pk-nm{color:var(--muted-foreground)}");
+});

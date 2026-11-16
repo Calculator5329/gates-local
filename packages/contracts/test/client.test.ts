@@ -387,4 +387,85 @@ describe("createClient", () => {
     expect(got).toEqual(["t1"]);
     expect(errors).toEqual(["bad-payload", "bad-payload", "bad-message"]);
   });
+
+  it("a call with no timeout of its own gives up after 30 seconds, not a moment before", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeSocket();
+    socket.open();
+    const client = createClient(socket);
+    let settled: unknown;
+    void client.call("models.refresh", {}).catch((error: unknown) => { settled = error; });
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(settled).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(settled).toMatchObject({ code: "timeout" });
+  });
+
+  it("a frame the client cannot use is written to the console when no one asked to hear about it", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const socket = new FakeSocket();
+      socket.open();
+      createClient(socket);
+      socket.reply("garbage");
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^\[contracts\] bad-message: /));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("an answer for a call nobody is waiting on is reported, naming its id", () => {
+    const socket = new FakeSocket();
+    socket.open();
+    const errors: WireError[] = [];
+    createClient(socket, { onProtocolError: (e) => errors.push(e) });
+    socket.reply(JSON.stringify({ type: "response", id: "never-asked", ok: true, result: [] }));
+    expect(errors).toEqual([expect.objectContaining({ code: "bad-message", message: expect.stringContaining('"never-asked"') })]);
+  });
+
+  it("the accepted result reaches onResult as the answer arrives, before the call's promise settles", async () => {
+    const socket = new FakeSocket();
+    socket.open();
+    const client = createClient(socket);
+    const listed = methodSamples["threads.list"].result;
+    const trace: unknown[] = [];
+    const result = client.call("threads.list", {}, { onResult: (value) => trace.push(["result", value]) }).then(() => trace.push("completion"));
+    const frame = encodeResult(socket.lastRequest().id, "threads.list", listed);
+    if (!frame.ok) throw frame.error;
+    socket.reply(frame.value);
+    expect(trace).toEqual([["result", listed]]);
+    await result;
+    expect(trace).toEqual([["result", listed], "completion"]);
+  });
+
+  it("an onResult that throws still lets the call resolve with its result, and the throw is reported", async () => {
+    const socket = new FakeSocket();
+    socket.open();
+    const errors: WireError[] = [];
+    const client = createClient(socket, { onProtocolError: (e) => errors.push(e) });
+    const created = methodSamples["threads.create"].result;
+    const result = client.call("threads.create", { title: "First" }, { onResult: () => { throw new Error("Stale state"); } });
+    const frame = encodeResult(socket.lastRequest().id, "threads.create", created);
+    if (!frame.ok) throw frame.error;
+    expect(() => socket.reply(frame.value)).not.toThrow();
+    await expect(result).resolves.toEqual(created);
+    expect(errors).toEqual([expect.objectContaining({ code: "internal" })]);
+  });
+
+  it("a push that arrives as an ArrayBuffer is read as text, the same as one from a Buffer", () => {
+    const socket = new FakeSocket();
+    socket.open();
+    const errors: string[] = [];
+    const client = createClient(socket, { onProtocolError: (e) => errors.push(e.code) });
+    const got: unknown[] = [];
+    client.subscribe("models.changed", (p) => got.push(p));
+    const text = JSON.stringify({ type: "push", channel: "models.changed", payload: pushSamples["models.changed"][0] });
+    const bytes = new TextEncoder().encode(text);
+    const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    expect(buffer).toBeInstanceOf(ArrayBuffer);
+    socket.reply(buffer);
+    socket.reply(Buffer.from(text));
+    expect(errors).toEqual([]);
+    expect(got).toEqual([pushSamples["models.changed"][0], pushSamples["models.changed"][0]]);
+  });
 });

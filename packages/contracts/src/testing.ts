@@ -1,6 +1,4 @@
-// Sample values for every method and push channel. The mapped types make
-// a new method or channel without a sample a type error, so round-trip
-// tests that walk these tables cover every channel by construction.
+// why: the mapped sample types make a missing method or channel a compile error
 import { ORDERED_DOMAINS, type SyncChange, scopesOf } from "./sync.ts";
 import { CHAT_MODELS, suggestedList } from "./chat-models.ts";
 import type { ImageFitAnswer, ImageFitInput } from "./image-fit.ts";
@@ -247,7 +245,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "models.pulls": { params: {}, result: [] },
   "models.remove": { params: { name: "gemma3:4b" }, result: { name: "gemma3:4b" } },
   "models.load": { params: { model: "qwen3.5:9b", numCtx: 16384 }, result: { model: "qwen3.5:9b", numCtx: 16384, state: "ready" } },
-  // None measured by default, so a client test that does not ask about speed sees none.
+  // why: a client test that does not ask about speed sees none
   "models.speed": { params: {}, result: [] },
   "models.measures": { params: {}, result: { measures: [measured] } },
   "models.measure": { params: { name: "qwen3.5:9b" }, result: { model: "qwen3.5:9b", state: "waiting", done: 0, total: 9 } },
@@ -311,7 +309,6 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "update.prepare": { params: { approval: "approval-1" }, result: { state: "ready", reservation: "reservation-1", target: "b".repeat(40) } },
   "update.commit": { params: { reservation: "reservation-1", target: "b".repeat(40), release: "main-release-1" }, result: { accepted: true, release: "main-release-1" } },
   "update.cancel": { params: { reservation: "reservation-1" }, result: { cancelled: true } },
-  // The update actions answer with the status they leave.
   "update.check": {
     params: {},
     result: {

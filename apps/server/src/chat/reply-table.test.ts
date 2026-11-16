@@ -931,6 +931,17 @@ describe("table 3: what every window is sent as a record changes", () => {
     expect(done.told.at(-1)).toEqual({ kind: "is", reply: { id: "q1", threadId: "t1", rev: expect.any(Number) as number, stage: "done", at: 9, questionId: "m1", replyId: "a1" }, saved: [ANSWER] });
   });
 
+  it("a reply stopped before any word was written ends with no saved words to name", () => {
+    const t = telling();
+    asked(t);
+    t.q.stop({ id: "q1" });
+    t.q.ended("turn-1", { how: "stopped", by: { who: "person" } }, 9, [QUESTION]);
+    t.q.notify();
+    const end = t.told.at(-1);
+    expect(end).toMatchObject({ kind: "is", reply: { id: "q1", stage: "stopped", questionId: "m1", by: { who: "person" } } });
+    expect(end?.kind === "is" ? end.reply : undefined).not.toHaveProperty("replyId");
+  });
+
   it("the step that saves a question carries the question", () => {
     const t = telling();
     asked(t);
@@ -968,6 +979,18 @@ describe("table 3: what every window is sent as a record changes", () => {
     const parts = at.r.pushes.flatMap((p) => (p.channel === "reply.words" ? [(p.payload as Payload<"reply.words">).id] : []));
     expect(parts.length).toBeGreaterThan(0);
     expect(new Set(parts)).toEqual(new Set([at.id]));
+  });
+
+  it("a record carries the message's words only until its question is saved", async () => {
+    const at = await reach.writing();
+    at.r.finish();
+    await until(() => at.r.told().some((c) => c.kind === "is" && c.reply.stage === "done"), "the end, sent to the windows");
+    const records = at.r.told().flatMap((c) => (c.kind === "is" ? [c.reply] : []));
+    expect(records.map((x) => x.stage)).toEqual(["starting", "thinking", "writing", "done"]);
+    expect(records[0]).toHaveProperty("text", "question");
+    for (const after of records.slice(1)) {
+      for (const key of ["messageId", "text", "images", "files", "numCtx", "think", "tools", "draw", "drawCount", "retryOf"]) expect(after, `${after.stage} carries ${key}`).not.toHaveProperty(key);
+    }
   });
 
   it("a restart sends nothing: each window reads the records", () => {
@@ -1153,6 +1176,28 @@ describe("reply.send, through the app", () => {
     expect(r.asked).toEqual([{ model: MODEL, numCtx: 8192 }]);
   });
 
+  it("a start refused because it would stop other replies: on hold with the replies in the way, in every window", async () => {
+    const r = rig();
+    const blocking = [{ threadId: "t-other", title: "Long answer", model: MODEL, turnId: "turn-other" }];
+    r.refusals.push(new AppError("would-stop", "needs the GPU memory of a running reply", undefined, undefined, blocking));
+    r.open();
+    await r.h["reply.send"](said(r), { clientId: ME });
+    await until(() => toldStages(r).at(-1) === "held", "the refusal");
+    expect(r.told().at(-1)).toMatchObject({ kind: "is", reply: { id: "q1", stage: "held", held: { why: "refused", code: "would-stop", blocking } } });
+    expect(await r.h["reply.list"]({}, { clientId: OTHER })).toMatchObject([{ reply: { id: "q1", stage: "held", held: { blocking } } }]);
+  });
+
+  it("a message typed with no model takes the best installed chat model when it goes", async () => {
+    const r = rig();
+    const typed: Params<"reply.send"> = { id: "q1", threadId: r.thread.id, messageId: "m-q1", text: "question", numCtx: 16384 };
+    const answer = await r.h["reply.send"](typed, { clientId: ME });
+    expect(answer).toMatchObject({ answer: "done", reply: { id: "q1", stage: "starting" } });
+    expect(answer.answer === "done" ? answer.reply : undefined).not.toHaveProperty("model");
+    r.open();
+    await until(() => r.asked.length === 1, "the message asked of the model");
+    expect(r.asked).toEqual([{ model: MODEL, numCtx: 16384 }]);
+  });
+
   it("the same words sent twice, the first answer lost: asked once", async () => {
     const r = rig();
     r.open();
@@ -1202,5 +1247,19 @@ describe("reply.send, through the app", () => {
     expect(r.told().at(-1)).toMatchObject({ kind: "is", reply: { id: "q2", stage: "failed", code: "wont-fit", message: "it does not fit" } });
     expect(r.db.getThread(r.thread.id).messages).toEqual(before);
     expect(await r.h["reply.list"]({}, { clientId: ME })).toEqual([]);
+  });
+
+  it("a Retry refused before it started fails without naming a question", async () => {
+    const r = rig();
+    r.open();
+    await r.h["reply.send"](said(r), { clientId: ME });
+    await until(() => toldStages(r).at(-1) === "done +1", "the first reply's end");
+    await until(() => r.app.activeTurns() === 0, "its work gone");
+    r.refusals.push(new AppError("wont-fit", "it does not fit"));
+    await r.h["reply.send"](said(r, { id: "q2", messageId: "m-q2", retryOf: "m-q1" }), { clientId: ME });
+    await until(() => toldStages(r).at(-1) === "failed", "the refusal");
+    const failed = r.told().at(-1);
+    expect(failed).toMatchObject({ kind: "is", reply: { id: "q2", stage: "failed", code: "wont-fit" } });
+    expect(failed?.kind === "is" ? failed.reply : undefined).not.toHaveProperty("questionId");
   });
 });

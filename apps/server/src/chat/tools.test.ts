@@ -285,6 +285,41 @@ describe("tool chat transport", () => {
       expect(JSON.stringify(pushed)).toContain('"state":"running"');
     } finally { await app.shutdown(); store.close(); vi.unstubAllGlobals(); }
   });
+  it("the Tools switch reaches new turns only: a turn already running keeps the tools it started with, also when it runs once more", async () => {
+    const root = scratch("gl-app-tools-switch-");
+    const sources = createSources({ dataDir: path.join(root, "data") });
+    const file = path.join(root, "notes.txt"); writeFileSync(file, "hello library");
+    await sources.add({ kind: "file", path: file });
+    const store = openThreadStore(path.join(root, "threads.db"));
+    let toolsOn = true;
+    const chatBodies: { tools?: unknown }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const pathname = new URL(String(url)).pathname;
+      if (pathname === "/api/show") return Response.json({ capabilities: ["tools"] });
+      if (pathname === "/api/ps") return Response.json({ models: [{ name: "m", model: "m", size: 1000, size_vram: 1000, context_length: 16384, expires_at: "later", digest: "d" }] });
+      if (pathname === "/api/tags") return Response.json({ models: [] });
+      chatBodies.push(JSON.parse(String(init?.body)) as { tools?: unknown });
+      if (chatBodies.length > 1) return ndjson([{ message: { content: "answered" }, done: true }]);
+      toolsOn = false;
+      return new Response("the runtime hiccuped", { status: 500 });
+    }));
+    const app = createApp({ store, sources, toolsEnabled: () => toolsOn,
+      runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
+      catalog: chatCatalog(),
+      push: () => {},
+      fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
+    });
+    try {
+      const thread = store.createThread();
+      await sendStarted(app, { threadId: thread.id, content: "read", model: "m", numCtx: 16384 }, { clientId: 1 });
+      await vi.waitFor(() => expect(app.activeTurns()).toBe(0));
+      expect(store.getThread(thread.id).messages.at(-1)).toMatchObject({ role: "assistant", content: "answered" });
+      expect(chatBodies.map(body => body.tools !== undefined), "both attempts of the running turn offer the tools").toEqual([true, true]);
+      await sendStarted(app, { threadId: thread.id, content: "again", model: "m", numCtx: 16384 }, { clientId: 1 });
+      await vi.waitFor(() => expect(app.activeTurns()).toBe(0));
+      expect(chatBodies.map(body => body.tools !== undefined), "the next turn goes without them").toEqual([true, true, false]);
+    } finally { await app.shutdown(); store.close(); vi.unstubAllGlobals(); }
+  });
   for (const image of [true, false]) {
     it(`reply.send ${image ? "offers the image tool and queues the job, which runs after the reply" : "neither offers nor runs the image tool"} when Tools › Make images is ${image ? "on" : "off"}`, async () => {
       const t = await imageApp(() => ndjson([{ message: { content: "Here's an image: ![Star Trek Ship](https://example.com/invented.png)" }, done: true }]), undefined, undefined, image);

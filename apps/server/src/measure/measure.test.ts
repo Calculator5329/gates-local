@@ -433,6 +433,61 @@ describe("measureModel", () => {
     expect(m.slow).toBe("first-token");
   });
 
+  it("gives the wait for the first word as the middle of the checks' waits, so one very slow check does not move it", async () => {
+    let t = 0;
+    const waits: number[] = [];
+    const rt = fakeRuntime(["completion", "tools"], (c, round) => {
+      if (c && round === 0) {
+        const wait = waits.length === 0 ? 900_000 : 1_000 + 37 * waits.length;
+        waits.push(wait);
+        t += wait;
+      }
+      return reference(true)(c, round);
+    });
+    const m = await run(rt, { now: () => t });
+    expect(waits).toHaveLength(CASES.length);
+    expect(waits.length % 2).toBe(1);
+    const sorted = waits.toSorted((a, b) => a - b);
+    expect(m.firstTokenMs).toBe(sorted[(sorted.length - 1) / 2]);
+    expect(m.slow).toBeUndefined();
+  });
+
+  it("gives decode speed as all the run's tokens over all its decode time, not the average of each request's speed", async () => {
+    let tokens = 0;
+    let ns = 0;
+    const speeds: number[] = [];
+    const rt = fakeRuntime(["completion", "tools"], (c, round) => {
+      const answer = reference(true)(c, round);
+      if (!c) return answer;
+      const timed = c.part === "tools" ? { evalCount: 100, evalNs: 1e9 } : { evalCount: 10, evalNs: 2e9 };
+      tokens += timed.evalCount;
+      ns += timed.evalNs;
+      speeds.push(timed.evalCount / (timed.evalNs / 1e9));
+      return { ...answer, ...timed };
+    });
+    const m = await run(rt);
+    const average = Math.round((speeds.reduce((a, b) => a + b, 0) / speeds.length) * 10) / 10;
+    expect(m.tokensPerSecond).toBe(Math.round((tokens / (ns / 1e9)) * 10) / 10);
+    expect(m.tokensPerSecond).not.toBe(average);
+    expect(m.tokensPerSecond).not.toBe(speeds.at(-1));
+  });
+
+  it("dates a measure in milliseconds since 1970, by the clock when it was made", async () => {
+    const before = Date.now();
+    const m = await run(fakeRuntime(["completion", "tools"], reference(true)));
+    expect(m.at).toBeGreaterThanOrEqual(before);
+    expect(m.at).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("cuts a long tool result short in a check's calls", async () => {
+    const m = await run(fakeRuntime(["completion", "tools"], reference(true)));
+    const call = check(m, "files-needle").calls?.[0] ?? "";
+    expect(call).toMatch(/^read .*meeting-notes\.md/);
+    const result = call.slice(call.indexOf(" → ") + 3);
+    expect(result).toHaveLength(301);
+    expect(result.endsWith("…")).toBe(true);
+  });
+
   it("skips the database checks when Run commands is off on Linux, and scores the rest", async () => {
     const rt = fakeRuntime(["completion", "tools"], reference(false));
     const m = await run(rt, { platform: "linux", shell: { state: "off", word: "Sandbox check failed" } });
@@ -583,6 +638,25 @@ describe("page grading", () => {
     const failed = gradePages(m, ["page-counter", "page-filter", "page-total"].map((id) => ({ id, seen: [], error: why })));
     expect(failed.score).toBeLessThan(skipped.score);
     expect(skipped.score).toBe(100);
+  });
+
+  it("keeps what the window saw on a page as its result, joined with a dot, or Nothing. when it saw nothing", async () => {
+    const m = { model: "m", digest: "d", ...await pending() };
+    const graded = gradePages(m, [
+      { id: "page-counter", seen: ["0", "3"] },
+      { id: "page-filter", seen: [], error: "The page did not finish within 5 seconds." },
+    ]);
+    expect(check(graded, "page-counter").result).toBe("0 · 3");
+    expect(check(graded, "page-filter").result).toBe("Nothing.");
+  });
+
+  it("leaves a page already graded as it was when the window sends it again", async () => {
+    const m = { model: "m", digest: "d", ...await pending() };
+    const once = gradePages(m, [{ id: "page-counter", seen: ["0", "3"] }]);
+    const again = gradePages(once, [{ id: "page-counter", seen: ["0", "1"] }, { id: "page-total", seen: ["37.50", "50.00"] }]);
+    expect(check(again, "page-counter")).toEqual(check(once, "page-counter"));
+    expect(check(again, "page-counter")).toMatchObject({ ok: true, result: "0 · 3" });
+    expect(check(again, "page-total").ok).toBe(true);
   });
 });
 

@@ -12,6 +12,8 @@ import { MAX_IMAGES_PER_TURN } from "./prompt.ts";
 const processCleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of processCleanups.splice(0)) await cleanup(); });
 
+async function queueAnyImage() { return { jobId: "job-1" }; }
+
 function isQueryProcess(cmd: string, timeoutMs: number) {
   return cmd.includes("node:sqlite") && cmd.includes(`\0${timeoutMs}\0`);
 }
@@ -254,5 +256,13 @@ describe("Library tools", () => {
   it("points a read of a SQLite source at sqlite3 on Linux", async () => {
     const tools = createTools({ platform: "linux", sources: [{ id: "books", kind: "sqlite", path: "live", snapshotPath: "snap", label: "books.db" }] });
     await expect(tools.execute({ name: "read", input: { path: "/library/books" } }, new AbortController().signal)).rejects.toThrow("books is a SQLite source; use shell with sqlite3 /data/books.db");
+  });
+  it("the only tools ever offered to a model are read, sql, shell and image, whatever the machine or turn", () => {
+    const offered = new Set<string>();
+    for (const platform of ["linux", "win32", "darwin"] as const)
+      for (const image of [false, true])
+        for (const shell of [undefined, false])
+          for (const t of createTools({ sources: [], platform, queueImage: queueAnyImage, image, ...(shell === undefined ? {} : { shell }) }).definitions) offered.add(t.function.name);
+    expect([...offered].toSorted()).toEqual(["image", "read", "shell", "sql"]);
   });
 });

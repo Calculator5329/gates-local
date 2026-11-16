@@ -135,6 +135,12 @@ describe("verdictOf", () => {
     // a report the server sent without words prints nothing, keeping only the colour of its verdict
     expect(verdictOf({ ...base, verdict: "fits" })).toMatchObject({ k: "gpu", word: "", label: "" });
   });
+
+  it.each(["fits", "spills", "refuse"] as const)("a %s report from a server too old to send words shows no verdict in any of its words", (verdict) => {
+    const v = verdictOf({ ...base, verdict });
+    expect([v.label, v.word, v.chip, v.detail, v.mark, v.short]).toEqual(["", "", "", "", "", ""]);
+    expect(v.amt).toBe(0);
+  });
 });
 
 const msg = (stats: Message["stats"]): Message => ({ id: "a", threadId: "t", role: "assistant", content: "x", createdAt: 1, ...(stats ? { stats } : {}) });

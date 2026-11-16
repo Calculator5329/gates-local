@@ -150,4 +150,25 @@ describe("pictures index", () => {
     expect(f.store.pictures.list({ limit: 500, setup: "sdxl-lightning" }).count).toBe(0);
     expect(() => f.store.pictures.list({ limit: 5, before: "not a cursor" })).toThrow(expect.objectContaining({ code: "bad-params" }));
   });
+
+  it("a picture's thread title is the thread's title now: renamed after the picture was indexed, the list says the new one", async () => {
+    const f = await fixture();
+    const thread = f.store.createThread({ title: "First name" });
+    await f.finish(thread.id, "p1", "a lighthouse", { facts: { seed: 1, steps: 4, runMs: 10 } });
+    expect(f.store.pictures.list({ limit: 50 }).pictures[0]).toMatchObject({ jobId: "p1", threadTitle: "First name" });
+    f.store.renameThread(thread.id, "Second name");
+    expect(f.store.pictures.list({ limit: 50 }).pictures[0]).toMatchObject({ jobId: "p1", threadTitle: "Second name" });
+  });
+
+  it("a picture from a card saved without a setup has none", async () => {
+    const f = await fixture();
+    const thread = f.store.createThread({ title: "t" });
+    f.store.saveImageJob({ jobId: "bare", threadId: thread.id, state: "queued" }, "an old card");
+    await writeFile(path.join(f.dataDir, "images", "bare.png"), testPng(16, 9));
+    f.store.saveImageJob({ jobId: "bare", threadId: thread.id, state: "done", progress: 1, imagePath: "images/bare.png" }, "an old card", { width: 16, height: 9, bytes: 1 });
+    await f.finish(thread.id, "set", "a new card", { facts: {} });
+    const { pictures } = f.store.pictures.list({ limit: 50 });
+    expect(pictures.find((p) => p.jobId === "bare")).not.toHaveProperty("preset");
+    expect(pictures.find((p) => p.jobId === "set")).toMatchObject({ preset: "flux2-klein-4b" });
+  });
 });

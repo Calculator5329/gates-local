@@ -14,6 +14,7 @@ import { type SocketLike, createClient } from "@gates-local/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { type FakeOllama, startFakeOllama, writeFakeBinary } from "../src/runtime/test-fakes.ts";
+import { startFakeOllama as startSharedFake } from "../../../test/fake-ollama/fake-ollama.ts";
 
 const ENTRY = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const TOKEN = "a".repeat(64);
@@ -418,5 +419,61 @@ describe("server CLI phone listener (GATES_LOCAL_WEB_LISTEN)", () => {
     expect((await getRoot(socketPath, { host: "localhost", "x-forwarded-host": "hub.example.ts.net:8456", "x-forwarded-for": "192.0.2.10" })).status).toBe(403);
     expect((await getRoot(socketPath, { ...serve, host: "hub.example.ts.net:8456" })).status).toBe(403);
     expect(await upgrade(`ws://127.0.0.1:${ready.port}/?token=${TOKEN}`)).toBe("open");
+  });
+});
+
+async function connect(s: Launched) {
+  const ready = JSON.parse(await until("the ready line", () => s.stdout[0])) as { port: number };
+  const ws = new WebSocket(`ws://127.0.0.1:${ready.port}/?token=${TOKEN}`);
+  cleanups.push(() => ws.terminate());
+  return createClient(ws as unknown as SocketLike, { timeoutMs: 20_000 });
+}
+
+function updateEnv(tmp: string, ollamaUrl: string): Record<string, string> {
+  const root = path.join(tmp, "update-root");
+  mkdirSync(root);
+  return {
+    GATES_LOCAL_SERVER_TOKEN: TOKEN,
+    GATES_LOCAL_RUNTIME: "discover-only",
+    GATES_LOCAL_OLLAMA_BINARY: "none",
+    GATES_LOCAL_OLLAMA_URL: ollamaUrl,
+    GATES_LOCAL_UPDATE_TEST_ROOT: root,
+    XDG_DATA_HOME: path.join(tmp, "xdg"),
+  };
+}
+
+describe("updates in the running server", () => {
+  it("treats Get every change left unset as off, so turning it off keeps the last check", async () => {
+    const tmp = cacheTmp();
+    const s = launch(updateEnv(tmp, `http://127.0.0.1:${await freePort()}`), path.join(tmp, "data"));
+    const client = await connect(s);
+    const checked = await client.call("update.check", {});
+    expect(checked.lastCheck).toMatchObject({ state: "cannot-check" });
+    await client.call("settings.update", { updateEveryChange: false });
+    expect((await client.call("update.status", {})).lastCheck).toEqual(checked.lastCheck);
+    await client.call("settings.update", { updateEveryChange: true });
+    expect((await client.call("update.status", {})).lastCheck).toBeNull();
+    client.close();
+  });
+
+  it("in the desktop app, checks for updates on its own when the automatic switch was never set", async () => {
+    const tmp = cacheTmp();
+    const s = launch({ ...updateEnv(tmp, `http://127.0.0.1:${await freePort()}`), GATES_LOCAL_DESKTOP: "1" }, path.join(tmp, "data"));
+    const line = await until("the automatic check", () => s.stderr.find((l) => l.includes("update check failed")), 30_000);
+    expect(line).toContain("outside the test root");
+  }, 45_000);
+
+  it("names a model download among the work an update would interrupt", async () => {
+    const fake = await startSharedFake({ scenario: "no-models", options: { pullTickMs: 60_000 } });
+    cleanups.push(() => fake.close());
+    const tmp = cacheTmp();
+    const s = launch(updateEnv(tmp, fake.url), path.join(tmp, "data"));
+    const client = await connect(s);
+    await vi.waitFor(async () => {
+      expect((await client.call("runtime.status", {})).state).toBe("ready");
+    }, { timeout: 20_000 });
+    await client.call("models.pull", { name: "qwen3.5:9b" });
+    expect((await client.call("update.status", {})).activity).toContain("model download: qwen3.5:9b");
+    client.close();
   });
 });

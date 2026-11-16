@@ -122,6 +122,7 @@ import { realRunner } from "@gates-local/update/run";
 import { createUsage } from "./usage/index.ts";
 import { createVoiceModule } from "./voice/module.ts";
 import { createServerShutdown } from "./shutdown.ts";
+import { interruptedWork } from "./update/activity.ts";
 
 /** The clone this server runs from (apps/server/src -> the repo root), for Settings › Updates. */
 const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
@@ -341,13 +342,12 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
   const sources = withImportAdmission(createSources({ dataDir, log: (line) => log(`sources ${line}`) }), imports);
   const libraryImports = createLibraryImports({ ...options.imports, sources, activity: imports });
   // What an update would interrupt, for the approval; imports cannot be interrupted at all.
-  const activity = () => [
-    ...imports.activity(),
-    ...libraryImports.activity(),
-    ...(app.activeTurns() === 0 ? [] : [`${app.activeTurns()} running ${app.activeTurns() === 1 ? "reply" : "replies"} (including other windows)`]),
-    ...services.pulls.pending().map((p) => `model download: ${p.name}`),
-    ...((image.activeJobs?.() ?? 0) > 0 ? [`${image.activeJobs?.()} image generation jobs (queued or running)`] : []),
-  ];
+  const activity = () => interruptedWork({
+    imports: [...imports.activity(), ...libraryImports.activity()],
+    turns: app.activeTurns(),
+    downloads: services.pulls.pending().map((p) => p.name),
+    imageJobs: image.activeJobs?.() ?? 0,
+  });
   const uninterruptible = () => [...imports.activity(), ...libraryImports.activity()];
   // One automatic checker for the supervised desktop server; browser-only servers never fetch on a timer.
   // An installed copy (the desktop app says its version) checks the signed release list instead.

@@ -15,7 +15,11 @@ import { createGpuLease, type GpuLease } from "../gpu/lease.ts";
 import { createModelServices, type ModelServices } from "./services.ts";
 import { freePort, freePortRun, removeDir, tmpDir, writeFakeBinary } from "./test-fakes.ts";
 import { ownedIdleComfy, type OwnedComfy } from "./test-image.ts";
-import type { ModelLoad, SyncChange } from "@gates-local/contracts";
+import { CHAT_MODELS, createClient, suggestedList, type Client, type ModelLoad, type SocketLike, type SyncChange } from "@gates-local/contracts";
+import { WebSocket } from "ws";
+import { startWsServer } from "../ws/server.ts";
+import type { Handlers } from "../ws/server.ts";
+import { useChatList } from "./chat-list.ts";
 
 const VERSION = "9.9.9-services";
 const manifest = { version: VERSION, url: "http://127.0.0.1:1/never", sha256: "0".repeat(64), sizeBytes: 1, format: "tar.zst", verified: true, source: "test" } as const;
@@ -1207,5 +1211,73 @@ describe("a load that needs a busy model's GPU: turns.blocking and reply.send co
     expect(t.terminal(t.x.turnId)).toEqual([]);
     expect(t.r.app.activeTurns()).toBe(2);
     await t.r.done();
+  });
+});
+
+const closers: (() => unknown)[] = [];
+afterEach(async () => {
+  for (const c of closers.splice(0).toReversed()) await c();
+});
+
+async function socketTo(handlers: Partial<Handlers>): Promise<Client> {
+  const ws = await startWsServer({ port: 0, token: "services-token", allowedOrigins: [], handlers, log: () => undefined });
+  closers.push(() => ws.close());
+  const sock = new WebSocket(`ws://127.0.0.1:${ws.port}/?token=services-token`);
+  closers.push(() => sock.terminate());
+  await new Promise<void>((resolve, reject) => {
+    sock.once("open", () => resolve());
+    sock.once("error", reject);
+  });
+  return createClient(sock as unknown as SocketLike, { timeoutMs: 5000 });
+}
+
+const fakeOllama = (tags: readonly { name: string; size: number }[], more: Record<string, Route> = {}) => startFakeServer({
+  "GET /": (_b, res) => { res.writeHead(200, { "content-type": "text/plain" }); res.end("Ollama is running"); },
+  "GET /api/version": (_b, res) => json(res, 200, { version: "0.0.9-fake" }),
+  "GET /api/tags": (_b, res) => json(res, 200, { models: tags.map((t) => ({ ...t, digest: t.name, modified_at: "2026-11-01T00:00:00Z" })) }),
+  "GET /api/ps": (_b, res) => json(res, 200, { models: [] }),
+  "POST /api/show": (_b, res) => json(res, 200, SHOW),
+  ...more,
+});
+
+describe("the chat model list over the socket", () => {
+  it("models.suggested answers the list in use, with its maker groups and example names", async () => {
+    const s = await services(path.join(work, "data"), { appPort: await freePort(), externalBaseUrl: await nothingAt() });
+    const client = await socketTo(s.handlers);
+    expect(await client.call("models.suggested", {})).toEqual(suggestedList(CHAT_MODELS));
+    const other = CHAT_MODELS.models.find((m) => m.name !== CHAT_MODELS.example)!;
+    const newer = { ...CHAT_MODELS, revision: CHAT_MODELS.revision + 1, example: other.name, makers: CHAT_MODELS.makers.toReversed() };
+    closers.push(() => useChatList(CHAT_MODELS));
+    useChatList(newer);
+    expect(await client.call("models.suggested", {})).toEqual({ ...suggestedList(newer), exampleLabel: other.label });
+  });
+});
+
+describe("a typed name before its download", () => {
+  it("a name that is not installed gets its size and fit over the socket, and nothing is downloaded", async () => {
+    const ollama = await fakeOllama([]);
+    servers.push(ollama);
+    const twelve = { runNvidiaSmi: async (args: readonly string[]) => (args[0]?.startsWith("--query-gpu") ? "12288, 288, 12000\n" : ""), readMeminfo: fit.readMeminfo };
+    const s = await services(path.join(work, "data"), { appPort: await freePort(), externalBaseUrl: ollama.baseUrl }, undefined, undefined, twelve);
+    expect((await s.runtime.ensure()).state).toBe("ready");
+    const client = await socketTo(s.handlers);
+    const out = await client.call("models.estimate", { name: "qwen3.5:4b", numCtx: 16384 });
+    expect(out).toMatchObject({ name: "qwen3.5:4b", found: "yes", downloadBytes: 3_324_173_934 });
+    expect(out.fit).toMatchObject({ verdict: "fits", freeVramBytes: 12288 * 1024 ** 2 });
+    expect(ollama.requests.filter((r) => r.path === "/api/pull")).toEqual([]);
+  });
+});
+
+describe("the chat model the server picks when none is set", () => {
+  it("is judged at the default window: one that fits only at a smaller window is passed over for one that fits at the default", async () => {
+    const ollama = await fakeOllama([{ name: "aaa:9b", size: 6_600_000_000 }, { name: "bbb:9b", size: 3_000_000_000 }]);
+    servers.push(ollama);
+    const tight = { runNvidiaSmi: async (args: readonly string[]) => (args[0]?.startsWith("--query-gpu") ? "16303, 8086, 8217\n" : ""), readMeminfo: fit.readMeminfo };
+    const s = await services(path.join(work, "data"), { appPort: await freePort(), externalBaseUrl: ollama.baseUrl }, undefined, undefined, tight);
+    expect(s.settings.get()).toMatchObject({ defaultNumCtx: 16384 });
+    expect(s.settings.get().defaultModel).toBeUndefined();
+    expect((await s.runtime.ensure()).state).toBe("ready");
+    const listed = (await s.catalog.refresh({ force: true })).models;
+    expect(listed.filter((m) => m.pick !== undefined).map((m) => [m.name, m.pick])).toEqual([["bbb:9b", { numCtx: 16384, verdict: "fits" }]]);
   });
 });

@@ -2,9 +2,11 @@
 // fit, from the same reading. The numbers are the report's: gemma4:e4b needs 8,200,560,697 bytes at
 // 16,384 and 7,848,239,161 at 4,096; once the other model had left, about 4.93 GB of GPU memory was
 // free and 4.32 GB of system memory available; qwen3.5:4b (3.3 GB) was installed.
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { chooseOffer } from "./alternatives.ts";
-import { DEFAULT_MARGINS, decideFit } from "./fit.ts";
+import { chooseOffer, offerAfterRefusal } from "./alternatives.ts";
+import { json, startFakeServer } from "./fake-http.ts";
+import { DEFAULT_MARGINS, decideFit, planLoad } from "./fit.ts";
 
 const FREE_VRAM = 4_930_000_000;
 const MEM_AVAILABLE = 4_320_000_000;
@@ -64,5 +66,40 @@ describe("chooseOffer", () => {
     expect(short.ramBytes).toBe(MEM_AVAILABLE - 2 * 1024 ** 3);
     expect(short.shortBytes).toBe(gemma16k.shortfallBytes);
     expect(short.shortBytes / 1e9).toBeCloseTo(1.63, 2);
+  });
+});
+
+const QWEN9 = "qwen3.5:9b";
+const QWEN9_SHOW = JSON.parse(readFileSync(new URL("./fixtures/show-qwen3-5-9b.json", import.meta.url), "utf8")) as unknown;
+
+function cardThatFrees(): ((args: readonly string[]) => Promise<string>) & { totals: number } {
+  const run = async (args: readonly string[]) => {
+    if (!args[0]?.startsWith("--query-gpu")) return "";
+    run.totals++;
+    return run.totals === 1 ? "16303, 15303, 1000\n" : "16303, 1303, 15000\n";
+  };
+  run.totals = 0;
+  return run;
+}
+
+describe("offerAfterRefusal", () => {
+  it("what does run is planned from the refusal's own GPU reading, not a newer one", async () => {
+    const ollama = await startFakeServer({
+      "GET /api/tags": (_b, res) => json(res, 200, { models: [{ name: QWEN9, size: 6_600_000_000, digest: "q" }] }),
+      "GET /api/ps": (_b, res) => json(res, 200, { models: [] }),
+      "POST /api/show": (_b, res) => json(res, 200, QWEN9_SHOW),
+    });
+    try {
+      const smi = cardThatFrees();
+      const deps = { runNvidiaSmi: smi, readMeminfo: async () => "MemTotal: 4000000 kB\nMemAvailable: 2100000 kB\n", baseUrl: ollama.baseUrl, holdsOne: false };
+      const { report } = await planLoad({ ...deps, model: QWEN9, numCtx: 16384, busy: [] });
+      expect(report.verdict).toBe("refuse");
+      const offer = await offerAfterRefusal({ ...deps, models: [QWEN9], defaultNumCtx: 16384, busy: [] }, report);
+      expect(smi.totals).toBe(1);
+      expect(offer?.context).toBeUndefined();
+      expect(offer?.short.gpuBytes).toBe(Math.max(0, report.freeVramBytes - DEFAULT_MARGINS.vramMarginBytes));
+    } finally {
+      await ollama.close();
+    }
   });
 });

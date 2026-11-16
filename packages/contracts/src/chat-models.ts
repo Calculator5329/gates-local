@@ -1,14 +1,3 @@
-// The chat models the app suggests, read from chat-models.json: the server's
-// catalog and tiers and the client's maker groups and example names all come
-// from that one file. A malformed edit stops the app at startup with the
-// reason, never a half-read list.
-//
-// An installed copy can also take a newer list from the release page
-// (models.json, signed like the release list; apps/server/src/update/installed/
-// models-list.ts). That list goes through parseChatModels too, so a downloaded
-// list is held to the same rules as the built-in one, and the server sends the
-// list in use to the client (models.suggested); the client never reads this
-// file for anything a downloaded list can change.
 import * as S from "effect/Schema";
 import data from "./chat-models.json" with { type: "json" };
 
@@ -18,7 +7,6 @@ const MakerRule = S.Struct({ name: S.String, match: S.String });
 export type MakerRule = typeof MakerRule.Type;
 const ChatModelsFile = S.Struct({
   format: S.Literal(1),
-  /** Raised with every edit: a downloaded list is used only when its revision is higher than the list in use. */
   revision: S.Number,
   models: S.Array(SuggestedModel),
   tiers: S.Struct({ system: S.Array(TierRow), gpu: S.Array(TierRow) }),
@@ -82,12 +70,9 @@ export const CHAT_MODELS: ChatModels = parseChatModels(data);
 /** What the client shows from the list in use: maker groups and example names (models.suggested). */
 export const SuggestedList = S.Struct({
   revision: S.Number,
-  /** The picker's groups in their order; a tag joins the first whose match (a case-blind pattern) finds it. */
   makers: S.Array(MakerRule),
-  /** The model the app names when it needs an example ("such as …", "ollama pull …"). */
   example: S.String,
   exampleLabel: S.String,
-  /** A name that is not in the list, for the "type a name" box. */
   typedExample: S.String,
 });
 export type SuggestedList = typeof SuggestedList.Type;

@@ -21,10 +21,15 @@ import { createMemoryOwner } from "../gpu/memory.ts";
 import { createImageHandlers } from "./handlers.ts";
 import { createComfyService } from "./service.ts";
 import { createServerShutdown, HARD_EXIT_MS } from "../shutdown.ts";
+import { pngFacts } from "../pictures/png.ts";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return { ...actual, writeFile: vi.fn(actual.writeFile) };
+});
+vi.mock("../pictures/png.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../pictures/png.ts")>();
+  return { ...actual, pngFacts: vi.fn(actual.pngFacts) };
 });
 
 const png = Buffer.from("iVBORw0KGgo=", "base64");
@@ -1853,6 +1858,60 @@ describe("image presets (fake ComfyUI file lists)", () => {
         expect(await f.handlers["image.stopDownload"]({ preset: "template:image_sdxl_simple" })).toEqual({ stopped: true });
         await vi.waitFor(() => expect(f.downloads.at(-1)).toMatchObject({ state: "cancelled", ended: true }));
       });
+
+      it("a download's end sends every window the list read again, with no download on it", async () => {
+        const { f, done } = await setup();
+        const before = f.presets.length;
+        await f.module.download("flux2-klein-4b");
+        await done(2);
+        await vi.waitFor(() => expect(f.presets).toHaveLength(before + 2));
+        expect(f.presets.at(-1)?.download).toBeUndefined();
+      });
+
+      it("while any file's size is unknown, a push leaves out the setup's bytes; once every size is known they come back", async () => {
+        const [a, b] = ["flux-2-klein-4b-fp8.safetensors", "qwen_3_4b.safetensors"].map((n) => `${n} v1`.length) as [number, number];
+        const root = await mkdtemp(path.join(tmpdir(), "gates-image-models-")); dirs.push(root);
+        let refused = false;
+        const unsized: typeof fetch = async (input, init) => {
+          if (!refused && init?.method === "HEAD" && String(input).includes("qwen_3_4b")) { refused = true; return new Response(null, { status: 503 }); }
+          return fileServer(input, init);
+        };
+        const f = await fixture({ download: { ...download, fetch: unsized, records: false } });
+        f.workflows({ ...routes, "/internal/folder_paths": Object.fromEntries(["checkpoints", "loras", "diffusion_models", "text_encoders", "vae"].map((k) => [k, [path.join(root, k)]])) });
+        expect(await f.module.download("flux2-klein-4b")).toEqual({ files: ["flux-2-klein-4b-fp8.safetensors", "qwen_3_4b.safetensors"] });
+        await vi.waitFor(() => expect(f.downloads.filter((p) => p.state === "done")).toHaveLength(2));
+        const first = f.downloads.filter((p) => p.file === 1);
+        expect(refused).toBe(true);
+        expect(first.length).toBeGreaterThan(0);
+        for (const p of first) expect([p.setupCompletedBytes, p.setupTotalBytes]).toEqual([undefined, undefined]);
+        expect(f.downloads.filter((p) => p.file === 2).at(-1)).toMatchObject({ state: "done", setupCompletedBytes: a + b, setupTotalBytes: a + b });
+      });
+
+      it("files already downloaded stay where they are when the folder changes; only the next download goes to the new one", async () => {
+        const { f, root, done } = await setup();
+        await f.module.download("flux2-klein-4b");
+        await done(2);
+        const picked = await mkdtemp(path.join(tmpdir(), "gates-image-picked-")); dirs.push(picked);
+        f.pickFolder(picked);
+        expect(await f.module.download("template:image_sdxl_simple")).toEqual({ files: ["sd_xl_base_1.0.safetensors"] });
+        await done(3);
+        expect(await readFile(path.join(root, "diffusion_models", "gates-local", "flux-2-klein-4b-fp8.safetensors"), "utf8")).toBe("flux-2-klein-4b-fp8.safetensors v1");
+        expect(await readFile(path.join(root, "text_encoders", "gates-local", "qwen_3_4b.safetensors"), "utf8")).toBe("qwen_3_4b.safetensors v1");
+        expect(await readdir(picked)).toEqual(["checkpoints"]);
+        expect(await readdir(path.join(picked, "checkpoints", "gates-local"))).toEqual(["sd_xl_base_1.0.safetensors"]);
+      });
+
+      it("a picked folder and a ComfyUI of the person's own: the app gives the line for its extra_model_paths.yaml and never writes that file", async () => {
+        const { f, root, done } = await setup();
+        const picked = await mkdtemp(path.join(tmpdir(), "gates-image-picked-")); dirs.push(picked);
+        f.pickFolder(picked);
+        expect((await f.module.presets()).disk).toMatchObject({ folder: picked, picked: true, line: expect.stringContaining(`base_path: '${picked}'`) });
+        await f.module.download("template:image_sdxl_simple");
+        await done(1);
+        for (const dir of [root, picked, f.dataDir]) {
+          expect((await readdir(dir, { recursive: true })).filter((p) => path.basename(p) === "extra_model_paths.yaml")).toEqual([]);
+        }
+      });
     });
 
     it("a send that names one runs its graph", async () => {
@@ -2509,5 +2568,146 @@ describe("what an image refusal names", () => {
   it("names the next program down when whisper holds the most", () => {
     const smaller = { pid: 9, usedBytes: GIB, label: "Discord" };
     expect(fitSentence(15 * GIB, 13 * GIB, [whisper, smaller], [])).toBe("The image needs 15.0 GiB and 13.0 GiB is free; Discord holds 1.0 GiB, close it.");
+  });
+});
+
+const seedOf = (graph: Record<string, { inputs: Record<string, unknown> }>): unknown => {
+  const sampler = Object.values(graph).find((node) => typeof node.inputs["seed"] === "number" || typeof node.inputs["noise_seed"] === "number");
+  return sampler?.inputs["seed"] ?? sampler?.inputs["noise_seed"];
+};
+
+const ownEngine = (installed: () => boolean) => ({
+  installed, address: () => "http://127.0.0.1:41234",
+  inspect: async () => ({ present: installed(), active: false, activeState: "inactive", pid: 0 }),
+  start: async () => {}, stop: async () => {}, onExit: () => {},
+});
+
+async function timedPicture() {
+  vi.useFakeTimers({ toFake: ["Date", "performance"] });
+  const times = { saved: 0 };
+  const f = await fixture({
+    readGpu: async () => { vi.advanceTimersByTime(30_000); return { freeBytes: 20_000, holders: "" }; },
+    thumbnail: async () => { vi.advanceTimersByTime(2_000); times.saved = Date.now(); },
+  });
+  f.sendFrames(() => { vi.advanceTimersByTime(4_000); return [frame("progress", { value: 1, max: 1 }), frame("executing", { node: null })]; });
+  const thread = f.store.createThread();
+  const release = await f.lease.acquire("chat");
+  const sent = Date.now();
+  const { jobId } = await f.module.generate({ prompt: "a tree", threadId: thread.id });
+  vi.advanceTimersByTime(60_000);
+  release();
+  await f.module.wait(jobId);
+  return { f, sent, saved: times.saved, picture: f.store.pictures.list({ limit: 1 }).pictures[0] };
+}
+
+describe("what a finished picture and the image status say", () => {
+  it("a send that names a seed runs that seed, and the picture keeps it", async () => {
+    const f = await fixture(); const thread = f.store.createThread();
+    const { jobId } = await f.module.generate({ prompt: "a tree", threadId: thread.id, seed: 4242 }); await f.module.wait(jobId);
+    expect(seedOf(f.graphs[0]!)).toBe(4242);
+    expect(f.store.pictures.list({ limit: 1 }).pictures[0]).toMatchObject({ jobId, seed: 4242 });
+  });
+
+  it("a send with no seed draws a new one each time from the random source", async () => {
+    const f = await fixture(); const thread = f.store.createThread();
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.25);
+    const first = await f.module.generate({ prompt: "a tree", threadId: thread.id }); await f.module.wait(first.jobId);
+    random.mockReturnValue(0.5);
+    const second = await f.module.generate({ prompt: "a tree", threadId: thread.id }); await f.module.wait(second.jobId);
+    expect(f.graphs.map(seedOf)).toEqual([2 ** 30, 2 ** 31]);
+  });
+
+  it("a job that settles to other files than the button names sends every window the list read again", async () => {
+    const f = await fixture(); f.files({ flux: true });
+    await f.module.status();
+    await f.presetsSent(1);
+    expect((await f.module.presets()).presets.map((p) => p.id)).toContain("flux2-klein-4b");
+    f.files({ flux: false });
+    const before = f.presets.length;
+    const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+    expect(f.events.at(-1)).toMatchObject({ state: "done", choice: { preset: "z-image-int8" } });
+    await vi.waitFor(() => expect(f.presets).toHaveLength(before + 1));
+    expect(f.presets.at(-1)?.presets.map((p) => p.id)).not.toContain("flux2-klein-4b");
+  });
+
+  it("a picture's run time is ComfyUI's time making it: the wait for the card and the freeing before it are left out", async () => {
+    const { f, picture } = await timedPicture();
+    expect(f.events.at(-1)).toMatchObject({ state: "done", runMs: 4_000 });
+    expect(picture?.runMs).toBe(4_000);
+  });
+
+  it("a picture's sent time is when it was sent, not when its turn came", async () => {
+    const { sent, picture } = await timedPicture();
+    expect(picture?.queuedAt).toBe(sent);
+  });
+
+  it("a picture's done time is when its file was saved", async () => {
+    const { sent, saved, picture } = await timedPicture();
+    expect(saved).toBeGreaterThan(sent);
+    expect(picture?.doneAt).toBe(saved);
+  });
+
+  it("a finished picture's size is the file's own, not the size the job asked for; a file that does not say keeps the job's size", async () => {
+    const f = await fixture(); const thread = f.store.createThread();
+    vi.mocked(pngFacts).mockResolvedValueOnce({ width: 640, height: 480, text: {} });
+    const { jobId } = await f.module.generate({ prompt: "a tree", threadId: thread.id, choice: { preset: "z-image-int8", width: 1024, height: 1024 } }); await f.module.wait(jobId);
+    expect(f.events.at(-1)).toMatchObject({ state: "done", choice: { width: 1024, height: 1024 } });
+    expect(f.store.pictures.list({ limit: 1 }).pictures[0]).toMatchObject({ jobId, width: 640, height: 480 });
+    vi.mocked(pngFacts).mockResolvedValueOnce(undefined);
+    const unsaid = await f.module.generate({ prompt: "a tree", threadId: thread.id, choice: { preset: "z-image-int8", width: 1024, height: 768 } }); await f.module.wait(unsaid.jobId);
+    expect(f.store.pictures.list({ limit: 2 }).pictures.find((p) => p.jobId === unsaid.jobId)).toMatchObject({ width: 1024, height: 768 });
+  });
+
+  it("with no address in Settings and no engine of the app's, the ComfyUI read is this computer's at 127.0.0.1:8188, under its service", async () => {
+    const f = await fixture(); f.configure({ answering: false });
+    expect(await f.module.status()).toMatchObject({ state: "stopped", baseUrl: "http://127.0.0.1:8188" });
+    expect(f.calls).toContain("inspect");
+  });
+
+  it("the app's own engine, stopped, is marked its own; a ComfyUI at an address in Settings or behind the service is not", async () => {
+    const f = await fixture({ own: ownEngine(() => true) }); f.configure({ answering: false });
+    expect(await f.module.status()).toMatchObject({ state: "stopped", baseUrl: "http://127.0.0.1:41234", own: true });
+    f.configure({ comfyUrl: "http://127.0.0.1:9999" });
+    const addressed = await f.module.status();
+    expect(addressed).toMatchObject({ state: "missing", baseUrl: "http://127.0.0.1:9999" });
+    expect(addressed.own).toBeUndefined();
+    const unit = await fixture(); unit.configure({ answering: false });
+    const found = await unit.module.status();
+    expect(found).toMatchObject({ state: "stopped", baseUrl: "http://127.0.0.1:8188" });
+    expect(found.own).toBeUndefined();
+  });
+
+  it("with image generation off, nowhere is said only when there is no engine of the app's, no address, no service and nothing at the default address", async () => {
+    const own = { installed: false };
+    const f = await fixture({ own: ownEngine(() => own.installed) });
+    f.configure({ enabled: false, answering: false, present: false });
+    const nowhere = async () => (await f.module.status()).nowhere;
+    expect(await nowhere()).toBe(true);
+    own.installed = true;
+    expect(await nowhere()).toBeUndefined();
+    own.installed = false;
+    f.configure({ present: true });
+    expect(await nowhere()).toBeUndefined();
+    f.configure({ present: false, answering: true });
+    expect(await nowhere()).toBeUndefined();
+    f.configure({ answering: false });
+    expect(await nowhere()).toBe(true);
+    f.configure({ comfyUrl: "http://127.0.0.1:9999" });
+    expect(await nowhere()).toBeUndefined();
+  });
+
+  it("an image unloads the chat model only for a ComfyUI on this computer on a card with room; not on the processor, elsewhere, on a small card or before the card is read", async () => {
+    const card = await fixture({ gpuStatus: async () => nvidia(16 * GIB) });
+    expect((await card.module.presets()).unloadsChat).toBe(true);
+    const processor = await fixture({ gpuStatus: async () => nvidia(16 * GIB) }); processor.configure({ cpu: true });
+    expect(await processor.module.presets()).toMatchObject({ slow: SLOW });
+    expect((await processor.module.presets()).unloadsChat).toBeUndefined();
+    const remote = await fixture({ gpuStatus: async () => nvidia(16 * GIB) }); remote.configure({ comfyUrl: "http://remote-comfy:8188" });
+    expect((await remote.module.presets()).unloadsChat).toBeUndefined();
+    const small = await fixture({ gpuStatus: async () => nvidia(2 * GIB) });
+    expect(await small.module.presets()).toMatchObject({ noGpu: NO_GPU });
+    expect((await small.module.presets()).unloadsChat).toBeUndefined();
+    const unread = await fixture();
+    expect((await unread.module.presets()).unloadsChat).toBeUndefined();
   });
 });

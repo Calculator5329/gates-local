@@ -1,7 +1,3 @@
-// The one place a fit verdict becomes words. The server calls it wherever it judges a fit (fit/fit.ts)
-// and sends the words with the verdict (FitReport.words, FitRow.card.words); every client prints them
-// as sent and judges nothing. The units live here so the server's words and the client's other
-// numbers read the same: "6.6 GB" is GiB with a no-break space, "16k" a context.
 import type { FitReport, FitVerdict, FitWords } from "./shapes.ts";
 
 const GIB = 1024 ** 3;
@@ -28,7 +24,7 @@ export function fitWords(r: Pick<FitReport, "verdict" | "numCtx" | "needVramByte
   const measured = r.source === "measured";
   const label = labelOf(r.verdict, measured, cpu);
   if (r.verdict === "fits") {
-    // A card the app cannot read (Ollama may still report VRAM on one nvidia-smi does not list) is no GPU to these words.
+    // external: Ollama may report VRAM on a card nvidia-smi does not list
     if (cpu) return { basis, k: "gpu", label, word: "Runs in system memory", chip: "system memory", detail: "", mark: "Runs in system memory", short: "System memory", amt: 0 };
     return { basis, k: "gpu", label, word: "Runs on GPU", chip: "on GPU", detail: "", mark: "Runs on the GPU", short: "Fits", amt: 0 };
   }
@@ -49,7 +45,6 @@ export function fitWords(r: Pick<FitReport, "verdict" | "numCtx" | "needVramByte
   return { basis, k: "no", label, word: `Not enough memory at ${k(r.numCtx)}`, chip: "not enough memory", detail: `needs ${gb(short)} more`, mark: "Too big for this computer", short: "Too big", amt: short };
 }
 
-/** The verdict's one sentence: "Should" until the model has really run at that size. */
 function labelOf(verdict: FitVerdict, measured: boolean, cpu: boolean): string {
   if (verdict === "refuse") return "Won't run here";
   return `${measured ? "Runs" : "Should run"} ${cpu ? "in system memory" : verdict === "fits" ? "well" : "slower"}`;

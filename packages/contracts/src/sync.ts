@@ -1,13 +1,9 @@
-// Ordered data. The server numbers every change to a thing; every answer and push about it carries
-// the number, and the window drops anything that is not newer than what it applied. A kind of data
-// joins ORDERED_DOMAINS only once every place the server writes it is numbered: from then on the
-// socket server refuses an answer or push of that kind without a number, and so does the client.
+// why: a kind joins ORDERED_DOMAINS only once every writer numbers it
 import * as S from "effect/Schema";
 
 export const SyncDomain = S.Literals(["settings", "models", "threads", "sources", "images", "updates"]);
 export type SyncDomain = typeof SyncDomain.Type;
 
-/** The things that have one number each, and the families (`thread:<id>`) that have one per member. */
 const FIXED_SCOPES = ["settings", "runtime", "models", "catalog", "threads", "gpu", "fit-inputs", "sources", "source-imports", "image-status", "update",
   "suggested", "fit-table", "pulls", "loads", "memory", "speeds", "measures", "image-presets", "image-download", "image-setup", "image-jobs"] as const;
 export type FixedScope = typeof FIXED_SCOPES[number];
@@ -42,16 +38,10 @@ export type SyncNegotiation = typeof SyncNegotiation.Type;
 export interface SyncRow {
   readonly domain: SyncDomain;
   readonly scope: FixedScope;
-  /** Other things the answer carries whole beside `scope`'s, each with its own number (the list's runtime). */
   readonly also?: readonly FixedScope[];
-  /**
-   * The answer or push is also about one member of a family, and carries that member's number: the
-   * chat (`thread:<id>`) named by the call's or the push's `threadId`.
-   */
   readonly member?: "thread";
 }
 
-/** The member a frame of `row` names: `threadId` of the call's params or the push's payload. */
 function memberOf(row: SyncRow, about: unknown): MemberScope | undefined {
   if (row.member === undefined || typeof about !== "object" || about === null) return undefined;
   const id = (about as { readonly threadId?: unknown }).threadId;

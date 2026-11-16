@@ -1,9 +1,3 @@
-// Image fit, two questions. The picker's: does a size fit this card at all? It is judged by the
-// card's memory to the nearest GB, never by what is free this second, since the chat
-// model leaves the GPU before an image loads. The job's (apps/server/src/image/module.ts): once
-// everything the app may move has left, does the job fit in what is free now? Other programs can
-// still hold memory then, and the job says so in words.
-
 const GIB = 1024 ** 3;
 
 /**
@@ -16,20 +10,14 @@ export const cardBytes = (totalBytes: number): number => Math.round(totalBytes /
 export const MIN_ROOM = 4 * GIB;
 
 export interface ImageFitInput {
-  /** The preset's estimate at the job's size. */
   readonly estimateBytes: number;
-  /** Free GPU memory now. */
   readonly freeBytes: number;
-  /** ComfyUI's own resident memory: the job reuses it, so it counts as free for the job. */
   readonly creditedBytes: number;
-  /** Memory the image may get back by unloading chat models (0 when it may unload none). */
   readonly freeableBytes?: number;
 }
 
 export interface ImageFitAnswer {
-  /** `fits` now, `frees`: fits once the chat models it may unload are gone, `refuse`: does not fit. */
   readonly verdict: "fits" | "frees" | "refuse";
-  /** What free memory lacks now (0 when it fits). */
   readonly shortBytes: number;
 }
 

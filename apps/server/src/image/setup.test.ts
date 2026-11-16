@@ -8,7 +8,8 @@ import type { InstallProgress } from "../runtime/types.ts";
 import { engineDir, engineFiles } from "./engine.ts";
 import { LINUX_ENGINE, linuxBuild } from "./linux-build.ts";
 import { createOwnComfy, writeDevice } from "./own.ts";
-import { BUILD_MARGIN, CARD_NOT_STARTED, CPU_SECONDS, createImageSetup, type BuildPlan, type EnginePlan, type ImageSetupDeps } from "./setup.ts";
+import { createImageHandlers } from "./handlers.ts";
+import { addressSet, BUILD_MARGIN, CARD_NOT_STARTED, CPU_SECONDS, createImageSetup, GPU_UNREAD, NO_ENGINE, NOT_YET, smallCard, type BuildPlan, type EnginePlan, type ImageSetupDeps } from "./setup.ts";
 
 const GIB = 1024 ** 3;
 
@@ -378,5 +379,74 @@ describe("what was built against what the computer has now", () => {
       await setup.info();
       expect(own.build?.()).toEqual({ version: "1.0.0", cpu: false });
     } finally { removeDir(appDataDir); }
+  });
+});
+
+const imageAt = (room: number | undefined, fetched: string[] = []): ImageSetupDeps["image"] => ({
+  status: async () => ({ state: "stopped", owner: "none" }) as never,
+  engine: () => ({ owner: "none", state: "stopped", ...room === undefined ? {} : { room } }) as never,
+  start: async () => ({}) as never,
+  download: async (preset) => { fetched.push(preset); return { files: [] }; },
+});
+
+const CANNOT_RUN: ReadonlyArray<readonly [string, Partial<ImageSetupDeps>, string]> = [
+  ["an address in Settings", { settingsAddress: () => "http://10.0.0.5:8188" }, addressSet("http://10.0.0.5:8188")],
+  ["a computer this release does not set up yet", { engine: () => "later" }, NOT_YET],
+  ["a computer the app cannot set up", { engine: () => undefined }, NO_ENGINE],
+  ["a card it cannot read", { image: imageAt(undefined) }, GPU_UNREAD],
+  ["a card too small for pictures", { image: imageAt(2 * GIB) }, smallCard(2 * GIB)],
+];
+
+describe("why Set up images cannot run here", () => {
+  it("where it cannot run, the setup read says why and offers nothing to fetch", async () => {
+    const plan = fakeBuild("1.0.0", 3000, []);
+    for (const [where, more, why] of CANNOT_RUN) {
+      const info = await fixture(16 * GIB, plan, more).setup.info();
+      expect(info.why, where).toBe(why);
+      expect(info.engine, where).toBeUndefined();
+      expect(info.model, where).toBeUndefined();
+    }
+    expect(await createImageHandlers({ image: {} as never })["image.setupInfo"]()).toEqual({ why: NO_ENGINE });
+  });
+
+  it("the reason names no service or unit, and a setup that can run carries no reason", async () => {
+    const plan = fakeBuild("1.0.0", 3000, []);
+    for (const [where, more] of CANNOT_RUN) {
+      expect((await fixture(16 * GIB, plan, more).setup.info()).why, where).not.toMatch(/\.service|\.socket|systemd|systemctl|\bunit\b/i);
+    }
+    expect(await fixture(16 * GIB, plan).setup.info()).not.toHaveProperty("why");
+    expect(await fixture(0, { ...plan, cpu: fakeBuild("1.0.0-cpu", 1000, []) }).setup.info()).not.toHaveProperty("why");
+  });
+});
+
+describe("what the setup read says before anything is fetched", () => {
+  it("on the processor it says the measured seconds a picture takes before anything downloads; with a card it says nothing of the processor", async () => {
+    const ran: string[] = [];
+    const fetched: string[] = [];
+    const plan: EnginePlan = { ...fakeBuild("1.0.0", 3000, ran), cpu: fakeBuild("1.0.0-cpu", 1000, ran) };
+    const none = await fixture(0, plan, { image: imageAt(0, fetched) }).setup.info();
+    expect(none.cpu).toEqual({ low: 100, high: 235 });
+    expect(none.engine).toMatchObject({ installed: false });
+    expect(ran).toEqual([]);
+    expect(fetched).toEqual([]);
+    expect((await fixture(8 * GIB, plan, { image: imageAt(8 * GIB, fetched) }).setup.info()).cpu).toBeUndefined();
+  });
+
+  it("each read asks the machine again: free space and the card are as they are at that ask", async () => {
+    let free = 500 * GIB;
+    let room = 16 * GIB;
+    const plan: EnginePlan = { ...fakeBuild("1.0.0", 3000, []), cpu: fakeBuild("1.0.0-cpu", 1000, []) };
+    const { setup } = fixture(16 * GIB, plan, {
+      freeBytes: async () => free,
+      image: { ...imageAt(undefined), engine: () => ({ owner: "none", state: "stopped", room }) as never },
+    });
+    const first = await setup.info();
+    expect(first).toMatchObject({ freeBytes: 500 * GIB, engine: { version: "1.0.0" } });
+    expect(first.cpu).toBeUndefined();
+    free = 7 * GIB;
+    room = 0;
+    expect(await setup.info()).toMatchObject({ freeBytes: 7 * GIB, engine: { version: "1.0.0-cpu" }, cpu: CPU_SECONDS });
+    room = 2 * GIB;
+    expect((await setup.info()).why).toBe(smallCard(2 * GIB));
   });
 });

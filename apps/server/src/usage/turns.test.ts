@@ -82,6 +82,20 @@ describe("usage from turns", () => {
     } finally { await close(t); }
   });
 
+  it("a usage row holds an hour, a model and its sums: no words, chat or title", async () => {
+    const t = await rig(() => ndjson([{ model: "m", message: { content: "a private answer" }, done: false }, done(11, 3, { eval_duration: 2e9, prompt_eval_duration: 5e8, total_duration: 3e9 })]));
+    try {
+      const thread = t.store.createThread({ title: "Secret plans" });
+      await t.send(thread.id, { content: "a private question" });
+      await t.settle();
+      const read = t.usage.handlers["usage.read"]({ since: 0 });
+      expect(read.rows).toHaveLength(1);
+      expect(Object.keys(read.rows[0]!).toSorted()).toEqual(["completionTokens", "decodeMs", "decodeTokens", "hour", "model", "promptTokens", "readMs", "readTokens", "replies", "wallMs"]);
+      const said = JSON.stringify(read);
+      for (const secret of [thread.id, "Secret plans", "a private question", "a private answer"]) expect(said).not.toContain(secret);
+    } finally { await close(t); }
+  });
+
   it("a tool turn counts each of its requests once and is one reply", async () => {
     const t = await rig((n) => (n === 1
       ? ndjson([{ message: { tool_calls: [{ function: { name: "read", arguments: { path: "/library" } } }] }, done: true, prompt_eval_count: 100, eval_count: 10 }])

@@ -39,4 +39,13 @@ describe("the suggested chat models", () => {
     expect(chatModelsProblems(broken)).toEqual(["gpu 8 GB: qwen3:14b is not in models"]);
     expect(chatModelsProblems({ ...CHAT_MODELS, typedExample: CHAT_MODELS.example })).toEqual([`typedExample ${CHAT_MODELS.example} is already in models`]);
   });
+
+  it("a model whose purpose runs over four words is refused by its name, and four words are enough", async () => {
+    const { chatModelsProblems, CHAT_MODELS } = await import("../src/chat-models.ts");
+    const [first, ...rest] = CHAT_MODELS.models;
+    if (first === undefined) throw new Error("no models listed");
+    const withPurpose = (purpose: string) => ({ ...CHAT_MODELS, models: [{ ...first, purpose }, ...rest] });
+    expect(chatModelsProblems(withPurpose("Fast answers for everyday questions"))).toEqual([`${first.name}: purpose is over four words`]);
+    expect(chatModelsProblems(withPurpose("Fast everyday answers here"))).toEqual([]);
+  });
 });

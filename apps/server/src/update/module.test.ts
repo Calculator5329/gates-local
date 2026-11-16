@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createUpdateHandlers, createUpdateModule } from "./module.ts";
 import { RECORD_FILE, writeRecord } from "@gates-local/update/record";
 import type { Runner } from "@gates-local/update/run";
-import { type Repos, commit, fakePnpm, head, makeRepos, publish, removeRepos, testEnv } from "@gates-local/update/testing";
+import { type Repos, commit, fakePnpm, git, head, makeRepos, publish, removeRepos, testEnv } from "@gates-local/update/testing";
 import { saveTransaction } from "@gates-local/update/transaction";
 import { acquireLock } from "@gates-local/update/lock";
 import { automaticChecks } from "./automatic.ts";
@@ -107,6 +107,38 @@ describe("update.status", () => {
     const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner: counting().runner, everyChange: () => false });
     expect(update.status().result?.line).toBe("The update stopped: The update to v0.2.0 has a step that ran too long.");
   });
+
+  it("gives the commands that finish going back when going back did not finish", () => {
+    const commands = [`git reset --keep ${"a".repeat(40)}`,"pnpm install --frozen-lockfile", "pnpm --filter @gates-local/web build"];
+    writeRecord(r.data, {
+      at: 5,
+      outcome: "rollback-failed",
+      from: { commit: "a".repeat(40), label: "v0.1.0" },
+      to: { commit: "b".repeat(40), label: "v0.2.0" },
+      step: "install",
+      reason: "ERR_PNPM_TEST",
+      commands,
+    });
+    const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner: counting().runner, everyChange: () => false });
+    expect(update.status().result).toMatchObject({ outcome: "rollback-failed", commands });
+    encodes("update.status", update.status());
+  });
+
+  it("never fetches or runs git when the status is read, however often", async () => {
+    commit(r.seed, "Second");
+    publish(r.seed);
+    const c = counting();
+    const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner: c.runner, everyChange: () => false });
+    const handlers = createUpdateHandlers(update);
+    for (let i = 0; i < 3; i += 1) {
+      update.status();
+      handlers["update.status"]();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(c.commands).toEqual([]);
+    expect(update.status().lastCheck).toBeNull();
+    await update.close();
+  });
 });
 
 describe("update.check", () => {
@@ -176,6 +208,28 @@ describe("update.check", () => {
     expect(changed).toHaveBeenCalledTimes(1);
     await update.close();
     expect(flip).toBeUndefined();
+  });
+
+  it("lists at most twenty of the new changes, newest first, and counts them all", async () => {
+    for (let i = 1; i <= 22; i += 1) commit(r.seed, `Change ${i}`);
+    publish(r.seed);
+    const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner: counting().runner, everyChange: () => false, now: () => 1 });
+    const check = await update.check();
+    expect(check).toMatchObject({ state: "available", total: 22 });
+    const changes = check.state === "available" ? check.changes : [];
+    expect(changes).toEqual(Array.from({ length: 20 }, (_, i) => `Change ${22 - i}`));
+    await update.close();
+  });
+
+  it("gives a release's notes as the whole message of its tag", async () => {
+    commit(r.seed, "Second");
+    git(r.seed, "tag", "-a", "v0.1.0", "-m", "First release\n\nThe updates group.");
+    publish(r.seed);
+    const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner: counting().runner, everyChange: () => false, now: () => 1 });
+    const check = await update.check();
+    expect(check).toMatchObject({ state: "available", channel: "release", notes: "First release\n\nThe updates group." });
+    encodes("update.check", { ...update.status(), lastCheck: check });
+    await update.close();
   });
 
   it("says up to date", async () => {

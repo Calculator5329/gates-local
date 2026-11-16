@@ -3,7 +3,7 @@
 // slow to answer carries a lower number than a push sent while it was out, and the window drops it.
 import { afterEach, expect, it, vi } from "vitest";
 import { createClient, type SocketLike, type SyncChange, type SyncMetadata } from "@gates-local/contracts";
-import { methodSamples as samples } from "@gates-local/contracts/testing";
+import { methodSamples as samples, pushSamples } from "@gates-local/contracts/testing";
 import { WebSocket } from "ws";
 import { startWsServer, type Handlers, type WsServer } from "./server.ts";
 
@@ -81,4 +81,53 @@ it("every models push and read the window applies is numbered", async () => {
   let gpuSync: SyncMetadata | undefined;
   await client.call("gpu.status", {}, { onMetadata: (sync) => { gpuSync = sync; } });
   expect(revs(gpuSync)).toEqual([["gpu", 2]]);
+});
+
+it("every images push and read takes the next number of its own scope, in the order the socket server gives each out", async () => {
+  const { server, client } = await serve({ "image.status": () => samples["image.status"].result });
+  const pushed: Array<SyncMetadata | undefined> = [];
+  for (const channel of ["image.status", "image.presets", "image.event", "image.download", "image.setup"] as const) {
+    client.subscribe(channel, (_p: unknown, sync) => pushed.push(sync));
+  }
+  server.push("image.status", pushSamples["image.status"][0]!);
+  await vi.waitFor(() => expect(pushed).toHaveLength(1));
+  let readSync: SyncMetadata | undefined;
+  await client.call("image.status", {}, { onMetadata: (sync) => { readSync = sync; } });
+  server.push("image.status", pushSamples["image.status"][1]!);
+  server.push("image.presets", pushSamples["image.presets"][0]!);
+  server.push("image.event", pushSamples["image.event"][0]!);
+  server.push("image.download", pushSamples["image.download"][0]!);
+  server.push("image.setup", pushSamples["image.setup"][0]!);
+  await vi.waitFor(() => expect(pushed).toHaveLength(6));
+  expect(revs(readSync)).toEqual([["image-status", 2]]);
+  expect(pushed.map((sync) => revs(sync))).toEqual([
+    [["image-status", 1]], [["image-status", 3]], [["image-presets", 1]], [["image-jobs", 1]], [["image-download", 1]], [["image-setup", 1]],
+  ]);
+});
+
+it("one presets read answers the setups and the running download, each with its own number", async () => {
+  const { server, client } = await serve({ "image.presets": () => samples["image.presets"].result });
+  const pushed: Array<SyncMetadata | undefined> = [];
+  client.subscribe("image.download", (_p, sync) => pushed.push(sync));
+  client.subscribe("image.presets", (_p, sync) => pushed.push(sync));
+  server.push("image.download", pushSamples["image.download"][0]!);
+  server.push("image.download", pushSamples["image.download"][0]!);
+  server.push("image.presets", pushSamples["image.presets"][0]!);
+  await vi.waitFor(() => expect(pushed).toHaveLength(3));
+  let readSync: SyncMetadata | undefined;
+  await client.call("image.presets", {}, { onMetadata: (sync) => { readSync = sync; } });
+  expect(revs(readSync)).toEqual([["image-presets", 2], ["image-download", 3]]);
+});
+
+it("a setup read carries Set up images' step number alone, the same count its step pushes take", async () => {
+  const { server, client } = await serve({ "image.setupInfo": () => samples["image.setupInfo"].result });
+  const pushed: Array<SyncMetadata | undefined> = [];
+  client.subscribe("image.setup", (_p, sync) => pushed.push(sync));
+  server.push("image.setup", pushSamples["image.setup"][0]!);
+  await vi.waitFor(() => expect(pushed).toHaveLength(1));
+  let readSync: SyncMetadata | undefined;
+  await client.call("image.setupInfo", {}, { onMetadata: (sync) => { readSync = sync; } });
+  server.push("image.setup", pushSamples["image.setup"][0]!);
+  await vi.waitFor(() => expect(pushed).toHaveLength(2));
+  expect([revs(pushed[0]), revs(readSync), revs(pushed[1])]).toEqual([[["image-setup", 1]], [["image-setup", 2]], [["image-setup", 3]]]);
 });

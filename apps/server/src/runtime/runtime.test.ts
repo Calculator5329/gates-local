@@ -2,9 +2,10 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { startFakeServer } from "../fit/fake-http.ts";
 import { httpGet } from "./http.ts";
 import { probe } from "./probe.ts";
-import { readProc, readRecord } from "@gates-local/runtime-files/ownership";
+import { readProc, readRecord, writeRecord } from "@gates-local/runtime-files/ownership";
 import { installedBinary, ownedStateFile } from "@gates-local/runtime-files/paths";
 import { InstallError } from "./install.ts";
 import { type OllamaRuntime, type RuntimeOptions, childHome, createOllamaRuntime, failureOf, ownedChildEnv } from "./runtime.ts";
@@ -516,4 +517,114 @@ describe("status listener", () => {
     await rt.discover();
     expect(seen.map((s) => s.state)).toEqual(["ready", "missing"]);
   });
+});
+
+function statusWhere(rt: OllamaRuntime, seen: readonly RuntimeStatus[], pred: (s: RuntimeStatus) => boolean, ms = 20_000): Promise<RuntimeStatus> {
+  return new Promise<RuntimeStatus>((resolve, reject) => {
+    const already = seen.find(pred);
+    if (already !== undefined) return resolve(already);
+    const bound = setTimeout(() => {
+      off();
+      reject(new Error("no status matched in time"));
+    }, ms);
+    const off = rt.onChange((x) => {
+      if (!pred(x)) return;
+      clearTimeout(bound);
+      off();
+      resolve(x);
+    });
+  });
+}
+
+describe("busy ports in the status", () => {
+  it("two other programs on the ports are listed in the order the detail names them", async () => {
+    const first = await startWrongService();
+    const second = await startWrongService();
+    cleanups.push(() => first.close(), () => second.close());
+    const { rt } = await makeRuntime({ externalBaseUrl: first.baseUrl, appPort: second.port });
+    const s = await rt.discover();
+    expect(s.state).toBe("wrong-service");
+    const detail = s.detail ?? "";
+    expect(detail.indexOf(`port ${first.port}`)).toBeGreaterThanOrEqual(0);
+    expect(detail.indexOf(`port ${first.port}`)).toBeLessThan(detail.indexOf(`port ${second.port}`));
+    expect(s.busyPorts).toEqual([String(first.port), String(second.port)]);
+  });
+
+  it("a port the detail names twice is listed once", async () => {
+    const other = await startWrongService();
+    cleanups.push(() => other.close());
+    const { rt } = await makeRuntime({ externalBaseUrl: `${other.baseUrl}/`, appPort: other.port });
+    const s = await rt.discover();
+    expect(s.state).toBe("wrong-service");
+    expect(s.busyPorts).toEqual([String(other.port)]);
+  });
+});
+
+describe("one model at a time", () => {
+  it("the app's copy adopted from a start that did not hold one model at a time does not claim it", async () => {
+    writeFakeBinary(installedBinary(appDataDir, VERSION));
+    const { rt } = await makeRuntime({ externalBaseUrl: await nothingAt() });
+    const s = await rt.ensure();
+    expect(s).toMatchObject({ state: "ready", owner: "app", holdsOne: true });
+    const file = ownedStateFile(appDataDir);
+    const rec = readRecord(file)!;
+    writeRecord(file, Object.fromEntries(Object.entries(rec).filter(([k]) => k !== "holdsOne")) as typeof rec);
+    const again = createOllamaRuntime({ appDataDir, home, appPort: Number(new URL(s.baseUrl).port), externalBaseUrl: await nothingAt(), env: { PATH: emptyPathDir }, allowInstall: false });
+    const adopted = await again.discover();
+    expect(adopted).toMatchObject({ state: "ready", owner: "app" });
+    expect("holdsOne" in adopted).toBe(false);
+  });
+});
+
+describe("what an error is called", () => {
+  it("an error that is not from installing or starting has no failure kind", async () => {
+    const { rt } = await makeRuntime({ externalBaseUrl: await nothingAt(), env: { get PATH(): string { throw new Error("the look broke"); }, HOME: home } });
+    const s = await rt.discover();
+    expect(s.state).toBe("error");
+    expect("failure" in s).toBe(false);
+  });
+
+  it("a drive too small for the install is a disk failure whose detail gives what is needed and what is free", async () => {
+    const { rt } = await makeRuntime({ externalBaseUrl: await nothingAt(), manifest: manifest({ unpackedBytes: 1e15 }), allowInstall: true });
+    const s = await rt.ensure();
+    expect(s).toMatchObject({ state: "error", failure: "disk" });
+    expect(s.detail).toMatch(/^Needs \d+\.\d GB free; \d+\.\d GB is free on this drive\.$/);
+  });
+});
+
+describe("the install's figures in the status", () => {
+  it("the disk the install takes is the pinned release's unpacked size", async () => {
+    const { rt, seen } = await makeRuntime({ externalBaseUrl: await nothingAt(), manifest: manifest({ unpackedBytes: 1e15 }), allowInstall: true });
+    await rt.ensure();
+    expect(seen.find((x) => x.state === "installing")?.install).toEqual({ receivedBytes: 0, totalBytes: 1, diskBytes: 1e15 });
+  });
+
+  it("a stalled download is said once, and the next bytes clear it with no Retry", async () => {
+    const tarball = buildFakeRelease(work);
+    const half = Math.floor(tarball.length / 2);
+    const most = Math.floor((tarball.length * 3) / 4);
+    let made: Awaited<ReturnType<typeof makeRuntime>> | undefined;
+    const release = await startFakeServer({
+      "GET /asset": async (_b, res) => {
+        res.writeHead(200, { "content-type": "application/octet-stream", "content-length": String(tarball.length) });
+        res.write(tarball.subarray(0, half));
+        await statusWhere(made!.rt, made!.seen, (x) => x.install?.stalled === true);
+        res.write(tarball.subarray(half, most));
+        await statusWhere(made!.rt, made!.seen, (x) => (x.install?.receivedBytes ?? 0) >= most).catch(() => undefined);
+        res.end(tarball.subarray(most));
+      },
+    });
+    cleanups.push(() => release.close());
+    const m = manifest({ url: `${release.baseUrl}/asset`, sha256: createHash("sha256").update(tarball).digest("hex"), sizeBytes: tarball.length });
+    made = await makeRuntime({ externalBaseUrl: await nothingAt(), manifest: m, allowInstall: true, stallMs: 1000 });
+    const s = await made.rt.ensure();
+    expect(s.state).toBe("ready");
+    expect(release.requests.filter((r) => r.path === "/asset")).toHaveLength(1);
+    const installing = made.seen.filter((x) => x.state === "installing");
+    const stalledAt = installing.findIndex((x) => x.install?.stalled === true);
+    expect(installing.filter((x) => x.install?.stalled === true)).toHaveLength(1);
+    const after = installing[stalledAt + 1];
+    expect(after?.install?.stalled).toBeUndefined();
+    expect(after?.install?.receivedBytes).toBeGreaterThan(installing[stalledAt]?.install?.receivedBytes ?? 0);
+  }, 30_000);
 });

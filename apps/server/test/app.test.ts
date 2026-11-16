@@ -11,7 +11,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { type Channel, type Client, type ImageEvent, type Message, type Payload, type Reply, type ReplyListed, type SocketLike, WireError, createClient } from "@gates-local/contracts";
+import { CHAT_MODELS, type Channel, type Client, type ImageEvent, type Message, type Payload, type Reply, type ReplyListed, type SocketLike, WireError, createClient } from "@gates-local/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { type App, type AppDeps, createApp } from "../src/app.ts";
@@ -25,6 +25,7 @@ import { createImageModule, type ImageModule } from "../src/image/module.ts";
 import { comfyInfo, ZIMAGE_FILES } from "./comfy/info.ts";
 import { json, startFakeServer, type FakeServer } from "../src/fit/fake-http.ts";
 import { createModelCatalog, listLoaded } from "../src/runtime/models.ts";
+import { useChatList } from "../src/runtime/chat-list.ts";
 import { createModelLoader, type ModelLoader } from "../src/runtime/load.ts";
 import { planLoad } from "../src/fit/fit.ts";
 import { createMemoryOwner, ENGINE_BUSY_NOTE, type MemoryEngine, type MemoryOwner } from "../src/gpu/memory.ts";
@@ -881,6 +882,56 @@ describe("the fit table", () => {
     await r.catalog.refresh({ force: true });
     const table = await r.waitFor("fit.changed", (t) => t.rows.some((row) => row.model === PULLED));
     expect(table.rows.filter((row) => row.model === PULLED).map((row) => row.numCtx)).toEqual([8192, 16384, 32768, 65536]);
+  });
+});
+
+describe("what the fit table follows", () => {
+  it("a model leaving memory builds the table again from a new reading", async () => {
+    const r = await rig();
+    await fitSettled(r);
+    r.gpu.freeMib = 12000;
+    r.app.fitTable.load({ model: MODEL, numCtx: 16384, state: "unloaded" });
+    const table = await r.waitFor("fit.changed", (t) => t.memory.kind === "gpu" && t.memory.freeBytes === 12000 * MIB);
+    expect(table.rows.some((row) => row.model === MODEL)).toBe(true);
+  });
+
+  it("a newer chat model list builds the table again", async () => {
+    const r = await rig();
+    await fitSettled(r);
+    cleanups.push(() => useChatList(CHAT_MODELS));
+    r.gpu.freeMib = 11000;
+    useChatList({ ...CHAT_MODELS, revision: CHAT_MODELS.revision + 1 });
+    await r.waitFor("fit.changed", (t) => t.memory.kind === "gpu" && t.memory.freeBytes === 11000 * MIB);
+  });
+});
+
+describe("the chat model list in use", () => {
+  it("a newer list reaches every open window as models.suggested", async () => {
+    const r = await rig();
+    const socket = new WebSocket(`ws://127.0.0.1:${r.server.port}/?token=${TOKEN}`);
+    cleanups.push(() => socket.terminate());
+    const other = createClient(socket as unknown as SocketLike);
+    await new Promise<void>((resolve) => socket.once("open", () => resolve()));
+    const revision = CHAT_MODELS.revision + 1;
+    const got = (c: Client) => new Promise<number>((resolve) => {
+      const off = c.subscribe("models.suggested", (p) => {
+        if (p.revision !== revision) return;
+        off();
+        resolve(p.revision);
+      });
+    });
+    const both = Promise.all([got(r.client), got(other)]);
+    await other.call("threads.list", {});
+    cleanups.push(() => useChatList(CHAT_MODELS));
+    useChatList({ ...CHAT_MODELS, revision });
+    expect(await within(3000, both, "models.suggested on both windows")).toEqual([revision, revision]);
+  });
+});
+
+describe("turns.blocking", () => {
+  it("answers an empty list when no reply is running, even with no runtime to ask", async () => {
+    const r = await rig({ ollamaUp: false });
+    expect(await r.client.call("turns.blocking", { model: MODEL, numCtx: 16384 })).toEqual([]);
   });
 });
 

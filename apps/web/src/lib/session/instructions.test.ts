@@ -38,6 +38,13 @@ describe("Instructions actions", () => {
     expect(store.getState().settings).not.toHaveProperty("systemPrompt");
     expect(store.getState().settings).not.toHaveProperty("modelSettings");
   });
+  it("Reset settings sends null for every setting that goes back to unset, Make images included, so none is saved as an explicit choice", async () => {
+    store.setState({ settings: { ...methodSamples["settings.get"].result, defaultModel: "qwen3.5:9b", imageTool: false, comfyUrl: "http://127.0.0.1:9000", imageFolder: "/pictures", whisperUrl: "http://127.0.0.1:9001", systemPrompt: "shared" } });
+    const held = b.server.hold("settings.update"), reset = session.resetSettings(), call = await held;
+    expect(call.params).toMatchObject({ defaultModel: null, imageChoice: null, imageTool: null, comfyUrl: null, imageFolder: null, whisperUrl: null, systemPrompt: null, modelSettings: null });
+    call.respond(methodSamples["settings.get"].result);
+    expect(await reset).toBeNull();
+  });
   it("model saves wait for the server and retain the old settings on failure", async () => {
     const original = methodSamples["settings.get"].result;
     store.setState({ settings: original });

@@ -1,5 +1,3 @@
-// Domain shapes that cross the wire. Every module keeps plain TypeScript
-// inside; these Schemas are the boundary check at both ends of the socket.
 import * as S from "effect/Schema";
 
 const Millis = S.Finite;
@@ -32,9 +30,7 @@ export const Thread = S.Struct({
   title: S.String,
   createdAt: Millis,
   updatedAt: Millis,
-  /** The image model and size this thread sends with (threads.setImageChoice, or its last image send); absent follows Settings' imageChoice. */
   imageChoice: S.optional(ImageChoice),
-  /** How many pictures an Image-mode send in this thread makes (threads.setImageCount, or its last image send); absent is 1. */
   imageCount: S.optional(ImageCount),
 });
 export type Thread = typeof Thread.Type;
@@ -45,12 +41,11 @@ export type Role = typeof Role.Type;
 export const MessageStats = S.Struct({
   promptTokens: S.optional(Count),
   completionTokens: S.optional(Count),
-  /** Wall time for the whole call, load and prompt included. */
   durationMs: S.optional(S.Finite),
   numCtx: S.optional(PositiveInt),
-  /** Ollama's eval_duration: decode time only. Speed is completionTokens over this. */
+  // external: Ollama's eval_duration is decode only, not the load or the prompt
   evalDurationMs: S.optional(S.Finite),
-  /** Ollama's prompt_eval_duration: time spent reading the prompt. */
+  // external: Ollama's prompt_eval_duration is the time spent reading the prompt
   promptEvalDurationMs: S.optional(S.Finite),
 });
 export type MessageStats = typeof MessageStats.Type;
@@ -58,20 +53,12 @@ export type MessageStats = typeof MessageStats.Type;
 /** One tool call in a turn, shown as a step row. */
 export const ToolStep = S.Struct({
   callId: S.String,
-  /** The tool: "read", "sql", "shell", "note" or "image". */
   name: S.String,
   state: S.Literals(["running", "done", "error"]),
-  /**
-   * With state "error": the person's Stop (or a halt) cut the call short, it did not fail. A field, not a
-   * fourth state, so a build that knows three states still reads the step (as failed). Never false.
-   */
   stopped: S.optional(S.Literal(true)),
-  /** Plain words: "Searched your library". */
   summary: S.String,
-  /** The call and its trimmed output, for the expanded row. */
   detail: S.optional(S.String),
   durationMs: S.optional(S.Finite),
-  /** URLs from actual tool output, excluding the model's call arguments. */
   links: S.optional(S.Array(S.String)),
 });
 export type ToolStep = typeof ToolStep.Type;
@@ -81,35 +68,20 @@ export const ImageEvent = S.Struct({
   jobId: S.String,
   threadId: S.optional(S.String),
   state: S.Literals(["queued", "running", "done", "error", "cancelled"]),
-  /**
-   * Running, and "freeing": still freeing GPU memory (unloading this app's chat models and waiting
-   * for the memory), absent once that step ends. "stopping": stopped (a Stop or its limit), and the
-   * engine has not let go yet; on the processor it ends the step it is in first.
-   */
   phase: S.optional(S.Literals(["freeing", "stopping"])),
-  /**
-   * Running: what ComfyUI said it is doing, only as it reported it. "queued": taken, not begun;
-   * "loading": a loader node ran (a model read from disk, so a cold first run); "encoding": the
-   * prompt's text encoder; "sampling" with `steps`; "decoding": the VAE. Absent: nothing reported yet.
-   */
+  // external: ComfyUI reports executing per node and progress frames on its websocket
   stage: S.optional(S.Literals(["queued", "loading", "encoding", "sampling", "decoding"])),
-  /** Sampling: the step ComfyUI reported and of how many. */
+  // external: ComfyUI's progress frame carries the sampler's step as value and max
   steps: S.optional(S.Struct({ done: S.Int, total: S.Int })),
-  /** The job has reached sampling (or decoding) once: a "loading" after it is not the first run's cold load. */
   sampled: S.optional(S.Literal(true)),
   progress: S.optional(S.Finite),
   imagePath: S.optional(S.String),
   message: S.optional(S.String),
   errorKind: S.optional(S.String),
-  /** One accepted retry per failed attempt; duplicates return this same job. */
   retryJobId: S.optional(S.String),
-  /** The preset and size the job runs; a retry runs the same. Absent on cards saved before presets. */
   choice: S.optional(ImageChoice),
-  /** The choice the card was first drawn with, when the job settled to another (an unset default passed over for the files ComfyUI has). The card's box keeps this shape. */
   sent: S.optional(ImageChoice),
-  /** One of several pictures from one Image-mode send; they show as tiles of one card. Absent: a picture of its own. */
   group: S.optional(ImageGroup),
-  /** Done: ComfyUI's time making the picture. Absent on cards saved before it was kept. */
   runMs: S.optional(Count),
 });
 export type ImageEvent = typeof ImageEvent.Type;
@@ -131,31 +103,14 @@ export type TurnEnded = typeof TurnEnded.Type;
  * and every reload shows the same seconds. Absent on rows saved before 2026-11-14 and on pictures.
  */
 export const ReplyTimes = S.Struct({
-  /** When the server took the turn. */
   startedAt: Millis,
-  /**
-   * When the model was ready: the start for a model in memory, the first token after a load. The
-   * wait from startedAt to here is the reply's own figure, beside its work. Absent on older rows.
-   */
   readyAt: S.optional(Millis),
-  /** The first word of the answer. */
   firstTokenAt: S.optional(Millis),
-  /**
-   * "Thought for": from the model being ready (the start, or the first token of a cold load) to
-   * the first word of the answer, or to the end of a reply that never answered. Only with thinking.
-   */
   thoughtMs: S.optional(Count),
-  /** Each closed span of thinking: where its words start in the thinking, and how long it ran. */
   spans: S.Array(S.Struct({ from: Count, ms: Count })),
-  /** The thinking's length when each call first arrived: where the call came in the thinking. */
   callsAt: S.Record(S.String, Count),
-  /**
-   * The reply's work: its thinking plus its tool calls, never its load or its writing (the one
-   * clock every window shows). Absent on rows saved before 2026-11-14.
-   */
   workMs: S.optional(Count),
   ended: TurnEnded,
-  /** Preempted or failed: the error the turn ended with, for the note under it. */
   why: S.optional(S.Struct({ code: S.String, message: S.String, neededBy: S.optional(S.String) })),
 });
 export type ReplyTimes = typeof ReplyTimes.Type;
@@ -166,18 +121,14 @@ export type ReplyTimes = typeof ReplyTimes.Type;
  * through the read tool, by its label, in this thread's turns only.
  */
 export const AttachedFile = S.Struct({
-  /** Relative to the server data dir, `files/att-<uuid>`: a generated name, never the person's file name. */
   path: S.String.check(S.isPattern(/^files\/att-[a-f0-9-]{36}$/)),
-  /** The original file name: the chip shows it and the model reads the file by it. */
   name: S.String.check(S.isMinLength(1), S.isMaxLength(255)),
   size: Count,
-  /** The browser's type for it, or "" when it gave none. */
   type: S.String.check(S.isMaxLength(200)),
 });
 export type AttachedFile = typeof AttachedFile.Type;
 
 export const Message = S.Struct({
-  /** Rows saved before 2026-11-13 may say that earlier images were left out; nothing shows it or writes it now. */
   contextNotice: S.optional(S.String),
   id: S.String,
   threadId: S.String,
@@ -187,19 +138,11 @@ export const Message = S.Struct({
   model: S.optional(S.String),
   createdAt: Millis,
   stats: S.optional(MessageStats),
-  /** Tool calls the assistant made in this turn, in order. */
   tools: S.optional(S.Array(ToolStep)),
-  /** Attached user images or generated assistant images, relative to the server data dir; served over authenticated HTTP. */
   images: S.optional(S.Array(S.String)),
-  /** Files the person attached to this message (AttachedFile). Absent when none. */
   files: S.optional(S.Array(AttachedFile)),
-  /** Saved unfinished assistant text, not a completed answer. Absent on older messages. */
   interrupted: S.optional(S.Literal(true)),
   imageJob: S.optional(ImageEvent),
-  /**
-   * An assistant reply: its times. A question whose turn ended with no reply saved (stopped or
-   * failed before any words): how that turn ended, with no spans.
-   */
   times: S.optional(ReplyTimes),
 });
 export type Message = typeof Message.Type;
@@ -216,9 +159,7 @@ export const ModelCapability = S.String;
  * models.changed so the first render already knows it.
  */
 export const ModelPick = S.Struct({
-  /** The context size the pick was fitted at: the settings default. */
   numCtx: PositiveInt,
-  /** "refuse" means no chat model fits at numCtx; this is the best-ranked one anyway. Absent when the fit check could not run. */
   verdict: S.optional(FitVerdict),
 });
 export type ModelPick = typeof ModelPick.Type;
@@ -231,11 +172,10 @@ export const ModelInfo = S.Struct({
   parameterSize: S.optional(S.String),
   quantization: S.optional(S.String),
   modifiedAt: S.String,
-  /** From /api/show, cached by digest. A model without "completion" cannot chat. */
+  // external: Ollama's /api/show lists capabilities; completion means it can chat
   capabilities: S.Array(ModelCapability),
-  /** The most context this model takes, from /api/show; the safe fallback when it does not say. */
+  // external: Ollama's /api/show may or may not report a model's context length
   maxContext: S.optional(PositiveInt),
-  /** Set on exactly one model, the one chat starts on, when any installed model can chat. */
   pick: S.optional(ModelPick),
 });
 export type ModelInfo = typeof ModelInfo.Type;
@@ -246,10 +186,8 @@ export type ModelInfo = typeof ModelInfo.Type;
  * without enough measured replies has no entry.
  */
 export const ModelSpeed = S.Struct({
-  /** The model name without ":latest", so either spelling matches. */
   model: S.String,
   tokensPerSecond: S.Finite.check(S.isGreaterThan(0)),
-  /** How many replies the number covers. */
   replies: PositiveInt,
 });
 export type ModelSpeed = typeof ModelSpeed.Type;
@@ -261,11 +199,8 @@ export type MeasurePart = typeof MeasurePart.Type;
 /** One thing the window does to a page a model wrote (Measure's Pages part), by CSS selector. */
 export const PageAction = S.Union([
   S.Struct({ do: S.Literal("click"), target: S.String }),
-  /** Types into an input as a person does: per character keydown, keypress, beforeinput, input and keyup; then change. */
   S.Struct({ do: S.Literal("fill"), target: S.String, text: S.String }),
-  /** Notes the element's value or text. */
   S.Struct({ do: S.Literal("read"), target: S.String }),
-  /** Notes the text of every matching element that is shown, joined by "|". */
   S.Struct({ do: S.Literal("visible"), target: S.String }),
 ]);
 export type PageAction = typeof PageAction.Type;
@@ -276,31 +211,20 @@ export type PageAction = typeof PageAction.Type;
  */
 export const MeasureCheck = S.Struct({
   id: S.String,
-  /** The part it counts toward; "sql" is a database question of a measure saved before version 2. */
   kind: S.Literals(["tools", "sql", "files", "database", "instructions", "pages"]),
   ok: S.Boolean,
-  /** What the model's answer said: its head and its tail when it is long. */
   reply: S.optional(S.String),
-  /** Before version 2: a database question's first row, or why its query did not run. Pages: what the window saw. */
   result: S.optional(S.String),
-  /** pending: a page waiting for the app's window to run it. skipped: it could not run on this computer. Neither counts. */
   state: S.optional(S.Literals(["pending", "skipped"])),
-  /** What a pass needs, in a few words. */
   needs: S.optional(S.String),
-  /** Why it failed or was skipped. */
   why: S.optional(S.String),
-  /** Each tool call and what came back, cut short. */
   calls: S.optional(S.Array(S.String)),
-  /** Tokens the model wrote for it, thinking included, over all its requests. */
   tokens: S.optional(S.Int),
-  /** Of those, the tokens it thought (counted from the stream; the runtime counts both together). */
+  // external: Ollama's eval_count counts thinking and answer tokens together
   thinkTokens: S.optional(S.Int),
-  /** Its tokens reached the check's budget, and the reply was cut there. */
   cut: S.optional(S.Boolean),
-  /** It was cut while it was still thinking. */
   cutThinking: S.optional(S.Boolean),
   ms: S.optional(S.Finite),
-  /** Pages: the page the model wrote, and what the window does to it. */
   page: S.optional(S.String),
   script: S.optional(S.Array(PageAction)),
 });
@@ -330,23 +254,14 @@ export type MeasurePartCount = typeof MeasurePartCount.Type;
 export const ModelMeasure = S.Struct({
   model: S.String,
   digest: S.String,
-  /** When it was measured, ms since 1970. */
   at: S.Finite,
-  /** 2 and on: the checks ran through the chat's own loop and tools, in parts. MEASURE_VERSION: this build's checks, grades and way of running them. */
   version: S.optional(S.Literals([2, 3, 4])),
-  /** The window the checks ran at: version 2 uses the one a chat with this model uses. */
   numCtx: S.Int,
-  /** Version 2: whether the model thought, as a chat with it does. */
   think: S.optional(S.Boolean),
-  /** How it sampled, its own and not the person's chat settings; the model's defaults for the rest. Absent: an earlier build's, which used the person's. */
   sampling: S.optional(S.Struct({ temperature: S.Finite, seed: S.Int })),
-  /** Decode speed: version 2 sums every request of the run. */
   tokensPerSecond: S.Finite.check(S.isGreaterThanOrEqualTo(0)),
-  /** Version 2: the median wait from a request to its first token. */
   firstTokenMs: S.optional(S.Finite),
-  /** Version 2: too slow to use here, and which number says so. Never part of the score. */
   slow: S.optional(S.Literals(["decode", "first-token"])),
-  /** Version 2: 0 to 100, each part's share of passes times its weight. Before: passed of 8. */
   score: S.Int.check(S.isBetween({ minimum: 0, maximum: 100 })),
   parts: S.optional(S.Array(MeasurePartCount)),
   checks: S.Array(MeasureCheck),
@@ -369,7 +284,6 @@ export type ThreadPage = typeof ThreadPage.Type;
 export const MeasureRun = S.Struct({
   model: S.String,
   state: S.Literals(["waiting", "running", "done", "error"]),
-  /** Steps finished, of `total` (one speed request and every check). */
   done: S.Int,
   total: S.Int,
   message: S.optional(S.String),
@@ -403,36 +317,18 @@ export const RuntimeStatus = S.Struct({
   owner: RuntimeOwner,
   baseUrl: S.String,
   version: S.optional(S.String),
-  /** Words for people. It can quote another service's reply, so no client parses it. */
   detail: S.optional(S.String),
-  /** Ports that something other than Ollama holds, which the detail talks about, in order, once each. */
   busyPorts: S.optional(S.Array(S.String)),
-  /** True where the app has no build of Ollama to install and no copy to run (Windows ARM today), so no client offers one. */
   noAppCopy: S.optional(S.Boolean),
-  /** The folder the app's own running Ollama was started with. Absent whenever that isn't known for certain, as for an Ollama the app did not start. */
   modelsDir: S.optional(S.String),
-  /**
-   * True while the app's own Ollama runs, started to hold one model at a time
-   * (OLLAMA_MAX_LOADED_MODELS=1): loading another model replaces the one in memory, so no model
-   * runs beside another. Absent for an Ollama the app did not start, or one started before this setting.
-   */
+  // external: OLLAMA_MAX_LOADED_MODELS=1 makes Ollama unload one model to load another
   holdsOne: S.optional(S.Boolean),
-  /**
-   * "error": what failed. "download": the app's own Ollama did not finish downloading (cut off or
-   * stalled); "checksum": it came down but is not the pinned file (its checksum or size differs);
-   * "disk": the drive has too little room for it (before the download, or a write refused); the
-   * detail carries the figures; "install": it came down but did not unpack or may not be
-   * installed; "start": it is there and did not start. Absent for an error from elsewhere.
-   */
   failure: S.optional(S.Literals(["download", "checksum", "disk", "install", "start"])),
-  /** "installing": how far the download of the app's own Ollama is, as a model download says it. Received equals total while it is checked and unpacked. */
   install: S.optional(S.Struct({
     receivedBytes: Count,
     totalBytes: Count,
     bytesPerSecond: S.optional(S.Finite),
-    /** The disk the installed copy takes, from the pinned release (larger than the download, which is compressed); absent where not measured. */
     diskBytes: S.optional(Count),
-    /** No bytes for the stall time: said once, with no speed; the next bytes or a Retry's new attempt clear it. */
     stalled: S.optional(S.Literal(true)),
   })),
 });
@@ -469,14 +365,8 @@ export const FitReport = S.Struct({
   shortfallBytes: S.optional(Count),
   source: S.Literals(["measured", "estimate"]),
   measuredAt: Millis,
-  /** One sentence that names the numbers behind the verdict. */
   message: S.optional(S.String),
-  /**
-   * The system memory free in the reading the verdict was decided from (freeVramBytes is that
-   * reading's GPU side). A send's reading is taken after everything else was asked to leave.
-   */
   memAvailableBytes: S.optional(Count),
-  /** The verdict in words, on the basis it was judged on. Absent from an older server: a client then shows no verdict. */
   words: S.optional(FitWords),
 });
 export type FitReport = typeof FitReport.Type;
@@ -533,7 +423,6 @@ export const FitMemory = S.Union([
     freeBytes: Count,
     usableBytes: Count,
     totalBytes: S.optional(Count),
-    /** More than one card: the figures are them together. Absent with one. */
     gpuCount: S.optional(Count),
     others: S.optional(S.Struct({ programs: S.Array(S.String), bytes: Count })),
   }),
@@ -555,7 +444,6 @@ export const FitTable = S.Struct({
 });
 export type FitTable = typeof FitTable.Type;
 
-/** A way a refused model runs: "spills" runs with part of it in system memory, slower. */
 const OfferVerdict = S.Literals(["fits", "spills"]);
 
 /**
@@ -577,44 +465,33 @@ export const BlockingTurn = S.Struct({
   threadId: S.String,
   title: S.String,
   model: S.String,
-  /** Which turn this is, for a send's named consent: a thread can be running a different turn by the time the person answers. */
   turnId: S.optional(S.String),
 });
 export type BlockingTurn = typeof BlockingTurn.Type;
 
 export const NumCtx = PositiveInt;
 
-// ---------------------------------------------------------------- one record per message
-// A message is one record from the moment the server first hears of it until its reply is
-// saved. Its `stage` is the only thing that says where it is, and each stage carries only its
-// own data, so a held message that is also going next cannot be written down.
 
 export const ReplyId = S.String.check(S.isMinLength(1), S.isMaxLength(200));
 const ReplyCommon = {
-  /** Made by the window that typed it; a reply sent before it had one is named by its turn. */
   id: ReplyId,
   threadId: S.String,
-  /** The number of the change that made the record what it is: a larger one is newer. */
   rev: Count,
 };
 /** The message as the window that typed it sends it (reply.send). */
 export const ReplySaid = {
-  /** Names these words. A change of words makes a new one. Saved in the chat means asked. */
   messageId: S.String.check(S.isMinLength(1), S.isMaxLength(200)),
   text: S.String,
   images: S.optional(S.Array(S.String).check(S.isMaxLength(8))),
   files: S.optional(S.Array(AttachedFile).check(S.isMaxLength(8))),
-  /** Typed before any model was installed: none, and it takes the best one installed. */
   model: S.optional(S.String),
   numCtx: S.optional(NumCtx),
   think: S.optional(S.Boolean),
   tools: S.optional(S.Boolean),
   draw: S.optional(ImageChoice),
   drawCount: S.optional(ImageCount),
-  /** A Retry: the question this send repeats. */
   retryOf: S.optional(S.String.check(S.isMaxLength(200))),
 };
-/** The message itself, with when the server took it: carried only until its question is saved. */
 const ReplyWords = { ...ReplySaid, at: Millis };
 
 /** What is in the way of a queued message right now. The server works it out; a window never does. */
@@ -622,7 +499,6 @@ export const WaitFor = S.Union([
   S.Struct({ what: S.Literal("setup") }),
   S.Struct({ what: S.Literal("download"), model: S.optional(S.String) }),
   S.Struct({ what: S.Literal("reply"), reply: ReplyId }),
-  /** That reply failed and is being run once more. */
   S.Struct({ what: S.Literal("retry"), reply: ReplyId }),
 ]);
 export type WaitFor = typeof WaitFor.Type;
@@ -636,9 +512,7 @@ export const HeldWhy = S.Union([
     why: S.Literal("refused"),
     code: S.String,
     message: S.String,
-    /** code "would-stop": the replies in the way. */
     blocking: S.optional(S.Array(BlockingTurn)),
-    /** code "wont-fit": what runs instead. */
     offer: S.optional(FitOffer),
   }),
 ]);
@@ -656,24 +530,19 @@ const HeldReply = S.Struct({ ...ReplyCommon, ...ReplyWords, stage: S.Literal("he
 const NextReply = S.Struct({ ...ReplyCommon, ...ReplyWords, stage: S.Literal("next"), consent: S.optional(StopConsent) });
 const EditingReply = S.Struct({
   ...ReplyCommon, ...ReplyWords, stage: S.Literal("editing"),
-  /** The window that has it open. One value: two windows cannot both hold it. */
   by: S.String,
-  /** Where it returns when the edit is saved or cancelled. */
   back: S.Union([
     S.Struct({ stage: S.Literal("queued") }),
     S.Struct({ stage: S.Literal("held"), held: HeldWhy }),
     S.Struct({ stage: S.Literal("next"), consent: S.optional(StopConsent) }),
   ]),
 });
-/** Taken: its files, its memory check and its load are running, and nothing of it is saved yet. */
 const StartingReply = S.Struct({
   ...ReplyCommon, ...ReplyWords, stage: S.Literal("starting"),
-  /** Counts the starts of this record. */
   attempt: PositiveInt,
   startedAt: Millis,
   loading: S.optional(S.Literal(true)),
 });
-/** The clock of a reply whose question is saved. */
 const ReplyClock = {
   questionId: S.String,
   model: S.String,
@@ -682,7 +551,6 @@ const ReplyClock = {
   firstTokenAt: S.optional(Millis),
   workMs: Count,
   toolMs: Count,
-  /** 1, then 2 while a failed reply runs once more. */
   try: PositiveInt,
   spans: S.Array(S.Struct({ from: Count, ms: Count })),
   callsAt: S.Record(S.String, Count),
@@ -694,12 +562,10 @@ const LiveReply = S.Struct({
 });
 // why: stoppedAt: a Stop was taken and the engine has not let go of its pictures yet
 const DrawingReply = S.Struct({ ...ReplyCommon, stage: S.Literal("drawing"), questionId: S.String, preset: S.String, startedAt: Millis, jobs: S.Array(S.String), stoppedAt: S.optional(Millis) });
-/** A Stop was taken: the clock stands at `stoppedAt` while the words so far are saved. */
 const StoppingReply = S.Struct({ ...ReplyCommon, ...ReplyClock, stage: S.Literal("stopping"), stoppedAt: Millis });
 const DoneReply = S.Struct({ ...ReplyCommon, stage: S.Literal("done"), at: Millis, questionId: S.String, replyId: S.String });
 const StoppedReply = S.Struct({
   ...ReplyCommon, stage: S.Literal("stopped"), at: Millis, questionId: S.String,
-  /** The saved words so far; absent when nothing had been written. */
   replyId: S.optional(S.String),
   by: S.Union([
     S.Struct({ who: S.Literal("person") }),
@@ -710,7 +576,6 @@ const StoppedReply = S.Struct({
 });
 const FailedReply = S.Struct({
   ...ReplyCommon, stage: S.Literal("failed"), at: Millis,
-  /** Absent for a Retry that was refused before it started. */
   questionId: S.optional(S.String),
   code: S.String, message: S.String,
 });
@@ -725,13 +590,9 @@ export type Reply = typeof Reply.Type;
  * says so.
  */
 export const ReplyAnswer = S.Union([
-  /** The server did it, or it was already so: the record as it now is (for a remove, as it was). */
   S.Struct({ answer: S.Literal("done"), reply: Reply }),
-  /** There is no waiting message with that id any more. `question`: why "sent", the saved question. */
   S.Struct({ answer: S.Literal("gone"), why: S.Literals(["sent", "removed", "chat-deleted", "unknown"]), question: S.optional(Message) }),
-  /** It is on its way or being answered: too late for this call. */
   S.Struct({ answer: S.Literal("sending"), reply: Reply }),
-  /** Another window has it open, or its words changed since this change began. */
   S.Struct({ answer: S.Literal("elsewhere"), reply: Reply }),
 ]);
 export type ReplyAnswer = typeof ReplyAnswer.Type;
@@ -811,16 +672,15 @@ const KeepAlive = S.Union([S.Literals([-1]), decimalControl("keep_alive")]);
 
 /** Only supported generation overrides. Omitted fields inherit the installed model/Ollama default. */
 export const ModelSettings = S.Struct({
-  /** Unset inherits the global prompt; an empty string explicitly uses no user/model prompt. */
   systemPrompt: S.optional(S.String),
   temperature: S.optional(decimalControl("temperature")),
   top_p: S.optional(decimalControl("top_p")),
   top_k: S.optional(integerControl("top_k")),
   repeat_penalty: S.optional(decimalControl("repeat_penalty")),
   seed: S.optional(integerControl("seed")),
-  /** -1: no reply limit; -2: fill context; positive: maximum reply tokens. */
+  // external: Ollama's num_predict -1 is no limit and -2 fills the context
   num_predict: S.optional(ReplyLimit),
-  /** Seconds after a reply; 0 unloads, -1 keeps loaded. Unset inherits Ollama's default. */
+  // external: Ollama's keep_alive is seconds; 0 unloads at once, a negative value keeps it
   keep_alive: S.optional(KeepAlive),
 });
 export type ModelSettings = typeof ModelSettings.Type;
@@ -843,33 +703,21 @@ export const ModelDefaults = S.Struct({ system: S.String, parameters: S.String }
 export type ModelDefaults = typeof ModelDefaults.Type;
 
 export const Settings = S.Struct({
-  /** Unset means the server picks: the best installed chat model that fits at defaultNumCtx (apps/server/src/runtime/pick.ts). */
   defaultModel: S.optional(S.String),
   defaultNumCtx: ContextSize,
   thinking: S.Boolean,
   theme: Theme,
   runtimeMode: RuntimeMode,
-  /** Model tool calls (read, sql, shell) on or off for new turns. The image tool has its own switch, imageGen. */
   tools: S.Boolean,
-  /** Image generation through ComfyUI; off until the user sets it up. */
   imageGen: S.Boolean,
-  /** The image preset and size for every image job (the composer's Image mode and the tool). Unset means the server's first listed preset. */
   imageChoice: S.optional(ImageChoice),
-  /** Tools › Make images: a chat model may call the image tool. Unset means on once a setup can run; false stays off. */
   imageTool: S.optional(S.Boolean),
-  /** A ComfyUI the user points at; unset means discover the local install. */
   comfyUrl: S.optional(S.String),
-  /** The folder image model downloads go in (its kind folders inside: diffusion_models, vae…), picked by the person; unset means the engine's own models folder. Files already downloaded stay where they are. */
   imageFolder: S.optional(S.String),
-  /** Local dictation; absent means off. Only a loopback HTTP IP literal is accepted. */
   whisperUrl: S.optional(S.String),
-  /** Updates take every change on the main branch, not only releases. Unset means off. */
   updateEveryChange: S.optional(S.Boolean),
-  /** Desktop-only automatic git checks. Unset means on. Never installs automatically. */
   updateAutomatic: S.optional(S.Boolean),
-  /** Unset means "neutral". */
   accent: S.optional(Accent),
-  /** Unset uses the installed model's system prompt. */
   systemPrompt: S.optional(S.String),
   modelSettings: S.optional(S.Record(S.String, ModelSettings)),
 });
@@ -884,23 +732,19 @@ export const SettingsPatch = S.Struct({
   tools: S.optional(S.Boolean),
   imageGen: S.optional(S.Boolean),
   imageChoice: S.optional(S.NullOr(ImageChoice)),
-  /** null: back to unset (Reset settings). */
   imageTool: S.optional(S.NullOr(S.Boolean)),
   comfyUrl: S.optional(S.NullOr(S.String)),
   imageFolder: S.optional(S.NullOr(S.String)),
   whisperUrl: S.optional(S.NullOr(S.String)),
   updateEveryChange: S.optional(S.Boolean),
   updateAutomatic: S.optional(S.Boolean),
-  // An older app still sends textSize; unknown keys are dropped on decode, so that is no error.
   accent: S.optional(Accent),
   systemPrompt: S.optional(S.NullOr(S.String)),
-  /** Reset all model overrides in one atomic settings update. Individual edits use settings.model.update. */
   modelSettings: S.optional(S.Null),
 });
 export type SettingsPatch = typeof SettingsPatch.Type;
 
 export const GpuStatus = S.Struct({
-  /** "none" is a machine with no NVIDIA GPU (models run on the CPU); "unreadable" is nvidia-smi failing. */
   vendor: S.Literals(["nvidia", "none", "unreadable"]),
   name: S.optional(S.String),
   totalBytes: S.optional(Count),
@@ -933,7 +777,6 @@ export const ModelLoad = S.Struct({
   numCtx: NumCtx,
   state: S.Literals(["loading", "ready", "error", "unloaded"]),
   message: S.optional(S.String),
-  /** An "error" refused for memory: what does run, from the same reading (as on a held send's wont-fit). */
   offer: S.optional(FitOffer),
 });
 export type ModelLoad = typeof ModelLoad.Type;
@@ -961,16 +804,12 @@ export type MemoryState = typeof MemoryState.Type;
 
 /** A model the app recommends or the user can download, with the reason to pick it. */
 export const CatalogEntry = S.Struct({
-  /** The Ollama tag, e.g. "qwen3.5:9b". */
   name: S.String,
-  /** The friendly name, e.g. "Qwen 3.5 9B". */
   label: S.String,
-  /** Four words or fewer: why you would pick it ("Fast everyday answers"). */
   purpose: S.String,
   downloadBytes: Count,
   installed: S.Boolean,
   recommended: S.Boolean,
-  /** A recommended model's place in its tier: 0 the first pick, then the alternates (runtime/tiers.ts). */
   rank: S.optional(S.Number),
   fit: S.optional(FitReport),
 });
@@ -982,7 +821,6 @@ export type CatalogEntry = typeof CatalogEntry.Type;
  * has no such model and "unknown" when it could not be asked (offline, or turned off).
  */
 export const ModelEstimate = S.Struct({
-  /** The Ollama tag asked about, with ":latest" when the name had no tag. */
   name: S.String,
   found: S.Literals(["yes", "no", "unknown"]),
   downloadBytes: S.optional(Count),
@@ -1005,13 +843,7 @@ export const Source = S.Struct({
   state: S.Literals(["ready", "refreshing", "error"]),
   detail: S.optional(S.String),
   managed: S.optional(S.Struct({ kind: S.Literals(["sample", "repository"]), key: S.String })),
-  /**
-   * A database's tables and row counts, read from its snapshot when it is made:
-   * its own tables, a virtual one (full-text, R-tree) by name with no count, never
-   * the tables SQLite keeps for itself or behind a virtual table. At most 500.
-   */
   tables: S.optional(S.Array(S.Struct({ name: S.String, rows: S.optional(Count) }))),
-  /** How many tables it has, only when that is more than `tables` lists. */
   tableCount: S.optional(Count),
 });
 export type Source = typeof Source.Type;
@@ -1034,15 +866,8 @@ export const ImageStatus = S.Struct({
   owner: RuntimeOwner,
   baseUrl: S.optional(S.String),
   detail: S.optional(S.String),
-  /** The address is the one the person set in Settings (not the app's own engine or the default): nothing answering there means "not running", never "not set up". */
   addressSet: S.optional(S.Boolean),
-  /** The address is the app's own engine (installed by Set up images), running or not: never one found elsewhere. */
   own: S.optional(S.Boolean),
-  /**
-   * With image generation off: no image engine anywhere (none of the app's, no address set, no
-   * ComfyUI service, nothing answering at the default address). Settings then offers Set up images
-   * in place of the switch.
-   */
   nowhere: S.optional(S.Boolean),
 });
 export type ImageStatus = typeof ImageStatus.Type;
@@ -1066,31 +891,18 @@ export type ImageSize = typeof ImageSize.Type;
 export const ImagePreset = S.Struct({
   id: S.String,
   name: S.String,
-  /** The composer button's name beside the family mark; no two of the app's own share its first letter. Absent: `name`. */
   short: S.optional(S.String),
-  /** The model family the graph is built for (one rail icon per family). */
   family: S.String,
-  /** The picker's group: a theme (General, Pixel art…) for the app's own setups, where it came from for ComfyUI's. Absent from older servers. */
   group: S.optional(S.String),
-  /** The quality tier this setup is for this GPU's free memory ("Fast", "Balanced", "Best", or two joined); absent for the rest. */
   tier: S.optional(S.String),
-  /** Set on a Defaults row: the style it is the default for at this machine's level ("general", "portraits", "pixel-art"…). */
   style: S.optional(S.String),
-  /** The model alone ("FLUX.2 Klein 4B"), where `name` adds a style: the picker's sizes head says this. Absent: `name` is the model. */
   model: S.optional(S.String),
   sizes: S.Array(ImageSize),
-  /** False: the bytes are an estimate, not a measured peak. */
   measured: S.Boolean,
-  /**
-   * Not ready: the files ComfyUI does not list (names as the workflow gives them), once known their
-   * total size, and `download` when every one has an address image.download fetches from.
-   */
   needs: S.optional(S.Struct({
     files: S.Array(S.String), bytes: S.optional(Count), download: S.optional(S.Boolean),
-    /** What is left to fetch into the download folder: `bytes` less the parts already there. Absent while a size is unknown. */
     leftBytes: S.optional(Count),
   })),
-  /** Not runnable here, in words: a node class ComfyUI lacks, or no single prompt, size, seed or output. */
   why: S.optional(S.String),
 });
 export type ImagePreset = typeof ImagePreset.Type;
@@ -1099,13 +911,10 @@ export type ImagePreset = typeof ImagePreset.Type;
 export const ImageDownload = S.Struct({
   ...PullProgress.fields,
   preset: S.String,
-  /** This file's place in the setup's list, from 1, and the list's length. */
   file: S.Int,
   files: S.Int,
-  /** The whole setup's bytes, every file's fetched so far and in all; only when every file's size is known. */
   setupCompletedBytes: S.optional(Count),
   setupTotalBytes: S.optional(Count),
-  /** The download's last word: every file is in, or it stopped or failed on this one. */
   ended: S.optional(S.Boolean),
 });
 export type ImageDownload = typeof ImageDownload.Type;
@@ -1118,9 +927,7 @@ export const ImageSetupProgress = S.Struct({
   step: S.Literals(["engine", "starting", "model", "done", "error"]),
   completedBytes: Count,
   totalBytes: Count,
-  /** The error's own words. */
   message: S.optional(S.String),
-  /** The run builds the card's engine beside the processor's (ImageSetup.toCard): pictures keep running on the processor meanwhile, so Image mode is not held. */
   toCard: S.optional(S.Literal(true)),
 });
 export type ImageSetupProgress = typeof ImageSetupProgress.Type;
@@ -1130,57 +937,26 @@ export type ImageSetupProgress = typeof ImageSetupProgress.Type;
  * ComfyUI (the engine) and the recommended setup for this card, as one download.
  */
 export const ImageSetup = S.Struct({
-  /** One sentence, no unit or service names; absent when it can run. */
   why: S.optional(S.String),
   engine: S.optional(S.Struct({ version: S.String, bytes: Count, installed: S.Boolean })),
   model: S.optional(S.Struct({ preset: S.String, name: S.String, bytes: Count })),
-  /** Set when pictures here run on the processor: the measured seconds a picture, said before anything downloads. */
   cpu: S.optional(S.Struct({ low: Count, high: Count })),
-  /** Free space on the app's drive, and what the setup needs there (the engine unpacked, plus the model). */
   freeBytes: S.optional(Count),
   needBytes: S.optional(Count),
-  /**
-   * The processor's build is the one installed, and this computer has a card that runs pictures
-   * now: the setup builds the card's (`engine`) beside it, and pictures run on the processor until
-   * that is done. The processor's build stays on disk.
-   */
   toCard: S.optional(S.Literal(true)),
-  /** The running setup's step, or the last one's end. */
   progress: S.optional(ImageSetupProgress),
 });
 export type ImageSetup = typeof ImageSetup.Type;
 
 export const ImagePresets = S.Struct({
-  /** Only the presets whose every node class and file ComfyUI listed. */
   presets: S.Array(ImagePreset),
-  /** The rest, each with `needs` or `why`; the picker lists them greyed out. */
   others: S.optional(S.Array(ImagePreset)),
-  /** When ComfyUI's file list was last read; absent means never (presets is then empty). */
   readAt: S.optional(Millis),
-  /**
-   * What an Image send runs now: Settings' choice, else the default. Named from every preset the
-   * server knows, so the composer can say it before ComfyUI has listed its files.
-   */
   current: S.Struct({ preset: ImagePreset, width: S.Int, height: S.Int }),
-  /** Set when this machine has too little GPU memory for any default (or none): why, in words. An unset send is then refused. */
   noGpu: S.optional(S.String),
-  /** Set when ComfyUI runs on the processor: pictures are made, slowly; how slowly, in words. */
   slow: S.optional(S.String),
-  /**
-   * Set when ComfyUI is on this computer and renders on its graphics card: the only case where a
-   * picture's fit asks the chat model to leave memory (image/module.ts fit). Absent on the
-   * processor, for a ComfyUI elsewhere, and before the card is read.
-   */
   unloadsChat: S.optional(S.Boolean),
-  /** The download running now, as its last image.download push said. */
   download: S.optional(ImageDownload),
-  /**
-   * Where image downloads go and the room there, read before any transfer: `folder` absent means
-   * there is no folder to put them in until the person picks one (an engine that never said where
-   * its models are). `picked`: Settings' imageFolder. `line`: set when the folder was picked and
-   * the ComfyUI on this computer is the person's own, not the app's: the one line to add to its
-   * extra_model_paths.yaml so it reads the folder (the app never writes that file).
-   */
   disk: S.optional(S.Struct({ folder: S.optional(S.String), freeBytes: S.optional(Count), picked: S.Boolean, line: S.optional(S.String) })),
 });
 export type ImagePresets = typeof ImagePresets.Type;
@@ -1190,9 +966,7 @@ export const SetupProbe = S.Struct({
   os: S.Struct({ platform: S.String, release: S.String, arch: S.String }),
   cpu: S.Struct({ model: S.String, threads: PositiveInt }),
   memory: S.Struct({ totalBytes: Count, availableBytes: Count }),
-  /** The same reading Settings' GPU panel shows; vendor "none" on a machine with no NVIDIA GPU. */
   gpu: GpuStatus,
-  /** Free bytes on the disk that holds the app data folder. */
   diskFreeBytes: Count,
   ollama: S.NullOr(
     S.Struct({ baseUrl: S.String, version: S.String, owner: RuntimeOwner, models: S.Array(S.String) }),
@@ -1201,7 +975,6 @@ export const SetupProbe = S.Struct({
     S.Struct({
       baseUrl: S.String,
       owner: RuntimeOwner,
-      /** Where image weights go; unset when the probe could not find the install folder. */
       modelsDir: S.optional(S.String),
       devices: S.Array(
         S.Struct({
@@ -1227,7 +1000,6 @@ export const SetupPlan = S.Struct({
     tier: S.String,
     model: S.String,
     numCtx: ContextSize,
-    /** Settings.thinking; true only for a model whose /api/show lists "thinking". */
     think: S.Boolean,
     reason: S.String,
   }),
@@ -1245,12 +1017,10 @@ export type SetupPlan = typeof SetupPlan.Type;
 
 /** The version this copy runs, read from the clone's .git folder (no git process, no network). */
 export const UpdateVersion = S.Union([
-  // date: the commit's date, when the .git folder could be read for it.
   S.Struct({ kind: S.Literal("release"), tag: S.String, commit: S.String, date: S.optional(Millis) }),
   S.Struct({ kind: S.Literal("commit"), commit: S.String, date: S.optional(Millis) }),
   S.Struct({ kind: S.Literal("not-a-clone") }),
   S.Struct({ kind: S.Literal("unreadable"), detail: S.String }),
-  /** An installed copy (AppImage or installer): the version it was packaged as. Checks read the signed release list. */
   S.Struct({ kind: S.Literal("installed"), version: S.String }),
 ]);
 export type UpdateVersion = typeof UpdateVersion.Type;
@@ -1284,26 +1054,14 @@ export const UpdateCheck = S.Union([
     channel: UpdateChannel,
     current: S.String,
     target: S.String,
-    /** Exact commit checked by the server; older servers omitted it. */
     targetCommit: S.optional(S.String),
-    /** Every commit between current and target. */
     total: Count,
-    /** Commit subjects, newest first, at most 20. */
     changes: S.Array(S.String),
-    /** A release's tag message, shown instead of the subjects when there is one. */
     notes: S.optional(S.String),
   }),
-  /** lines: what happened, then what to do, in plain words. page: the release page the lines send the person to, when they do. */
   S.Struct({ state: S.Literal("cannot-check"), checkedAt: Millis, reason: UpdateBlocked, lines: S.Array(S.String), page: S.optional(S.String) }),
-  /**
-   * An installed copy found a newer version in a verified release list. It
-   * carries no commit, approval or install control. forThisCopy: the list
-   * holds an installer for this platform. download: where fetching that
-   * installer stands; lines already say it in words, progress included.
-   */
   S.Struct({
     state: S.Literal("newer"), checkedAt: Millis, current: S.String, target: S.String, forThisCopy: S.Boolean, lines: S.Array(S.String), page: S.String, download: S.optional(UpdateDownload),
-    /** True: the download is ready and this copy can replace its own file (Restart to update). False: it can, once the check of its own go-back file ends. Absent: it cannot. */
     restart: S.optional(S.Boolean),
   }),
 ]);
@@ -1312,30 +1070,21 @@ export type UpdateCheck = typeof UpdateCheck.Type;
 /** The last update run, shown once on the next start. */
 export const UpdateResult = S.Struct({
   at: Millis,
-  /** rolled-back: an installed copy's new version did not start and it went back. */
   outcome: S.Literals(["updated", "rolled-back", "stopped", "rollback-failed", "refused"]),
-  /** "Updated to v0.2.0, 12 changes." or the stopped-at line. */
   line: S.String,
-  /** The line ends by sending the person to the release page (an installed copy's failure notes). */
   page: S.optional(S.String),
   logPath: S.optional(S.String),
-  /** rollback-failed: the commands that finish going back, run in the clone. */
   commands: S.optional(S.Array(S.String)),
 });
 export type UpdateResult = typeof UpdateResult.Type;
 
 export const UpdateStatus = S.Struct({
   version: UpdateVersion,
-  /** Present until update.dismissResult. */
   result: S.NullOr(UpdateResult),
-  /** The last manual check or successful automatic check since startup. */
   lastCheck: S.NullOr(UpdateCheck),
-  /** Work the desktop's restart would interrupt, including other clients. */
   activity: S.optional(S.Array(S.String)),
-  /** Server-owned approval for this target and exact activity snapshot. */
   approval: S.optional(S.String),
   installing: S.optional(S.Boolean),
-  /** Phone listeners expose update status without update controls. */
   canControl: S.optional(S.Boolean),
 });
 export type UpdateStatus = typeof UpdateStatus.Type;
@@ -1363,32 +1112,21 @@ export const UpdatePreparation = S.Union([
 ]);
 export type UpdatePreparation = typeof UpdatePreparation.Type;
 
-// ---- Pictures: an index of the finished image cards. The card is the picture; this only finds it.
-
 /** One finished picture. Its job id is its card's message id. */
 export const Picture = S.Struct({
   jobId: S.String,
   threadId: S.String,
-  /** The thread's title now. */
   threadTitle: S.String,
-  /** The person's words, as on the card. */
   prompt: S.String,
-  /** The setup it ran (ImageChoice.preset). Absent on cards saved before setups. */
   preset: S.optional(S.String),
-  /** The file's own size in pixels. */
   width: PositiveInt,
   height: PositiveInt,
-  /** Absent when not known: a picture from before the index whose file does not say. */
   seed: S.optional(Count),
   steps: S.optional(PositiveInt),
-  /** When it was sent, and when its file was saved. */
   queuedAt: Millis,
   doneAt: Millis,
-  /** ComfyUI's time making it. Absent on pictures made before it was kept. */
   runMs: S.optional(Count),
-  /** The file's size in bytes. */
   bytes: Count,
-  /** The full picture, relative to the data dir; the thumbnail is /files/thumbs/<jobId>.webp. */
   imagePath: S.String,
 });
 export type Picture = typeof Picture.Type;

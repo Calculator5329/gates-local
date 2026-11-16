@@ -81,6 +81,16 @@ describe("turnClock (chat row 32, decision 33)", () => {
     expect(t.workMs).toBe(work);
   });
 
+  it("a reply that never thought has no thought time, whether it answered or ended with nothing", () => {
+    const answered = reply(1_000);
+    answered.ready(1_000);
+    answered.see({ type: "delta", text: "Yes" }, 1_500, "");
+    expect(answered.end({ reason: "done", at: 2_000 }, "")).not.toHaveProperty("thoughtMs");
+    const silent = reply(1_000);
+    silent.ready(1_000);
+    expect(silent.end({ reason: "failed", at: 3_000 }, "")).not.toHaveProperty("thoughtMs");
+  });
+
   it("keeps why only for a turn the server halted or that failed", () => {
     const why = { code: "model-error", message: "boom" };
     expect(turnClock(0).end({ reason: "failed", at: 5 }, "", why).why).toEqual(why);

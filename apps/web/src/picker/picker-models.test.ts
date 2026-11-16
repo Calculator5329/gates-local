@@ -1,6 +1,6 @@
 import { CHAT_MODELS } from "@gates-local/contracts";
 import { describe, expect, it } from "vitest";
-import { activeEntry, makerOf, memoryRuler, pickerEntries, pickerLabel, pickerLabels, suggestedOf } from "./picker-models.ts";
+import { activeEntry, makerGroups, makerOf, memoryRuler, pickerEntries, pickerLabel, pickerLabels, suggestedOf } from "./picker-models.ts";
 
 /** An installed model that can chat. */
 const chat = (name: string) => ({ name, capabilities: ["completion"] }) as never;
@@ -48,6 +48,15 @@ describe("model picker presentation", () => {
   it("takes its makers from the list the server sends, and names none before it arrives", () => {
     expect(makerOf("newco-7b:latest", [{ name: "Newco", match: "^newco" }])).toBe("Newco");
     expect(makerOf("gemma4:12b", undefined)).toBe("Other");
+  });
+  it("a tag two makers' patterns both find joins the first in the list's order, matched without regard to case, and the groups keep that order", () => {
+    const coderFirst = [{ name: "Coder", match: "coder" }, { name: "Qwen", match: "^QWEN" }];
+    const qwenFirst = coderFirst.toReversed();
+    expect(makerOf("qwen2.5-coder:14b", coderFirst)).toBe("Coder");
+    expect(makerOf("qwen2.5-coder:14b", qwenFirst)).toBe("Qwen");
+    expect(makerOf("Qwen3.5:9b", coderFirst)).toBe("Qwen");
+    expect(makerGroups(coderFirst)).toEqual(["Coder", "Qwen", "Other"]);
+    expect(makerGroups(qwenFirst)).toEqual(["Qwen", "Coder", "Other"]);
   });
   it("scales to usable memory, exposes overflow, and keeps a bounded display", () => {
     const fitting = memoryRuler(7.64, 11.56);

@@ -157,6 +157,16 @@ describe("the installed module's checks", () => {
     expect(quiet.changed).not.toHaveBeenCalled();
   });
 
+  it("never reads the release list when the status is read, however often", async () => {
+    const { module, feed } = copy();
+    feed.serve(signedList("1.3.0", ["linux"], key.privateKey));
+    for (let i = 0; i < 3; i += 1) module.status();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(feed.reads).toEqual([]);
+    expect(module.status().lastCheck).toBeNull();
+    await module.close();
+  });
+
   it("stops the read on close", async () => {
     let seen: AbortSignal | undefined;
     const module = createInstalledUpdateModule({
@@ -312,6 +322,36 @@ describe("downloading a newer version", () => {
     await settled(module);
     expect(shown(module).download).toBe("ready");
     expect(artifactRequests()).toBe(1);
+    await module.close();
+  });
+
+  it("with the switch off, the Download click checks for the newer version, downloads and checks it, and installs nothing", async () => {
+    serveGood();
+    const admission = createUpdateAdmission();
+    const { module } = installed(false, { restart: "yes", admission });
+    await module.download?.();
+    await settled(module);
+    expect(shown(module)).toMatchObject({ download: "ready", restart: true });
+    expect(artifactRequests()).toBe(1);
+    await module.download?.();
+    expect(typeof module.status().approval).toBe("string");
+    expect(admission.installing()).toBe(false);
+    expect(module.status().installing).toBe(false);
+    expect(artifactRequests()).toBe(1);
+    await module.close();
+  });
+
+  it("an automatic check downloads a newer version and offers Restart, but never installs it", async () => {
+    serveGood();
+    const admission = createUpdateAdmission();
+    const { module } = installed(true, { restart: "yes", admission });
+    await module.check(true);
+    await settled(module);
+    await module.check(true);
+    expect(shown(module)).toMatchObject({ download: "ready", restart: true });
+    expect(typeof module.status().approval).toBe("string");
+    expect(admission.installing()).toBe(false);
+    expect(module.status().installing).toBe(false);
     await module.close();
   });
 

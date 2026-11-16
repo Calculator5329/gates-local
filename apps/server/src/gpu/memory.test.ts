@@ -1,4 +1,5 @@
 // The memory owner alone: what it asks to leave, what it never touches, and when it waits.
+import type { MemoryState } from "@gates-local/contracts";
 import { describe, expect, it } from "vitest";
 import type { LoadedModel } from "../runtime/types.ts";
 import { createMemoryOwner, LEAVE_POLL_MS, LEAVE_WAIT_MS, type EngineLeave, type MemoryOwnerDeps } from "./memory.ts";
@@ -256,5 +257,35 @@ describe("an Ollama that holds one model (the app's own)", () => {
     m.loaded.loaded("a:1b", 8192);
     expect(m.loaded.loaded("b:2b", 16384)).toEqual([]);
     expect(m.loaded.listed().toSorted()).toEqual(["a:1b", "b:2b"]);
+  });
+});
+
+describe("memory.changed", () => {
+  it("a handoff pushes each stage as it moves: leaving, measuring, loading, then what is resident", async () => {
+    const pushed: MemoryState[] = [];
+    const m = owner(ollama(["a:1b"]), { onChanged: (s) => pushed.push(s), now: () => 5 });
+    await m.handoff(chat("b:2b"), signal);
+    m.stage(chat("b:2b"), "loading");
+    m.settled(chat("b:2b"));
+    const to = { kind: "chat", model: "b:2b", numCtx: 16384 };
+    expect(pushed).toEqual([
+      { handoff: { to, stage: "leaving" } },
+      { handoff: { to, stage: "measuring" } },
+      { handoff: { to, stage: "loading" } },
+      { resident: { ...to, since: 5 } },
+    ]);
+  });
+
+  it("a model coming into memory or leaving it is pushed once each, and a reading that changes nothing pushes nothing", () => {
+    const pushed: MemoryState[] = [];
+    const m = owner(ollama([]), { onChanged: (s) => pushed.push(s), now: () => 5 });
+    m.observe([row("a:1b")]);
+    m.observe([row("a:1b")]);
+    m.observe([]);
+    m.observe([]);
+    expect(pushed).toEqual([
+      { resident: { kind: "chat", model: "a:1b", numCtx: 16384, since: 5 } },
+      {},
+    ]);
   });
 });

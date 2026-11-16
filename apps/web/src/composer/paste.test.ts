@@ -46,6 +46,17 @@ it("a file that is not an image is copied to the server and the draft names it (
   vi.doUnmock("../lib/session/index.ts");
 });
 
+it("a file the browser gives no type is sent with an empty type, never one the window made up", async () => {
+  const attached = { path: "files/att-0f8b5c1e-3a2d-4c7e-9b1a-2d3e4f5a6b7c", name: "Makefile", size: 5, type: "" };
+  const call = vi.fn().mockResolvedValue(attached);
+  vi.doMock("../lib/session/index.ts", () => ({ call }));
+  await attachFiles([new File(["hello"], "Makefile")]);
+  expect(call).toHaveBeenCalledWith("files.attach", { name: "Makefile", type: "", data: "aGVsbG8=" });
+  expect(getDraft().files).toEqual([attached]);
+  replaceDraft(null, { files: [] });
+  vi.doUnmock("../lib/session/index.ts");
+});
+
 it("a file over 50 MB is refused at its chip in plain words and never read", async () => {
   const big = new File([new Uint8Array(50 * 1024 * 1024 + 1)], "big.log", { type: "" });
   const read = vi.spyOn(big, "arrayBuffer");

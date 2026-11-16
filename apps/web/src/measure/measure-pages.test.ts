@@ -205,3 +205,54 @@ describe("the page harness", () => {
     expect(p.posted).toEqual([{ token: "t", seen: ["12"] }]);
   });
 });
+
+class FakeElement {
+  textContent: string;
+  shown: boolean;
+  visibility: string;
+  constructor(textContent: string, shown = true, visibility = "visible") {
+    this.textContent = textContent;
+    this.shown = shown;
+    this.visibility = visibility;
+  }
+  getClientRects() { return this.shown ? [{}] : []; }
+}
+class FakeInput extends FakeElement { value = ""; }
+class FakeTextArea extends FakeElement { value = ""; }
+class FakeSelect extends FakeElement { value = ""; }
+
+async function seenOn(elements: Record<string, FakeElement[]>, steps: Parameters<typeof harness>[1]): Promise<unknown[]> {
+  vi.useFakeTimers();
+  const frame = new EventTarget();
+  const posted: unknown[] = [];
+  vi.stubGlobal("HTMLInputElement", FakeInput);
+  vi.stubGlobal("HTMLTextAreaElement", FakeTextArea);
+  vi.stubGlobal("HTMLSelectElement", FakeSelect);
+  vi.stubGlobal("document", { querySelector: (t: string) => elements[t]?.[0] ?? null, querySelectorAll: (t: string) => elements[t] ?? [] });
+  vi.stubGlobal("getComputedStyle", (el: FakeElement) => ({ visibility: el.visibility }));
+  vi.stubGlobal("requestAnimationFrame", (f: () => void) => setTimeout(f, 0));
+  vi.stubGlobal("addEventListener", frame.addEventListener.bind(frame));
+  vi.stubGlobal("parent", { postMessage: (m: unknown) => posted.push(m) });
+  harness("t", steps, 10);
+  frame.dispatchEvent(new Event("load"));
+  await vi.advanceTimersByTimeAsync(200);
+  vi.useRealTimers();
+  return posted;
+}
+
+describe("what the page harness notes", () => {
+  it("a read of a field notes what the field holds, not its text; any other element, its text", async () => {
+    const qty = Object.assign(new FakeInput(""), { value: " 21 " });
+    const note = Object.assign(new FakeTextArea("default words"), { value: "typed words" });
+    const size = Object.assign(new FakeSelect("Small Large"), { value: "large" });
+    const posted = await seenOn({ "#qty": [qty], "#note": [note], "#size": [size], "#out": [new FakeElement(" 42 ")] },
+      [{ do: "read", target: "#qty" }, { do: "read", target: "#note" }, { do: "read", target: "#size" }, { do: "read", target: "#out" }, { do: "read", target: "#gone" }]);
+    expect(posted).toEqual([{ token: "t", seen: ["21", "typed words", "large", "42", ""] }]);
+  });
+
+  it("visible notes only the matches on screen, their text joined by a bar", async () => {
+    const rows = [new FakeElement(" Milk "), new FakeElement("Folded away", false), new FakeElement("Hidden", true, "hidden"), new FakeElement("Eggs")];
+    const posted = await seenOn({ ".item": rows, ".none": [] }, [{ do: "visible", target: ".item" }, { do: "visible", target: ".none" }]);
+    expect(posted).toEqual([{ token: "t", seen: ["Milk|Eggs", ""] }]);
+  });
+});

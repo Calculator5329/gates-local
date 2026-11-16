@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-11-16: the wire contract package holds to the six comment kinds
+
+- packages/contracts/src passes the comment rule: all 318 offenders
+  went, and the folder's comment lines fell from 770 to 303. What stays
+  is JSDoc on the exported declarations the package offers, twelve
+  one-line `external:` facts about Ollama, ComfyUI and ws, and six `why:`
+  lines.
+- Twelve comments were stale and went. Among them: SetupProbe and
+  SetupPlan describe a reading nothing produces (setup.probe and
+  setup.plan have no handler), WireError.offer is never sent over the
+  wire, and an image setup's tier comes from the card's total memory,
+  not its free memory.
+- 265 rules that tests already held went with their comment; one in
+  five was broken in the source and watched fail.
+- 97 rules gained a unit test, each watched fail with its rule broken:
+  the client's 30 second default timeout and its reports, image seeds,
+  times and sizes, the image and setup numbering, update checks that
+  never install, Measure's figures, the reply records' fields, the
+  picker's first-match groups, and Set up images turning image making
+  on, among others.
+- The list of work an update would interrupt moved out of main.ts into
+  apps/server/src/update/activity.ts, unchanged, so a unit test holds
+  that running replies, model downloads and image jobs are named.
+
 ## 2026-11-16: the server's socket folder holds to the six comment kinds
 
 - apps/server/src/ws passes the comment rule: 36 offenders went, and

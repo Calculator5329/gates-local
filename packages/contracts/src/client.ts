@@ -1,6 +1,3 @@
-// Framework-free client over any WebSocket-like object (the browser
-// WebSocket and the ws package both fit). Requests are encoded against the
-// method table before they leave; results and pushes are decoded on arrival.
 import {
   type Channel,
   type MethodName,
@@ -32,17 +29,13 @@ export interface SocketLike {
 }
 
 export interface ClientOptions {
-  /** Default per-call timeout. 30 s. */
   readonly timeoutMs?: number;
-  /** Frames the client could not use (bad envelope, unknown id, bad payload). Defaults to console.warn. */
   readonly onProtocolError?: (error: WireError) => void;
 }
 
 export interface CallOptions<M extends MethodName = MethodName> {
   readonly timeoutMs?: number;
-  /** Metadata before a successful call settles. Hook failures are reported separately. */
   readonly onMetadata?: (sync: SyncMetadata | undefined) => void;
-  /** Accepted wire value before promise completion; stale state must not block acknowledgement. */
   readonly onResult?: (value: ResultOf<M>, sync: SyncMetadata | undefined) => void;
 }
 
@@ -51,17 +44,11 @@ export interface ClientSync { readonly epoch: string; readonly protocol?: number
 
 export interface Client {
   call<M extends MethodName>(method: M, params: Params<M>, options?: CallOptions<M>): Promise<ResultOf<M>>;
-  /**
-   * A call that names one reply: the server's answer, or "not-reached" when the socket closed or
-   * the wait ran out. This is the one place a missing answer becomes a value, so no caller
-   * swallows a rejection. A request refused as malformed still rejects.
-   */
+  // why: a missing answer becomes a value in one place, so no caller swallows a rejection
   reply<M extends ReplyCall>(method: M, params: Params<M>, options?: CallOptions<M>): Promise<ReplyOutcome>;
   subscribe<C extends Channel>(channel: C, handler: (payload: Payload<C>, sync?: SyncMetadata) => void): () => void;
-  /** Once per socket; a server that does not number every kind is refused and the socket closed. */
   negotiate(): Promise<ClientSync>;
   readonly sync: ClientSync | undefined;
-  /** Resolves when the socket has closed; every pending call is rejected with code "closed" by then. */
   readonly closed: Promise<void>;
   close(): void;
 }
@@ -79,7 +66,7 @@ interface Pending {
 
 function frameText(data: unknown): unknown {
   if (typeof data === "string") return data;
-  // ws hands Buffers to raw listeners; the browser may hand ArrayBuffers. Text is what the protocol speaks.
+  // external: ws hands a raw listener a Buffer; a browser may hand an ArrayBuffer
   if (data instanceof ArrayBuffer) return new TextDecoder().decode(data);
   if (ArrayBuffer.isView(data)) return new TextDecoder().decode(data as Uint8Array);
   return data;
@@ -91,7 +78,7 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
     try {
       if (options.onProtocolError) options.onProtocolError(error);
       else console.warn(`[contracts] ${error.code}: ${error.message}`);
-    } catch { /* Diagnostics must not escape socket dispatch. */ }
+    } catch {}
   };
   const pending = new Map<string, Pending>();
   const outbox: Array<readonly [frame: string, id: string]> = [];
@@ -112,8 +99,6 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
   const protocolError = (error: WireError) => {
     try { report(error); } finally { if (sync !== undefined) client.close(); }
   };
-  // A row of an ordered kind must carry exactly one snapshot number for its scope in this epoch.
-  // `about`: the call's params or the push's payload, which name the member a row is about.
   const metadataError = (metadata: SyncMetadata | undefined, row: SyncRow | undefined, about: unknown): WireError | undefined => {
     if (sync === undefined) return;
     const { epoch } = sync;
@@ -151,8 +136,7 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
     const r = decodeResult(call.method, msg.result);
     if (!r.ok) return call.reject(r.error);
     if (call.method === "sync.negotiate") {
-      // The method-specific codec above checked this value. Accept negotiation
-      // synchronously, before a following frame from the same socket is handled.
+      // why: a push that comes right after negotiation must see the accepted epoch
       const negotiated = r.value as SyncNegotiation;
       if (negotiated.ordered.some(domain => !call.offered?.includes(domain))) {
         call.reject(new WireError("bad-result", "server enabled an unrequested ordered domain"));
@@ -259,7 +243,7 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
     get sync() { return sync; },
     closed,
     close() {
-      // Reject pending calls now; the close handshake may take a while to finish.
+      // why: the close handshake can be slow, and no caller should wait on it
       shutdown();
       if (socket.readyState <= OPEN) socket.close(1000, "client closed");
     },

@@ -108,17 +108,7 @@
       "apps/web/src/thread/reveal.ts": 3,
       "apps/web/src/thread/threads.ts": 49,
       "apps/web/src/thread/times.ts": 11,
-      "apps/web/src/thread/turn.ts": 15,
-      "packages/contracts/src/chat-models.ts": 5,
-      "packages/contracts/src/client.ts": 13,
-      "packages/contracts/src/fit-words.ts": 3,
-      "packages/contracts/src/image-fit.ts": 7,
-      "packages/contracts/src/index.ts": 1,
-      "packages/contracts/src/pages.ts": 4,
-      "packages/contracts/src/protocol.ts": 79,
-      "packages/contracts/src/shapes.ts": 198,
-      "packages/contracts/src/sync.ts": 5,
-      "packages/contracts/src/testing.ts": 3
+      "apps/web/src/thread/turn.ts": 15
     },
     "gates/disable-needs-reason": {
       "test/finder/page.ts": 1,
