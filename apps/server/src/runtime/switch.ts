@@ -1,40 +1,20 @@
-// The runtime the rest of the server talks to, following Settings'
-// runtimeMode. A switch makes a fresh runtime for the new mode and runs its
-// discovery (ensure), and its status changes reach onChange listeners, so
-// app.ts pushes runtime.changed as usual. The system Ollama is never
-// stopped. The app's own copy is stopped on a switch only when this
-// process started it; one adopted from an earlier run keeps running.
 import type { RuntimeMode, RuntimeStatus } from "@gates-local/contracts";
 import type { OllamaRuntime } from "./runtime.ts";
 import type { Listener } from "./types.ts";
 
 export interface RuntimeSwitch extends Pick<OllamaRuntime, "status" | "baseUrl" | "onChange" | "ensure" | "discover" | "startedByThisProcess" | "killNow"> {
   mode(): RuntimeMode;
-  /** Switch modes and ensure the new runtime; resolves with its status. Same mode: no-op. */
   setMode(mode: RuntimeMode): Promise<RuntimeStatus>;
-  /** Stop the app's own copy if this process started it (server shutdown). */
   stopIfStartedHere(): Promise<void>;
-  /**
-   * The phone's Retry: look for an Ollama that came back, never start or install one. Decided
-   * when its turn in the queue comes: a ready status is not probed again (a slow probe would mark
-   * it stopped), and an error stays (only ensure(), the computer's Retry, can clear it). Callers
-   * share one pending look; that is the only bound, since the phone is the owner's own.
-   */
   lookIfDown(): Promise<RuntimeStatus>;
 }
 
 export interface RuntimeSwitchOptions {
   readonly initialMode: RuntimeMode;
   readonly make: (mode: RuntimeMode) => OllamaRuntime;
-  /**
-   * Before a switch takes effect (abort downloads and turns bound to the old
-   * runtime). The old runtime stops only after its promise settles.
-   */
   readonly beforeSwitch?: () => void | Promise<void>;
-  /** Once the new runtime's ensure settled, however it went (always paired with beforeSwitch). */
   readonly afterSwitch?: () => void;
   readonly log?: (line: string) => void;
-  /** Tests only (gpu/rules.test.ts): turns one guard off, so the test that needs it is seen failing. */
   readonly faultForTest?: "stop-any-runtime";
 }
 
@@ -49,31 +29,15 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
     lastSent = key;
     for (const l of listeners) l(s);
   };
-  /**
-   * From a switch's first line until its ensure settles: baseUrl() is
-   * undefined, so nothing new is sent to the runtime being stopped (or to a
-   * new one that is not ready yet).
-   */
   let switching = false;
-  /**
-   * A switch beforeSwitch refused (turns on the old runtime would not end): the old runtime
-   * stays and serves, and status() says error with the reason until it next changes.
-   */
   let refused: RuntimeStatus | undefined;
-  // A ready the new runtime announces mid-switch would reach listeners while baseUrl() still
-  // says undefined (app.ts refreshes the model list on it, and would empty it). It waits:
-  // setMode sends the settled status once baseUrl() is the new URL and the loader settled.
   const forward = (s: RuntimeStatus) => {
     refused = undefined;
     if (switching && s.state === "ready") return;
     send(s);
   };
   let off = inner.onChange(forward);
-  // ensure, discover, setMode and stopIfStartedHere run one after another, so
-  // a switch waits for an outstanding startup to settle before it decides
-  // whether the old runtime was started here (no orphaned app Ollama).
   let chain: Promise<unknown> = Promise.resolve();
-  /** The phone's queued or running look, shared by every caller until it settles. */
   let looking: Promise<RuntimeStatus> | undefined;
   const serial = <T>(fn: () => Promise<T>): Promise<T> => {
     const run = chain.then(fn);
@@ -90,7 +54,6 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
   return {
     status: () => refused ?? inner.status(),
     baseUrl: () => (switching ? undefined : inner.baseUrl()),
-    // The computer's Retry ends a refused switch: a ready runtime's ensure() changes nothing, so forward never would.
     ensure: () =>
       serial(async () => {
         const s = await inner.ensure();
@@ -129,7 +92,6 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
         } finally {
           switching = false;
           options.afterSwitch?.();
-          // The settled status, ready included; a fresh runtime that lands on its initial status emits nothing itself.
           send(refused ?? inner.status());
         }
       });

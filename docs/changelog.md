@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-16: the runtime folder's model list, downloads, switch and wiring hold to the six comment kinds
+
+- The model list, downloads, the runtime switch and the services wiring
+  pass the comment rule: 99 offenders went, and the runtime folder's
+  comment lines fell from 648 to 462. One rule no test held now has
+  one: a new default model in Settings moves the chat pick at once,
+  with no window focus.
+- One comment was wrong and went: a download with no registry to ask
+  shows the running sum of the files Ollama has named, not no total.
+
 ## 2026-11-16: the runtime folder's small files hold to the six comment kinds
 
 - Sixteen files of the runtime folder (the catalog, the pick, the tiers,

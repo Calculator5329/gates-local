@@ -1,8 +1,3 @@
-// Builds the settings store, the runtime switch, the model list, the GPU
-// watcher, downloads and the loader, wired to each other, for main.ts. All
-// real-machine reads (nvidia-smi, /proc, systemctl --user show, Ollama's
-// HTTP API) are read-only; nothing here stops or signals a process the app
-// did not start.
 import type { RuntimeMode } from "@gates-local/contracts";
 import type { Push } from "../app/push.ts";
 import { offerAfterRefusal } from "../fit/alternatives.ts";
@@ -30,25 +25,12 @@ import { registryLookup, registrySize } from "./registry-size.ts";
 import { createOllamaRuntime, DEFAULT_EXTERNAL_BASE_URL, type RuntimeOptions } from "./runtime.ts";
 import { createRuntimeSwitch, type RuntimeSwitch } from "./switch.ts";
 
-/** models.refresh makes at most one real /api/tags call per this interval. */
-
-/** The pick without a GPU reading: every model has no verdict. */
 const noFit = async (_model: string): Promise<FitReport | undefined> => undefined;
 export const MODELS_REFRESH_MIN_MS = 2000;
-/** whisper-server's MainPID changes only on a restart; re-read it this often. */
+// why: whisper-server's MainPID changes only on a restart
 const WHISPER_PID_TTL_MS = 60_000;
-/** How long a switch waits for the old runtime's turns to end before it fails and keeps that runtime. */
 export const TURN_DRAIN_MS = 10_000;
 
-/**
- * The loader's part of a switch, before the old runtime stops. What the app owned in the old
- * runtime is set aside, and loads and turns are refused until the new runtime's ensure settles
- * (afterSwitch). Every turn reserved against the old runtime is told to end, and a turn ends at
- * once (app.ts drops whatever it waits on); the switch waits for them, so none sends another
- * request to a runtime being stopped. Bounded: a turn still running after `drainMs` refuses the
- * switch (this throws), which keeps the old runtime (never stops it under a running turn), and
- * what was set aside is the record again, since the models are still in that runtime.
- */
 export async function endTurnsForSwitch(loader: Pick<ModelLoader, "runtimeChanged" | "turnsEnded" | "runtimeKept"> | undefined, drainMs: number): Promise<void> {
   if (loader === undefined) return;
   loader.runtimeChanged();
@@ -72,38 +54,23 @@ export interface ModelServices {
   readonly gpu: GpuWatcher;
   readonly pulls: PullManager;
   readonly loader: ModelLoader;
-  /** The one owner of memory: the image module hands off through it too. */
   readonly memory: MemoryOwner;
-  /** The image engine the handoff asks to free (bound once the image module exists). */
   bindEngine(engine: MemoryEngine): void;
   readonly handlers: Partial<Handlers>;
-  /** Abort downloads, stop polling, stop the app's own Ollama if this process started it. */
   close(options: { stopRuntime: boolean }): Promise<void>;
-  /** Shutdown ran out of time: see OllamaRuntime.killNow. */
   killRuntimeNow(): void;
 }
 
 export interface ModelServicesOptions {
   readonly admit?: () => void;
   readonly dataDir: string;
-  /** Bound late: the ws server exists after the handlers. */
   readonly push: Push;
-  /** Extra runtime options (external URL, allowInstall). */
   readonly runtime?: Omit<RuntimeOptions, "mode">;
   readonly log?: (line: string) => void;
-  /** The nvidia-smi runner and meminfo reader for the GPU status and every fit check (tests inject fakes), and the card's baseline for the catalog's download estimates. */
   readonly fit?: Pick<FitDeps, "runNvidiaSmi" | "readMeminfo" | "baseline">;
-  /** The app's one GPU lease: models.load takes a shared chat claim on it. */
   readonly lease?: GpuLease;
-  /**
-   * The registry asked for the size of a model the curated list does not hold, before Ollama has
-   * named all its files. Unset: never asked (tests, a pinned Ollama), and such a download shows no
-   * total until it is done.
-   */
   readonly modelRegistry?: string;
-  /** How long a switch waits for the old runtime's turns to end before it fails (default 10 s). */
   readonly turnDrainMs?: number;
-  /** The ComfyUI process the app runs, from the image module's held engine value (bound late). */
   readonly imagePid?: () => number | undefined;
 }
 
@@ -116,18 +83,12 @@ export async function createModelServices(options: ModelServicesOptions): Promis
   });
   if (settings.loadNote) log(settings.loadNote);
 
-  // Late-bound so the switch can abort downloads made against the old runtime
-  // and tell the loader the runtime changed. The loader also feeds the GPU
-  // status's ownership, and the watcher refreshes after loads.
+  // why: late-bound, since the switch is made before the downloads and the loader it calls
   let pulls: PullManager | undefined;
   let loader: ModelLoader | undefined;
-  /** The image engine, bound by main once the image module exists. */
   let engine: MemoryEngine | undefined;
   const runtime = createRuntimeSwitch({
     initialMode: settings.get().runtimeMode,
-    // Everything follows --data-dir: the ownership record, the serve log, the
-    // install and the models folder, so two instances never share a mutable
-    // model store. An explicit runtime.appDataDir still wins.
     make: (mode: RuntimeMode) => createOllamaRuntime({ appDataDir: options.dataDir, ...options.runtime, mode, stateDir: options.dataDir }),
     beforeSwitch: async () => {
       pulls?.stop();
@@ -138,9 +99,7 @@ export async function createModelServices(options: ModelServicesOptions): Promis
   });
   const catalog = createModelCatalog(() => runtime.baseUrl(), {
     minIntervalMs: MODELS_REFRESH_MIN_MS,
-    // The chat pick (runtime/pick.ts): one GPU reading, every chat model fitted against it.
     pick: async (models, baseUrl) => {
-      // Nothing to pick from (an Ollama too old to say, only embedding models): skip the GPU and memory reads each retry would take.
       if (!models.some(canChat)) return undefined;
       const { defaultModel, defaultNumCtx } = settings.get();
       let fit: (model: string) => Promise<FitReport | undefined> = noFit;
@@ -164,25 +123,18 @@ export async function createModelServices(options: ModelServicesOptions): Promis
         listeningPids: procListeningPids,
         ...options.imagePid ? { imagePid: options.imagePid } : {},
         modelLabel,
-        // Unprotected is what the next thing in memory asks to leave (gpu/memory.ts): every resident
-        // model no running reply uses, whoever loaded it. From the same /api/ps, no second read: the
-        // loader's reading below writes the memory owner's record, and this asks the record.
         mayUnload: () => {
           const replying = new Set(loader?.replying() ?? []);
           return owner.loaded.listed().filter((tag) => !replying.has(tag));
         },
-        // The loader reads /api/ps for the runtime it owns now and prunes against it.
         residentModels: async () => ((await loader?.residentModels()) ?? []).map((m) => ({ name: canonicalTag(m.name), sizeVramBytes: m.sizeVramBytes })),
       }),
     push: (status) => options.push("gpu.changed", status),
     log,
   });
 
-  // The app's own Ollama holds one model (OLLAMA_MAX_LOADED_MODELS=1): every plan against its
-  // address counts the model in memory as leaving, and a chat handoff asks nothing (it replaces it).
   const holdsOne = () => runtime.baseUrl() !== undefined && runtime.status().holdsOne === true;
   const forgetHoldsOne = answerHoldsOne((baseUrl) => holdsOne() && runtime.baseUrl() === baseUrl);
-  // The one owner of memory (gpu/memory.ts): every load, send and image job hands off through it.
   const owner = createMemoryOwner({
     ollamaUrl: () => runtime.baseUrl(),
     holdsOne,
@@ -205,14 +157,9 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     baseUrl: () => runtime.baseUrl(),
     push: (load) => options.push("models.load", load),
     listLoaded: (url, signal) => listLoaded(url, undefined, signal),
-    // The runtime the load captured, never whatever baseUrl() says by the time the fit runs.
-    // `signal` (shutdown, a switch) ends every request and child process of the check.
-    // The planner reply.send uses (fit/planLoad), after the handoff: the reading alone decides.
-    // A preload stops nothing: models a turn or another preload holds are busy.
     fit: async (model, numCtx, baseUrl, signal) =>
       (await planLoad({ ...options.fit, baseUrl, model, numCtx, signal, busy: loader?.busyModels() ?? [], measured: true })).report,
     memory: owner,
-    // A refusal's offer: what runs instead, planned the same way on the reading that refused.
     offer: (refused, baseUrl) => offerAfterRefusal({
       ...options.fit,
       baseUrl,
@@ -220,7 +167,7 @@ export async function createModelServices(options: ModelServicesOptions): Promis
       defaultNumCtx: settings.get().defaultNumCtx,
       busy: loader?.busyModels() ?? [],
     }, refused),
-    // a load changed the GPU: no fit after it reuses a reading from before it
+    // why: a fit after a load must not reuse a GPU reading from before it
     onLoaded: () => { forgetGpuReadings(); gpu.poke(); },
     ...(options.lease ? { lease: options.lease } : {}),
     log,
@@ -240,11 +187,9 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     log,
   });
 
-  // Each mode choice gets a generation; only the newest one's failure puts Settings back.
   let requested = 0;
   let puttingBack = false;
   settings.onChange((next, previous) => {
-    // The pick depends on the default model and context; models.changed carries the new one.
     if (next.defaultModel !== previous.defaultModel || next.defaultNumCtx !== previous.defaultNumCtx) {
       catalog.refresh({ force: true }).catch((e: unknown) => log(`model refresh failed: ${(e as Error).message}`));
     }
@@ -254,10 +199,7 @@ export async function createModelServices(options: ModelServicesOptions): Promis
       (s) => log(`runtime mode ${next.runtimeMode}: ${s.state} (${s.owner}) at ${s.baseUrl}`),
       (e: unknown) => {
         log(`runtime switch failed: ${(e as Error).message}`);
-        // A newer choice is queued behind this one and decides the mode.
         if (generation !== requested) return;
-        // The old runtime still serves: Settings says so, and choosing the new mode again retries.
-        // Putting it back schedules no switch.
         puttingBack = true;
         try {
           const restored = settings.update({ runtimeMode: runtime.mode() });
@@ -272,11 +214,9 @@ export async function createModelServices(options: ModelServicesOptions): Promis
   });
 
   const handlers = {
-    // What is in memory now, and the handoff under way (gpu/memory.ts); memory.changed pushes each change.
     "memory.status": () => owner.status(),
     ...createSettingsHandlers({ settings, push: options.push, baseUrl: () => runtime.baseUrl() }),
     ...createGpuHandlers({ gpu }),
-    // The catalog's fit survey reads the same injected GPU and memory as every other fit.
     ...createRuntimeHandlers({
       baseUrl: () => runtime.baseUrl(),
       catalog,

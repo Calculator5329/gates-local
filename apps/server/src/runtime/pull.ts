@@ -1,23 +1,13 @@
-// Model downloads through Ollama's POST /api/pull, one at a time; the rest
-// wait as "queued". Progress pushes go out at most 4 times a second (state
-// changes always go out) with bytesPerSecond smoothed. Cancel aborts the
-// request; Ollama keeps the blobs it already has, so pulling the same model
-// again resumes. A bad name or a full disk ends in "error" with Ollama's
-// message in plain words.
 import type { PullProgress } from "@gates-local/contracts";
+import { parseJson } from "./schemas.ts";
 
 export const PULL_PUSH_INTERVAL_MS = 250;
-/** Weight of the newest rate sample in the smoothed bytesPerSecond. */
 const RATE_SMOOTHING = 0.3;
 
 export interface PullManager {
-  /** Start or queue a download; a name already queued or downloading returns its progress. */
   pull(name: string): PullProgress;
-  /** Withdraw a queued or running download. False when there is none. */
   cancel(name: string): boolean;
-  /** Queued and running downloads, in order. */
   pending(): readonly PullProgress[];
-  /** Abort everything (a runtime switch, server shutdown); every job ends in a "cancelled" push. */
   stop(): void;
 }
 
@@ -27,14 +17,7 @@ export interface PullManagerOptions {
   admit?(): void;
   baseUrl: () => string | undefined;
   push: (progress: PullProgress) => void;
-  /** After a download finishes: refresh the model list and the catalog. */
   onDone?: (name: string) => void | Promise<void>;
-  /**
-   * The whole download's size, from the curated list at once or from the registry a moment later.
-   * Ollama names one file at a time, so the sum of what it has named is not the model's size until
-   * the last file starts. With this set, no total goes out while the size is being asked for; once
-   * it answers with nothing (or fails), the total is the sum of the files Ollama has named so far.
-   */
   sizeOf?: (name: string, signal: AbortSignal) => number | undefined | Promise<number | undefined>;
   now?: () => number;
   intervalMs?: number;
@@ -46,21 +29,16 @@ interface Job {
   progress: PullProgress;
   controller: AbortController;
   layers: Map<string, { total: number; completed: number }>;
-  /** The whole download, when sizeOf knew it. */
   size?: number;
-  /** sizeOf has answered with nothing (offline, a private repo, a timeout, no registry): the total is what Ollama has named. */
   unsized?: boolean;
   lastPushAt: number;
-  /** A held-back progress push, sent when the interval is up if no newer line comes first. */
   trailing?: ReturnType<typeof setTimeout>;
   rateAt: number;
   rateBytes: number;
   rate?: number;
-  /** Set by stop(): the cancelled push says why. */
   stopped?: boolean;
 }
 
-/** Ollama's error text, in words a person can act on. */
 export function plainPullError(name: string, raw: string): string {
   const text = raw.trim();
   if (/no space left|disk full|not enough space/i.test(text)) {
@@ -120,14 +98,12 @@ export function createPullManager(options: PullManagerOptions): PullManager {
 
   const progressed = (job: Job, flush = false) => {
     const { listed, completed } = sums(job);
-    // What Ollama has named so far is a floor, never the answer, while the whole size is being
-    // asked for. With no answer to come, it is the best total there is (settings row 27).
     const total = options.sizeOf === undefined || job.unsized === true ? listed : job.size === undefined ? 0 : Math.max(job.size, listed);
     const t = now();
     if (!flush && t - job.lastPushAt < interval && job.progress.state === "downloading") {
       const { totalBytes: _total, ...held } = job.progress;
       job.progress = { ...held, completedBytes: completed, ...(total > 0 ? { totalBytes: total } : {}) };
-      // Ollama can go quiet mid-layer; the latest numbers still reach the client.
+      // external: Ollama can go quiet mid-layer, so a held push goes out when the interval is up
       job.trailing ??= setTimeout(() => {
         job.trailing = undefined;
         if (job.progress.state === "downloading") progressed(job, true);
@@ -188,14 +164,9 @@ export function createPullManager(options: PullManagerOptions): PullManager {
     });
     if (!res.ok || !res.body) {
       const text = await res.text().catch(() => "");
-      let message = text;
-      try {
-        const parsed = JSON.parse(text) as { error?: unknown };
-        if (typeof parsed.error === "string") message = parsed.error;
-      } catch {
-        // keep the raw text
-      }
-      throw new PullFailure(message || `HTTP ${res.status}`);
+      const parsed = parseJson(text);
+      const error = parsed.ok ? (parsed.value as { error?: unknown } | null)?.error : undefined;
+      throw new PullFailure((typeof error === "string" ? error : text) || `HTTP ${res.status}`);
     }
     const decoder = new TextDecoder();
     let buffer = "";
@@ -230,7 +201,6 @@ export function createPullManager(options: PullManagerOptions): PullManager {
     running = job;
     run(job)
       .then(async () => {
-        // done: every file has been named, so their sum is the true size
         const total = sums(job).listed || job.progress.totalBytes || job.progress.completedBytes;
         setState(job, { state: "done", completedBytes: total, ...(total > 0 ? { totalBytes: total } : {}) });
         try {
@@ -291,7 +261,6 @@ export function createPullManager(options: PullManagerOptions): PullManager {
         j.controller.abort();
         setState(j, { state: "cancelled", completedBytes: j.progress.completedBytes, message: PULL_STOPPED_MESSAGE });
       }
-      // The running job's catch pushes its own "cancelled" once the abort lands.
       if (running) {
         running.stopped = true;
         running.controller.abort();
@@ -301,7 +270,6 @@ export function createPullManager(options: PullManagerOptions): PullManager {
 }
 
 class PullFailure extends Error {
-  /** True when the message is already in plain words. */
   readonly plain: boolean;
   constructor(message: string, plain = false) {
     super(message);
