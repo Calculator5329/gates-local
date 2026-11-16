@@ -1,8 +1,3 @@
-// Test repositories for the updater: a bare "origin", a "seed" clone that
-// publishes to it, and the "clone" the updater works on, all inside one
-// fresh temporary folder that is also the guard's test root (guard.ts). The
-// git commands here run with the same ceiling, and refuse a folder outside
-// the root before they start, so a slip in a test cannot reach a checkout.
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,7 +11,6 @@ export interface Repos {
   readonly origin: string;
   readonly seed: string;
   readonly clone: string;
-  /** The app's data folder for the CLI's log and result files. */
   readonly data: string;
 }
 
@@ -105,7 +99,6 @@ export function crashAt<F extends { readonly runner: Runner }>(fake: F, when: (c
 
 export interface PnpmCall {
   readonly args: readonly string[];
-  /** The clone's commit when the call ran. */
   readonly head: string;
 }
 

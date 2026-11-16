@@ -1,20 +1,3 @@
-// `pnpm run app-update`: the command line around runUpdate, written for
-// someone who has never used git. scripts/update.ts wires it to this clone,
-// the app's data folder and the real git and pnpm.
-//
-//   pnpm run app-update                 update now (the app must be closed)
-//   pnpm run app-update --check         say what an update would bring; change nothing
-//   pnpm run app-update --channel main  every change on the branch, not only releases
-//
-// The desktop app's "Restart to update" starts this detached with
-// --wait-pid <its pid> --restart: the command waits for the app to exit,
-// updates, writes the result for the app's next start and opens the app
-// again with --relaunch-cwd and the --relaunch-arg list it was given.
-//
-// The app's own start runs it with --finish when it finds an update a crash
-// left (checkout-start.ts): it finishes that update or takes it back, and
-// looks for nothing new. It opens the app again only with --restart, since
-// without it the start that ran it is still there and waiting.
 import { closeSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeSync } from "node:fs";
 import path from "node:path";
 import { uptime } from "node:os";
@@ -41,16 +24,17 @@ export interface Relaunch {
   readonly onStart?: (pid: number) => void;
 }
 
+/**
+ * `defaultDataDir` is the desktop's default, used when --data-dir is not
+ * given. `relaunch` opens the app again and throws when it cannot.
+ */
 export interface CliDeps {
   readonly root: string;
   readonly argv: readonly string[];
-  /** The app's data folder when --data-dir is not given (the desktop's default). */
   readonly defaultDataDir: string;
   readonly pnpm: Pnpm;
   readonly runner?: Runner;
-  /** The running app from the pid file in this data folder, or null. */
   readonly appRunning: (dataDir: string) => { readonly pid: number; readonly file: string } | null;
-  /** Opens the app again; throws when it cannot. */
   readonly relaunch: (spec: Relaunch) => StartupProcess | void | Promise<StartupProcess | void>;
   readonly alive?: (pid: number) => boolean;
   readonly print?: (line: string) => void;
@@ -90,7 +74,6 @@ const stamp = (ms: number) => new Date(ms).toISOString().replace(/[:.]/g, "-");
 function openLog(dataDir: string, now: number): { file: string; write: (chunk: string) => void; close: () => void } {
   const dir = path.join(dataDir, "update-logs");
   mkdirSync(dir, { recursive: true });
-  // Only the newest few logs stay.
   const old = readdirSync(dir).filter((f) => f.endsWith(".log")).toSorted();
   for (const f of old.slice(0, Math.max(0, old.length - (KEEP_LOGS - 1)))) rmSync(path.join(dir, f), { force: true });
   const file = path.join(dir, `${stamp(now)}.log`);
@@ -98,11 +81,10 @@ function openLog(dataDir: string, now: number): { file: string; write: (chunk: s
   return {
     file,
     write: (chunk) => {
+      // why: a full disk must not stop the update half way.
       try {
         writeSync(fd, chunk);
-      } catch {
-        // A full disk must not stop the update half way.
-      }
+      } catch {}
     },
     close: () => closeSync(fd),
   };
@@ -304,8 +286,6 @@ export async function runCli(deps: CliDeps): Promise<number> {
       say(`Could not save the result for the app (${(e as Error).message}).`);
     }
   };
-  // A start asked for this run. When the update is still saved at the end, that start shows these lines
-  // and opens nothing: they are what it can tell the person about where the copy stands.
   const leave = (lines: readonly string[]) => {
     if (!finishOnly) return;
     try {
@@ -318,7 +298,6 @@ export async function runCli(deps: CliDeps): Promise<number> {
   };
   let attemptedStartup = false;
   const reopen = async () => {
-    // A start that asked for the finish and did not quit for it is still there: it opens the app, or says why not.
     if (!restart && (finishOnly || !attemptedStartup)) return;
     try {
       await deps.relaunch(relaunch);
@@ -334,8 +313,6 @@ export async function runCli(deps: CliDeps): Promise<number> {
       const remaining = () => approvalDeadline === undefined ? Infinity : (approvalDeadline - (deps.uptime ?? uptime)()) * 1000;
       const closed = await waitForExit(waitPid, { timeoutMs: Math.min(deps.closeWaitMs ?? CLOSE_WAIT_MS, Math.max(0, remaining())), ...(deps.alive ? { alive: deps.alive } : {}) });
       if (remaining() <= 0 && !brokenForTest("deadline-read-once")) {
-        // This updater no longer owns admission. Do not reopen or overwrite a
-        // later attempt's result, even when the old desktop has finally quit.
         say("The desktop update approval expired before Gates Local closed. Nothing was installed. Check for updates again and approve the current activity.");
         return 1;
       }
@@ -344,13 +321,12 @@ export async function runCli(deps: CliDeps): Promise<number> {
         record({ outcome: "refused", reason: "Gates Local did not close, so the update did not start" });
         return 1;
       }
-      // Electron's helper processes can outlive the main one by a moment, and on Windows they hold electron.exe.
+      // external: Electron helper processes outlive the main one briefly; on Windows they hold electron.exe.
       if ((deps.platform ?? process.platform) === "win32") await new Promise((r) => setTimeout(r, 2000));
     }
 
     let run: UpdateRun;
     try {
-      // What an earlier attempt said is not this one's finding.
       if (finishOnly) clearLeft(deps.root);
       run = await runUpdate({
         root: deps.root,
@@ -373,7 +349,7 @@ export async function runCli(deps: CliDeps): Promise<number> {
         },
       });
     } catch (e) {
-      // The test guard's refusal is the test's to see.
+      // why: the test guard's refusal is for the test to see, not a line for the person.
       if (e instanceof UpdateGuardError) throw e;
       const lines = [`The updater stopped on an error it did not expect: ${(e as Error).message}`, ...(log ? [`The full log is in ${log.file}`] : [])];
       for (const line of lines) say(line);
@@ -386,10 +362,9 @@ export async function runCli(deps: CliDeps): Promise<number> {
       case "refused": {
         const lines = refusalLines(run.refusal);
         for (const line of lines) say(line);
-        // Another updater has this copy now: where it stands is that one's to say.
+        // why: another updater has this copy now, and where it stands is that one's to say.
         if (run.refusal.reason !== "busy" && run.refusal.reason !== "lost-lock") leave(lines);
         if (waitPid !== undefined) record({ outcome: "refused", reason: lines.join(" ") });
-        // Not while something may still be replacing what the app runs from.
         if (!["busy", "lost-lock", "still-running"].includes(run.refusal.reason) && !(run.refusal.reason === "cannot-save" && run.refusal.pid !== null)) await reopen();
         return 1;
       }
@@ -408,8 +383,6 @@ export async function runCli(deps: CliDeps): Promise<number> {
         return 0;
       case "updated":
         say(run.from.commit === run.to.commit ? `Repaired ${run.to.label}.` : `Updated to ${run.to.label}, ${run.changes === 1 ? "1 change" : `${run.changes} changes`}.`);
-        // The ready app wrote and consumed its own success note. It is
-        // already open; launching it again would hide startup failures.
         return 0;
       case "awaiting-start":
         say(`Built ${run.to.label}. Start Gates Local to finish the update; success is recorded only after its server is ready.`);

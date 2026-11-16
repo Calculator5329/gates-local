@@ -1,12 +1,3 @@
-// A whole installed copy for the watcher tests, on real files: a program
-// file with known bytes, a data folder with a real thread store, a verified
-// download of the next version signed with a key made for this test, and
-// fake processes. The new version, when started, makes the store's
-// pre-migration copy and migrates the store as the server would, then is
-// killed with its WAL live; whether it acknowledges is up to the test.
-//
-// Every effect is recorded, and the world checks the design's five
-// invariants after each run (`checkInvariants`).
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -32,7 +23,6 @@ const OLD_BYTES = "old program bytes, version 1.4.0";
 const NEW_BYTES = "new program bytes, version 1.5.0, a little longer";
 const UPTIME = 1_000;
 
-/** Thrown by a stop point: the watcher was killed there. */
 export class Crash extends Error {
   readonly point: StopPoint;
   constructor(point: StopPoint) {
@@ -42,17 +32,12 @@ export class Crash extends Error {
   }
 }
 
-/** A returned I/O error shaped like Node's: the source in `path`, a rename, link or copy's target in `dest`. */
+// external: Node's fs errors name the source in path and a rename, link or copy's target in dest.
 export const ioError = (code: string, file: string, dest?: string): Error =>
   Object.assign(new Error(`${code}: ${file}`), { code, path: file }, dest === undefined ? {} : { dest });
 
 interface Proc { alive: boolean; readonly version: "old" | "new" | "other"; readonly token: string }
 
-/**
- * An injected returned error: a matching call throws `code`, before or after
- * doing what it does, once (or `times` times) after letting `skip` matching
- * calls through. The error names the call's first path, as Node's do.
- */
 export interface Fault {
   readonly op: keyof FileOps;
   readonly match: (args: readonly string[]) => boolean;
@@ -70,7 +55,6 @@ export interface RunLog {
   readonly ops: string[];
   readonly violations: string[];
   readonly pages: Words[];
-  /** The lines the watcher wrote to update.log. */
   readonly logged: string[];
   ordinary: number;
 }
@@ -81,10 +65,8 @@ export function removeWorlds(): void {
 }
 
 export interface WorldOptions {
-  /** Whether the new version acknowledges (forward path) or never does (go-back path). */
   readonly newAcks?: boolean;
   readonly oldAcks?: boolean;
-  /** The data folder had no thread store before the update. */
   readonly noStore?: boolean;
 }
 
@@ -98,7 +80,6 @@ export class World {
   readonly old: Identity;
   readonly new: Identity;
   readonly trustedKeys: readonly string[];
-  /** What row H writes; a test may change it before `beginUpdate`. */
   approval: Approval;
   newAcks: boolean;
   oldAcks: boolean;
@@ -108,9 +89,7 @@ export class World {
   readonly procs = new Map<number, Proc>();
   readonly results = new Map<string, InstalledResult>();
   faults: Fault[] = [];
-  /** The next result write fails with this code, before writing anything. */
   resultFault: string | null = null;
-  /** Token launches of this version cannot be confirmed stopped. */
   unstoppable: "old" | "new" | null = null;
   #pid = 100;
   #tokens = 0;
@@ -142,7 +121,7 @@ export class World {
     writeFileSync(path.join(this.download, "release.json"), list);
     writeFileSync(path.join(this.download, "release.json.sig"), signManifest(list, privateKey));
 
-    // The old main and its server, already gone: the person clicked Restart and main quit.
+    // why: main quit when the person clicked Restart, so its records name processes already gone.
     const main = this.#spawnProc("old", "main"), server = this.#spawnProc("old", "server");
     this.#setAlive(main.pid, false);
     this.#setAlive(server.pid, false);
@@ -170,30 +149,23 @@ export class World {
     if (proc !== undefined) proc.alive = alive;
   }
 
-  /** The old app has not closed. */
   hangOldApp(): void {
     this.#setAlive(this.approval.main.pid, true);
     this.#setAlive(this.approval.server.pid, true);
   }
 
-  /**
-   * What a token launch does when its watcher dies (section 2, "when the
-   * watcher dies"): with no result carrying its token, it stops its server and
-   * asks the person to close it, and the person does. One with a result runs on.
-   */
+  // why: main stops a token launch whose watcher died with no result for its token (RT-05).
   watcherDied(): void {
     const answered = new Set([...this.results.values()].flatMap(r => "token" in r ? [r.token] : []));
     for (const proc of this.procs.values()) if (proc.token.startsWith("T-") && !answered.has(proc.token)) proc.alive = false;
   }
 
-  /** A restart of the computer: every process ends and the boot id changes. */
   reboot(): void {
     for (const proc of this.procs.values()) proc.alive = false;
     this.boot = `boot-${Number(this.boot.slice(5)) + 1}`;
     this.uptime = 10;
   }
 
-  /** Whether the transaction on disk has decided, after which nothing may be spawned, stopped or moved. */
   #decided(): string | null {
     let tx: InstalledTransaction | null;
     try {
@@ -207,7 +179,6 @@ export class World {
     return null;
   }
 
-  /** The intent on disk now, or null when there is no transaction or it does not decode. */
   #intent(): string | null {
     try {
       return readTransaction(this.file)?.intent ?? null;
@@ -228,7 +199,6 @@ export class World {
       fault.times = (fault.times ?? 1) - 1;
       return fault;
     };
-    // Ops with a source and a destination; the rest act on their first argument.
     const twoPaths = new Set<keyof FileOps>(["rename", "link", "copyFile"]);
     const changes = new Set<keyof FileOps>(["writeFile", "rename", "link", "copyFile", "unlink", "removeTree"]);
     const wrap = (op: keyof FileOps, real: (...args: string[]) => void, isDelete = false) => (...args: string[]): void => {
@@ -236,13 +206,12 @@ export class World {
       const fault = firing(op, args);
       if (fault !== undefined && (fault.when ?? "before") === "before") throw ioError(fault.code, args[0] ?? "", args[1]);
       const dest = (twoPaths.has(op) ? args[1] : args[0]) ?? "";
-      // Only B2a and B2b may change the live store: a write to it, or a rename away from it, anywhere else is a violation.
       const touched = [dest, ...(op === "rename" ? [args[0] ?? ""] : [])].find(f => storeFiles.has(f));
       if (changes.has(op) && touched !== undefined) {
         const intent = this.#intent();
         if (intent !== "restore-aside" && intent !== "restore-install") log.violations.push(`${op} changed the live ${path.basename(touched)} at ${intent ?? "no transaction"}`);
       }
-      // A rename, link or copy that lands on a file destroys what was there: it counts as a deletion of it.
+      // why: a rename, link or copy onto a file destroys what was there.
       const replaces = twoPaths.has(op) && existsSync(dest);
       if (isDelete) log.deleted.push(args[0] ?? "");
       real(...args);
@@ -258,13 +227,12 @@ export class World {
       removeTree: wrap("removeTree", a => realFileOps.removeTree(a ?? ""), true),
       mkdir: (dir, mode) => wrap("mkdir", d => realFileOps.mkdir(d ?? "", mode))(dir),
       chmod: (file, mode) => wrap("chmod", f => realFileOps.chmod(f ?? "", mode))(file),
-      // A flush is logged and can be made to fail, but never waits for the disk: no test here cuts the power, and the waits were most of the matrix's time.
+      // why: no test here cuts the power, and waiting for the disk was most of the matrix's time.
       fsyncFile: wrap("fsyncFile", () => {}),
       fsyncDir: wrap("fsyncDir", () => {}),
     };
   }
 
-  /** The effects for one run. `crashAt` kills the run the first time it reaches that point. */
   effects(log: RunLog, crashAt?: StopPoint): WatcherEffects {
     let crashed = false;
     const guard = (what: string) => {
@@ -328,13 +296,11 @@ export class World {
     return this.procs.get(record.pid)?.alive ?? false;
   }
 
-  /** Every named file and folder of this transaction that exists now. */
   named(): string[] {
     const p = this.paths;
     return [p.previous, p.incoming, this.download, this.storeCopy, this.aside].filter(f => existsSync(f));
   }
 
-  /** The bytes under the root, for "changed no file". */
   snapshot(): Map<string, string> {
     const out = new Map<string, string>();
     const walk = (dir: string) => {
@@ -357,7 +323,6 @@ export const newLog = (): RunLog => ({ points: [], spawns: [], stops: [], delete
 
 export type RunEnd = WatchOutcome | { readonly outcome: "crashed"; readonly point: StopPoint };
 
-/** Runs `run`, turning a Crash into a run end; anything else is a real failure. */
 export async function attempt(run: () => Promise<WatchOutcome>): Promise<RunEnd> {
   try {
     return await run();
@@ -367,14 +332,6 @@ export async function attempt(run: () => Promise<WatchOutcome>): Promise<RunEnd>
   }
 }
 
-/**
- * The design's invariants, after any run (section 10):
- * 1. the program path holds `old` or `new`;
- * 2. a run ending updated, rolled-back or stopped leaves a live store that holds exactly the rows from before (the migrated rows after an accept);
- * 3. nothing spawned or stopped once the transaction decided, and no file op changed the live store outside `restore-aside` and `restore-install`;
- * 4. rollback-failed and stuck delete nothing the transaction names (a rename, link or copy onto a file counts as deleting it);
- * 5. a stop before the replace leaves `old` and no `.incoming`.
- */
 const within = (inner: string, outer: string): boolean => inner.startsWith(`${outer}${path.sep}`);
 
 export function checkInvariants(w: World, end: RunEnd, log: RunLog, o: { readonly storeExpected?: boolean } = {}): void {
@@ -385,7 +342,6 @@ export function checkInvariants(w: World, end: RunEnd, log: RunLog, o: { readonl
     if (!existsSync(w.live)) problems.push(`2: no live store after ${end.outcome}`);
     else {
       const found = contents(w.live);
-      // A stop comes before the replace, so the store must be exactly what it was before the update.
       const want = end.outcome === "updated" ? { version: STORE_AFTER, ids: MIGRATED } : { version: STORE_BEFORE, ids: BEFORE };
       if (JSON.stringify(found) !== JSON.stringify(want)) problems.push(`2: store after ${end.outcome} holds ${JSON.stringify(found)}`);
     }
@@ -393,7 +349,6 @@ export function checkInvariants(w: World, end: RunEnd, log: RunLog, o: { readonl
   problems.push(...log.violations.map(v => `3: ${v}`));
   if (end.outcome === "rollback-failed" || end.outcome === "stuck") {
     const named = [w.paths.previous, w.paths.incoming, w.download, w.storeCopy, w.aside];
-    // A deletion counts when it removes a kept path, something inside one, or a folder that holds one.
     for (const gone of log.deleted) if (named.some(n => gone === n || within(gone, n) || within(n, gone))) problems.push(`4: ${end.outcome} deleted ${path.relative(w.root, gone)}`);
   }
   if (end.outcome === "stopped" && (at !== "old" || existsSync(w.paths.incoming))) problems.push(`5: stopped with the path at ${at}, incoming ${existsSync(w.paths.incoming) ? "present" : "absent"}`);

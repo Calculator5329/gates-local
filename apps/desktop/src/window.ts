@@ -6,10 +6,7 @@
 import type { BrowserWindowConstructorOptions } from "electron";
 import path from "node:path";
 
-/**
- * The window icon (X11, Windows, and Wayland compositors that take one); the
- * desktop entry's icon covers the rest.
- */
+// external: X11, Windows and some Wayland compositors take a window icon; the rest use the desktop entry's.
 export function iconFile(o: { packaged: boolean; resourcesPath: string; desktopDir: string }): string {
   return o.packaged ? path.join(o.resourcesPath, "icon.png") : path.join(o.desktopDir, "assets", "icon.png");
 }
@@ -29,7 +26,7 @@ export function windowOptions(o: { icon: string; preload: string; platform?: Nod
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
-      // On by default; on Linux it downloads dictionaries from Google.
+      // external: Electron's spellcheck is on by default, and on Linux it downloads dictionaries from Google.
       spellcheck: false,
     },
   };

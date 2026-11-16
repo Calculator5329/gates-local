@@ -1,12 +1,3 @@
-// What an update has promised to finish, kept where a crash cannot lose it.
-//
-// Written before the checkout moves and removed only once the update has
-// finished, or has gone all the way back. A file left behind means the last
-// run was cut off (or its rollback failed), so "this copy has the newest
-// commit" proves nothing: the install and builds may never have happened.
-//
-// In the checkout's git folder, next to the lock. Node built-ins only, like
-// the lock, so shapes are checked by hand here.
 import { closeSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
 import path from "node:path";
 import type { Step } from "./apply.ts";
@@ -18,20 +9,22 @@ export const TRANSACTION_FILE = "gates-local-update.json";
 
 interface Common {
   readonly channel: Channel;
-  /** The branch the update moved; a different one now means someone has moved on. */
   readonly branch: string;
   readonly from: Commit;
   readonly to: Commit;
-  /** Commits between from and to. */
   readonly changes: number;
-  /** The command changing the checkout. Still here later means it may still be at it: nothing may start until it has ended. */
   readonly running?: ProcessRecord;
 }
 
+/**
+ * What an update has promised to finish. `branch` is the one it moved, and a
+ * different one now means someone has moved on; `running` is the command
+ * changing the checkout, which may still be at it; phase `back` means a step
+ * failed and the run started back to `from`.
+ */
 export type Transaction =
   | (Common & { readonly phase: "forward" })
   | (Common & { readonly phase: "launch"; readonly startupToken?: string })
-  /** A step failed and the run started back to `from`. */
   | (Common & { readonly phase: "back"; readonly step: Step; readonly reason: string });
 
 function fileOf(root: string): string | null {
@@ -45,11 +38,10 @@ function flushDir(dir: string): void {
     fsyncSync(fd);
     closeSync(fd);
   } catch {
-    // Windows cannot open a folder this way; the rename is still atomic.
+    // external: Windows cannot open a folder this way; the rename is still atomic.
   }
 }
 
-/** Atomic and on disk before it returns. */
 function save(file: string, value: object): void {
   const tmp = `${file}.${process.pid}.tmp`;
   const fd = openSync(tmp, "w");
@@ -110,7 +102,6 @@ export function readLeft(root: string): Left | null {
     if (version !== 1 || !isString(to) || !Array.isArray(lines) || lines.length === 0 || !lines.every((l) => typeof l === "string")) return null;
     return { to, lines: lines as string[] };
   } catch {
-    // No file, or not ours to read: there is nothing to add to the plain words.
     return null;
   }
 }

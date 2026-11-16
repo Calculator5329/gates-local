@@ -1,11 +1,3 @@
-// The Electron side of an installed Linux copy's update
-// (docs/design/installed-updates.md, section 2): the launch routing that runs
-// before any window or server, the watcher process, and the pages that need
-// no server. main.ts calls routeInstalled for every launch of a copy whose
-// program is an AppImage, and routeUnreplaceable for every other packaged
-// Linux launch, which shares the data folder. A source checkout's start goes
-// through routeCheckout: its update is the checkout's own (packages/update),
-// and the same rule holds, nothing starts beside an unfinished update.
 import { app, BrowserWindow, Menu, shell, type BrowserWindowConstructorOptions } from "electron";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -32,34 +24,24 @@ export interface InstalledHost {
   readonly copy: Copy;
   readonly testBuild: boolean;
   readonly trustedKeys: readonly string[];
-  /** The release page the words send a person to. */
   readonly releasePage: string;
-  /** The app's own window options (window.ts), so a page looks like the app. */
   readonly window: () => BrowserWindowConstructorOptions;
-  /** Whether this launch asked for no window (a background start). */
   readonly background: boolean;
 }
 
-/** How main starts the app once the routing says so. */
 export interface StartApp {
-  /** A token launch: T1 or T2, admission closed until a result carries the token. */
   readonly token?: string;
-  /** Shown instead of the client: the update startup page, or the earlier failure page. */
   readonly page?: Words;
-  /** The earlier failure: the server waits for the page's one button. */
   readonly hold?: boolean;
 }
 
 const log = (line: string) => console.error(`[desktop] ${line}`);
 
-/** The page's URL: the words once, the release page only where they send the person there. */
 export const updatePageUrl = (words: Words, releasePage: string, actions: readonly PageAction[] = []): string =>
   dataUrl(renderUpdatePage({ words, releasePage, actions }));
 
-/** What a page-only process needs: the app's window options and the release page. */
 export type PageHost = Pick<InstalledHost, "window" | "releasePage">;
 
-/** A window for pages with no server behind them. A release page link opens in the system browser; nothing else navigates. */
 function pageWindow(host: PageHost): BrowserWindow {
   if (hidesMenu(process.platform)) Menu.setApplicationMenu(null);
   const window = new BrowserWindow(host.window());
@@ -72,23 +54,21 @@ function pageWindow(host: PageHost): BrowserWindow {
   return window;
 }
 
-/** A window with one page. */
 function openPage(host: PageHost, words: Words): BrowserWindow {
   const window = pageWindow(host);
   void window.loadURL(updatePageUrl(words, host.releasePage));
   return window;
 }
 
-/** A process that only shows pages uses its own profile folder, so it never shares one with a running app. */
+// why: a process that only shows pages must never share a profile folder with a running app.
 function ownProfile(name: string): void {
   app.setPath("userData", path.join(app.getPath("userData"), name));
 }
 
-/** Pages this process shows; it exits once its work is done and the last page is closed. */
 function pageCounter(host: PageHost): { show: (words: Words) => void; done: (code: number) => void } {
   let open = 0;
   let finished: number | null = null;
-  // Closing a page never quits by itself: the watcher may still be working.
+  // why: the watcher may still be working when the last page closes.
   app.on("window-all-closed", () => undefined);
   return {
     show: (words) => {
@@ -107,7 +87,6 @@ function pageCounter(host: PageHost): { show: (words: Words) => void; done: (cod
   };
 }
 
-/** Say this and exit when the person closes the page. */
 function sayAndExit(host: PageHost, words: Words): void {
   ownProfile("update-pages");
   const pages = pageCounter(host);
@@ -115,40 +94,26 @@ function sayAndExit(host: PageHost, words: Words): void {
   pages.done(0);
 }
 
-/**
- * Watcher mode (spawned at row H, or an ordinary launch that found an
- * unfinished update with update.lock free): no profile lock and no server.
- * The watcher's own pages (stuck, rollback failed) and a stop the person must
- * hear about open here; everything else ends without a window.
- */
 async function runAsWatcher(host: InstalledHost, file: string, resumed: boolean): Promise<void> {
   ownProfile("update-watcher");
   const pages = pageCounter(host);
   let code = 0;
-  // Earlier launches' extract folders, swept before this watcher starts any
-  // launch: a launch it starts gets an empty folder that its runtime fills
-  // only later. This watcher's own folder is in use, so it stays.
+  // why: a launch this watcher starts gets an empty folder that its runtime fills only later.
   sweepOwnTmp(process.env);
   try {
     const fx = watcherEffects({ program: host.copy.program, dataDir: host.copy.dataDir, env: process.env, argv: process.argv, testBuild: host.testBuild, trustedKeys: host.trustedKeys, showPage: pages.show });
     const outcome = await (resumed ? resumeWatcher : runWatcher)(file, fx);
     logLine(host.copy.dataDir, `watcher ended: ${outcome.outcome}`);
-    // A stop that starts no app (the old version did not close in time) is said here, or nowhere.
+    // why: a stop that starts no app (the old app did not close in time) is said here or nowhere.
     if (outcome.outcome === "stopped" && !outcome.startApp && outcome.words !== null) pages.show(outcome.words);
   } catch (error) {
-    // A crash of the watcher: nothing is turned into an ending, the transaction stays for the next launch.
+    // why: a watcher crash is no ending; the transaction stays for the next launch.
     logLine(host.copy.dataDir, `watcher crashed: ${(error as Error).message}`);
     code = 1;
   }
   pages.done(code);
 }
 
-/**
- * A packaged Linux launch with no program file to replace, holding the
- * profile lock: it reads this data folder's transaction and update.lock before
- * it opens anything, and while either says an update is unfinished it says
- * so and exits, never opening the store (launch-kinds.ts, decideUnrouted).
- */
 export function routeUnreplaceable(host: PageHost, dataDir: string, start: (o?: StartApp) => void): void {
   const kind = routeUnrouted(dataDir, {
     start,
@@ -161,21 +126,11 @@ export function routeUnreplaceable(host: PageHost, dataDir: string, start: (o?: 
 }
 
 export interface CheckoutHost extends PageHost {
-  /** The checkout this app runs from: apps/desktop/../.. */
   readonly root: string;
   readonly dataDir: string;
-  /** Whether this launch asked for no window: it then says what it has to say in the log. */
   readonly background: boolean;
 }
 
-/**
- * A source checkout's start (../checkout-start.ts has the order of its
- * steps). It reads the checkout's lock and saved update before anything
- * else. With no update in flight it takes the single-instance lock and calls
- * `start`. While an updater runs it shows a page and waits; an update a crash
- * left is handed to the updater to finish or take back; an update still
- * unfinished after that is said in the page, and nothing starts.
- */
 export function routeCheckout(host: CheckoutHost, start: () => void): void {
   let window: BrowserWindow | null = null;
   let opening = false;
@@ -189,12 +144,11 @@ export function routeCheckout(host: CheckoutHost, start: () => void): void {
     opening = true;
     void app.whenReady().then(() => {
       window = pageWindow(host);
-      // The updater, if one is running, goes on without this window and opens the app itself when it has finished.
+      // why: a running updater goes on without this window and opens the app itself when done.
       window.on("closed", () => app.exit(0));
       if (page !== null) void window.loadURL(page);
     });
   };
-  /** The updater told only to finish or take back; `ended` settles when its process has gone. */
   const finisher = (quits: boolean): Promise<Started & { readonly ended?: Promise<void> }> =>
     new Promise((resolve) => {
       const plan = finisherLaunch({ repoRoot: host.root, pid: process.pid, dataDir: host.dataDir, argv: process.argv, cwd: process.cwd(), env: process.env, exists: existsSync, quits });
@@ -206,22 +160,22 @@ export function routeCheckout(host: CheckoutHost, start: () => void): void {
         resolve({ ok: true, ended });
       });
     });
-  // startCheckout calls `start` before its first wait or not at all, so main's start runs here, in this call, and a throw from it is main's own.
+  // why: startCheckout calls start before its first wait or not at all, so a throw is main's own.
   let go = false;
   const end = startCheckout({
     look: (tried) => {
       try {
         return decideCheckoutStart(checkoutStartFacts(host.root, { env: process.env, tried }));
       } catch (e) {
-        // The test guard's refusal is the test's to see.
+        // why: the test guard's refusal is the test's to see.
         if (e instanceof UpdateGuardError) throw e;
-        // Not knowing whether an update is in flight is not a reason to start on one.
+        // why: not knowing whether an update is in flight is no reason to start on one.
         return { kind: "say", lines: [DID_NOT_START, `This copy's update state could not be read (${(e as Error).message}).`] };
       }
     },
     claim: () => {
       if (!app.requestSingleInstanceLock({ background: host.background })) {
-        // A second launch reaches the first through the lock; it says whether it was itself a background launch.
+        // external: Electron hands the lock's data to the first instance's second-instance event.
         app.quit();
         return false;
       }
@@ -276,11 +230,6 @@ export function routeCheckout(host: CheckoutHost, start: () => void): void {
   if (go) start();
 }
 
-/**
- * The three kinds of launch (launch-kinds.ts): an ordinary launch decides
- * holding the profile lock, the watcher never takes it, and a token launch
- * takes it itself, retrying, because a double-click may hold it on its way out.
- */
 export function routeInstalled(host: InstalledHost, start: (o?: StartApp) => void): void {
   const watching = process.argv.some(a => a.startsWith(`${WATCH_FLAG}=`));
   const hasToken = (process.env[STARTUP_TOKEN_ENV] ?? "") !== "";

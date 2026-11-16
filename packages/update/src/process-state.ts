@@ -1,10 +1,8 @@
-// A PID or process group can still exist after every member has exited:
-// a parent or subreaper may not have collected their exit status yet.
 import { readFileSync, readdirSync } from "node:fs";
 
+/** `exists` answers as kill(pid, 0): a negative id asks about a process group, and EPERM counts as present. */
 export interface ProcessSystem {
   readonly platform: NodeJS.Platform;
-  /** kill(pid, 0): negative ids ask about a process group. EPERM counts as present. */
   exists(pid: number): boolean;
   stat(pid: number): string;
   pids(): readonly number[];
@@ -26,10 +24,11 @@ const system: ProcessSystem = {
   tasks: (pid) => readdirSync(`/proc/${pid}/task`).filter((entry) => /^\d+$/.test(entry)).map(Number),
 };
 const valid = (pid: number) => Number.isSafeInteger(pid) && pid > 0;
+// external: on Linux an exited process stays listed, as a zombie, until its parent or a subreaper collects it.
 const dead = (state: string) => state === "Z" || state === "X" || state === "x";
 
 function fields(stat: string) {
-  // comm may contain spaces and ')'. Fields 3, 5 and 22 follow its last ')'.
+  // external: in /proc/<pid>/stat comm may hold spaces and ')'; fields 3, 5 and 22 follow its last ')'.
   const close = stat.lastIndexOf(")");
   if (close < 0) return undefined;
   const rest = stat.slice(close + 2).trim().split(/\s+/);
@@ -42,7 +41,6 @@ function fields(stat: string) {
 
 const same = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((member, i) => member === b[i]);
 
-/** A zombie main thread can still have running workers. Unknown task state also stays live. */
 function exitedTasks(pid: number, row: NonNullable<ReturnType<typeof fields>>, on: ProcessSystem): string[] | undefined {
   const members = [`${pid}:${row.start}`];
   let tasks: readonly number[];
@@ -100,7 +98,6 @@ export function groupAlive(pid: number, on: ProcessSystem = system): boolean {
     const second = scan();
     if (second === undefined) return true;
     if (first.length > 0 && same(first, second)) return false;
-    // A changing or unseen membership is not evidence that a group ended.
     return on.exists(-pid);
   } catch { return true; }
 }

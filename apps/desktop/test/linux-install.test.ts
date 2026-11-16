@@ -131,6 +131,12 @@ describe.skipIf(linuxOnly)("installLinux", () => {
     expect(kept.toSorted()).toEqual([...versions].toSorted());
   });
 
+  it("gives each install that keeps a file its own backup folder, even at the same timestamp", () => {
+    const dataHome = fresh();
+    for (const p of ["/opt/v1/run", "/opt/v2/run", "/opt/v3/run"]) installLinux({ dataHome, exec: [p], assets, now: FIXED, ...quiet });
+    expect(readdirSync(path.join(dataHome, BACKUP_DIR))).toHaveLength(2);
+  });
+
   it("backs a changed icon up too, and no backup lands where the menu or icon theme would read it", () => {
     const dataHome = fresh();
     const old = path.join(dataHome, SVG);

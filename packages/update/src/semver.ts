@@ -1,8 +1,3 @@
-// Release tags: v<major>.<minor>.<patch>, compared as numbers, so v0.10.0
-// comes after v0.9.0. A tag with anything after the patch number (v1.0.0-rc.1,
-// v1.0.0-beta) is a pre-release and never a release-channel target; a tag
-// that is not of this form (v1, version-2) is ignored.
-
 export interface Version {
   readonly major: number;
   readonly minor: number;

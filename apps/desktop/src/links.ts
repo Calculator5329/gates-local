@@ -1,28 +1,19 @@
-// What the window does with a link: a page of the client stays in the
-// window, a web page opens in the system browser, anything else is dropped.
-// Electron is passed in (the parts of WebContents and shell this needs), so
-// the handlers are tested without it.
-
 import { externalUrl } from "./client-protocol.ts";
 
 export interface LinkDeps {
   isClientUrl(url: string): boolean;
   openExternal(url: string): Promise<void>;
   log(line: string): void;
-  /** The port this app's server listens on right now; undefined while none is ready. */
   pagePort(): number | undefined;
 }
 
-/** A navigation in any frame of the window, as Electron's will-frame-navigate gives it. */
 export interface FrameNavigation {
   readonly url: string;
   readonly isMainFrame: boolean;
-  /** The frame that asked for it: the window's own document has no parent. */
   readonly initiator?: { readonly parent: unknown } | null;
   preventDefault(): void;
 }
 
-/** A page's own window (apps/web/src/pages): a blank window of the client's, as locked as this one. */
 export const PAGE_WINDOW = {
   width: 900,
   height: 700,
@@ -33,7 +24,6 @@ export const PAGE_WINDOW = {
 
 export type WindowOpen = { action: "deny" } | { action: "allow"; overrideBrowserWindowOptions: typeof PAGE_WINDOW };
 
-/** The parts of Electron's WebContents the guard uses. */
 export interface GuardedContents {
   setWindowOpenHandler(handler: (details: { url: string }) => WindowOpen): void;
   on(event: "will-navigate", listener: (event: { preventDefault(): void }, url: string) => void): unknown;
@@ -42,22 +32,11 @@ export interface GuardedContents {
   setWebRTCIPHandlingPolicy(policy: "disable_non_proxied_udp"): void;
 }
 
-/**
- * The one kind of address a frame in the window may load: a page a reply wrote, at the server's
- * one-time page address (apps/server/src/pages/route.ts). Given `port`, on that port only: another
- * program on this computer serving under /pages/ is not this app's server.
- */
 export function isPageFrame(url: string, port?: number): boolean {
   const at = /^http:\/\/127\.0\.0\.1:(\d{1,5})\/pages\/[0-9a-f]{32}$/.exec(url);
   return at !== null && (port === undefined || Number(at[1]) === port);
 }
 
-/**
- * Hand an http(s) link to the system browser; any other URL is dropped.
- * A link can carry a password or a token, so a log line names at most the
- * scheme of a refused link and the origin of an accepted one, never the
- * rest of the URL or the shell's error text (which can repeat it).
- */
 export function openOutside(url: string, deps: Pick<LinkDeps, "openExternal" | "log">): void {
   const target = externalUrl(url);
   if (target === null) {
@@ -80,12 +59,6 @@ function errorName(error: unknown): string {
   return error instanceof Error ? error.name : typeof error;
 }
 
-/**
- * The window never leaves the client, and opens no other window but a blank
- * one the client fills with a page (guarded the same way). A frame inside it
- * loads only a page the window itself put there: a page cannot move its own
- * frame anywhere. WebRTC gets no direct route out.
- */
 export function guardNavigation(contents: GuardedContents, deps: LinkDeps): void {
   contents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
   contents.setWindowOpenHandler(({ url }) => {
@@ -100,11 +73,7 @@ export function guardNavigation(contents: GuardedContents, deps: LinkDeps): void
     openOutside(url, deps);
   });
   contents.on("will-frame-navigate", (details) => {
-    // the window's own document is will-navigate's
     if (details.isMainFrame) return;
-    // Pages and Measure's page checks load the server's page address (below), set before their
-    // frame is in the document, so no frame of the client's ever navigates to about:blank or
-    // about:srcdoc: those are refused like any other address.
     const fromWindow = details.initiator === undefined || details.initiator === null || details.initiator.parent === null;
     const port = deps.pagePort();
     if (port !== undefined && isPageFrame(details.url, port) && fromWindow) return;

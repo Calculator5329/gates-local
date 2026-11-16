@@ -1,8 +1,3 @@
-// Server supervisor: spawns the Gates Local server as a child of Electron
-// main, waits for its ready line, reports crashes and restarts on request.
-// Pure Node (no Electron imports) so vitest can drive it against fakes.
-// The CLI contract it speaks is documented in apps/desktop/README.md.
-
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -15,30 +10,22 @@ import { boundedServerOutput, writeServerFailureReport } from "./server-failure.
 export type { CrashReason, SupervisorState } from "./supervisor-state.ts";
 export type { RestartResult } from "./bridge.ts";
 
-/** Env var the token travels in (not argv: /proc/<pid>/cmdline is world-readable). */
+// external: Linux /proc/<pid>/cmdline is world-readable, so the token travels in the environment.
 export const TOKEN_ENV = "GATES_LOCAL_SERVER_TOKEN";
 export const HOST = "127.0.0.1";
 
 export interface SupervisorOptions {
-  /** Server entry file, passed as the first argument to `execPath`. */
   readonly entry: string;
-  /** Passed as `--data-dir`; created if missing. */
   readonly dataDir: string;
-  /** Defaults to process.execPath (Electron run as Node, or Node under test). */
   readonly execPath?: string;
-  /** Base environment for the child; defaults to process.env. */
   readonly env?: NodeJS.ProcessEnv;
-  /** Fixed port; by default the server binds port 0 and reports the assigned port. */
   readonly port?: number;
   readonly readyTimeoutMs?: number;
-  /** Grace between SIGTERM and SIGKILL. */
   readonly stopTimeoutMs?: number;
   readonly stderrTailLines?: number;
-  /** Loop guard: at most `max` explicit restarts per `windowMs`. */
   readonly restartLimit?: { readonly max: number; readonly windowMs: number };
   readonly log?: (line: string) => void;
   readonly now?: () => number;
-  /** How a stop asks the server to exit; defaults to process.platform (tests inject). */
   readonly platform?: NodeJS.Platform;
 }
 
@@ -49,7 +36,6 @@ const DEFAULTS = {
   restartLimit: { max: 3, windowMs: 60_000 },
 } as const;
 
-/** Ask the kernel for a free loopback port. */
 export async function findFreePort(host: string = HOST): Promise<number> {
   return await new Promise<number>((resolve, reject) => {
     const probe = createServer();
@@ -76,7 +62,6 @@ interface Launch {
   readonly token: string;
   readonly stderrTail: string[];
   readonly stdoutTail: string[];
-  /** Set when the supervisor itself decided the launch failed (timeout, bad ready). */
   failure: CrashReason | null;
   readyTimer: NodeJS.Timeout | null;
   exited: Promise<void>;
@@ -112,13 +97,11 @@ export class Supervisor {
     };
   }
 
-  /** First launch. Resolves once the launch is ready or crashed. */
   async start(): Promise<SupervisorState> {
     if (this.#state.status !== "idle") return this.#state;
     return await this.#launch("starting");
   }
 
-  /** Explicit restart from the UI. Only from crashed, and rate-limited. */
   restart(): RestartResult {
     if (this.#state.status !== "crashed") return { ok: false, reason: "not-crashed" };
     const blockedFor = this.#restartBlockedFor();
@@ -128,7 +111,6 @@ export class Supervisor {
     return { ok: true };
   }
 
-  /** Resolves on the next ready or crashed state (or immediately if already settled). */
   async settled(): Promise<SupervisorState> {
     const s = this.#state.status;
     if (s === "ready" || s === "crashed" || s === "stopped") return this.#state;
@@ -136,7 +118,6 @@ export class Supervisor {
     return this.#state;
   }
 
-  /** Stop the child this supervisor spawned: SIGTERM, then SIGKILL after the grace. */
   async stop(): Promise<void> {
     if (this.#state.status === "stopped") return;
     if (this.#stopping !== null) return await this.#stopping;
@@ -152,7 +133,6 @@ export class Supervisor {
     await this.#stopping;
   }
 
-  /** Last resort for process 'exit' handlers: synchronous SIGKILL of the live child. */
   killNow(): void {
     const child = this.#current?.child;
     if (child !== undefined && isRunning(child)) child.kill("SIGKILL");
@@ -218,8 +198,6 @@ export class Supervisor {
     const execPath = this.#opts.execPath ?? process.execPath;
     const args = [this.#opts.entry, "--port", String(port), "--data-dir", this.#opts.dataDir];
     const env = { ...(this.#opts.env ?? process.env), ELECTRON_RUN_AS_NODE: "1", [TOKEN_ENV]: token };
-    // stdin stays an open pipe for the child's lifetime: when this process
-    // dies, even by SIGKILL, the kernel closes it and the server sees EOF.
     const child = spawn(execPath, args, { env, stdio: ["pipe", "pipe", "pipe"] });
     const exited = deferred();
     const launch: Launch = {
@@ -251,7 +229,8 @@ export class Supervisor {
     }
 
     child.once("error", (error) => {
-      if (child.pid !== undefined) return; // kill() failures etc.; the exit event still comes
+      // external: Node emits error for a failed kill() of a started child, and its exit event still comes.
+      if (child.pid !== undefined) return;
       exited.resolve();
       if (this.#isCurrent(id)) this.#crash(id, null, { kind: "spawn-error", message: error.message }, []);
     });
@@ -259,15 +238,12 @@ export class Supervisor {
       clearReadyTimer(launch);
       child.stdin?.destroy();
       if (!this.#isCurrent(id) && launch.failure === null) {
-        exited.resolve(); // An intended stop, not an observed failure.
+        exited.resolve();
         return;
       }
       const reason = launch.failure ?? { kind: "exit", code, signal };
-      // Give the stderr reader a moment to flush the last lines; do not wait
-      // for 'close', which never comes if a grandchild inherited the pipes.
+      // external: Node's 'close' never comes while a grandchild holds the pipes, so stderr gets 50 ms to flush.
       setTimeout(() => {
-        // Quit may suppress the UI notification, but not a failure already
-        // observed above. stop() also waits for this kept stderr snapshot.
         try {
           this.#crash(id, child.pid ?? null, reason, launch.stderrTail, this.#isCurrent(id));
         } finally {
@@ -337,9 +313,7 @@ export class Supervisor {
   async #terminate(launch: Launch): Promise<void> {
     const { child } = launch;
     if (!isRunning(child)) return await launch.exited;
-    // Windows has no SIGTERM: kill("SIGTERM") there is TerminateProcess, so
-    // the server's shutdown (which stops the app's own Ollama) would never
-    // run. The polite request there is the contract's other one: stdin EOF.
+    // external: Windows has no SIGTERM (kill is TerminateProcess), so a stop there closes stdin instead.
     const win = (this.#opts.platform ?? process.platform) === "win32";
     if (win) child.stdin?.end();
     else child.kill("SIGTERM");
@@ -371,7 +345,6 @@ function clearReadyTimer(launch: Launch): void {
   launch.readyTimer = null;
 }
 
-/** The ready line is `{"ready":true,"port":<n>}`; anything else is ordinary output. */
 export function parseReady(line: string): { port: number } | null {
   const trimmed = line.trim();
   if (!trimmed.startsWith("{")) return null;

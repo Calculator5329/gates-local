@@ -11,13 +11,13 @@ export const FINISHING = "Gates Local is finishing an update. Try again in a mom
 /**
  * `finishing`: this server is a token launch of an installed update. Admission
  * stays closed, with its own sentence, until `open()`, which the caller calls
- * once it reads a result carrying its token.
+ * once it reads a result carrying its token. A producer calls `admit()`
+ * synchronously, before it registers work or reaches its first await.
  */
 export function createUpdateAdmission(o: { readonly finishing?: boolean } = {}) {
   let revision = 0;
   let closed = false;
   let finishing = o.finishing === true;
-  // target: a clone's commit, or an installed copy's pinned artifact identity.
   let lease: { token: string; target: string; committed: boolean; detach?: () => void } | undefined;
   let expiry: ReturnType<typeof setTimeout> | undefined;
   const listeners = new Set<() => void>();
@@ -36,7 +36,6 @@ export function createUpdateAdmission(o: { readonly finishing?: boolean } = {}) 
     expiry.unref?.();
   };
   return {
-    /** Called synchronously before a producer registers work or reaches its first await. */
     admit() {
       if (finishing && !closed) throw Object.assign(new Error(FINISHING), { code: "update-finishing" });
       const held = lease !== undefined && !(brokenForTest("reservation-lets-work-in") && !lease.committed);
@@ -46,7 +45,6 @@ export function createUpdateAdmission(o: { readonly finishing?: boolean } = {}) 
     revision: () => revision,
     installing: () => lease !== undefined,
     finishing: () => finishing,
-    /** The update startup's result carried this launch's token: writes go through from now on. */
     open() {
       if (!finishing) return;
       finishing = false;
@@ -57,31 +55,16 @@ export function createUpdateAdmission(o: { readonly finishing?: boolean } = {}) 
       if (closed || lease !== undefined) throw new Error(UPDATE_PAUSED);
       const token = randomUUID();
       lease = { token, target, committed: false };
-      // A renderer that disappears before handing off cannot strand admission.
       expire(token);
       notify();
       return token;
     },
-    /**
-     * `graceMs`: how long after main's connection goes this stays closed while
-     * main is still open. It is never shorter than the time the program that
-     * makes the change gives the old app to close: that program goes ahead if
-     * the app closes inside its time, and work let in before then would be cut.
-     */
     commit(token: string, target: string, release: string, disconnected?: AbortSignal, graceMs = HANDOFF_GRACE_MS) {
       if (lease?.token !== token || lease.target !== target || lease.committed || release === "" || release === token) return null;
-      // Transfer cancellation authority to main. A late renderer cancellation
-      // must not reopen admission after main has started the detached updater.
       if (!brokenForTest("commit-leaves-the-window-its-key")) lease.token = release;
       lease.committed = true;
-      // Main already knows this capability even if its reply is lost. Only
-      // explicit failure cancellation or server exit releases a committed install.
       clearTimeout(expiry);
       if (disconnected) {
-        // Main normally quits immediately after handoff. If it disconnects
-        // but stays open, the detached updater is still waiting for its PID;
-        // once that updater has given up, let normal work resume instead of
-        // stranding every client.
         const lost = () => expire(release, brokenForTest("grace-is-the-short-one") ? HANDOFF_GRACE_MS : graceMs);
         if (disconnected.aborted) lost();
         else {

@@ -1,21 +1,3 @@
-// Windows W-A (docs/design/installed-updates.md, section 3): an install made
-// by the Windows installer updates by running the checked installer of the
-// new version silently. No watcher and no automatic go-back.
-//
-// The click (after the server committed the approval): verify the download
-// again from its bytes, write updates/windows-pending.json, start
-// `<installer> /S --updated --force-run` detached, and quit. The installer's
-// running-app check (apps/desktop/build/installer.nsh) waits for this
-// install's processes to end, never kills, then installs and starts the new
-// version. An installer that is refused (Smart App Control, a policy) or
-// ends at once leaves the running app as it was: the note is removed and the
-// person reads where the checked installer is, to run it themselves.
-//
-// The next launch reads the note: the version it names is running, so it says
-// "Updated to version <v>." once; or the update did not finish, and it names
-// the installer. The running version's folder in updates/ stays: it is the
-// kept installer the next update names to go back with (the server's cleanup
-// keeps it).
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -27,18 +9,16 @@ import type { UpdateAndRestartResult } from "../bridge.ts";
 import * as words from "@gates-local/update/installed/words";
 
 export const PENDING_FILE = "windows-pending.json";
-/** Silent, as an update (the stock close prompt is skipped), and start the app when done. */
+// external: the Windows installer reads /S as silent, --updated as an update with no close prompt, --force-run as start after.
 export const INSTALLER_ARGS = ["/S", "--updated", "--force-run"] as const;
-/** The installer leaves this next to the app; a copy without it was not installed by it. */
+// external: the Windows installer leaves this next to the app; a copy without it was not installed by it.
 export const UNINSTALLER = "Uninstall Gates Local.exe";
-/** How long a started installer must keep running before the app quits for it. It waits for this app, so it cannot finish sooner. */
+// why: the installer waits for this app to quit, so it cannot finish inside this time.
 export const INSTALLER_GRACE_MS = 2_000;
 
-/** What the click wrote before it started the installer. */
 export interface Pending {
   readonly from: string;
   readonly to: string;
-  /** SHA-512 of the signed list the person approved. */
   readonly listDigest: string;
   readonly installer: string;
   readonly at: number;
@@ -48,7 +28,6 @@ export const pendingFile = (dataDir: string) => path.join(updatesRoot(dataDir), 
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-/** Write, flush, rename into place. Windows cannot open a folder to flush it; the rename is what it has. */
 export function writePending(dataDir: string, pending: Pending): void {
   const file = pendingFile(dataDir);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -61,6 +40,7 @@ export function writePending(dataDir: string, pending: Pending): void {
     fs.closeSync(fd);
   }
   fs.renameSync(tmp, file);
+  // external: Windows cannot open a folder to flush it, so there the rename is the last step.
   if (process.platform !== "win32") {
     const dir = fs.openSync(path.dirname(file), "r");
     try { fs.fsyncSync(dir); } finally { fs.closeSync(dir); }
@@ -86,14 +66,8 @@ export type Settled =
   | { readonly kind: "none" }
   | { readonly kind: "updated"; readonly to: string }
   | { readonly kind: "did-not-finish"; readonly to: string; readonly installer: string }
-  /** A note that does not decode, or names a version below the running one (installed by hand since): removed, nothing said. */
   | { readonly kind: "dropped"; readonly why: string };
 
-/**
- * Step 6, before the server starts: the note becomes the result the server
- * shows once (update-result.json), then the note goes. A crash between the
- * two says it again on the next launch, never not at all.
- */
 export function settlePending(dataDir: string, running: string, now: () => number = Date.now): Settled {
   let raw: string;
   try { raw = fs.readFileSync(pendingFile(dataDir), "utf8"); }
@@ -123,12 +97,6 @@ export function settlePending(dataDir: string, running: string, now: () => numbe
 
 export type InstallerStart = { readonly started: true } | { readonly started: false; readonly why: string };
 
-/**
- * Starts the installer on its own, outside this app, so it outlives the quit.
- * Started means it was still running after the grace period: a refusal shows
- * as a spawn error, and a run that ends at once (another installer open, a
- * check that could not run) as an exit inside the grace.
- */
 export function startInstaller(file: string, o: { readonly graceMs?: number } = {}): Promise<InstallerStart> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
@@ -156,9 +124,7 @@ export function startInstaller(file: string, o: { readonly graceMs?: number } = 
 
 export interface WindowsClick {
   readonly dataDir: string;
-  /** This copy's version. */
   readonly running: string;
-  /** verifyPrepared for this copy; it deletes a folder that fails. */
   readonly verify: (version: string) => Promise<Verified>;
   readonly start: (installer: string) => Promise<InstallerStart>;
   readonly quit: () => void;
@@ -168,7 +134,6 @@ export interface WindowsClick {
 
 const TARGET = /^(\d+\.\d+\.\d+):([a-f0-9]{128})$/;
 
-/** Step 4, once the server has committed the approval of `<version>:<list digest>`. */
 export async function startWindowsUpdate(target: string, o: WindowsClick): Promise<UpdateAndRestartResult> {
   const match = TARGET.exec(target);
   if (match === null) return { ok: false, message: "An exact checked version and current server approval are required. Check for updates again." };
@@ -194,11 +159,6 @@ export async function startWindowsUpdate(target: string, o: WindowsClick): Promi
   return { ok: true };
 }
 
-/**
- * Step 7: the installer of the newest version below the running one that is
- * still kept and checks out, for the status page of a version whose server
- * failed. Null when there is none.
- */
 export async function goBackInstaller(o: Identity): Promise<string | null> {
   const own = parseRelease(`v${o.running}`);
   if (own === null) return null;

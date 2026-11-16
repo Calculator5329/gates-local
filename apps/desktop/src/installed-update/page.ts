@@ -1,8 +1,3 @@
-// The pages an installed update shows in a window with no server behind it:
-// the watcher's failure pages, the token launch's "finishing" page, and the
-// launch routing's refusals (section 8's sentences). No script runs here: the
-// release page and the one action are links, and main catches the navigation
-// (an action) or opens it in the system browser (the release page).
 import { escapeHtml } from "../status-page.ts";
 import type { Words } from "@gates-local/update/installed/words";
 
@@ -12,10 +7,8 @@ const LABELS: Record<PageAction, string> = { continue: "Start Gates Local" };
 
 export interface UpdatePage {
   readonly words: Words;
-  /** The release page, for words that send the person there. */
   readonly releasePage: string | null;
   readonly actions: readonly PageAction[];
-  /** More lines under the words, one paragraph each: what a source checkout's start says about an update left unfinished. */
   readonly lines?: readonly string[];
 }
 
@@ -48,7 +41,6 @@ ${actions}
 </html>`;
 }
 
-/** The action a navigation names, or null for any other address. */
 export function pageAction(url: string): PageAction | null {
   if (!url.startsWith(ACTION_SCHEME)) return null;
   const name = url.slice(ACTION_SCHEME.length);

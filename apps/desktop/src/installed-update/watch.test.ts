@@ -581,6 +581,16 @@ describe("endings outside the matrix", () => {
     expect(w.transaction()?.intent).toBe("launch-old");
   });
 
+  it("B1: T1's stop cannot be confirmed: stuck, naming the new version, the store untouched", async () => {
+    const w = new World({ newAcks: false });
+    w.unstoppable = "new";
+    const { end, log } = await update(w);
+    expect(end).toEqual({ outcome: "stuck", words: words.stuck(TO), intent: "stop-new" });
+    expect(w.transaction()?.intent).toBe("stop-new");
+    expect(log.spawns).toHaveLength(1);
+    expect(existsSync(w.aside)).toBe(false);
+  });
+
   it("S3: a file the watcher did not put at the path is the unknown file: rollback-failed, touch nothing", async () => {
     const w = new World();
     const log = newLog();
@@ -663,6 +673,23 @@ describe("endings outside the matrix", () => {
     const { end, log } = await update(w, [{ op: "removeTree", match: is(w.download), code: "EACCES" }]);
     expect(end).toMatchObject({ outcome: "stopped", cleaned: false, startApp: true });
     expect(log.ordinary).toBe(1);
+  });
+
+  it("the app is started only once update.lock is free", async () => {
+    const w = new World(); w.free = 10;
+    const fx = w.effects(newLog());
+    const freeAtStart: boolean[] = [];
+    const probing: WatcherEffects = {
+      ...fx,
+      startOrdinary: () => {
+        const taken = acquireFileLock(updateLockFile(w.dataDir));
+        freeAtStart.push(taken.ok);
+        if (taken.ok) taken.lock.release();
+      },
+    };
+    beginUpdate(w.approval, { spawnWatcher: () => undefined, fs: fx.fs, earlierFailure: false });
+    expect(await runWatcher(w.file, probing)).toMatchObject({ outcome: "stopped", startApp: true });
+    expect(freeAtStart).toEqual([true]);
   });
 
   it("C retried by an ordinary launch: row C's deletes only, nothing started, no result written; the transaction goes once they succeed", async () => {

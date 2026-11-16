@@ -96,6 +96,23 @@ describe("without a crash", () => {
   });
 });
 
+describe("what a stop point means", () => {
+  // B4's own action records the old version's ack as `went-back`; C's own action removes the record.
+  const OWN_WRITE: Partial<Record<Row, string | null>> = { B4: "went-back", C: null };
+  it.each([["forward", {}], ["go-back", { newAcks: false }]] as const)("on the %s path no row has written the next row's intent by its .after point", async (_path, options) => {
+    const w = new World(options);
+    const fx = w.effects(newLog());
+    const intents = new Map<StopPoint, string | null>();
+    const stopAt = (point: StopPoint) => { intents.set(point, w.transaction()?.intent ?? null); fx.stopAt?.(point); };
+    beginUpdate(w.approval, { spawnWatcher: () => {}, stopAt, fs: fx.fs, earlierFailure: false });
+    await runWatcher(w.file, { ...fx, stopAt });
+    const rows = [...intents.keys()].filter(point => point.endsWith(".before")).map(rowOf);
+    expect(rows.length).toBeGreaterThan(8);
+    const moved = rows.filter(row => intents.get(`${row}.after`) !== (row in OWN_WRITE ? OWN_WRITE[row] : intents.get(`${row}.before`)));
+    expect(moved).toEqual([]);
+  });
+});
+
 describe("forward path, killed at each point, then resumed", () => {
   it.each(FORWARD)("%s", async point => {
     const w = new World();

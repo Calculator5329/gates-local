@@ -1,7 +1,3 @@
-// Row H in the old main (docs/design/installed-updates.md, section 2), once
-// the server has committed the person's approval of `<version>:<list digest>`:
-// re-verify the download from its bytes, check it is the approved list, build
-// the approval with this app's process records, begin, and quit.
 import { inUpdatesFolder, type Verified } from "@gates-local/update/installed/download";
 import { INSTALL_REFUSAL, type Restart } from "@gates-local/update/installed/copy";
 import type { ProcessRecord } from "@gates-local/update/identity";
@@ -14,15 +10,11 @@ import * as words from "@gates-local/update/installed/words";
 export interface InstalledClick {
   readonly restart: Restart;
   readonly copy: Copy | null;
-  /** This copy's version. */
   readonly running: string;
   readonly serverPid: number | undefined;
-  /** verifyPrepared for this copy; it deletes a folder that fails. */
   readonly verify: (version: string) => Promise<Verified>;
-  /** beginUpdate with the real effects. */
   readonly begin: (approval: Approval) => Begin;
   readonly record: (pid: number) => ProcessRecord;
-  /** The uptime read before the server was asked to commit (launchApprovedUpdate): the deadline counts from it, not from the end of the re-check below. */
   readonly askedAt: number;
   readonly bootId: () => string;
   readonly quit: () => void;
@@ -31,7 +23,7 @@ export interface InstalledClick {
 const NOT_READY = "The app server is not ready to approve an update. Try again after it reconnects.";
 
 function cannot(restart: Exclude<Restart, "yes">, version: string): string {
-  // A Windows install updates through windows.ts; this click replaces an AppImage only.
+  // why: a Windows install updates through windows.ts, so this click refuses it like one that cannot.
   if (restart === "none" || restart === "windows") return INSTALL_REFUSAL;
   if (restart === "pinned") return words.pinnedDataFolder(version).text;
   return words.cannotReplace(restart, version).text;
@@ -42,7 +34,6 @@ export async function startInstalledUpdate(target: string, o: InstalledClick): P
   if (match === null) return { ok: false, message: "An exact checked version and current server approval are required. Check for updates again." };
   const [, version, digest] = match as unknown as [string, string, string];
   if (o.restart !== "yes" || o.copy === null) return { ok: false, message: cannot(o.restart === "yes" ? "not-appimage" : o.restart, version) };
-  // The server refuses this first; a program inside the download folder is never replaced in place.
   if (inUpdatesFolder(o.copy.dataDir, o.copy.program)) return { ok: false, message: cannot("download-folder", version) };
   if (o.serverPid === undefined) return { ok: false, message: NOT_READY };
   const verified = await o.verify(version);

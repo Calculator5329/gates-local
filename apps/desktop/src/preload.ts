@@ -1,6 +1,3 @@
-// Sandboxed preload: exposes window.gatesLocal (GatesLocalBridge) and nothing
-// else. Bundled to out/preload.cjs; may import only bridge.ts and electron.
-
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import { BRIDGE_KEY, IPC, type BridgeState, type GatesLocalBridge, type RestartResult, type UpdateAndRestartResult } from "./bridge.ts";
 

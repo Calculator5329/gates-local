@@ -1,46 +1,34 @@
-// One guard of the update code, switched off for the length of one test.
-//
-// The rules an update keeps (no work starts after the person approved, a
-// start never runs a half-installed copy, nothing of the person's is written
-// over) each rest on a line of code. A test of such a rule proves little
-// until it has been seen to fail with that line gone. So each guard asks
-// `brokenForTest` with its own name, and the rule's test runs twice: as it
-// is, and with the guard off, where it must fail.
-//
-// Nothing outside a test can turn a guard off. `breakForTest` is the only
-// way to set one and it throws unless the test runner started this process;
-// break-for-test.test.ts reads every source file and fails when one that is
-// not a test calls it. There is no flag, variable or setting that reaches it.
-
-/** The guards that can be switched off, each named for what goes wrong without it. */
+/**
+ * The guards a test can switch off, each named for what goes wrong without it:
+ * - grace-is-the-short-one: the server lets work back in after its short wait while an installed copy's update can still go ahead.
+ * - reservation-lets-work-in: a reservation alone does not keep new work out.
+ * - commit-leaves-the-window-its-key: the window keeps the key that can call the update off after main took over.
+ * - cancel-after-a-good-start: main calls the update off after it started the updater.
+ * - deadline-read-once: the updater reads the approval's deadline before its wait and not after.
+ * - checkout-start-skips-the-look: a source checkout's start does not read the lock or the saved update.
+ * - part-way-copy-not-refused: a copy part way between two versions is not refused.
+ * - update-saved-after-the-change: the update is saved only after the command that changes the copy has ended.
+ * - go-back-over-edits: going back does not stop for the person's edits, and resets over them.
+ * - installed-start-skips-the-look: an installed copy's start does not read the saved update.
+ * - program-written-in-place: the new program is written over the old file in place of a rename.
+ * - delete-a-folder-in-use: a version folder is deleted without asking whether it is in use.
+ * - go-back-drops-the-store: going back deletes the thread store it should move aside.
+ * - any-ready-note-counts: a ready note from any launch counts as this one's.
+ */
 export const BREAKS = [
-  /** The server lets work back in after its short wait, while an installed copy's update can still go ahead. */
   "grace-is-the-short-one",
-  /** A reservation alone does not keep new work out. */
   "reservation-lets-work-in",
-  /** The window keeps the key that can call the update off, after main took over. */
   "commit-leaves-the-window-its-key",
-  /** Main calls the update off after it started the updater. */
   "cancel-after-a-good-start",
-  /** The updater reads the approval's deadline once, before its wait, and not after. */
   "deadline-read-once",
-  /** A source checkout's start does not read the lock or the saved update. */
   "checkout-start-skips-the-look",
-  /** A copy part way between two versions is not refused. */
   "part-way-copy-not-refused",
-  /** The update is saved only after the command that changes the copy has ended. */
   "update-saved-after-the-change",
-  /** Going back does not stop for the person's edits, and resets over them. */
   "go-back-over-edits",
-  /** An installed copy's start does not read the saved update. */
   "installed-start-skips-the-look",
-  /** The new program is written over the old file, in place of a rename. */
   "program-written-in-place",
-  /** A version folder is deleted without asking whether it is in use. */
   "delete-a-folder-in-use",
-  /** Going back deletes the thread store it should move aside. */
   "go-back-drops-the-store",
-  /** A ready note from any launch counts as this one's. */
   "any-ready-note-counts",
 ] as const;
 

@@ -25,6 +25,19 @@ it("SR-04: refuses a real symlink substituted after the owned folder was display
   expect(actions.modelsFolder()).toBeNull();
 });
 
+it("SR-04: refuses an owned folder reached through a linked parent", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "models-parent-"));
+  mkdirSync(path.join(root, "store", "models"), { recursive: true });
+  symlinkSync(path.join(root, "store"), path.join(root, "alias"), "dir");
+  const models = path.join(root, "alias", "models");
+  const record = { pid: 1, startTime: "1", command: "ollama serve", baseUrl: "http://runtime.invalid", binary: "/app/ollama", startedAt: 1, modelsDir: models };
+  const openPath = vi.fn(async (_folder: string) => "");
+  const actions = modelFolderActions({ ownership: () => ({ kind: "ours", record }), isFolder: folder => statSync(folder).isDirectory(), openPath });
+  expect(actions.modelsFolder()).toBeNull();
+  await actions.openModelsFolder();
+  expect(openPath).not.toHaveBeenCalled();
+});
+
 describe("SQ-01: main resolves the owned models folder", () => {
   const models = mkdtempSync(path.join(tmpdir(), "owned-models-"));
   const record = { pid: 1, startTime: "1", command: "ollama serve", baseUrl: "http://runtime.invalid", binary: "/app/ollama", startedAt: 1, modelsDir: models };

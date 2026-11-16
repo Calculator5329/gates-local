@@ -9,7 +9,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LIST_FILE, SIGNATURE_FILE, verifyPrepared } from "@gates-local/update/installed/download";
 import { artifactFile, listFor, releaseKey, sha512 } from "@gates-local/update/installed/testing";
-import { readRecord } from "@gates-local/update/record";
+import { readRecord, RECORD_FILE } from "@gates-local/update/record";
 import { goBackInstaller, INSTALLER_ARGS, pendingFile, settlePending, startInstaller, startWindowsUpdate, writePending, type WindowsClick } from "./windows.ts";
 
 const key = releaseKey();
@@ -159,6 +159,13 @@ describe("the next launch reads the note", () => {
     expect(settlePending(dataDir, NEXT)).toMatchObject({ kind: "dropped" });
     expect(fs.existsSync(pendingFile(dataDir))).toBe(false);
     expect(readRecord(dataDir)).toBeUndefined();
+  });
+
+  it("WS-11 the note goes only after its result is written, so a result that cannot be written is said next launch", () => {
+    note(NEXT);
+    fs.mkdirSync(path.join(dataDir, RECORD_FILE, "blocked"), { recursive: true });
+    expect(() => settlePending(dataDir, NEXT)).toThrow();
+    expect(fs.existsSync(pendingFile(dataDir))).toBe(true);
   });
 });
 

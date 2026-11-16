@@ -1,5 +1,3 @@
-// Kept diagnostics: at most five 64 KiB reports, including escaped JSON bytes.
-// Only this feature's generated, single-link regular files are rotated.
 import { randomBytes } from "node:crypto";
 import { closeSync, fstatSync, lstatSync, openSync, readdirSync, readSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
 import { join } from "node:path";
@@ -13,13 +11,11 @@ const REDACTED = "[redacted]";
 const TRUNCATED = "[...TRUNCATED...] ";
 const lines = (text: string) => text === "" ? [] : text.split("\n");
 
-/** Redact before cutting, including any token that crosses the eventual cut. */
 function boundedText(text: string, token: string | undefined, limit: number, encode: (value: string) => string = JSON.stringify): string {
   const clean = token ? text.replaceAll(token, REDACTED) : text;
   const fits = (value: string) => Buffer.byteLength(encode(value), "utf8") <= limit;
   if (fits(clean)) return clean;
   const tail = (offset: number) => {
-    // Neither UTF-16 pairs nor replacement markers should be cut in half.
     const unit = clean.charCodeAt(offset);
     if (unit >= 0xdc00 && unit <= 0xdfff) offset++;
     const marker = clean.lastIndexOf(REDACTED, offset);
@@ -36,7 +32,6 @@ function boundedText(text: string, token: string | undefined, limit: number, enc
   return tail(low);
 }
 
-/** Also cap retained in-memory lines and console forwarding, before reporting. */
 export function boundedServerOutput(line: string, token: string): string {
   return boundedText(line, token, MAX_BYTES);
 }
@@ -65,13 +60,12 @@ function missing(error: unknown): boolean {
 const same = (a: Stats, b: Stats) => a.dev === b.dev && a.ino === b.ino;
 const regular = (stat: Stats) => stat.isFile() && stat.nlink === 1;
 
-/** Recognize new reports and the previous writer's header without reading a huge legacy payload. */
 function ownReport(file: string, stat: Stats): boolean {
   const fd = openSync(file, "r");
   try {
     const opened = fstatSync(fd);
     if (!regular(opened) || !same(opened, stat)) return false;
-    // Long enough to reach execPath after any real entry path.
+    // why: 8 KiB reaches the execPath field after any real entry path.
     const prefix = Buffer.alloc(8 * 1024);
     const bytes = readSync(fd, prefix, 0, prefix.length, 0);
     const text = prefix.toString("utf8", 0, bytes);
@@ -125,8 +119,7 @@ export function writeServerFailureReport(dataDir: string, failure: Failure, toke
   const report = encode(stderr);
   if (Buffer.byteLength(report, "utf8") > MAX_BYTES) throw new Error("server failure metadata exceeds the report byte limit");
   const file = join(dataDir, `server-failure-${Date.now()}-${randomBytes(6).toString("hex")}.json`);
-  // Rotate first: if deletion is refused, do not grow storage with a new file.
-  // Oversized legacy reports are removed too, so old output cannot evade the cap.
+  // why: rotating first means a refused delete stops the write, so storage never grows past the cap.
   reserveReportSlot(dataDir);
   writeFileSync(file, report, { flag: "wx", mode: 0o600 });
   return file;

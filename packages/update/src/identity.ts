@@ -1,8 +1,3 @@
-// Telling a process from a later one that was given the same number.
-//
-// A process id alone says nothing once the process is gone: the system hands
-// the number out again. The start time, where the platform gives it, tells
-// them apart. Node built-ins only, like everything the updater imports.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { uptime } from "node:os";
@@ -18,10 +13,10 @@ const exec: Exec = (command, args) =>
 /** Field 22 of a /proc stat line, the start time. The process name is in brackets and can hold spaces and brackets, so this counts from after the last one. */
 export const startTicks = (stat: string): string | undefined => stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
 
-/** Clock ticks since boot, with the boot's id: the ticks alone repeat after a restart. */
 function linuxStart(pid: number): string | null {
   try {
     const ticks = startTicks(readFileSync(`/proc/${pid}/stat`, "utf8"));
+    // external: Linux counts start ticks from boot, so they repeat after a restart; the boot id tells boots apart.
     const boot = readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
     return ticks === undefined ? null : `${boot}:${ticks}`;
   } catch {
@@ -56,13 +51,16 @@ export function windowsBootTime(run: Exec = exec): string | null {
   } catch { return null; }
 }
 
-/** A command the updater started, as saved in the transaction. */
+/**
+ * A command the updater started, as saved in the transaction. `uptime` is the
+ * computer's when it was saved, and only goes down across a restart. `boot` is
+ * Windows' LastBootUpTime as UTC FILETIME, absent on older records or when the
+ * lookup failed.
+ */
 export interface ProcessRecord {
   readonly pid: number;
   readonly start: string | null;
-  /** The computer's uptime when this was saved. It only ever goes down across a restart. */
   readonly uptime: number;
-  /** LastBootUpTime as UTC FILETIME. Absent on older records or an unreadable lookup. */
   readonly boot?: string;
 }
 
@@ -79,13 +77,13 @@ export function createProcessRecorder(o: TreeCheck = {}): (pid: number) => Proce
   return pid => processRecord(pid, { ...o, platform, bootTime: () => boot });
 }
 
+/** `requireWholeWindowsTree`: a saved desktop launch, whose helpers may outlive its Windows root. */
 export interface TreeCheck {
   readonly platform?: NodeJS.Platform;
   readonly exists?: (pid: number) => boolean;
   readonly startOf?: (pid: number) => string | null;
   readonly uptime?: () => number;
   readonly bootTime?: () => string | null;
-  /** A saved desktop launch may retain helpers after its Windows root disappears. */
   readonly requireWholeWindowsTree?: boolean;
 }
 
@@ -101,13 +99,10 @@ export function treeGone(r: ProcessRecord, o: TreeCheck = {}): boolean {
     const current = (o.bootTime ?? windowsBootTime)();
     if (isWindowsBootTime(current) && BigInt(current) > BigInt(r.boot)) return true;
   }
-  // A later updater has no owned taskkill acknowledgement or job handle.
-  // Until boot evidence or uptime proves a restart, neither root absence nor PID reuse can
-  // certify a saved Windows desktop launch's descendants have stopped.
   if (o.requireWholeWindowsTree === true && platform === "win32") return false;
   const exists = o.exists ?? (platform === "win32" ? isAlive : groupExists);
   if (!exists(r.pid)) return true;
-  // A number still in use as a group is never handed out again, so a different process there means the group ended.
+  // external: POSIX never hands out a process id still in use as a group id.
   const now = r.start === null ? null : (o.startOf ?? startOf)(r.pid);
   return now !== null && now !== r.start;
 }

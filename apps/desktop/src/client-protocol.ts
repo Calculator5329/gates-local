@@ -1,24 +1,12 @@
-// The built web client is served on its own scheme, gates-local://app, not
-// file://. Electron's security checklist warns that a file:// page can read
-// other local files, and the renderer shows model output. The scheme also
-// gives the WebSocket upgrade a fixed Origin the server can allow exactly
-// (a file:// page sends "file://", which every local file shares).
-// Pure functions only, so the mapping is tested without Electron.
-
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+// external: Electron's security checklist warns that a file:// page can read other local files.
 export const CLIENT_SCHEME = "gates-local";
 export const CLIENT_HOST = "app";
 export const CLIENT_ORIGIN = `${CLIENT_SCHEME}://${CLIENT_HOST}`;
 
-/**
- * Scheme and host of a URL. WHATWG URL gives "null" as the origin of a
- * non-special scheme such as gates-local:, so two different custom schemes
- * would compare equal; this compares what Chromium sends instead.
- * file: and unparsable URLs give null: they are never an allowed origin.
- */
 export function originOf(url: string): string | null {
   let parsed: URL;
   try {
@@ -28,10 +16,6 @@ export function originOf(url: string): string | null {
   }
   if (parsed.protocol === "file:" || parsed.host === "") return null;
   if (SPECIAL_SCHEMES.has(parsed.protocol)) return `${parsed.protocol}//${parsed.host}`;
-  // WHATWG keeps a non-special host opaque (gates-local://APP stays "APP"),
-  // but gates-local is registered as a standard scheme, so Chromium
-  // canonicalises its host like http's: lowercase, percent-decoded. Reparse
-  // the host as http to match what the renderer sends; keep the port as given.
   let host: string;
   try {
     host = new URL(`http://${parsed.hostname}/`).hostname;
@@ -43,12 +27,6 @@ export function originOf(url: string): string | null {
 
 const SPECIAL_SCHEMES = new Set(["http:", "https:", "ws:", "wss:", "ftp:"]);
 
-/**
- * The URL to open in the system browser for a link the client follows, or
- * null. Only http and https pages with a host and no credentials go out:
- * a reply is model output, and file:, javascript:, custom OS schemes and
- * user:pass@ links must never reach the shell.
- */
 export function externalUrl(target: string): string | null {
   let url: URL;
   try {
@@ -61,7 +39,6 @@ export function externalUrl(target: string): string | null {
   return url.href;
 }
 
-/** True when target is a page of the client at clientUrl (a file client must match its path). */
 export function sameClient(clientUrl: string, target: string): boolean {
   let client: URL;
   let next: URL;
@@ -76,11 +53,6 @@ export function sameClient(clientUrl: string, target: string): boolean {
   return origin !== null && origin === originOf(target);
 }
 
-/**
- * The file under root that a gates-local://app request names, or null when
- * the request is for another host, does not decode, or would leave root.
- * pathImpl is a parameter so the Windows rules are tested on Linux.
- */
 export function clientFile(root: string, requestUrl: string, pathImpl: typeof path = path): string | null {
   let url: URL;
   try {
@@ -102,7 +74,6 @@ export function clientFile(root: string, requestUrl: string, pathImpl: typeof pa
   return isInside(base, file, pathImpl) ? file : null;
 }
 
-/** True when file is strictly under base (not base itself). */
 function isInside(base: string, file: string, pathImpl: typeof path = path): boolean {
   const inside = pathImpl.relative(base, file);
   return inside !== "" && inside.split(pathImpl.sep)[0] !== ".." && !pathImpl.isAbsolute(inside);
@@ -110,14 +81,7 @@ function isInside(base: string, file: string, pathImpl: typeof path = path): boo
 
 export type Served = { kind: "file"; path: string } | { kind: "refused" } | { kind: "missing" };
 
-/**
- * The real file a gates-local://app request may be served from. clientFile's
- * check is lexical, and Electron's file fetch follows links without its own
- * checks, so a symlink or Windows junction under the root could expose a file
- * outside it. This resolves the root and the file and checks containment on
- * the resolved paths. "missing" (no such file, or a directory) makes the
- * handler fail the load, so the window shows the retry page.
- */
+// external: Electron's file fetch follows links with no checks of its own, so containment uses real paths.
 export async function servedFile(root: string, requestUrl: string): Promise<Served> {
   const file = clientFile(root, requestUrl);
   if (file === null) return { kind: "refused" };
@@ -137,13 +101,6 @@ export async function servedFile(root: string, requestUrl: string): Promise<Serv
   }
 }
 
-/**
- * The gates-local:// handler's answer. A refused path is a plain 404; a
- * missing file rejects, which fails the load and routes a main frame to the
- * retry page. Electron logs a rejection, and a link into the client can carry
- * a token in its path, query or fragment, so the error names nothing from
- * the request.
- */
 export async function clientResponse(root: string, requestUrl: string, fetchFile: (fileUrl: string) => Promise<Response>): Promise<Response> {
   const served = await servedFile(root, requestUrl);
   if (served.kind === "refused") return new Response("Not found", { status: 404 });

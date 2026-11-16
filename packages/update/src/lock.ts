@@ -1,23 +1,3 @@
-// One update of a checkout at a time, from before the first look at the
-// checkout until after the last rollback step.
-//
-// The lock is a file in the checkout's own git folder, so it follows the
-// checkout rather than the data folder, and it never shows in `git status`.
-// Node built-ins only: it has to work while node_modules is being replaced.
-//
-// A crash leaves the file behind. The only way past a lock is that its owner
-// has ended: the process is gone, or its number now belongs to a process that
-// started at another time. A live owner is never taken over, however long it
-// has been quiet, because it may have a command running.
-//
-// Replacing a dead owner's lock takes a claim first, so only one run can do
-// it. A claim is a file named after the exact lock it replaces, created
-// exclusively, and that lock's contents are compared again while it is held.
-// A lock is never written twice, so a run that paused and claims late finds a
-// different file and stops. Claims can be left by a crash too: when the
-// holder of one has ended, the next run takes the next rung up, and whoever
-// finishes clears them all. The lock is replaced by a rename, so the path is
-// never empty for a third run to walk into.
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, fsyncSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
 import path from "node:path";
@@ -26,9 +6,8 @@ import { startOf } from "./identity.ts";
 import { isAlive } from "./wait.ts";
 
 export const LOCK_FILE = "gates-local-update.lock";
-/** A file with no owner written in it yet is someone between creating and writing it. */
 const BEING_WRITTEN_MS = 60_000;
-/** More crashes in a row, each inside a takeover, than can really happen: past this the person is told. */
+// why: more crashes in a row, each inside a takeover, than can really happen.
 const MAX_RUNGS = 32;
 
 /**
@@ -55,7 +34,6 @@ export function stateDir(root: string): string | null {
 }
 
 export interface UpdateLock {
-  /** False once the file no longer holds this run's token. */
   stillOurs(): boolean;
   release(): void;
 }
@@ -67,7 +45,6 @@ export interface LockOptions {
   readonly alive?: (pid: number) => boolean;
   readonly startOf?: (pid: number) => string | null;
   readonly now?: () => number;
-  /** Where a test holds this run: after it judged the lock, and inside the takeover. */
   readonly pauseAt?: (at: "judged" | "taking-over") => void;
 }
 
@@ -87,7 +64,6 @@ function parseOwner(raw: string): { pid: number | null; start: string | null } {
   }
 }
 
-/** A lock or claim as it is now; null when there is none. */
 function read(file: string): Seen | null {
   try {
     const raw = readFileSync(file, "utf8");
@@ -98,7 +74,6 @@ function read(file: string): Seen | null {
   }
 }
 
-/** Has this owner ended? Not knowing counts as no: a live number with no start time to compare is the same process. */
 function ended(s: Seen, o: LockOptions): boolean {
   if (s.pid === null) return (o.now ?? Date.now)() - s.touchedAt > BEING_WRITTEN_MS;
   if (!(o.alive ?? isAlive)(s.pid)) return true;
@@ -107,7 +82,6 @@ function ended(s: Seen, o: LockOptions): boolean {
   return now !== null && now !== s.start;
 }
 
-/** Creates the file only if there is none; false when there is one. */
 function create(file: string, text: string): boolean {
   let fd: number;
   try {
@@ -128,7 +102,6 @@ function create(file: string, text: string): boolean {
   return true;
 }
 
-/** Puts `text` at `file` in one step, whole and on disk. False when the system would not. */
 function replace(file: string, text: string): boolean {
   const tmp = `${file}.${randomUUID()}.tmp`;
   try {
@@ -154,20 +127,17 @@ function clearClaims(file: string, prefix: string): void {
   }
 }
 
-/** The claim on one exact lock, or why there is none: busy, someone else's and live; gone, that lock has been dealt with. */
 function claim(file: string, prefix: string, holder: string, o: LockOptions): string | "busy" | "gone" {
   for (let rung = 0; rung < MAX_RUNGS; rung++) {
     const candidate = path.join(path.dirname(file), `${prefix}${rung}`);
     if (create(candidate, holder)) return candidate;
     const other = read(candidate);
     if (other === null) return "gone";
-    // Only rungs whose holders have ended are stepped over, so at most one live run holds a claim on this lock.
     if (!ended(other, o)) return "busy";
   }
   return "busy";
 }
 
-/** Swaps a lock whose owner has ended for this run's. "changed" means look again. */
 function takeOver(file: string, judged: string, text: string, holder: string, o: LockOptions): "taken" | "busy" | "changed" {
   const prefix = `${path.basename(file)}.takeover.${createHash("sha256").update(judged).digest("hex").slice(0, 16)}.`;
   const claimed = claim(file, prefix, holder, o);
@@ -178,7 +148,7 @@ function takeOver(file: string, judged: string, text: string, holder: string, o:
     if (read(file)?.raw !== judged) return "changed";
     return replace(file, text) ? "taken" : "busy";
   } finally {
-    // Every rung names a lock that is gone, or this run failed to replace it: either way no one is relying on them.
+    // why: every rung names a lock that is gone or one this run failed to replace; none is relied on.
     clearClaims(file, prefix);
   }
 }
@@ -214,7 +184,7 @@ export function acquireFileLock(file: string, o: LockOptions = {}): Acquired {
   const pid = o.pid ?? process.pid;
   const start = (o.startOf ?? startOf)(pid);
   const text = JSON.stringify({ pid, start, startedAt: (o.now ?? Date.now)(), token: randomUUID() });
-  // Each pass either takes it, finds an owner or replaces a dead one; a few passes cover a release in between.
+  // why: a few passes cover an owner that releases the lock between our create and our read.
   for (let pass = 0; pass < 3; pass++) {
     if (create(file, text)) return { ok: true, lock: held(file, text) };
     const seen = read(file);

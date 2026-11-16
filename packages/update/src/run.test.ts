@@ -3,11 +3,11 @@
 // subprocess does, so ending only the immediate process leaves `close` unfired.
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type TreeStop, createRunner, endTree, groupExists, realRunner } from "./run.ts";
+import { type TreeStop, commandEnv, createRunner, endTree, groupExists, realRunner } from "./run.ts";
 import { type Repos, makeRepos, removeRepos, testEnv } from "./testing.ts";
 import { isAlive } from "./wait.ts";
 
@@ -24,6 +24,21 @@ afterEach(() => {
 });
 
 const pidIn = (file: string) => Number(readFileSync(file, "utf8").trim());
+
+describe("the environment a command gets", () => {
+  const elsewhere = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_ALTERNATE_OBJECT_DIRECTORIES"];
+
+  it("drops what would point git at another repository, and never lets git ask for a password", () => {
+    const env = commandEnv({ ...testEnv(r.base), ...Object.fromEntries(elsewhere.map(k => [k, path.join(r.base, "elsewhere")])), GIT_TERMINAL_PROMPT: "1", KEEP: "kept" });
+    for (const k of elsewhere) expect.soft(env[k], k).toBeUndefined();
+    expect(env).toMatchObject({ GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", KEEP: "kept" });
+  });
+
+  it("keeps git from looking for a repository above the test root", () => {
+    const env = commandEnv({ ...testEnv(r.base), GIT_CEILING_DIRECTORIES: path.parse(r.base).root });
+    expect(env["GIT_CEILING_DIRECTORIES"]).toBe(realpathSync(r.base));
+  });
+});
 
 it.skipIf(process.platform !== "linux").each(["orderly", "hard-exit", "early-exit", "exit-only", "updater"])("SN-CO-07 command groups end with their process (%s)", async mode => {
   const marker = path.join(r.base, "signal-cleanup");

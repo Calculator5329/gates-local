@@ -1,8 +1,7 @@
-// Clipboard metadata only. Never opens, stats or reads a copied file.
 const hasControls = (value: string) => [...value].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
 const PATH_FORMATS = ["text/uri-list", "application/x-kde4-urilist", "x-special/gnome-copied-files", "x-special/nautilus-clipboard"] as const;
 type PathFormat = typeof PATH_FORMATS[number];
-/** Electron 45 wraps unmapped platform formats; accept only these file-list names. */
+// external: Electron 45 wraps unmapped platform clipboard formats in `electron application/osclipboard`.
 export const pathClipboardTypes = (types: readonly string[]): (PathFormat | `electron application/osclipboard;format="${PathFormat}"`)[] => PATH_FORMATS.flatMap(format =>
   ([format, `electron application/osclipboard;format="${format}"`] as const).filter(type => types.includes(type)));
 export function parseClipboardPaths(text: string, platform: string): { paths: string[]; skipped: boolean } {
@@ -24,7 +23,7 @@ export function parseClipboardPaths(text: string, platform: string): { paths: st
         if (!/^(?:[a-z]:\\|\\\\)/i.test(pathname)) continue;
       } else if (uri.hostname && uri.hostname !== "localhost") continue;
       paths.push(pathname);
-    } catch { /* Malformed URI or percent escape: skip that entry. */ }
+    } catch {}
   }
   return { paths: [...new Set(paths)], skipped };
 }

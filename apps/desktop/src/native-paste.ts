@@ -1,7 +1,5 @@
 export interface PasteResult { paths: string[]; skipped: boolean; failed?: boolean; }
 
-// Main runs both scripts in one private isolated world. The page cannot read
-// this captured element or replace it by making another textarea with its id.
 export const capturePaste = (id: string): string => `(() => {
   const element = document.activeElement;
   if (!(element instanceof HTMLTextAreaElement) || element.id !== "ta" || element.disabled || element.readOnly || element.dataset.draftVersion === undefined) return false;

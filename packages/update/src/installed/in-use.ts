@@ -1,21 +1,3 @@
-// Whether a version folder under <data dir>/updates/ could be in use, asked
-// before every delete of one (the server's cleanup and the watcher's row C).
-// A download is the app's own until a person starts the program from it: then
-// the file is theirs, and no cleanup takes it.
-//
-// What can be known, and so what counts:
-//   1. a program this process says is running is inside the folder;
-//   2. the app was started from the folder before: the copy that found itself
-//      there left a note in it (STARTED_FILE; download.ts writes it);
-//   3. a process running now was started from a file inside it (Linux: /proc);
-//   4. a launcher points into it: a .desktop file in the menu, on the desktop
-//      or in autostart that names a file inside it, or a link to one from
-//      those folders or the person's bin folders.
-// When 3 or 4 cannot be read, the answer is "in use": the folder stays.
-//
-// Not known: a launcher kept anywhere else, and on Windows who is running.
-// There a version folder holds an installer, never the program the app runs
-// from, and Windows itself refuses to delete a file that is running.
 import fs from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -24,14 +6,16 @@ import { brokenForTest } from "../break-for-test.ts";
 /** The note in a version folder the app was started from: the time of the last such start. */
 export const STARTED_FILE = "started-here";
 
-/** A launcher file larger than this is not one: it is skipped. */
 const LAUNCHER_MAX_BYTES = 1_000_000;
 
-/** What the computer says about running programs and launchers. Each answers null when it could not be read. */
+/**
+ * What the computer says about running programs and launchers. Each answers
+ * null when it could not be read. `running` is the program file of every
+ * process this user can see; `launchers` is the text of each .desktop file
+ * and the file each link points to.
+ */
 export interface Look {
-  /** The program file of every running process this user can see. */
   readonly running: () => readonly string[] | null;
-  /** Each launcher: the text of a .desktop file, or the file a link points to. */
   readonly launchers: () => readonly string[] | null;
 }
 
@@ -44,24 +28,24 @@ export function real(file: string): string {
 }
 
 function runningPrograms(): readonly string[] | null {
+  // external: Windows refuses to delete a running file, and there a version folder holds an installer.
   if (process.platform !== "linux") return [];
   let names: string[];
   try { names = fs.readdirSync("/proc"); } catch { return null; }
   const programs: string[] = [];
   for (const name of names) {
     if (!/^\d+$/.test(name)) continue;
-    // No answer for a process that ended, a kernel thread, or another user's process.
-    try { programs.push(fs.readlinkSync(`/proc/${name}/exe`)); } catch { /* not this user's to see */ }
+    // external: Linux /proc has no exe link for an ended process, a kernel thread or another user's.
+    try { programs.push(fs.readlinkSync(`/proc/${name}/exe`)); } catch {}
   }
   return programs;
 }
 
 const absolute = (value: string | undefined, fallback: string) => (value !== undefined && path.isAbsolute(value) ? value : fallback);
 
-/** The desktop folder: the one user-dirs.dirs names, else ~/Desktop. */
 function desktopFolder(config: string, home: string): string {
   let text = "";
-  try { text = fs.readFileSync(path.join(config, "user-dirs.dirs"), "utf8"); } catch { /* the default applies */ }
+  try { text = fs.readFileSync(path.join(config, "user-dirs.dirs"), "utf8"); } catch {}
   const named = /^XDG_DESKTOP_DIR="(.+)"$/m.exec(text)?.[1]?.replace(/^\$HOME(?=\/|$)/, home);
   return named !== undefined && path.isAbsolute(named) ? named : path.join(home, "Desktop");
 }

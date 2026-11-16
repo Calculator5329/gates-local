@@ -1,5 +1,12 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { clipboardPaths, pathClipboardTypes } from "./clipboard.ts";
+
+it("imports nothing, so it can never open, stat or read a copied file", () => {
+  const source = readFileSync(new URL("./clipboard.ts", import.meta.url), "utf8");
+  expect(source).not.toMatch(/^\s*import\s/m);
+  expect(source).not.toMatch(/\brequire\s*\(|\bimport\s*\(/);
+});
 
 it("recognizes only file-list formats, including Electron's raw OS wrappers", () => {
   expect(pathClipboardTypes(["text/plain", 'electron application/osclipboard;format="x-special/gnome-copied-files"', "text/uri-list", 'electron application/osclipboard;format="application/x-kde4-urilist"', 'electron application/osclipboard;format="unrelated-format"'])).toEqual([

@@ -1,29 +1,17 @@
-// The one network read an installed copy makes for updates: a bounded GET
-// of the release list, its signature (contract: the signed version list of a
-// release, docs/releasing.md) or the artifact the list names.
-//
-// https only, every redirect too, at most FEED_LIMITS.redirects of them. The
-// copy adds no query string (a redirect's own query is followed as given:
-// GitHub's asset links are signed that way), sends no cookie and keeps none,
-// and names itself "Gates-Local" without a version. A body over its limit is dropped
-// as soon as it is seen. A test build alone may read a loopback http feed.
-//
-// streamGet is the read; what happens to a 200 body is the caller's Body.
-// boundedGet keeps a small body in memory (the list and its signature);
-// download.ts streams the artifact to disk through the same redirects,
-// refusals and timeouts.
 import http, { type IncomingMessage } from "node:http";
 import https from "node:https";
 
+/**
+ * `modelsBytes` is for the signed chat model list (models.json); the built-in
+ * one is under 4 KiB. `idleMs` covers connecting and any silence after;
+ * `totalMs` is the whole read, every redirect included.
+ */
 export const FEED_LIMITS = {
   redirects: 5,
   listBytes: 64 * 1024,
   signatureBytes: 1024,
-  /** The signed chat model list (models.json); the built-in one is under 4 KiB. */
   modelsBytes: 64 * 1024,
-  /** Connecting, and any silence after: one socket timeout covers both. */
   idleMs: 30_000,
-  /** The whole read, every redirect included. */
   totalMs: 60_000,
 } as const;
 
@@ -41,13 +29,12 @@ export type Get = (url: URL, maxBytes: number, signal: AbortSignal) => Promise<F
 /**
  * What a read does with a 200 body. Any result one of these returns ends the
  * read there and hangs up, so the rest of the body is never received.
+ * `declared` gets the Content-Length before a byte is read; `chunk` gets each
+ * chunk in order, and while a promise it returned is pending the response is paused.
  */
 export interface Body<T> {
-  /** The declared Content-Length, before a byte is read. */
   readonly declared?: (length: number) => T | undefined;
-  /** Each chunk in order. While a returned promise is pending the response is paused. */
   readonly chunk: (bytes: Buffer) => T | undefined | Promise<T | undefined>;
-  /** The whole body arrived. */
   readonly end: () => T;
 }
 
@@ -56,10 +43,9 @@ export type Streamed<T> = T | { readonly kind: "missing" } | { readonly kind: "f
 /** One read of url whose 200 body goes to body. */
 export type Stream = <T>(url: URL, body: Body<T>, signal: AbortSignal) => Promise<Streamed<T>>;
 
+/** `allowLoopbackHttp` is for test builds only: also read http from 127.0.0.1, localhost or [::1]. */
 export interface GetOptions {
-  /** Test builds only: also read http from 127.0.0.1, localhost or [::1]. */
   readonly allowLoopbackHttp?: boolean;
-  /** Tests shorten it; the default is FEED_LIMITS.idleMs. */
   readonly idleMs?: number;
 }
 
@@ -87,8 +73,6 @@ function once<T>(url: URL, body: Body<T>, idleMs: number, signal: AbortSignal): 
       resolve(answer);
     };
     const failed = (detail: string) => settle({ kind: "failed", detail });
-    // A body this read will not use is never read: hang up, so a server
-    // that keeps streaming it cannot hold the connection open.
     const hangUp = (answer: Answer<T>) => { request.destroy(); settle(answer); };
     const silent = () => new Error(`no answer for ${Math.round(idleMs / 1000)} seconds`);
     const read = (res: IncomingMessage) => {
@@ -104,7 +88,7 @@ function once<T>(url: URL, body: Body<T>, idleMs: number, signal: AbortSignal): 
       const declared = Number(res.headers["content-length"]);
       const early = Number.isFinite(declared) ? body.declared?.(declared) : undefined;
       if (early !== undefined) { hangUp(early); return; }
-      // The chunk after a pending write waits for it; end waits for the last one.
+      // why: the chunk after a pending write waits for it, and end waits for the last one.
       let pending: Promise<void> = Promise.resolve();
       res.on("data", (chunk: Buffer) => {
         if (settled) return;
@@ -128,11 +112,9 @@ function once<T>(url: URL, body: Body<T>, idleMs: number, signal: AbortSignal): 
       res.on("error", (error) => failed(error.message));
       res.on("close", () => { if (!res.complete) failed("the connection closed before the whole file arrived"); });
     };
-    // agent false: a fresh connection each time, nothing pooled between checks.
+    // external: Node pools connections unless agent is false; each check gets a fresh one.
     const options = { method: "GET", headers: { "User-Agent": USER_AGENT, Accept: "*/*" }, timeout: idleMs, signal, agent: false } as const;
     const request = url.protocol === "https:" ? https.request(url, options, read) : http.request(url, options, read);
-    // Connecting (TCP and TLS) up to the response headers: one idle period
-    // from the start. The socket timeout covers any silence after that.
     const headers = setTimeout(() => request.destroy(silent()), idleMs);
     request.on("timeout", () => request.destroy(silent()));
     request.on("error", (error) => {
@@ -168,7 +150,6 @@ function isRedirect<T>(answer: Answer<T>): answer is { readonly kind: "redirect"
   return typeof answer === "object" && answer !== null && "kind" in answer && answer.kind === "redirect" && "location" in answer;
 }
 
-/** A body kept in memory, dropped the moment it passes maxBytes. */
 function inMemory(maxBytes: number): Body<Fetched> {
   const chunks: Buffer[] = [];
   let size = 0;

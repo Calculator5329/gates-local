@@ -1,7 +1,3 @@
-// Signed release lists for the installed-copy tests: a key made in memory for
-// each test, lists written by the contract's own writer, an in-memory feed in
-// place of the network, and a loopback release page for the download's real
-// requests. Nothing here writes to disk.
 import { createHash, generateKeyPairSync, type KeyObject } from "node:crypto";
 import http, { type ServerResponse } from "node:http";
 import { encodeManifest, signManifest } from "../release-manifest.ts";
@@ -62,12 +58,14 @@ export function memoryFeed(answers: Record<string, Fetched> = {}): { readonly ge
 /** How the loopback page answers one path; undefined falls through to the served files. */
 export type Route = (path: string, res: ServerResponse) => boolean;
 
+/**
+ * `base` is B, an http loopback address, read only with allowLoopbackHttp.
+ * `requests` is every path asked for, in order; `hangUps` holds one promise per
+ * hang-up seen on an artifact request, in order.
+ */
 export interface ReleasePage {
-  /** The base B, an http loopback address (read only with allowLoopbackHttp). */
   readonly base: URL;
-  /** Every path asked for, in order. */
   readonly requests: string[];
-  /** Resolves once per hang-up seen on an artifact request, in order. */
   readonly hangUps: Promise<void>[];
   serve(files: { readonly list: Buffer; readonly sig: Buffer }, artifact?: { readonly file: string; readonly bytes: Buffer }): void;
   route(route: Route | undefined): void;

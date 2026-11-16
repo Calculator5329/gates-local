@@ -1,23 +1,19 @@
-// The file operations an installed update performs, in one place, so a test
-// can make any one of them return an error (a full disk, a refused link, a
-// rename that takes effect and still reports failure) without a real fault.
-//
-// "Flush" in the design means fsync of the file, then fsync of the folder
-// that holds it. Linux only: a folder that cannot be flushed is an error the
-// caller handles, never swallowed (the clone updater swallows it for Windows).
 import { createHash } from "node:crypto";
 import { chmodSync, closeSync, copyFileSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readSync, renameSync, rmSync, statSync, unlinkSync, writeSync } from "node:fs";
 import path from "node:path";
 import type { ReleaseArtifact } from "../release-manifest.ts";
 
+/**
+ * Every file operation an installed update performs, so a test can make any one
+ * fail (a full disk, a refused link, a rename that takes effect and still
+ * reports failure) without a real fault. `writeFile` fsyncs before it closes.
+ */
 export interface FileOps {
-  /** Creates or truncates `file`, writes `data`, fsyncs it and closes it. */
   writeFile(file: string, data: string, mode: number): void;
   rename(from: string, to: string): void;
   link(existing: string, created: string): void;
   copyFile(from: string, to: string): void;
   unlink(file: string): void;
-  /** A folder and everything in it. */
   removeTree(dir: string): void;
   mkdir(dir: string, mode: number): void;
   chmod(file: string, mode: number): void;

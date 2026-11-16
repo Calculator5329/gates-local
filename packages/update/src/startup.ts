@@ -1,4 +1,3 @@
-// Durable handoff from the detached updater to the app's first ready server.
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { brokenForTest } from "./break-for-test.ts";
@@ -12,9 +11,9 @@ export const STARTUP_TOKEN_ENV = "GATES_LOCAL_UPDATE_STARTUP_TOKEN";
 export const STARTUP_ACK_FILE = "update-startup.json";
 export type StartupAck = { readonly token: string; readonly commit: string; readonly state: "ready" | "failed"; readonly reason?: string };
 
+/** `stop` ends only this app's own process tree, and resolves true once it has ended. */
 export interface StartupProcess {
   readonly pid: number;
-  /** Ends only this app's owned process tree and confirms it has ended. */
   stop(): Promise<boolean>;
 }
 

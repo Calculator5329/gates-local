@@ -1,18 +1,3 @@
-// The watcher: rows W1 to C of an installed Linux update
-// (docs/design/installed-updates.md, section 2), and the resume of a
-// transaction a crash left on disk.
-//
-// One engine runs both. Each row reads the intent on disk, does its action
-// (which is also its recovery, so running it again after a crash finishes
-// it), and writes the next row's intent before that row acts. The only rows
-// that differ on a resume are `launch-new` and `launch-old`, found on disk
-// only when a watcher died while a token launch was starting: they take the
-// three steps of "when the watcher dies" and retry once with a fresh token.
-//
-// Every outside effect comes in through `WatcherEffects`, and `stopAt` is
-// called at each named stop point (stop-points.ts), where a test kills the
-// run. `update.lock` is taken here, with the server's recoverable lock,
-// before the transaction is read.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -32,48 +17,33 @@ import {
 import * as words from "@gates-local/update/installed/words";
 import type { PauseCause, Words } from "@gates-local/update/installed/words";
 
-/** Rows L2 and B4: how long a token launch has to acknowledge. */
 export const ACK_TIMEOUT_MS = 60_000;
 
 export type Ack = "ready" | "exited" | "timeout";
 
-/** The result the token launch and the next ordinary launch read. Every one carries the transaction id. */
 export type InstalledResult = { readonly id: string; readonly from: string; readonly to: string; readonly words: Words } & (
   | { readonly outcome: "updated" | "rolled-back"; readonly token: string }
   | { readonly outcome: "stopped" }
-  /** `keeps`: the files and folders it names, as they are when it is written. No cleanup may delete them until it is dismissed. */
   | { readonly outcome: "rollback-failed"; readonly keeps: readonly string[] }
 );
 
 export interface WatcherEffects {
-  /** Start the program file detached, as a token launch with this token; its process record. Throws when the spawn fails. */
   readonly spawn: (token: string) => ProcessRecord;
-  /** Resolves true once the process has ended, false at the time limit. */
   readonly waitForExit: (record: ProcessRecord, timeoutMs: number) => Promise<boolean>;
-  /** Whether the process and everything in its group have ended. */
   readonly treeGone: (record: ProcessRecord) => boolean;
-  /** Stop a token launch's tree with the createRelaunch policy; true once confirmed stopped. */
   readonly stopTree: (record: ProcessRecord) => Promise<boolean>;
-  /** Wait for the ack carrying `token`, timed with performance.now(); "exited" when the launch ended first. */
   readonly waitForAck: (token: string, record: ProcessRecord, timeoutMs: number) => Promise<Ack>;
-  /** Write the result durably: file flush, then data-folder flush. */
   readonly writeResult: (result: InstalledResult) => void;
-  /** The undismissed result of this transaction, if there is one. */
   readonly readResult: (transactionId: string) => InstalledResult | null;
-  /** os.uptime(), in seconds. */
+  // external: Node's os.uptime() counts seconds.
   readonly uptime: () => number;
   readonly bootId: () => string;
-  /** Open a window with this page; needs no server. */
   readonly showPage: (words: Words) => void;
-  /** Write one line to update.log. */
   readonly log?: (line: string) => void;
   readonly freeBytes: (dir: string) => number;
-  /** The built-in release keys. */
   readonly trustedKeys: readonly string[];
-  /** Whether automatic checks are on, for the bracketed sentences. */
   readonly automaticChecks: boolean;
   readonly newToken: () => string;
-  /** Start the program file as an ordinary launch. Called only after update.lock is released. */
   readonly startOrdinary: () => void;
   readonly stopAt?: (point: StopPoint) => void;
   readonly fs?: FileOps;
@@ -82,22 +52,15 @@ export interface WatcherEffects {
 
 export type WatchOutcome =
   | { readonly outcome: "updated" | "rolled-back"; readonly cleaned: boolean; readonly startApp: boolean }
-  /** `words` is null only for a cleanup retry whose result the person has already dismissed. */
   | { readonly outcome: "stopped"; readonly words: Words | null; readonly cleaned: boolean; readonly startApp: boolean }
   | { readonly outcome: "rollback-failed"; readonly words: Words }
   | { readonly outcome: "stuck"; readonly words: Words; readonly intent: Intent }
-  /** Nothing was changed. `other-copy`: the transaction names another copy's files, or is not this data folder's file. */
   | { readonly outcome: "lock-held" | "no-transaction" | "unreadable" | "other-copy" };
 
 type Finished = Exclude<WatchOutcome, { readonly outcome: "lock-held" | "no-transaction" | "unreadable" | "other-copy" }>;
 
 export interface BeginEffects {
-  /** Spawn this program file detached in watcher mode: `--gates-local-update-watch=<transaction file>`. */
   readonly spawnWatcher: (transactionFile: string) => void;
-  /**
-   * Whether an undismissed `rollback-failed` result of an earlier update
-   * exists. The core does not read results itself, so the caller must answer.
-   */
   readonly earlierFailure: boolean;
   readonly stopAt?: (point: StopPoint) => void;
   readonly fs?: FileOps;
@@ -106,20 +69,8 @@ export interface BeginEffects {
 
 export type Begin =
   | { readonly kind: "begun"; readonly transaction: InstalledTransaction }
-  /** Nothing was written and nothing spawned: show these words; the caller does not quit. */
   | { readonly kind: "refused"; readonly words: Words };
 
-/**
- * Row H, in the old main while it holds the profile lock, after the admission
- * commit: write `approved`, spawn the watcher. The caller quits next.
- *
- * It is the one door for a new update. It refuses while an earlier failure is
- * undismissed, so a `cleanup` transaction never sits beside such a result.
- * A `cleanup` transaction is retried once under `update.lock`; if it stays,
- * or the lock is held, it refuses with "cleanup pending". Any other
- * transaction throws: the launch routing resumes it before any app starts,
- * so meeting one here is a bug in the caller.
- */
 export function beginUpdate(a: Approval, fx: BeginEffects): Begin {
   if (fx.earlierFailure) return { kind: "refused", words: words.earlierFailure() };
   const fs = fx.fs ?? realFileOps;
@@ -137,12 +88,6 @@ export function beginUpdate(a: Approval, fx: BeginEffects): Begin {
   return { kind: "begun", transaction: tx };
 }
 
-/**
- * Row H's retry of row C. Null once the transaction is gone; otherwise the
- * "cleanup pending" words. `keep` is the new approval's download folder: when
- * the leftover transaction was for the same version, its download is the one
- * the new approval needs, so the retry leaves it for the watcher to prove.
- */
 function finishCleanup(file: string, fs: FileOps, lock: LockOptions | undefined, keep: string): Words | null {
   const tx = readTransaction(file);
   if (tx === null) return null;
@@ -158,12 +103,6 @@ function finishCleanup(file: string, fs: FileOps, lock: LockOptions | undefined,
   return cleaned ? null : words.cleanupPending(leftOver(tx, keep));
 }
 
-/**
- * The folder that still holds what row C has to remove, in the order
- * `cleanupFiles` removes things: the program folder while a kept program
- * file is there, else the download (unless it is kept), else the updates
- * folder, which holds the transaction.
- */
 function leftOver(tx: InstalledTransaction, keep: string | null): string {
   const p = programPaths(tx.copy.program, tx.id);
   if ([p.previous, p.incoming, p.previousPart].some(exists)) return p.dir;
@@ -172,19 +111,12 @@ function leftOver(tx: InstalledTransaction, keep: string | null): string {
   return path.join(tx.copy.dataDir, UPDATES_FOLDER);
 }
 
-/** Watcher mode, spawned at row H: takes update.lock, then runs the transaction from wherever it is (W1 for a fresh one). */
 export const runWatcher = (file: string, fx: WatcherEffects): Promise<WatchOutcome> => watch(file, fx, false);
 
-/**
- * An ordinary launch that found a transaction and update.lock free: resumes
- * it from what is on disk. Once the transaction ends, it starts the app as
- * an ordinary launch if no app of this copy is running, so the person's
- * launch still gives them the app.
- */
 export const resumeWatcher = (file: string, fx: WatcherEffects): Promise<WatchOutcome> => watch(file, fx, true);
 
 async function watch(file: string, fx: WatcherEffects, resumed: boolean): Promise<WatchOutcome> {
-  // No updates folder, no transaction: and nothing to lock in.
+  // why: with no updates folder there is no transaction, and no folder to hold the lock.
   if (!exists(path.dirname(file))) return { outcome: "no-transaction" };
   const acquired = acquireFileLock(path.join(path.dirname(file), LOCK_NAME), fx.lock);
   if (!acquired.ok) return { outcome: "lock-held" };
@@ -198,11 +130,6 @@ async function watch(file: string, fx: WatcherEffects, resumed: boolean): Promis
   return outcome;
 }
 
-/**
- * Whether the transaction belongs to the data folder whose lock is held:
- * both paths of its copy are absolute, and the file read is that copy's own
- * transaction file. A file copied into another data folder moves nothing.
- */
 const ownCopy = (file: string, tx: InstalledTransaction): boolean =>
   path.isAbsolute(tx.copy.program) && path.isAbsolute(tx.copy.dataDir) && file === transactionFile(tx.copy.dataDir);
 
@@ -226,7 +153,6 @@ interface Run {
   readonly p: ProgramPaths;
   readonly resumed: boolean;
   tx: InstalledTransaction;
-  /** A stop that came after the old tree was gone: the app is started once the transaction ends. */
   relaunch: boolean;
   stopWords: Words | null;
 }
@@ -238,7 +164,6 @@ async function drive(r: Run): Promise<Finished> {
   if (settled !== null) return settled;
   for (;;) {
     const intent = r.tx.intent;
-    // Rows A and B4: a decided transaction is past both rules, whatever happened to the result. Never B1, never a retry.
     if (intent === "accepted" || intent === "went-back") {
       decided(r, intent);
       continue;
@@ -267,7 +192,6 @@ function row(r: Run, intent: Row): Promise<Finished | undefined> | Finished | un
 
 const at = (r: Run, point: StopPoint): void => r.fx.stopAt?.(point);
 
-/** Writes the next intent; the run's copy changes only once it is on disk. */
 function write(r: Run, intent: Intent, extra: Partial<InstalledTransaction> = {}): void {
   const next: InstalledTransaction = { ...r.tx, ...extra, intent };
   writeIntent(r.file, next, r.fs);
@@ -293,13 +217,6 @@ const megabytes = (bytes: number, round: (n: number) => number): number => round
 
 const inProgramFolder = (r: Run, file: string): boolean => file.startsWith(`${r.p.dir}${path.sep}`);
 
-/**
- * The sentence for a returned error before the replace, or null for one the
- * design does not name (it is rethrown). A permission or read-only error is
- * "cannot replace" only when its file is in the program file's folder;
- * anywhere else it is "could not start the update", naming the error's own
- * file, or else `folder`, the folder the row was working in.
- */
 function stopSentence(r: Run, e: unknown, folder: string): Words | null {
   const code = ioCode(e);
   if (code === null) return null;
@@ -314,7 +231,6 @@ function stopSentence(r: Run, e: unknown, folder: string): Words | null {
   return words.couldNotStartUpdate(target ?? folder);
 }
 
-/** Why a replace or a go-back paused, or null for an error the design does not name. */
 function pauseCause(r: Run, e: unknown): PauseCause | null {
   const code = ioCode(e);
   if (code === null) return null;
@@ -326,10 +242,6 @@ function pauseCause(r: Run, e: unknown): PauseCause | null {
   return null;
 }
 
-/**
- * "Before the replace": delete this transaction's incomplete staging files,
- * write `stopped`, and end the transaction through row C.
- */
 function stop(r: Run, sentence: Words, relaunch: boolean): undefined {
   removeStaging(r.p, r.fs);
   r.fx.writeResult({ ...base(r.tx), outcome: "stopped", words: sentence });
@@ -339,18 +251,8 @@ function stop(r: Run, sentence: Words, relaunch: boolean): undefined {
   return undefined;
 }
 
-/**
- * What a row's file operations decided. The ending is written by the caller,
- * outside the catch around those operations: an error while writing a
- * failure ending is a crash, never turned into `stopped` or "paused".
- */
 type Decision = undefined | { readonly end: "unknown-file" } | { readonly end: "stopped"; readonly words: Words };
 
-/**
- * A returned error before the replace becomes `stopped`; anything else is
- * rethrown (a crash, recovered by the next launch). `folder` is the folder the
- * row works in: the data folder at W1 and W2, the program file's at S1 and S2.
- */
 function beforeReplace(r: Run, folder: string, body: () => Decision): Finished | undefined {
   let decision: Decision;
   try {
@@ -364,11 +266,9 @@ function beforeReplace(r: Run, folder: string, body: () => Decision): Finished |
   return decision.end === "unknown-file" ? unknownFile(r) : stop(r, decision.words, true);
 }
 
-/** B3 only: the path holds `new` and nothing at `.previous-<id>` is `old`. */
 type SavedOldNotThere = { readonly end: "saved-old-not-there"; readonly saved: "missing" | "not-old" };
 type GoingBackDecision = Exclude<Decision, { readonly end: "stopped" }> | SavedOldNotThere;
 
-/** A returned error while going back keeps the intent and every file: `stuck`, "go-back paused". */
 function goingBack(r: Run, body: () => GoingBackDecision): Finished | undefined {
   let decision: GoingBackDecision;
   try {
@@ -390,7 +290,6 @@ function stuck(r: Run, sentence: Words): Finished {
   return { outcome: "stuck", words: sentence, intent: r.tx.intent };
 }
 
-/** The result is written durably with the paths as they are, then the transaction is removed. No file is deleted. */
 function rollbackFailed(r: Run, sentence: Words): Finished {
   const tx = r.tx, dataDir = tx.copy.dataDir;
   const named = [r.p.previous, r.p.incoming, downloadFolder(tx), ...(tx.storeBefore === undefined ? [] : [copyPath(dataDir, tx.storeBefore)]), asideFolder(dataDir, tx.id)];
@@ -402,11 +301,6 @@ function rollbackFailed(r: Run, sentence: Words): Finished {
 
 const matches = (file: string, identity: Identity | undefined): boolean => identity !== undefined && savedFile(file, identity) === "same";
 
-/**
- * The unknown-file ending. Its page names only the versions saved on disk
- * with a matching identity: `old` at `.previous-<id>`; `new` at
- * `.incoming-<id>`, or else the verified artifact in the download folder.
- */
 function unknownFile(r: Run): Finished {
   const tx = r.tx, next: Identity = { size: tx.artifact.size, sha512: tx.artifact.sha512 };
   const newAt = [r.p.incoming, artifactFile(tx)].find(file => matches(file, next));
@@ -417,11 +311,6 @@ function unknownFile(r: Run): Finished {
   ));
 }
 
-/**
- * A result of this transaction already says how it ended, but the
- * transaction was not moved on before the crash: a `stopped` goes on to row
- * C, a `rollback-failed` only removes the transaction and shows its page.
- */
 function settledByResult(r: Run): Finished | null {
   if (r.tx.intent === "cleanup" || r.tx.intent === "accepted" || r.tx.intent === "went-back") return null;
   const result = r.fx.readResult(r.tx.id);
@@ -439,7 +328,6 @@ function settledByResult(r: Run): Finished | null {
   return null;
 }
 
-/** W1: wait for the old main and server, bounded by the time left before the deadline, then check the deadline again. */
 async function closeOldApp(r: Run): Promise<Finished | undefined> {
   const { fx, tx } = r;
   at(r, "W1.before");
@@ -448,7 +336,6 @@ async function closeOldApp(r: Run): Promise<Finished | undefined> {
   await fx.waitForExit(tx.processes.main, leftMs());
   await fx.waitForExit(tx.processes.server, leftMs());
   const gone = fx.treeGone(tx.processes.main) && fx.treeGone(tx.processes.server);
-  // Why W1 stopped goes to update.log; "did not close" only when the old app really had not.
   const why = !gone ? "the old app was still running at the approval deadline"
     : !sameBoot() ? "the computer restarted after the approval"
     : fx.uptime() >= tx.deadline.uptime ? "the approval deadline passed after the old app closed"
@@ -469,10 +356,6 @@ async function closeOldApp(r: Run): Promise<Finished | undefined> {
 const sameArtifact = (a: ReleaseArtifact, b: ReleaseArtifact): boolean =>
   a.platform === b.platform && a.arch === b.arch && a.kind === b.kind && a.file === b.file && a.size === b.size && a.sha512 === b.sha512;
 
-/**
- * W2's checks of the cached list and artifact: whether one fails. Every
- * failure is the same "bad download" sentence, without its bracket part.
- */
 function downloadFailsCheck(r: Run): boolean {
   const tx = r.tx, dir = downloadFolder(tx);
   let list: Buffer, signature: Buffer;
@@ -497,7 +380,6 @@ function downloadFailsCheck(r: Run): boolean {
   return !sameIdentity(identify(artifactFile(tx)), tx.artifact);
 }
 
-/** W2: re-read the cached list, verify it and the artifact, re-check disk space on both volumes. */
 function recheck(r: Run): Decision {
   at(r, "W2.before");
   if (downloadFailsCheck(r)) return { end: "stopped", words: words.badDownload(r.tx.to, false) };
@@ -511,7 +393,6 @@ function recheck(r: Run): Decision {
   return undefined;
 }
 
-/** S1: stage the artifact next to the program file; a staged file that is not `new` is redone, and checked once more. */
 function stageIncoming(r: Run): Decision {
   const { next } = identities(r.tx);
   at(r, "S1.before");
@@ -522,7 +403,6 @@ function stageIncoming(r: Run): Decision {
   return undefined;
 }
 
-/** S2: keep the old version as `.previous-<id>`. The path must still hold `old`. */
 function keepOld(r: Run): Decision {
   const { old, next } = identities(r.tx);
   at(r, "S2.before");
@@ -533,11 +413,6 @@ function keepOld(r: Run): Decision {
   return undefined;
 }
 
-/**
- * S3: the replacing rename and the folder flush. A rename that returns an
- * error is not trusted: what is at the path decides. A flush that fails
- * after the replace keeps the intent: `stuck`, "replace paused".
- */
 async function replaceProgram(r: Run): Promise<Finished | undefined> {
   const { old, next } = identities(r.tx);
   at(r, "S3.before");
@@ -569,7 +444,6 @@ async function replaceProgram(r: Run): Promise<Finished | undefined> {
   return launchNew(r);
 }
 
-/** L1 and L2: spawn T1 with a fresh token, save its record, wait for its ack. The ack decides between A and B1. */
 async function launchNew(r: Run): Promise<undefined> {
   const t1: TokenLaunch = { token: r.fx.newToken(), boot: r.fx.bootId() };
   write(r, "launch-new", { t1 });
@@ -578,7 +452,6 @@ async function launchNew(r: Run): Promise<undefined> {
   try {
     record = r.fx.spawn(t1.token);
   } catch {
-    // A spawn that fails counts as T1 having exited.
     write(r, "stop-new", { t1: { ...t1, spawnFailed: true } });
     return undefined;
   }
@@ -592,7 +465,6 @@ async function launchNew(r: Run): Promise<undefined> {
   return undefined;
 }
 
-/** Rows A and B4's last half: the result again if it is not there, then C. */
 function decided(r: Run, intent: "accepted" | "went-back"): void {
   const accepted = intent === "accepted";
   const t = launchOf(r.tx, accepted ? "t1" : "t2");
@@ -605,18 +477,12 @@ function decided(r: Run, intent: "accepted" | "went-back"): void {
   write(r, "cleanup", { ending: outcome });
 }
 
-/**
- * Whether a token launch can no longer be running: its saved tree is gone,
- * or with no saved record, it never ran or the computer restarted since. A
- * saved record always decides.
- */
 function cannotBeRunning(r: Run, t: TokenLaunch): boolean {
   if (t.record !== undefined) return r.fx.treeGone(t.record);
   if (t.spawnFailed === true) return true;
   return r.fx.bootId() !== t.boot;
 }
 
-/** B1: stop T1's tree. Not confirmed stopped: `stuck`. Then B2a's entry condition. */
 async function stopNew(r: Run): Promise<Finished | undefined> {
   const t1 = launchOf(r.tx, "t1");
   at(r, "B1.before");
@@ -635,7 +501,6 @@ async function stopNew(r: Run): Promise<Finished | undefined> {
   });
 }
 
-/** B2a: every live store file into the aside folder, then both folders flushed. */
 function moveStoreAside(r: Run): undefined {
   at(r, "B2a.before");
   setAside(r.tx.copy.dataDir, r.tx.id, r.fs, name => at(r, `B2a.rename.${name}`));
@@ -644,7 +509,6 @@ function moveStoreAside(r: Run): undefined {
   return undefined;
 }
 
-/** B2b: the copy at storeBefore into place by `.restoring` and a rename. */
 function installStoreCopy(r: Run): undefined {
   const { storeBefore } = identities(r.tx);
   at(r, "B2b.before");
@@ -654,7 +518,6 @@ function installStoreCopy(r: Run): undefined {
   return undefined;
 }
 
-/** B3: the kept old version back at the path. `old` there already is done; `new` with a matching previous file is redone. */
 async function putOldBack(r: Run): Promise<Finished | undefined> {
   const { old, next } = identities(r.tx);
   const paused = goingBack(r, () => {
@@ -675,7 +538,6 @@ async function putOldBack(r: Run): Promise<Finished | undefined> {
   return launchOld(r);
 }
 
-/** B4: spawn T2 and wait as in L2. Ready: `went-back`. Not ready: stop T2's tree, `rollback-failed` with B4's sentence. */
 async function launchOld(r: Run): Promise<Finished | undefined> {
   const t2: TokenLaunch = { token: r.fx.newToken(), boot: r.fx.bootId() };
   write(r, "launch-old", { t2 });
@@ -700,41 +562,25 @@ async function launchOld(r: Run): Promise<Finished | undefined> {
   return didNotStart();
 }
 
-/**
- * "When the watcher dies", for a transaction found at `launch-new` (T1) or
- * `launch-old` (T2). This launch held the profile instance lock, so no main
- * of this copy holds it (step 1, the caller's). Step 2: the launch's saved
- * tree is gone, or with no saved record the boot id has changed; otherwise
- * `stuck`. Step 3: retry once with a fresh token.
- */
 async function retryLaunch(r: Run, which: "t1" | "t2"): Promise<Finished | undefined> {
   const { old, next } = identities(r.tx);
   const found = holds(r.p.program, old, next);
   if (which === "t1" && found === "old") {
-    // T1 can only have started the old version: go back, which finds `old` at B3.
+    // why: T1 can only have started the old version, so go back; B3 finds old there.
     write(r, "stop-new");
     return undefined;
   }
   if (found !== (which === "t1" ? "new" : "old")) return unknownFile(r);
-  // The stuck page names the version this launch ran: the new one for T1, the old one for T2.
   if (!cannotBeRunning(r, launchOf(r.tx, which))) return stuck(r, words.stuck(which === "t1" ? r.tx.to : r.tx.from));
   return which === "t1" ? launchNew(r) : launchOld(r);
 }
 
-/** Whether no process this transaction knows of is still running: the old main and server, T1 and T2. */
 function noAppRunning(r: Run): boolean {
   const { main, server } = r.tx.processes;
   const records = [main, server, r.tx.t1?.record, r.tx.t2?.record].filter(rec => rec !== undefined);
   return records.every(rec => r.fx.treeGone(rec));
 }
 
-/**
- * Row C's deletes: `.previous-<id>` and the download, then the transaction.
- * False when one returned an error; the transaction then stays. Only row H
- * passes `keep`: a download folder the new approval needs is left in place.
- * A download folder that could be in use (a person starts the app from it)
- * is left too, by the same rule as every other delete of a version folder.
- */
 function cleanupFiles(file: string, tx: InstalledTransaction, fs: FileOps, keep: string | null = null): boolean {
   try {
     removeKept(programPaths(tx.copy.program, tx.id), fs);
@@ -748,11 +594,6 @@ function cleanupFiles(file: string, tx: InstalledTransaction, fs: FileOps, keep:
   return true;
 }
 
-/**
- * An ordinary launch that found this copy's transaction at `cleanup`, with
- * update.lock taken by the caller: row C's deletes once more, nothing else.
- * Starts no process and writes no result. True when the transaction is gone.
- */
 export function retryCleanup(file: string, fs: FileOps = realFileOps): boolean {
   let tx: InstalledTransaction | null;
   try {
@@ -766,7 +607,6 @@ export function retryCleanup(file: string, fs: FileOps = realFileOps): boolean {
   return cleanupFiles(file, tx, fs);
 }
 
-/** C: delete `.previous-<id>` and the download, then the transaction. A failure leaves `cleanup` for a later launch; the app starts anyway. */
 function cleanup(r: Run): Finished {
   const ending: Ending = r.tx.ending ?? "stopped";
   at(r, "C.before");

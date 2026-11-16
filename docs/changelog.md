@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-15: the desktop app and the update package say what they need in tests
+
+- Internal: nothing changed for the person using the app. Every comment
+  in `apps/desktop/src` and `packages/update/src` is now one of the
+  allowed kinds, and both folders have no comment the lint rule refuses
+  (738 before). The desktop app keeps no documentation comments; the
+  update package keeps them only on what it exports.
+- Each rule a comment stated now has a test that fails when the rule
+  breaks. Twelve rules had no such test, and now do: among them "the app
+  is started only once the update lock is free", "a first launch whose
+  stop cannot be confirmed leaves the update stuck", and "the updater
+  runs on Node's own modules, so it works while node_modules is
+  replaced".
+
 ## 2026-11-15: a comment in the source has to be one of six kinds
 
 - Internal: nothing changed for the person using the app. A lint rule,

@@ -1,11 +1,3 @@
-// The version this copy runs, read straight from the .git folder: the
-// release tag when HEAD is one, else the short commit, with the commit's
-// date. No git process and no network, so the server can show it at start
-// and Settings can show it on open. Manual and desktop automatic checks run git.
-//
-// It reads what a clone holds: HEAD, loose refs, packed-refs, loose objects
-// and pack files (index v2, with delta chains). Anything it cannot read
-// leaves the date out, or says the version is unreadable; never throws.
 import { closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { inflateSync } from "node:zlib";
@@ -26,7 +18,6 @@ interface Repo {
   readonly commonDir: string;
 }
 
-/** .git is a folder in a clone and a "gitdir:" file in a worktree. */
 function openRepo(root: string): Repo | null {
   const dotGit = path.join(root, ".git");
   let gitDir: string;
@@ -40,12 +31,11 @@ function openRepo(root: string): Repo | null {
   } catch {
     return null;
   }
+  // why: a plain clone has no commondir file, and its gitDir is the common one.
   let commonDir = gitDir;
   try {
     commonDir = path.resolve(gitDir, readFileSync(path.join(gitDir, "commondir"), "utf8").trim());
-  } catch {
-    // A plain clone: no commondir.
-  }
+  } catch {}
   return existsSync(path.join(gitDir, "HEAD")) ? { gitDir, commonDir } : null;
 }
 
@@ -53,7 +43,6 @@ const isHash = (s: string) => /^([0-9a-f]{40}|[0-9a-f]{64})$/.test(s);
 
 interface PackedRef {
   readonly hash: string;
-  /** The commit an annotated tag points at, when packed-refs recorded it. */
   readonly peeled?: string;
 }
 
@@ -82,13 +71,11 @@ function packedRefs(repo: Repo): Map<string, PackedRef> {
 }
 
 function looseRef(repo: Repo, name: string): string | undefined {
-  // Per-worktree refs (HEAD itself) live in the gitDir, shared refs in the commonDir.
+  // why: a worktree's own refs (HEAD itself) are in gitDir, the shared refs in commonDir.
   for (const dir of [repo.gitDir, repo.commonDir]) {
     try {
       return readFileSync(path.join(dir, ...name.split("/")), "utf8").trim();
-    } catch {
-      // Try the next folder.
-    }
+    } catch {}
   }
   return undefined;
 }
@@ -100,8 +87,6 @@ function resolveRef(repo: Repo, name: string, packed: Map<string, PackedRef>, de
   if (value.startsWith("ref:")) return resolveRef(repo, value.slice(4).trim(), packed, depth + 1);
   return isHash(value) ? value : undefined;
 }
-
-// ---------------------------------------------------------------- objects
 
 interface GitObject {
   readonly type: "commit" | "tree" | "blob" | "tag";
@@ -222,7 +207,7 @@ function packEntry(repo: Repo, fd: number, packSize: number, offset: number, wid
     base = readObject(repo, baseHash, depth + 1);
     if (base === undefined) throw new Error("delta base missing");
   }
-  // The compressed data is at most a little larger than the data itself.
+  // why: deflated data is at most a little larger than the data itself, so no more is read.
   const data = inflateSync(readAt(fd, offset + at, Math.min(packSize - offset - at, size + 1024 + Math.ceil(size / 100))));
   if (base !== undefined) return { type: base.type, body: applyDelta(base.body, data) };
   const name = PACK_TYPES[type as keyof typeof PACK_TYPES];
@@ -266,7 +251,6 @@ export function objectIn(root: string, hash: string): GitObject | undefined {
   return repo === null ? undefined : readObject(repo, hash);
 }
 
-/** The commit an object names, following annotated tags. */
 function peel(repo: Repo, hash: string): string | undefined {
   let at = hash;
   for (let i = 0; i < MAX_TAG_DEPTH; i++) {
@@ -285,16 +269,14 @@ function releaseTagsAt(repo: Repo, commit: string, packed: Map<string, PackedRef
   const found = new Set<string>();
   for (const [name, ref] of packed) {
     if (!name.startsWith("refs/tags/v")) continue;
-    // A loose ref of the same name wins over packed-refs.
+    // why: git lets a loose ref of the same name win over packed-refs.
     if (existsSync(path.join(repo.commonDir, "refs", "tags", name.slice("refs/tags/".length)))) continue;
     if ((ref.peeled ?? (ref.hash === commit ? commit : peel(repo, ref.hash))) === commit) found.add(name.slice("refs/tags/".length));
   }
   let loose: string[] = [];
   try {
     loose = readdirSync(path.join(repo.commonDir, "refs", "tags")).filter((t) => t.startsWith("v"));
-  } catch {
-    // No loose tags.
-  }
+  } catch {}
   for (const tag of loose) {
     const value = looseRef(repo, `refs/tags/${tag}`);
     if (value !== undefined && isHash(value) && (value === commit || peel(repo, value) === commit)) found.add(tag);
@@ -321,6 +303,11 @@ export function readHeadCommit(root: string): string | undefined {
   } catch { return undefined; }
 }
 
+/**
+ * The release tag when HEAD is one, else the short commit, with its date, read
+ * straight from the .git folder: no git process and no network, so the server
+ * can show it at start. Never throws: what it cannot read is `unreadable`.
+ */
 export function readVersion(root: string): VersionInfo {
   try {
     const repo = openRepo(root);

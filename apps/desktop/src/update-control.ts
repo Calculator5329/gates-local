@@ -14,7 +14,6 @@ async function connectUpdateClient(url: string) {
   } catch (error) { socket.close(); throw error; }
 }
 
-/** Authenticated supervised-server connection, independent of the renderer's state. */
 export async function withUpdateControl<T>(url: string, run: (control: UpdateControl) => Promise<T>): Promise<T> {
   const client = await connectUpdateClient(url);
   try {
@@ -24,8 +23,7 @@ export async function withUpdateControl<T>(url: string, run: (control: UpdateCon
         try { return await client.call("update.cancel", { reservation }); }
         catch (error) {
           if (!(error instanceof WireError) || error.code !== "closed") throw error;
-          // Cancellation is idempotent. A lost commit reply still has to
-          // release main's known capability through a fresh connection.
+          // why: cancel is idempotent, and a lost commit reply still leaves main's capability to release.
           const recovery = await connectUpdateClient(url);
           try { return await recovery.call("update.cancel", { reservation }); }
           finally { recovery.close(); }

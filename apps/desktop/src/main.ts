@@ -1,7 +1,3 @@
-// Electron main: one window, one supervised server. Bundled to out/main.cjs
-// by scripts/build.ts. See README.md for the server contract and the
-// renderer's reconnect duties.
-
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, protocol, session, shell, type IpcMainInvokeEvent } from "electron";
 import { parseClipboardPaths, pathClipboardTypes } from "./clipboard.ts";
 import { capturePaste, finishPaste, type PasteResult } from "./native-paste.ts";
@@ -45,15 +41,13 @@ import { iconFile, windowOptions } from "./window.ts";
 
 const DEV_WEB_URL = "http://127.0.0.1:5187/";
 
-// out/main.cjs -> apps/desktop
+// why: this file runs bundled as out/main.cjs, one folder below apps/desktop.
 const desktopDir = path.resolve(__dirname, "..");
-// The clone, for "Restart to update" (apps/desktop -> the repo root).
 const repoRoot = path.resolve(desktopDir, "..", "..");
 
 app.setName("gates-local");
 app.setPath("userData", desktopUserDataDir({ platform: process.platform, env: process.env, appData: app.getPath("appData"), packaged: app.isPackaged }));
-// Must run before ready. Standard + secure gives the scheme a real origin
-// (gates-local://app) and lets the module scripts and fetch load from it.
+// external: Electron takes privileged schemes only before ready; standard+secure gives an origin.
 protocol.registerSchemesAsPrivileged([
   { scheme: CLIENT_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
@@ -73,12 +67,10 @@ function serverEntry(): string {
   return path.resolve(desktopDir, "..", "server", "src", "main.ts");
 }
 
-/** The built web files that gates-local://app serves. */
 function webRoot(): string {
   return app.isPackaged ? path.join(process.resourcesPath, "web") : path.resolve(desktopDir, "..", "web", "dist");
 }
 
-/** Dist (the default): the built web files on gates-local://app. Dev: the Vite dev server. */
 function clientUrl(): string {
   const override = process.env["GATES_LOCAL_WEB_URL"];
   if (override !== undefined && override !== "") return override;
@@ -92,7 +84,6 @@ function isClientUrl(url: string): boolean {
 
 const mode = launchMode(process.argv, process.env);
 
-/** A test build (resources/test-build.json) reads test keys, a loopback feed and stop points; a release never does. */
 function isTestBuild(): boolean {
   if (!app.isPackaged) return false;
   try {
@@ -103,17 +94,15 @@ function isTestBuild(): boolean {
 }
 const testBuild = isTestBuild();
 if (testBuild) {
-  // A test build never reaches this computer's Ollama or ComfyUI unless the probe names where they are:
-  // the copy the Windows installer starts after an update may not carry the probe's environment.
+  // why: the copy the Windows installer starts after an update may not carry the probe's environment.
   const safe = { GATES_LOCAL_RUNTIME: "discover-only", GATES_LOCAL_OLLAMA_BINARY: "none", GATES_LOCAL_OLLAMA_URL: "http://127.0.0.1:19750", GATES_LOCAL_COMFY_URL: "http://127.0.0.1:1" };
   for (const [key, value] of Object.entries(safe)) process.env[key] ??= value;
-  // The copy the Windows installer starts (--updated) opens DevTools on the probe's port, as a watcher's launch does on Linux (handoff.ts forwardedArgs).
+  // why: the probe also drives the copy the Windows installer starts after an update (--updated).
   const port = process.env[TEST_DEBUG_PORT_ENV] ?? "";
   if (process.platform === "win32" && process.argv.includes("--updated") && /^\d{2,5}$/.test(port)) app.commandLine.appendSwitch("remote-debugging-port", port);
 }
-// Read before the routing below can move a page-only process to its own profile folder.
+// why: the routing below can move a page-only process to its own profile folder.
 const dataDir = serverDataDir({ platform: process.platform, env: process.env, home: app.getPath("home"), userData: app.getPath("userData"), packaged: app.isPackaged });
-// Whether this copy can replace its own file (an AppImage on Linux, or an install the Windows installer made), and the file.
 const replace = replaceability({ platform: process.platform, packaged: app.isPackaged, env: process.env, testBuild, execPath: process.execPath });
 const installedCopy = replace.program === null ? null : copyOf(replace.program, dataDir);
 const feed = installedFeed(process.env, { testBuild });
@@ -123,24 +112,21 @@ const appWindow = () => windowOptions({
 });
 
 if (installedCopy !== null) {
-  // An AppImage: an update may be in flight, so the launch is routed first (installed-update/desktop.ts).
+  // why: an update may be in flight, so an AppImage's launch is routed before anything starts.
   routeInstalled({ copy: installedCopy, testBuild, trustedKeys: feed.keys, releasePage: feed.page, window: appWindow, background: mode.background }, run);
 } else if (!app.isPackaged) {
-  // A source checkout: an update of it may be running or cut off, so the start reads the checkout before it
-  // takes the single-instance lock or starts anything (checkout-start.ts).
   routeCheckout({ root: repoRoot, dataDir, window: appWindow, releasePage: feed.page, background: mode.background }, () => run());
 } else if (!app.requestSingleInstanceLock({ background: mode.background })) {
-  // A second launch reaches this instance through the lock; it says whether it
-  // was itself a background launch (systemd starting it again wants no window).
+  // external: Electron hands this data to the first instance's second-instance event.
   app.quit();
 } else if (process.platform === "linux" && app.isPackaged) {
-  // Packaged Linux with no program to replace (a renamed file, AppRun alone): it shares the data folder, so it reads the update first.
+  // why: a copy with nothing to replace shares the data folder, so it reads the update first.
   routeUnreplaceable({ window: appWindow, releasePage: feed.page }, dataDir, run);
 } else {
   run();
 }
 
-/** Starts the updater on its own, outside this app's process group, so it outlives the quit. */
+// external: Node's detached spawn leads its own process group, so the updater outlives the quit.
 function startDetached(plan: UpdaterLaunch, env: NodeJS.ProcessEnv): Promise<UpdateAndRestartResult> {
   return new Promise((resolve) => {
     const child = spawn(plan.command, [...plan.args], { cwd: plan.cwd, env, detached: true, stdio: "ignore", windowsHide: true });
@@ -155,14 +141,13 @@ function startDetached(plan: UpdaterLaunch, env: NodeJS.ProcessEnv): Promise<Upd
 }
 
 function run(start: StartApp = {}): void {
-  // pnpm run app-update reads this to refuse while the app is open.
+  // why: pnpm run app-update reads this file to refuse while the app is open.
   try {
     writeRunning(dataDir, process.pid, Date.now());
   } catch (e) {
     console.error(`[desktop] could not write the pid file: ${(e as Error).message}`);
   }
   process.on("exit", () => clearRunning(dataDir, process.pid));
-  // Windows W-A step 6: the note the click left becomes the result the server shows once, before the server starts.
   const windowsUpdates = replace.restart === "windows";
   if (windowsUpdates) {
     try {
@@ -172,17 +157,15 @@ function run(start: StartApp = {}): void {
       console.error(`[desktop] could not read the Windows update note: ${(e as Error).message}`);
     }
   }
-  // The server allows the client's WebSocket Origin; a file: client gets none, so it cannot connect.
+  // why: the server allows only the client's WebSocket Origin, and a file: page sends none.
   const env = serverEnv({ env: process.env, clientOrigin: originOf(clientUrl()), webRoot: webRoot(), installedVersion: app.isPackaged ? app.getVersion() : null });
-  // The server offers "Restart to update" only when this copy can replace its file, and says why not otherwise.
+  // why: the server offers "Restart to update" only when this copy can replace its file.
   if (app.isPackaged) env[RESTART_ENV] = replace.restart;
   const supervisor = new Supervisor({ entry: serverEntry(), dataDir, env });
   const modelFolders = modelFolderActions({ ownership: () => checkOwnership(ownedStateFile(dataDir)), isFolder, openPath: folder => shell.openPath(folder) });
   let win: BrowserWindow | null = null;
-  /** The client URL (with its route) to restore after a restart. */
   let lastClientUrl: string | null = null;
   let showingClient = false;
-  /** An update page shown in place of the client: a token launch's "finishing" page, the earlier failure, the watcher's death. */
   let held: { readonly words: Words; readonly actions: readonly PageAction[] } | null =
     start.page === undefined ? null : { words: start.page, actions: start.hold === true ? ["continue"] : [] };
 
@@ -197,7 +180,6 @@ function run(start: StartApp = {}): void {
     return true;
   }
 
-  // The earlier failure page's one button carries on with a normal start.
   let serverWaits = start.hold === true;
   function carryOn(): void {
     if (!serverWaits) return;
@@ -206,9 +188,6 @@ function run(start: StartApp = {}): void {
     void supervisor.start();
   }
 
-  // A token launch acks on ready, then waits for a result carrying its token
-  // (the server opens admission on the same result). If the watcher dies
-  // first, it stops its server and says so; the next launch finishes the update.
   let acked = false;
   if (start.token !== undefined) {
     const token = start.token;
@@ -233,7 +212,6 @@ function run(start: StartApp = {}): void {
     void win.loadURL(dataUrl(renderStatusPage(view)));
   }
 
-  // Windows W-A step 7: a crashed server's page names the kept installer of the version before, looked up (and checked) on the first crash.
   let goBack: { readonly file: string | null } | "looking" | null = null;
   function showCrashed(state: SupervisorState): void {
     const file = goBack !== null && goBack !== "looking" ? goBack.file : null;
@@ -251,15 +229,12 @@ function run(start: StartApp = {}): void {
   function showClient(): void {
     if (win === null || win.isDestroyed()) return;
     showingClient = true;
-    void win.loadURL(lastClientUrl ?? clientUrl()).catch(() => {
-      // did-fail-load shows the status page.
-    });
+    void win.loadURL(lastClientUrl ?? clientUrl()).catch(() => {});
   }
 
   function route(state: SupervisorState): void {
     try {
       if (start.token !== undefined) {
-        // The ack is a request, not a decision: the watcher decides, and a crash is seen as no ack.
         if (state.status === "ready" && !acked) {
           writeAck(dataDir, start.token);
           acked = true;
@@ -288,7 +263,6 @@ function run(start: StartApp = {}): void {
         if (!showHeld()) showStatus({ kind: "server", state: toBridgeState(state) });
         break;
       case "idle":
-        // The earlier failure page waits for its button before the server starts.
         showHeld();
         break;
       case "stopping":
@@ -311,7 +285,7 @@ function run(start: StartApp = {}): void {
     const { color, symbolColor } = colors;
     if (typeof color !== "string" || typeof symbolColor !== "string" || !/^#[0-9a-f]{6}$/i.test(color) || !/^#[0-9a-f]{6}$/i.test(symbolColor)) return;
     win?.setBackgroundColor(color);
-    // macOS owns the traffic-light colours; its overlay geometry still works.
+    // external: Electron cannot recolour macOS's traffic lights; its overlay geometry still works.
     if (process.platform !== "darwin") win?.setTitleBarOverlay({ color, symbolColor });
   });
   ipcMain.handle(IPC.restart, (event) => {
@@ -334,7 +308,6 @@ function run(start: StartApp = {}): void {
     if (!fromOurWindow(event)) throw new Error("refused");
     return modelFolders.openModelsFolder();
   });
-  // The image download folder's change control: the system dialog, nothing read or written here.
   ipcMain.handle(IPC.pickFolder, async (event, from: unknown): Promise<string | null> => {
     if (!fromOurWindow(event) || win === null) throw new Error("refused");
     const picked = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"], ...typeof from === "string" && from !== "" ? { defaultPath: from } : {} });
@@ -342,12 +315,10 @@ function run(start: StartApp = {}): void {
   });
   ipcMain.handle(IPC.openDataFolder, async (event): Promise<string | null> => {
     if (!fromOurWindow(event)) throw new Error("refused");
-    // shell.openPath resolves to an error message, "" when it worked
+    // external: Electron's shell.openPath resolves to an error message, "" when it worked.
     const failed = await shell.openPath(dataDir);
     return failed === "" ? null : `Couldn't open the folder: ${failed}`;
   });
-  // A checked download this copy cannot install by itself: show its file, checked again, to run from there.
-  // Only a version name crosses from the renderer; the folder is main's own, and nothing is deleted.
   ipcMain.handle(IPC.showUpdate, async (event, version: unknown): Promise<string | null> => {
     if (!fromOurWindow(event)) throw new Error("refused");
     if (typeof version !== "string") return "No downloaded update was named.";
@@ -356,12 +327,10 @@ function run(start: StartApp = {}): void {
     shell.showItemInFolder(kept.prepared.file);
     return null;
   });
-  // Row H for an installed copy: after the server commits the approval, re-verify, write `approved`, start the watcher, quit.
   const startInstalled = (request: UpdateInstallRequest): Promise<UpdateAndRestartResult> => {
     const state = supervisor.state;
     if (state.status !== "ready") return Promise.resolve({ ok: false, message: "The app server is not ready to approve an update. Try again after it reconnects." });
     if (windowsUpdates) {
-      // Windows W-A step 4: re-verify, write the note, start the checked installer; a refused start leaves this app as it was.
       return withUpdateControl(state.url, (control) => launchApprovedUpdate(request, control, (target) => startWindowsUpdate(target, {
         dataDir,
         running: app.getVersion(),
@@ -427,7 +396,6 @@ function run(start: StartApp = {}): void {
       }),
     );
     const contents = window.webContents;
-    // Only main can start this operation. There is no renderer clipboard request channel.
     const paste = async () => {
       const started = performance.now();
       const id = randomUUID();
@@ -438,7 +406,7 @@ function run(start: StartApp = {}): void {
       const copied: string[] = [];
       let skipped = false;
       try {
-        // Electron 45 maps Windows CF_HDROP to file:// URIs in this privileged read.
+        // external: Electron 45 maps Windows CF_HDROP to file:// URIs in this privileged read.
         for (const item of await clipboard.read()) {
           for (const format of pathClipboardTypes(item.types)) {
             const parsed = parseClipboardPaths(await (await item.getType(format)).text(), process.platform);
@@ -470,12 +438,9 @@ function run(start: StartApp = {}): void {
       );
       if (template.length) Menu.buildFromTemplate(template).popup({ window });
     });
-    // An update page's one button is a link only main acts on; the guard below still refuses to navigate.
     contents.on("will-navigate", (_event, url) => {
       if (pageAction(url) === "continue") carryOn();
     });
-    // The window never opens another window or leaves the client. A web
-    // link (the Ollama library, a link in a reply) opens in the system browser.
     guardNavigation(contents, {
       isClientUrl,
       openExternal: (url) => shell.openExternal(url),
@@ -483,12 +448,10 @@ function run(start: StartApp = {}): void {
       pagePort: () => (supervisor.state.status === "ready" ? supervisor.state.port : undefined),
     });
     contents.on("did-fail-load", (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
-      // -3 is ERR_ABORTED: a newer navigation replaced this one.
+      // external: Chromium's -3 is ERR_ABORTED: a newer navigation replaced this one.
       if (!isMainFrame || errorCode === -3 || !showingClient) return;
       showStatus({ kind: "client-load-failed", url: validatedUrl, error: `${errorDescription} (${errorCode})` });
     });
-    // No menu on Linux and Windows, so reload, close, quit, full screen,
-    // dev tools and zoom keys come from here (keys.ts).
     installWindowKeys(window, contents, { platform: process.platform, devTools: !app.isPackaged, quit: () => app.quit() });
     contents.on("render-process-gone", (_event, details) => {
       console.error(`[desktop] renderer gone: ${details.reason}`);
@@ -507,7 +470,7 @@ function run(start: StartApp = {}): void {
       case "none":
         return;
       case "create":
-        // A launch can arrive before ready; the window waits for it.
+        // external: Electron can deliver second-instance before ready, and a window needs ready.
         void app.whenReady().then(() => {
           if (win !== null && !win.isDestroyed()) return win.focus();
           win = createWindow();
@@ -532,7 +495,6 @@ function run(start: StartApp = {}): void {
     quitting = true;
     void supervisor.stop().finally(() => app.quit());
   });
-  // Background mode keeps the server up with no window; quit (or SIGTERM) still stops it.
   app.on("window-all-closed", () => {
     if (quitOnAllClosed(mode)) app.quit();
   });
@@ -550,7 +512,7 @@ function run(start: StartApp = {}): void {
       allowsMicrophone(contents?.getURL() ?? "", permission, origin, [details.mediaType ?? "unknown"], details.isMainFrame));
     const root = webRoot();
     protocol.handle(CLIENT_SCHEME, (request) => clientResponse(root, request.url, (fileUrl) => net.fetch(fileUrl)));
-    // The earlier failure page shows even on a background start: it comes before the server.
+    // why: the earlier failure page comes before the server, so it shows even on a background start.
     if ((windowAtStart(mode) || serverWaits) && win === null) {
       win = createWindow();
       route(supervisor.state);

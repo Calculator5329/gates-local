@@ -1,14 +1,3 @@
-// What an update would do, worked out from git: the version this copy runs,
-// the target on its channel and the changes in between, or why there is no
-// update to take. Both the Settings check (server) and the update command
-// (scripts/update.ts) use inspect(); only the command then changes anything.
-//
-// Channels:
-// - main: the newest commit on the clone's upstream branch.
-// - release: the newest release tag (v1.2.3, semver.ts) on the remote. Never
-//   backwards: a copy already past that tag is up to date.
-// - auto (the default): release once the remote has a release tag, main
-//   until then. Settings can pin main.
 import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { treeGone } from "./identity.ts";
@@ -28,26 +17,19 @@ const LOCAL_MS = 30_000;
 
 export interface Commit {
   readonly commit: string;
-  /** A release tag when the commit has one, else the short commit. */
   readonly label: string;
 }
 
+/** `diverged`: the target is not ahead of this copy on the same line, as a release tag off the branch. */
 export type Blocked =
   | { readonly reason: "no-git" }
   | { readonly reason: "not-a-clone" }
-  /** Not on a branch, or the branch has no upstream to update from. */
   | { readonly reason: "no-upstream"; readonly detail: string }
-  /** Tracked files with changes not committed. Untracked and ignored files never count. */
   | { readonly reason: "local-changes"; readonly files: readonly string[] }
-  /** git fetch or ls-remote failed: offline, or the remote refused. */
   | { readonly reason: "remote"; readonly detail: string }
-  /** Commits here that the target does not have. Never merged or reset over. */
   | { readonly reason: "local-commits"; readonly count: number; readonly subjects: readonly string[] }
-  /** --channel release with no release tag on the remote yet. */
   | { readonly reason: "no-releases" }
-  /** The target is not ahead of this copy on the same line (a release tag off the branch). */
   | { readonly reason: "diverged"; readonly target: string }
-  /** The last update was cut off, so the commit here proves nothing about the install and builds. */
   | { readonly reason: "unfinished"; readonly target: string; readonly runningPid: number | null };
 
 export type Inspection =
@@ -59,11 +41,8 @@ interface Found {
   readonly channel: Channel;
   readonly head: Commit;
   readonly target: Commit;
-  /** Commit subjects from head to target, newest first, at most MAX_CHANGES. */
   readonly changes: readonly string[];
-  /** How many commits head to target, all of them. */
   readonly total: number;
-  /** A release's tag message. */
   readonly notes?: string;
 }
 
@@ -122,7 +101,6 @@ export async function labelOf(git: Git, commit: string): Promise<string> {
 export interface Upstream {
   readonly branch: string;
   readonly remote: string;
-  /** refs/remotes/<remote>/<branch> */
   readonly ref: string;
 }
 
@@ -148,13 +126,12 @@ export async function changedFiles(git: Git): Promise<string[] | Blocked> {
     const entry = parts[i] ?? "";
     if (entry.length < 4) continue;
     files.push(entry.slice(3));
-    // A rename or copy carries its old path as the next field.
+    // why: in git's -z status a rename or copy carries its old path as the next field.
     if (entry[0] === "R" || entry[0] === "C") i++;
   }
   return files;
 }
 
-/** The remote's release tags and the commit each names (annotated tags peeled). */
 async function remoteReleases(git: Git, remote: string): Promise<Map<string, string> | Blocked> {
   const listed = await git(["ls-remote", "--tags", remote, "refs/tags/v*"], FETCH_MS);
   if (!ok(listed)) return { reason: "remote", detail: lastLines(listed) || "git ls-remote failed" };
@@ -173,22 +150,20 @@ async function remoteReleases(git: Git, remote: string): Promise<Map<string, str
 
 export const isBlocked = (v: unknown): v is Blocked => typeof v === "object" && v !== null && "reason" in v;
 
+const blocked = (b: Blocked): Inspection => ({ state: "blocked", blocked: b });
+
 /**
  * Everything short of changing the copy: preconditions, then git fetch and
  * ls-remote (the two network calls, both to the clone's own remote), the
  * target and the changes. Changes nothing but the remote-tracking refs and
  * tags that fetch brings.
  */
-const blocked = (b: Blocked): Inspection => ({ state: "blocked", blocked: b });
-
 export async function inspect(o: InspectOptions): Promise<Inspection> {
   const git = gitIn(o.root, o.runner, o.log, o.signal);
   if (!(await hasGit(git))) return blocked({ reason: "no-git" });
   if (!(await isClone(o.root, git))) return blocked({ reason: "not-a-clone" });
-  // Before "up to date" can be said: an update the last run left half done is finished by the update, not a check.
   const unfinished = readTransaction(o.root);
   if (unfinished !== null) {
-    // Only asks whether the command is there; any advice has to start with it if it is.
     const { running } = unfinished;
     return blocked({ reason: "unfinished", target: unfinished.to.label, runningPid: running !== undefined && !treeGone(running, { requireWholeWindowsTree: true }) ? running.pid : null });
   }
@@ -217,12 +192,10 @@ export async function inspect(o: InspectOptions): Promise<Inspection> {
   const notes = channel === "release" ? await tagNotes(git, newest!) : undefined;
   const withNotes = notes ? { notes } : {};
 
-  // Never backwards: a target this copy already contains is up to date.
   if (ok(await git(["merge-base", "--is-ancestor", targetSha, headSha]))) {
     return { state: "up-to-date", channel, head, target, changes: [], total: 0, ...withNotes };
   }
   if (!ok(await git(["merge-base", "--is-ancestor", headSha, targetSha]))) {
-    // Commits here that the remote branch does not have are the person's own.
     const own = await git(["rev-list", "--count", `${upstream.ref}..${headSha}`]);
     const count = Number(out(own));
     if (ok(own) && count > 0) {
@@ -245,7 +218,7 @@ export async function inspect(o: InspectOptions): Promise<Inspection> {
 }
 
 async function tagNotes(git: Git, tag: string): Promise<string | undefined> {
-  // Annotated tags only: a lightweight tag has no message of its own.
+  // why: only an annotated tag has a message of its own.
   const type = await git(["cat-file", "-t", `refs/tags/${tag}`]);
   if (!ok(type) || out(type) !== "tag") return undefined;
   const r = await git(["tag", "--list", "--format=%(contents)", tag]);

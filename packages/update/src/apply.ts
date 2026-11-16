@@ -1,19 +1,3 @@
-// The update itself: preconditions, the target (check.ts), then fast-forward,
-// pnpm install and the two builds `pnpm start` runs. A failed install or
-// build goes back to the old commit and installs and builds that again, so
-// the person keeps a working app; only when going back fails too does the
-// result carry the exact commands to run.
-//
-// Nothing here merges, rebases or resets over someone's work: a copy with
-// tracked changes or commits of its own is refused before anything changes,
-// and the one reset (going back) is `git reset --keep`, run only after this
-// run has checked again that the copy is exactly as it left it.
-//
-// The whole of it holds the checkout's lock (lock.ts). Before the checkout
-// moves, what is about to happen is saved (transaction.ts), so a run cut off
-// at any point is finished or undone by the next one. Each command that
-// changes the checkout is saved there too while it runs, so a later run waits
-// for one that outlived the updater or could not be stopped.
 import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -37,11 +21,13 @@ export const STEP_WORDS: Record<Step, string> = {
 const INSTALL_MS = 20 * 60_000;
 const BUILD_MS = 10 * 60_000;
 
-/** How to run pnpm: a command plus arguments that come before pnpm's own (node <pnpm.cjs>). */
+/**
+ * How to run pnpm: a command plus arguments that come before pnpm's own
+ * (node <pnpm.cjs>). `shell`: pnpm.cmd on Windows only runs through the shell.
+ */
 export interface Pnpm {
   readonly command: string;
   readonly prefix: readonly string[];
-  /** pnpm.cmd on Windows only runs through the shell. */
   readonly shell: boolean;
 }
 
@@ -50,27 +36,33 @@ export const INSTALL_ARGS = ["install", "--frozen-lockfile", "--config.confirmMo
 export const BUILD_WEB_ARGS = ["--filter", "@gates-local/web", "build"] as const;
 export const BUILD_DESKTOP_ARGS = ["--filter", "@gates-local/desktop", "build"] as const;
 
+/**
+ * - `lost-lock`: the lock was replaced while this run was held up; it changed nothing after that.
+ * - `still-running`: a command of an update could not be confirmed ended; nothing starts until it has.
+ * - `cannot-save`: the saved state could not be written, so the next command did not go on;
+ *   `pid` is one that was started and could not be confirmed ended.
+ * - `partial-checkout`: files, the index or git's own markers say a merge or reset was cut off.
+ * - `changed-during-update`: the copy changed while the update ran, so it did not go back on its own.
+ */
 export type Refusal =
   | Blocked
   | { readonly reason: "target-changed"; readonly approved: string; readonly target: Commit }
   | { readonly reason: "app-running"; readonly pid: number; readonly file: string }
   | { readonly reason: "no-pnpm" }
-  /** Another update holds this checkout. */
   | { readonly reason: "busy"; readonly pid: number | null; readonly file: string }
-  /** Its lock was replaced while this run was held up; it changed nothing after that. */
   | { readonly reason: "lost-lock" }
-  /** A command of an update could not be confirmed ended. Nothing starts until it has. */
   | { readonly reason: "still-running"; readonly pid: number | null; readonly target: string }
-  /** The saved state could not be written, so the next command did not go on. `pid`: one that was started and could not be confirmed ended. */
   | { readonly reason: "cannot-save"; readonly target: string; readonly detail: string; readonly pid: number | null }
-  /** Files, the index or git's own markers say a merge or reset was cut off. */
   | { readonly reason: "partial-checkout"; readonly target: string; readonly files: readonly string[]; readonly gitLock: string | null }
-  /** The copy changed while the update ran, so it did not go back on its own. */
   | { readonly reason: "changed-during-update"; readonly target: string; readonly step: Step; readonly stepReason: string; readonly changed: "branch" | "commit" | "files"; readonly files: readonly string[] };
 
+/**
+ * `settled` is for finishing only: nothing of a cut-off update is left, and
+ * nothing new was looked for. `commands`, on rollback-failed: what to run by
+ * hand, one command a line, from the clone.
+ */
 export type UpdateRun =
   | { readonly outcome: "refused"; readonly refusal: Refusal }
-  /** Finishing only: nothing of a cut-off update is left, and nothing new was looked for. */
   | { readonly outcome: "settled" }
   | { readonly outcome: "up-to-date"; readonly inspection: Extract<Inspection, { state: "up-to-date" }> }
   | { readonly outcome: "available"; readonly inspection: Extract<Inspection, { state: "available" }> }
@@ -82,32 +74,27 @@ export type UpdateRun =
       readonly to: Commit;
       readonly step: Step;
       readonly reason: string;
-      /** rollback-failed: what to run by hand, one command a line, from the clone. */
       readonly commands?: readonly string[];
     };
 
+/**
+ * - `approvedCommit`: the exact checked commit a desktop approval pins; the manual command leaves it out.
+ * - `finishOnly`: only finish or take back what a cut-off update left; look for nothing new. The
+ *   app's start asks for this (checkout-start.ts), so a start never installs a version nobody approved.
+ * - `say` is plain-language progress, one line each; `log` is every command and its output.
+ * - `startApp` starts the owned app, waits for server readiness, and ends its tree on failure.
+ */
 export interface UpdateOptions {
-  /** Desktop approval pins an exact checked commit. Omitted by the manual command. */
   readonly approvedCommit?: string;
   readonly root: string;
   readonly runner: Runner;
   readonly choice: ChannelChoice;
   readonly pnpm: Pnpm;
-  /** The running app, from its pid file; null when it is not running. */
   readonly appRunning: () => { readonly pid: number; readonly file: string } | null;
-  /** Report only: change nothing. */
   readonly checkOnly: boolean;
-  /**
-   * Only finish or take back what a cut-off update left; look for nothing
-   * new. The app's start asks for this (checkout-start.ts), so a start never
-   * installs a version nobody approved.
-   */
   readonly finishOnly?: boolean;
-  /** Plain-language progress, one line each. */
   readonly say: (line: string) => void;
-  /** Every command and its output, for the log file. */
   readonly log: (chunk: string) => void;
-  /** Starts the owned app, waits for server readiness, and ends its tree on failure. */
   readonly startApp?: (startup: { readonly token: string; readonly commit: string }, onStart: (pid: number) => void) => Promise<RunResult>;
 }
 
@@ -126,7 +113,7 @@ export function pnpmLine(args: readonly string[]): string {
 const refused = (refusal: Refusal): UpdateRun => ({ outcome: "refused", refusal });
 const lostLock = (): UpdateRun => refused({ reason: "lost-lock" });
 
-/** The files git names, one per tab-indented line, when it will not write over them. Read by shape, so any git language works. */
+// why: git names each file in the way on a tab-indented line; by shape, any git language works.
 function filesInTheWay(merge: RunResult): string[] {
   return merge.stderr.split(/\r?\n/).filter((l) => l.startsWith("\t")).map((l) => l.trim());
 }
@@ -146,7 +133,6 @@ function switchFailure(merge: RunResult): string {
   return files.length > 0 ? inTheWaySentence(files) : reasonOf(merge, "git merge");
 }
 
-/** The saved state could not be written. Caught once, in runUpdate. */
 class CannotSave extends Error {
   readonly refusal: Refusal;
 
@@ -160,21 +146,10 @@ interface Context {
   readonly o: UpdateOptions;
   readonly git: Git;
   readonly pnpm: (args: readonly string[], ms: number, onStart?: (pid: number) => void) => Promise<RunResult>;
-  /** False once another run has taken the checkout: nothing more may change. */
   readonly ours: () => boolean;
   readonly recordProcess: (pid: number) => ProcessRecord;
 }
 
-/**
- * Runs a command that changes the checkout, with its process in the saved
- * state while it runs. A command that ended is taken out again; one that may
- * not have ended stays, and holds off every later run.
- *
- * No command runs that a later run could not account for. A process's number
- * only exists once it has started, so the write is proved first, and a
- * command whose number then cannot be saved is ended at once. Either way this
- * throws CannotSave, which ends the run with a refusal.
- */
 async function changing(c: Context, t: Transaction, run: (onStart: (pid: number) => void) => Promise<RunResult>, persistAfter = true): Promise<RunResult> {
   const { root } = c.o;
   const cannotSave = (e: unknown, pid: number | null) => new CannotSave({ reason: "cannot-save", target: t.to.label, detail: (e as Error).message, pid });
@@ -201,7 +176,7 @@ async function changing(c: Context, t: Transaction, run: (onStart: (pid: number)
     try {
       saveTransaction(root, t);
     } catch (e) {
-      // The command has ended, so a stale process in the file only costs the next run a look at it.
+      // why: the command has ended, so a stale process in the file only costs the next run a look.
       c.o.log(`Could not save the update's state: ${(e as Error).message}\n`);
     }
   }
@@ -218,7 +193,6 @@ interface LeftBehind {
   readonly files: readonly string[];
 }
 
-/** What git and the files say about the checkout now. */
 async function leftBehind(c: Context): Promise<LeftBehind | Blocked> {
   const dir = stateDir(c.o.root);
   const marker = (name: string) => (dir !== null && existsSync(path.join(dir, name)) ? path.join(dir, name) : null);
@@ -257,7 +231,7 @@ async function transact(o: UpdateOptions, ours: () => boolean): Promise<UpdateRu
   const c: Context = { o, git, pnpm, ours, recordProcess: createProcessRecorder() };
 
   if (!o.checkOnly) {
-    // On Windows a running app holds electron.exe and the install would stop half way.
+    // external: on Windows a running Electron app holds electron.exe, so an install stops half way.
     const running = o.appRunning();
     if (running !== null) return refused({ reason: "app-running", ...running });
     if (o.finishOnly === true && readTransaction(o.root) === null) return { outcome: "settled" };
@@ -268,7 +242,6 @@ async function transact(o: UpdateOptions, ours: () => boolean): Promise<UpdateRu
       const recovered = await recover(c, unfinished);
       if (recovered !== null) return recovered;
     }
-    // What the cut-off run left is dealt with. One that could not be read (git is not usable) stays, and the check below says so.
     if (o.finishOnly === true && readTransaction(o.root) === null) return { outcome: "settled" };
   }
 
@@ -284,14 +257,11 @@ async function transact(o: UpdateOptions, ours: () => boolean): Promise<UpdateRu
   const move: Move = { channel, branch: branch.stdout.trim(), from, to, changes: total };
   if (!ours()) return lostLock();
   const forward: Transaction = { ...move, phase: "forward" };
-  // Saved by `changing` before anything moves: every way back starts there, and a failure to save stops the update.
-  // Never over a file of the person's: by default git writes over ignored ones.
   const switched = await changing(c, forward, (onStart) => git(["merge", "--ff-only", "--no-overwrite-ignore", "--quiet", to.commit], undefined, onStart));
   if (!ok(switched)) {
     if (switched.treeStillRunning === true) return stillRunning(c, to);
     const now = await git(["rev-parse", "HEAD"]);
     if (ok(now) && now.stdout.trim() === from.commit) {
-      // The old commit alone proves nothing: a merge cut off can have written files without moving it.
       const left = await leftBehind(c);
       if (isBlocked(left)) return refused(left);
       if (anythingLeft(left)) return partial(to, left);
@@ -305,24 +275,11 @@ async function transact(o: UpdateOptions, ours: () => boolean): Promise<UpdateRu
   return installAndBuild(c, move);
 }
 
-/**
- * Takes up what a cut-off run left. Null means nothing is left to do and the
- * update goes on as usual.
- *
- * A command that may still be running holds recovery off unless the person
- * has moved HEAD themselves. On the new commit: the install and
- * builds may not have finished, so they run (and go back if they fail). On
- * the old commit after a start back: going back runs again. On the old commit
- * otherwise: it did not move, and the saved state goes only once the files
- * and git agree nothing was left half done. A hand-moved HEAD on the same
- * branch keeps that commit and repairs its install and builds; a branch
- * switch clears the old record without installing anything.
- */
 async function recover(c: Context, t: Transaction): Promise<UpdateRun | null> {
   const { o, git } = c;
   const now = await git(["rev-parse", "HEAD"]);
   const branch = await git(["symbolic-ref", "--quiet", "--short", "HEAD"]);
-  // git is not usable: inspect says why, and refuses while the file is there.
+  // why: with git unusable the saved update stays; inspect says why and refuses while it is there.
   if (!ok(now)) return null;
   const head = now.stdout.trim();
   const onNew = head === t.to.commit;
@@ -337,12 +294,11 @@ async function recover(c: Context, t: Transaction): Promise<UpdateRun | null> {
   if (!ok(branch)) return null;
   const left = await leftBehind(c);
   if (isBlocked(left)) return refused(left);
-  // A merge moves the commit last, so on the new commit going forward the files are all there and any difference is the person's.
+  // why: git merge moves the commit last, so on the new commit a changed file is the person's.
   const mergeFinished = onNew && t.phase === "forward";
   const partWay = left.gitLock !== null || left.merging || (left.files.length > 0 && !mergeFinished);
   if (partWay && !brokenForTest("part-way-copy-not-refused")) return partial(t.to, left);
-  // The switch is done, so these are the person's edits. An update asked for by hand stops for them. A start
-  // finishing the update goes on: the install and builds change no tracked file, and going back checks again.
+  // why: a finishing start goes on; install and builds touch no tracked file; going back rechecks.
   if (left.files.length > 0 && o.finishOnly !== true) return refused({ reason: "local-changes", files: left.files });
   if (!c.ours()) return lostLock();
   if (repair) {
@@ -363,7 +319,7 @@ async function recover(c: Context, t: Transaction): Promise<UpdateRun | null> {
 
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-/** The saved update is done with. Not saving this only repeats the install next time, so it never fails a run. */
+// why: a saved update left behind only repeats the install next time, so this never fails a run.
 function settle(c: Context): void {
   try {
     clearTransaction(c.o.root);
@@ -414,11 +370,7 @@ interface Failed extends Move {
   readonly reason: string;
 }
 
-/**
- * Why an automatic reset must not run: the copy is not what this run left.
- * `git reset --keep` keeps a changed working copy but can drop a staged
- * version, so any tracked change at all rules it out. Null when it may go on.
- */
+// why: git reset --keep keeps a changed working copy but can drop a staged version.
 async function changedByHand(c: Context, f: Failed): Promise<Refusal | "unknown" | null> {
   const now = await c.git(["rev-parse", "HEAD"]);
   const branch = await c.git(["symbolic-ref", "--quiet", "--short", "HEAD"]);
@@ -441,7 +393,6 @@ async function goBack(c: Context, f: Failed): Promise<UpdateRun> {
     pnpmLine(BUILD_WEB_ARGS),
     pnpmLine(BUILD_DESKTOP_ARGS),
   ];
-  // The saved state stays, so the next run takes this up again.
   const failedBack = (): UpdateRun => ({ outcome: "rollback-failed", ...result, commands });
   if (!c.ours()) return lostLock();
   const changed = await changedByHand(c, f);
@@ -452,7 +403,6 @@ async function goBack(c: Context, f: Failed): Promise<UpdateRun> {
     ? `Repairing ${f.to.label} stopped at ${STEP_WORDS[f.step]}. Retrying the repair at this commit…`
     : `The update to ${f.to.label} stopped at ${STEP_WORDS[f.step]}. Going back to ${f.from.label}…`);
   const back: Transaction = { channel: f.channel, branch: f.branch, from: f.from, to: f.to, changes: f.changes, phase: "back", step: f.step, reason: f.reason };
-  // --keep is safe here: the copy was just found to be exactly as this run left it.
   const reset = await changing(c, back, (onStart) => git(["reset", brokenForTest("go-back-over-edits") ? "--hard" : "--keep", f.from.commit], undefined, onStart));
   if (reset.treeStillRunning === true) return stillRunning(c, f.to);
   if (!ok(reset)) return failedBack();

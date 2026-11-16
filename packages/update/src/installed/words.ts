@@ -1,10 +1,7 @@
-// What the person reads about an installed copy's update: section 8 of
-// docs/design/installed-updates.md, word for word, as functions of the values
-// each sentence shows. words.test.ts reads the design and compares.
-//
-// `link` means the sentence is followed by a link to the release page.
-// `detail` is the second line under a title ("Restart to update" — "...").
-
+/**
+ * `link`: the sentence is followed by a link to the release page.
+ * `detail`: the second line under a title ("Restart to update" — "...").
+ */
 export interface Words {
   readonly text: string;
   readonly detail?: string;
@@ -55,7 +52,7 @@ export const downloaded = (version: string): Words => say(`Update ${version} is 
 export type KeptReason = CannotReplace | "pinned" | "none";
 const ELSEWHERE = "put the new file where you keep programs and start it from there";
 function keptLinux(reason: KeptReason, program: string | null): string {
-  // Only a copy started from an AppImage has a file to name; none of these reasons arises without one.
+  // why: only an AppImage copy has a file to name, and none of these reasons arises without one.
   const file = program ?? "the file you started Gates Local from";
   switch (reason) {
     case "read-only": return `The folder of ${file} is read-only, so put the new file in its place yourself.`;
@@ -80,7 +77,7 @@ export const rolledBack = (newVersion: string, oldVersion: string): Words =>
 export const stuck = (version: string): Words =>
   say(`Gates Local could not confirm that version ${version} stopped. Restart your computer and start Gates Local; it will finish going back.`);
 
-/** A `permission` cause also covers a read-only volume (EROFS), so the clause names neither. */
+// why: a `permission` cause also covers a read-only volume (EROFS), so the clause names neither.
 const because = (cause: PauseCause): string => cause.kind === "disk" ? "the disk is full" : `it cannot change ${cause.path}`;
 const CARRY_ON = "Nothing was deleted. Fix that, then start Gates Local again; it will carry on from where it stopped.";
 export const replacePaused = (cause: PauseCause): Words => say(`Gates Local could not finish replacing its program file because ${because(cause)}. ${CARRY_ON}`);

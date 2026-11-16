@@ -1,10 +1,3 @@
-// How the updater runs git and pnpm. Everything goes through a Runner, so
-// tests can make install or build fail (and record every call) while real
-// git runs against their own temporary repositories.
-//
-// The real runner checks the guard (guard.ts) before each command, drops the
-// environment variables that point git at another repository, and never lets
-// git ask for a password (a check that needs one fails instead of hanging).
 import { type ChildProcessByStdio, execFile, spawn } from "node:child_process";
 import path from "node:path";
 import type { Readable } from "node:stream";
@@ -12,39 +5,41 @@ import { groupAlive } from "./process-state.ts";
 import { guardTarget, testRoot } from "./guard.ts";
 import { isAlive } from "./wait.ts";
 
+/**
+ * `failure` is set when the command did not start (`not-found`: not installed)
+ * or was ended. `treeStillRunning`: a command that was ended but whose
+ * processes could not be confirmed gone; nothing else may touch the checkout.
+ */
 export interface RunResult {
-  /** The exit code; null when the command was killed or did not start. */
   readonly code: number | null;
   readonly stdout: string;
   readonly stderr: string;
-  /** Set when the command did not start (ENOENT: not installed) or ran past its time limit. */
   readonly failure?: "not-found" | "timeout" | "spawn-error" | "aborted";
-  /** A timed-out command whose processes could not be confirmed ended. Nothing else may touch the checkout. */
   readonly treeStillRunning?: true;
 }
 
+/**
+ * `onStart` gets the process id as soon as it is known; if it throws, the
+ * command is ended at once. `shell` is needed for pnpm.cmd on Windows, and the
+ * arguments must then be plain words.
+ */
 export interface RunOptions {
   readonly signal?: AbortSignal;
   readonly cwd: string;
   readonly timeoutMs?: number;
-  /** Each chunk of stdout and stderr as it arrives (the update log). */
   readonly onOutput?: (chunk: string) => void;
-  /** The started process's id, as soon as it is known. If this throws, the command is ended at once. */
   readonly onStart?: (pid: number) => void;
-  /** Run through the shell. Needed for pnpm.cmd on Windows; the arguments must be plain words. */
   readonly shell?: boolean;
   readonly env?: NodeJS.ProcessEnv;
 }
 
 export type Runner = (command: string, args: readonly string[], options: RunOptions) => Promise<RunResult>;
 
-/** Variables that would make git act on a repository other than the one in cwd. */
 const REDIRECTS = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_ALTERNATE_OBJECT_DIRECTORIES"];
 
 export function commandEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" };
   for (const key of REDIRECTS) delete env[key];
-  // In tests git never looks for a repository above the test root.
   const root = testRoot(base);
   if (root !== undefined) env["GIT_CEILING_DIRECTORIES"] = root;
   return env;
@@ -54,7 +49,7 @@ export function commandEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 export const TERM_GRACE_MS = 5_000;
 export const KILL_CONFIRM_MS = 5_000;
 const POLL_MS = 25;
-/** Let git's SIGTERM handler remove its locks before the server's hard exit. */
+// why: git's SIGTERM handler removes its locks in this time, before the server's hard exit.
 const ABORT_GRACE_MS = 300;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -67,12 +62,9 @@ export function groupExists(pid: number): boolean {
 function signalGroup(pid: number, signal: NodeJS.Signals): void {
   try {
     process.kill(-pid, signal);
-  } catch {
-    // Already gone.
-  }
+  } catch {}
 }
 
-/** Runs taskkill and resolves its exit code; null when it could not run or did not finish. */
 function runTaskkill(args: readonly string[]): Promise<number | null> {
   return new Promise((resolve) => {
     execFile("taskkill", [...args], { windowsHide: true, timeout: KILL_CONFIRM_MS }, (error) => {
@@ -82,11 +74,11 @@ function runTaskkill(args: readonly string[]): Promise<number | null> {
   });
 }
 
+/** `exists` asks whether the tree is still there: the process group on POSIX, the root process on Windows. */
 export interface TreeStop {
   readonly platform: NodeJS.Platform;
   readonly graceMs: number;
   readonly confirmMs: number;
-  /** Is the tree still there: the process group on POSIX, the root process on Windows. */
   readonly exists: (pid: number) => boolean;
   readonly signal: (pid: number, signal: NodeJS.Signals) => void;
   readonly taskkill: (args: readonly string[]) => Promise<number | null>;
@@ -110,8 +102,13 @@ async function goneWithin(pid: number, ms: number, exists: TreeStop["exists"]): 
   return true;
 }
 
-/** taskkill's exit code when it found no such process: already gone. */
+// external: Windows taskkill exits 128 when it finds no such process.
 const TASKKILL_NOT_FOUND = 128;
+
+/** `requireWindowsTreeKill`: startup may leave helpers behind a dead root, so "no such process" cannot certify that tree. */
+export interface EndTreeOptions {
+  readonly requireWindowsTreeKill?: boolean;
+}
 
 /**
  * Ends a command and everything it started, within a bound, and says whether
@@ -119,10 +116,6 @@ const TASKKILL_NOT_FOUND = 128;
  * grace. Windows has no process groups here: `taskkill /T /F` walks the tree
  * from the root, and only the root can be confirmed afterwards.
  */
-export interface EndTreeOptions {
-  /** Startup may leave helpers behind a dead root; exit 128 cannot certify that tree. */
-  readonly requireWindowsTreeKill?: boolean;
-}
 export async function endTree(pid: number, s: TreeStop = treeStop(), options: EndTreeOptions = {}): Promise<boolean> {
   if (s.platform === "win32") {
     const code = await s.taskkill(["/PID", String(pid), "/T", "/F"]);
@@ -136,9 +129,6 @@ export async function endTree(pid: number, s: TreeStop = treeStop(), options: En
   return goneWithin(pid, s.confirmMs, s.exists);
 }
 
-// Commands run in their own process groups so a timeout can end all of each
-// one, which also keeps Ctrl+C from reaching them: it goes to the terminal's
-// foreground group, this process. Without this they would outlive it.
 const liveGroups = new Set<number>();
 const STOP_SIGNALS: readonly NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
 
@@ -148,22 +138,17 @@ function killTrackedGroups(): void {
 }
 
 function onStopSignal(signal: NodeJS.Signals): void {
-  // The server owns graceful shutdown; exit cleanup catches anything it leaves.
   if (process.listeners(signal).some(listener => listener !== onStopSignal)) return;
   killTrackedGroups();
   for (const s of STOP_SIGNALS) process.removeListener(s, onStopSignal);
-  // Nobody else is handling it (the updater): die of it, as a signal normally would.
   if (process.listenerCount(signal) === 0) process.kill(process.pid, signal);
 }
 
-// Commands starting or running. The listeners go in before a command is
-// started: a signal that arrives between the start and the next line of this
-// file would otherwise end the process by default and leave the group running.
 let listeningFor = 0;
 
 function listenForStop(): void {
   if (listeningFor++ > 0) return;
-  // Run before once-listeners remove themselves during signal delivery.
+  // external: Node removes once-listeners as it delivers a signal; this one must see them first.
   for (const s of STOP_SIGNALS) process.prependListener(s, onStopSignal);
   process.on("exit", killTrackedGroups);
 }
@@ -178,7 +163,6 @@ function stopListening(): void {
 export function createRunner(stop: Partial<TreeStop> = {}): Runner {
   const s = { ...treeStop(), ...stop };
   return (command, args, options) => {
-    // Throws before anything starts when the folder is not allowed.
     guardTarget(options.cwd);
     const env = commandEnv(options.env ?? process.env);
     if (options.signal?.aborted) return Promise.resolve({ code: null, stdout: "", stderr: "The command was cancelled.", failure: "aborted" });
@@ -220,8 +204,7 @@ export function createRunner(stop: Partial<TreeStop> = {}): Runner {
         if (stopping || settled) return;
         failure = why;
         stopping = true;
-        // Node holds the Windows process handle until exit. Afterwards its
-        // PID can belong to someone else, even while a helper keeps stdio open.
+        // external: Node holds a Windows process handle only until exit; then its PID can be reused.
         if (s.platform === "win32" && (child.exitCode !== null || child.signalCode !== null)) {
           child.stdout.destroy();
           child.stderr.destroy();
@@ -234,7 +217,7 @@ export function createRunner(stop: Partial<TreeStop> = {}): Runner {
           return;
         }
         void endTree(pid, why === "aborted" ? { ...s, graceMs: ABORT_GRACE_MS } : s).then((ended) => {
-          // Something outside the tree can still hold a pipe open; `close` is no longer waited for.
+          // why: something outside the tree can still hold a pipe open, so `close` is not waited for.
           child.stdout.destroy();
           child.stderr.destroy();
           finish(null, !ended);
@@ -253,18 +236,17 @@ export function createRunner(stop: Partial<TreeStop> = {}): Runner {
         stderr += chunk;
         options.onOutput?.(chunk);
       });
-      // A command that never started may or may not also emit close.
+      // external: Node may or may not emit close after error for a command that never started.
       child.on("error", (e: NodeJS.ErrnoException) => {
         if (stopping) return;
         failure = e.code === "ENOENT" ? "not-found" : "spawn-error";
         stderr += e.message;
         if (child.pid === undefined) finish(null);
       });
-      // While a timeout is ending the tree, the answer waits for that to be confirmed.
       child.on("close", (code) => {
         if (!stopping) finish(code);
       });
-      // The hook can abort synchronously, so install its listener first.
+      // why: the onStart hook can abort synchronously, so the abort listener goes in first.
       try { if (child.pid !== undefined) options.onStart?.(child.pid); }
       catch { stopTree("spawn-error"); }
     });

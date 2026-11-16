@@ -1,15 +1,3 @@
-// The installed update's write-ahead record: <data dir>/updates/installed-update.json.
-//
-// Every row of the design's Linux table (docs/design/installed-updates.md,
-// section 2) writes its intent here before it acts, and recovery reads it
-// back. `writeIntent` is the only writer: file write, file flush, rename into
-// place, then a flush of the folder, so a reader sees the old intent or the
-// new one and never half a file. Only the watcher calls it after row H.
-//
-// The fields are checked by hand. The repo decodes files it reads back with
-// Effect Schema, but the desktop package has no `effect` dependency, and
-// adding one is outside this folder (see the lane report). The clone
-// updater's own transaction is checked by hand for a similar reason.
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -31,36 +19,42 @@ export const INTENTS = [
 ] as const;
 export type Intent = (typeof INTENTS)[number];
 
-/** A token launch (T1 of row L1, T2 of row B4). */
+/**
+ * A token launch (T1 of row L1, T2 of row B4). `boot` is the boot id when the
+ * intent naming the token was written: a later boot means it cannot be running.
+ * `record` is saved after the spawn; without it the launch was not spawned yet,
+ * or the watcher died before saving it.
+ */
 export interface TokenLaunch {
   readonly token: string;
-  /** The boot id when the intent naming this token was written: a later boot means it cannot be running. */
   readonly boot: string;
-  /** Saved after the spawn. Absent: not spawned yet, or the watcher died before saving it. */
   readonly record?: ProcessRecord;
-  /** The spawn returned an error, so this launch never ran. */
   readonly spawnFailed?: true;
 }
 
 /** How a transaction that reached row C ended, so a cleanup retry knows. */
 export type Ending = "updated" | "rolled-back" | "stopped";
 
+/**
+ * The record in <data dir>/updates/installed-update.json.
+ * - `copy`: real paths of the program file and the data folder, what "this copy" means.
+ * - `listDigest`: SHA-512 of the approved release list's exact bytes.
+ * - `deadline`: row H's approval deadline, uptime in seconds, valid only on this boot.
+ * - `processes`: the old main and its supervised server, saved at row H.
+ * - `old`, `new`, `storeBefore`: row W2's look at the program path, the pinned
+ *   artifact and the store's user_version.
+ */
 export interface InstalledTransaction {
   readonly version: 1;
   readonly id: string;
-  /** Real paths of the program file and the data folder: what "this copy" means. */
   readonly copy: { readonly program: string; readonly dataDir: string };
   readonly from: string;
   readonly to: string;
-  /** SHA-512 of the approved release list's exact bytes. */
   readonly listDigest: string;
   readonly artifact: ReleaseArtifact;
-  /** Row H's approval deadline: uptime in seconds, valid only on this boot. */
   readonly deadline: { readonly uptime: number; readonly boot: string };
-  /** The old main and its supervised server, saved at row H. */
   readonly processes: { readonly main: ProcessRecord; readonly server: ProcessRecord };
   readonly intent: Intent;
-  /** Row W2: what was at the program path, the pinned artifact, and the store's user_version. */
   readonly old?: Identity;
   readonly new?: Identity;
   readonly storeBefore?: number;
@@ -69,6 +63,7 @@ export interface InstalledTransaction {
   readonly ending?: Ending;
 }
 
+/** `uptime` and `boot` are os.uptime() and the boot id when the person's approval was committed. */
 export interface Approval {
   readonly id?: string;
   readonly copy: InstalledTransaction["copy"];
@@ -76,7 +71,6 @@ export interface Approval {
   readonly to: string;
   readonly listDigest: string;
   readonly artifact: ReleaseArtifact;
-  /** os.uptime() and the boot id when the person's approval was committed. */
   readonly uptime: number;
   readonly boot: string;
   readonly main: ProcessRecord;
@@ -173,16 +167,15 @@ function tokenLaunch(v: unknown): TokenLaunch | null {
   const record = v["record"] === undefined ? undefined : processRecord(v["record"]);
   if (record === null) return null;
   if (v["spawnFailed"] !== undefined && v["spawnFailed"] !== true) return null;
-  // A saved record means the spawn succeeded; one with both is not a file the watcher wrote.
   if (record !== undefined && v["spawnFailed"] !== undefined) return null;
   return { token: v["token"], boot: v["boot"], ...(record === undefined ? {} : { record }), ...(v["spawnFailed"] === true ? { spawnFailed: true } : {}) };
 }
 
-/** Which later fields each intent needs. */
 const NEEDS_IDENTITIES: ReadonlySet<Intent> = new Set(["identified", "stage", "keep-previous", "replace", "launch-new", "accepted", "stop-new", "restore-aside", "restore-install", "put-back", "launch-old", "went-back"]);
 const NEEDS_T1: ReadonlySet<Intent> = new Set(["launch-new", "accepted", "stop-new", "restore-aside", "restore-install", "put-back", "launch-old", "went-back"]);
 const NEEDS_T2: ReadonlySet<Intent> = new Set(["launch-old", "went-back"]);
 
+// why: the desktop package has no effect dependency, so the fields are checked by hand.
 function decode(file: string, text: string): InstalledTransaction {
   const fail = (why: string): never => { throw new UnreadableTransaction(file, why); };
   let v: unknown;
@@ -193,7 +186,6 @@ function decode(file: string, text: string): InstalledTransaction {
   }
   if (!isRow(v) || v["version"] !== 1) return fail("not a version 1 transaction");
   const { id, copy, from, to, listDigest, deadline, processes, intent } = v;
-  // The id and `to` name files and folders (`.previous-<id>`, `updates/<to>`): both must stay inside them.
   if (!isName(id) || !isVersion(from) || !isVersion(to) || !isHex128(listDigest)) return fail("id, versions or list digest");
   if (!isRow(copy) || !isText(copy["program"]) || !isText(copy["dataDir"])) return fail("copy");
   const pinned = artifact(v["artifact"]) ?? fail("artifact");

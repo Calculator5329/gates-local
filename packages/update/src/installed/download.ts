@@ -1,29 +1,3 @@
-// Download a newer version for this copy into <data dir>/updates/<version>/
-// and prove it is the file the signed release list names. Nothing here
-// installs, runs or moves the file into place: the next step reads the folder
-// through verifyPrepared, the only door to "ready".
-//
-// The folder's contract, in the order it is written:
-//   1. release.json and release.json.sig, the exact bytes the check verified;
-//   2. <file>.part, streamed from B/download/v<version>/<file>, counted and
-//      hashed as it arrives, stopped the moment it passes the listed size;
-//   3. <file>, renamed from .part only after its size and SHA-512 matched and
-//      it was flushed.
-// A folder without the list or signature, or holding a .part, is incomplete
-// and deleted; nothing is resumed. A complete folder is still checked again
-// (signature against the built-in keys, version above the running one, the
-// artifact's hash) before anything calls it ready, and deleted if it fails.
-// Nothing outside <data dir>/updates/ is ever deleted: every recursive delete
-// resolves its version folder first and refuses a name that is not
-// major.minor.patch. That holds by path. A version folder that could be in
-// use is never deleted, by any delete here, whoever asks: one a program runs
-// from, one the app was started from before (a copy that finds itself started
-// from its version folder leaves a note there, noteStartedFrom), one a
-// launcher points into (in-use.ts decides). Cleanup of other versions also
-// leaves the newest one on disk. If the person made updates/ itself a
-// link, the deletes follow it to wherever it points; a version folder or an
-// artifact that is a link is never trusted, and deleting one removes only
-// the link.
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -51,62 +25,63 @@ export const RENAME_RETRY_MS = 2_000;
 const RENAME_WAIT_MS = 100;
 const RENAME_RETRY_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
 
-/** Who is asking: which keys, which running version, which platform's file. */
+/**
+ * Who is asking: which keys, which running version, which platform's file.
+ * A prepared version must be above `running`. `programs` are the running
+ * program's files: no delete removes a version folder that holds one.
+ */
 export interface Identity {
   readonly dataDir: string;
-  /** The running copy's version: a prepared version must be above it. */
   readonly running: string;
   readonly keys: readonly string[];
   readonly platform: string;
   readonly arch: string;
-  /** The running program's files: no delete removes a version folder that holds one. */
   readonly programs?: readonly string[];
-  /** Tests say what runs and which launchers exist; the default reads the computer. */
   readonly look?: Look;
 }
 
-/** A folder verifyPrepared has just checked from its bytes on disk. */
+/**
+ * A folder verifyPrepared has just checked from its bytes on disk.
+ * `listSha512` is the SHA-512 of the stored list's exact bytes: the approval pin (design section 5).
+ */
 export interface PreparedRelease {
   readonly version: string;
   readonly folder: string;
-  /** The artifact's absolute path. */
   readonly file: string;
   readonly artifact: ReleaseArtifact;
   readonly manifest: ReleaseManifest;
-  /** SHA-512 of the stored list's exact bytes: the approval pin (design section 5). */
   readonly listSha512: string;
 }
 
 export type Verified = { readonly ok: true; readonly prepared: PreparedRelease } | { readonly ok: false; readonly reason: string };
 
+/** `bad-download`: the bytes did not match the signed list (size or hash); `received` is how many were taken. */
 export type DownloadOutcome =
   | { readonly kind: "ready"; readonly prepared: PreparedRelease; readonly fetched: boolean }
-  /** The bytes did not match the signed list (size or hash); received is how many were taken. */
   | { readonly kind: "bad-download"; readonly detail: string; readonly received: number }
   | { readonly kind: "could-not-download"; readonly detail: string }
   | { readonly kind: "disk"; readonly volume: string; readonly needed: number; readonly free: number }
   | { readonly kind: "cancelled" };
 
+/** `volume`: the mount point (Linux) or drive (Windows) the folder is on. */
 export interface Space {
-  /** The mount point (Linux) or drive (Windows) the folder is on. */
   readonly volume: string;
   readonly free: number;
 }
 
+/**
+ * `base` is the release page base B. `version` is the one the check found and
+ * must be the list's own; `list` is the exact bytes the check fetched and verified.
+ */
 export interface DownloadOptions extends Identity {
-  /** The release page base B. */
   readonly base: URL;
-  /** The version the check found; must be the list's own. */
   readonly version: string;
-  /** The exact bytes the check fetched and verified. */
   readonly list: Buffer;
   readonly signature: Buffer;
   readonly stream: Stream;
   readonly signal: AbortSignal;
   readonly progress?: (received: number, total: number) => void;
-  /** Tests pretend a full disk; the default reads the real volume. */
   readonly freeSpace?: (folder: string) => Promise<Space>;
-  /** Tests shorten it; the default is SLOWEST. */
   readonly slowest?: { readonly windowMs: number; readonly bytes: number };
   readonly now?: () => number;
 }
@@ -131,17 +106,11 @@ export function versionFolder(dataDir: string, version: string): string {
   return folder;
 }
 
-/**
- * The one recursive delete: a version folder, its path checked first, and
- * only when nothing could be using it (in-use.ts). Returns why it was left,
- * or null once it is gone. On Windows a scanner may hold a fresh file for a
- * moment; the retries keep that from turning "did not match" into "could not
- * download".
- */
 async function removeVersion(dataDir: string, version: string, who: { readonly programs?: readonly string[] | undefined; readonly look?: Look | undefined }): Promise<string | null> {
   const folder = versionFolder(dataDir, version);
   const used = inUse(folder, who.programs ?? [], who.look ?? realLook);
   if (used !== null) return used;
+  // external: on Windows a scanner may hold a fresh file for a moment; the retries ride that out.
   await fs.promises.rm(folder, { recursive: true, force: true, maxRetries: 3 });
   return null;
 }
@@ -185,7 +154,6 @@ export function artifactUrl(base: URL, version: string, file: string): URL {
 
 const artifactFor = (manifest: ReleaseManifest, o: Identity) => manifest.artifacts.find((a) => a.platform === o.platform && a.arch === o.arch);
 
-/** The stored list's own checks, from bytes: trusted, this version, above the running one (unless kept), a file for this copy. */
 function trustList(list: Buffer, signature: Buffer, version: string, o: Identity, kept = false): { manifest: ReleaseManifest; artifact: ReleaseArtifact } | string {
   let manifest: ReleaseManifest;
   try { manifest = verifyManifest(list, signature, o.keys); }
@@ -238,7 +206,6 @@ export async function verifyKept(o: Identity & { readonly version: string }): Pr
 }
 
 async function check(folder: string, o: Identity & { readonly version: string }, kept = false): Promise<PreparedRelease | string> {
-  // Links are never followed: a link's target can change after its bytes were hashed.
   if (!(await fs.promises.lstat(folder)).isDirectory()) return "the version folder is not a real folder";
   const names = await fs.promises.readdir(folder);
   if (names.some((name) => name.endsWith(PART))) return "the folder holds an unfinished download";
@@ -266,7 +233,6 @@ export async function preparedRelease(o: Identity & { readonly version: string; 
   let folder: string;
   try { folder = versionFolder(o.dataDir, o.version); }
   catch (error) { return { ok: false, reason: message(error) }; }
-  // lstat: a link in the folder's place is something to check (and delete), not to follow.
   const exists = await fs.promises.lstat(folder).then(() => true, () => false);
   if (!exists) return null;
   const verified = await verifyPrepared(o);
@@ -287,7 +253,6 @@ export async function removeVersions(dataDir: string, keep: readonly string[], p
     if (errorCode(error) === "ENOENT") return [];
     throw error;
   });
-  // Only a name versionFolder accepts is ever deleted; anything else in updates/ is not ours.
   const isVersion = (name: string) => {
     try { versionFolder(dataDir, name); return true; } catch { return false; }
   };
@@ -307,7 +272,6 @@ function newer(a: string, b: string): boolean {
   return left !== null && right !== null && compare(left, right) > 0;
 }
 
-/** The volume a folder is on: the drive on Windows, the mount point elsewhere. */
 async function volumeOf(folder: string): Promise<string> {
   const resolved = path.resolve(folder);
   if (process.platform === "win32") return path.parse(resolved).root.replace(/[\\/]+$/, "");
@@ -326,7 +290,6 @@ export async function freeSpace(folder: string): Promise<Space> {
   return { volume: await volumeOf(folder), free: stats.bavail * stats.bsize };
 }
 
-/** Write, flush, close: used for the list and signature. */
 async function writeFlushed(file: string, bytes: Buffer): Promise<void> {
   const handle = await fs.promises.open(file, "wx");
   try {
@@ -337,19 +300,14 @@ async function writeFlushed(file: string, bytes: Buffer): Promise<void> {
   }
 }
 
-/** Windows cannot open a folder to flush it; elsewhere this makes the rename durable. */
+// external: Windows cannot open a folder to flush it; elsewhere this makes the rename durable.
 async function flushFolder(folder: string): Promise<void> {
   if (process.platform === "win32") return;
   const handle = await fs.promises.open(folder, "r");
   try { await handle.sync(); } finally { await handle.close(); }
 }
 
-/**
- * The final rename. On Windows a scanner may hold a fresh .exe open for a
- * moment (EPERM in 3 of 28 measured runs), so a refusal there is tried again
- * for up to RENAME_RETRY_MS. Elsewhere the same codes are a real permission
- * problem and fail at once.
- */
+// external: on Windows a scanner may hold a fresh .exe open for a moment (EPERM in 3 of 28 runs).
 async function renameLast(from: string, to: string): Promise<void> {
   const deadline = Date.now() + RENAME_RETRY_MS;
   for (;;) {
@@ -370,7 +328,6 @@ type Read =
   | { readonly kind: "write-failed"; readonly detail: string }
   | { readonly kind: "too-slow"; readonly detail: string };
 
-/** The artifact's body: counted, size-capped, hashed and written as it arrives. */
 function toFile(handle: fs.promises.FileHandle, artifact: ReleaseArtifact, o: DownloadOptions): { body: Body<Read>; received: () => number } {
   const now = o.now ?? Date.now;
   const slowest = o.slowest ?? SLOWEST;
@@ -382,7 +339,6 @@ function toFile(handle: fs.promises.FileHandle, artifact: ReleaseArtifact, o: Do
     declared: (length) => (length > artifact.size ? { kind: "mismatch", detail: `the server offered ${length} bytes; the signed list says ${artifact.size}` } : undefined),
     chunk: async (bytes) => {
       received += bytes.length;
-      // Past the signed size: stop here, before writing, and hang up.
       if (received > artifact.size) return { kind: "mismatch", detail: `the server sent more than the ${artifact.size} bytes the signed list says` };
       hash.update(bytes);
       const at = received - bytes.length;
@@ -416,7 +372,6 @@ function toFile(handle: fs.promises.FileHandle, artifact: ReleaseArtifact, o: Do
  * verifyPrepared. Every other ending leaves no folder behind.
  */
 export async function downloadRelease(o: DownloadOptions): Promise<DownloadOutcome> {
-  // From the bytes in hand, before any file call: the name, then the list.
   let folder: string;
   try { folder = versionFolder(o.dataDir, o.version); }
   catch (error) { return { kind: "could-not-download", detail: message(error) }; }
@@ -429,7 +384,7 @@ export async function downloadRelease(o: DownloadOptions): Promise<DownloadOutco
   try {
     const existing = await preparedRelease(o);
     if (existing?.ok === true) return { kind: "ready", prepared: existing.prepared, fetched: false };
-    // preparedRelease deleted a folder that failed; anything else left is not trusted either.
+    // why: preparedRelease deleted a folder that failed; anything else left is not trusted either.
     const used = await removeVersion(o.dataDir, o.version, o);
     if (used !== null) return { kind: "could-not-download", detail: `its folder is in use: ${used}` };
     if (o.signal.aborted) return { kind: "cancelled" };
@@ -454,7 +409,6 @@ async function disk(o: DownloadOptions, artifact: ReleaseArtifact): Promise<Down
   return { kind: "disk", volume: space.volume, needed: artifact.size, free: space.free };
 }
 
-/** Steps 1 to 3 into an empty folder; final is fileIn's path. Undefined when the file is in place, else why not. */
 async function fetchInto(folder: string, final: string, artifact: ReleaseArtifact, o: DownloadOptions): Promise<DownloadOutcome | undefined> {
   await fs.promises.mkdir(updatesRoot(o.dataDir), { recursive: true });
   const space = await (o.freeSpace ?? freeSpace)(updatesRoot(o.dataDir));
@@ -463,7 +417,6 @@ async function fetchInto(folder: string, final: string, artifact: ReleaseArtifac
   await writeFlushed(path.join(folder, LIST_FILE), o.list);
   await writeFlushed(path.join(folder, SIGNATURE_FILE), o.signature);
   const part = `${final}${PART}`;
-  // An AppImage is a program: a copy that cannot replace itself leaves it for the person to put in place and start.
   const handle = await fs.promises.open(part, "wx", artifact.kind === "appimage" ? 0o755 : 0o644);
   let read: Streamed<Read> | undefined;
   let taken = 0;

@@ -1,13 +1,7 @@
-// The small local page main shows while the server is starting, after it
-// crashed, or when the web client failed to load. The draggable header stays
-// clear of native controls even when the web client is unavailable. Its buttons call the
-// preload bridge (window.gatesLocal), so it works with the sandbox on.
-
 import { describeCrash, type BridgeState } from "./bridge.ts";
 import { windowsGoBack } from "@gates-local/update/installed/words";
 
 export type StatusView =
-  /** goBack: on Windows, the kept installer of the version before this one (installed updates, design section 3, step 7). */
   | { readonly kind: "server"; readonly state: BridgeState; readonly goBack?: string | undefined }
   | { readonly kind: "client-load-failed"; readonly url: string; readonly error: string };
 

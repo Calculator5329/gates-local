@@ -1,17 +1,3 @@
-// The one safety catch between the updater's tests and a real checkout.
-//
-// The updater fast-forwards, resets and rebuilds a git clone. A test that
-// pointed it at the developer's own checkout could reset that checkout, so
-// every command the updater runs (git and pnpm alike, see run.ts) first
-// passes through guardTarget:
-//
-// - With GATES_LOCAL_UPDATE_TEST_ROOT set, the folder a command runs in must
-//   be that folder or inside it (after resolving links), or the command is
-//   refused before anything starts.
-// - Under vitest (VITEST is set) with no test root, every command is refused:
-//   a test that forgot to set the root fails instead of reaching a checkout.
-//
-// Outside tests neither variable is set and the guard does nothing.
 import { realpathSync } from "node:fs";
 import path from "node:path";
 
@@ -39,13 +25,16 @@ export function testRoot(env: NodeJS.ProcessEnv = process.env): string | undefin
   return real(root);
 }
 
-/** True when dir is root or inside it. */
 export function inside(root: string, dir: string): boolean {
   const rel = path.relative(root, dir);
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
-/** Throws unless a command may run in dir (see the file comment). */
+/**
+ * Keeps the updater's tests off a real checkout: with a test root set, a
+ * command runs only in that folder or inside it (links resolved); under vitest
+ * without one, every command is refused. Outside tests it does nothing.
+ */
 export function guardTarget(dir: string, env: NodeJS.ProcessEnv = process.env): void {
   const root = testRoot(env);
   if (root === undefined) return;

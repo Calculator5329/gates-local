@@ -1,13 +1,3 @@
-// The result of the last update run, left in the data folder for the app to
-// show on its next start: "Updated to v0.2.0, 12 changes", or where it
-// stopped, why, and where the log is. A clone's server takes the file when it
-// starts (reads it and removes it), so it is shown for one launch only.
-//
-// An installed copy's watcher writes its result here too, with an `installed`
-// part: the transaction id, the versions, the words, and the token of the
-// launch it is for. Its readers use `readRecord`, which never removes the
-// file: a token launch must find its own result, and a status call from a
-// phone must not consume it first (docs/design/installed-updates.md, 1).
 import fs from "node:fs";
 import path from "node:path";
 import type { Channel, Commit } from "./check.ts";
@@ -15,32 +5,36 @@ import type { Step } from "./apply.ts";
 
 export const RECORD_FILE = "update-result.json";
 
-/** An installed copy's result, as the watcher wrote it. */
+/**
+ * An installed copy's result, as the watcher wrote it. `id` is the transaction
+ * it ended; `link` sends the person to the release page; `token` (updated,
+ * rolled-back) is the launch that may open admission on it, and never goes on
+ * the wire; `keeps` (rollback-failed) names files no cleanup deletes until the
+ * result is dismissed; `shown` means its token launch showed it once already.
+ */
 export interface InstalledRecord {
-  /** The transaction it ended. */
   readonly id: string;
   readonly from: string;
   readonly to: string;
-  /** The sentence (installed-update/words.ts), its second line, and whether it sends the person to the release page. */
   readonly text: string;
   readonly detail?: string;
   readonly link?: true;
-  /** updated and rolled-back: the token of the launch that may open admission on it (T1 or T2). Never on the wire. */
   readonly token?: string;
-  /** rollback-failed: the files and folders it names; no cleanup deletes them until it is dismissed. */
   readonly keeps?: readonly string[];
-  /** The token launch it was for has shown it: the next start does not show it again. */
   readonly shown?: true;
 }
 
+/**
+ * `refused`: a detached update that did not start, or stopped short of
+ * changing more. `rolled-back`: installed copies only. `changes`: commits
+ * between `from` and `to`.
+ */
 export interface UpdateRecord {
   readonly at: number;
-  /** refused: a detached update that did not start, or stopped short of changing more (the app shows why). rolled-back: installed copies only. */
   readonly outcome: "updated" | "rolled-back" | "stopped" | "rollback-failed" | "refused";
   readonly channel?: Channel;
   readonly from?: Commit;
   readonly to?: Commit;
-  /** Commits between from and to. */
   readonly changes?: number;
   readonly step?: Step;
   readonly reason?: string;
@@ -67,7 +61,7 @@ export function writeRecord(dataDir: string, record: UpdateRecord): string {
 }
 
 function flushFolder(dir: string): void {
-  // Windows cannot open a folder to flush it (EISDIR); the rename is all it has.
+  // external: Windows cannot open a folder to flush it (EISDIR); the rename is all it has.
   if (process.platform === "win32") return;
   const fd = fs.openSync(dir, "r");
   try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
@@ -127,7 +121,11 @@ function decode(text: string): UpdateRecord | undefined {
   };
 }
 
-/** The record, left in place; undefined when there is none or it does not parse (then it is left too). */
+/**
+ * The record, left in place; undefined when there is none or it does not parse
+ * (then it is left too). An installed copy reads with this: its token launch
+ * must still find its result after a phone's status call read it.
+ */
 export function readRecord(dataDir: string): UpdateRecord | undefined {
   let text: string;
   try {

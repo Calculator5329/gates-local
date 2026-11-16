@@ -1,9 +1,3 @@
-// What both sides of an installed copy (AppImage or installer) agree on: the
-// environment the desktop app hands its server, where the copy checks for
-// updates and which keys it trusts, whether it can restart into a checked
-// download, and the words for that download. The server's Settings module
-// (apps/server/src/update/installed/module.ts) and the desktop's updater
-// (apps/desktop/src/installed-update/) both read them from here.
 import type { UpdateDownload } from "@gates-local/contracts";
 import fs from "node:fs";
 import { REPO_URL } from "../cli.ts";
@@ -18,9 +12,9 @@ export const TEST_KEYS_ENV = "GATES_LOCAL_UPDATE_TEST_KEYS";
 /** B: the public repository's release pages, from the same address the clone updater uses. */
 export const DEFAULT_FEED = new URL(`${REPO_URL.replace(/\.git$/, "")}/releases`);
 
+/** `page` is where the words send a person: B/latest. */
 export interface InstalledFeed {
   readonly base: URL;
-  /** The page the words send a person to: B/latest. */
   readonly page: string;
   readonly keys: readonly string[];
   readonly allowLoopbackHttp: boolean;
@@ -84,7 +78,6 @@ export type Fetch =
   | { readonly state: Exclude<UpdateDownload, "downloading" | "disk"> };
 
 const MB = 1_000_000;
-/** Megabytes for the words: one decimal under 10 MB, whole above. */
 function mb(bytes: number, round: (n: number) => number = Math.round): string {
   const value = bytes / MB;
   return value < 10 ? (round(value * 10) / 10).toFixed(1) : String(round(value));
@@ -102,7 +95,6 @@ export function downloadLines(target: string, fetch: Fetch, restart: Restart = "
     case "failed":
       return [`Could not download version ${target}. Check your connection.`];
     case "disk":
-      // Needed rounds up and free rounds down, so the two never read equal when the space is short.
       return [`Not enough free space on ${fetch.volume} for version ${target} (needs ${mb(fetch.needed, Math.ceil)} MB, ${mb(fetch.free, Math.floor)} MB free). Free some space, then use Check for updates.`];
     case "ready":
       if (restart === "yes") return [downloaded(target).text];
@@ -110,7 +102,6 @@ export function downloadLines(target: string, fetch: Fetch, restart: Restart = "
         const detail = goBack === undefined ? undefined : readyWindows(target, goBack).detail;
         return [downloaded(target).text, ...(detail === undefined ? [] : [detail])];
       }
-      // Nothing is downloaded twice: the person uses the file already here (Windows: the installer; Linux: the AppImage), told why in a few words.
       return [keptDownload(target, restart, { platform, program }).text];
   }
 }

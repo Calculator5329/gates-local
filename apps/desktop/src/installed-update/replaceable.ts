@@ -1,6 +1,3 @@
-// "Who may update" (docs/design/installed-updates.md, section 2): whether this
-// copy can replace its own program file, found once at startup by the desktop
-// main and handed to the server in GATES_LOCAL_INSTALLED_RESTART.
 import { closeSync, existsSync, openSync, realpathSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import type { Restart } from "@gates-local/update/installed/copy";
@@ -11,15 +8,12 @@ export interface ReplaceFacts {
   readonly packaged: boolean;
   readonly env: NodeJS.ProcessEnv;
   readonly testBuild: boolean;
-  /** Creates and removes one file in a folder; throws the folder's refusal. Real by default. */
   readonly probe?: (dir: string) => void;
-  /** The app's own executable (Windows): an install made by the installer has its uninstaller beside it. */
   readonly execPath?: string;
 }
 
 export interface Replaceability {
   readonly restart: Restart;
-  /** The real path of the program file, when there is one to replace. */
   readonly program: string | null;
 }
 
@@ -42,7 +36,6 @@ function appImageFile(value: string | undefined): string | null {
 export function replaceability(f: ReplaceFacts): Replaceability {
   if (f.platform === "win32" && f.packaged) {
     if ((f.env["GATES_LOCAL_DATA_DIR"] ?? "") !== "" && !f.testBuild) return { restart: "pinned", program: null };
-    // Section 3 (W-A): the installer runs over the install it made, which keeps its uninstaller beside the app.
     const installed = f.execPath !== undefined && existsSync(path.join(path.dirname(f.execPath), UNINSTALLER));
     return { restart: installed ? "windows" : "none", program: null };
   }

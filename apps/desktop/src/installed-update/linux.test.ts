@@ -68,6 +68,19 @@ it("S1 stages an executable copy, flushes it and the program folder; recovery re
   expect(readFileSync(c.program, "utf8")).toBe("old program bytes");
 });
 
+it("S1 recovery flushes a staged file that already matches new again, and never copies it over", () => {
+  const c = copy(); const log: string[] = [];
+  stage(c.p, c.artifact, realFileOps);
+  const ino = statSync(c.p.incoming).ino;
+  const ops: FileOps = { ...calls(log, c.root),
+    copyFile: (a, b) => { log.push(`copy ${path.basename(b)}`); realFileOps.copyFile(a, b); },
+    unlink: f => { log.push(`delete ${path.basename(f)}`); realFileOps.unlink(f); } };
+  recoverStage(c.p, c.artifact, c.next, ops);
+  expect(log).toEqual(["flush .Gates-Local.AppImage.incoming-tx1", "flush program folder"]);
+  expect(statSync(c.p.incoming).ino).toBe(ino);
+  expect(statSync(c.p.incoming).mode & 0o777).toBe(0o755);
+});
+
 it("S2 keeps the previous file as a hard link, and flushes the folder", () => {
   const c = copy(); const log: string[] = [];
   keepPrevious(c.p, c.old, calls(log, c.root));
