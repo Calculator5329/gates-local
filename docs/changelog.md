@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-16: the last fixed waits in browser tests
+
+- Three browser tests waited a fixed time and then checked. Each now waits
+  for an event: the Library download test records every label the button
+  shows and checks them once the download is done; the queue test sends
+  one more message after the reply and checks it comes straight after the
+  first; the 30-second test moves the window's clock forward 33 seconds
+  instead of waiting them, so it takes about 19 seconds instead of 80.
+- gates/no-wait-for-timeout now has no recorded offenders. The one fixed
+  wait left is the `holds` helper in test/e2e/waits.ts, which checks that
+  something stays true for a stated time.
+
 ## 2026-11-16: three classes the lint rule held back
 
 - A download row's model name cuts off again with an ellipsis and keeps

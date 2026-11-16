@@ -14,17 +14,18 @@ test("a downloading sample's progress moves for three seconds with at most one i
   await page.getByTestId("settings.nav.open-library").click();
   const button = page.locator('[data-db="sample:chinook"] .fill-btn');
   await expect(button).toHaveText("Download");
+  await button.evaluate((el) => {
+    const labels: string[] = [];
+    (window as unknown as { labels: string[] }).labels = labels;
+    new MutationObserver(() => labels.push(el.querySelector(".lab")?.textContent ?? "")).observe(el, { subtree: true, childList: true, characterData: true });
+  });
   const start = Date.now();
   await button.click();
   await expect(button).toHaveText(/^\d+%$/);
   // The fake sends 512 bytes every 200 ms, so the 8 KB sample takes about three seconds.
-  const seen: number[] = [];
-  while (Date.now() - start < 3000) {
-    const label = (await button.textContent()) ?? "";
-    if (/^\d+%$/.test(label)) seen.push(Number.parseInt(label, 10));
-    // oxlint-disable-next-line gates/no-wait-for-timeout -- the test samples the label across a fixed three-second window
-    await page.waitForTimeout(100);
-  }
+  await expect(button, "the sample finished downloading").toHaveClass(/\bdone\b/, { timeout: 15_000 });
+  const seen = (await page.evaluate(() => (window as unknown as { labels: string[] }).labels))
+    .filter(label => /^\d+%$/.test(label)).map(label => Number.parseInt(label, 10));
   expect(new Set(seen).size, "the progress moved while Library was open").toBeGreaterThanOrEqual(3);
   expect(seen, "the progress never went back").toEqual(seen.toSorted((a, b) => a - b));
   expect(reads.filter(at => at >= start), "imports reads during the download").toHaveLength(0);

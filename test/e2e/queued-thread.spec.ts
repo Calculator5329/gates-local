@@ -31,15 +31,17 @@ const loaded = async () => (await state()).loaded.map((m) => m.name);
 
 // Guards a shipped bug fix (chat row 23): a send that waited past 30 s behind another reply was dropped.
 test("a new thread's send that waits over 30 s behind another reply stays sent, sits under it, and shows its tool call live", async ({ page, open }, info) => {
-  test.setTimeout(150_000);
+  test.setTimeout(90_000);
+  // the window's clock is the test's: the 30 s every other call gets passes at once below
+  await page.clock.install();
   await open(); await waitReady(page);
   await libraryOn(page, info);
   // A's send has to be a cold load: that is what holds the load gate until A's first token,
-  // 45 s away. Picking warms the model, and so does the first key typed (chat row 39), at most
+  // 15 s away. Picking warms the model, and so does the first key typed (chat row 39), at most
   // once a minute for a model. So A's words go in first, and the fake GPU is emptied once that
   // load has landed: nothing loads the model again before the send. B takes the same model, one
   // the fake offers native tool calls.
-  const scenario = { prompts: { alpha: { firstTokenDelayMs: 45_000 }, [B]: { toolCalls: 1, quietToolRounds: 1, holdAfterTokens: 5 } } };
+  const scenario = { prompts: { alpha: { firstTokenDelayMs: 15_000 }, [B]: { toolCalls: 1, quietToolRounds: 1, holdAfterTokens: 5 } } };
   await pick(page, MODEL);
   await expect.poll(loaded).toContain(MODEL);
   await configure(scenario);
@@ -56,7 +58,7 @@ test("a new thread's send that waits over 30 s behind another reply stays sent, 
   await expect.soft.poll(async () => (await rows(page)).map((r) => r.split("\n")[0])).toEqual(["alpha", B]);
   await expect(page.locator(".sb-row", { hasText: B }).locator(".live")).toHaveCount(1);
   // past the 30 s every other call gets: still sent, nothing said, the composer still empty
-  await page.waitForTimeout(33_000);
+  await page.clock.fastForward(33_000);
   await expect(page.locator(".c-note")).toHaveCount(0);
   await expect(page.locator("#ta")).toHaveValue("");
   expect.soft((await rows(page)).map((r) => r.split("\n")[0])).toEqual(["alpha", B]);

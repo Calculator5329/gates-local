@@ -37,10 +37,11 @@ test("a message queued in one window shows in a second window, and removing it t
   // the removed message never goes: the reply ends on its own (a Stop would hold the queue by itself) and nothing follows it
   await fetch(`${FAKE_URL}/__fake/release`, { method: "POST", body: "{}" });
   await expect(stop(page)).toHaveCount(0, { timeout: 15_000 });
-  // long enough for a queued message to have gone out after the reply
-  await page.waitForTimeout(1500);
-  await expect(page.locator(".turn.u")).toHaveCount(1);
-  await expect(other.locator(".turn.u")).toHaveCount(1);
+  // a removed message that still went out would start the moment the reply ended, before this send
+  await sendMessage(page, "Sent after the reply");
+  const asked = ["How do I check disk space before a download?", "Sent after the reply"];
+  await expect(page.locator(".turn.u .bubble")).toHaveText(asked);
+  await expect(other.locator(".turn.u .bubble")).toHaveText(asked);
   await other.close();
 });
 
