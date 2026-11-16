@@ -1094,7 +1094,7 @@ export const FEATURES: readonly Feature[] = [
     server: [],
     calls: [],
     pushes: [],
-    specs: ["flicker-audit.spec.ts", "flicker-swaps.spec.ts", "flicker.spec.ts", "settings-cards-desktop.spec.ts"],
+    specs: ["flicker-audit.spec.ts", "flicker-probe.spec.ts", "flicker-swaps.spec.ts", "flicker.spec.ts", "settings-cards-desktop.spec.ts"],
   },
   {
     id: "popup",

@@ -232,7 +232,8 @@ export function wholeSampler(o: WholeOptions & { track: string }): void {
         if (skel && (el.closest("[aria-busy=true]") === null || el.closest("[aria-hidden=true]") === null)) loose++;
         const kind = skel ? "skel" : el.hasAttribute("data-wait") ? "wait" : kinds.find((k) => el.matches(k)) ?? "?";
         const grp = el.parentElement?.closest(".grp");
-        const base = `${kind} ${grp ? `${words(grp)} / ` : ""}${labelOf(el)}`;
+        // Unlabeled placeholders carry their own class, so one that goes is not paired with another by order.
+        const base = `${kind} ${grp ? `${words(grp)} / ` : ""}${skel ? `.${el.classList[0] ?? ""} ` : ""}${labelOf(el)}`;
         const n = (count.get(base) ?? 0) + 1;
         count.set(base, n);
         els.push({ key: n === 1 ? base : `${base} #${n}`, box: [r.x, r.y, r.width, r.height].map((v) => Math.round(v * 2) / 2) });

@@ -168,7 +168,7 @@ has a path.
 
 | Feature | What it is, and where | Code | Tests |
 | --- | --- | --- | --- |
-| **Whole on the first frame**<br>also: flicker audit, placeholders, data-skel | Every surface shows its full shape on its first frame: nothing arrives late, moves or blinks. Every screen (docs/design.md). | web: `lib/ui/ui.tsx` | `flicker-audit`, `flicker-swaps`, `flicker`, `settings-cards-desktop` |
+| **Whole on the first frame**<br>also: flicker audit, placeholders, data-skel | Every surface shows its full shape on its first frame: nothing arrives late, moves or blinks. Every screen (docs/design.md). | web: `lib/ui/ui.tsx` | `flicker-audit`, `flicker-probe`, `flicker-swaps`, `flicker`, `settings-cards-desktop` |
 | **Pop-up** | Settings, Models and Usage open in one box of one size over the dimmed chat, which comes back as it was. The sidebar footer's Settings, Models and Usage. | web: `lib/ui/Panel.tsx`, `app/App.tsx` | `popups`, `settings-hides-chat`, `usage` |
 | **Reload window**<br>also: error boundary | A screen that fails to draw recovers in place, keeps the draft, and offers Reload window if that fails too. Wherever a screen broke. | web: `app/ErrorBoundary.tsx` | `error-boundary` |
 | **Speed checks** | Timed journeys (start, send, switch threads, paste, voice, queue) compared between two builds; informational. `pnpm perf:compare`; the e2e perf spec. |  | `perf`, `test/perf/journeys`, `test/perf/priority`, `test/perf/next` |

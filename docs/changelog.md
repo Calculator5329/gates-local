@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-16: the flicker probe tells two placeholders apart
+
+- The app start check no longer reports the sidebar's placeholder as
+  moved when it goes before the model chip's placeholder does. The probe
+  named both by order alone; each now carries its own class. A
+  placeholder that really moves is still reported, and two new browser
+  checks on a plain page hold both halves.
+
 ## 2026-11-16: the thread, its reveal and Pictures follow the store instead of their effects
 
 - A thread opens at its end before it paints and follows the end from
