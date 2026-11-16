@@ -239,6 +239,17 @@ describe("the server's record of every message", () => {
     expect(store(file).q.list()).toHaveLength(2);
   });
 
+  it("a save the disk refused is tried again at the next step, so a restart still finds the message", () => {
+    const file = dataFile();
+    const { q } = store(file);
+    waits(q, entry("a"));
+    mkdirSync(`${file}.tmp`);
+    waits(q, entry("b"));
+    rmSync(`${file}.tmp`, { recursive: true });
+    q.notify();
+    expect(store(file).q.list().map((e) => e.id)).toEqual(["a", "b"]);
+  });
+
   it("a restart leaves out a waiting message whose question is already saved, and tells a late call it was sent", () => {
     const file = dataFile();
     const { q } = store(file);

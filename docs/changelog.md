@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-16: a queue the disk refused once is saved at the next step
+
+- When saving the waiting messages failed once, as on a full disk, the server did not try again
+  until the queue changed, so a restart could bring back an older queue. It now tries at every step.
+
 ## 2026-11-16: a message waiting for its model is not called unsent
 
 - A message sent while its model loaded, or while a picture held the graphics card, came back

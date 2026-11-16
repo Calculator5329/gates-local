@@ -261,6 +261,8 @@ export function createReplies({ file, log, told, saved, deleting, closing, cut, 
         renameSync(tmp, file);
         written = text;
       } catch (e) {
+        // why: a refused write is tried again at the next step, or a restart brings back an older queue
+        dirty = true;
         log(`queue not saved: ${(e as Error).message}`);
       }
     }
