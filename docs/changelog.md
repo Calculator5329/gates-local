@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-16: the server's socket folder holds to the six comment kinds
+
+- apps/server/src/ws passes the comment rule: 36 offenders went, and
+  the folder's comment lines fell from 49 to 3. Two why lines stay,
+  each one line: the 128 MiB frame cap fits eight 10 MiB pasted images
+  in base64, and equal-length digests keep the token compare
+  constant-time. The outside fact about a browser's going-away close
+  was already one line.
+- The frame cap's comment said 16 MiB; the cap is 128 MiB. It went.
+- Rules the socket, phone and ordering tests already held went with
+  their comment. One in five was broken in the source and watched
+  fail: a state owner's capture, a missing thumbnail's 404, the
+  internal error code, and a numbered answer refused without its
+  numbers.
+- One test is new, watched fail with its rule broken: the server says
+  how many clients are open after each connect and each close, which
+  is what the GPU poll runs on.
+
 ## 2026-11-16: the models folder holds to the six comment kinds
 
 - Models, Download, the memory mark, the speed gauge and the session's

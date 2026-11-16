@@ -1,12 +1,3 @@
-// The server end of the one WebSocket. Loopback only; the upgrade needs the
-// per-launch token and an absent or allowed Origin, so another local web
-// page cannot drive the app. Every inbound frame is decoded against the
-// contracts tables; a bad one gets a named error and the socket stays up.
-// With `phone` set a second listener, on an owner-only Unix socket
-// (src/web/socket.ts), serves the web client and the same socket on /ws,
-// admitted by Tailscale Serve's headers instead of the token
-// (src/web/phone.ts); both listeners share handlers and pushes, and the
-// contracts method table says which methods the phone may call.
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { type IncomingMessage, createServer } from "node:http";
 import { isIP } from "node:net";
@@ -43,66 +34,47 @@ import { SECURITY_HEADERS, phoneGate } from "../web/phone.ts";
 import { listenOwnerSocket } from "../web/socket.ts";
 import { serveClient } from "../web/static.ts";
 
-// One opaque identity for this process, shared by desktop and phone listeners.
 const epoch = randomUUID();
 
 export interface HandlerContext {
-  /** Stable per connection, for handlers that track who started what. */
   readonly clientId: number;
   readonly window?: number;
   readonly listener?: "desktop" | "phone";
   readonly signal?: AbortSignal;
-  /** Called by the state owner while capturing the result, before any await. */
   readonly capture?: (changes: readonly SyncChange[]) => void;
 }
 
 export type Handler<M extends MethodName> = (params: Params<M>, ctx: HandlerContext) => ResultOf<M> | Promise<ResultOf<M>>;
 
-/** Application registry; negotiation belongs to the transport, not an app handler. */
 export type Handlers = { readonly [M in Exclude<MethodName, "sync.negotiate">]: Handler<M> };
 
 export interface WsServerOptions {
-  /** Loopback only: 127.0.0.0/8 or ::1. Default 127.0.0.1. */
   readonly host?: string;
-  /** 0 picks a free port. */
   readonly port: number;
-  /** Per-launch secret; the upgrade URL must carry it as `?token=`. */
   readonly token: string;
-  /** Exact Origin header values allowed. A request with no Origin (Electron main, node) is allowed. */
   readonly allowedOrigins: readonly string[];
-  /** Application methods without a handler answer "not-implemented". */
   readonly handlers: Partial<Handlers>;
   readonly log?: (line: string) => void;
-  /** Largest inbound frame. Default 16 MiB. */
   readonly maxPayloadBytes?: number;
-  /** Called with the number of open clients after each connect and close (the GPU poll runs only while it is above 0). */
   readonly onClientCount?: (count: number) => void;
   readonly onWindowGone?: (window: number) => void;
   readonly windowGraceMs?: number;
   readonly leavingGraceMs?: number;
   readonly dataDir?: string;
-  /** A picture's thumbnail by job id (pictures/thumbs.ts), served at /files/thumbs/<jobId>.webp; 404 when absent. */
   readonly thumbnails?: (jobId: string) => Promise<Buffer | undefined>;
-  /** A second listener for the phone through Tailscale Serve (apps/server/src/web/phone.ts); off when absent. */
   readonly phone?: PhoneListenerOptions;
 }
 
 export interface PhoneListenerOptions {
-  /** Absolute path of the owner-only Unix socket Tailscale Serve proxies to; its parent must be 0700 and ours, or missing. */
   readonly socketPath: string;
-  /** The exact public origin the phone loads the client from. */
   readonly origin: string;
-  /** The one Tailscale-User-Login value admitted. */
   readonly user: string;
-  /** When set, the only source addresses (Serve's X-Forwarded-For) admitted. */
   readonly peers?: readonly string[];
-  /** The built web client served on GET. */
   readonly webRoot: string;
 }
 
 export interface WsServer {
   readonly port: number;
-  /** The phone listener's socket path, when it is on. */
   readonly phoneSocket?: string;
   push<C extends Channel>(channel: C, payload: Payload<C>, changes?: readonly SyncChange[]): void;
   close(): Promise<void>;
@@ -153,7 +125,6 @@ function send(ws: WebSocket, frame: string): void {
   if (ws.readyState === ws.OPEN) ws.send(frame);
 }
 
-/** Thrown values with a string `code` keep it; anything else is "internal". */
 function errorCode(e: unknown): { code: string; message: string; blocking?: readonly BlockingTurn[] } {
   if (typeof e === "object" && e !== null) {
     const { code, message, blocking } = e as { code?: unknown; message?: unknown; blocking?: unknown };
@@ -190,11 +161,10 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     }
     res.writeHead(426, { "Content-Type": "text/plain" }).end("WebSocket only\n");
   });
-  // Eight 10 MiB pasted images expand to about 107 MiB in base64. Saved threads carry paths only.
+  // why: eight 10 MiB pasted images are about 107 MiB in base64
   const wss = new WebSocketServer({ noServer: true, maxPayload: options.maxPayloadBytes ?? 128 * 1024 * 1024 });
   const clients = new Set<WebSocket>();
   const negotiated = new WeakSet<WebSocket>();
-  /** The last number given out for each scope of a kind this socket numbers (SENT_IN_ORDER). */
   const issued = new Map<ScopeName, number>();
   const sent = (scope: ScopeName): SyncChange => {
     const rev = (issued.get(scope) ?? 0) + 1;
@@ -202,7 +172,6 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     return { scope, kind: "snapshot", rev };
   };
   const phoneClients = new WeakSet<WebSocket>();
-  // why: streamed words start at a socket's first request (reply.list has them before); idle sockets keep no backlog
   const chatClients = new WeakSet<WebSocket>();
   let nextClientId = 1;
   const windowNumbers = new Map<string, number>();
@@ -215,7 +184,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
   const admits = (req: IncomingMessage): { ok: true } | { ok: false; status: 401 | 403; reason: string } => {
     const url = new URL(req.url ?? "/", "http://loopback");
     const token = url.searchParams.get("token") ?? "";
-    // Digests make the compare constant-time whatever the lengths.
+    // why: equal-length digests keep the compare constant-time whatever the token's length
     if (!timingSafeEqual(digest(token), tokenDigest)) return { ok: false, status: 401, reason: "Unauthorized" };
     const origin = req.headers.origin;
     if (origin !== undefined && !allowed.has(origin)) return { ok: false, status: 403, reason: "Forbidden" };
@@ -231,8 +200,6 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
   });
 
-  // The phone listener: same handlers and push set, header admission instead
-  // of the token. Refusals log the reason only, never a header value.
   let phoneHttp: ReturnType<typeof createServer> | null = null;
   if (phone !== undefined && phoneAdmits !== null) {
     const phonePages = createPageRoute({ frameAncestors: phone.origin });
@@ -252,7 +219,6 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
         void serveImage(req, res, options.dataDir).catch(fail);
         return;
       }
-      // the client frames nothing but this listener's own pages
       res.setHeader("Content-Security-Policy", `frame-src ${phone.origin}/pages/`);
       void serveClient(req, res, phone.webRoot, phone.origin).catch(fail);
     });
@@ -285,14 +251,13 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
       const frame = encodeResult(id, method, { epoch, ordered: ORDERED_DOMAINS, protocol: PROTOCOL_VERSION });
       if (!frame.ok) throw frame.error;
       send(ws, frame.value);
-      negotiated.add(ws); // Success is enqueued before any ordered push.
+      negotiated.add(ws);
       return;
     }
     const handler = handlers[method] as ((p: unknown, c: HandlerContext) => unknown) | undefined;
     if (handler === undefined) return send(ws, encodeErrorResponse(id, "not-implemented", `${method} has no handler`));
     let result: unknown;
     const row = methodSync(method);
-    // A read of a kind the socket numbers takes its numbers now, before its value is read.
     let captured: SyncMetadata | undefined = row !== undefined && SENT_IN_ORDER.includes(row.domain) ? { epoch, changes: scopesOf(row).map(sent) } : undefined;
     try {
       result = await handler(decodedParams, { ...ctx, capture: changes => { captured = { epoch, changes }; } });
@@ -301,7 +266,6 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
       if (code === "internal") log(`${method} handler threw: ${message}`);
       return send(ws, encodeErrorResponse(id, code, message, blocking));
     }
-    // A method row answers a negotiated socket with its numbers, or not at all.
     const numbered = row !== undefined && negotiated.has(ws);
     const missing = numbered ? missingScope(row, decodedParams, captured, epoch) : undefined;
     if (missing !== undefined) {
@@ -329,7 +293,6 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     const ctx: HandlerContext = { clientId, window, listener: phoneClients.has(ws) ? "phone" : "desktop", signal: controller.signal };
     ws.on("message", (data, isBinary) => {
       chatClients.add(ws);
-      // Binary frames fail the text check in decodeRequest and are dropped with a log.
       const raw = isBinary ? data : Buffer.isBuffer(data) ? data.toString("utf8") : Buffer.concat(data as Buffer[]).toString("utf8");
       dispatch(ws, ctx, raw).catch((e: unknown) => log(`dispatch failed: ${String(e)}`));
     });
@@ -367,9 +330,6 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     push(channel, payload, given) {
       const frame = encodePush(channel, payload);
       if (!frame.ok) throw frame.error;
-      // A push row of an ordered kind carries its number, whoever is listening: an unnumbered
-      // writer fails here, on its first push, not only once an ordered window happens to connect.
-      // A kind the socket numbers takes the next number as it is sent.
       const row = pushSync(channel);
       const changes = given ?? (row !== undefined && SENT_IN_ORDER.includes(row.domain) ? [sent(row.scope)] : undefined);
       const missing = row === undefined ? undefined : missingScope(row, payload, changes === undefined ? undefined : { epoch, changes }, epoch);

@@ -11,7 +11,7 @@ import {
   PROTOCOL_VERSION,
 } from "@gates-local/contracts";
 import { methodSamples, pushSamples, sampleChanges } from "@gates-local/contracts/testing";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { type Handlers, type WsServer, startWsServer } from "./server.ts";
 
@@ -370,5 +370,28 @@ describe("close", () => {
     await server.close();
     await expect(pending).rejects.toMatchObject({ code: "closed" });
     await expect(c.closed).resolves.toBeUndefined();
+  });
+});
+
+describe("open clients", () => {
+  it("says how many clients are open after each connect and each close", async () => {
+    const counts: number[] = [];
+    const server = await startWsServer({
+      port: 0,
+      token: TOKEN,
+      allowedOrigins: [APP_ORIGIN],
+      handlers: {},
+      log: () => {},
+      onClientCount: (n) => counts.push(n),
+    });
+    open.push(server);
+    const first = await client(server);
+    await vi.waitFor(() => expect(counts).toEqual([1]));
+    const second = await client(server);
+    await vi.waitFor(() => expect(counts).toEqual([1, 2]));
+    first.ws.close();
+    await vi.waitFor(() => expect(counts).toEqual([1, 2, 1]));
+    second.ws.close();
+    await vi.waitFor(() => expect(counts).toEqual([1, 2, 1, 0]));
   });
 });
