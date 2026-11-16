@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-16: a tab opened from another takes its own window
+
+- A duplicated tab, or one opened from the app with window.open, copies the tab's
+  sessionStorage and with it the window id the server keys edit ownership by. Both tabs
+  were one window: either could open or close the other's edit, and an edit stayed held
+  while the copy lived. Each tab now holds a Web Lock named for its window; a tab whose
+  copied window is held by another takes a new one. A reload keeps its window.
+- Without Web Locks (a page on plain http off this computer) a copy still shares the
+  window, as before.
+
 ## 2026-11-16: a page from another release offers Reload instead of reconnecting forever
 
 - The server refuses a page that numbers other kinds with the code "other-version", and a page

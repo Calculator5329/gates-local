@@ -2,6 +2,7 @@ import { type CallOptions, type Client, type MethodName, type Params, type Reply
 import { NA, setState } from "../store/store.ts";
 import { pinFramePolicy } from "../../pages/frame-policy.ts";
 import { withTimeout } from "../ui/kit/async.ts";
+import { claimWindow } from "./window-id.ts";
 
 interface ConnectionEffects {
   readonly applyServerEvent: typeof setState;
@@ -12,17 +13,11 @@ interface ConnectionEffects {
   readonly afterDisconnect: () => void;
 }
 
-let thisWindow: string | undefined;
-function windowId(): string {
-  if (thisWindow !== undefined) return thisWindow;
-  const made = crypto.randomUUID();
-  try {
-    thisWindow = sessionStorage.getItem("gates-local-window") ?? made;
-    sessionStorage.setItem("gates-local-window", thisWindow);
-  } catch {
-    thisWindow = made;
-  }
-  return thisWindow;
+let thisWindow: Promise<string> | undefined;
+function windowId(): Promise<string> {
+  let storage: Storage | undefined;
+  try { storage = sessionStorage; } catch {}
+  return thisWindow ??= claimWindow(storage, typeof navigator === "undefined" ? undefined : navigator.locks);
 }
 
 export const isNA = (e: unknown): boolean => e instanceof WireError && e.code === "not-implemented";
@@ -105,7 +100,7 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
         catch { setState({ notice: "Image drafts cannot be saved on this device. Keep this window open until you send them." }); }
         if (stopped) { stopDrafts?.(); stopDrafts = undefined; return; }
       }
-      parsed.searchParams.set("window", windowId());
+      parsed.searchParams.set("window", await windowId());
       const ws = new WebSocket(parsed.href);
       const c = createClient(ws, { onProtocolError: (e) => console.warn(`[gates-local] ${e.code}`) });
       const opened = await new Promise<boolean>((resolve) => {

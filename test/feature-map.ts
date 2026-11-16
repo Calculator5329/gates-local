@@ -789,12 +789,12 @@ export const FEATURES: readonly Feature[] = [
     group: "First run and Ollama",
     what: "What the window says when the server is slow to answer or gone, and how it comes back.",
     where: "The banner and controls, while the connection is down.",
-    window: ["lib/session/connection.ts", "app/App.tsx"],
+    window: ["lib/session/connection.ts", "lib/session/window-id.ts", "app/App.tsx"],
     server: ["ws"],
     packages: ["contracts"],
     calls: ["sync.negotiate"],
     pushes: [],
-    specs: ["reconnect.spec.ts", "actions.spec.ts"],
+    specs: ["reconnect.spec.ts", "actions.spec.ts", "window-id.spec.ts"],
   },
 
   // ---------------------------------------------------------------- Updates

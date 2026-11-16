@@ -116,7 +116,7 @@ has a path.
 | --- | --- | --- | --- |
 | **First run**<br>also: Download your first model, Setting up Ollama | Finds or installs Ollama, offers one recommended model, downloads it and starts the chat. The first window on a new install, or when no chat model is installed. | web: `first-run`<br>server: `runtime/install.ts`, `runtime/manifest.ts`, `runtime/pick.ts`, `runtime/recommended.ts`<br>packages: `runtime-files` | `first-run`, `first-run-engine`, `first-run-failures`, `model-pick`, `no-models` |
 | **Runtime banner** | One line over the chat when Ollama is installing, stalled, on the wrong port or stopped, with Retry. The top of the chat. | web: `runtime/Banner.tsx`, `runtime/install-stall.ts`, `runtime/words.tsx`<br>server: `runtime/handlers.ts` | `first-run-engine`, `runtime-wrong` |
-| **Connecting… and Reconnecting** | What the window says when the server is slow to answer or gone, and how it comes back. The banner and controls, while the connection is down. | web: `lib/session/connection.ts`, `app/App.tsx`<br>server: `ws`<br>packages: `contracts` | `reconnect`, `actions` |
+| **Connecting… and Reconnecting** | What the window says when the server is slow to answer or gone, and how it comes back. The banner and controls, while the connection is down. | web: `lib/session/connection.ts`, `lib/session/window-id.ts`, `app/App.tsx`<br>server: `ws`<br>packages: `contracts` | `reconnect`, `actions`, `window-id` |
 
 ## Updates
 

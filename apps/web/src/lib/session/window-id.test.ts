@@ -1,0 +1,53 @@
+// A tab's window id: a reload keeps it, a duplicated tab (whose copied sessionStorage names a
+// window another open tab holds) takes its own.
+import { expect, it } from "vitest";
+import { claimWindow, type Locks } from "./window-id.ts";
+
+function fakeLocks(): Locks & { held: Set<string> } {
+  const held = new Set<string>();
+  return {
+    held,
+    request(name, _options, run) {
+      const free = !held.has(name);
+      if (free) held.add(name);
+      return Promise.resolve(run(free ? { name } : null));
+    },
+  };
+}
+
+function fakeStorage(start?: string) {
+  const items = new Map<string, string>(start === undefined ? [] : [["gates-local-window", start]]);
+  return { getItem: (k: string) => items.get(k) ?? null, setItem: (k: string, v: string) => void items.set(k, v), items };
+}
+
+let n = 0;
+const make = () => `new-${++n}`;
+
+it("a reload keeps its window", async () => {
+  const locks = fakeLocks();
+  expect(await claimWindow(fakeStorage("a"), locks, make)).toBe("a");
+  expect(locks.held).toEqual(new Set(["gates-local-window:a"]));
+});
+
+it("a duplicated tab whose copied window another tab holds takes its own, and keeps it", async () => {
+  const locks = fakeLocks();
+  const original = fakeStorage("a");
+  const copy = fakeStorage("a");
+  expect(await claimWindow(original, locks, make)).toBe("a");
+  const own = await claimWindow(copy, locks, make);
+  expect(own).not.toBe("a");
+  expect(copy.items.get("gates-local-window")).toBe(own);
+  expect(locks.held.has(`gates-local-window:${own}`)).toBe(true);
+  expect(original.items.get("gates-local-window")).toBe("a");
+});
+
+it("a tab with no stored window takes a new one and stores it", async () => {
+  const storage = fakeStorage();
+  const id = await claimWindow(storage, fakeLocks(), make);
+  expect(storage.items.get("gates-local-window")).toBe(id);
+});
+
+it("without Web Locks or storage it still answers: the stored window, or a new one", async () => {
+  expect(await claimWindow(fakeStorage("a"), undefined, make)).toBe("a");
+  expect(await claimWindow(undefined, undefined, make)).toMatch(/^new-/);
+});
