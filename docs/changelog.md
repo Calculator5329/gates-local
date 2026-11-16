@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-16: a reply opened mid-stream keeps growing
+
+- Words that reach a window after it connects but before its list of records is read now wait
+  for that list and follow its words so far. Before, they were dropped, every later part looked
+  like a gap, and the reply stood still until it finished.
+- A list read before a retry the window already took no longer brings back the first try's
+  words over the new ones.
+
 ## 2026-11-16: a tab opened from another takes its own window
 
 - A duplicated tab, or one opened from the app with window.open, copies the tab's

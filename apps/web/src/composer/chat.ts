@@ -341,6 +341,7 @@ function handedOver(id: string, restored: boolean): void {
 }
 
 const shownTurn = (id: string) => Object.values(getState().turns).find((t) => t.turnId === id);
+const tryOf = (r: Reply | undefined): number => (r !== undefined && "try" in r ? r.try : 0);
 
 export function createChat({ applyServerEvent, reply: askOne, codeOf, createThread, creatingDraft, loadThread, loading, noteMessage, rowsSaved, withMessage, untrackedDone, openThread, blockingFor }: ChatEffects, rules?: WindowRules) {
   askServer = askOne;
@@ -609,8 +610,10 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
   }
 
   function replyListed(list: readonly ReplyListed[]): void {
+    const held = new Map(list.map(({ reply }) => [reply.id, tryOf(getState().replies.get(reply.id))]));
     for (const { reply } of list) recordChanged({ kind: "is", reply }, true);
-    for (const { reply, soFar } of list) if (soFar !== undefined) caughtUp(reply.id, soFar);
+    // why: a list read before a retry this window already took holds the thrown-away try's words
+    for (const { reply, soFar } of list) if (soFar !== undefined && tryOf(reply) >= (held.get(reply.id) ?? 0)) caughtUp(reply.id, soFar);
     const unlisted = new Set(records.unlisted());
     for (const id of unlisted) editsHere.delete(id);
     if (unlisted.size > 0) {
@@ -971,7 +974,11 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
   // why: a part says where it starts, so words this window has are not added twice
   function onWords({ id, part }: Payload<"reply.words">): void {
     const turn = shownTurn(id);
-    if (turn === undefined) return;
+    if (turn === undefined) {
+      // why: words before this connection's list is read follow the words so far it brings
+      if (!listedHere) ahead.set(id, part.type === "again" ? [] : [...ahead.get(id) ?? [], part]);
+      return;
+    }
     const { threadId } = turn;
     if (part.type === "again") {
       waiting.delete(threadId);

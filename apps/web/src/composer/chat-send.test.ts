@@ -354,6 +354,30 @@ it("a reply's second attempt starts over without the first attempt's words still
   expect(getState().turns.t1?.text).toBe("second try");
 });
 
+it("words that land before a reconnect's list is read follow its words so far, and the reply keeps growing", () => {
+  setState({ ...READY, view: "thread", threadId: "t1" });
+  chat.connected();
+  chat.onWords({ id: "a1", part: { type: "text", from: 4, text: "two " } });
+  chat.replyListed([{ reply: live("a1", 2), soFar: { text: "one ", thinking: "", steps: [] } }]);
+  runFrames();
+  chat.onWords({ id: "a1", part: { type: "text", from: 8, text: "three " } });
+  runFrames();
+  expect(getState().turns.t1?.text).toBe("one two three ");
+});
+
+it("a list read before a retry the window already took does not bring back the first try's words", () => {
+  setState({ ...READY, view: "thread", threadId: "t1" });
+  chat.connected();
+  chat.recordChanged(is(live("a1", 3, { try: 2 })));
+  chat.onWords({ id: "a1", part: { type: "text", from: 0, text: "New answer" } });
+  runFrames();
+  chat.replyListed([{ reply: live("a1", 2), soFar: { text: "Discarded words from attempt one", thinking: "", steps: [] } }]);
+  runFrames();
+  chat.onWords({ id: "a1", part: { type: "text", from: 10, text: " goes on" } });
+  runFrames();
+  expect(getState().turns.t1?.text).toBe("New answer goes on");
+});
+
 it("a reply that ends in the change that first brings its saved question shows the question before the reply", () => {
   const question: Message = { id: "m-d1", threadId: "t1", role: "user", content: "words d1", createdAt: 1 };
   const answer: Message = { id: "r-d1", threadId: "t1", role: "assistant", content: "the answer", createdAt: 2 };
