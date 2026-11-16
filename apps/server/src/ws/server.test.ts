@@ -176,11 +176,11 @@ describe("round trip over a real socket", () => {
 });
 
 /** A server that records each call's window and each window let go. */
-async function windows(graceMs: number) {
+async function windows(graceMs: number, leavingGraceMs?: number) {
   const seen: (number | undefined)[] = [];
   const gone: number[] = [];
   const server = await startWsServer({
-    port: 0, token: TOKEN, allowedOrigins: [], log: () => {}, windowGraceMs: graceMs,
+    port: 0, token: TOKEN, allowedOrigins: [], log: () => {}, windowGraceMs: graceMs, ...(leavingGraceMs === undefined ? {} : { leavingGraceMs }),
     handlers: { "models.refresh": (_p, ctx) => { seen.push(ctx.window); return methodSamples["models.refresh"].result; } },
     onWindowGone: (w) => gone.push(w),
   });
@@ -196,7 +196,7 @@ async function windows(graceMs: number) {
   return { seen, gone, join };
 }
 
-const leave = (ws: WebSocket) => new Promise<void>((resolve) => { ws.once("close", () => resolve()); ws.close(); });
+const leave = (ws: WebSocket, code?: number) => new Promise<void>((resolve) => { ws.once("close", () => resolve()); ws.close(code); });
 const later = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe("a window across its connections", () => {
@@ -221,6 +221,14 @@ describe("a window across its connections", () => {
     // its next connection is a new window
     await w.join("window-bbbb");
     expect(w.seen[2]).not.toBe(w.seen[0]);
+  });
+
+  it("a page that closed is let go after the short grace; a dropped connection still waits the long one", async () => {
+    const w = await windows(5000, 100);
+    await leave(await w.join("window-dddd"), 1001);
+    await leave(await w.join("window-eeee"));
+    await later(250);
+    expect(w.gone, "only the closed page").toEqual([w.seen[0]]);
   });
 
   it("two tabs of one window: the window stays while either is open", async () => {

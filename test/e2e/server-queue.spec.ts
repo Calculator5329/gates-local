@@ -106,9 +106,9 @@ test("a message open for editing in another window says so, and sends once that 
   await expect(rows(page).first(), "the first window sees the edit").toContainText("Being edited in another window");
   await shot(page, "edited-in-another-window");
 
-  // the editing window goes away mid-edit: the row is free again and goes when the reply ends
+  // the editing window closes mid-edit: the row is free again within the short grace a reload gets, and goes when the reply ends
   await other.close();
-  await expect(rows(page).first()).not.toContainText("Being edited in another window");
+  await expect(rows(page).first()).not.toContainText("Being edited in another window", { timeout: 15_000 });
   await fetch(`${FAKE_URL}/__fake/release`, { method: "POST", body: "{}" });
   await expect(rows(page)).toHaveCount(0, { timeout: 15_000 });
   await expect(page.locator(".turn.u").last()).toContainText("Queued, then edited elsewhere");

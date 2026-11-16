@@ -81,6 +81,7 @@ export interface WsServerOptions {
   readonly onClientCount?: (count: number) => void;
   readonly onWindowGone?: (window: number) => void;
   readonly windowGraceMs?: number;
+  readonly leavingGraceMs?: number;
   readonly dataDir?: string;
   /** A picture's thumbnail by job id (pictures/thumbs.ts), served at /files/thumbs/<jobId>.webp; 404 when absent. */
   readonly thumbnails?: (jobId: string) => Promise<Buffer | undefined>;
@@ -110,6 +111,9 @@ export interface WsServer {
 }
 
 export const WINDOW_GRACE_MS = 120_000;
+// external: a browser closes a page's socket with 1001 (going away) when it closes or reloads
+export const LEAVING_GRACE_MS = 10_000;
+const GOING_AWAY = 1001;
 
 function windowKey(req: IncomingMessage | undefined): string | undefined {
   const key = new URL(req?.url ?? "/", "http://loopback").searchParams.get("window");
@@ -207,6 +211,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
   const windowSockets = new Map<number, Set<WebSocket>>();
   const windowsLeaving = new Map<number, ReturnType<typeof setTimeout>>();
   const windowGrace = options.windowGraceMs ?? WINDOW_GRACE_MS;
+  const leavingGrace = Math.min(options.leavingGraceMs ?? LEAVING_GRACE_MS, windowGrace);
   let closing = false;
 
   const admits = (req: IncomingMessage): { ok: true } | { ok: false; status: 401 | 403; reason: string } => {
@@ -329,7 +334,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
       dispatch(ws, ctx, raw).catch((e: unknown) => log(`dispatch failed: ${String(e)}`));
     });
     ws.on("error", (e) => log(`client ${ctx.clientId} error: ${e.message}`));
-    ws.on("close", () => {
+    ws.on("close", (code) => {
       controller.abort();
       if (clients.delete(ws)) options.onClientCount?.(clients.size);
       const open = windowSockets.get(window);
@@ -342,7 +347,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
         windowsLeaving.delete(window);
         windowNumbers.delete(named);
         options.onWindowGone?.(window);
-      }, windowGrace));
+      }, code === GOING_AWAY ? leavingGrace : windowGrace));
     });
   });
 
