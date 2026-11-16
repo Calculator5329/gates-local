@@ -29,7 +29,7 @@ import {
   phoneMay,
   methodSync,
   pushSync,
-  revisionOf,
+  missingScope,
   decodeRequest,
   encodeErrorResponse,
   encodePush,
@@ -303,7 +303,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     }
     // A method row answers a negotiated socket with its numbers, or not at all.
     const numbered = row !== undefined && negotiated.has(ws);
-    const missing = numbered ? scopesOf(row, decodedParams).find(scope => revisionOf(captured, epoch, scope) === undefined) : undefined;
+    const missing = numbered ? missingScope(row, decodedParams, captured, epoch) : undefined;
     if (missing !== undefined) {
       return send(ws, encodeErrorResponse(id, "bad-result", `${method} did not capture ${missing} metadata`));
     }
@@ -372,7 +372,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
       // A kind the socket numbers takes the next number as it is sent.
       const row = pushSync(channel);
       const changes = given ?? (row !== undefined && SENT_IN_ORDER.includes(row.domain) ? [sent(row.scope)] : undefined);
-      const missing = row !== undefined ? scopesOf(row, payload).find(scope => revisionOf(changes === undefined ? undefined : { epoch, changes }, epoch, scope) === undefined) : undefined;
+      const missing = row === undefined ? undefined : missingScope(row, payload, changes === undefined ? undefined : { epoch, changes }, epoch);
       if (missing !== undefined) throw new Error(`${channel} did not capture ${missing} metadata`);
       let versioned: string | undefined;
       for (const ws of clients) {

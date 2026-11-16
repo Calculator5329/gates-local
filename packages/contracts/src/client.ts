@@ -17,7 +17,7 @@ import {
   pushSync,
 } from "./protocol.ts";
 import type { ReplyAnswer, ReplyOutcome } from "./shapes.ts";
-import { ORDERED_DOMAINS, revisionOf, scopesOf, type SyncDomain, type SyncRow, type SyncMetadata, type SyncNegotiation } from "./sync.ts";
+import { missingScope, ORDERED_DOMAINS, type SyncDomain, type SyncRow, type SyncMetadata, type SyncNegotiation } from "./sync.ts";
 
 const CONNECTING = 0;
 const OPEN = 1;
@@ -117,9 +117,9 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
   const metadataError = (metadata: SyncMetadata | undefined, row: SyncRow | undefined, about: unknown): WireError | undefined => {
     if (sync === undefined) return;
     const { epoch } = sync;
-    if ((metadata !== undefined && metadata.epoch !== epoch) ||
-      (row !== undefined && scopesOf(row, about).some(scope => revisionOf(metadata, epoch, scope) === undefined))) {
-      return new WireError("bad-message", `missing or invalid ${row === undefined ? "synchronization" : scopesOf(row, about).join(" and ")} metadata; reconnect required`);
+    const missing = row === undefined ? undefined : missingScope(row, about, metadata, epoch);
+    if ((metadata !== undefined && metadata.epoch !== epoch) || missing !== undefined) {
+      return new WireError("bad-message", `missing or invalid ${missing ?? "synchronization"} metadata; reconnect required`);
     }
   };
 

@@ -87,3 +87,8 @@ export function revisionOf(sync: SyncMetadata | undefined, epoch: string, scope:
   const changes = sync.changes.filter(change => change.scope === scope);
   return changes.length === 1 && changes[0]?.kind === "snapshot" ? changes[0].rev : undefined;
 }
+
+/** The first scope a frame of `row` has no number for in `sync`; the server and the client both refuse such a frame. */
+export function missingScope(row: SyncRow, about: unknown, sync: SyncMetadata | undefined, epoch: string): ScopeName | undefined {
+  return scopesOf(row, about).find(scope => revisionOf(sync, epoch, scope) === undefined);
+}

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-16: one check for a frame's missing numbers
+
+- The server's answer and push checks and the page's check now share
+  one function, so they cannot drift apart on what a frame must carry.
+- A test fails when a new kind of data is added without being
+  numbered: there is no unnumbered kind any more.
+
 ## 2026-11-16: every connection numbers every kind; the old mode is gone
 
 - The server refuses a page that does not ask for all six numbered

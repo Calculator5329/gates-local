@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { type SyncMetadata, decodeServerMessage, encodePush, encodeResult } from "../src/index.ts";
+import { ORDERED_DOMAINS, SyncDomain, type SyncMetadata, decodeServerMessage, encodePush, encodeResult } from "../src/index.ts";
 
 const sync: SyncMetadata = { epoch: "process-a", changes: [
   { scope: "settings", kind: "snapshot", rev: 0 },
@@ -38,4 +38,8 @@ it("rejects malformed present metadata, including unsafe counters and unknown sc
     expect(encodeResult("1", "threads.list", [], metadata as SyncMetadata).ok).toBe(false);
     expect(encodePush("threads.changed", { threadId: "one", thread: null }, metadata as SyncMetadata).ok).toBe(false);
   }
+});
+
+it("orders every kind: a new SyncDomain is numbered from the start, there is no unnumbered mode", () => {
+  expect(ORDERED_DOMAINS.toSorted()).toEqual(SyncDomain.literals.toSorted());
 });
