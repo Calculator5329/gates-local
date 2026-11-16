@@ -1,5 +1,3 @@
-// The server's shared stdin/signal shutdown path. Keep cancellation and joins
-// here so one slow resource cannot prevent another producer being signalled.
 type Closing = { close(): unknown };
 export interface ShutdownResources {
   admission: Closing;
@@ -36,14 +34,12 @@ export function createServerShutdown(resources: ShutdownResources) {
       try { await fn(); }
       catch (error) { resources.log(`${name} failed: ${(error as Error).message}`); }
     };
-    // Begin cancellation before any drain can stall. Join snapshot workers
-    // and their cleanup while a slow fetch is still pending.
     const importsClosing = step("finish imports", () => resources.imports.close());
     const updateClosing = step("finish update check", () => resources.update.close());
     await step("cancel turns", () => resources.app.shutdown());
     await importsClosing;
     await updateClosing;
-    // A preload holds a shared GPU claim; image close needs it alone.
+    // why: a preload holds a shared GPU claim, and the image close needs the card alone
     await step("drain model loads", () => resources.loader.close());
     await step("close image module", () => resources.image.close());
     await step("close ws", () => resources.server()?.close());

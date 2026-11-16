@@ -29,15 +29,12 @@ const MAX_ACTIVE_IMPORTS = 2;
 const MAX_IMPORT_JOBS = 20;
 const FAILED_RETRY_MS = 5 * 60_000;
 
-/** A launch token in the OS command line distinguishes this worker from a recycled PID. */
 function workerGone(worker: WorkerIdentity): boolean {
   if (!isAlive(worker.pid)) return true;
   const current = readWindowsProc(worker.pid);
-  // Missing command information is uncertainty, not evidence of termination.
   return current !== undefined && current.command !== "" && !current.command.includes(worker.token);
 }
 
-/** Download only the pinned bytes; redirects, oversize and underlength are refused before add. */
 async function download(sample: PinnedSample, file: string, signal: AbortSignal, progress: (bytes: number) => void, get: typeof fetch) {
   if (new URL(sample.url).protocol !== "https:") throw new Error("Sample downloads require HTTPS.");
   const response = await get(sample.url, { signal, redirect: "error", credentials: "omit" });
@@ -64,7 +61,6 @@ async function download(sample: PinnedSample, file: string, signal: AbortSignal,
   } finally { await handle.close(); }
 }
 
-/** Deletes clone metadata before the ordinary folder path can expose or index it. */
 function stripGit(folder: string) {
   const root = openDir(folder, process.platform);
   if (!root) throw new Error("The cloned folder could not be opened.");
@@ -94,8 +90,6 @@ export function createLibraryImports(deps: ImportsDeps) {
   const now = deps.now ?? Date.now;
   const listeners = new Set<(value: SourceImports) => void>();
   const build = (): SourceImports => ({ samples: samples.map(s => ({ id: s.id, label: s.label, description: s.description, sizeBytes: s.sizeBytes, url: s.url, license: s.license, licenseUrl: s.licenseUrl, tables: s.tables, questions: s.questions })), jobs: [...jobs.values()].map(j => ({ ...j })) });
-  // Every change to the jobs is committed here with its number, then announced: the answer to
-  // sources.imports and each push carry the number of the value they hold.
   let current = build();
   const revisions = createRevisions<SourceImports>("source-imports", current);
   const snapshot = () => current;
@@ -125,8 +119,6 @@ export function createLibraryImports(deps: ImportsDeps) {
     const active = [...jobs.values()].find(j => j.kind === kind && j.key.toLowerCase() === key.toLowerCase() && (running.has(j.id) || recovered.has(j.id)));
     if (active) return { ...active };
     if (running.size + recovered.size >= MAX_ACTIVE_IMPORTS) throw new Error("The Library can run 2 imports at once. Wait for one to finish or cancel one, then retry.");
-    // Reserve history space before starting work. Recent failures can only be
-    // replaced by their own Retry; when all slots are protected, refuse new work.
     const evictions = new Set([...jobs.values()].filter(j => j.kind === kind && j.key.toLowerCase() === key.toLowerCase()).map(j => j.id));
     for (const [id, ended] of finishedAt) {
       if (jobs.size - evictions.size < MAX_IMPORT_JOBS) break;
@@ -168,7 +160,6 @@ export function createLibraryImports(deps: ImportsDeps) {
             try {
               return await (deps.git ?? runGit)({ ...call, onWorkerStart: (pid, token) => {
                 if (process.platform === "win32") {
-                  // No Git work starts unless its stable identity is durably saved.
                   deps.sources.rememberWorker(job, { pid, token }); remembered = true;
                 }
                 call.onWorkerStart?.(pid, token);
@@ -213,8 +204,6 @@ export function createLibraryImports(deps: ImportsDeps) {
     "sources.clone": ({ url }) => { const key = githubRepo(url); return begin("repository", key, key.slice("https://github.com/".length)); },
     "sources.cancelImport": ({ id }) => { checkRecovered(); const controller = running.get(id); controller?.abort(new DOMException("Cancelled. Nothing was added; retry whenever you like.", "AbortError")); return { cancelled: controller !== undefined }; },
   } satisfies Partial<Handlers>;
-  // Recovered workers belong to a previous server. Keep them in the update
-  // snapshot until their identity is confirmed gone; never try to kill them.
   const activity = (): readonly string[] => { checkRecovered(); return [...recovered.values()].map(({ job }) => `Import: ${job.label}`); };
   return { handlers, snapshot, stamp: revisions.stamp, activity, onChange(listener: (value: SourceImports) => void) { listeners.add(listener); return () => { listeners.delete(listener); }; }, close() { for (const c of running.values()) c.abort(new DOMException("The app closed during the import. Retry.", "AbortError")); } };
 }

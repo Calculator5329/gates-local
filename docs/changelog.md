@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-16: the Library's sources folder holds to the six comment kinds
+
+- The sources folder, shutdown.ts, the server entry and the GPU status
+  script pass the comment rule: 90 offenders went, and the sources
+  folder's comment lines fell from 130 to 20. One rule no test held now
+  has one: a Windows import whose worker exits before taskkill reports
+  success ends at that report.
+- Two comments were wrong and went: a refresh does save "refreshing"
+  before it makes the snapshot, and a crash leaves that on disk for the
+  next start to settle. A map kept beside them was never read and went
+  too.
+
 ## 2026-11-16: the runtime folder's model loader holds to the six comment kinds
 
 - The model loader passes the comment rule: 88 offenders went, the

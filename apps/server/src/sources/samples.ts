@@ -1,6 +1,5 @@
 import type { SampleDatabase } from "@gates-local/contracts";
 
-/** `notice` is written beside the downloaded copy: this sample's own licence, never another's. */
 export type PinnedSample = SampleDatabase & { readonly sha256: string; readonly notice: string };
 
 const MIT_TEXT = `The MIT License
@@ -29,7 +28,6 @@ International License (CC BY-SA 4.0):
 https://creativecommons.org/licenses/by-sa/4.0/
 `;
 
-/** The head every notice shares: what it is, where it came from, where its licence is stated. */
 const head = (label: string, repo: string, licenseUrl: string, copyright: string) =>
   `${label} sample database, downloaded unchanged from its source.
 Source: ${repo}
@@ -42,12 +40,7 @@ ${copyright}
 type Entry = Omit<PinnedSample, "notice"> & { readonly repo: string; readonly copyright: string; readonly text: string };
 const pinned = ({ repo, copyright, text, ...sample }: Entry): PinnedSample => ({ ...sample, notice: head(sample.label, repo, sample.licenseUrl, copyright) + text });
 
-/**
- * No network at module load. Every URL and digest is pinned to the reviewed
- * upstream commit, on GitHub's raw host, which serves it without a redirect.
- * Table counts are the pinned file's. The four questions are the shown ones;
- * all five with their SQL and answers are in sample-questions.json.
- */
+// external: GitHub's raw host serves a pinned commit's file without a redirect
 export const SAMPLES: readonly PinnedSample[] = [
   pinned({
     id: "chinook", label: "Chinook", description: "Music store: artists, albums and invoices", sizeBytes: 1_007_616,
@@ -94,7 +87,7 @@ export const SAMPLES: readonly PinnedSample[] = [
     url: "https://raw.githubusercontent.com/jfjelstul/worldcup/35a8667f518b07469182ae16d35574dd0e7a00fb/data-sqlite/worldcup.db",
     sha256: "080f60bec8fde7f85f8b11d3f7a231e0af9122619a1b00920233eb9c63b0ab70",
     license: "CC BY-SA 4.0 · © 2023 Joshua C. Fjelstul, Ph.D.",
-    // The repository states its licence in the README; it has no LICENSE file.
+    // external: this GitHub repository states its licence in its README and has no LICENSE file
     licenseUrl: "https://github.com/jfjelstul/worldcup/blob/35a8667f518b07469182ae16d35574dd0e7a00fb/README.md#the-license",
     repo: "https://github.com/jfjelstul/worldcup/tree/35a8667f518b07469182ae16d35574dd0e7a00fb",
     copyright: "© 2023 Joshua C. Fjelstul, Ph.D.", text: CC_BY_SA_TEXT,

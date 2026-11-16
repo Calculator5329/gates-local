@@ -1,5 +1,4 @@
-// Run by hand, never by the test runner. It only reads (nvidia-smi queries, /proc, systemctl show,
-// GET /api/ps): it loads, unloads, starts and stops nothing.
+// why: run by hand on a live machine, so it only reads and never loads, unloads, starts or stops
 import { readFileSync } from "node:fs";
 import { listLoaded } from "../runtime/models.ts";
 import { canonicalTag, modelLabel } from "../runtime/recommended.ts";

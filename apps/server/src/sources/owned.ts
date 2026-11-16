@@ -15,7 +15,7 @@ export interface WorkerIdentity { pid: number; token: string; }
 export interface HeldImport { job: SourceImport; worker: WorkerIdentity | null; }
 const decodeWorker = S.decodeUnknownSync(S.Struct({ job: SourceImport, worker: S.Struct({ pid: S.Number, token: S.String }) }));
 
-/** Atomic, flushed lifecycle records. Directory fsync is available on POSIX. */
+// external: a folder can be fsynced on POSIX only
 function syncDir(dir: Dir) {
   if (process.platform === "win32") return;
   const fd = openSync(dir.at("."), constants.O_RDONLY | constants.O_DIRECTORY);
@@ -35,7 +35,6 @@ function readRecord(dir: Dir, name: string): unknown {
   try { return JSON.parse(readFileSync(dir.at(name), "utf8")) as unknown; } catch { return undefined; }
 }
 
-/** Completed copies never depend on registry membership for their lifetime. */
 export function ownedSources(dataDir: string) {
   const rootPath = path.join(dataDir, "library-imports");
   try { mkdirSync(rootPath, { mode: 0o700 }); } catch (e) { if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e; }
@@ -55,7 +54,6 @@ export function ownedSources(dataDir: string) {
     if (typeof owner !== "object" || owner === null || !("id" in owner) || owner.id !== id) { dir.close(); return undefined; }
     return { dir, phase: "phase" in owner ? owner.phase : undefined };
   };
-  // A link is unlinked as itself; traversal always uses held real folders.
   const empty = (dir: Dir) => {
     for (const name of dir.names()) {
       if (!dir.placed()) throw new Error("A Library import moved during removal.");
@@ -83,8 +81,6 @@ export function ownedSources(dataDir: string) {
     if (root.lstat(workerName(id))) return;
     const held = opened(id);
     if (!held) return;
-    // Legacy copies with content are ambiguous and must survive. A directory
-    // containing only its valid marker has no completed content to preserve.
     let staging: boolean;
     try { staging = held.phase === "staging" || held.dir.names().every(name => name === "owner.json"); }
     finally { held.dir.close(); }
@@ -143,7 +139,7 @@ export function ownedSources(dataDir: string) {
           if (record.job.id !== id || record.job.kind !== "repository" || !Number.isSafeInteger(record.worker.pid) || record.worker.pid <= 0 || record.worker.pid > 0x7fffffff || !ID.test(record.worker.token)) throw new Error("Invalid worker record");
           return [record];
         } catch {
-          // An unreadable ownership record never authorizes cleanup or reuse.
+          // why: an unreadable record never frees its staging, so the import stays held
           return [{ worker: null, job: { id, key: id, label: "Interrupted repository import " + id, kind: "repository" as const, state: "cloning" as const, bytes: 0, detail: "The worker record could not be read. Restart Windows before moving this import's staging folder and worker record aside." } }];
         }
       });

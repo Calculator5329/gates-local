@@ -100,6 +100,20 @@ it("Windows successful taskkill waits for worker exit, then releases the slot wi
   } finally { await s.stop(); }
 });
 
+it("Windows: a worker that exits before taskkill reports success ends at that report, without waiting for pipe close (DF-01)", async () => {
+  const s = setup();
+  try {
+    const job = s.start("one"); await vi.waitFor(() => expect(s.workers).toHaveLength(1));
+    s.imports.handlers["sources.cancelImport"]({ id: job.id });
+    s.workers[0]!.emit("exit", 1, null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.imports.snapshot().jobs[0]!.state).toBe("cloning");
+    s.kills[0]!(null);
+    await vi.waitFor(() => expect(s.imports.snapshot().jobs[0]!.state).toBe("cancelled"));
+    expect(existsSync(path.join(s.dataDir, "library-imports", job.id))).toBe(false);
+  } finally { await s.stop(); }
+});
+
 it("a Windows worker's broken start pipe still waits for confirmed termination", async () => {
   const s = setup();
   try {

@@ -9,7 +9,6 @@ export const REPO_FILES = 10_000;
 export const IMPORT_MS = 60_000;
 export const TOO_LARGE = "This repository is too large. Choose one under 64 MiB and 10,000 files.";
 
-/** Exact spelling, before URL normalization: no credentials, port, escapes, arguments or extra path. */
 export function githubRepo(input: string): string {
   const match = /^https:\/\/github\.com\/([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))\/([A-Za-z0-9_][A-Za-z0-9_.-]{0,99})(?:\.git)?\/?$/.exec(input);
   if (!match || match[1]?.endsWith("-") || match[1]?.includes("--")) throw new Error("Paste a public GitHub URL like https://github.com/owner/repo.");
@@ -18,7 +17,6 @@ export function githubRepo(input: string): string {
   return `https://github.com/${match[1]}/${repo}`;
 }
 
-/** Counts metadata as well as files, without following links. Used while git is receiving. */
 export async function importSize(root: string, signal: AbortSignal): Promise<number> {
   let bytes = 0;
   let files = 0;
@@ -43,13 +41,11 @@ export async function importSize(root: string, signal: AbortSignal): Promise<num
 
 export interface GitCall {
   args: readonly string[]; cwd: string; env: NodeJS.ProcessEnv; signal: AbortSignal;
-  /** Persist identity before allowing the Windows worker to start Git. Not supplied by the wire. */
   onWorkerStart?: (pid: number, token: string) => void;
   onStopUnconfirmed?: () => void;
 }
 export type GitTransport = (call: GitCall) => Promise<string>;
 
-/** Parent-owned process group, bounded output and bounded cancellation. No shell. */
 export const runGit: GitTransport = ({ args, cwd, env, signal, onWorkerStart, onStopUnconfirmed }) => new Promise((resolve, reject) => {
   signal.throwIfAborted();
   const token = randomUUID();
@@ -79,7 +75,6 @@ export const runGit: GitTransport = ({ args, cwd, env, signal, onWorkerStart, on
   const cancel = () => {
     if (stopping || settled) return;
     stopping = true;
-    // Never wait exclusively for close or for a stopped worker to service EOF.
     const pid = worker.pid;
     if (pid === undefined) { finish(null); return; }
     if (process.platform === "win32") {
@@ -88,14 +83,13 @@ export const runGit: GitTransport = ({ args, cwd, env, signal, onWorkerStart, on
         if (stopTimer) clearTimeout(stopTimer);
         if (windowsStop !== "confirmed") windowsStop = "unconfirmed";
         if (closed) finish(null);
-        else onStopUnconfirmed?.(); // Keep the promise, staging and admission slot held.
+        else onStopUnconfirmed?.();
       };
       stopTimer = setTimeout(unconfirmed, 1000);
       execFile("taskkill", ["/PID", String(pid), "/T", "/F"], { timeout: 1000, windowsHide: true }, killError => {
         if (settled) return;
         if (killError !== null) { unconfirmed(); return; }
         windowsStop = "confirmed";
-        // A successful tree kill plus the worker's exit confirms termination.
         if (exited || closed) finish(null);
       });
     } else {
@@ -128,7 +122,6 @@ export const runGit: GitTransport = ({ args, cwd, env, signal, onWorkerStart, on
   });
 });
 
-/** Config, hooks, filters, credentials and writable scratch paths are isolated to this job. */
 export async function cloneRepository(options: { url: string; work: string; destination: string; signal: AbortSignal; progress: (bytes: number) => void; onStopUnconfirmed?: () => void; git?: GitTransport }): Promise<number> {
   const { work, destination, signal } = options;
   const config = path.join(work, "empty-config");
@@ -141,14 +134,13 @@ export async function cloneRepository(options: { url: string; work: string; dest
     HOME: work, USERPROFILE: work, XDG_CONFIG_HOME: work, TMPDIR: work, TMP: work, TEMP: work,
     GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_SYSTEM: config, GIT_CONFIG_GLOBAL: config,
     GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", GIT_LFS_SKIP_SMUDGE: "1", GIT_ATTR_NOSYSTEM: "1",
-    // The desktop server's execPath is Electron; its worker must stay in Node mode.
+    // external: the desktop server's execPath is Electron, which runs as Node only with this set
     ELECTRON_RUN_AS_NODE: "1",
     GIT_ALLOW_PROTOCOL: "https", GIT_PROTOCOL_FROM_USER: "0",
   });
   const settings = ["core.hooksPath=" + empty, "core.symlinks=false", "credential.helper=", "core.askPass=", "protocol.allow=never", "protocol.https.allow=always", "submodule.recurse=false", "filter.lfs.required=false", "filter.lfs.smudge=", "filter.lfs.process=", "http.followRedirects=false", "http.extraHeader=", "http.cookieFile=", "http.saveCookies=false", "http.lowSpeedLimit=1", "http.lowSpeedTime=15"];
   const prefix = settings.flatMap(s => ["-c", s]);
   const git = (args: readonly string[], cwd = work) => (options.git ?? runGit)({ args: [...prefix, ...args], cwd, env, signal, onStopUnconfirmed: options.onStopUnconfirmed });
-  // No checkout until the entire tree's expanded sizes and modes have passed the budget.
   await git(["clone", "--depth=1", "--single-branch", "--no-tags", "--no-checkout", "--no-recurse-submodules", `--template=${empty}`, "--", options.url, destination]);
   const tree = await git(["ls-tree", "-r", "-l", "-z", "HEAD", "--"], destination);
   let size = 0;
@@ -157,7 +149,7 @@ export async function cloneRepository(options: { url: string; work: string; dest
     if (row === "") continue;
     const match = /^(100644|100755|120000|160000) (blob|commit) [a-f0-9]+ +([0-9]+|-)\t/.exec(row);
     if (!match) throw new Error("This repository contains an unsupported file type.");
-    if (match[1] === "160000") continue; // Submodules stay empty and are never fetched.
+    if (match[1] === "160000") continue;
     size += Number(match[3]);
     if (++files > REPO_FILES || size > REPO_BYTES) throw new Error(TOO_LARGE);
   }

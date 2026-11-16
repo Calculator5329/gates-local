@@ -1,12 +1,9 @@
 import type { UpdateAdmission } from "@gates-local/update/admission";
 import type { Sources } from "./index.ts";
 
-/** Track full import lifetimes, including worker exit and cleanup, rather than RPC acknowledgements. */
 export function createImportActivity(admission: UpdateAdmission) {
   let closed = false;
   const pending = new Map<symbol, { label: string; controller: AbortController; finished: Promise<void> }>();
-  // begin is synchronous so job-returning import APIs can refuse before
-  // allocating anything. finish belongs in their worker/cleanup finally.
   const begin = (label: string) => {
     if (closed) throw new Error("Imports are shutting down.");
     admission.admit();
