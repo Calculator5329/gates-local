@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-16: the in-use check's real-process test runs where sleep is a multi-call program
+
+- The test copies sleep under its own name. On Ubuntu's uutils coreutils a copy named
+  anything else exits at once, so the test never saw it running.
+
 ## 2026-11-16: the flicker probe tells two placeholders apart
 
 - The app start check no longer reports the sidebar's placeholder as

@@ -59,7 +59,8 @@ describe("a version folder in use", () => {
   });
 
   it.runIf(process.platform === "linux")("finds a real process started from a file inside it", async () => {
-    const program = path.join(folder, "sleeper");
+    // The copy keeps the name sleep: a multi-call coreutils (uutils on Ubuntu) runs only under a name it knows.
+    const program = path.join(folder, "sleep");
     fs.copyFileSync("/bin/sleep", program);
     fs.chmodSync(program, 0o755);
     expect(inUse(folder, [], realLook)).toBeNull();
