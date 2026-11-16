@@ -1,7 +1,4 @@
-// One real, read-only discovery run against this machine (not part of vitest):
-//   node apps/server/src/runtime/real-discovery.ts
-// Only GETs /, /api/version, /api/tags and /api/ps. discover() never starts,
-// installs, pulls, loads or stops anything; installs are off as well.
+// why: run by hand against this machine's real Ollama, so it only reads and installs are off
 import { listLoaded, listModels } from "./models.ts";
 import { detectModelsDir, findModelsDirs } from "@gates-local/runtime-files/paths";
 import { createOllamaRuntime } from "./runtime.ts";

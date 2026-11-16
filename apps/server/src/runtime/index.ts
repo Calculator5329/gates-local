@@ -1,5 +1,3 @@
-// Ollama runtime: discovery, the app-owned install and server, process
-// ownership and the model list.
 export type { InstallPhase, InstallProgress, LoadedModel, ModelInfo, RuntimeOwner, RuntimeState, RuntimeStatus } from "./types.ts";
 export { createOllamaRuntime, DEFAULT_APP_PORT, DEFAULT_EXTERNAL_BASE_URL, type OllamaRuntime, type RuntimeOptions } from "./runtime.ts";
 export { createModelCatalog, listLoaded, listModels, RuntimeResponseError, type ModelCatalog } from "./models.ts";

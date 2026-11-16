@@ -1,8 +1,3 @@
-// models.catalog: the curated models merged with what is installed. Installed
-// models get a verdict from the fit check at the default context; curated
-// models not downloaded yet get the rough pre-download estimate (source
-// "estimate", and the message says so). Recommended is the computer's tier
-// (tiers.ts): picks by the GPU's memory, or by system memory with no GPU.
 import type { CatalogEntry, FitReport, ModelEstimate } from "@gates-local/contracts";
 import { estimateBeforeDownload, judge, surveyFit, type FitDeps, type FitSurvey } from "../fit/fit.ts";
 import { defaultMeminfo, defaultNvidiaSmi, GPU_REUSE_MS, readGpu, readMemory } from "../fit/gpu.ts";
@@ -15,7 +10,6 @@ import type { ModelInfo } from "./types.ts";
 
 export interface CatalogDeps {
   readonly baseUrl: () => string | undefined;
-  /** The installed list (the model catalog's current or refreshed list). */
   readonly installed: () => Promise<readonly ModelInfo[]>;
   readonly settings: Pick<SettingsReader, "get">;
   readonly fit?: Omit<FitDeps, "baseUrl">;
@@ -29,21 +23,16 @@ const withFit = (entry: Omit<CatalogEntry, "fit" | "recommended">, fit: FitRepor
   ...(fit === undefined ? {} : { fit }),
 });
 
-/** A download is judged against the card and the system memory the computer has, as the fit table's rows are. */
 const preDownload = (c: Pick<CatalogEntry, "name" | "downloadBytes">, numCtx: number, survey: FitSurvey, fit: CatalogDeps["fit"]): FitReport =>
   estimateBeforeDownload({ model: c.name, numCtx, downloadBytes: c.downloadBytes, gpu: survey.gpu, memTotalBytes: survey.memTotalBytes, ...(fit?.margins ? { margins: fit.margins } : {}) });
 
-/** An installed model's right-now report judged against the card instead, as the fit table's `card` verdict is. */
 const onCard = (r: FitReport, survey: FitSurvey, fit: CatalogDeps["fit"]): FitReport =>
   judge("card", { model: r.model, numCtx: r.numCtx, needBytes: r.needVramBytes, gpu: survey.gpu, memTotalBytes: survey.memTotalBytes, freeVramBytes: r.freeVramBytes, ...(fit?.margins ? { margins: fit.margins } : {}) });
 
-/** A model the catalog lists, before its fit: the installed chat models, then the ones offered for download. */
 export type CatalogModel = Omit<CatalogEntry, "fit" | "recommended">;
 
-/** The models the catalog lists, from the installed list: the fit table states the same ones. */
 export function catalogModels(listed: readonly ModelInfo[]): CatalogModel[] {
-  const installed = listed.filter(canChat); // embedding models never chat; unknown ones wait for discovery
-  // Every installed name, chat or not: an installed model is never offered as a download (MP-01).
+  const installed = listed.filter(canChat);
   const installedTags = new Set(listed.map((m) => canonicalTag(m.name)));
   const models: CatalogModel[] = [];
   const byTag = new Map(installed.map((m) => [canonicalTag(m.name), m]));
@@ -76,8 +65,6 @@ export async function buildCatalog(deps: CatalogDeps): Promise<CatalogEntry[]> {
   const entries = models.map((m) => withFit(m, m.installed ? survey?.reports.get(m.name) : survey && preDownload(m, numCtx, survey, deps.fit)));
   if (survey === undefined) return entries;
   const tier = tierFor({ gpuCount: survey.gpu.gpuCount, gpuTotalBytes: survey.gpu.totalBytes, systemTotalBytes: survey.memTotalBytes });
-  // An installed model's report plans it right now, as a send would load it; whether it is
-  // recommended is judged against the card, as the lists show it (the owner's ruling, 2026-11-13).
   const s = survey;
   const judged = entries.map((e) => (e.installed && e.fit !== undefined ? { ...e, fit: onCard(e.fit, s, deps.fit) } : e));
   return markRecommended(judged, numCtx, tier).map((e, i) => {
@@ -87,16 +74,10 @@ export async function buildCatalog(deps: CatalogDeps): Promise<CatalogEntry[]> {
 }
 
 export interface EstimateDeps {
-  /** The registry's answer for a name; absent when the registry is off (tests, a pinned Ollama). */
   readonly lookup?: (name: string, signal: AbortSignal) => Promise<RegistryLookup>;
   readonly fit?: Omit<FitDeps, "baseUrl">;
 }
 
-/**
- * A typed name before its download: its size (the curated list, else the registry) and its fit
- * against the card and the system memory the computer has, as the Download list's rows are judged.
- * A name whose size cannot be read gets no fit: the size is what the estimate is made from.
- */
 export async function estimateTyped(deps: EstimateDeps, name: string, numCtx: number, signal: AbortSignal): Promise<ModelEstimate> {
   const tag = canonicalTag(name.trim());
   const known = curated(tag)?.downloadBytes;
@@ -111,16 +92,10 @@ export async function estimateTyped(deps: EstimateDeps, name: string, numCtx: nu
     const report = estimateBeforeDownload({ model: tag, numCtx, downloadBytes: found.bytes, gpu, memTotalBytes: memory.totalBytes, ...(fit?.margins ? { margins: fit.margins } : {}) });
     return { name: tag, found: "yes", downloadBytes: found.bytes, fit: report };
   } catch {
-    // no reading of the GPU or memory: the size alone
     return { name: tag, found: "yes", downloadBytes: found.bytes };
   }
 }
 
-/**
- * The tier's picks are recommended, in its order (`rank`), each one that can run here: a pick
- * with no verdict, one that cannot hold the default context, or one with not enough memory is
- * left with the rest.
- */
 export function markRecommended(entries: readonly CatalogEntry[], numCtx: number, tier: Tier): CatalogEntry[] {
   return entries.map((e) => {
     const rank = tier.picks.indexOf(canonicalTag(e.name));

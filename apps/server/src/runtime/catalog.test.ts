@@ -136,6 +136,7 @@ describe("models.catalog", () => {
 const MIB_PER_GB = 1024;
 /** nvidia-smi totals for a card sold as `gb`: a little under the label, as real cards read, with 500 MiB in use. */
 const card = (totalMib: number): NvidiaSmiRunner => async (args) => (args[0]?.startsWith("--query-gpu") ? `${totalMib}, 500, ${totalMib - 500}\n` : "");
+const cardOtherAppsFill: NvidiaSmiRunner = async (args) => (args[0]?.startsWith("--query-gpu") ? "16303, 15000, 1303\n" : "");
 /** /proc/meminfo for a computer with `totalGib` of memory, `availableGib` of it free right now. */
 const meminfo = (totalGib: number, availableGib = totalGib / 2) => `MemTotal: ${Math.round(totalGib * 1024 * 1024)} kB\nMemAvailable: ${Math.round(availableGib * 1024 * 1024)} kB\n`;
 
@@ -195,6 +196,19 @@ describe("recommended by the computer's tier (row 21)", () => {
     });
     expect(byName(entries).get("qwen3.5:9b")?.installed).toBe(true);
     expect(picks(entries)).toEqual(tierFor({ gpuCount: 0, gpuTotalBytes: 0, systemTotalBytes: 15.6 * 1024 ** 3 }).picks);
+  });
+
+  it("an installed pick's row shows its fit right now, while recommended is judged on the memory the computer has", async () => {
+    const s = await fakeOllama();
+    const entries = await buildCatalog({
+      baseUrl: () => s.baseUrl,
+      installed: () => listModels(s.baseUrl),
+      settings,
+      fit: { runNvidiaSmi: cardOtherAppsFill, readMeminfo: async () => meminfo(31.25), now: () => 1 },
+    });
+    const nine = byName(entries).get("qwen3.5:9b");
+    expect(nine?.recommended).toBe(true);
+    expect(nine?.fit?.verdict).toBe("spills");
   });
 });
 

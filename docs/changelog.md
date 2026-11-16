@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-16: the runtime folder's small files hold to the six comment kinds
+
+- Sixteen files of the runtime folder (the catalog, the pick, the tiers,
+  the registry size, the probe, the types and the test fakes among them)
+  pass the comment rule: 98 offenders went, and the folder's comment
+  lines fell from 870 to 648. Three rules no test held now have one: a
+  new model list shows on the next read and only another list is told
+  to listeners, a port counts as Ollama only when its front page says
+  so, and an installed model's row shows its fit right now while its
+  recommendation is judged on the memory the computer has.
+- The tier picks' provisional status and the reasons behind them moved
+  to the tier table item in the roadmap.
 ## 2026-11-16: the GPU folder's comments hold to the six kinds
 
 - The gpu folder passes the comment rule with no offenders: 275

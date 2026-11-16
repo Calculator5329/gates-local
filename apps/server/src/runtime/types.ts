@@ -1,5 +1,3 @@
-// Plain shapes shared inside the runtime module. The contracts package
-// mirrors RuntimeStatus and ModelInfo as Schemas for the wire.
 
 export type RuntimeState =
   | "ready"
@@ -18,17 +16,11 @@ export type RuntimeStatus = {
   baseUrl: string;
   version?: string;
   detail?: string;
-  /** Ports that something other than Ollama holds (contracts RuntimeStatus.busyPorts). */
   busyPorts?: readonly string[];
-  /** The app has no build of Ollama to install here and no copy to run (contracts RuntimeStatus.noAppCopy). */
   noAppCopy?: boolean;
-  /** The folder the app's own running Ollama was started with (contracts RuntimeStatus.modelsDir). */
   modelsDir?: string;
-  /** The app's own Ollama holds one model at a time (contracts RuntimeStatus.holdsOne). */
   holdsOne?: boolean;
-  /** "error": what failed (contracts RuntimeStatus.failure). */
   failure?: "download" | "checksum" | "disk" | "install" | "start";
-  /** "installing": the download of the app's own Ollama (contracts RuntimeStatus.install). */
   install?: { receivedBytes: number; totalBytes: number; bytesPerSecond?: number; stalled?: true };
 };
 
@@ -40,21 +32,16 @@ export type ModelInfo = {
   parameterSize?: string;
   quantization?: string;
   modifiedAt: string;
-  /** Ollama's words from /api/show (contracts ModelInfo.capabilities). */
   capabilities: readonly string[];
-  /** The most context this model takes (contracts ModelInfo.maxContext). */
   maxContext?: number;
-  /** The model chat starts on (contracts ModelPick); set by the catalog's pick hook. */
   pick?: { numCtx: number; verdict?: "fits" | "spills" | "refuse" };
 };
 
-/** A model the runtime currently holds in memory (`/api/ps`). */
 export type LoadedModel = {
   name: string;
   sizeBytes: number;
   sizeVramBytes: number;
   expiresAt?: string;
-  /** /api/ps context_length: the num_ctx it is loaded at; undefined when Ollama does not say. */
   contextLength?: number;
 };
 

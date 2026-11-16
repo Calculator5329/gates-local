@@ -815,6 +815,14 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       hardware tier (NVIDIA by VRAM, no GPU by system memory), dated.
       *Accept:* every entry names its source, download size, memory at 16k
       and license; the research behind it is in `docs/research/`.
+      Until then the tiers in `packages/contracts/src/chat-models.json` are
+      picked from the pre-download estimate at 16k (`preDownloadNeed` in
+      `fit/fit.ts`), not measured: qwen3.5:4b 4.4 GiB, qwen3.5:9b 7.7,
+      gemma4:12b 9.2, gpt-oss:20b 15.1, qwen3.8:27b 19.2. With no GPU they
+      favour small models, and gpt-oss 20B (3.6B active per token) once there
+      is room; on 12 and 16 GB cards the 9B stays first, leaving the card room
+      for a longer context and for speech and images. Measure them on the test
+      machines and adjust.
 - [ ] <!-- workspace:id=work:7cb6f429-529c-5443-b3cd-91999212715b --> `pnpm setup:probe`: device facts as JSON (OS, GPU vendor and memory,
       system memory, disk free, CPU, Ollama and ComfyUI found, models
       installed).

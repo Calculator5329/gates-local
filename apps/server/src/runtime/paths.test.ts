@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { defaultAppDataDir, detectModelsDir, findModelsDirs, findOnPath } from "@gates-local/runtime-files/paths";
+import { json, startFakeServer } from "../fit/fake-http.ts";
 import { probe } from "./probe.ts";
 import { freePort, removeDir, startFakeOllama, startWrongService, tmpDir, writeFakeBinary } from "./test-fakes.ts";
 
@@ -89,6 +90,23 @@ describe("probe", () => {
     } finally {
       await ollama.close();
       await other.close();
+    }
+  });
+
+  it("counts a port as Ollama only when GET / also says Ollama is running", async () => {
+    const lookalike = await startFakeServer({
+      "GET /api/version": (_b, res) => json(res, 200, { version: "1.2.3" }),
+      "GET /": (_b, res) => {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("Welcome");
+      },
+    });
+    try {
+      const w = await probe(lookalike.baseUrl, 500);
+      expect(w.kind).toBe("wrong-service");
+      expect(w.kind === "wrong-service" && w.detail).toContain("Ollama is running");
+    } finally {
+      await lookalike.close();
     }
   });
 });

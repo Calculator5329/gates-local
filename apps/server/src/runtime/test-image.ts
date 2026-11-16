@@ -1,7 +1,3 @@
-// The real image module over an injected ComfyUI service and HTTP fake, with
-// an idle ComfyUI the app started: one job started the service, then failed
-// before rendering, so the module owns a ComfyUI that close() must stop. No
-// request reaches a real ComfyUI and nothing calls systemctl.
 import path from "node:path";
 import type { GpuLease } from "../gpu/lease.ts";
 import { createImageModule, type ImageModule } from "../image/module.ts";
@@ -9,14 +5,8 @@ import { openThreadStore } from "../threads/store.ts";
 
 export interface OwnedComfy {
   readonly image: ImageModule;
-  /** comfyui.service stop calls so far. */
   stops(): number;
-  /** POST /free calls so far (the memory owner's handoff): ComfyUI stays up and gives its weights back. */
   frees(): number;
-  /**
-   * The next service.inspect(), stop() or POST /free waits for release() (a /free also ends on its
-   * request's abort); `asked` resolves when it is called.
-   */
   hold(call: "inspect" | "stop" | "free"): { asked: Promise<void>; release(): void };
   close(): void;
 }
@@ -40,7 +30,7 @@ export async function ownedIdleComfy(lease: GpuLease, dir: string): Promise<Owne
     settings: () => ({ imageGen: true }),
     readGpu: async () => ({ freeBytes: 1e12, holders: "nothing else" }),
     requiredBytes: 1,
-    // Only close() stops it: no idle timer fires during a test.
+    // why: only close() stops it, so no idle timer fires during a test
     idleMs: 3_600_000,
     startupTimeoutMs: 2000,
     localAddresses: () => [],
@@ -72,7 +62,7 @@ export async function ownedIdleComfy(lease: GpuLease, dir: string): Promise<Owne
         calls.push("free");
         return new Response(null, { status: 200 });
       }
-      // The job ends here, before rendering: the module keeps the ComfyUI it started.
+      // why: the job ends here, before rendering, so the module keeps the ComfyUI it started
       return Response.json({ error: `no ${route} in this fake` }, { status: 500 });
     },
   });

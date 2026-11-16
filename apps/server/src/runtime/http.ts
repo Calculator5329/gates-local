@@ -1,5 +1,4 @@
-// Minimal loopback GET with a hard timeout. node:http rather than fetch so
-// connection errors keep their errno code (ECONNREFUSED vs a hung listener).
+// external: Node's fetch drops a connection error's errno code, so ECONNREFUSED is lost.
 import http from "node:http";
 
 export type GetResult =
@@ -10,7 +9,6 @@ export type GetResult =
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
-/** `signal` ends the request early with an ABORT_ERR error result. */
 export function httpGet(url: string, timeoutMs: number, signal?: AbortSignal): Promise<GetResult> {
   return new Promise((resolve) => {
     let settled = false;

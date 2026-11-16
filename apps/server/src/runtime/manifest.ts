@@ -1,17 +1,6 @@
-// The pinned Ollama release the app installs into its own folder (D1).
 import type { InstallManifest } from "./schemas.ts";
 
-/**
- * Linux amd64 asset of Ollama v0.40.15 (published 2026-11-03). URL, size and
- * sha256 were read on 2026-11-07 from the GitHub release API
- * (api.github.com/repos/ollama/ollama/releases/latest, asset
- * `ollama-linux-amd64.tar.zst`, field `digest`). Bump all of them together.
- *
- * unpackedBytes: the sum of the archive's file sizes (`zstd -dc | tar -tv`, 80 files), read
- * 2026-11-14. It is larger than the download because the archive is compressed, and it holds the
- * CUDA 12 and 13 libraries in every copy. zstd frames here carry no content
- * size, so it cannot be read from the archive's header and is pinned like the size.
- */
+// external: Ollama's tar.zst frames carry no content size, so unpackedBytes is pinned.
 export const PINNED_OLLAMA: InstallManifest = {
   version: "0.40.15",
   url: "https://github.com/ollama/ollama/releases/download/v0.40.15/ollama-linux-amd64.tar.zst",
@@ -23,17 +12,7 @@ export const PINNED_OLLAMA: InstallManifest = {
   source: "GitHub release API asset digest, read 2026-11-07",
 };
 
-/**
- * Windows amd64 asset of the same release. URL, size and sha256 were read
- * on 2026-11-07 from the GitHub release API
- * (api.github.com/repos/ollama/ollama/releases/tags/v0.40.15, asset
- * `ollama-windows-amd64.zip`, fields `size` and `digest`). The ZIP holds
- * ollama.exe at its top level and lib\ollama\ beside it. Bump with the
- * Linux entry.
- *
- * unpackedBytes: the sum of the uncompressed sizes in the ZIP's central directory (80 entries),
- * read 2026-11-14 with a range request for the archive's last 4 MiB.
- */
+// external: Ollama's Windows ZIP has ollama.exe at its top level and lib\ollama\ beside it.
 export const PINNED_OLLAMA_WINDOWS: InstallManifest = {
   version: "0.40.15",
   url: "https://github.com/ollama/ollama/releases/download/v0.40.15/ollama-windows-amd64.zip",
@@ -45,7 +24,6 @@ export const PINNED_OLLAMA_WINDOWS: InstallManifest = {
   source: "GitHub release API asset digest, read 2026-11-07",
 };
 
-/** The pinned release for this platform, or undefined where the app has none to install. */
 export function pinnedOllamaFor(platform: NodeJS.Platform, arch: string): InstallManifest | undefined {
   if (arch !== "x64") return undefined;
   if (platform === "linux") return PINNED_OLLAMA;

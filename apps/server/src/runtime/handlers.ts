@@ -1,5 +1,3 @@
-// models.catalog, models.suggested, models.pulls, models.pull, models.cancelPull,
-// models.remove and models.load. models.list and models.refresh stay in app.ts (slice 1).
 import { suggestedList } from "@gates-local/contracts";
 import type { FitDeps } from "../fit/fit.ts";
 import { chatList } from "./chat-list.ts";
@@ -10,6 +8,7 @@ import type { RegistryLookup } from "./registry-size.ts";
 import { ModelActionError, type ModelLoader } from "./load.ts";
 import type { ModelCatalog } from "./models.ts";
 import type { PullManager } from "./pull.ts";
+import { parseJson } from "./schemas.ts";
 
 export interface RuntimeHandlerDeps {
   readonly baseUrl: () => string | undefined;
@@ -18,12 +17,10 @@ export interface RuntimeHandlerDeps {
   readonly pulls: PullManager;
   readonly loader: ModelLoader;
   readonly fit?: Omit<FitDeps, "baseUrl">;
-  /** The registry's answer for a typed name (models.estimate); absent when the registry is off. */
   readonly lookup?: (name: string, signal: AbortSignal) => Promise<RegistryLookup>;
   readonly log?: (line: string) => void;
 }
 
-/** DELETE /api/delete. Ollama answers 404 with a JSON error for an unknown name. */
 async function deleteModel(baseUrl: string, name: string): Promise<void> {
   const res = await fetch(new URL("/api/delete", baseUrl), {
     method: "DELETE",
@@ -33,13 +30,9 @@ async function deleteModel(baseUrl: string, name: string): Promise<void> {
   });
   if (res.ok) return;
   const text = await res.text().catch(() => "");
-  let message = text || `HTTP ${res.status}`;
-  try {
-    const parsed = JSON.parse(text) as { error?: unknown };
-    if (typeof parsed.error === "string") message = parsed.error;
-  } catch {
-    // keep the raw text
-  }
+  const parsed = parseJson(text);
+  const error = parsed.ok ? (parsed.value as { error?: unknown } | null)?.error : undefined;
+  const message = typeof error === "string" ? error : text || `HTTP ${res.status}`;
   throw new ModelActionError("remove-failed", `Could not remove ${name}: ${message}`);
 }
 
@@ -64,7 +57,6 @@ export function createRuntimeHandlers(deps: RuntimeHandlerDeps) {
     "models.estimate": ({ name, numCtx }) =>
       estimateTyped({ ...(deps.lookup ? { lookup: deps.lookup } : {}), ...(deps.fit ? { fit: deps.fit } : {}) }, name, numCtx, AbortSignal.timeout(10_000)),
     "models.pulls": () => deps.pulls.pending(),
-    // Refused while no runtime is ready, a switch included: never queued against the old one.
     "models.pull": ({ name }) => {
       ready();
       return deps.pulls.pull(name);
@@ -72,7 +64,6 @@ export function createRuntimeHandlers(deps: RuntimeHandlerDeps) {
     "models.cancelPull": ({ name }) => ({ cancelled: deps.pulls.cancel(name) }),
     "models.remove": async ({ name }) => {
       const baseUrl = ready();
-      // Refuses while a turn holds the model; until done(), a new turn on it refuses too.
       const done = deps.loader.beginRemove(name);
       try {
         await deleteModel(baseUrl, name);

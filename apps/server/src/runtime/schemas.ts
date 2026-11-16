@@ -1,6 +1,3 @@
-// Effect Schemas for everything the runtime module reads from outside:
-// Ollama HTTP responses and the install manifest. The ownership record's
-// schema is in @gates-local/runtime-files/ownership.
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
@@ -31,13 +28,12 @@ export const PsResponse = Schema.Struct({
       size: Schema.Number,
       size_vram: Schema.Number,
       expires_at: Schema.optionalKey(Schema.String),
-      /** The num_ctx the model is loaded at; absent (older Ollama) means unknown. */
       context_length: Schema.optionalKey(Schema.Number),
     }),
   ),
 });
 
-/** POST /api/generate with stream false: one object; a load that failed may still be HTTP 200 with `error`. */
+// external: Ollama can answer a failed load with HTTP 200 and an error field.
 export const GenerateResponse = Schema.Struct({
   done: Schema.optionalKey(Schema.Boolean),
   error: Schema.optionalKey(Schema.String),
@@ -48,16 +44,13 @@ export const InstallManifest = Schema.Struct({
   url: Schema.String,
   sha256: Schema.String,
   sizeBytes: Schema.Number,
-  /** What the unpacked tree holds, in bytes: the disk it takes once installed. Absent where nobody measured it. */
   unpackedBytes: Schema.optional(Schema.Number),
-  /** tar.zst and tar.gz: the Linux releases. zip: the Windows release. 7z: the image engine's Windows portable. */
   format: Schema.Literals(["tar.zst", "tar.gz", "zip", "7z"]),
   verified: Schema.Boolean,
   source: Schema.String,
 });
 export type InstallManifest = typeof InstallManifest.Type;
 
-/** Decode or return a readable message; never throws. */
 export function decode<S extends Schema.ConstraintDecoder<unknown>>(
   schema: S,
   input: unknown,
