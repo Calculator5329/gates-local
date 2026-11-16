@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-16: queued messages no longer show a stray comment
+
+- Since the message box comment pass (58598a1e), each queued message's
+  row showed the text "// external: a browser announces changes in a
+  live region, not one added already filled". A JSX comment had lost
+  its braces and become text. It is back inside braces, and Composer.tsx
+  compiles exactly as it did before that pass. That pass's note that
+  compiled output was identical was wrong for this file.
+- Lint now refuses comment-like text in JSX (react/jsx-no-comment-textnodes).
+
 ## 2026-11-16: the server's chat folder holds to the six comment kinds
 
 - apps/server/src/chat passes the comment rule: all 271 offenders went,

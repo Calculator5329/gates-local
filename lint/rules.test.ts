@@ -212,6 +212,11 @@ const CASES: Case[] = [
     fixed: { "apps/web/src/Pick.tsx": text('export const Pick = () => <button type="button" aria-haspopup="listbox">One</button>;') },
   },
   {
+    rule: "react/jsx-no-comment-textnodes",
+    planted: { "apps/web/src/Row.tsx": text("export const Row = () => (", "  <li>", "    // external: a browser reads this line out", "    <span />", "  </li>", ");") },
+    fixed: { "apps/web/src/Row.tsx": text("export const Row = () => (", "  <li>", "    {/* external: a browser reads this line out */}", "    <span />", "  </li>", ");") },
+  },
+  {
     rule: "eslint/no-restricted-imports",
     planted: { "apps/desktop/src/preload.ts": text('import { join } from "node:path";', "export const joined = join;") },
     fixed: { "apps/desktop/src/preload.ts": text('import { contextBridge } from "electron/renderer";', "export const bridge = contextBridge;") },

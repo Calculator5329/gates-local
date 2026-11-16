@@ -589,7 +589,7 @@ function QueueTray() {
           <li key={q.id} className="qt-r" aria-label={`Queued ${q.draw === undefined ? "message" : "image"} ${i + 1} of ${n}`}>
             {q.draw === undefined ? null : <span className="qt-k" data-tip="Image"><Icon id="image" cls="s14" /></span>}
             <span className="qt-t">{q.text}{q.images?.length ? ` · ${q.images.length} image${q.images.length === 1 ? "" : "s"}` : ""}{q.files?.length ? ` · ${q.files.length} file${q.files.length === 1 ? "" : "s"}` : ""}</span>
-            // external: a browser announces changes in a live region, not one added already filled
+            {/* external: a browser announces changes in a live region, not one added already filled */}
             <span className="qt-s" role="status" data-tip={CLOCKED.has(words) ? words ?? undefined : undefined}>
               {CLOCKED.has(words) ? <><Icon id="clock" cls="s14" /><span className="vh">{words}</span><WaitNumbers value={words === AFTER_SETUP ? setupAt : downloadAt} /></> : words ?? ""}
             </span>

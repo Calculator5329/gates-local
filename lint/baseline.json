@@ -67,6 +67,7 @@
     "import/extensions": {},
     "import/no-cycle": {},
     "react/forbid-elements": {},
+    "react/jsx-no-comment-textnodes": {},
     "react/no-danger": {},
     "typescript/ban-ts-comment": {},
     "typescript/no-explicit-any": {},

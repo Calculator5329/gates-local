@@ -19,6 +19,7 @@
     "vitest/no-focused-tests": "error",
     "vitest/no-disabled-tests": "error",
     "react/no-danger": "error",
+    "react/jsx-no-comment-textnodes": "error",
     "react/forbid-elements": ["error", { "forbid": [{ "element": "select", "message": "the app draws its own lists and menus, never the browser's dropdown" }] }]
   },
   "overrides": [
