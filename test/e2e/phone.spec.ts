@@ -165,7 +165,9 @@ test("the phone reads, sends, stops and switches models, and nothing it offers i
 
   // Send, then stop while the reply is still coming.
   await stack.scenario("slow-drip", { holdAfterTokens: 46 });
+  const replies = await page.locator(".turn.a").count();
   await sendMessage(page, "Stop this one");
+  await expect(page.locator(".turn.a").nth(replies).locator(".md")).not.toBeEmpty();
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   await expect(page.locator(".turn.a .a-act.stop .s").last()).toHaveText(/^\d+ s$/);
   await stack.scenario("models");
