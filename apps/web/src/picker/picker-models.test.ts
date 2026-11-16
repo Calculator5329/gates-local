@@ -1,6 +1,9 @@
 import { CHAT_MODELS } from "@gates-local/contracts";
 import { describe, expect, it } from "vitest";
-import { makerOf, memoryRuler, pickerLabel, pickerLabels } from "./picker-models.ts";
+import { activeEntry, makerOf, memoryRuler, pickerEntries, pickerLabel, pickerLabels, suggestedOf } from "./picker-models.ts";
+
+/** An installed model that can chat. */
+const chat = (name: string) => ({ name, capabilities: ["completion"] }) as never;
 
 describe("model picker presentation", () => {
   it("keeps single names clean and falls back to a full tag when collision suffixes also match", () => {
@@ -57,5 +60,23 @@ describe("model picker presentation", () => {
     expect(memoryRuler(32.59, 11.56).continues).toBe(true);
     expect(memoryRuler(32.59, 11.56).overflow).toBeLessThanOrEqual(36);
     expect(memoryRuler(5, 0)).toEqual({ fill: 0, overflow: 36, continues: true });
+  });
+  it("lists the selected model first, then by visible name in number order, a download among them", () => {
+    const models = [chat("gpt-oss:120b"), chat("gpt-oss:20b"), chat("phi4:latest")];
+    const pulls = { "gpt-oss:9b": { name: "gpt-oss:9b", state: "downloading" } } as never;
+    expect(pickerEntries(models, pulls, undefined, "phi4:latest").map(e => e.tag)).toEqual(["phi4:latest", "gpt-oss:9b", "gpt-oss:20b", "gpt-oss:120b"]);
+  });
+  it("the context column follows a pending choice, else the highlighted row, else the selected one, else the first listed", () => {
+    const a = { tag: "a" }, b = { tag: "b" }, c = { tag: "c" }, d = { tag: "d" };
+    const rows = [a, b, c];
+    expect(activeEntry(rows, "b", "c", d)).toBe(d);
+    expect(activeEntry(rows, "b", "c")).toBe(c);
+    expect(activeEntry(rows, "b", null)).toBe(b);
+    expect(activeEntry(rows, "gone", "also-gone")).toBe(a);
+  });
+  it("reads the chat list the server sent, a newer one than the built-in list included, and none before it arrives", () => {
+    const newer = { ...CHAT_MODELS, makers: [{ name: "Newco", match: "^newco" }] } as never;
+    expect(suggestedOf({ suggested: newer })).toBe(newer);
+    expect(suggestedOf({ suggested: "na" } as never)).toBeUndefined();
   });
 });

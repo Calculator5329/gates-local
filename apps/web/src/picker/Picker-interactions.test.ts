@@ -2,12 +2,13 @@
 // Every pick is decided by the server's fit table: the row at the context the
 // model really runs at, and nothing else (no catalog report, no held answer).
 import { isValidElement, type ReactElement } from "react";
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const probe = vi.hoisted(() => ({
   state: {} as Record<string, unknown>, phone: false, root: undefined as unknown,
   states: [] as unknown[], cursor: 0, refs: 0, refValues: [] as { current: unknown }[],
-  pick: vi.fn(), context: vi.fn(), close: vi.fn(), save: vi.fn(),
+  pick: vi.fn(), context: vi.fn(), close: vi.fn(), save: vi.fn(), openTip: vi.fn(),
+  place: undefined as ((el: unknown) => void) | undefined,
 }));
 vi.mock("react", async original => ({
   ...await original<typeof import("react")>(),
@@ -30,7 +31,11 @@ vi.mock("../lib/session/index.ts", () => ({ pickModel: probe.pick, setContext: p
 vi.mock("../composer/focus.ts", () => ({ focusComposer: vi.fn() }));
 vi.mock("../lib/ui/ui.tsx", async original => ({
   ...await original<typeof import("../lib/ui/ui.tsx")>(), useMedia: () => probe.phone, isPhone: () => probe.phone,
-  isTouch: () => false, closePop: probe.close, closeTip: vi.fn(), place: vi.fn(),
+  isTouch: () => false, closePop: probe.close, closeTip: vi.fn(), place: vi.fn(), openTip: probe.openTip,
+}));
+vi.mock("../lib/ui/kit/popover.ts", async original => ({
+  ...await original<typeof import("../lib/ui/kit/popover.ts")>(),
+  usePopover: (_ref: unknown, _open: boolean, place: (el: unknown) => void) => { probe.place = place; },
 }));
 vi.stubGlobal("window", { innerWidth: 412 });
 const { Picker } = await import("./Picker.tsx");
@@ -210,6 +215,15 @@ it("a size chosen in the picker is saved for the next start; picking a model alo
   expect(probe.save).toHaveBeenCalledExactlyOnceWith({ defaultNumCtx: 65536 });
 });
 
+it("picking a small model alone keeps the saved size: its cap is not a choice", () => {
+  probe.state.settings = { defaultNumCtx: 16384 };
+  table(fit("fits"));
+  call(select(render()), "onClick");
+  expect(probe.pick).toHaveBeenCalledExactlyOnceWith(tag);
+  expect(probe.context, "the chat runs at the cap").toHaveBeenCalledExactlyOnceWith(8192);
+  expect(probe.save).not.toHaveBeenCalled();
+});
+
 it.each([8192, 16384])("a catalog report at %d cannot authorize a pick the table has no row for", numCtx => {
   probe.state.numCtx = 8192;
   probe.state.catalog = [{ name: tag, label: "Local model", fit: { ...fit("fits", numCtx), measuredAt: 0 } }];
@@ -331,3 +345,91 @@ for (const owner of ["picker", "app"] as const) {
     expect(rail.focus).not.toHaveBeenCalled();
   });
 }
+
+it("a favorite stays starred for this session when the browser cannot store it", () => {
+  const before = globalThis.localStorage;
+  vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => { throw new Error("storage is full"); } });
+  try {
+    const star = () => find(render(), p => p.className === "pk-favorite");
+    expect(star().props["aria-pressed"]).toBe(false);
+    call(star(), "onClick");
+    expect(star().props["aria-pressed"]).toBe(true);
+  } finally { vi.stubGlobal("localStorage", before); }
+});
+
+it("on a server that cannot save settings, a size chosen still runs and no save is tried", () => {
+  probe.state.models = [{ name: tag, maxContext: 131072, capabilities: ["completion"] }];
+  probe.state.settings = { defaultNumCtx: 16384 };
+  probe.state.unavailable = { "settings.update": true };
+  table(fit("fits", 65536));
+  call(find(render(), p => p["data-ctx"] === 65536), "onClick");
+  expect(probe.pick).toHaveBeenCalledExactlyOnceWith(tag);
+  expect(probe.context).toHaveBeenCalledExactlyOnceWith(65536);
+  expect(probe.save).not.toHaveBeenCalled();
+});
+
+/** The picker footer's card line, as rendered. */
+const card = () => find(render(), p => p["data-testid"] === "models.picker.card").props.children as ReactElement<Record<string, unknown>>;
+
+it("the footer names the card every size is judged against, never what is free now, and waits for the first table", () => {
+  probe.state.gpu = { vendor: "nvidia", freeBytes: 4 * gib, totalBytes: 16 * gib };
+  expect(card().props["aria-busy"]).toBe("true");
+  table(fit("fits"));
+  (probe.state.fitTable as { memory: object }).memory = { kind: "gpu", freeBytes: 4 * gib, usableBytes: 4 * gib, totalBytes: 16 * gib };
+  expect(card()).toMatch(/^16\sGB GPU$/);
+});
+
+it("an arrow key leaves focus in the search and opens the highlighted row's tip, as focus would", () => {
+  vi.stubGlobal("requestAnimationFrame", (f: () => void) => { f(); return 0; });
+  vi.stubGlobal("CSS", { escape: (s: string) => s });
+  const pick = { focus: vi.fn() }, row = { scrollIntoView: vi.fn(), querySelector: (q: string) => q === ".pk-select" ? pick : null };
+  probe.root = { querySelector: (q: string) => q === `[data-m="${tag}"]` ? row : null };
+  call(find(render(), p => p.id === "pkSearch"), "onKeyDown", { key: "ArrowDown", preventDefault: vi.fn() });
+  expect(probe.openTip).toHaveBeenCalledExactlyOnceWith(pick);
+  expect(pick.focus).not.toHaveBeenCalled();
+});
+
+it("a row's name carries its full text for the tip a cut name opens", () => {
+  const button = select(render());
+  const shown = find(button, p => p.className === "pk-nm").props.children;
+  expect(shown).toBeTruthy();
+  expect(button.props["data-tipt"]).toBe(shown);
+});
+
+it("a row reads its name before its facts", () => {
+  const row = find(render(), p => p["data-m"] === tag);
+  const kids = (row.props.children as unknown[]).filter(isValidElement) as ReactElement<Record<string, unknown>>[];
+  const name = kids.findIndex(k => k.props.className === "pk-select"), facts = kids.findIndex(k => k.props.className === "vh");
+  expect(name).toBeGreaterThanOrEqual(0);
+  expect(facts).toBeGreaterThan(name);
+});
+
+it.each([false, true])("on phone %s: a row the table refuses at this size is closed to a pick, except on the phone, whose next step offers other sizes", phone => {
+  probe.phone = phone;
+  table(fit("refuse"));
+  expect(find(render(), p => p["data-m"] === tag).props["aria-disabled"]).toBe(!phone);
+});
+
+/** Where the picker lands with the model button's top at `top` in a 1400 by 900 window. */
+const placedAt = (top: number) => {
+  const anchor = { getBoundingClientRect: () => ({ top, bottom: top + 30, right: 1000 }) };
+  vi.stubGlobal("document", { getElementById: (id: string) => id === "modelBtn" ? anchor : null, querySelector: () => null });
+  vi.stubGlobal("window", { innerWidth: 1400, innerHeight: 900 });
+  render();
+  const root = { style: { maxHeight: "", left: "", top: "" }, offsetWidth: 600, offsetHeight: 500 };
+  probe.place?.(root);
+  vi.stubGlobal("window", { innerWidth: 412 });
+  return root.style;
+};
+
+describe("where the picker opens above the model button", () => {
+  it("with room, it opens up at full height, its right edge on the button's", () => {
+    expect(placedAt(800)).toEqual({ maxHeight: "", left: "400px", top: "294px" });
+  });
+  it("on the new-chat screen it gives up a little height rather than open below or cover the button", () => {
+    expect(placedAt(400)).toEqual({ maxHeight: "386px", left: "400px", top: "8px" });
+  });
+  it("it opens below only when the room above leaves it cramped", () => {
+    expect(placedAt(250)).toEqual({ maxHeight: "", left: "400px", top: "286px" });
+  });
+});

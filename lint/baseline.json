@@ -126,8 +126,6 @@
       "apps/web/src/pages/page-doc.ts": 12,
       "apps/web/src/pages/pages.ts": 16,
       "apps/web/src/pages/sandbox.ts": 6,
-      "apps/web/src/picker/Picker.tsx": 26,
-      "apps/web/src/picker/picker-models.ts": 11,
       "apps/web/src/pictures/Pictures.tsx": 21,
       "apps/web/src/pictures/pictures-layout.ts": 8,
       "apps/web/src/pictures/pictures.ts": 16,

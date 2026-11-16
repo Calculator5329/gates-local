@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-16: the picker folder holds to the six comment kinds
+
+- The model picker passes the comment rule: 37 offenders went, and the
+  folder's comment lines fell from 57 to the two of its license note.
+  Rules a named test already held went with the comment; one in five
+  was broken in the source and watched fail.
+- Twelve picker rules no test held now have one: the row order and the
+  row the context column follows, the server's chat list over the
+  built-in one, a favorite that cannot be stored, a server that cannot
+  save settings, the footer's card line, an arrow's tip with focus left
+  in the search, a cut name's full text, name before facts, where the
+  picker opens, the phone's open row, and a small model picked alone
+  keeping the saved size.
+
 ## 2026-11-16: the first-run folder holds to the six comment kinds
 
 - First run's screens and their shared frame pass the comment rule: 31
