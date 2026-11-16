@@ -11,7 +11,7 @@ import { Icon } from "../lib/ui/icons.tsx";
 import { MakerMark } from "../models/MakerMark.tsx";
 import { getDraft } from "../lib/store/drafts.ts";
 import { chooseForQueued, pickModel, send, sendQueuedNow, setContext } from "../lib/session/index.ts";
-import { NA, type NoticeOffer, type State, getState, setState, useStore } from "../lib/store/store.ts";
+import { NA, type NoticeOffer, type State, getState, setState, useStore, waitingReplies } from "../lib/store/store.ts";
 import { closeTip } from "../lib/ui/ui.tsx";
 
 const catalogOf = (s: Pick<State, "catalog">) => (s.catalog === NA ? undefined : s.catalog);
@@ -37,7 +37,7 @@ export function takeOffer(kind: "context" | "model"): void {
     void send(draft.text);
     return;
   }
-  const held = s.queued.find((q) => q.threadId === s.threadId && q.held === true && q.waitFor === "reply");
+  const held = waitingReplies(s).find((q) => q.threadId === s.threadId && q.stage === "held");
   if (held === undefined) return;
   // sent once the server says the message has the choice
   void chooseForQueued(held.id, model, choice.numCtx).then((chosen) => { if (chosen) sendQueuedNow(held.id); });

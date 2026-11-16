@@ -289,6 +289,7 @@ export function createHandlers({
     "reply.now": (params) => moved(replies.now(params)),
     "reply.hold": (params) => moved(replies.hold(params)),
     "reply.stop": (params) => moved(replies.stop(params)),
+    "reply.list": () => replies.records(),
 
     // the older Stop, for a page from before reply.stop: the same one step, answered yes or no
     "chat.cancel": ({ turnId }) => {

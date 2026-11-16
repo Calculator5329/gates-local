@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { isValidElement } from "react";
 import { vi } from "vitest";
-import type { Message, Params, Payload, ResultOf, Settings, SettingsPatch, SyncDomain, SyncMetadata } from "@gates-local/contracts";
+import type { Message, Params, Payload, Reply, ReplyListed, ResultOf, Settings, SettingsPatch, SyncDomain, SyncMetadata } from "@gates-local/contracts";
 import { type Numbering, numberServer } from "./numbered-server.ts";
 import { decodeResult } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
@@ -50,6 +50,8 @@ export class OrderingServer extends FakeServer {
   readonly turns = new Map<string, Message>();
   readonly admissions = new Map<string, Message>();
   readonly startTargets = new Map<string, readonly FakeSocket[]>();
+  /** Turns whose reply is saved or ended: a window connecting now is told nothing of them. */
+  readonly ended = new Set<string>();
   readonly cancelled: string[] = [];
   readonly labels = new Map<FakeSocket, string>();
   holdHydration = false;
@@ -117,6 +119,9 @@ export class OrderingServer extends FakeServer {
       save(turnId, { turnId });
       if (!this.holdChat) this.response(turnId);
       if (!this.deferAdmission) this.admit(turnId);
+    } else if (request.method === "reply.list") {
+      this.log.push(request);
+      respond(this.listed());
     } else if (request.method === "reply.stop") {
       this.log.push(request);
       this.cancelled.push((request.params as { id: string }).id);
@@ -148,13 +153,35 @@ export class OrderingServer extends FakeServer {
     target.frame({ type: "push", channel: "settings.changed", payload: tagged ? payload : settings, ...(delivery.sync ? { sync: delivery.sync } : {}) });
   }
 
+  /** A turn's record while its reply is written, as every window is told once its question is saved. */
+  private live(turnId: string, question: Message): Reply {
+    return { id: turnId, threadId: question.threadId, rev: 2, questionId: question.id, model: "gemma3:4b", startedAt: 1, workMs: 0, toolMs: 0, try: 1, spans: [], callsAt: {}, stage: "thinking" };
+  }
+
+  /** What a window reads at connect: the messages that wait; and of this server's own turns, a send taken and not yet saved is on its way, a saved one is being written, an ended one is on no list. */
+  private listed(): readonly ReplyListed[] {
+    return [
+      ...this.listing(),
+      ...[...this.admissions].map(([turnId, m]): ReplyListed => ({ reply: { id: turnId, threadId: m.threadId, rev: 1, messageId: m.id, text: m.content, at: m.createdAt, stage: "starting", attempt: 1, startedAt: 1 } })),
+      ...[...this.turns].filter(([turnId]) => !this.ended.has(turnId)).map(([turnId, m]): ReplyListed => ({ reply: this.live(turnId, m) })),
+    ];
+  }
+
+  /** The record's change follows the chat event on the same socket, as the server sends the two. */
+  private record(target: FakeSocket, reply: Reply, saved: readonly Message[]): void {
+    target.frame({ type: "push", channel: "reply.changed", payload: { kind: "is", reply, saved } });
+  }
+
   chatPush(turnId: string, target: FakeSocket, done = false): void {
     const userMessage = this.turns.get(turnId);
     if (!userMessage) throw new Error(`No admitted turn: ${turnId}`);
+    const message: Message = { ...userMessage, id: `reply-${turnId}`, role: "assistant", content: "reply" };
     const event: Payload<"chat.event">["event"] = done
-      ? { type: "done", message: { ...userMessage, id: `reply-${turnId}`, role: "assistant", content: "reply" }, stopReason: "stop" }
+      ? { type: "done", message, stopReason: "stop" }
       : { type: "start", model: "gemma3:4b", userMessage };
     target.frame({ type: "push", channel: "chat.event", payload: { turnId, threadId: userMessage.threadId, event } });
+    if (done) this.record(target, { id: turnId, threadId: userMessage.threadId, rev: 3, stage: "done", at: Date.now(), questionId: userMessage.id, replyId: message.id }, [message]);
+    else this.record(target, this.live(turnId, userMessage), [userMessage]);
   }
 
   /** Words of a running reply; after Stop, its end with the saved row (runTurn in app.ts). */
@@ -165,6 +192,7 @@ export class OrderingServer extends FakeServer {
       ? { type: "error", code: "cancelled", message: "stopped", partial: { id: `reply-${turnId}`, threadId: userMessage.threadId, role: "assistant", content: text, interrupted: true, createdAt: 1_000 }, ended: { reason: "stopped", at: Date.now() } }
       : { type: "delta", text };
     target.frame({ type: "push", channel: "chat.event", payload: { turnId, threadId: userMessage.threadId, event } });
+    if (event.type === "error" && event.partial !== undefined) this.record(target, { id: turnId, threadId: userMessage.threadId, rev: 3, stage: "stopped", at: event.ended?.at ?? Date.now(), questionId: userMessage.id, replyId: event.partial.id, by: { who: "person" } }, [event.partial]);
   }
 
   /** A runtime error after some words: the terminal event carries the saved row and the server's reason. */
@@ -176,6 +204,7 @@ export class OrderingServer extends FakeServer {
     const partial: Message = { id: `reply-${turnId}`, threadId: userMessage.threadId, role: "assistant", content: text, interrupted: true, createdAt: 1_000,
       times: { startedAt: 1_000, spans: [], callsAt: {}, ended, why: { code: "runtime-error", message } } };
     target.frame({ type: "push", channel: "chat.event", payload: { turnId, threadId: userMessage.threadId, event: { type: "error", code: "runtime-error", message, partial, ended } } });
+    this.record(target, { id: turnId, threadId: userMessage.threadId, rev: 3, stage: "failed", at: ended.at, questionId: userMessage.id, code: "runtime-error", message }, [partial]);
   }
 
   admittedPush(turnId: string, label: string): void {

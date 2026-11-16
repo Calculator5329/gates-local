@@ -1,14 +1,14 @@
 // What an update stops: the server's activity list plus this window's queue
 // and drafts. One source for the footer's ask and the installer's native one.
 import { savedDrafts } from "../lib/store/drafts.ts";
-import { getState } from "../lib/store/store.ts";
+import { getState, waitingReplies } from "../lib/store/store.ts";
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /** The work an update would stop, in the server's words, then this window's; undefined when the server sent no activity list. */
 export function updateWork(activity: readonly string[] | undefined): string[] | undefined {
   if (activity === undefined) return undefined;
-  const queued = getState().queued.length;
+  const queued = waitingReplies(getState()).length;
   const drafts = savedDrafts().filter(({ draft }) => draft.text.trim() || draft.images.length || draft.files?.length).length;
   return [
     ...activity,

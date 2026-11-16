@@ -180,7 +180,7 @@ export function createDrawTurn({ deps, store, log, push, reserve, replies, queue
       const now = Date.now();
       const event: TurnEnd = { ...last, ended: last.type === "done" ? { reason: "done", at: now } : { reason: "stopped", at: replies.stoppedAt(turn.turnId) ?? now } };
       // The record ends with its last event; the windows hear what became of the messages behind it after that event.
-      replies.ended(turn.turnId, last.type === "done" ? { how: "done", replyId: last.message.id } : { how: "stopped", by: { who: "person" } }, now);
+      replies.ended(turn.turnId, last.type === "done" ? { how: "done", replyId: last.message.id } : { how: "stopped", by: { who: "person" } }, now, last.type === "done" ? [last.message] : []);
       push("chat.event", { turnId: turn.turnId, threadId, event });
       push(...threadChanged(store, threadId));
       replies.notify();

@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { act, createElement } from "react";
 import type { Root } from "react-dom/client";
-import type { Message } from "@gates-local/contracts";
+import type { Message, ReplyChange } from "@gates-local/contracts";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import type { State } from "../lib/store/store.ts";
 import { editDraft } from "../lib/store/drafts.ts";
@@ -197,7 +197,7 @@ it("keeps the turn in view where it was while older turns mount above it", async
   }
 });
 
-/** The session's real chat event handler, with every effect a done event does not need refused. */
+/** The session's real reply handler, with every effect a saved reply does not need refused. */
 async function realChat() {
   const { createChat } = await import("../composer/chat.ts");
   const { withMessage } = await import("./threads.ts");
@@ -220,6 +220,10 @@ async function realChat() {
   });
 }
 
+/** The running reply's record once its answer is saved, as the server tells every window. */
+const savedAs = (threadId: string, questionId: string, answer: Message): ReplyChange =>
+  ({ kind: "is", reply: { id: "running", threadId, rev: 1, stage: "done", at: answer.createdAt, questionId, replyId: answer.id }, saved: [answer] });
+
 const liveIn = (threadId: string, userMessageId: string | undefined, gen: number) =>
   ({ gen, threadId, turnId: "running", ...(userMessageId === undefined ? {} : { userMessageId }), model: "qwen3.5:9b", startedAt: 1, thinking: "", text: "Still writing", tools: [], pendingUser: null });
 
@@ -234,8 +238,8 @@ it("holds back the history that arrives in front of a reply that finished before
   idle.length = 0;
   act(() => root.render(createElement(Timeline, { threadId: "late-history", key: "late-history" })));
   expect(turns()).toHaveLength(1);
-  // the done handler caches the one message it has (session/chat.ts withMessage)
-  act(() => chat.onChatEvent({ threadId: "late-history", turnId: "running", event: { type: "done", message: answer, stopReason: "stop" } }));
+  // the saved reply's record caches the one message it has (composer/chat.ts withMessage)
+  act(() => chat.recordChanged(savedAs("late-history", "m1998", answer)));
   expect(store.getState().messages["late-history"]).toHaveLength(1);
   // then the history arrives with that reply at its end
   act(() => store.setState({ messages: { "late-history": thread } }));
@@ -263,7 +267,7 @@ it("keeps the reply on screen, the same element in the same place, when the hist
     const reply = turns()[1];
     expect(reply?.getAttribute("aria-label")).toBe("Reply");
     const top = reply?.getBoundingClientRect().top;
-    act(() => chat.onChatEvent({ threadId: "partial", turnId: "running", event: { type: "done", message: answer, stopReason: "stop" } }));
+    act(() => chat.recordChanged(savedAs("partial", question.id, answer)));
     expect(turns()[1], "the save keeps the reply").toBe(reply);
     act(() => store.setState({ messages: { partial: thread } }));
     expect(turns()).toHaveLength(BOUND.firstCommitTurns);

@@ -571,7 +571,7 @@ it("TL-01: active-turn hydration restores ongoing replies and orders terminal ev
       name: `active turns: ${ending}`,
       create: async () => {
         const w = await OrderingWorld.create(false);
-        w.server.answer("turns.active", () => [...w.server.turns].map(([turnId, message]) => ({ turnId, threadId: message.threadId, reply: { stage: "thinking", startedAt: 1, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {} } })));
+        // the server's list of records names each reply still being written (ordering-world.ts)
         w.server.turns.set("existing", { id: "user-existing", threadId: "t1", role: "user", content: "hello", createdAt: 1 });
         await w.step(() => w.server.chatPush("existing", w.a.socket));
         expect(runningIds(w.a.store)).toEqual({ t1: "existing" });

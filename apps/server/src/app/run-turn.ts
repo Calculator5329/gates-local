@@ -61,7 +61,8 @@ export function createTurnRunner({ deps, store, log, push, pushReply, draftEvery
       if (event.type === "delta") turn.text += event.text;
       if (event.type === "thinking") turn.thinking += event.text;
       if (event.type === "tool") turn.steps.set(event.step.callId, event.step);
-      push("chat.event", { turnId, threadId, event });
+      const replyId = replies.of(turnId)?.id;
+      push("chat.event", { turnId, threadId, ...(replyId === undefined ? {} : { replyId }), event });
       // the record after the event that changed it: a window has the words before the stage that names them
       if (changed) pushReply(turn);
       keepDraft();
@@ -147,7 +148,8 @@ export function createTurnRunner({ deps, store, log, push, pushReply, draftEvery
       const ended = endedOf(turn, saved, now, stoppedAt);
       const event: TurnEnd = { ...saved, ended };
       // The record ends with its last event: a window that reads now is told of no reply on its way.
-      replies.ended(turnId, endOf(turn, event, ended), now);
+      const rows = event.type === "done" ? [event.message] : event.partial !== undefined ? [event.partial] : event.question !== undefined ? [event.question] : [];
+      replies.ended(turnId, endOf(turn, event, ended), now, rows);
       push("chat.event", { turnId, threadId, event });
       if (event.type === "done" || event.partial !== undefined) push(...threadChanged(store, threadId));
       if (event.type === "done") pushSpeeds();

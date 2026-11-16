@@ -16,7 +16,7 @@ function store(file?: string, more: Partial<RepliesDeps> = {}) {
   const heard: (readonly Entry[])[] = [];
   const cuts: string[] = [];
   const q = createReplies({
-    file, log: () => undefined, changed: (l) => heard.push(l), saved: () => undefined, deleting: () => false, closing: () => false,
+    file, log: () => undefined, changed: (l) => heard.push(l), told: () => undefined, saved: () => undefined, deleting: () => false, closing: () => false,
     cut: (turnId) => cuts.push(turnId), clock: () => undefined, ...more,
   });
   /** A reply a window sent itself in `threadId`, with its question saved: what a waiting message waits behind. */

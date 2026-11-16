@@ -4,10 +4,13 @@
 // the few browser globals session.ts touches (location, history, document,
 // localStorage, requestAnimationFrame). Each test imports session.ts fresh.
 import { vi } from "vitest";
-import type { Channel, Message, MethodName, Params, Payload, QueuedMessage, ReplyAnswer, ReplyRecord, ResultOf, SyncMetadata } from "@gates-local/contracts";
+import type { Channel, Message, MethodName, Params, Payload, QueuedMessage, ReplyAnswer, ReplyListed, ReplyRecord, ResultOf, SyncMetadata } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { createReplies, type QueuePatch } from "@gates-local/server/chat/replies.ts";
-import type { End } from "@gates-local/server/chat/reply.ts";
+import { isLive, type End } from "@gates-local/server/chat/reply.ts";
+
+/** The call a pushed record stands for when it says "tool" and the test pushed no step of its own. */
+const SHOWN_CALL = "shown-call";
 
 type Listener = (event: { data?: unknown }) => void;
 
@@ -133,7 +136,12 @@ export class FakeServer {
     if (req.method === "chat.cancel") this.store.stop({ id: (req.params as Params<"chat.cancel">).turnId });
     const answer = (result: unknown) => socket.frame({ type: "response", id: req.id, ok: true, result });
     const send = req.params as Params<"chat.send">;
-    const start = (payload: Payload<"chat.event">) => { socket.frame({ type: "push", channel: "chat.event", payload }); this.heard(payload); };
+    const start = (payload: Payload<"chat.event">) => {
+      // a Stop took the message back before its question was saved: its work saves nothing and starts nothing
+      if (this.made.has(payload.turnId) && !this.over.has(payload.turnId) && this.store.of(payload.turnId)?.stage !== "starting") return;
+      socket.frame({ type: "push", channel: "chat.event", payload: this.named("chat.event", payload) });
+      this.heard(payload);
+    };
     // the server takes a send's turn before it answers: until then the send is in its chat's way
     if (req.method === "chat.send") this.asked.set(req.id, send.threadId);
     const ok = req.method === "chat.send" ? (result: unknown) => {
@@ -170,14 +178,38 @@ export class FakeServer {
 
   /** `sync`: the number an ordered push carries (numbered-server.ts gives it). */
   push<C extends Channel>(channel: C, payload: Payload<C>, sync?: SyncMetadata): void {
-    this.socket.frame({ type: "push", channel, payload, ...(sync === undefined ? {} : { sync }) });
+    if (!this.muted) this.socket.frame({ type: "push", channel, payload: this.named(channel, payload), ...(sync === undefined ? {} : { sync }) });
     this.pushed(channel, payload);
   }
 
   /** A push to every open socket, as the real server sends it to each connected client. */
   broadcast<C extends Channel>(channel: C, payload: Payload<C>): void {
-    for (const s of this.sockets) s.frame({ type: "push", channel, payload });
+    const named = this.named(channel, payload);
+    if (!this.muted) for (const s of this.sockets) s.frame({ type: "push", channel, payload: named });
     this.pushed(channel, payload);
+  }
+
+  private muted = false;
+  /**
+   * What `happens` happens on the server and reaches no window: a reply that began before a window
+   * connected, or one that ended while its connection was down. The next reply.list says where
+   * each record stands.
+   */
+  unheard(happens: () => void): void {
+    this.muted = true;
+    try {
+      happens();
+    } finally {
+      this.muted = false;
+    }
+  }
+
+  /** A chat event names the record its turn works for, as the server's does (app/run-turn.ts). */
+  private named<C extends Channel>(channel: C, payload: Payload<C>): Payload<C> {
+    if (channel !== "chat.event") return payload;
+    const p = payload as Payload<"chat.event">;
+    const replyId = p.replyId ?? this.store.of(p.turnId)?.id;
+    return (replyId === undefined ? p : { ...p, replyId }) as Payload<C>;
   }
 
   // The server's record of every message: its real rules (server chat/replies.ts) and, in small,
@@ -187,6 +219,7 @@ export class FakeServer {
   private readonly store = createReplies({
     log: () => undefined,
     changed: (list) => this.broadcast("queue.changed", list),
+    told: (change) => this.broadcast("reply.changed", change),
     saved: () => undefined,
     deleting: () => false,
     closing: () => false,
@@ -196,7 +229,12 @@ export class FakeServer {
   /** The waiting messages, for a test that changes them as another window would. */
   readonly queue = {
     add: (entry: QueuedMessage) => this.store.add(entry),
-    change: (id: string, patch: QueuePatch) => this.store.update(id, patch, 0),
+    change: (id: string, patch: QueuePatch) => {
+      const answer = this.store.update(id, patch, 0);
+      // another window's call: the server looks at what may start now, as it does after any call
+      this.pump();
+      return answer;
+    },
     remove: (id: string) => this.store.remove({ id }).answer === "done",
     list: () => this.store.list(),
   };
@@ -231,8 +269,11 @@ export class FakeServer {
   /** The record of a send that waited in no list: taken at once for its turn (server app/handlers.ts). */
   private direct(turnId: string, send: Pick<Params<"chat.send">, "threadId" | "content" | "messageId" | "retryOf">): void {
     const at = this.begun.get(turnId) ?? Date.now();
+    this.made.add(turnId);
     this.store.direct(turnId, send.threadId, { messageId: send.messageId ?? turnId, text: send.content, at }, send.retryOf !== undefined, at);
   }
+  /** Turns the server has made a record for: one that moved on is not made again by a late event of its turn. */
+  private readonly made = new Set<string>();
 
   /** The times of a turn's reply: its last pushed record, or one that has only begun. */
   private clock(turnId: string, now: number): ReplyRecord {
@@ -245,11 +286,18 @@ export class FakeServer {
    */
   private cut(turnId: string, at: number): void {
     const threadId = this.replies.get(turnId);
-    if (threadId === undefined) return;
+    // a record the test pushed as stopping has been sent already
+    if (threadId === undefined || this.records.get(turnId)?.stoppedAt !== undefined) return;
     this.broadcast("chat.event", { turnId, threadId, event: { type: "reply", reply: { ...this.clock(turnId, at), stage: "stopping", stoppedAt: at } } });
   }
 
-  private queueCall(req: Request): readonly QueuedMessage[] | ReplyAnswer {
+  /** Every record the server keeps, as reply.list answers a window that connects. */
+  protected listing(): readonly ReplyListed[] {
+    return this.store.records();
+  }
+
+  private queueCall(req: Request): readonly QueuedMessage[] | readonly ReplyListed[] | ReplyAnswer {
+    if (req.method === "reply.list") return this.listing();
     const p = req.params as { id: string };
     const by = this.caller;
     const answer = this.replyCall(req, by);
@@ -313,6 +361,9 @@ export class FakeServer {
       this.attempts.set(turnId, event.reply.attempt);
       this.records.set(turnId, event.reply);
       if (event.reply.attempt > before) this.store.retrying(turnId);
+      this.follow(turnId, event.reply);
+      // the same times, on the record every window keeps
+      this.store.clocked(turnId);
       return;
     }
     if (event.type === "start") {
@@ -328,17 +379,21 @@ export class FakeServer {
     this.replies.delete(turnId);
     // its chat.send may not be answered yet: the server's own turn has ended all the same
     for (const [id, t] of this.asked) if (t === threadId) this.asked.delete(id);
+    const started = event.type === "done" || event.partial !== undefined || event.question !== undefined;
+    // a turn the test never started (another window's, ended before this one looked): the server had its record all the same
+    if (started && this.store.of(turnId) === undefined && !this.made.has(turnId)) this.direct(turnId, { threadId, content: "", messageId: `asked-${turnId}` });
     const rec = this.store.of(turnId);
-    if (rec?.stage === "starting" && event.type === "error") {
+    if (rec?.stage === "starting" && !started) {
       // refused, or cut, before its question was saved
-      this.store.refused(turnId, rec.attempt, { code: event.code, message: event.message, ...(event.blocking === undefined ? {} : { blocking: event.blocking }) });
+      if (event.type === "error") this.store.refused(turnId, rec.attempt, { code: event.code, message: event.message, ...(event.blocking === undefined ? {} : { blocking: event.blocking }) });
     } else if (rec !== undefined) {
       // a test may push a turn's end with no start: its question was saved all the same
       if (rec.stage === "starting") this.questionSaved(turnId, threadId, { id: rec.words.messageId, threadId, role: "user", content: rec.words.text, createdAt: rec.words.at }, rec.words.model ?? "", rec.words.draw !== undefined);
       const end: End = event.type === "done" ? { how: "done", replyId: event.message.id }
         : event.ended?.reason === "failed" ? { how: "failed", code: event.code, message: event.message }
         : { how: "stopped", by: event.ended?.reason === "preempted" ? { who: "preempted" } : { who: "person" } };
-      this.store.ended(turnId, end, Date.now());
+      const rows = event.type === "done" ? [event.message] : event.partial !== undefined ? [event.partial] : event.question !== undefined ? [event.question] : [];
+      this.store.ended(turnId, end, event.ended?.at ?? Date.now(), rows);
     }
     // its work has given back what it took
     this.store.left(turnId);
@@ -346,9 +401,28 @@ export class FakeServer {
     this.pump();
   }
 
+  /**
+   * A test pushed a turn's older record: the record every window keeps moves to the stage it says,
+   * as the turn's work would have moved it (a load, a thought, a word, a call, a Stop at its time).
+   */
+  private follow(turnId: string, shown: ReplyRecord): void {
+    const rec = this.store.of(turnId);
+    if (rec === undefined) return;
+    if (shown.stoppedAt !== undefined) return void this.store.stop({ id: turnId }, shown.stoppedAt);
+    if (shown.stage === "loading") return void this.store.loading(turnId);
+    if (!isLive(rec)) return;
+    if (shown.stage === "tool") {
+      if (rec.stage !== "tool") this.store.heard(turnId, { type: "tool", step: { callId: SHOWN_CALL, state: "running" } });
+      return;
+    }
+    if (shown.stage !== "thinking" && shown.stage !== "writing") return;
+    if (rec.calls.includes(SHOWN_CALL)) this.store.heard(turnId, { type: "tool", step: { callId: SHOWN_CALL, state: "done" } });
+    this.store.heard(turnId, { type: shown.stage === "thinking" ? "thinking" : "delta", text: "." });
+  }
+
   /** A turn's question was saved: its record becomes a reply. A turn the server made no record for (a test pushed its start) gets one first. */
   private questionSaved(turnId: string, threadId: string, question: Message, model: string, drawing: boolean): void {
-    if (this.store.of(turnId) === undefined) this.direct(turnId, { threadId, content: question.content, messageId: question.id });
+    if (this.store.of(turnId) === undefined && !this.made.has(turnId)) this.direct(turnId, { threadId, content: question.content, messageId: question.id });
     const rec = this.store.of(turnId);
     if (rec?.stage === "starting") this.store.started(turnId, rec.attempt, question, model, { cold: false, drawing });
   }
@@ -386,7 +460,10 @@ export class FakeServer {
         // The test names the turn in its answer, so the message is taken here, not before the call
         // as the server takes it. One that changed meanwhile is not taken: its turn runs as a send of its own.
         if (this.store.take(q.id, turnId, Date.now()) === undefined) this.direct(turnId, params);
-        else this.store.begun(turnId);
+        else {
+          this.made.add(turnId);
+          this.store.begun(turnId);
+        }
       }
       sendAnswer((payload) => this.broadcast("chat.event", payload), params, result, () => undefined);
       done();

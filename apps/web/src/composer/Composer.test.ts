@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LiveTurn, State } from "../lib/store/store.ts";
 import { clearDraft, replaceDraft } from "../lib/store/drafts.ts";
+import { repliesOf } from "../../test/queue.ts";
 
 const device = vi.hoisted(() => ({ touch: false }));
 vi.mock("../lib/store/store.ts", async (original) => {
@@ -15,6 +16,8 @@ vi.mock("../lib/session/index.ts", () => ({
   ...Object.fromEntries(["cancelQueuedEdit", "cancelStopAsk", "confirmStopAsk", "editQueued","openSettings", "pickModel", "pull", "removeQueued", "send", "sendQueuedNow", "setContext", "stop", "recheckRuntime"].map((name) => [name, vi.fn()])),
   firstPull: () => undefined,
   queueReason: () => null,
+  // no edit is open in this window unless the fixture says so, which the composer asks first
+  editedElsewhere: (q: { stage: string }) => q.stage === "editing",
 }));
 vi.mock("../fit/FitPanel.tsx", () => ({ openFit: vi.fn() }));
 vi.mock("./focus.ts", () => ({ focusComposer: vi.fn() }));
@@ -180,7 +183,7 @@ it("chat row 31: during setup the field keeps Ask anything…, and a queued mess
   const installing: State = { ...ready, runtime: { state: "installing", owner: "app", baseUrl: "http://127.0.0.1:5288", version: "test" } };
   setFixture(installing);
   expect(renderToStaticMarkup(createElement(Composer)), "the field is the ready field").toMatch(/placeholder="Ask anything…"/);
-  setFixture({ ...installing, queued: [{ id: "q", threadId: "thread", text: "hello", at: 1, waitFor: "setup" }] });
+  setFixture({ ...installing, replies: repliesOf([{ id: "q", threadId: "thread", text: "hello", at: 1, waitFor: "setup" }]) });
   const html = renderToStaticMarkup(createElement(Composer));
   const row = html.match(/<ul class="qt"[\s\S]*?<\/ul>/)?.[0] ?? "";
   expect(row).toMatch(/data-tip="Sends when setup finishes"/);
@@ -190,9 +193,11 @@ it("chat row 31: during setup the field keeps Ask anything…, and a queued mess
 });
 
 // Chat row 36, owner pick A (2026-11-13): the queue is a shelf inside the message box, three icons a row, more than three fold to a count.
-const queuedAt = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `q${i + 1}`, threadId: "thread", text: `message ${i + 1}`, at: i, waitFor: "reply" as const }));
+const rowsAt = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `q${i + 1}`, threadId: "thread", text: `message ${i + 1}`, at: i, waitFor: "reply" as const }));
+/** The window's records of `n` messages waiting in the open chat. */
+const queuedAt = (n: number) => repliesOf(rowsAt(n));
 it("chat row 36: queued messages sit on a shelf inside the message box, above the field", () => {
-  setFixture({ ...ready, queued: queuedAt(2) });
+  setFixture({ ...ready, replies: queuedAt(2) });
   const html = renderToStaticMarkup(createElement(Composer));
   const form = html.match(/<form\b[^>]*class="composer[^"]*"[^>]*>([\s\S]*)<\/form>/)?.[1] ?? "";
   expect(form, "the shelf is in the box").toMatch(/^<ul class="qt"/);
@@ -201,19 +206,19 @@ it("chat row 36: queued messages sit on a shelf inside the message box, above th
 });
 
 it("a queued message open in another window's composer says so, and the same row open here says nothing", () => {
-  const rows = [{ ...queuedAt(1)[0]!, editing: true as const }];
-  setFixture({ ...ready, queued: rows });
+  const rows = repliesOf([{ ...rowsAt(1)[0]!, editing: true as const }]);
+  setFixture({ ...ready, replies: rows });
   expect(renderToStaticMarkup(createElement(Composer))).toContain("Being edited in another window");
-  setFixture({ ...ready, queued: rows, editingQueued: "q1" });
+  setFixture({ ...ready, replies: rows, editingQueued: "q1" });
   expect(renderToStaticMarkup(createElement(Composer))).not.toContain("Being edited in another window");
 });
 
 it("chat row 36: three queued show as three rows; more fold to the next two and a count that opens the rest", () => {
-  setFixture({ ...ready, queued: queuedAt(3) });
+  setFixture({ ...ready, replies: queuedAt(3) });
   let html = renderToStaticMarkup(createElement(Composer));
   expect(html.match(/<li class="qt-r"/g)).toHaveLength(3);
   expect(html).not.toMatch(/data-testid="chat\.queue\.more"/);
-  setFixture({ ...ready, queued: queuedAt(5) });
+  setFixture({ ...ready, replies: queuedAt(5) });
   html = renderToStaticMarkup(createElement(Composer));
   expect(html.match(/<li class="qt-r"/g), "the next two to go").toHaveLength(2);
   expect(html).toMatch(/message 1[\s\S]*message 2/);
@@ -223,7 +228,7 @@ it("chat row 36: three queued show as three rows; more fold to the next two and 
   expect(more).toMatch(/aria-label="Show 3 more queued messages"/);
   expect(more.replace(/<[^>]+>/g, ""), "a count, no sentence").toBe("+3");
   // the one being edited shows even when it is folded
-  setFixture({ ...ready, queued: queuedAt(5), editingQueued: "q4" });
+  setFixture({ ...ready, replies: queuedAt(5), editingQueued: "q4" });
   html = renderToStaticMarkup(createElement(Composer));
   expect(html).toMatch(/message 4/);
   expect(html.match(/<li class="qt-r"/g)).toHaveLength(3);

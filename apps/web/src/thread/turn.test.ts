@@ -100,12 +100,14 @@ describe("reduceTurn", () => {
     expect(reduceTurn(failed, { type: "reply", reply: record({ stage: "stopping", stoppedAt: at(2) }) }, at(5))).toBe(failed);
   });
 
-  it("chat.send's answer gives the turn its id; its start brings the saved question", () => {
+  it("chat.send's answer gives the turn its id; the saved question is its record's to bring, not the start mark's", () => {
     const pending = turn({ turnId: null, pendingUser: "hi" });
     const sent = reduceTurn(pending, { type: "sent", turnId: "t9" }, T0)!;
     expect(sent).toMatchObject({ turnId: "t9", pendingUser: "hi" });
     expect(sent.userMessageId).toBeUndefined();
-    expect(reduceTurn(sent, { type: "start", model: "m", userMessage: question }, T0)).toMatchObject({ turnId: "t9", userMessageId: "u1", pendingUser: null });
+    const marked = reduceTurn(sent, { type: "start", model: "other", userMessage: question }, T0)!;
+    expect(marked).toMatchObject({ turnId: "t9", pendingUser: "hi", model: "m" });
+    expect(marked.userMessageId).toBeUndefined();
   });
 
   it("a refused send keeps how it ended, without the question it waited to save", () => {
@@ -122,28 +124,28 @@ describe("reduceTurn", () => {
     expect(stopping(lost)).toBe(false);
   });
 
-  it("a cut-off reply runs again on turns.active and on the server's start snapshot, which replaces its words", () => {
+  it("a cut-off reply runs again on its record and on the server's start mark, which replaces its words", () => {
     const cut = reduceTurn(turn({ text: "one ", thinking: "t" }), { type: "lost" }, T0)!;
     expect(reduceTurn(cut, { type: "running" }, T0)).toMatchObject({ end: undefined, text: "one " });
-    expect(reduceTurn(cut, { type: "start", model: "m", userMessage: question }, T0)).toMatchObject({ end: undefined, text: "", thinking: "", tools: [], userMessageId: "u1" });
+    expect(reduceTurn(cut, { type: "start", model: "m", userMessage: question }, T0)).toMatchObject({ end: undefined, text: "", thinking: "", tools: [] });
   });
 
-  it("the start snapshot replaces the words of a reply turns.active already showed running again", () => {
+  it("the start mark replaces the words of a reply its record already showed running again", () => {
     const revived = reduceTurn(reduceTurn(turn({ text: "one ", thinking: "t" }), { type: "lost" }, T0)!, { type: "running" }, T0)!;
     expect(reduceTurn(revived, { type: "start", model: "m", userMessage: question }, T0)).toMatchObject({ end: undefined, text: "", thinking: "", tools: [] });
   });
 
-  it("a turn known only from turns.active becomes a turn like any other at its own first event", () => {
-    const listed = turn({ listed: true });
-    expect(reduceTurn(listed, { type: "running" }, T0)?.listed).toBe(true);
-    expect(reduceTurn(listed, { type: "start", model: "m", userMessage: question }, T0)?.listed).toBeUndefined();
-    expect(reduceTurn(listed, { type: "delta", text: "Hi" }, T0)).toMatchObject({ text: "Hi", listed: undefined });
+  it("a turn made from another window's record takes its words like any other, and the start mark leaves whose question it shows", () => {
+    const theirs = turn({ pendingUser: "theirs", userMessageId: "u0", model: "m0" });
+    expect(reduceTurn(theirs, { type: "delta", text: "Hi" }, T0)).toMatchObject({ text: "Hi", userMessageId: "u0" });
+    expect(reduceTurn(theirs, { type: "start", model: "m", userMessage: question }, T0)).toMatchObject({ userMessageId: "u0", model: "m0", pendingUser: "theirs" });
   });
 
-  it("a listed turn's start starts its clock; a turn already running keeps its own", () => {
-    expect(reduceTurn(turn({ listed: true }), { type: "start", model: "m", userMessage: question }, at(20))?.startedAt).toBe(at(20));
+  it("the start mark and a record after a reconnect keep the turn's own clock", () => {
     expect(reduceTurn(turn(), { type: "start", model: "m", userMessage: question }, at(20))?.startedAt).toBe(T0);
-    expect(reduceTurn(turn({ listed: true }), { type: "running" }, at(20))?.startedAt).toBe(T0);
+    expect(reduceTurn(turn(), { type: "running" }, at(20))?.startedAt).toBe(T0);
+    const cut = reduceTurn(turn(), { type: "lost" }, at(5))!;
+    expect(reduceTurn(cut, { type: "running" }, at(20))?.startedAt).toBe(T0);
   });
 
   it("neither revives a reply stopped here", () => {
@@ -168,6 +170,6 @@ describe("the turn map", () => {
     expect(unfinished(turn({ end: { kind: "stopped", secs: 1 }, reply: record({ stage: "stopping", stoppedAt: at(1) }) }))).toBe(true);
     expect(unfinished(turn({ end: { kind: "stopped", secs: 1 }, reply: record({ stage: "ended", stoppedAt: at(1) }) }))).toBe(false);
     expect(unfinished(turn({ end: { kind: "stopped", secs: 1 } }))).toBe(false);
-    expect(unfinished(turn({ listed: true })), "the server may drop a listed turn without a word").toBe(false);
+    expect(unfinished(turn({ pendingUser: "theirs" })), "one on its way, its question not saved yet").toBe(true);
   });
 });

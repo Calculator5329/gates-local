@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { installBrowser, tick, until } from "../../../test/harness.ts";
+import { heldOnServer, queuedOf } from "../../../test/queue.ts";
 
 let browser: ReturnType<typeof installBrowser>;
 let store: typeof import("./store.ts");
@@ -59,8 +60,8 @@ it("one typed character runs zero global listeners and their store selectors", (
   expect({ publishes, selectors }).toEqual({ publishes: 0, selectors: 0 });
 });
 
-it("Cancel and leaving a queued edit restore the draft that preceded it", () => {
-  store.setState({ queued: [{ id: "q", threadId: "A", text: "queued words", at: 1, held: true, waitFor: "reply" }] });
+it("Cancel and leaving a queued edit restore the draft that preceded it", async () => {
+  await heldOnServer(browser.server, store.getState, { id: "q", threadId: "A", text: "queued words" });
   drafts.editDraft("unfinished A");
   session.editQueued("q");
   drafts.editDraft("edited queue");
@@ -71,7 +72,7 @@ it("Cancel and leaving a queued edit restore the draft that preceded it", () => 
   expect(drafts.getDraft().text).toBe("");
   session.openThread("A");
   expect(drafts.getDraft().text).toBe("unfinished A");
-  expect(store.getState().queued[0]?.text).toBe("queued words");
+  expect(queuedOf(store.getState())[0]?.text).toBe("queued words");
 });
 
 it("deleting A discards its draft without touching B", async () => {
@@ -133,13 +134,13 @@ it("New thread on the new-chat screen keeps its words and gives the draft a new 
 
 it("M18: removing a queued editor restores the earlier draft and attachments", async () => {
   browser.server.queue.add({ id: "q", threadId: "A", messageId: "m-q", text: "queued words", at: 1, held: true, waitFor: "reply" });
-  await until(() => store.getState().queued.length === 1, 2000, "the server's list");
+  await until(() => queuedOf(store.getState()).length === 1, 2000, "the server's list");
   drafts.replaceDraft("A", { text: "before edit", images: ["before-image"], sendId: "before-id" });
   session.editQueued("q"); drafts.editDraft("edited queue");
   session.removeQueued("q");
   // the row goes when the server answers
-  await until(() => store.getState().queued.length === 0, 2000, "the server's answer");
+  await until(() => queuedOf(store.getState()).length === 0 && store.getState().editingQueued === null, 2000, "the server's answer");
   expect(drafts.getDraft("A")).toMatchObject({ text: "before edit", images: ["before-image"], sendId: "before-id" });
-  expect(store.getState().queued).toEqual([]);
+  expect(queuedOf(store.getState())).toEqual([]);
   expect(store.getState().editingQueued).toBeNull();
 });

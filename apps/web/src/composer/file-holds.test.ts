@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
 import type { AttachedFile } from "@gates-local/contracts";
+import { queuedOf, repliesOf } from "../../test/queue.ts";
 
 const file = (n: string): AttachedFile => ({ path: `files/att-${n.repeat(8)}-0000-0000-0000-${"0".repeat(12)}`, name: `${n}.txt`, size: 1, type: "text/plain" });
 
@@ -21,7 +22,7 @@ it("releasing a chip sends only the paths no other draft, earlier words or queue
   drafts.replaceDraft("other", { text: "x", files: [b] });
   drafts.replaceDraft("edited", { text: "y", files: [c] });
   drafts.beginQueuedDraft("edited", "y2", [], null, []);
-  store.setState({ queued: [{ id: "q1", threadId: "t", text: "z", at: 0, images: [], files: [d], waitFor: "reply" }] as never });
+  store.setState({ replies: repliesOf([{ id: "q1", threadId: "t", text: "z", at: 0, images: [], files: [d], waitFor: "reply" }]) });
   holds.releaseFiles([a.path, b.path, c.path, d.path]);
   expect(calls).toEqual([["files.release", { paths: [a.path] }]]);
 });
@@ -30,15 +31,21 @@ it("removing a queued message releases its files; a draft that still names one k
   const { drafts, store, chat, calls } = await fresh();
   const [a, b] = [file("a"), file("b")];
   drafts.replaceDraft("t", { text: "again", files: [b] });
-  store.setState({ queued: [{ id: "q1", threadId: "t", text: "z", at: 0, images: [], files: [a, b], waitFor: "reply" }] as never });
-  // the server removes it and answers with the message as it was
+  store.setState({ replies: repliesOf([{ id: "q1", threadId: "t", text: "z", at: 0, images: [], files: [a, b], waitFor: "reply" }]) });
+  // the server removes it, says so to every window, and answers with the message as it was
   const removed = { answer: "done", reply: { id: "q1", threadId: "t", rev: 1, messageId: "m-q1", text: "z", at: 0, files: [a, b], stage: "queued" } };
   vi.stubGlobal("window", {});
-  chat.createChat({ reply: () => Promise.resolve(removed) } as never);
+  const window = chat.createChat({
+    applyServerEvent: (patch: never) => store.setState(patch),
+    reply: () => {
+      window.recordChanged({ kind: "left", id: "q1", threadId: "t", rev: 2, why: "removed" });
+      return Promise.resolve(removed);
+    },
+  } as never);
   chat.removeQueued("q1");
+  expect(queuedOf(store.getState())).toEqual([]);
   expect(calls, "nothing before the server's answer").toEqual([]);
   await Promise.resolve();
-  expect(store.getState().queued).toEqual([]);
   expect(calls).toEqual([["files.release", { paths: [a.path] }]]);
 });
 
@@ -49,7 +56,7 @@ it("keep names every file the drafts, their earlier words and the queue hold, an
   const [a, b, c] = [file("a"), file("b"), file("c")];
   drafts.replaceDraft("one", { text: "x", files: [a] });
   drafts.beginQueuedDraft("one", "x2", [], null, []);
-  store.setState({ queued: [{ id: "q1", threadId: "t", text: "z", at: 0, images: [], files: [b, c], waitFor: "reply" }] as never });
+  store.setState({ replies: repliesOf([{ id: "q1", threadId: "t", text: "z", at: 0, images: [], files: [b, c], waitFor: "reply" }]) });
   await holds.keepHeldFiles();
   expect(calls).toEqual([["files.keep", { paths: [a.path, b.path, c.path] }]]);
 });

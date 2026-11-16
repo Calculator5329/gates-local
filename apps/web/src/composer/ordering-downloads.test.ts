@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
 import type { ModelInfo, PullProgress } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
-import { drain, OrderingWorld } from "../../test/ordering-world.ts";
+import { drain, OrderingWorld, type WindowSession } from "../../test/ordering-world.ts";
 import { replay, type ReplayEvent, type ReplayScenario } from "../../test/ordering-replay.ts";
 
 vi.mock("react", async (original) => ({
@@ -43,6 +43,8 @@ interface World {
 type Event = ReplayEvent<World>;
 const event = (name: string, after: readonly string[], run: Event["run"], extra: Pick<Event, "emit" | "delivery" | "discard"> = {}): Event => ({ name, after, run, ...extra });
 const dispose = (w: World) => w.wire.dispose();
+/** The messages a window shows waiting, from its records. */
+const waiting = (window: WindowSession) => window.store.waitingReplies(window.store.getState());
 
 async function create(state: "queued" | "downloading" | "verifying", firstModel = false, available = true): Promise<World> {
   const initial: PullProgress = { name: NAME, state, completedBytes: state === "queued" ? 0 : state === "verifying" ? 100 : 20, totalBytes: 100 };
@@ -81,7 +83,7 @@ function ended(outcome: "done" | "error" | "cancelled", firstModel: boolean, ava
     name: `RS-01: ${outcome} while offline (first=${firstModel}, read=${available})`,
     create: async () => {
       const w = await create("downloading", firstModel, available);
-      if (firstModel) { void w.wire.a.session.send(MESSAGE); await drain(); expect(w.wire.a.store.getState().queued).toHaveLength(1); }
+      if (firstModel) { void w.wire.a.session.send(MESSAGE); await drain(); expect(waiting(w.wire.a)).toHaveLength(1); }
       return w;
     }, dispose,
     witnesses: [["socket.drop", "server.offline-change", "terminal.push-B", "socket.reconnect", "settings.snapshot", "hydration.ready", "hydration.release"]],
@@ -108,16 +110,16 @@ function ended(outcome: "done" | "error" | "cancelled", firstModel: boolean, ava
         expect(state.pulls[NAME], "a job that ended offline cannot remain Downloading").toBeUndefined();
         expect(w.wire.a.session.queueReason(state), "first-model messages cannot wait for a nonexistent download").toBeNull();
         if (firstModel && outcome === "done") {
-          expect(state.queued, "a first-model send resumes after the installed snapshot").toEqual([]);
+          expect(waiting(w.wire.a), "a first-model send resumes after the installed snapshot").toEqual([]);
           expect(w.wire.server.calls("chat.send")).toHaveLength(1);
         }
       }
       if (firstModel && (outcome !== "done" || !order.includes("hydration.release") || !available)) {
-        expect(state.queued, "the unsent message and its text survive").toHaveLength(1);
-        const q = state.queued[0];
+        expect(waiting(w.wire.a), "the unsent message and its text survive").toHaveLength(1);
+        const q = waiting(w.wire.a)[0];
         if (!q) throw new Error("Missing queued message");
         expect(q.text).toBe(MESSAGE);
-        expect(q.waitFor, "render derives the words without changing the stored queue").toBe("download");
+        expect(q.stage === "queued" ? q.waitFor?.what : q.stage, "render derives the words without changing the server's record").toBe("download");
         const firstDownload = w.wire.a.session.firstPull(state);
         const stopped = available && order.includes("hydration.release") && outcome !== "done";
         if (stopped) expect(firstDownload, "the entry cannot promise an absent download").toBeUndefined();
@@ -181,7 +183,7 @@ it.each(["error", "cancelled"] as const)("RS-01: connected %s keeps the message 
   const tray = () => renderToStaticMarkup(createElement(Composer)).match(/<ul class="qt"[\s\S]*?<\/ul>/)?.[0];
   try {
     void client.session.send(MESSAGE); await drain();
-    const queued = client.store.getState().queued;
+    const queued = waiting(client);
     expect(queued).toHaveLength(1);
     expect(tray()).toContain(WAITING);
     if (outcome === "cancelled") {
@@ -190,7 +192,7 @@ it.each(["error", "cancelled"] as const)("RS-01: connected %s keeps the message 
     } else {
       w.wire.server.broadcast("models.pull", { ...w.initial, state: "error", message: "Download failed" }); await drain();
     }
-    expect(client.store.getState().queued, "the same entry and its text remain editable").toEqual(queued);
+    expect(waiting(client), "the same entry and its text remain editable").toEqual(queued);
     expect(client.session.firstPull(client.store.getState())).toBeUndefined();
     const stopped = tray();
     expect(stopped).toContain(MESSAGE);

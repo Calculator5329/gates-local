@@ -790,6 +790,7 @@ const StartingReply = S.Struct({
   /** Counts the starts of this record. */
   attempt: PositiveInt,
   startedAt: Millis,
+  loading: S.optional(S.Literal(true)),
 });
 /** The clock of a reply whose question is saved. */
 const ReplyClock = {
@@ -805,8 +806,13 @@ const ReplyClock = {
   spans: S.Array(S.Struct({ from: Count, ms: Count })),
   callsAt: S.Record(S.String, Count),
 };
-const LiveReply = S.Struct({ ...ReplyCommon, ...ReplyClock, stage: S.Literals(["loading", "thinking", "tool", "writing"]) });
-const DrawingReply = S.Struct({ ...ReplyCommon, stage: S.Literal("drawing"), questionId: S.String, startedAt: Millis, jobs: S.Array(S.String) });
+const LiveReply = S.Struct({
+  ...ReplyCommon, ...ReplyClock, stage: S.Literals(["loading", "thinking", "tool", "writing"]),
+  // why: silent: its model is in memory and has sent nothing yet, so there is no work to time
+  silent: S.optional(S.Literal(true)),
+});
+// why: stoppedAt: a Stop was taken and the engine has not let go of its pictures yet
+const DrawingReply = S.Struct({ ...ReplyCommon, stage: S.Literal("drawing"), questionId: S.String, preset: S.String, startedAt: Millis, jobs: S.Array(S.String), stoppedAt: S.optional(Millis) });
 /** A Stop was taken: the clock stands at `stoppedAt` while the words so far are saved. */
 const StoppingReply = S.Struct({ ...ReplyCommon, ...ReplyClock, stage: S.Literal("stopping"), stoppedAt: Millis });
 const DoneReply = S.Struct({ ...ReplyCommon, stage: S.Literal("done"), at: Millis, questionId: S.String, replyId: S.String });
@@ -850,6 +856,25 @@ export const ReplyAnswer = S.Union([
 export type ReplyAnswer = typeof ReplyAnswer.Type;
 /** What a caller gets back: the server's answer, or the client's word that there was none. The server never sends "not-reached". */
 export type ReplyOutcome = ReplyAnswer | { readonly answer: "not-reached"; readonly why: "closed" | "timeout" };
+
+/**
+ * One record changed, or left (reply.changed). Always the whole record, numbered by the one
+ * counter every record shares: a window keeps a record only when its `rev` is above the one it has.
+ */
+export const ReplyChange = S.Union([
+  S.Struct({
+    kind: S.Literal("is"),
+    reply: Reply,
+    // why: the saved rows come with the change, so no window reads the chat again to show them
+    saved: S.optional(S.Array(Message)),
+  }),
+  S.Struct({ kind: S.Literal("left"), id: ReplyId, threadId: S.String, rev: Count, why: S.Literals(["removed", "chat-deleted", "settled"]) }),
+]);
+export type ReplyChange = typeof ReplyChange.Type;
+
+/** One record of reply.list: a message waiting or a reply on its way. */
+export const ReplyListed = S.Struct({ reply: Reply });
+export type ReplyListed = typeof ReplyListed.Type;
 
 /** The context sizes the product offers; a model runs at the most it takes when that is less. */
 export const ContextSize = S.Literals([8192, 16384, 32768, 65536]);

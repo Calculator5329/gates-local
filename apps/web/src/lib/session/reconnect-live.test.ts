@@ -85,7 +85,7 @@ it("TE-03: replay revives a closed reply, replaces its snapshot once and survive
 });
 
 it("TE-03: a reply the server lists as still running gets its words replaced by the snapshot, not doubled", async () => {
-  browser.server.answer("turns.active", () => [{ threadId: "t1", turnId: "turn-live", reply: { stage: "writing", startedAt: 1, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {} } }]);
+  // the server's list of records names the reply: nothing ended it
   const held = await dropConnection();
   held.batch.respond(methodSamples["models.list"].result);
   (await held.thread).respond(history([question]));
@@ -96,7 +96,9 @@ it("TE-03: a reply the server lists as still running gets its words replaced by 
   expect(openTurn()).toMatchObject({ turnId: "turn-live", text: "one two ", thinking: "server thoughts", tools: [{ callId: "server-read" }] });
 });
 
-it("TE-03: a reply with no replay keeps its closed state and partial words", async () => {
+it("TE-03: a reply that ended unheard, with nothing saved, keeps its closed state and partial words", async () => {
+  // it broke as the connection went: no window heard, and the list at the reconnect names it no more
+  browser.server.unheard(() => chat({ type: "error", code: "internal", message: "the runner went away", ended: { reason: "failed", at: 5 } }));
   const held = await dropConnection();
   held.batch.respond(methodSamples["models.list"].result);
   (await held.thread).respond(history([question]));
@@ -120,10 +122,13 @@ it("TE-03: replay cannot revive a reply the server stopped", async () => {
   expect(store.runningThreads(store.getState()).size).toBe(0);
 });
 
-it("TE-03: a completed reply with no replay still replaces the closed partial from saved history", async () => {
+it("TE-03: a reply completed unheard still replaces the closed partial from saved history", async () => {
+  const answer: Message = { id: "answer", threadId: "t1", role: "assistant", content: "one two three", createdAt: 2 };
+  // it finished as the connection went: no window heard, and the list at the reconnect names it no more
+  browser.server.unheard(() => chat({ type: "done", message: answer, stopReason: "stop" }));
   const held = await dropConnection();
   held.batch.respond(methodSamples["models.list"].result);
-  (await held.thread).respond(history([question, { id: "answer", threadId: "t1", role: "assistant", content: "one two three", createdAt: 2 }]));
+  (await held.thread).respond(history([question, answer]));
   await tick();
   expect(openTurn()).toBeNull();
   expect(store.getState().messages["t1"]?.at(-1)?.content).toBe("one two three");

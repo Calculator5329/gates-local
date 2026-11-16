@@ -25,7 +25,8 @@ describe("the confirm's lines", () => {
     const { replaceDraft } = await import("../lib/store/drafts.ts");
     const { updateWork } = await import("./update-work.ts");
     expect(updateWork([])).toEqual([]);
-    setState({ queued: [{ id: "q1", threadId: "t", text: "a", at: 1, waitFor: "reply" }, { id: "q2", threadId: "t", text: "b", at: 2, waitFor: "reply" }] });
+    const { repliesOf } = await import("../../test/queue.ts");
+    setState({ replies: repliesOf([{ id: "q1", threadId: "t", text: "a", at: 1, waitFor: "reply" }, { id: "q2", threadId: "t", text: "b", at: 2, waitFor: "reply" }]) });
     replaceDraft("t", { text: "half a thought" });
     expect(updateWork(["1 running reply (including other windows)"])).toEqual(["1 running reply (including other windows)", "2 queued messages in this window", "1 unsent draft in this window"]);
     expect(updateWork(undefined)).toBeUndefined();

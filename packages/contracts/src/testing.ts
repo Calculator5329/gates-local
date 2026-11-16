@@ -215,6 +215,13 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "reply.now": { params: { id: "q-1", consent: { kind: "standing" } }, result: { answer: "sending", reply: { id: "q-1", threadId: "t1", rev: 5, messageId: "m-q1", text: "and then?", at: 1_700_000_000_000, stage: "starting", attempt: 1, startedAt: 1_700_000_000_500 } } },
   "reply.hold": { params: { id: "q-1" }, result: { answer: "gone", why: "sent", question: userMessage } },
   "reply.stop": { params: { id: "turn-1" }, result: { answer: "done", reply: { id: "turn-1", threadId: "t1", rev: 6, questionId: "m1", model: "qwen3:14b", startedAt: 1_700_000_000_000, readyAt: 1_700_000_000_800, workMs: 1200, toolMs: 0, try: 1, spans: [], callsAt: {}, stage: "stopping", stoppedAt: 1_700_000_002_000 } } },
+  "reply.list": {
+    params: {},
+    result: [
+      { reply: { id: "q-1", threadId: "t1", rev: 7, messageId: "m-q1", text: "and then?", at: 1_700_000_000_000, stage: "held", held: { why: "refused", code: "wont-fit", message: "It needs more memory than this GPU has." } } },
+      { reply: { id: "turn-1", threadId: "t1", rev: 8, questionId: "m1", model: "qwen3:14b", startedAt: 1_700_000_000_000, workMs: 0, toolMs: 0, try: 1, spans: [], callsAt: {}, stage: "loading" } },
+    ],
+  },
 
   "messages.delete": { params: { threadId: "t1", messageId: "m1" }, result: { messageId: "m1" } },
   "files.attach": { params: { name: "notes.txt", type: "text/plain", data: "aGVsbG8=" }, result: { path: "files/att-0f8b5c1e-3a2d-4c7e-9b1a-2d3e4f5a6b7c", name: "notes.txt", size: 5, type: "text/plain" } },
@@ -370,6 +377,13 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
       threadId: "t1",
       event: { type: "done", message: { ...assistantMessage, tools: [toolStep], images: ["images/j1.png"] }, stopReason: "stop" },
     },
+  ],
+  "reply.changed": [
+    { kind: "is", reply: { id: "q-1", threadId: "t1", rev: 3, messageId: "m-q1", text: "and then?", at: 1_700_000_000_000, stage: "starting", attempt: 1, startedAt: 1_700_000_000_500, loading: true } },
+    { kind: "is", reply: { id: "q-1", threadId: "t1", rev: 4, questionId: "m1", model: "qwen3:14b", startedAt: 1_700_000_000_500, workMs: 0, toolMs: 0, try: 1, spans: [], callsAt: {}, stage: "thinking" }, saved: [userMessage] },
+    { kind: "is", reply: { id: "q-1", threadId: "t1", rev: 9, stage: "done", at: 1_700_000_003_000, questionId: "m1", replyId: "m2" }, saved: [assistantMessage] },
+    { kind: "is", reply: { id: "q-1", threadId: "t1", rev: 9, stage: "stopped", at: 1_700_000_003_000, questionId: "m1", by: { who: "preempted", neededBy: "qwen3:14b" } } },
+    { kind: "left", id: "q-2", threadId: "t1", rev: 10, why: "removed" },
   ],
   "runtime.changed": [runtime, { state: "missing", owner: "none", baseUrl: "http://127.0.0.1:11434", detail: "no answer" }],
   "models.changed": [models, []],

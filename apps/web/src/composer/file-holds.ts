@@ -15,10 +15,10 @@ let call: Call | undefined;
 /** session.ts hands over its call once; tests hand a fake. */
 export function setFileCalls(next: Call | undefined): void { call = next; }
 
-/** Every path a draft (or its words before a queued edit) or a queued message names. */
+/** Every path a draft (or its words before a queued edit) names, or a message that waits or is on its way. */
 export function heldFilePaths(): Set<string> {
   const held = draftFilePaths();
-  for (const q of getState().queued) for (const f of q.files ?? []) held.add(f.path);
+  for (const r of getState().replies.values()) if ("files" in r) for (const f of r.files ?? []) held.add(f.path);
   return held;
 }
 

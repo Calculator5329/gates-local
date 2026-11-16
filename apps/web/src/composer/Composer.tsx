@@ -33,6 +33,7 @@ import {
   cancelStopAsk,
   confirmStopAsk,
   editQueued,
+  editedElsewhere,
   firstPull,
   readImageRun,
   openSettings,
@@ -44,7 +45,7 @@ import {
   stop,
   typedInComposer,
 } from "../lib/session/index.ts";
-import { NA, type Queued, type State, getState, runningTurn, setState, streamingHere, useStore } from "../lib/store/store.ts";
+import { NA, type State, type WaitingReply, behindSetup, getState, runningTurn, setState, streamingHere, useStore, waitingReplies } from "../lib/store/store.ts";
 import { editDraft, getDraft, useDraft } from "../lib/store/drafts.ts";
 import { PHONE, SheetHead, Skel, closePop, closeTip, esc, isTouch, openTip, place, togglePop, useMedia } from "../lib/ui/ui.tsx";
 
@@ -538,18 +539,20 @@ export function enterAnswer(s: { readonly sendDisabled: boolean; readonly memRef
  * for this chat's reply, and while it is edited here (the pressed pencil says that). `elsewhere`: no reply runs in this
  * chat but one runs in another, and the queue sends one reply at a time, so that one is what it waits for.
  */
-export function queueWords(q: Queued, editing: boolean, first: string | undefined, model: string | undefined, installing: boolean, elsewhere = false): string | null {
+export function queueWords(q: WaitingReply, editing: boolean, first: string | undefined, model: string | undefined, installing: boolean, elsewhere = false): string | null {
   if (editing) return null;
   // open in another window's composer, it does not go until that edit ends or that window closes
-  if (q.editing === true) return EDITED_ELSEWHERE;
-  if (q.waitFor === "download") return first === undefined && (q.model ?? model) === undefined ? "Download stopped" : AFTER_DOWNLOAD;
+  if (editedElsewhere(q)) return EDITED_ELSEWHERE;
+  // why: an edit that just ended here: the message is as it was before it
+  const at = q.stage === "editing" ? q.back : q;
+  const wait = q.stage === "queued" ? q.waitFor : undefined;
+  if (wait?.what === "download") return first === undefined && (q.model ?? model) === undefined ? "Download stopped" : AFTER_DOWNLOAD;
   // setup has ended: a download that runs is what it waits for now; with none, the offer above the composer says a model is needed
-  if (q.waitFor === "setup") return installing ? AFTER_SETUP : first !== undefined ? AFTER_DOWNLOAD : null;
-  if (q.retry === "running") return RETRYING;
-  if (q.retry === "failed") return RETRY_FAILED;
-  if (q.held) return "On hold";
-  // Send now waits only for its own chat (server chat/queue.ts next)
-  return elsewhere && q.waitFor === "reply" && q.now !== true ? AFTER_OTHER_REPLY : null;
+  if (wait?.what === "setup") return installing ? AFTER_SETUP : first !== undefined ? AFTER_DOWNLOAD : null;
+  if (wait?.what === "retry") return RETRYING;
+  if (at.stage === "held") return at.held.why === "failed" ? RETRY_FAILED : "On hold";
+  // why: Send now waits only for its own chat: the server's record says it goes next
+  return elsewhere && at.stage === "queued" ? AFTER_OTHER_REPLY : null;
 }
 
 /** A chat reply runs in another chat and none in this one (a picture is not a reply). */
@@ -631,7 +634,7 @@ const SHELF_ROWS = 3;
  */
 function QueueTray() {
   const [open, setOpen] = useState(false);
-  const queued = useStore((s) => s.queued);
+  const queued = useStore(waitingReplies);
   const threadId = useStore((s) => s.threadId);
   const editingId = useStore((s) => s.editingQueued);
   const first = useStore(firstPull);
@@ -663,7 +666,7 @@ function QueueTray() {
             <span className="qt-s" role="status" data-tip={CLOCKED.has(words) ? words ?? undefined : undefined}>
               {CLOCKED.has(words) ? <><Icon id="clock" cls="s14" /><span className="vh">{words}</span><WaitNumbers value={words === AFTER_SETUP ? setupAt : downloadAt} /></> : words ?? ""}
             </span>
-            {q.waitFor === "reply" && !editing ? (
+            {!behindSetup(q) && !editing ? (
               <button type="button" className="ibtn xs" data-testid={`chat.queue.send-now-${i + 1}`} aria-label="Send now" data-send-now data-tip={nowTip} onClick={andFocus(() => sendQueuedNow(q.id))}>
                 <SendArrow />
               </button>

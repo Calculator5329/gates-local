@@ -129,6 +129,7 @@ function offscreenReconnect(): ReplayScenario<World> {
       event("server.done", [], (w) => {
         const user = w.wire.server.turns.get("turn-1"); if (!user) throw new Error("Missing admitted turn");
         w.wire.server.messages.push({ ...user, id: "reply-turn-1", role: "assistant", content: "reply" });
+        w.wire.server.ended.add("turn-1");
         w.terminalTarget = w.wire.a.socket.readyState === 1 ? w.wire.a.socket : undefined;
       }, { emit: (prefix) => [
         ...(!prefix.includes("socket.drop") ? [frame("A1", "done.push-A")] : prefix.includes("socket.reconnect") ? [frame("A2", "done.push-A")] : []), frame("B", "done.push-B"),
@@ -137,7 +138,11 @@ function offscreenReconnect(): ReplayScenario<World> {
       event("done.push-B", ["server.done"], (w) => w.wire.step(() => w.wire.server.chatPush("turn-1", w.wire.b.socket, true)), { delivery: true }),
     ],
     check(w, order, complete) {
-      if (order.includes("socket.drop")) expect(runningIds(w.wire.a.store), "a disconnected off-screen stream cannot remain marked as running").toEqual({});
+      const at = (name: string) => order.indexOf(name);
+      // after a drop the mark is the server's to give back: the list read at the reconnect names the reply only while it is still written
+      const listed = at("hydration.release") !== -1 && (at("server.done") === -1 || at("server.done") > at("socket.reconnect"));
+      const running = at("done.push-A") === -1 && (at("socket.drop") === -1 || listed);
+      expect(runningIds(w.wire.a.store), "an off-screen reply is marked as running only while the server says it is").toEqual(running ? { t1: "turn-1" } : {});
       expect(runningIds(w.wire.b.store)).toEqual(order.includes("done.push-B") ? {} : { t1: "turn-1" });
       if (complete) expect(w.wire.a.store.getState().conn.kind).toBe("open");
     },
@@ -260,7 +265,7 @@ function pullTimeout(): ReplayScenario<World> {
 
 it("preload rejects a superseded model choice", () => run(preloadChoice()));
 it("modelsOrder rejects an old model refresh after a push", () => run(modelRefresh()));
-it("lostTurn clears off-screen marks across completion and hydration", () => run(offscreenReconnect()));
+it("a dropped window's off-screen marks follow the server's list across completion and hydration", () => run(offscreenReconnect()));
 it.each(["check", "post-save"] as const)("image status %s preserves a newer push", (kind) => run(imageStatus(kind)));
 it("update hydration preserves a check and dismissal", () => run(updateHydration()));
 it("pull timeout preserves newer server progress", () => run(pullTimeout()));

@@ -21,7 +21,7 @@ export type TurnEvent =
   | { readonly type: "refused" }
   /** The connection dropped: a reply still being written is cut off here, and one the server was stopping stops waiting for it. */
   | { readonly type: "lost" }
-  /** turns.active after a reconnect: the server is still writing this reply. */
+  /** Its record after a reconnect: the server is still writing this reply. */
   | { readonly type: "running" };
 
 const CLOSED = { kind: "error", code: "closed", message: "The connection dropped while this reply was being written." } as const;
@@ -74,27 +74,11 @@ function upsertStep(steps: readonly ToolStep[], step: ToolStep): ToolStep[] {
  * dropped (W-05); a tool step still lands.
  */
 export function reduceTurn(turn: LiveTurn, event: TurnEvent, now: number): LiveTurn | null {
-  const next = advance(turn, event, now);
-  // a record alone does not make a listed turn one that shows: its start does
-  if (next === null || next.listed !== true || event.type === "running" || event.type === "reply") return next;
-  // its own first event makes a turn known only from turns.active a turn like any other
-  return { ...next, listed: undefined, ...(event.type === "start" ? { startedAt: now } : {}) };
-}
-
-function advance(turn: LiveTurn, event: TurnEvent, now: number): LiveTurn | null {
   switch (event.type) {
     case "start":
-      // a reply the connection cut off comes back with the server's snapshot of its words,
-      // also when turns.active already showed it running again
-      return {
-        ...turn,
-        model: event.model,
-        userMessageId: turn.userMessageId ?? event.userMessage.id,
-        // the saved question takes the place of the words shown while it waited
-        pendingUser: null,
-        ...(event.image === true ? { image: true as const } : {}),
-        ...(turn.end === undefined || closed(turn) ? { end: undefined, text: "", thinking: "", tools: [] } : {}),
-      };
+      // the mark that the reply's words so far follow: a reply the connection cut off comes back
+      // with the server's snapshot of them. Its question and model are its record's to say.
+      return turn.end === undefined || closed(turn) ? { ...turn, end: undefined, text: "", thinking: "", tools: [] } : turn;
     case "reply": {
       // a reply that failed here keeps how it ended; a stopped one, or one the connection cut off, takes the server's record
       if (turn.end?.kind === "error" && !closed(turn)) return turn;
@@ -143,7 +127,7 @@ export function withTurn(turns: State["turns"], threadId: string, turn: LiveTurn
   return rest;
 }
 
-/** A reply still being written, or one the server is stopping and has not ended; one known only from turns.active may never start, so it is neither. */
+/** A reply still being written, or one the server is stopping and has not ended. */
 export function unfinished(turn: LiveTurn | undefined): boolean {
-  return turn !== undefined && turn.listed !== true && (turn.end === undefined || stopping(turn));
+  return turn !== undefined && (turn.end === undefined || stopping(turn));
 }

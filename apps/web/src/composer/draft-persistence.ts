@@ -2,7 +2,7 @@
 import type { AttachedFile } from "@gates-local/contracts";
 import { getState, setState, subscribe, type Queued } from "../lib/store/store.ts";
 import { type DraftKey, type DraftWords, cancelQueuedDraft, draftRevision, restoreDrafts, savedDrafts, subscribeDrafts } from "../lib/store/drafts.ts";
-import { oldQueueRead, queueOnServer, stillOwed } from "./chat.ts";
+import { oldQueueOwed, oldQueueRead } from "./chat.ts";
 
 interface Slot { key: DraftKey; draft: DraftWords & { beforeEdit?: DraftWords }; }
 /** `owed`: the queue saved is one the server has yet to take, kept only until it does. */
@@ -100,13 +100,6 @@ export async function watchDraft(key: string): Promise<() => void> {
   });
   const [saved, attachments] = await Promise.all([read(key), read([key, "attachments"])]);
   const recovered = recoverStored(saved, attachments);
-  /**
-   * A queue this browser saved before the server kept it: shown on hold, handed to the server once
-   * (session/chat.ts oldQueueRead), and kept here until the server has it, so an update never drops
-   * a message that was waiting. Once the browser's queue is the server's, a save's copy of it is
-   * stale and read as nothing, unless the save says the server still owes it.
-   */
-  let legacy: readonly Queued[] = recovered === undefined || queueOnServer() && record(saved)?.["owed"] !== true ? [] : recovered.queued;
   if (recovered) {
     const savedEditor = recovered.queued.find(q => q.id === recovered.editing);
     const draftKey = recovered.threadId !== undefined ? recovered.threadId : recovered.sendThreadId ?? savedEditor?.threadId ?? before.threadId;
@@ -118,13 +111,15 @@ export async function watchDraft(key: string): Promise<() => void> {
     const editing = editThread !== undefined && restored.has(editThread) && current.threadId === editThread &&
       (current.editingQueued === null || current.editingQueued === recovered.editing) ? recovered.editing : null;
     if (editThread !== undefined && restored.has(editThread) && editing === null) cancelQueuedDraft(editThread);
-    setState(s => ({
-      ...(editing !== null ? { editingQueued: editing } : {}),
-      ...(s.queued === before.queued && legacy.length ? { queued: legacy } : {}),
-      ...(legacy.length ? { notice: "Your queued messages were restored on hold. Use Send now when you are ready." } : {}),
-    }));
+    if (editing !== null) setState({ editingQueued: editing });
   }
-  oldQueueRead(legacy);
+  /**
+   * A queue this browser saved before the server kept it goes to the server once, on hold
+   * (chat.ts oldQueueRead), and is kept here until the server has answered for each message, so
+   * an update never drops one that was waiting. Once the browser's queue is the server's, a
+   * save's copy of it is stale and read as nothing, unless the save says the server still owes it.
+   */
+  let owed = oldQueueRead(recovered?.queued ?? [], record(saved)?.["owed"] === true);
   let last = getState();
   let lastRevision = draftRevision();
   let committed = record(saved)?.["format"] === 2 ? recovered : undefined;
@@ -188,16 +183,18 @@ export async function watchDraft(key: string): Promise<() => void> {
   const update = () => {
     const s = getState();
     const revision = draftRevision();
-    if (lastRevision === revision && last.queued === s.queued && last.editingQueued === s.editingQueued) return;
+    // an old saved queue is forgotten here once the server has answered for each message (a refusal said so)
+    const stillOwed = oldQueueOwed();
+    if (lastRevision === revision && owed === stillOwed && last.editingQueued === s.editingQueued) return;
     lastRevision = revision;
     last = s;
+    owed = stillOwed;
     const slots = savedDrafts();
     const draft = slots.find(slot => slot.key === s.threadId)?.draft ?? { text: "", images: [], sendId: null };
-    // an old saved queue is forgotten here once the server has each message (or refused it, which said so)
-    if (legacy.length > 0) legacy = legacy.filter(q => stillOwed(q.id));
-    pending = { draft: draft.text, images: draft.images, slots, threadId: s.threadId, queued: legacy, ...(legacy.length ? { owed: true as const } : {}), editing: s.editingQueued, ...(draft.sendId ? { sendId: draft.sendId, sendThreadId: s.threadId ?? undefined } : {}) };
+    pending = { draft: draft.text, images: draft.images, slots, threadId: s.threadId, queued: owed, ...(owed.length ? { owed: true as const } : {}), editing: s.editingQueued, ...(draft.sendId ? { sendId: draft.sendId, sendThreadId: s.threadId ?? undefined } : {}) };
     pump();
   };
+  oldQueueOwed(update);
   const off = subscribe(update);
   const offDrafts = subscribeDrafts(update);
   // Request an early commit, without a parallel write. Unload can still abort

@@ -75,6 +75,7 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
     file: deps.dataDir === undefined ? undefined : path.join(deps.dataDir, "queue.json"),
     log,
     changed: (list) => push("queue.changed", list),
+    told: (change) => push("reply.changed", change),
     saved: (messageId) => store.getMessage(messageId),
     deleting: (threadId) => deleting.has(threadId),
     closing: () => closing,
@@ -97,8 +98,11 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
     begin: (params, taken) => begin(params, taken),
   });
 
-  /** The turn's reply record as it is now, to every window. */
-  const pushReply = (turn: Turn) => push("chat.event", { turnId: turn.turnId, threadId: turn.threadId, event: { type: "reply", reply: turn.clock.record(Date.now()) } });
+  /** The turn's times changed: its record as it is now, to every window (and, for the older pages, the older record). */
+  const pushReply = (turn: Turn) => {
+    push("chat.event", { turnId: turn.turnId, threadId: turn.threadId, event: { type: "reply", reply: turn.clock.record(Date.now()) } });
+    replies.clocked(turn.turnId);
+  };
 
   /** Models a models.load says are loading now (a preload the first key started, or another window's). */
   const loadingModels = new Set<string>();
@@ -256,7 +260,7 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
         // only a reply whose question is saved and that has not ended, as its record says
         const rec = replies.of(turn.turnId);
         if (!isAsked(rec)) continue;
-        const send = (event: WireEvent) => target("chat.event", { turnId: turn.turnId, threadId: turn.threadId, event });
+        const send = (event: WireEvent) => target("chat.event", { turnId: turn.turnId, threadId: turn.threadId, replyId: rec.id, event });
         const image = rec.stage === "drawing" || (rec.stage === "stopping" && rec.drawing);
         send({ type: "start", model: rec.model, userMessage: rec.question, ...(image ? { image: true as const } : {}), replayed: true });
         // the record as it is now: a window that joins mid-reply draws the same stage and seconds

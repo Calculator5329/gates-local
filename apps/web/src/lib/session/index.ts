@@ -38,7 +38,7 @@ import { type ActionResult, codeOf, createConnection, failure, isNA } from "./co
 
 // Preserve the UI's action imports while implementation moves into session modules.
 export { threadMarkdown } from "../../thread/threads.ts";
-export { queueReason, firstPull, cancelStopAsk, canRetry, removeQueued, editQueued, chooseForQueued } from "../../composer/chat.ts";
+export { queueReason, firstPull, cancelStopAsk, canRetry, removeQueued, editQueued, editedElsewhere, chooseForQueued } from "../../composer/chat.ts";
 export { type ActionCall, type ActionResult, failure, isNA } from "./connection.ts";
 export { fileUrl, dataFolder, openDataFolder, canOpenFolder, canUpdateHere, canShowUpdate, showUpdate, folderDialog } from "./platform.ts";
 export { threadFromHash } from "../../app/navigation.ts";
@@ -138,7 +138,7 @@ const chat = createChat({ applyServerEvent,
   openThread: (threadId) => openThread(threadId), blockingFor,
 });
 export const { send, confirmStopAsk, stop, retry, sendQueuedNow, cancelQueuedEdit } = chat;
-const { onChatEvent, lostTurn, catchUp, activeTurns, queueChanged, queueListed, editEnded } = chat;
+const { onChatEvent, lostTurn, catchUp, connected, recordChanged, replyListed, editEnded } = chat;
 
 const modelsSession = createModels({ applyServerEvent,
   call, probe, act, isNA, restoreSaved,
@@ -256,8 +256,10 @@ async function hydrateWith(
   release: (next: ReadonlySet<Channel> | "none") => void,
   negotiate: Client["negotiate"],
 ): Promise<void> {
+  // why: what this window holds of the records is from before this connection, until its list
+  connected();
   on("chat.event", onChatEvent);
-  on("queue.changed", (list) => queueChanged(list));
+  on("reply.changed", (change) => recordChanged(change));
   on("usage.changed", () => usageSession.usageChanged());
   // Install every receipt handler first. Ordered domains stay disabled until
   // their full migration lands; unsupported servers continue in legacy mode.
@@ -277,7 +279,7 @@ async function hydrateWith(
   const listModels = batched(rowOf(methodSync("models.list")));
   const suggestedRead = batched(SUGGESTED);
   const memoryRead = batched(MEMORY);
-  const [status, listed, threads, snapshot, active, pendingPulls, suggested, memory, queue] = await Promise.all([
+  const [status, listed, threads, snapshot, pendingPulls, suggested, memory, replies] = await Promise.all([
     call("runtime.status", {}, { onResult: (_, sync) => statusRead.arrived(sync) }),
     // The list's runtime is the one it was read beside; the newer of it and the status shows.
     // Its models say what is installed only beside a ready runtime (answered).
@@ -289,7 +291,6 @@ async function hydrateWith(
     orderedSettings
       ? call("settings.get", {}, { onResult: settingsSession.acceptSettings })
       : probe("settings.get", {}, { onResult: settingsSession.acceptSettings }),
-    call("turns.active", {}),
     // Every download's progress, a whole the models.pull pushes are parts of: on an ordered
     // connection it applies as it lands, so a newer push after it applies on top.
     probe("models.pulls", {}, { onResult: (pending, sync) => onArrival(PULLS, () => applyServerEvent((s) => ({ pulls: reconcilePulls(s.pulls, pending) })))(sync) }),
@@ -297,8 +298,7 @@ async function hydrateWith(
     probe("models.suggested", {}, { onResult: (_, sync) => suggestedRead.arrived(sync) }),
     // What is in memory: a new chat's button starts on its chat model (memory.changed keeps it current).
     probe("memory.status", {}, { onResult: (_, sync) => memoryRead.arrived(sync) }),
-    // The queue every window shows: the server keeps it and sends it.
-    probe("queue.list", {}),
+    probe("reply.list", {}),
   ]);
   // a list read while no Ollama answered says nothing: the store keeps what it had
   const models = listed !== undefined && answered(listed.runtime) && listModels.lands() ? listed.models : undefined;
@@ -310,11 +310,11 @@ async function hydrateWith(
     const chats = ordering.ordered("threads") ? s.threads : sortThreads(threads);
     const held = memory === NA || memory === undefined || !memoryRead.lands() ? {} : { memory, ...(s.threadId === null && !s.newChatPicked ? { newChatResident: residentChat({ memory }) } : {}) };
     const pulls = inBatch(PULLS, pendingPulls) ? reconcilePulls(s.pulls, pendingPulls) : s.pulls;
-    const next: State = { ...s, suggested: suggestedRead.lands() || suggested === NA ? suggested ?? s.suggested : s.suggested, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(pulls, models ?? s.models), threads: chats,...activeTurns(s, active), ...withSettings, ...held };
+    const next: State = { ...s, suggested: suggestedRead.lands() || suggested === NA ? suggested ?? s.suggested : s.suggested, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(pulls, models ?? s.models), threads: chats, ...withSettings, ...held };
     return { ...next, ...decided(modelChoice(next)) };
   });
   if (settings !== NA && settings !== undefined) settingsSession.seedContext();
-  if (queue !== undefined && queue !== NA) queueListed(queue);
+  if (replies !== undefined && replies !== NA) replyListed(replies);
   restoreSaved();
   applyTheme(settings === NA || settings === undefined ? "system" : settings.theme);
   applyAccent(settings === NA || settings === undefined ? undefined : settings.accent);

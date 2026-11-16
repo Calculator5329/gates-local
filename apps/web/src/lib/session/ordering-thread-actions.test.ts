@@ -3,6 +3,7 @@ import type { Message, Thread } from "@gates-local/contracts";
 import { installBrowser, type Held } from "../../../test/harness.ts";
 import { drain } from "../../../test/ordering-world.ts";
 import { replay } from "../../../test/ordering-replay.ts";
+import { queuedOf, repliesOf } from "../../../test/queue.ts";
 
 const original: Thread = { id: "t1", title: "Saved title", createdAt: 1, updatedAt: 2 };
 const other: Thread = { ...original, id: "t2", title: "Other conversation", updatedAt: 1 };
@@ -33,7 +34,7 @@ async function create() {
   void session.deleteThread(original.id);
   await drain();
   const remove: Held<"threads.delete"> = await deleting;
-  store.setState({ threadModels: { t1: "gemma3:4b" }, queued: [{ id: "q1", threadId: "t1", text: "Next question", at: 1, waitFor: "reply", held: true }] });
+  store.setState((s) => ({ threadModels: { t1: "gemma3:4b" }, replies: new Map([...s.replies, ...repliesOf([{ id: "q1", threadId: "t1", text: "Next question", at: 1, waitFor: "reply", held: true }], 100)]) }));
   return { browser, store, close, load, rename, remove };
 }
 
@@ -57,7 +58,8 @@ it("failed thread actions preserve an open streaming/loading conversation across
     check(w, order) {
       const state = w.store.getState();
       expect(state.threads.map(t => t.id), "a rejected delete must keep index order").toEqual(["t1", "t2"]);
-      expect(state).toMatchObject({ view: "thread", threadId: "t1", threadModels: { t1: "gemma3:4b" }, queued: [{ id: "q1", text: "Next question" }] });
+      expect(state).toMatchObject({ view: "thread", threadId: "t1", threadModels: { t1: "gemma3:4b" } });
+      expect(queuedOf(state), "the message that waits stays").toMatchObject([{ id: "q1", text: "Next question" }]);
       expect(state.threads[0]?.title).toBe(order.includes("index.push") ? "Other window's title" : "Saved title");
       const lastFailure = order.findLast(name => name.endsWith("failure"));
       if (lastFailure) expect(state.notice).toContain(lastFailure === "delete.failure" ? "Couldn't delete this conversation" : "Couldn't rename this conversation");

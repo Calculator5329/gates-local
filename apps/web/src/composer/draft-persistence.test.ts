@@ -4,9 +4,11 @@ import { draftDatabase } from "./draft-persistence-testing.ts";
 import { getState, setState } from "../lib/store/store.ts";
 import { clearDraft, editDraft, getDraft, replaceDraft, type Draft } from "../lib/store/drafts.ts";
 import type { State } from "../lib/store/store.ts";
+import { oldQueueOwed } from "./chat.ts";
+import { queuedOf, repliesOf } from "../../test/queue.ts";
 
-// Combine independent sources only for compact assertions, never in the app store.
-const observation = (state: State, draft: Draft) => ({ ...state, draft: draft.text, draftImages: draft.images, draftSendId: draft.sendId });
+// Combine independent sources only for compact assertions, never in the app store. `queued`: the messages that wait, read from the window's records.
+const observation = (state: State, draft: Draft) => ({ ...state, draft: draft.text, draftImages: draft.images, draftSendId: draft.sendId, queued: queuedOf(state) });
 const observed = () => observation(getState(), getDraft());
 const savedSlot = (key: string) => ({ key, draft: { text: key, images: [], sendId: null } });
 
@@ -103,7 +105,7 @@ it("reload preserves the draft saved before a queued edit", async () => {
   const fixture = draftDatabase();
   const a = await freshWatcher();
   const drafts = await import("../lib/store/drafts.ts");
-  a.setState({ threadId: "A", queued: [{ id: "q", threadId: "A", text: "queued", at: 1, waitFor: "reply" }] });
+  a.setState({ threadId: "A", replies: repliesOf([{ id: "q", threadId: "A", text: "queued", at: 1, waitFor: "reply" }]) });
   a.replaceDraft("A", { text: "before edit", images: ["before-image"] });
   const stop = await a.watchDraft("edit");
   drafts.beginQueuedDraft("A", "changed queue", ["edit-image"], "send");
@@ -156,7 +158,7 @@ it("CI-01: ten edits retain one in-flight write and submit unchanged attachments
   const fixture = draftDatabase();
   const images = Array.from({ length: 8 }, (_, i) => "data:image/png;base64," + String(i).repeat(10 * 1024 * 1024));
   const queuedImage = "data:image/png;base64," + "q".repeat(10 * 1024 * 1024);
-  replaceDraft(null, { images }); setState({ queued: [{ id: "q", threadId: "t", text: "queued", images: [queuedImage], at: 1, waitFor: "reply" }] });
+  replaceDraft(null, { images }); setState({ replies: repliesOf([{ id: "q", threadId: "t", text: "queued", images: [queuedImage], at: 1, waitFor: "reply" }]) });
   const stop = await watchDraft("scope");
   try {
     editDraft("initial");
@@ -209,19 +211,23 @@ it("legacy drafts migrate atomically, and the old queue stays saved as it was un
   const image = "data:image/png;base64," + "a".repeat(32_000);
   fixture.records.set(JSON.stringify("legacy"), { draft: "old", images: [image], queued: [{ id: "q", threadId: "t", text: "queued", images: [image], model: "vision", at: 1 }], editing: "q", sendId: "retry", sendThreadId: "t" });
   const stop = await watchDraft("legacy");
-  expect(observed()).toMatchObject({ draft: "old", draftImages: [image], draftSendId: "retry", editingQueued: "q", queued: [expect.objectContaining({ images: [image], held: true, model: "vision" })] });
+  expect(observed()).toMatchObject({ draft: "old", draftImages: [image], draftSendId: "retry", editingQueued: "q" });
+  // no row yet: the server shows it once it has it. Until then it is owed, on hold, as it was saved
+  expect(observed().queued).toEqual([]);
+  expect(oldQueueOwed()).toEqual([expect.objectContaining({ images: [image], held: true, model: "vision" })]);
   editDraft("new");
   fixture.pending[0]!.finish(); await settled();
   const count = fixture.writes.length;
-  const bytes = fixture.writes.reduce((n, put) => n + put.bytes, 0);
-  setState(s => ({ queued: s.queued.map(q => ({ ...q, text: "edited queue" })) }));
-  fixture.pending[0]!.finish(); await settled();
-  expect(fixture.writes.length - count).toBe(1);
-  expect(fixture.writes.reduce((n, put) => n + put.bytes, 0) - bytes).toBeLessThan(1024);
+  // the server's record of it, reworded in another window, is the server's to keep: this save writes nothing for it
+  setState({ replies: repliesOf([{ id: "other", threadId: "t", text: "edited queue", at: 1, held: true, waitFor: "reply" }]) });
+  await settled();
+  expect(fixture.pending).toHaveLength(0);
+  expect(fixture.writes.length - count).toBe(0);
   stop(); reset(); setState({ threadId: "t", view: "thread" });
   const resume = await watchDraft("legacy");
-  // a change to the shown row is the server's to keep; what is owed is still the saved row, with its image
-  expect(observed()).toMatchObject({ draft: "new", draftImages: [image], editingQueued: "q", queued: [expect.objectContaining({ text: "queued", images: [image], held: true })] });
+  // what is owed is still the saved row, with its image
+  expect(observed()).toMatchObject({ draft: "new", draftImages: [image], editingQueued: "q" });
+  expect(oldQueueOwed()).toEqual([expect.objectContaining({ text: "queued", images: [image], held: true })]);
   resume();
 });
 
@@ -261,12 +267,12 @@ it.each(["replaced", "cleared"])("CI-03: completed %s attachments in another wat
   const stopA = await a.watchDraft("shared");
   const stopB = await b.watchDraft("shared");
   try {
-    a.replaceDraft(null, { text: "A words", images: ["image-A"] }); a.setState({ queued: [{ id: "a", threadId: "t", text: "A queue", images: ["queued-A"], at: 1, waitFor: "reply" }] });
+    a.replaceDraft(null, { text: "A words", images: ["image-A"] }); a.setState({ replies: repliesOf([{ id: "a", threadId: "t", text: "A queue", images: ["queued-A"], at: 1, waitFor: "reply" }]) });
     while (fixture.pending.length) { fixture.pending[0]!.finish(); await settled(); }
-    b.replaceDraft(null, { text: "B words", images: ["image-B"] }); b.setState({ queued: [{ id: "b", threadId: "t", text: "B queue", images: ["queued-B"], at: 2, waitFor: "reply" }] });
+    b.replaceDraft(null, { text: "B words", images: ["image-B"] }); b.setState({ replies: repliesOf([{ id: "b", threadId: "t", text: "B queue", images: ["queued-B"], at: 2, waitFor: "reply" }]) });
     while (fixture.pending.length) { fixture.pending[0]!.finish(); await settled(); }
     if (otherEdit === "cleared") {
-      b.clearDraft(null); b.setState({ queued: [] });
+      b.clearDraft(null); b.setState({ replies: new Map() });
       while (fixture.pending.length) { fixture.pending[0]!.finish(); await settled(); }
     }
     a.editDraft("A final words");
@@ -316,7 +322,7 @@ it("attached files reload in the open draft, another chat's draft and a queued m
   const resume = await b.watchDraft("files");
   expect(b.getDraft("A").files).toEqual([file(1)]);
   expect(b.getDraft("B").files).toEqual([file(2)]);
-  expect(b.getState().queued.map(q => q.files)).toEqual([[file(3)]]);
+  expect((await import("./chat.ts")).oldQueueOwed().map(q => q.files)).toEqual([[file(3)]]);
   resume();
 });
 
@@ -336,8 +342,8 @@ it("a browser whose queue is the server's saves none of it, and reads an older c
   fixture.records.set(JSON.stringify("moved"), { draft: "", images: [], queued: [{ ...waiting, id: "stale" }], editing: null });
   const a = await freshWatcher(); a.setState({ threadId: "A" });
   const stop = await a.watchDraft("moved");
-  expect(a.getState().queued, "a copy of the server's queue, some of it sent since").toEqual([]);
-  a.setState({ queued: [waiting] }); a.editDraft("words");
+  expect((await import("./chat.ts")).oldQueueOwed(), "a copy of the server's queue, some of it sent since").toEqual([]);
+  a.setState({ replies: repliesOf([waiting]) }); a.editDraft("words");
   while (fixture.pending.length) { fixture.pending[0]!.finish(); await settled(); }
   stop();
   expect(fixture.records.get(JSON.stringify("moved"))).toMatchObject({ queued: [] });
@@ -349,7 +355,7 @@ it("a saved queue the server has yet to take is read back even once the browser 
   fixture.records.set(JSON.stringify("owed"), { draft: "", images: [], queued: [waiting], owed: true, editing: null });
   const a = await freshWatcher(); a.setState({ threadId: "A" });
   const stop = await a.watchDraft("owed");
-  expect(a.getState().queued).toMatchObject([{ id: "w", held: true }]);
+  expect((await import("./chat.ts")).oldQueueOwed()).toMatchObject([{ id: "w", held: true }]);
   // no connection yet: still owed, so still saved
   a.editDraft("words");
   while (fixture.pending.length) { fixture.pending[0]!.finish(); await settled(); }

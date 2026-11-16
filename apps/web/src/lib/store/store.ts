@@ -4,6 +4,7 @@
 import { useSyncExternalStore } from "react";
 import { readLoadTimes } from "./load-times.ts";
 import type {
+  Reply,
   ReplyRecord,
   BlockingTurn,
   CatalogEntry,
@@ -56,14 +57,16 @@ export interface LiveTurn {
   /** The client's own count of turns started this session; a response or event for an older one never touches this turn. */
   readonly gen: number;
   readonly threadId: string;
+  // why: null for a send of this window's that the server has not named yet
   readonly turnId: string | null;
   /** The saved user message, once the turn's start came: reconnect drops this turn when the server saved its reply. */
   readonly userMessageId?: string;
   readonly model: string;
   readonly startedAt: number;
   /**
-   * The server's reply record: the live line's stage and seconds come from it and
-   * nothing else, a Stop included (stage "stopping", `stoppedAt`). Absent until its first push.
+   * The times of the reply's record as the server last sent it: the live line's stage and seconds
+   * come from them and nothing else, a Stop included (stage "stopping", `stoppedAt`). They stay
+   * with a reply that ended here, for its stopped line. Absent until the record's first change.
    */
   readonly reply?: ReplyRecord;
   /** This client's time when `reply` arrived: its work grows from then while it thinks or runs a call. */
@@ -77,17 +80,12 @@ export interface LiveTurn {
   readonly pendingFiles?: readonly AttachedFile[];
   /** Set once the turn ended without a saved message, or the server's record says a Stop was taken (`secs` from that record). */
   readonly end?: { readonly kind: "stopped"; readonly secs: number } | { readonly kind: "error"; readonly code: string; readonly message: string };
-  /**
-   * Known only from turns.active, with no event of its own yet: it shows as
-   * running in the sidebar and nothing more. The server lists a turn before it
-   * saves the question and may drop it with no event, so nothing waits for it.
-   */
-  readonly listed?: true;
   /** An Image turn: the words went to the image model and the reply is its picture card; nothing of a chat reply shows. */
   readonly image?: true;
 }
 
-/** A message typed during setup, the first download or a reply being written; it sends when that is over. */
+export type WaitingReply = Extract<Reply, { readonly stage: "queued" | "held" | "next" | "editing" }>;
+
 export interface Queued {
   readonly messageId?: string;
   readonly images?: readonly string[];
@@ -163,7 +161,12 @@ export interface State {
   readonly messages: Readonly<Record<string, readonly Message[]>>;
   /** Each chat's reply, by thread id: being written, or ended here and still shown. The open chat shows `turns[threadId]`. */
   readonly turns: Readonly<Record<string, LiveTurn>>;
-  readonly queued: readonly Queued[];
+  /**
+   * Every message waiting and every reply on its way, by its id, each as the server last sent it
+   * (reply.changed, reply.list). Nothing else writes it: the queue's rows are the waiting records
+   * (`waitingReplies`), in the order the server first named them.
+   */
+  readonly replies: ReadonlyMap<string, Reply>;
   /** The queued message being changed in the composer; the next Send updates it instead of sending. */
   readonly editingQueued: string | null;
   /** The warning before a send stops another chat's reply. */
@@ -295,7 +298,7 @@ const initial: State = {
   threads: [],
   messages: {},
   turns: {},
-  queued: [],
+  replies: new Map(),
   editingQueued: null,
   stopAsk: null,
   view: "new",
@@ -403,11 +406,29 @@ export function runningTurn(s: State, threadId: string | null): LiveTurn | undef
   return turn?.end === undefined ? turn : undefined;
 }
 
-/** This chat's turn as its screen, Stop and Retry see it: one known only from turns.active is not there yet. */
 export function turnOf(s: State, threadId: string | null): LiveTurn | undefined {
-  const turn = threadId === null ? undefined : s.turns[threadId];
-  return turn?.listed === true ? undefined : turn;
+  return threadId === null ? undefined : s.turns[threadId];
 }
+
+const WAITING: ReadonlySet<Reply["stage"]> = new Set(["queued", "held", "next", "editing"]);
+export const isWaiting = (r: Reply): r is WaitingReply => WAITING.has(r.stage);
+
+let waitingFrom: State["replies"] | undefined;
+let waitingRows: readonly WaitingReply[] = [];
+
+// why: one going next shows first, as it goes first; the rest keep the server's order
+export function waitingReplies(s: State): readonly WaitingReply[] {
+  if (waitingFrom === s.replies) return waitingRows;
+  const rows = [...s.replies.values()].filter(isWaiting);
+  waitingFrom = s.replies;
+  waitingRows = [...rows.filter((r) => r.stage === "next"), ...rows.filter((r) => r.stage !== "next")];
+  return waitingRows;
+}
+
+export const onHold = (r: WaitingReply): boolean => r.stage === "held" || (r.stage === "editing" && r.back.stage === "held");
+
+// why: behind setup or the first download the whole app waits, so there is no Send now
+export const behindSetup = (r: WaitingReply): boolean => r.stage === "queued" && (r.waitFor?.what === "setup" || r.waitFor?.what === "download");
 
 /** True while a reply is being written in the chat on screen: Stop and queueing belong to that chat, not to one running behind it. */
 export function streamingHere(s: State): boolean {

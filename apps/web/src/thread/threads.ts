@@ -436,7 +436,6 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     // the answer is the deletion's number: a list read before it cannot bring the row back
     if (!await threadAction("delete", threadId, () => call("threads.delete", { threadId }, { onResult: (_, sync) => { numbers.row(threadId, numbers.of(sync, "threads")); } }))) return;
     forget(threadId);
-    applyServerEvent((s) => ({ queued: s.queued.filter((q) => q.threadId !== threadId) }));
     if (getState().threadId === threadId) {
       const notice = getState().notice;
       newThread();

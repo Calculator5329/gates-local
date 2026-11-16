@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ImageChoice, ImagePreset, ImagePresets, Message, Settings } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { type Browser, installBrowser, tick, until } from "../../test/harness.ts";
+import { queuedOf } from "../../test/queue.ts";
 
 type Session = typeof import("../lib/session/index.ts");
 type Store = typeof import("../lib/store/store.ts");
@@ -188,7 +189,8 @@ it("a message typed with Image on while a reply runs waits, then goes to the ima
   store.setState({ image: true });
   type("now a picture");
   await session.send("now a picture");
-  expect(st().queued).toMatchObject([{ text: "now a picture", draw: { preset: PIXEL.id } }]);
+  await until(() => queuedOf(st()).length === 1, 2000, "the waiting message");
+  expect(queuedOf(st())).toMatchObject([{ text: "now a picture", draw: { preset: PIXEL.id } }]);
   // Image turned off before it goes: it still goes as it was typed
   store.setState({ image: false });
   b.server.push("chat.event", { turnId: "turn-A-1", threadId: "A", event: { type: "done", message: { id: "a-A-1", threadId: "A", role: "assistant", content: "answer", createdAt: 2 }, stopReason: "stop" } });

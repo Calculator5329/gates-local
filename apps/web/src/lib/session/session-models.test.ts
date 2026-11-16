@@ -35,7 +35,7 @@ const defaults: Record<string, unknown> = {
   "threads.list": [{ id: "A", title: "A", createdAt: 1, updatedAt: 1 }],
   "threads.get": { messages: [] },
   "turns.blocking": [],
-  "turns.active": [],
+  "reply.list": [],
   "models.load": { model: QWEN, numCtx: 16384, state: "ready" },
   "settings.get": { theme: "system", defaultNumCtx: 16384, thinking: true, imageGen: false },
 };
@@ -685,8 +685,10 @@ describe("the phone's image pick, which cannot write Settings (IR3-62, IR3-63)",
     sent.resolve({ turnId });
     await settled();
     expect(store.getState().imagePick, "the pick stays until the server saved the send that carries it").toEqual(moss);
-    // the turn's start (chat row 32): the thread now keeps the pick
-    push("chat.event", { turnId, threadId: methodSamples["threads.create"].result.id, event: { type: "start", model: moss.preset, userMessage: { ...userMessage!, threadId: methodSamples["threads.create"].result.id }, image: true } });
+    // the turn's start, on its record with the saved question (chat row 32): the thread now keeps the pick
+    const threadId = methodSamples["threads.create"].result.id;
+    const question = { ...userMessage!, threadId };
+    push("reply.changed", { kind: "is", reply: { id: turnId, threadId, rev: 2, stage: "drawing", questionId: question.id, preset: moss.preset, startedAt: 1, jobs: [] }, saved: [question] });
     await vi.waitFor(() => expect(store.getState().imagePick).toBeUndefined());
     session.newThread();
     expect(store.getState().imagePick).toBeUndefined();

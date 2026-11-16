@@ -525,7 +525,7 @@ describe("the chat that got stopped", () => {
   describe("Retry", () => {
     const unfinished: Payload<"chat.event">["event"] = { type: "error", code: "cancelled", message: "stopped", partial: { ...asstMsg("p8", "A", "so far"), interrupted: true }, ended: { reason: "stopped", at: Date.now() } };
 
-    it("of an unfinished reply names the question, and the old rows go once the server answers", async () => {
+    it("of an unfinished reply names the question, and the old rows go once the server has saved the new one", async () => {
       const question = await ask(unfinished);
       const held = b.server.hold("chat.send");
       session.retry();
@@ -533,7 +533,7 @@ describe("the chat that got stopped", () => {
       expect(h.params).toMatchObject({ retryOf: question, content: "hello A" });
       expect((st().messages["A"] ?? []).map((m) => m.id)).toEqual([question, "p8"]);
       h.respond({ turnId: "turn-retry", userMessage: userMsg("u-again", "A", "hello A") });
-      await until(() => live()?.turnId === "turn-retry", 2000, "the retry");
+      await until(() => live()?.turnId === "turn-retry" && live()?.userMessageId === "u-again", 2000, "the retry, its question saved");
       expect((st().messages["A"] ?? []).map((m) => m.id)).toEqual(["u-again"]);
     });
 
@@ -798,9 +798,13 @@ describe("messages typed while a reply is being written", () => {
     const turn = await answering("A");
     await session.send("one");
     await session.send("two");
+    await until(() => st().queued.length === 2, 2000, "both waiting");
+    // the turn of a message that waited is named by its record, from the tray to the saved reply
+    const one = st().queued.find((q) => q.text === "one")?.id;
+    expect(one).toBeDefined();
     chat(turn, "A", { type: "done", message: asstMsg("a1", "A"), stopReason: "stop" });
     await until(() => sends().length === 2, 2000, "the first");
-    await until(() => live()?.turnId === "turn-A-2" && live()?.pendingUser === null, 2000, "turn 2");
+    await until(() => live()?.turnId === one && live()?.pendingUser === null, 2000, "turn 2");
     expect(sends().map((s) => s.content)).toEqual(["hello A", "one"]);
     expect(st().queued.map((q) => q.text)).toEqual(["two"]);
     chat("turn-A-2", "A", { type: "done", message: asstMsg("a2", "A"), stopReason: "stop" });
@@ -1178,8 +1182,8 @@ describe("a message the person typed is never lost", () => {
       h.fail("wont-fit", "no");
       await until(() => st().queued.length === 1, 2000, "the message back");
       expect(st().queued).toMatchObject([{ threadId: "A", text: "next", held: true }]);
-      expect(live()?.reply?.stage).toBe("ended");
-      expect(live()?.pendingUser).toBeNull();
+      // its question was never saved: the row on hold says it, and no stopped line stands beside it
+      expect(live()).toBeNull();
     });
 
     it("while another chat owns the live slot is back in its own chat's queue, and the notice says where (CFS-03)", async () => {
@@ -1274,7 +1278,9 @@ describe("a message the person typed is never lost", () => {
       b.server.answer("turns.blocking", () => BLOCKING);
       session.sendQueuedNow(ids[0] ?? "");
       await until(() => st().stopAsk !== null, 2000, "the warning");
-      store.setState({ queued: [] });
+      // another window removed it
+      b.server.queue.remove(ids[0] ?? "");
+      await until(() => st().queued.length === 0, 2000, "the row gone");
       session.confirmStopAsk(false);
       await tick();
       expect(sends()).toHaveLength(1);

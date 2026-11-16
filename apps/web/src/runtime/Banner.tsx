@@ -7,7 +7,7 @@ import { rowOf } from "../fit/fit-table.ts";
 import { Icon } from "../lib/ui/icons.tsx";
 import { canChat, chatBlockedReason, modelNameKey } from "../models/pick.ts";
 import { firstPull, pull, recheckRuntime } from "../lib/session/index.ts";
-import { NA, type State, useStore } from "../lib/store/store.ts";
+import { NA, type State, useStore, waitingReplies } from "../lib/store/store.ts";
 import { booting, FAIL_FALLBACK, failWords, INSTALL_TITLE, type InstallSize, installStep, ownCopyNote, portOf, rtOf, searching, STALLED, underTitle, unread, useInstallStall } from "./words.tsx";
 
 function Shell({ icon, role, title, children }: { icon: ReactNode; role: "status" | "alert"; title: string; children: ReactNode }) {
@@ -47,7 +47,7 @@ export function firstModelOffer(s: State): CatalogEntry | undefined {
 }
 
 /** A message in the open chat that waits for a chat model (a picture does not). */
-const waitsHere = (s: State): boolean => s.threadId !== null && s.queued.some((q) => q.threadId === s.threadId && q.draw === undefined);
+const waitsHere = (s: State): boolean => s.threadId !== null && waitingReplies(s).some((q) => q.threadId === s.threadId && q.draw === undefined);
 
 /**
  * Ollama is ready with no chat model: the first window's offer, in its words and sizes, wherever

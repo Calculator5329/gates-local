@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { installBrowser, tick, until } from "../../../test/harness.ts";
+import { queuedOf } from "../../../test/queue.ts";
 
 let browser: ReturnType<typeof installBrowser>;
 let store: typeof import("./store.ts");
@@ -40,7 +41,7 @@ it.each([false, true])("New thread pressed while the first chat is being created
   request.respond({ id: "N", title: "only once", createdAt: 1, updatedAt: 1 });
   await sent;
   expect(store.getState().threadId).toBe("N");
-  if (queued) expect(store.getState().queued.map(q => q.text)).toEqual(["only once"]);
+  if (queued) expect(queuedOf(store.getState()).map(q => q.text)).toEqual(["only once"]);
   expect(drafts.getDraft("N").text).toBe("");
   expect(drafts.getDraft(null).text).toBe("");
 });

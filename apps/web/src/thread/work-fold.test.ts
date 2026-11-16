@@ -120,7 +120,8 @@ describe("the live line says the server's record (decisions 1, 2, 33)", () => {
   });
 
   it("a window that opened mid-reply has the same number as the one that sent it", async () => {
-    const listed: LiveTurn = { ...sent(), startedAt: 20_000, listed: true };
+    // its turn is made from the reply's record, read at the window's own clock
+    const listed: LiveTurn = { ...sent(), startedAt: 20_000 };
     const opened = play(listed, [push(20_000, { stage: "tool", readyAt: 2000, workMs: 18_000 }), [20_010, { type: "start", model: "m", userMessage: user, replayed: true }], [20_010, { type: "thinking", text: "eighteen seconds of thought" }], [20_010, { type: "tool", step: step("a", "running") }]]);
     expect(says(await live(25_000, opened))).toBe("23 s Searching your library");
   });

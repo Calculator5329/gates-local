@@ -13,7 +13,9 @@ import {
   ChatEvent,
   ReplyRecord,
   ReplyAnswer,
+  ReplyChange,
   ReplyId,
+  ReplyListed,
   StopConsent,
   type FitOffer,
   FitTable,
@@ -402,6 +404,7 @@ export const methods = {
    * already ended the answer is "gone", and what waits behind it holds all the same.
    */
   "reply.stop": { params: S.Struct({ id: ReplyId }), result: ReplyAnswer, phone: "allow" },
+  "reply.list": { params: NoParams, result: S.Array(ReplyListed), phone: "allow" },
   "settings.get": { params: NoParams, result: Settings, phone: "allow", sync: SETTINGS },
   "settings.update": { params: S.Struct({ ...SettingsPatch.fields, voiceChange: S.optional(S.String.check(S.isMaxLength(128))) }), result: Settings, phone: "deny", sync: SETTINGS },
   "settings.model.update": { params: S.Struct({ model: S.String.check(S.isMinLength(1)), patch: S.NullOr(ModelSettingsPatch) }), result: Settings, phone: "deny", sync: SETTINGS },
@@ -506,7 +509,8 @@ export const methods = {
 /** Server-to-client channels and their payload Schemas. */
 export const pushes = {
   "update.changed": { payload: UpdateStatus, sync: UPDATE },
-  "chat.event": { payload: S.Struct({ turnId: S.String, threadId: S.String, event: ChatEvent }) },
+  "chat.event": { payload: S.Struct({ turnId: S.String, threadId: S.String, replyId: S.optional(ReplyId), event: ChatEvent }) },
+  "reply.changed": { payload: ReplyChange },
   "runtime.changed": { payload: RuntimeStatus, sync: RUNTIME },
   "models.changed": { payload: S.Array(ModelInfo), sync: MODELS },
   /** The chat list in use changed: a newer signed list arrived with the update check. The catalog changes with it. */
@@ -554,7 +558,7 @@ export type MethodName = keyof Methods;
 export type Params<M extends MethodName> = Methods[M]["params"]["Type"];
 export type ResultOf<M extends MethodName> = Methods[M]["result"]["Type"];
 /** The calls that name one reply and are answered with what happened to it (ReplyAnswer). */
-export type ReplyCall = { [M in MethodName]: M extends `reply.${string}` ? M : never }[MethodName];
+export type ReplyCall = { [M in MethodName]: M extends `reply.${string}` ? (ResultOf<M> extends ReplyAnswer ? M : never) : never }[MethodName];
 
 export type Pushes = typeof pushes;
 export type Channel = keyof Pushes;

@@ -8,10 +8,10 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import * as Result from "effect/Result";
 import * as S from "effect/Schema";
-import { QueuedMessage, type Message, type Params, type Reply, type ReplyAnswer, type ReplyRecord, type ReplyStage, type StopConsent, type WaitFor } from "@gates-local/contracts";
+import { QueuedMessage, type Message, type Params, type Reply, type ReplyAnswer, type ReplyChange, type ReplyListed, type ReplyRecord, type ReplyStage, type StopConsent, type WaitFor } from "@gates-local/contracts";
 import {
-  SOUND, fromQueued, heardAs, isAsked, isInFlight, isLive, isWaiting, move, shownStage, stillStarting, toQueued,
-  type Ahead, type Back, type Drawing, type End, type Heard, type InFlight, type Input, type Live, type Moved, type Queued, type Rec, type Refusal, type Rules, type Stopping, type Waiting, type Words,
+  SOUND, fromQueued, heardAs, isAsked, isEnded, isInFlight, isLive, isWaiting, move, shownStage, stillStarting, toQueued,
+  type Ahead, type Back, type Drawing, type End, type Ended, type Heard, type InFlight, type Input, type Live, type Moved, type Queued, type Rec, type Refusal, type Rules, type Stopping, type Waiting, type Words,
 } from "./reply.ts";
 
 export type Entry = QueuedMessage;
@@ -43,6 +43,7 @@ export interface RepliesDeps {
   readonly log: (line: string) => void;
   /** The list every window shows, after it changed. */
   readonly changed: (list: readonly Entry[]) => void;
+  readonly told: (change: ReplyChange) => void;
   /** The saved message with this id. */
   readonly saved: (messageId: string) => Message | undefined;
   /** This chat's delete is running. */
@@ -58,8 +59,8 @@ export interface RepliesDeps {
 }
 
 export interface Replies {
-  /** The waiting messages, as every window is sent them. */
   list(): readonly Entry[];
+  records(): readonly ReplyListed[];
   /** A window's message, to wait its turn. "removed" for an id removed before, which never comes back. */
   add(entry: Entry): "ok" | "removed";
   /** A message a window sent itself (chat.send), taken at once for `turnId`: the window keeps its words. */
@@ -74,7 +75,7 @@ export interface Replies {
   now(params: Params<"reply.now">): ReplyAnswer;
   hold(params: Params<"reply.hold">): ReplyAnswer;
   /** `id`: a message's, or a turn's. */
-  stop(params: Params<"reply.stop">): ReplyAnswer;
+  stop(params: Params<"reply.stop">, at?: number): ReplyAnswer;
 
   /** The message to start now, if any. */
   pick(ready: Ready): Picked | undefined;
@@ -100,8 +101,9 @@ export interface Replies {
   heard(turnId: string, heard: Heard): ReplyStage | undefined;
   /** The reply failed and runs once more. The stage its record now shows. */
   retrying(turnId: string): ReplyStage | undefined;
-  /** The reply ended. Told to the windows at `notify`, after its last event. */
-  ended(turnId: string, end: End, at: number): void;
+  /** The reply ended. `saved`: the rows its end wrote to the chat. Told to the windows at `notify`, after its last event. */
+  ended(turnId: string, end: End, at: number, saved?: readonly Message[]): void;
+  clocked(turnId: string): void;
   /** The work of this turn has given back everything it took. */
   left(turnId: string): void;
   /** When the work of this turn was cut by a Stop, if it was. */
@@ -169,7 +171,24 @@ function read(file: string, log: (line: string) => void): { entries: Entry[]; re
   return { entries, removed: removed.slice(-REMOVED_KEPT) };
 }
 
-export function createReplies({ file, log, changed, saved, deleting, closing, cut, clock, rules = SOUND }: RepliesDeps): Replies {
+const NO_ROWS: readonly Message[] = [];
+
+// why: a waiting message found asked has nothing to show, so its end makes no record
+function over(r: Ended, rows: readonly Message[]): Reply | undefined {
+  const common = { id: r.id, threadId: r.threadId, rev: r.rev, at: r.at };
+  if (r.stage === "failed") return { ...common, stage: "failed", code: r.code, message: r.message, ...(r.questionId === undefined ? {} : { questionId: r.questionId }) };
+  if (r.questionId === undefined) return undefined;
+  if (r.stage === "done") return r.replyId === undefined ? undefined : { ...common, stage: "done", questionId: r.questionId, replyId: r.replyId };
+  const words = rows.find((m) => m.role === "assistant");
+  return { ...common, stage: "stopped", questionId: r.questionId, by: r.by, ...(words === undefined ? {} : { replyId: words.id }) };
+}
+
+// why: the older chat.send keeps its own words, so no window lists its record
+const keptBySender = (r: Rec): boolean => isWaiting(r) && r.direct;
+
+const revOf = (c: ReplyChange): number => (c.kind === "is" ? c.reply.rev : c.rev);
+
+export function createReplies({ file, log, changed, told, saved, deleting, closing, cut, clock, rules = SOUND }: RepliesDeps): Replies {
   /** Every record by its id, oldest first: a record keeps its place however it changes. */
   const recs = new Map<string, Rec>();
   /** The record each turn was started for: a call may name a message by its turn. */
@@ -186,6 +205,9 @@ export function createReplies({ file, log, changed, saved, deleting, closing, cu
   let counter = 0;
   /** The list changed since the windows last heard. */
   let dirty = false;
+  const pending = new Map<string, { readonly last: Rec; readonly saved: readonly Message[] }>();
+  // why: a clock that a cut stops is told once every cut of the step is done
+  let cutting = false;
 
   const forget = (id: string) => {
     recs.delete(id);
@@ -206,6 +228,7 @@ export function createReplies({ file, log, changed, saved, deleting, closing, cu
     if (next === undefined || next === prev) return prev;
     const rec: Rec = { ...next, rev: ++counter };
     recs.set(rec.id, rec);
+    pending.set(rec.id, { last: rec, saved: pending.get(rec.id)?.saved ?? NO_ROWS });
     // a start that is over, however it ended, is shown as the record says
     const taken = untold.get(rec.id);
     if (taken !== undefined && !(rec.stage === "starting" && rec.turnId === taken.turnId)) untold.delete(rec.id);
@@ -272,8 +295,11 @@ export function createReplies({ file, log, changed, saved, deleting, closing, cu
   };
   let pushed = "";
   let written: string | undefined;
-  /** The file and the windows, when the list is not what they last had. */
   function flush(): void {
+    keep();
+    tellWindows();
+  }
+  function keep(): void {
     if (!dirty) return;
     dirty = false;
     const rows = list();
@@ -301,10 +327,18 @@ export function createReplies({ file, log, changed, saved, deleting, closing, cu
    */
   function settle(quiet = false): void {
     if (!quiet) flush();
-    for (let c = toCut.shift(); c !== undefined; c = toCut.shift()) {
-      if (!cuts.has(c.turnId)) cuts.set(c.turnId, c.at);
-      cut(c.turnId, c.at);
+    if (toCut.length === 0) return;
+    cutting = true;
+    try {
+      for (let c = toCut.shift(); c !== undefined; c = toCut.shift()) {
+        if (!cuts.has(c.turnId)) cuts.set(c.turnId, c.at);
+        cut(c.turnId, c.at);
+      }
+    } finally {
+      cutting = false;
     }
+    // why: the cuts stopped clocks, and the windows hear the times
+    if (!quiet) flush();
   }
 
   function waitFor(r: Queued): WaitFor | undefined {
@@ -320,14 +354,14 @@ export function createReplies({ file, log, changed, saved, deleting, closing, cu
     if (c === undefined) return undefined;
     const common = { id, threadId: r.threadId, rev: r.rev };
     // an Image turn runs no chat model: its pictures are the image module's jobs, which it lists itself
-    if (r.stage === "drawing" || (r.stage === "stopping" && r.drawing)) return { ...common, stage: "drawing", questionId: r.question.id, startedAt: c.startedAt, jobs: [] };
+    if (r.stage === "drawing" || (r.stage === "stopping" && r.drawing)) return { ...common, stage: "drawing", questionId: r.question.id, preset: r.model, startedAt: c.startedAt, jobs: [], ...(r.stage === "stopping" ? { stoppedAt: r.stoppedAt } : {}) };
     const times = {
       questionId: r.question.id, model: r.model, startedAt: c.startedAt, workMs: c.workMs, toolMs: c.toolMs, try: r.try, spans: c.spans, callsAt: c.callsAt,
       ...(c.readyAt === undefined ? {} : { readyAt: c.readyAt }),
       ...(c.firstTokenAt === undefined ? {} : { firstTokenAt: c.firstTokenAt }),
     };
     if (r.stage === "stopping") return { ...common, ...times, stage: "stopping", stoppedAt: r.stoppedAt };
-    return { ...common, ...times, stage: r.stage };
+    return { ...common, ...times, stage: r.stage, ...(r.stage === "thinking" && !r.heard ? { silent: true as const } : {}) };
   }
 
   /** The record as the reply calls answer with it; none for one that has ended. */
@@ -335,13 +369,38 @@ export function createReplies({ file, log, changed, saved, deleting, closing, cu
     if (isAsked(r)) return flying(r, askedId);
     if (!(isWaiting(r) || r.stage === "starting")) return undefined;
     const words = { id: r.id, threadId: r.threadId, rev: r.rev, ...r.words };
-    if (r.stage === "starting") return { ...words, stage: "starting", attempt: r.attempt, startedAt: r.startedAt };
+    if (r.stage === "starting") return { ...words, stage: "starting", attempt: r.attempt, startedAt: r.startedAt, ...(r.loading ? { loading: true as const } : {}) };
     if (r.stage === "editing") return { ...words, stage: "editing", by: String(r.by), back: wireBack(r.back) };
     if (r.stage === "held") return { ...words, stage: "held", held: r.why };
     if (r.stage === "next") return { ...words, stage: "next", ...(r.consent === undefined ? {} : { consent: r.consent }) };
     const wait = waitFor(r);
     return { ...words, stage: "queued", ...(wait === undefined ? {} : { waitFor: wait }) };
   }
+
+  function changeOf(r: Rec, rows: readonly Message[]): ReplyChange | undefined {
+    const left = (why: "removed" | "chat-deleted" | "settled"): ReplyChange => ({ kind: "left", id: r.id, threadId: r.threadId, rev: r.rev, why });
+    if (r.stage === "removed") return left(r.why);
+    if (keptBySender(r)) return left("settled");
+    const reply = isEnded(r) ? over(r, rows) : wire(r, r.id);
+    if (reply === undefined) return isEnded(r) ? left("settled") : undefined;
+    return { kind: "is", reply, ...(rows.length === 0 ? {} : { saved: rows }) };
+  }
+
+  function tellWindows(): void {
+    if (pending.size === 0) return;
+    const changes: ReplyChange[] = [];
+    for (const [id, p] of pending) {
+      if (untold.has(id)) continue;
+      pending.delete(id);
+      const change = changeOf(recs.get(id) ?? p.last, p.saved);
+      if (change !== undefined) changes.push(change);
+    }
+    for (const c of changes.toSorted((a, b) => revOf(a) - revOf(b))) told(c);
+  }
+  const savedWith = (id: string, rows: readonly Message[]) => {
+    const p = pending.get(id);
+    if (p !== undefined && rows.length > 0) pending.set(id, { last: p.last, saved: [...p.saved, ...rows] });
+  };
 
   const gone = (why: "sent" | "removed" | "chat-deleted" | "unknown", questionId?: string): ReplyAnswer => {
     const question = questionId === undefined ? undefined : saved(questionId);
@@ -388,9 +447,20 @@ export function createReplies({ file, log, changed, saved, deleting, closing, cu
     dirty = asked;
     pushed = JSON.stringify(list());
   }
+  // why: no window has connected yet: each reads the records with reply.list
+  pending.clear();
 
   return {
     list,
+    records() {
+      const rows: ReplyListed[] = [];
+      for (const r of recs.values()) {
+        if (!(isWaiting(r) || isInFlight(r)) || keptBySender(r)) continue;
+        const reply = wire(r, r.id);
+        if (reply !== undefined) rows.push({ reply });
+      }
+      return rows;
+    },
     add(entry) {
       const known = recs.get(entry.id) ?? [...recs.values()].find((r) => (isWaiting(r) || r.stage === "starting") && r.words.messageId === entry.messageId);
       const m = apply(known, {
@@ -444,7 +514,7 @@ export function createReplies({ file, log, changed, saved, deleting, closing, cu
       return called(id, { call: "now", ...(consent === undefined ? {} : { consent }), stops });
     },
     hold: ({ id }) => called(id, { call: "hold" }),
-    stop({ id }) {
+    stop({ id }, at = Date.now()) {
       // by its own id, or by a turn taken for it
       const own = recs.get(id);
       const rec = own ?? ofTurn(id);
@@ -455,7 +525,7 @@ export function createReplies({ file, log, changed, saved, deleting, closing, cu
         settle();
         return gone("sent");
       }
-      const m = apply(rec, { call: "stop", at: Date.now() });
+      const m = apply(rec, { call: "stop", at });
       settle();
       return answered(m, id);
     },
@@ -505,8 +575,11 @@ export function createReplies({ file, log, changed, saved, deleting, closing, cu
       const rec = ofTurn(turnId);
       const next = apply(rec, { event: "start", turnId, attempt, question, model, cold, drawing }).next;
       const ok = next !== rec && isAsked(next);
-      // a window's own copy of the same message has been asked too
-      if (ok) for (const r of waitingWith(question.id, next.id)) apply(r, { event: "saved" });
+      if (ok) {
+        savedWith(next.id, [question]);
+        // why: a window's own copy of the same message has been asked too
+        for (const r of waitingWith(question.id, next.id)) apply(r, { event: "saved" });
+      }
       settle(true);
       return ok;
     },
@@ -526,9 +599,21 @@ export function createReplies({ file, log, changed, saved, deleting, closing, cu
       settle();
       return isLive(next) && next.turnId === turnId ? shownStage(next) : undefined;
     },
-    ended(turnId, end, at) {
-      apply(ofTurn(turnId), { event: "end", turnId, at, end });
+    ended(turnId, end, at, rows = NO_ROWS) {
+      const rec = ofTurn(turnId);
+      const next = apply(rec, { event: "end", turnId, at, end }).next;
+      if (next !== undefined && next !== rec) savedWith(next.id, rows);
       settle(true);
+    },
+    clocked(turnId) {
+      const rec = ofTurn(turnId);
+      // why: numbered again, so no window keeps the times it had for a newer change
+      if (isAsked(rec) && rec.turnId === turnId && !pending.has(rec.id)) {
+        const again: Rec = { ...rec, rev: ++counter };
+        recs.set(rec.id, again);
+        pending.set(rec.id, { last: again, saved: NO_ROWS });
+      }
+      if (!cutting) flush();
     },
     left(turnId) {
       const rec = ofTurn(turnId);

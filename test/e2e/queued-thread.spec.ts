@@ -73,3 +73,60 @@ test("a new thread's send that waits over 30 s behind another reply stays sent, 
   await expect(page.locator(".c-note")).toHaveCount(0);
   await expect(page.locator(".turn.u")).toHaveCount(1);
 });
+
+const THINKER = "qwen3.5:9b";
+/** The running reply's live line. */
+const live = (page: Page) => page.locator(".turn.a").last().locator(".think.run");
+/** The whole seconds on the live line. */
+const liveSecs = async (page: Page) => Number.parseInt(await live(page).locator(".lv-t").innerText(), 10);
+/** What a window says about the chat: the question asked, the reply's stage, and each waiting row with its state. */
+const said = async (page: Page) => ({
+  asked: await page.locator(".turn.u .bubble").allInnerTexts(),
+  stage: (await live(page).locator(".lv-w").innerText()).trim(),
+  waiting: await page.locator(".qt-r").evaluateAll((trays) => trays.map((r) => [r.querySelector(".qt-t")?.textContent ?? "", r.querySelector(".qt-s")?.textContent ?? ""])),
+});
+const SAID = { asked: ["alpha"], stage: "Thinking", waiting: [["beta", ""], ["gamma", "On hold"]] };
+
+// Guards the reload rule: a reload and a second window read the reply and the waiting messages from the server's records, with no new word needed.
+test("a thinking reply and two waiting messages, one on hold, read the same after a reload and in a second window", async ({ page, open, context }) => {
+  test.setTimeout(90_000);
+  await open(); await waitReady(page);
+  await pick(page, THINKER);
+  // the model stops inside its thinking and stays there: nothing new arrives until the release below
+  await configure({ holdThinkingAfterTokens: 6 });
+  await sendMessage(page, "alpha");
+  await expect(live(page).locator(".lv-w")).toHaveText("Thinking");
+  await sendMessage(page, "beta");
+  await expect(page.locator(".qt-r")).toHaveCount(1);
+  await sendMessage(page, "gamma");
+  await expect(page.locator(".qt-r")).toHaveCount(2);
+  const server = new URL(page.url()).searchParams.get("server");
+  if (!server) throw new Error("No test server");
+  const client = createClient(new WebSocket(server));
+  const gamma = (await client.call("queue.list", {})).find((q) => q.text === "gamma");
+  if (gamma === undefined) throw new Error("gamma is not waiting on the server");
+  expect((await client.call("reply.hold", { id: gamma.id })).answer).toBe("done");
+  await expect.poll(() => said(page)).toEqual(SAID);
+  // a clock that has run a while, so one that starts again from nothing after the reload is seen
+  await expect.poll(() => liveSecs(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(3);
+  const before = await liveSecs(page);
+  const words = (await state()).turns.find((t) => t.prompt === "alpha");
+
+  await page.reload(); await waitReady(page);
+  await expect.poll(() => said(page), "the reloaded window").toEqual(SAID);
+  expect(await liveSecs(page), "the clock went on from the server's time").toBeGreaterThanOrEqual(before);
+
+  const other = await context.newPage();
+  await other.goto(page.url());
+  await waitReady(other);
+  await expect.poll(() => said(other), "a second window").toEqual(SAID);
+  await expect.poll(async () => Math.abs((await liveSecs(other)) - (await liveSecs(page))), "both windows show the same seconds").toBeLessThanOrEqual(1);
+  expect(await liveSecs(other)).toBeGreaterThanOrEqual(before);
+  expect((await state()).turns.find((t) => t.prompt === "alpha"), "the model said nothing new in between").toEqual(words);
+
+  // both windows still follow the reply to its end
+  await release("alpha");
+  await expect(page.locator(".turn.a").first()).toHaveClass(/\bdone\b/, { timeout: 30_000 });
+  await expect(other.locator(".turn.a").first()).toHaveClass(/\bdone\b/, { timeout: 30_000 });
+  await other.close();
+});

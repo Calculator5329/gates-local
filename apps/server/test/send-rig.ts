@@ -3,7 +3,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Channel, Payload, QueuedMessage, ReplyRecord } from "@gates-local/contracts";
+import type { Channel, Payload, QueuedMessage, ReplyChange, ReplyRecord } from "@gates-local/contracts";
 import { afterEach, vi } from "vitest";
 import { createApp } from "../src/app.ts";
 import type { Rules } from "../src/chat/reply.ts";
@@ -123,8 +123,10 @@ export function rig(hooks: RigHooks = {}) {
     return p.channel === "chat.event" && e.type === "start" ? [e.userMessage.content] : [];
   });
   const queued = (): readonly QueuedMessage[] => (pushes.findLast((p) => p.channel === "queue.changed")?.payload ?? []) as readonly QueuedMessage[];
+  /** Every change of a record the windows were sent, in order. */
+  const told = (): readonly ReplyChange[] => pushes.flatMap((p) => p.channel === "reply.changed" ? [p.payload as ReplyChange] : []);
   const entry = (id: string, text: string): QueuedMessage => ({ id, threadId: thread.id, messageId: `m-${id}`, text, at: 1, waitFor: "reply", model: MODEL, numCtx: 16384 });
-  return { app, db, thread, open, openOne, finish, refusals, asked, pushes, events, record, starts, queued, entry, h: app.handlers as Required<typeof app.handlers> };
+  return { app, db, thread, open, openOne, finish, refusals, asked, pushes, events, record, starts, queued, told, entry, h: app.handlers as Required<typeof app.handlers> };
 }
 
 export type Rig = ReturnType<typeof rig>;

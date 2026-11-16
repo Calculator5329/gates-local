@@ -1,9 +1,13 @@
 // The reply's stages as a table: a case per cell. Each case puts one reply at a stage, makes one
 // call or lets one server event happen, and checks the answer and the stage that follows, as
 // every window is told it.
-import type { Message, Payload, QueuedMessage, Reply, ReplyAnswer, ReplyRecord, ReplyStage } from "@gates-local/contracts";
-import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import type { Message, Payload, QueuedMessage, Reply, ReplyAnswer, ReplyChange, ReplyRecord, ReplyStage } from "@gates-local/contracts";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { MODEL, type Rig, type RigHooks, rig, settle, until } from "../../test/send-rig.ts";
+import { type Replies, createReplies } from "./replies.ts";
 import { type Call as Asked, type Event, type Queued, type Rec, type Stage, type Words, fromQueued, heardAs, move, shownStage, stillStarting, toQueued } from "./reply.ts";
 
 /** Where a case starts: a reply the server has taken and not started, one being written, one a Stop was taken for. */
@@ -804,5 +808,160 @@ describe("the older shapes are made from the record", () => {
     expect(shownStage(AT.writing)).toBe("writing");
     expect(shownStage(AT.stopping)).toBe("stopping");
     expect(shownStage(AT.drawing)).toBe("waiting");
+  });
+});
+
+// ---------------------------------------------------------------- table 3: what every window is sent
+// A case per change: the store alone takes the steps, and the case checks each change it sent
+// the windows (reply.changed), that their numbers only rise, and that a window connecting now
+// (reply.list) reads every record as it was last sent.
+
+const ROW: QueuedMessage = { id: "q1", threadId: "t1", messageId: "m1", text: "words", at: 1, waitFor: "reply", model: MODEL, numCtx: 8192 };
+const ANSWER: Message = { id: "a1", threadId: "t1", role: "assistant", content: "answer", createdAt: 3 };
+const WARM = { cold: false, drawing: false };
+
+function telling() {
+  const told: ReplyChange[] = [];
+  const q: Replies = createReplies({
+    log: () => undefined, changed: () => undefined, told: (c) => told.push(c), saved: () => undefined, deleting: () => false, closing: () => false,
+    // as the app does: the work's clock stops at the cut, and its record is sent again
+    cut: (turnId) => q.clocked(turnId),
+    clock: () => ({ stage: "waiting", startedAt: 5, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {} }),
+  });
+  return { q, told };
+}
+type Telling = ReturnType<typeof telling>;
+
+/** One change as a case names it: the stage ("loading" for a start behind its model's load, "silent" for a model not heard from yet), the rows sent with it, or why it left. */
+const sent = (c: ReplyChange): string => {
+  if (c.kind === "left") return `left ${c.why}`;
+  const loading = c.reply.stage === "starting" && c.reply.loading === true ? " loading" : "";
+  const silent = "silent" in c.reply && c.reply.silent === true ? " silent" : "";
+  const stopped = c.reply.stage === "drawing" && c.reply.stoppedAt !== undefined ? " stopped" : "";
+  return `${c.reply.stage}${loading}${silent}${stopped}${c.saved === undefined ? "" : ` +${c.saved.length}`}`;
+};
+
+const waits = ({ q }: Telling) => { q.add(ROW); };
+const starts = (t: Telling) => { waits(t); t.q.take("q1", "turn-1", 5); t.q.begun("turn-1"); };
+const asked = (t: Telling, how = WARM) => { starts(t); t.q.started("turn-1", 1, QUESTION, MODEL, how); t.q.notify(); };
+const writes = (t: Telling) => { asked(t); t.q.heard("turn-1", { type: "delta", text: "some" }); t.q.clocked("turn-1"); };
+const mine = ({ q }: Telling, retry = false) => { q.direct("turn-1", "t1", WORDS, retry, 5); };
+
+const TOLD: Record<string, readonly [steps: (t: Telling) => void, told: readonly string[]]> = {
+  "a message joins the list": [waits, ["queued"]],
+  "the same message is sent again": [(t) => { waits(t); t.q.add(ROW); }, ["queued"]],
+  "a waiting message is put on hold": [(t) => { waits(t); t.q.hold({ id: "q1" }); }, ["queued", "held"]],
+  "a waiting message goes by Send now": [(t) => { waits(t); t.q.now({ id: "q1" }); }, ["queued", "next"]],
+  "a waiting message is opened in a composer": [(t) => { waits(t); t.q.edit({ id: "q1", open: true }, 1); }, ["queued", "editing"]],
+  "a waiting message gets new words": [(t) => { waits(t); t.q.change({ id: "q1", base: "m1", messageId: "m2", text: "new words" }, 1); }, ["queued", "queued"]],
+  "a waiting message is removed": [(t) => { waits(t); t.q.remove({ id: "q1" }); }, ["queued", "left removed"]],
+  "a waiting message's chat is deleted": [(t) => { waits(t); t.q.dropThread("t1"); }, ["queued", "left chat-deleted"]],
+  "a waiting message is found asked": [(t) => { waits(t); t.q.sent("m1"); }, ["queued", "left settled"]],
+  "a message is taken and its start is not answered yet": [(t) => { waits(t); t.q.take("q1", "turn-1", 5); }, ["queued"]],
+  "a taken message's start work is under way": [starts, ["queued", "starting"]],
+  "a taken message is refused before any work": [(t) => { waits(t); t.q.take("q1", "turn-1", 5); t.q.refused("turn-1", 1, WHY); t.q.notify(); }, ["queued", "held"]],
+  "a start waits behind its model's load": [(t) => { starts(t); t.q.loading("turn-1"); t.q.clocked("turn-1"); }, ["queued", "starting", "starting loading"]],
+  "a start is refused": [(t) => { starts(t); t.q.refused("turn-1", 1, WHY); t.q.notify(); }, ["queued", "starting", "held"]],
+  "a start is stopped": [(t) => { starts(t); t.q.stop({ id: "q1" }); }, ["queued", "starting", "held"]],
+  "a question is saved, its model in memory": [(t) => asked(t), ["queued", "starting", "thinking silent +1"]],
+  "a question is saved, its model loading": [(t) => asked(t, { cold: true, drawing: false }), ["queued", "starting", "loading +1"]],
+  "a picture's question is saved": [(t) => asked(t, { cold: false, drawing: true }), ["queued", "starting", "drawing +1"]],
+  "a reply's first thought comes": [(t) => { asked(t); t.q.heard("turn-1", { type: "thinking", text: "hm" }); t.q.clocked("turn-1"); }, ["queued", "starting", "thinking silent +1", "thinking"]],
+  "a reply's first word comes": [writes, ["queued", "starting", "thinking silent +1", "writing"]],
+  "a reply calls a tool": [(t) => { asked(t); t.q.heard("turn-1", { type: "tool", step: { callId: "c1", state: "running" } }); t.q.clocked("turn-1"); }, ["queued", "starting", "thinking silent +1", "tool"]],
+  "a reply's times change at the same stage": [(t) => { writes(t); t.q.clocked("turn-1"); }, ["queued", "starting", "thinking silent +1", "writing", "writing"]],
+  "a reply runs once more": [(t) => { writes(t); t.q.retrying("turn-1"); }, ["queued", "starting", "thinking silent +1", "writing", "thinking"]],
+  // the Stop, then the times as its cut left them
+  "a reply is stopped": [(t) => { writes(t); t.q.stop({ id: "q1" }); }, ["queued", "starting", "thinking silent +1", "writing", "stopping", "stopping"]],
+  // its engine may hold on a while: the windows hear the Stop was taken, on the record its cards belong to
+  "a picture is stopped": [(t) => { asked(t, { cold: false, drawing: true }); t.q.stop({ id: "q1" }); }, ["queued", "starting", "drawing +1", "drawing stopped", "drawing stopped"]],
+  "a reply ends well": [(t) => { writes(t); t.q.ended("turn-1", { how: "done", replyId: "a1" }, 9, [ANSWER]); t.q.notify(); }, ["queued", "starting", "thinking silent +1", "writing", "done +1"]],
+  "a stopped reply ends with its words kept": [(t) => { writes(t); t.q.stop({ id: "q1" }); t.q.ended("turn-1", { how: "stopped", by: { who: "person" } }, 9, [ANSWER]); t.q.notify(); }, ["queued", "starting", "thinking silent +1", "writing", "stopping", "stopping", "stopped +1"]],
+  "a reply fails with nothing written": [(t) => { asked(t); t.q.ended("turn-1", { how: "failed", code: "internal", message: "it broke" }, 9, [QUESTION]); t.q.notify(); }, ["queued", "starting", "thinking silent +1", "failed +1"]],
+  "a reply's work leaves without a word": [(t) => { writes(t); t.q.left("turn-1"); }, ["queued", "starting", "thinking silent +1", "writing", "failed"]],
+  "a reply starts and ends before the windows hear": [(t) => { starts(t); t.q.started("turn-1", 1, QUESTION, MODEL, WARM); t.q.ended("turn-1", { how: "done", replyId: "a1" }, 9, [ANSWER]); t.q.notify(); }, ["queued", "starting", "done +2"]],
+  "a window's own send is taken": [(t) => mine(t), ["starting"]],
+  "a window's own send is refused": [(t) => { mine(t); t.q.refused("turn-1", 1, WHY); t.q.notify(); }, ["starting", "left settled"]],
+  "a window's own Retry is refused": [(t) => { mine(t, true); t.q.refused("turn-1", 1, WHY); t.q.notify(); }, ["starting", "failed"]],
+};
+
+describe("table 3: what every window is sent as a record changes", () => {
+  it.each(Object.entries(TOLD))("%s", (_name, [steps, told]) => {
+    const t = telling();
+    steps(t);
+    expect(t.told.map(sent)).toEqual(told);
+    // one counter: a later change never carries a lower number, and no two carry the same
+    const revs = t.told.map((c) => (c.kind === "is" ? c.reply.rev : c.rev));
+    expect(revs).toEqual([...new Set(revs)].toSorted((a, b) => a - b));
+    // a window connecting now reads what the others were last sent: nothing ended, removed or settled
+    const last = new Map(t.told.map((c) => [c.kind === "is" ? c.reply.id : c.id, c]));
+    const listed = [...last.values()].flatMap((c) => c.kind === "is" && !["done", "stopped", "failed"].includes(c.reply.stage) ? [{ reply: c.reply }] : []);
+    const read = t.q.records();
+    // a start not answered yet is read as the start it is, ahead of the change that says so
+    if (t.told.length === 1 && _name.includes("not answered yet")) expect(read).toMatchObject([{ reply: { id: "q1", stage: "starting" } }]);
+    else expect(read).toEqual(listed);
+  });
+
+  it("an end carries what its record needs and the rows it saved", () => {
+    const t = telling();
+    writes(t);
+    t.q.stop({ id: "q1" });
+    t.q.ended("turn-1", { how: "stopped", by: { who: "person" } }, 9, [ANSWER]);
+    t.q.notify();
+    expect(t.told.at(-1)).toMatchObject({ kind: "is", reply: { id: "q1", threadId: "t1", stage: "stopped", questionId: "m1", replyId: "a1", by: { who: "person" } }, saved: [ANSWER] });
+    const done = telling();
+    writes(done);
+    done.q.ended("turn-1", { how: "done", replyId: "a1" }, 9, [ANSWER]);
+    done.q.notify();
+    expect(done.told.at(-1)).toEqual({ kind: "is", reply: { id: "q1", threadId: "t1", rev: expect.any(Number) as number, stage: "done", at: 9, questionId: "m1", replyId: "a1" }, saved: [ANSWER] });
+  });
+
+  it("the step that saves a question carries the question", () => {
+    const t = telling();
+    asked(t);
+    expect(t.told.at(-1)).toMatchObject({ kind: "is", reply: { id: "q1", stage: "thinking", questionId: "m1", model: MODEL, try: 1 }, saved: [QUESTION] });
+  });
+
+  it("changes made before the windows hear are sent once, as the record is then", () => {
+    const t = telling();
+    waits(t);
+    t.q.take("q1", "turn-1", 5);
+    t.q.loading("turn-1");
+    t.q.started("turn-1", 1, QUESTION, MODEL, WARM);
+    t.q.heard("turn-1", { type: "delta", text: "some" });
+    expect(t.told.map(sent)).toEqual(["queued"]);
+    t.q.notify();
+    expect(t.told.map(sent)).toEqual(["queued", "writing +1"]);
+  });
+
+  it("the app sends a reply's whole life in order, and reply.list reads the same record", async () => {
+    const at = await reach.writing();
+    const live = at.r.told().at(-1);
+    expect(await at.r.h["reply.list"]({}, { clientId: 2 })).toEqual(live?.kind === "is" ? [{ reply: live.reply }] : []);
+    at.r.finish();
+    await until(() => over(at), "the reply's end");
+    await until(() => at.r.told().some((c) => c.kind === "is" && c.reply.stage === "done"), "the end, sent to the windows");
+    const told = at.r.told();
+    expect(told.map(sent)).toEqual(["starting", "thinking silent +1", "writing", "done +1"]);
+    expect(told.every((c) => (c.kind === "is" ? c.reply.id : c.id) === at.turnId)).toBe(true);
+    const saved = at.r.db.getThread(at.r.thread.id).messages;
+    expect(told.flatMap((c) => (c.kind === "is" ? c.saved ?? [] : []))).toEqual(saved);
+    expect(await at.r.h["reply.list"]({}, { clientId: 2 })).toEqual([]);
+    // the words of the reply name their record, so a window puts them on the reply it has by that id
+    const words = at.r.pushes.flatMap((p) => p.channel === "chat.event" && (p.payload as Payload<"chat.event">).event.type === "delta" ? [(p.payload as Payload<"chat.event">).replyId] : []);
+    expect(words).toEqual([at.turnId]);
+  });
+
+  it("a restart sends nothing: each window reads the records", () => {
+    const told: ReplyChange[] = [];
+    const root = path.join(os.homedir(), ".cache", "gates-local-tests");
+    mkdirSync(root, { recursive: true });
+    const dir = mkdtempSync(path.join(root, "reply-table-"));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    const deps = { file: path.join(dir, "queue.json"), log: () => undefined, changed: () => undefined, saved: () => undefined, deleting: () => false, closing: () => false, cut: () => undefined, clock: () => undefined };
+    createReplies({ ...deps, told: () => undefined }).add(ROW);
+    const again = createReplies({ ...deps, told: (c) => told.push(c) });
+    expect(told).toEqual([]);
+    expect(again.records()).toMatchObject([{ reply: { id: "q1", stage: "held", held: { why: "restart" } } }]);
   });
 });

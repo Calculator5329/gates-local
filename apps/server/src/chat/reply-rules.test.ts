@@ -1,23 +1,24 @@
 // The rules of the reply table, each with the test that fails without it. Every rule can be
 // turned off one at a time, and only from a test: the server's through the `Rules` argument of
-// the record module, the store and the app (chat/reply.ts), the two a window keeps through the
-// stand-in window below. Each test runs twice here: as the product runs it, and with its rule
-// off, where it must fail.
+// the record module, the store and the app (chat/reply.ts), the one a window keeps on its own
+// calls through the stand-in window below. Each test runs twice here: as the product runs it,
+// and with its rule off, where it must fail. The rule a window keeps on the order of what it
+// hears is tested on the window itself (apps/web/src/composer/records.test.ts).
 //
 // To watch one fail by name, run this file with GATES_LOCAL_REPLY_RULE_OFF set to the rule's
 // name. Nothing but this file reads that variable; the last test checks it.
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { Message, ReplyAnswer } from "@gates-local/contracts";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { MODEL, rig, settle, until } from "../../test/send-rig.ts";
+import { callsOf, mentions as mentionsIn, oneArgument, productSource } from "./product-testing.ts";
 import { type Entry, type Ready, type RepliesDeps, createReplies } from "./replies.ts";
 import { SOUND, type Rules } from "./reply.ts";
 
-/** The two rules a window keeps. The server gives it what they need: a number on every record that rises with every change, and an honest answer. */
-const WINDOW_RULES = ["windowOrdersByRev", "windowWaitsForAnswer"] as const;
+/** The rule a window keeps on its own calls. The server gives it what that needs: an honest answer. */
+const WINDOW_RULES = ["windowWaitsForAnswer"] as const;
 type WindowRule = (typeof WINDOW_RULES)[number];
 type Rule = keyof Rules | WindowRule;
 interface Under {
@@ -31,7 +32,7 @@ const isRule = (rule: string): rule is Rule => isServerRule(rule) || (WINDOW_RUL
 /** Everything as the product runs it, but for this one rule. */
 const without = (rule: Rule | undefined): Under => ({
   rules: rule !== undefined && isServerRule(rule) ? { ...SOUND, [rule]: false } : SOUND,
-  window: { windowOrdersByRev: rule !== "windowOrdersByRev", windowWaitsForAnswer: rule !== "windowWaitsForAnswer" },
+  window: { windowWaitsForAnswer: rule !== "windowWaitsForAnswer" },
 });
 const named = process.env[SWITCH];
 if (named !== undefined && !isRule(named)) throw new Error(`${SWITCH} names no rule: ${named}`);
@@ -44,7 +45,7 @@ const WARM = { cold: false, drawing: false };
 
 function store({ rules }: Under, file?: string, more: Partial<RepliesDeps> = {}) {
   return createReplies({
-    file, log: () => undefined, changed: () => undefined, saved: () => undefined, deleting: () => false, closing: () => false,
+    file, log: () => undefined, changed: () => undefined, told: () => undefined, saved: () => undefined, deleting: () => false, closing: () => false,
     cut: () => undefined, clock: () => undefined, rules, ...more,
   });
 }
@@ -59,8 +60,8 @@ function dataFile(): string {
 
 /**
  * A stand-in for a window on the reply calls: what it shows for each message, from the answers
- * it is given. The app's window is not on these calls yet, so the two rules a window keeps are
- * broken here, against the real store.
+ * it is given. The app's window does not send through these calls yet, so the rule a window
+ * keeps on its own calls is broken here, against the real store.
  */
 function standIn(window: Under["window"]) {
   const shown = new Map<string, { readonly rev: number; readonly stage: string }>();
@@ -70,8 +71,8 @@ function standIn(window: Under["window"]) {
       return;
     }
     const has = shown.get(id);
-    // older than what it shows: dropped. The broken variant shows whatever came last.
-    if (window.windowOrdersByRev && has !== undefined && a.reply.rev < has.rev) return;
+    // older than what it shows: dropped
+    if (has !== undefined && a.reply.rev < has.rev) return;
     shown.set(id, { rev: a.reply.rev, stage: a.reply.stage });
   };
   return {
@@ -167,26 +168,6 @@ const CASES: readonly Case[] = [
       const again = store(under, file);
       expect(again.list().map((e) => [e.id, e.held, e.now, e.editing])).toEqual([["a", true, undefined, undefined], ["b", true, undefined, undefined], ["c", true, undefined, undefined]]);
       expect(again.pick(idle)).toBeUndefined();
-    },
-  },
-  {
-    rule: "windowOrdersByRev",
-    name: "an answer that arrives after a newer one changes nothing a window shows",
-    run(under) {
-      const q = store(under);
-      q.add(entry("a"));
-      const one = standIn(under.window);
-      const two = standIn(under.window);
-      // window one puts it on hold; that answer is slow on its way back
-      const held = q.hold({ id: "a" });
-      // window two sends it now, and every window hears of that first
-      const next = q.now({ id: "a" });
-      one.hears("a", next);
-      two.hears("a", next);
-      one.hears("a", held);
-      expect(two.shows("a")).toBe("next");
-      expect(one.shows("a"), "every window shows the same").toBe(two.shows("a"));
-      expect(q.list()[0], "and it is what the server has").toMatchObject({ id: "a", now: true });
     },
   },
   {
@@ -294,34 +275,9 @@ describe("each rule turned off fails its own test", () => {
   }
 });
 
-/** The text of a call's arguments: from just after its opening bracket to the matching close, comments and quoted text blanked. */
-function argumentsOf(source: string, from: number): string {
-  let out = "";
-  let depth = 1;
-  for (let i = from; i < source.length && depth > 0; i++) {
-    const ch = source[i] ?? "";
-    const two = source.slice(i, i + 2);
-    if (two === "//") { i = source.indexOf("\n", i); if (i < 0) break; continue; }
-    if (two === "/*") { i = source.indexOf("*/", i) + 1; if (i < 1) break; continue; }
-    if (ch === '"' || ch === "'" || ch === "`") {
-      for (i++; i < source.length && source[i] !== ch; i++) if (source[i] === "\\") i++;
-      out += '""';
-      continue;
-    }
-    if (ch === "(" || ch === "[" || ch === "{") depth++;
-    if (ch === ")" || ch === "]" || ch === "}") depth--;
-    if (depth > 0) out += depth === 1 ? ch : " ";
-  }
-  return out;
-}
-
 describe("no rule can be turned off from the product", () => {
-  const repo = fileURLToPath(new URL("../../../../", import.meta.url));
-  const product = ["apps", "packages"].flatMap((top) => readdirSync(path.join(repo, top)).map((name) => path.join(top, name, "src")))
-    .flatMap((dir) => { try { return readdirSync(path.join(repo, dir), { recursive: true, encoding: "utf8" }).map((f) => path.join(dir, f)); } catch { return []; } })
-    .filter((f) => /\.(ts|tsx)$/.test(f) && !/\.test\.tsx?$/.test(f))
-    .map((f) => ({ file: f.split(path.sep).join("/"), text: readFileSync(path.join(repo, f), "utf8") }));
-  const mentions = (re: RegExp) => product.filter((p) => re.test(p.text)).map((p) => p.file).toSorted();
+  const product = productSource();
+  const mentions = (re: RegExp) => mentionsIn(product, re);
 
   it("looks at the product's files", () => {
     expect(product.length).toBeGreaterThan(200);
@@ -337,13 +293,9 @@ describe("no rule can be turned off from the product", () => {
   });
 
   it("every product call that makes the app or the store passes no rules", () => {
-    // their own declarations are not calls
-    const calls = product.flatMap((p) => [...p.text.matchAll(/(?<!function )\b(createApp|createReplies)\(/g)].map((m) => ({ file: p.file, name: m[1] ?? "", args: argumentsOf(p.text, m.index + m[0].length) })));
+    const calls = callsOf(product, ["createApp", "createReplies"]);
     expect(calls.map((c) => `${c.file} ${c.name}`).toSorted()).toEqual(["apps/server/src/app.ts createReplies", "apps/server/src/main.ts createApp"]);
-    for (const c of calls) {
-      // one argument: no comma outside its brackets, but for a last one
-      expect(c.args.replace(/,\s*$/, ""), `${c.file} ${c.name}`).not.toContain(",");
-    }
+    for (const c of calls) expect(oneArgument(c), `${c.file} ${c.name}(${c.args})`).toBe(true);
     // the app hands the store the rules it was given and makes none of its own
     const wiring = product.find((p) => p.file === "apps/server/src/app.ts")?.text ?? "";
     const code = wiring.split("\n").map((l) => l.trim()).filter((l) => /\brules\b/.test(l) && !/^(\/\/|\/?\*)/.test(l));

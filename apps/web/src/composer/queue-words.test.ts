@@ -2,7 +2,8 @@
 // engine is in, the row follows what is true then (a download, or nothing: the offer above the
 // composer says a model is needed, and the row does not repeat it).
 import { beforeAll, expect, it, vi } from "vitest";
-import type { Queued } from "../lib/store/store.ts";
+import type { WaitingReply } from "../lib/store/store.ts";
+import { type QueuedRow, repliesOf } from "../../test/queue.ts";
 
 type Mod = typeof import("./Composer.tsx");
 let AFTER_DOWNLOAD: Mod["AFTER_DOWNLOAD"], AFTER_SETUP: Mod["AFTER_SETUP"], queueWords: Mod["queueWords"];
@@ -11,7 +12,8 @@ beforeAll(async () => {
   ({ AFTER_DOWNLOAD, AFTER_SETUP, queueWords } = await import("./Composer.tsx"));
 });
 
-const q = (over: Partial<Queued> = {}): Queued => ({ id: "q1", threadId: "t1", text: "hello", at: 1, waitFor: "setup", ...over });
+/** The server's record of a waiting message, as the window holds it. */
+const q = (over: Partial<QueuedRow> = {}): WaitingReply => repliesOf([{ id: "q1", threadId: "t1", text: "hello", at: 1, waitFor: "setup", ...over }]).get("q1") as WaitingReply;
 const turn = (threadId: string, end?: { kind: "stopped"; secs: number }) => ({ gen: 1, threadId, turnId: `turn-${threadId}`, model: "m", startedAt: 0, thinking: "", text: "", tools: [], pendingUser: null, ...(end ? { end } : {}) });
 
 it("a message waiting for setup says so while setup runs", () => {
@@ -35,7 +37,7 @@ it("a message that waits only for a reply in another chat says so, once, in Send
   type S = Parameters<typeof replyElsewhere>[0];
   expect(replyElsewhere({ threadId: "t1", turns: { t2: turn("t2") } } as unknown as S)).toBe(true);
   expect(replyElsewhere({ threadId: "t1", turns: { t1: turn("t1"), t2: turn("t2") } } as unknown as S), "its own chat's reply comes first").toBe(false);
-  expect(replyElsewhere({ threadId: "t1", turns: { t1: { ...turn("t1"), listed: true }, t2: turn("t2") } } as unknown as S), "one another window started here").toBe(false);
+  expect(replyElsewhere({ threadId: "t1", turns: { t1: { ...turn("t1"), turnId: "another-windows" }, t2: turn("t2") } } as unknown as S), "one another window started here").toBe(false);
   expect(replyElsewhere({ threadId: "t1", turns: { t2: turn("t2", { kind: "stopped", secs: 1 }) } } as unknown as S)).toBe(false);
   expect(replyElsewhere({ threadId: "t1", turns: { t2: { ...turn("t2"), image: true } } } as unknown as S), "a picture is not a reply").toBe(false);
 });

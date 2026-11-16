@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { draftDatabase } from "./draft-persistence-testing.ts";
 import { installBrowser, tick, until } from "../../test/harness.ts";
+import { queuedOf, repliesOf } from "../../test/queue.ts";
 
 const settled = () => new Promise<void>(resolve => setImmediate(resolve));
 async function fresh() {
@@ -52,7 +53,7 @@ it("TD-14: recovery preserves a cleared editor and never replaces its marker wit
     const tx = transaction(name, mode);
     if (mode === undefined && !started) {
       started = true; a.replaceDraft("B", { text: "before B" }); a.beginQueuedDraft("B", "queued B", [], null);
-      a.replaceDraft("B", { text: "" }, true); a.setState({ queued: [saved, active], editingQueued: "active" });
+      a.replaceDraft("B", { text: "" }, true); a.setState({ replies: repliesOf([saved, active]), editingQueued: "active" });
     }
     return tx;
   };
@@ -97,7 +98,7 @@ it.each(["before opening", "while opening"])("R3: memory wins for the same chat 
 
 it("R7: an editor restored off screen returns to its earlier draft", async () => {
   const fixture = draftDatabase(), a = await fresh();
-  a.setState({ threadId: "A", queued: [{ id: "q", messageId: "M", threadId: "A", text: "queued", at: 1, waitFor: "reply" }] });
+  a.setState({ threadId: "A", replies: repliesOf([{ id: "q", messageId: "M", threadId: "A", text: "queued", at: 1, waitFor: "reply" }]) });
   a.replaceDraft("A", { text: "before edit" });
   const stop = await a.watchDraft("r7");
   a.beginQueuedDraft("A", "queued", [], "M"); a.setState({ editingQueued: "q" });
@@ -105,7 +106,7 @@ it("R7: an editor restored off screen returns to its earlier draft", async () =>
   const b = await fresh(); b.setState({ threadId: "B", view: "thread" });
   const resume = await b.watchDraft("r7");
   // the queue itself is the server's, listed at connect: this save holds none of it
-  expect({ editing: b.getState().editingQueued, text: b.getDraft("A").text, id: b.getDraft("A").sendId, queued: b.getState().queued.map(q => q.messageId) }).toEqual({ editing: null, text: "before edit", id: null, queued: [] });
+  expect({ editing: b.getState().editingQueued, text: b.getDraft("A").text, id: b.getDraft("A").sendId, queued: queuedOf(b.getState()).map(q => q.messageId) }).toEqual({ editing: null, text: "before edit", id: null, queued: [] });
   resume();
 });
 
@@ -128,7 +129,7 @@ it("R7: recovery leaves a different active editor alone", async () => {
   fixture.db.transaction = (name, mode) => {
     const tx = transaction(name, mode);
     if (mode === undefined && !started) {
-      started = true; a.setState({ queued: [saved, active], editingQueued: "active" });
+      started = true; a.setState({ replies: repliesOf([saved, active]), editingQueued: "active" });
       a.beginQueuedDraft("B", "editing B", [], null);
     }
     return tx;
@@ -137,7 +138,7 @@ it("R7: recovery leaves a different active editor alone", async () => {
   expect(a.getState().editingQueued).toBe("active");
   expect(a.getDraft("A").text).toBe("before A");
   expect(a.getDraft("B").text).toBe("editing B");
-  expect(a.getState().queued.map(q => q.id)).toEqual(["saved", "active"]); stop();
+  expect(queuedOf(a.getState()).map(q => q.id)).toEqual(["saved", "active"]); stop();
 });
 
 it("R8: reading the open chat before recovery does not make it oldest", async () => {
@@ -162,7 +163,8 @@ it("X17b: memory typed during recovery survives the next bounded save of 32 slot
     return tx;
   };
   const stop = await a.watchDraft("full");
-  a.setState({ queued: [] }); await drain(fixture); stop();
+  // the next save, whatever brings it: here an edit of a waiting message opened and closed
+  a.setState({ editingQueued: "q" }); a.setState({ editingQueued: null }); await drain(fixture); stop();
   const b = await fresh(), resume = await b.watchDraft("full");
   expect(b.getDraft("typed").text).toBe("typed during recovery");
   expect(b.savedDrafts().map(slot => slot.key)).toEqual([...Array.from({ length: 31 }, (_, i) => `saved-${i + 1}`), "typed"]);
@@ -182,7 +184,10 @@ it.each([true, false])("X19: main's single-draft format migrates into its own sl
   expect(a.getDraft("B").text).toBe("");
   expect(a.getState().editingQueued).toBe(editing ? "q" : null);
   expect(a.getDraft("A").beforeEdit).toEqual(editing ? { text: "", images: [], sendId: null } : undefined);
-  if (editing) expect(a.getState().queued).toMatchObject([{ id: "q", images: ["queued image"], held: true }]);
-  else expect(a.getState().queued).toEqual([]);
+  // the old saved message is owed to the server, on hold, with its image; the server shows its row once it has it
+  const { oldQueueOwed } = await import("./chat.ts");
+  if (editing) expect(oldQueueOwed()).toMatchObject([{ id: "q", images: ["queued image"], held: true }]);
+  else expect(oldQueueOwed()).toEqual([]);
+  expect(queuedOf(a.getState())).toEqual([]);
   stop();
 });

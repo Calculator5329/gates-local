@@ -103,7 +103,7 @@ function marked(): string[] {
 describe("sidebar running replies", () => {
   it("hydrates a reply that started before this window connected", async () => {
     disconnect?.();
-    b.server.answer("turns.active", () => [{ threadId: "A", turnId: "already-running", reply: { stage: "thinking", startedAt: 1, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {} } }]);
+    b.server.unheard(() => chat("already-running", "A", { type: "start", model: "gemma3:4b", userMessage: { id: "asked-before", threadId: "A", role: "user", content: "asked before this window", createdAt: 1 } }));
     store.setState({ imageStatus: undefined });
     disconnect = session.connect();
     await until(() => store.getState().imageStatus !== undefined, 2000, "second hydration");

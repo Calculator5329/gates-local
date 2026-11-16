@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { installBrowser, tick, until } from "../../test/harness.ts";
+import { queuedOf } from "../../test/queue.ts";
 
 // A Library question, pressed in Settings, over a new chat the person has half written:
 // the real session, draft store and fake server; only the composer's focus is faked.
@@ -46,9 +47,10 @@ it("a question that waits for the runtime queues alone in its new chat and leave
   browser.server.push("runtime.changed", { ...methodSamples["runtime.status"].result, state: "installing" });
   await until(() => store.getState().runtime?.state === "installing", 2000, "setup");
   starter.askWith(QUESTION);
-  await until(() => store.getState().queued.length === 1, 2000, "queued");
+  await until(() => queuedOf(store.getState()).length === 1, 2000, "queued");
   const thread = store.getState().threadId;
-  expect(store.getState().queued[0]).toMatchObject({ threadId: thread, text: QUESTION, images: [] });
+  expect(queuedOf(store.getState())[0]).toMatchObject({ threadId: thread, text: QUESTION });
+  expect(queuedOf(store.getState())[0]?.images ?? [], "none of the draft's pictures").toEqual([]);
   expect(drafts.getDraft(thread).text).toBe("");
   expect(drafts.getDraft(null)).toMatchObject({ text: "my half-written question", images: [PICTURE] });
 });

@@ -1,18 +1,19 @@
-// A reply this client knows only from turns.active, with no event of its own
-// yet: it shows as running in the sidebar and nothing more. The server lists a
-// turn from the moment chat.send takes it, before the question is saved; if
-// saving fails, its error event ends it here too (chat row 32), and a
-// hydration that no longer lists it drops it as well.
+// A reply this window knows only from the server's list of records, with no
+// word of its own yet: it is its chat's turn, on its way. The server lists a
+// reply from the moment a send is taken, before the question is saved; if
+// saving fails, its record leaves and the turn goes here too (chat row 32),
+// and a list that no longer names it drops it as well.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import type { Message, Payload, ReplyRecord } from "@gates-local/contracts";
+import type { Message, Payload, ReplyListed, ReplyRecord } from "@gates-local/contracts";
 import { createApp } from "@gates-local/server/app.ts";
 import { sendStarted } from "@gates-local/server/chat/send-started.ts";
 import { openThreadStore } from "@gates-local/server/threads/store.ts";
 import { installBrowser, tick, until } from "../../test/harness.ts";
+import { queuedOf } from "../../test/queue.ts";
 
 const cleanups: (() => void)[] = [];
 /** The server's reply record of a turn still waiting (decision 33). */
@@ -32,7 +33,7 @@ function cacheTmp(): string {
 }
 
 const noop = () => {};
-const never = () => { throw new Error("activeTurns only returns a patch"); };
+const never = () => { throw new Error("a list of records asks the server nothing"); };
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve = noop;
@@ -85,8 +86,13 @@ it("a listed turn that fails before its start puts the sidebar's dot out, holds 
     const replay: unknown[] = [];
     app.replayTurns((channel, payload) => { replay.push({ channel, payload }); });
     expect(replay).toEqual([]);
-    let listed = snapshot;
-    b.server.answer("turns.active", () => listed);
+    // what a window is given at connect: the server's records, with this reply on its way
+    const list = app.handlers["reply.list"];
+    if (list === undefined) throw new Error("the server has no reply.list");
+    let listed = await list({}, { clientId: 2 });
+    expect(listed).toMatchObject([{ reply: { threadId: a.id, stage: "starting" } }]);
+    const theirs = listed[0]!.reply.id;
+    b.server.answer("reply.list", () => listed);
     b.server.answer("threads.list", () => [a]);
     b.server.answer("threads.create", () => ({ id: "B", title: "B", createdAt: 1, updatedAt: 1 }));
     b.server.answer("threads.get", ({ threadId }) => ({ thread: { id: threadId, title: threadId, createdAt: 1, updatedAt: 1 }, messages: [] }));
@@ -97,14 +103,22 @@ it("a listed turn that fails before its start puts the sidebar's dot out, holds 
     disconnect = session.connect();
     await until(() => store.getState().imageStatus !== undefined);
     expect(store.runningThreads(store.getState()).has(a.id), "the sidebar shows A running").toBe(true);
-    expect.soft(store.runningTurn(store.getState(), a.id), "A has no reply to stop yet").toBeUndefined();
+    expect.soft(store.runningTurn(store.getState(), a.id), "A's reply on its way, with no question saved yet").toMatchObject({ turnId: theirs, pendingUser: "A" });
     // saving the question fails: the server ends the turn and says so to every client (chat row 32)
+    const told = pushes.length;
     gate.resolve();
     expect(await sending).toBe(rejected);
     expect(app.activeTurns()).toBe(0);
-    const said = pushes.filter((p): p is { channel: "chat.event"; payload: Payload<"chat.event"> } => (p as { channel: string }).channel === "chat.event");
+    const since = pushes.slice(told);
+    const said = since.filter((p): p is { channel: "chat.event"; payload: Payload<"chat.event"> } => (p as { channel: string }).channel === "chat.event");
     expect(said.map((p) => p.payload.event)).toEqual([expect.objectContaining({ type: "error", code: "internal", ended: { reason: "failed", at: expect.any(Number) } })]);
+    // and its record ends in every window, with no question saved
+    const ended = since.filter((p): p is { channel: "reply.changed"; payload: Payload<"reply.changed"> } => (p as { channel: string }).channel === "reply.changed");
+    expect(ended.map((p) => p.payload)).toEqual([expect.objectContaining({ kind: "is", reply: expect.objectContaining({ id: theirs, stage: "failed", code: "internal" }) })]);
+    expect(ended[0]!.payload).not.toHaveProperty("reply.questionId");
     b.server.push("chat.event", said[0]!.payload);
+    b.server.push("reply.changed", ended[0]!.payload);
+    await tick();
     expect(store.runningThreads(store.getState()).has(a.id), "the sidebar's working dot goes out").toBe(false);
     expect(store.getState().turns[a.id]).toBeUndefined();
     session.newThread();
@@ -113,8 +127,8 @@ it("a listed turn that fails before its start puts the sidebar's dot out, holds 
     b.server.push("chat.event", { threadId: "B", turnId: "turn-B", event: { type: "done", message: { id: "aB", threadId: "B", role: "assistant", content: "B finished", createdAt: 2 }, stopReason: "stop" } });
     await tick(); b.frame();
     expect.soft(b.server.calls("chat.send").map(call => call.params), "the queue goes on once B finishes").toHaveLength(2);
-    expect.soft(store.getState().queued).toEqual([]);
-    // the person opens A; the next hydration no longer lists its turn, and the mark goes
+    expect.soft(queuedOf(store.getState())).toEqual([]);
+    // the person opens A; the next list no longer names its reply, and the mark stays gone
     session.openThread(a.id);
     await tick();
     listed = [];
@@ -130,7 +144,7 @@ it("a listed turn that fails before its start puts the sidebar's dot out, holds 
   }
 });
 
-it("a listed turn draws the server's record: the one turns.active gave, then each one pushed (decision 33)", async () => {
+it("a listed reply draws the server's record: the one reply.list gave, then each one pushed (decision 33)", async () => {
   const b = installBrowser();
   let skew = 0;
   const realNow = Date.now.bind(Date);
@@ -138,7 +152,8 @@ it("a listed turn draws the server's record: the one turns.active gave, then eac
   const question: Message = { id: "their-question", threadId: "A", role: "user", content: "theirs", createdAt: 1 };
   const answer: Message = { id: "their-answer", threadId: "A", role: "assistant", content: "First words", createdAt: 2 };
   const chat = (event: Payload<"chat.event">["event"]) => b.server.push("chat.event", { threadId: "A", turnId: "other", event });
-  b.server.answer("turns.active", () => [{ threadId: "A", turnId: "other", reply: { ...record, stage: "loading" } }]);
+  // another window's send, taken before this one connected: its model is loading, its question not saved yet
+  b.server.answer("reply.list", () => [{ reply: { id: "other", threadId: "A", rev: 1, messageId: question.id, text: question.content, at: 1, stage: "starting", attempt: 1, startedAt: 0, loading: true } }]);
   b.server.answer("threads.get", ({ threadId }) => ({ thread: { id: threadId, title: threadId, createdAt: 1, updatedAt: 1 }, messages: [] }));
   vi.resetModules();
   const session = await import("../lib/session/index.ts");
@@ -148,7 +163,7 @@ it("a listed turn draws the server's record: the one turns.active gave, then eac
     await until(() => store.getState().imageStatus !== undefined);
     session.openThread("A");
     await tick();
-    expect(store.getState().turns.A).toMatchObject({ listed: true, reply: { stage: "loading" } });
+    expect(store.getState().turns.A).toMatchObject({ turnId: "other", pendingUser: "theirs", reply: { stage: "loading" } });
     // another client's question waits 20 s before the model starts on it
     skew += 20_000;
     chat({ type: "start", model: "qwen3.5:9b", userMessage: question });
@@ -171,21 +186,23 @@ it("a listed turn draws the server's record: the one turns.active gave, then eac
   }
 });
 
-// In the app every hydration follows a dropped connection, and lostTurn has
-// already dropped listed turns by then; this holds the rule on its own.
-it("a hydration whose turns.active no longer lists a listed turn drops it, with no dropped connection first", async () => {
+// In the app every list follows a dropped connection; this holds the rule on its own.
+it("a list that no longer names a reply on its way drops it and its turn, with no dropped connection first", async () => {
   installBrowser();
   vi.resetModules();
   const store = await import("../lib/store/store.ts");
   const { createChat } = await import("./chat.ts");
   const chat = createChat({
-    applyServerEvent: never, call: never, reply: never, codeOf: () => "", createThread: never, creatingDraft: () => false, loadThread: never, loading: () => false,
+    applyServerEvent: (patch: Parameters<typeof store.setState>[0]) => store.setState(patch),
+    call: never, reply: never, codeOf: () => "", createThread: never, creatingDraft: () => false, loadThread: never, loading: () => false,
     noteMessage: never, withMessage: never, untrackedDone: never, openThread: never, blockingFor: never,
-  });
-  const listing = [{ threadId: "A", turnId: "other", reply: record }];
-  store.setState(chat.activeTurns(store.getState(), listing));
-  expect(store.getState().turns.A?.listed).toBe(true);
-  store.setState(chat.activeTurns(store.getState(), listing));
-  expect(store.getState().turns.A?.listed, "still listed: it stays").toBe(true);
-  expect(chat.activeTurns(store.getState(), []).turns, "no longer listed: it goes").toEqual({});
+  } as unknown as Parameters<typeof createChat>[0]);
+  const listing: readonly ReplyListed[] = [{ reply: { id: "other", threadId: "A", rev: 1, messageId: "their-question", text: "theirs", at: 1, stage: "starting", attempt: 1, startedAt: 0 } }];
+  chat.connected(); chat.replyListed(listing);
+  expect(store.getState().turns.A?.turnId).toBe("other");
+  chat.connected(); chat.replyListed(listing);
+  expect(store.getState().turns.A?.turnId, "still listed: it stays").toBe("other");
+  chat.connected(); chat.replyListed([]);
+  expect(store.getState().turns, "no longer listed: it goes").toEqual({});
+  expect(store.getState().replies.size).toBe(0);
 });
