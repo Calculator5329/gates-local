@@ -32,3 +32,16 @@ it.each([
   await until(() => store.getState().imageStatus !== undefined);
   expect(store.getState().outdated === true).toBe(asks);
 });
+
+it.each([
+  ["refuses the page as another version", () => { throw { code: "other-version", message: "This page is from another version of Gates Local. Reload it." }; }],
+  ["numbers fewer kinds than the page", () => ({ epoch: "e", ordered: ORDERED_DOMAINS.slice(1), protocol: PROTOCOL_VERSION })],
+])("a server that %s: the page asks for a reload", async (_what, negotiate) => {
+  browser = installBrowser();
+  vi.resetModules();
+  browser.server.answer("sync.negotiate", negotiate);
+  const session = await import("../lib/session/index.ts");
+  const store = await import("../lib/store/store.ts");
+  disconnect = session.connect();
+  await until(() => store.getState().outdated === true);
+});

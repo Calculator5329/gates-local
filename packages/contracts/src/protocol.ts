@@ -69,6 +69,8 @@ export type WireErrorCode =
   | "bad-result"
   | "bad-payload"
   | "not-implemented"
+  // why: a page and a server from different releases; the page offers a reload
+  | "other-version"
   | "internal"
   | "timeout"
   | "closed";

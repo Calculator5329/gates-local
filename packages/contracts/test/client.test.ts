@@ -134,10 +134,10 @@ describe("createClient", () => {
     const client = createClient(socket, { onProtocolError: error => errors.push(error.code) });
     const ready = client.negotiate();
     socket.reply(JSON.stringify({ type: "response", id: socket.lastRequest().id, ok: true, result: { epoch: "current", ordered } }));
-    await expect(ready).rejects.toMatchObject({ code: "bad-result" });
+    await expect(ready).rejects.toMatchObject({ code: "other-version" });
     expect(client.sync).toBeUndefined();
     expect(socket.readyState).toBe(3);
-    expect(errors).toEqual(["bad-result"]);
+    expect(errors).toEqual(["other-version"]);
   });
   it.each([false, true])("SS6-02/03: a throwing metadata hook preserves delivery and acknowledgement (reporter throws=%s)", async reporterThrows => {
     const socket = new FakeSocket(); socket.open();

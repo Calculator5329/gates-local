@@ -11,6 +11,7 @@ import {
   PROTOCOL_VERSION,
   methodSync,
   pushSync,
+  WireError,
 } from "@gates-local/contracts";
 import { runPages } from "../../measure/measure-pages.ts";
 import { imagesUnset, runKey } from "../../image/image-choice.ts";
@@ -201,7 +202,10 @@ async function hydrateWith(
   on("reply.words", onWords);
   on("reply.changed", (change) => recordChanged(change));
   on("usage.changed", () => usageSession.usageChanged());
-  const negotiated = await negotiate();
+  const negotiated = await negotiate().catch((e: unknown) => {
+    if (e instanceof WireError && e.code === "other-version") setState({ outdated: true });
+    throw e;
+  });
   if (negotiated.protocol !== undefined && negotiated.protocol !== PROTOCOL_VERSION) setState({ outdated: true });
   settingsSession.ready();
   threadSession.connected(negotiated.epoch);

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-16: a page from another release offers Reload instead of reconnecting forever
+
+- The server refuses a page that numbers other kinds with the code "other-version", and a page
+  that meets a server numbering fewer kinds refuses it the same way. Either way the page shows
+  "Gates Local changed since this page opened" with Reload. Before, it closed the socket, tried
+  again every few seconds and said nothing.
+- A page opened on 0.2.4 cannot learn the new code: a phone tab left open across the update to
+  0.2.5 shows Gates Local as not connected until it is reloaded by hand.
+
 ## 2026-11-16: the in-use check's real-process test runs where sleep is a multi-call program
 
 - The test copies sleep under its own name. On Ubuntu's uutils coreutils a copy named

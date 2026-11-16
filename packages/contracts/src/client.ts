@@ -143,7 +143,7 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
         client.close(); return;
       }
       if (ORDERED_DOMAINS.some(domain => !negotiated.ordered.includes(domain))) {
-        call.reject(new WireError("bad-result", "server numbers only some kinds; it is from another version"));
+        call.reject(new WireError("other-version", "server numbers only some kinds; it is from another version"));
         client.close(); return;
       }
       const { epoch, protocol } = negotiated;

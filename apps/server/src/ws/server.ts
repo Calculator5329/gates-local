@@ -246,7 +246,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     }
     if (method === "sync.negotiate") {
       if (ORDERED_DOMAINS.some(domain => !decodedParams.ordered.includes(domain))) {
-        return send(ws, encodeErrorResponse(id, "bad-params", "This page is from another version of Gates Local. Reload it."));
+        return send(ws, encodeErrorResponse(id, "other-version", "This page is from another version of Gates Local. Reload it."));
       }
       const frame = encodeResult(id, method, { epoch, ordered: ORDERED_DOMAINS, protocol: PROTOCOL_VERSION });
       if (!frame.ok) throw frame.error;

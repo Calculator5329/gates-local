@@ -139,7 +139,7 @@ describe("round trip over a real socket", () => {
     const server = await start({});
     const desktop = await client(server);
     const other = await client(server, APP_ORIGIN);
-    await expect(desktop.client.call("sync.negotiate", { ordered: ["settings", "threads"] })).rejects.toMatchObject({ code: "bad-params" });
+    await expect(desktop.client.call("sync.negotiate", { ordered: ["settings", "threads"] })).rejects.toMatchObject({ code: "other-version" });
     const result = await other.client.call("sync.negotiate", { ordered: ORDERED_DOMAINS });
     expect(result.ordered).toEqual(ORDERED_DOMAINS);
     expect(result.epoch).toMatch(/^[\da-f-]{36}$/);
