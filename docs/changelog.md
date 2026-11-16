@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-16: the old queue calls are gone
+
+- A window sends, changes and lists waiting messages only through the
+  reply calls (`reply.send`, `reply.change`, `reply.list` and the rest),
+  and hears of them only through `reply.changed`. The older calls
+  `queue.list`, `queue.add`, `queue.update` and `queue.remove`, the
+  `queue.changed` push and `turns.active` are removed from the server
+  and the contract.
+- A page that kept its own queue in the browser, from before the server
+  kept one, hands it over with `reply.send` and the new `held` option:
+  each message arrives on hold and goes only on Send now, even when its
+  chat is free.
+- Decision: the code that moves a page's own saved queue to the server
+  (`oldQueue`, `moveOldQueue` and the "restored on hold" notice in
+  `apps/web/src/composer/chat.ts`, with its browser test in
+  `test/e2e/server-queue.spec.ts`) stays for one release after the first
+  release that has the server's queue, then goes.
+
 ## 2026-11-15: the desktop app and the update package say what they need in tests
 
 - Internal: nothing changed for the person using the app. Every comment

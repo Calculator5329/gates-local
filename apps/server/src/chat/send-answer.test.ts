@@ -1,5 +1,5 @@
 // chat.send answers once the turn is taken (chat row 32): its id at once, before the fit, the
-// load and saving the question. turns.active lists the turn from then. A refusal from then on
+// load and saving the question. reply.list lists the turn from then. A refusal from then on
 // is the turn's error event, the one way every window hears of it.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
@@ -72,7 +72,7 @@ function rig(admit: () => Promise<void> = async () => {}) {
   return { app, db, thread, gate, events };
 }
 
-it("chat.send answers with the turn id while the turn waits to be admitted, and turns.active lists it from then", async () => {
+it("chat.send answers with the turn id while the turn waits to be admitted, and reply.list lists it from then", async () => {
   mkdirSync(path.join(os.homedir(), ".cache", "gates-local-tests"), { recursive: true });
   const r = rig();
   const sending = Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 }));
@@ -80,10 +80,10 @@ it("chat.send answers with the turn id while the turn waits to be admitted, and 
   if (answer === "waiting") throw new Error("chat.send waited for the admission");
   expect(answer).toEqual({ turnId: expect.any(String) });
   expect(r.events(answer.turnId), "nothing has started yet").toEqual([]);
-  const listActive = r.app.handlers["turns.active"];
-  if (listActive === undefined) throw new Error("the server has no turns.active");
-  // with the record as it is: still waiting for the model (decision 33)
-  expect(await listActive({}, { clientId: 2 }), "another window sees the reply coming").toEqual([{ turnId: answer.turnId, threadId: r.thread.id, reply: expect.objectContaining({ stage: "waiting", workMs: 0 }) }]);
+  const list = r.app.handlers["reply.list"];
+  if (list === undefined) throw new Error("the server has no reply.list");
+  // with the record as it is: taken, its start not through yet (decision 33)
+  expect(await list({}, { clientId: 2 }), "another window sees the reply coming").toEqual([{ reply: expect.objectContaining({ id: answer.turnId, threadId: r.thread.id, stage: "starting", attempt: 1 }) }]);
   r.gate.resolve();
   await until(() => r.events(answer.turnId).some((e) => e.type === "start"), "the start");
   expect(r.events(answer.turnId)[0]).toMatchObject({ type: "start", model: MODEL, userMessage: { role: "user", content: "hi" } });

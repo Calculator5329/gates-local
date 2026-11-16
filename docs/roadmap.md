@@ -1037,8 +1037,9 @@ RS-03 remains dropped.
       *Accept:* the next setup collects that run and preserves recent and linked paths.
 - [ ] <!-- workspace:id=work:b1729469-e4fb-5dcf-99b0-6f04fc1d60e1 --> Verify the scratch-root, SQL-parent and cancelled-release changes on native Windows; the unit-hygiene landing used Linux checks.
       *Accept:* Windows keeps its temp-path rules, bounds cancellation and leaves no owned query child.
-- [ ] <!-- workspace:id=work:005b7a72-a2c3-510c-96b1-3d21782b91a8 --> The default session harness answers `turns.active` with the empty contract sample unless a test overrides it.
+- [x] <!-- workspace:id=work:005b7a72-a2c3-510c-96b1-3d21782b91a8 --> The default session harness answers `turns.active` with the empty contract sample unless a test overrides it.
       *Accept:* representative reconnect/queue tests include server-listed work so active-turn regressions cannot pass through an empty fixture.
+      *Done 2026-11-16:* `turns.active` is gone; the harness answers `reply.list` from the server's own store (`apps/web/test/harness.ts`), so what it lists is what the tests sent.
 - [ ] <!-- workspace:id=work:f3885671-23fc-5569-82cf-ec66b22e2ee6 --> The long-thread unit scroll model does not model browser anchoring independently; it cannot distinguish a content offset from a view offset.
       *Accept:* either offset bug fails the model, with the real browser drift journey retained as the position proof.
 - [ ] <!-- workspace:id=work:1fb09f37-2be1-5c5d-bf0a-260f2031b1b1 --> The unexplained immediate-reload paste loss (`paste.spec.ts:67`, last typed character missing) was seen a second time on 2026-11-09 and not reproduced in 50 further runs across two hosts; IndexedDB unload remains best effort.

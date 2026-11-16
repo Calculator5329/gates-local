@@ -4,10 +4,12 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Message, Params, Payload, QueuedMessage, Reply, ReplyAnswer, ReplyChange, ReplyRecord, ReplyStage } from "@gates-local/contracts";
+import type { Message, Params, Payload, Reply, ReplyAnswer, ReplyChange, ReplyRecord, ReplyStage } from "@gates-local/contracts";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { MODEL, type Rig, type RigHooks, rig, settle, until } from "../../test/send-rig.ts";
+import { MODEL, type Rig, type RigHooks, WAITING, rig, settle, until } from "../../test/send-rig.ts";
 import { AppError } from "../app.ts";
+import type { SavedEntry } from "./queue-file.ts";
+import { waits as joins } from "./queue-testing.ts";
 import { type Replies, type SendNow, type Sent, createReplies } from "./replies.ts";
 import { type Call as Asked, type Event, type Queued, type Rec, type Stage, type Words, fromQueued, heardAs, move, shownStage, stillStarting, toQueued } from "./reply.ts";
 
@@ -91,24 +93,28 @@ type Answered = "done" | "sending" | "elsewhere" | "gone unknown" | "gone sent" 
 /** The stage after: a waiting stage, off every list, its reply stopping, or as it was. */
 type After = "queued" | "held" | "editing" | "next" | "removed" | "stopping" | "same";
 
-/** The stage a window reads from the queue as it is pushed. */
-const shown = (q: QueuedMessage | undefined): string =>
-  q === undefined ? "none" : q.sending !== undefined ? "starting" : q.editing === true ? "editing" : q.now === true ? "next" : q.held === true ? "held" : "queued";
-const q1 = (r: Rig) => r.queued().find((q) => q.id === "q1");
+/** The stage a window shows from what it was told. */
+const shown = (q: Reply | undefined): string => q?.stage ?? "none";
+/** The message as the windows were last told, while it waits or is taken; undefined once it is asked or left. */
+const q1 = (r: Rig) => {
+  const q = r.latest("q1");
+  return q !== undefined && (WAITING.has(q.stage) || q.stage === "starting") ? q : undefined;
+};
+const textOf = (q: Reply | undefined): string | undefined => (q !== undefined && "text" in q ? q.text : undefined);
 
 /** A message typed behind a reply that has not started: it waits. */
 const behind = async (hooks: RigHooks = {}): Promise<Rig> => {
   const r = rig(hooks);
   await r.h["chat.send"]({ threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: ME });
-  await r.h["queue.add"](r.entry("q1", "second"), { clientId: ME });
+  await r.h["reply.send"](r.entry("q1", "second"), { clientId: ME });
   return r;
 };
 /** A message the server took, with the turn it started for it. */
 const taken = async (hooks: RigHooks = {}): Promise<At> => {
   const r = rig(hooks);
-  await r.h["queue.add"](r.entry("q1", "second"), { clientId: ME });
-  await until(() => q1(r)?.sending !== undefined, "the message taken");
-  return { r, turnId: q1(r)?.sending ?? "" };
+  await r.h["reply.send"](r.entry("q1", "second"), { clientId: ME });
+  await until(() => r.takenAs("q1") !== undefined, "the message taken");
+  return { r, turnId: r.takenAs("q1") ?? "" };
 };
 
 const rows: Record<Row, () => Promise<Rig>> = {
@@ -256,7 +262,7 @@ describe("a call on a waiting message at each stage", () => {
     else if (after === "removed") expect(told).toBe(shown(before.find((q) => q.id === "q1")));
     else expect(told).toBe(shown(now));
     if (call === "change" && answered === "done") expect(now).toMatchObject({ messageId: "m-q1b", text: "new words" });
-    if (answered === "elsewhere" || answered === "sending") expect(now?.text ?? "second").toBe("second");
+    if (answered === "elsewhere" || answered === "sending") expect(textOf(now) ?? "second").toBe("second");
     // a hold on a message open in a composer waits for the edit: it returns on hold
     if ((call === "hold" || call === "stop") && answer.reply.stage === "editing") expect(answer.reply.back).toEqual({ stage: "held", held: { why: "stopped" } });
     // a message taken and stopped before its question was saved is on hold with its words, and none of it is saved
@@ -297,8 +303,8 @@ const stages = (r: Rig) => Object.fromEntries(r.queued().map((q) => [q.id, shown
 /** A reply being written, sent from a composer, with two messages waiting behind it. */
 const writingWithTwo = async (): Promise<At> => {
   const at = await reach.writing();
-  await at.r.h["queue.add"](at.r.entry("q1", "second"), { clientId: ME });
-  await at.r.h["queue.add"](at.r.entry("q2", "third"), { clientId: ME });
+  await at.r.h["reply.send"](at.r.entry("q1", "second"), { clientId: ME });
+  await at.r.h["reply.send"](at.r.entry("q2", "third"), { clientId: ME });
   return at;
 };
 
@@ -315,7 +321,7 @@ describe("Stop and Send now, each one step", () => {
 
   it("starting, stop by the turn taken for it: the message is back on hold with the rest, named by its own id, and nothing of it is saved", async () => {
     const at = await taken();
-    await at.r.h["queue.add"](at.r.entry("q2", "third"), { clientId: ME });
+    await at.r.h["reply.send"](at.r.entry("q2", "third"), { clientId: ME });
     expect(await at.r.h["reply.stop"]({ id: at.turnId }, { clientId: OTHER })).toMatchObject({ answer: "done", reply: { id: "q1", stage: "held", held: { why: "stopped" }, text: "second" } });
     expect(stages(at.r)).toEqual({ q1: "held", q2: "held" });
     at.r.open();
@@ -345,7 +351,7 @@ describe("Stop and Send now, each one step", () => {
 
   it("starting, send now on a message behind it: the one taken comes back on hold unsaved, and the other goes", async () => {
     const at = await taken();
-    await at.r.h["queue.add"](at.r.entry("q2", "third"), { clientId: ME });
+    await at.r.h["reply.send"](at.r.entry("q2", "third"), { clientId: ME });
     expect(await at.r.h["reply.now"]({ id: "q2" }, { clientId: OTHER })).toMatchObject({ answer: "done", reply: { id: "q2", stage: "next" } });
     expect(stages(at.r)).toEqual({ q1: "held", q2: "next" });
     at.r.open();
@@ -358,15 +364,15 @@ describe("Stop and Send now, each one step", () => {
   it("ended, stop: the answer is too late, and still a message that went out behind it by Send now comes back unsaved and the rest holds", async () => {
     const r = rig();
     const first = await r.h["chat.send"]({ threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: ME });
-    await r.h["queue.add"](r.entry("q1", "second"), { clientId: ME });
+    await r.h["reply.send"](r.entry("q1", "second"), { clientId: ME });
     await r.h["reply.hold"]({ id: "q1" }, { clientId: ME });
     r.openOne();
     await until(() => over({ r, turnId: first.turnId }), "the first reply's end");
     await settle();
     // the reply has ended on its own; Send now takes the held message, and one more waits behind it
     await r.h["reply.now"]({ id: "q1" }, { clientId: ME });
-    await until(() => q1(r)?.sending !== undefined, "the message taken");
-    await r.h["queue.add"](r.entry("q2", "third"), { clientId: ME });
+    await until(() => q1(r)?.stage === "starting", "the message taken");
+    await r.h["reply.send"](r.entry("q2", "third"), { clientId: ME });
     expect(stages(r)).toEqual({ q1: "starting", q2: "queued" });
     expect(await r.h["reply.stop"]({ id: first.turnId }, { clientId: OTHER })).toMatchObject({ answer: "gone", why: "sent", question: { content: "first" } });
     expect(stages(r)).toEqual({ q1: "held", q2: "held" });
@@ -537,11 +543,6 @@ describe("table 1: every call on a record at every stage", () => {
     expect(move(move(AT.held, CALLS["open edit"]).next, CALLS["close edit"]).next).toEqual(AT.held);
     // on hold while open: it returns on hold
     expect(move(move(AT["editing (this window)"], CALLS.hold).next, CALLS["close edit"]).next).toMatchObject({ stage: "held", why: { why: "stopped" } });
-  });
-  it("the older calls: an edit is taken over and ended by any window, and a change checks nothing", () => {
-    expect(move(AT["editing (another window)"], { call: "edit", open: true, by: 1, older: true }).next).toMatchObject({ stage: "editing", by: 1 });
-    expect(move(AT["editing (another window)"], { call: "edit", open: false, by: 1, older: true }).next).toMatchObject({ stage: "queued" });
-    expect(move(AT["editing (another window)"], { ...CALLS.change, base: "m0", older: true }).next).toMatchObject({ stage: "editing", by: 2, words: { text: "new words" } });
   });
   it("Send now: a new yes replaces the old one, and the reply on its way in its chat is stopped in the same step", () => {
     const consent = { kind: "standing" } as const;
@@ -767,10 +768,10 @@ describe("table 2: every server event on a record at every stage", () => {
   });
 });
 
-describe("the older shapes are made from the record", () => {
-  const row: QueuedMessage = { id: "q1", threadId: "t1", messageId: "m1", text: "words", at: 1, waitFor: "setup", model: MODEL, numCtx: 8192 };
+describe("the queue file's rows are made from the record", () => {
+  const row: SavedEntry = { id: "q1", threadId: "t1", messageId: "m1", text: "words", at: 1, waitFor: "setup", model: MODEL, numCtx: 8192 };
   const why = { code: "wont-fit", message: "it does not fit" };
-  it.each<readonly [string, Partial<QueuedMessage>, Stage]>([
+  it.each<readonly [string, Partial<SavedEntry>, Stage]>([
     ["waiting", {}, "queued"],
     ["on hold", { held: true }, "held"],
     ["on hold, refused", { held: true, why }, "held"],
@@ -817,14 +818,14 @@ describe("the older shapes are made from the record", () => {
 // the windows (reply.changed), that their numbers only rise, and that a window connecting now
 // (reply.list) reads every record as it was last sent.
 
-const ROW: QueuedMessage = { id: "q1", threadId: "t1", messageId: "m1", text: "words", at: 1, waitFor: "reply", model: MODEL, numCtx: 8192 };
+const ROW: SavedEntry = { id: "q1", threadId: "t1", messageId: "m1", text: "words", at: 1, waitFor: "reply", model: MODEL, numCtx: 8192 };
 const ANSWER: Message = { id: "a1", threadId: "t1", role: "assistant", content: "answer", createdAt: 3 };
 const WARM = { cold: false, drawing: false };
 
 function telling() {
   const told: ReplyChange[] = [];
   const q: Replies = createReplies({
-    log: () => undefined, changed: () => undefined, told: (c) => told.push(c), saved: () => undefined, deleting: () => false, closing: () => false,
+    log: () => undefined, told: (c) => told.push(c), saved: () => undefined, deleting: () => false, closing: () => false,
     // as the app does: the work's clock stops at the cut, and its record is sent again
     cut: (turnId) => q.clocked(turnId),
     clock: () => ({ stage: "waiting", startedAt: 5, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {} }),
@@ -842,7 +843,7 @@ const sent = (c: ReplyChange): string => {
   return `${c.reply.stage}${loading}${silent}${stopped}${c.saved === undefined ? "" : ` +${c.saved.length}`}`;
 };
 
-const waits = ({ q }: Telling) => { q.add(ROW); };
+const waits = ({ q }: Telling) => { joins(q, ROW); };
 const starts = (t: Telling) => { waits(t); t.q.take("q1", "turn-1", 5); t.q.begun("turn-1"); };
 const asked = (t: Telling, how = WARM) => { starts(t); t.q.started("turn-1", 1, QUESTION, MODEL, how); t.q.notify(); };
 const writes = (t: Telling) => { asked(t); t.q.heard("turn-1", { type: "delta", text: "some" }); t.q.clocked("turn-1"); };
@@ -855,7 +856,7 @@ const RETRY = { retryOf: "m0" };
 
 const TOLD: Record<string, readonly [steps: (t: Telling) => void, told: readonly string[]]> = {
   "a message joins the list": [waits, ["queued"]],
-  "the same message is sent again": [(t) => { waits(t); t.q.add(ROW); }, ["queued"]],
+  "the same message is sent again": [(t) => { waits(t); joins(t.q, ROW); }, ["queued"]],
   "a waiting message is put on hold": [(t) => { waits(t); t.q.hold({ id: "q1" }); }, ["queued", "held"]],
   "a waiting message goes by Send now": [(t) => { waits(t); t.q.now({ id: "q1" }); }, ["queued", "next"]],
   "a waiting message is opened in a composer": [(t) => { waits(t); t.q.edit({ id: "q1", open: true }, 1); }, ["queued", "editing"]],
@@ -981,8 +982,8 @@ describe("table 3: what every window is sent as a record changes", () => {
     mkdirSync(root, { recursive: true });
     const dir = mkdtempSync(path.join(root, "reply-table-"));
     onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
-    const deps = { file: path.join(dir, "queue.json"), log: () => undefined, changed: () => undefined, saved: () => undefined, deleting: () => false, closing: () => false, cut: () => undefined, clock: () => undefined };
-    createReplies({ ...deps, told: () => undefined }).add(ROW);
+    const deps = { file: path.join(dir, "queue.json"), log: () => undefined, saved: () => undefined, deleting: () => false, closing: () => false, cut: () => undefined, clock: () => undefined };
+    joins(createReplies({ ...deps, told: () => undefined }), ROW);
     const again = createReplies({ ...deps, told: (c) => told.push(c) });
     expect(told).toEqual([]);
     expect(again.records()).toMatchObject([{ reply: { id: "q1", stage: "held", held: { why: "restart" } } }]);
@@ -1001,7 +1002,7 @@ const came = (s: Sent): string => {
 };
 
 const store = (app: { saved?: Message; deleting?: true; closing?: true } = {}) => createReplies({
-  log: () => undefined, changed: () => undefined, told: () => undefined, cut: () => undefined, clock: () => undefined,
+  log: () => undefined, told: () => undefined, cut: () => undefined, clock: () => undefined,
   saved: (id) => (app.saved?.id === id ? app.saved : undefined), deleting: () => app.deleting === true, closing: () => app.closing === true,
 });
 
@@ -1039,16 +1040,16 @@ describe("the one send call: the server decides whether a message starts or wait
 
   it("a message of its chat waits to go on its own: the new one waits behind it, and one on hold is not in its way", () => {
     const q = store();
-    q.add({ ...ROW, id: "q0", messageId: "m0" });
+    joins(q, { ...ROW, id: "q0", messageId: "m0" });
     expect(came(sends({ q }))).toBe("done queued");
     expect(q.list().map((r) => r.id)).toEqual(["q0", "q1"]);
     const held = store();
-    held.add({ ...ROW, id: "q0", messageId: "m0" });
+    joins(held, { ...ROW, id: "q0", messageId: "m0" });
     held.hold({ id: "q0" });
     expect(came(sends({ q: held }))).toBe("start");
     // another chat's waiting message is not in its way either
     const other = store();
-    other.add({ ...ROW, id: "q0", messageId: "m0", threadId: "t2" });
+    joins(other, { ...ROW, id: "q0", messageId: "m0", threadId: "t2" });
     expect(came(sends({ q: other }))).toBe("start");
   });
 

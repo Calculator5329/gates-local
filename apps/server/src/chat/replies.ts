@@ -8,15 +8,14 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import * as Result from "effect/Result";
 import * as S from "effect/Schema";
-import { QueuedMessage, type Message, type Params, type Reply, type ReplyAnswer, type ReplyChange, type ReplyListed, type ReplyRecord, type ReplyStage, type StopConsent, type WaitFor } from "@gates-local/contracts";
+import type { Message, Params, Reply, ReplyAnswer, ReplyChange, ReplyListed, ReplyRecord, ReplyStage, StopConsent, WaitFor } from "@gates-local/contracts";
 import {
   SOUND, fromQueued, heardAs, isAsked, isEnded, isInFlight, isLive, isWaiting, move, shownStage, stillStarting, toQueued,
-  type Ahead, type Back, type Behind, type Drawing, type End, type Ended, type Heard, type InFlight, type Input, type Live, type Moved, type Next, type Queued, type Rec, type Refusal, type Rules, type Stopping, type Waiting, type Words,
+  type Ahead, type Back, type Behind, type Drawing, type End, type Ended, type Heard, type Held, type InFlight, type Input, type Live, type Moved, type Next, type Queued, type Rec, type Refusal, type Rules, type Stopping, type Waiting, type Words,
 } from "./reply.ts";
+import { SavedEntry } from "./queue-file.ts";
 
-export type Entry = QueuedMessage;
-/** The older queue.update: every part of a waiting message a window could change, in one call. */
-export type QueuePatch = Omit<Params<"queue.update">, "id">;
+export type Entry = SavedEntry;
 
 /** What the server has now, for the next start. */
 export interface Ready {
@@ -56,8 +55,6 @@ export interface RepliesDeps {
   /** Where the waiting messages are kept; none keeps them in memory only (tests, a server with no data folder). */
   readonly file?: string | undefined;
   readonly log: (line: string) => void;
-  /** The list every window shows, after it changed. */
-  readonly changed: (list: readonly Entry[]) => void;
   readonly told: (change: ReplyChange) => void;
   /** The saved message with this id. */
   readonly saved: (messageId: string) => Message | undefined;
@@ -74,16 +71,13 @@ export interface RepliesDeps {
 }
 
 export interface Replies {
+  /** The waiting messages as the queue's file keeps them. */
   list(): readonly Entry[];
   records(): readonly ReplyListed[];
-  /** A window's message, to wait its turn. "removed" for an id removed before, which never comes back. */
-  add(entry: Entry): "ok" | "removed";
   // why: the same send again is answered as the message now is, never taken twice
   send(params: Params<"reply.send">, now: SendNow): Sent;
   /** A message an older page sent itself (chat.send), taken at once for `turnId`: that page keeps its words. */
   direct(turnId: string, threadId: string, words: Words, retry: boolean, at: number): void;
-  /** The older queue.update. Undefined when there is no such waiting message; "sending" when it is on its way. */
-  update(id: string, patch: QueuePatch, by: number): "ok" | "sending" | undefined;
   /** A window is gone for good: the messages it had open to edit go back to where they were. */
   windowGone(by: number): void;
   change(params: Params<"reply.change">, by: number): ReplyAnswer;
@@ -135,7 +129,7 @@ export interface Replies {
   notify(): void;
 }
 
-const decodeEntry = S.decodeUnknownResult(QueuedMessage);
+const decodeEntry = S.decodeUnknownResult(SavedEntry);
 /** Removed ids are remembered at most; the oldest go first. */
 const REMOVED_KEPT = 1000;
 /** Ended messages are remembered at most; the oldest go first. Bounded by count, never by time. */
@@ -205,7 +199,7 @@ const keptBySender = (r: Rec): boolean => isWaiting(r) && r.direct;
 
 const revOf = (c: ReplyChange): number => (c.kind === "is" ? c.reply.rev : c.rev);
 
-export function createReplies({ file, log, changed, told, saved, deleting, closing, cut, clock, rules = SOUND }: RepliesDeps): Replies {
+export function createReplies({ file, log, told, saved, deleting, closing, cut, clock, rules = SOUND }: RepliesDeps): Replies {
   /** Every record by its id, oldest first: a record keeps its place however it changes. */
   const recs = new Map<string, Rec>();
   /** The record each turn was started for: a call may name a message by its turn. */
@@ -310,7 +304,6 @@ export function createReplies({ file, log, changed, told, saved, deleting, closi
     }
     return rows;
   };
-  let pushed = "";
   let written: string | undefined;
   function flush(): void {
     keep();
@@ -334,9 +327,6 @@ export function createReplies({ file, log, changed, told, saved, deleting, closi
         log(`queue not saved: ${(e as Error).message}`);
       }
     }
-    if (entries === pushed) return;
-    pushed = entries;
-    changed(rows);
   }
   /**
    * After a step: the windows hear, then the works it cut are cut. `quiet`: the chat event that
@@ -462,7 +452,6 @@ export function createReplies({ file, log, changed, told, saved, deleting, closi
     toCut.length = 0;
     // the file is written again at the next change when a row was left out of it here
     dirty = asked;
-    pushed = JSON.stringify(list());
   }
   // why: no window has connected yet: each reads the records with reply.list
   pending.clear();
@@ -478,29 +467,20 @@ export function createReplies({ file, log, changed, told, saved, deleting, closi
       }
       return rows;
     },
-    add(entry) {
-      const known = recs.get(entry.id) ?? [...recs.values()].find((r) => (isWaiting(r) || r.stage === "starting") && r.words.messageId === entry.messageId);
-      const m = apply(known, {
-        call: "send", record: fromQueued(entry), saved: saved(entry.messageId) !== undefined,
-        // it waits its turn: the pump takes it
-        chat: { deleting: deleting(entry.threadId), closing: closing(), busy: true },
-      });
-      settle();
-      return m.answer?.answer === "gone" && m.answer.why === "removed" ? "removed" : "ok";
-    },
-    send({ id, threadId, askFirst, consent, ...said }, { at, behind, busy, turnId }) {
+    send({ id, threadId, askFirst, consent, held, ...said }, { at, behind, busy, turnId }) {
       const retry = said.retryOf !== undefined;
       const known = recs.get(id) ?? [...recs.values()].find((r) => (isWaiting(r) || r.stage === "starting") && r.words.messageId === said.messageId);
       // why: behind what already waits in its chat, so the order they were typed in is kept
       const waits = behind !== "reply" || busy || going(threadId) !== undefined
         || inChat(threadId).some((r) => goes(r, { ...rules, pickSkipsEditing: false }) !== undefined);
       if (known === undefined && retry && (waits || closing())) return { kind: "cannot" };
-      const starts = known === undefined && !waits;
+      const starts = known === undefined && !waits && held === undefined;
       const part = { id, threadId, rev: 0, words: { ...said, at }, behind, starts: 0, direct: retry };
       // why: a person waits on a send that starts now, so it goes as Send now does, with its yes
-      const record: Queued | Next = starts && (askFirst === true || consent !== undefined)
-        ? { ...part, stage: "next", ...(consent === undefined ? {} : { consent }) }
-        : { ...part, stage: "queued", waitFor: behind };
+      const record: Queued | Held | Next = held === true ? { ...part, stage: "held", why: { why: "stopped" } }
+        : starts && (askFirst === true || consent !== undefined)
+          ? { ...part, stage: "next", ...(consent === undefined ? {} : { consent }) }
+          : { ...part, stage: "queued", waitFor: behind };
       const m = apply(known, {
         call: "send", record, saved: saved(said.messageId) !== undefined,
         chat: { deleting: deleting(threadId), closing: closing(), busy: waits },
@@ -524,26 +504,8 @@ export function createReplies({ file, log, changed, told, saved, deleting, closi
       });
       settle();
     },
-    update(id, patch, by) {
-      const rec = recs.get(id);
-      if (rec === undefined || !(isWaiting(rec) || rec.stage === "starting")) return undefined;
-      if (rec.stage === "starting") return "sending";
-      const { editing, now, stopOthers, stopTurns, held, ...rest } = patch;
-      const words = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined)) as Partial<Words>;
-      if (Object.keys(words).length > 0) apply(recs.get(id), { call: "change", base: rec.words.messageId, messageId: words.messageId ?? rec.words.messageId, words, by, baseSaved: false, older: true });
-      if (editing !== undefined) apply(recs.get(id), { call: "edit", open: editing, by, older: true });
-      // the person stopped the reply it waited behind; one going by Send now still goes
-      const at = recs.get(id);
-      if (held === true && at !== undefined && goes(at, { ...rules, pickSkipsEditing: false }) !== "next") apply(at, { call: "hold" });
-      if (now === true) {
-        const consent: StopConsent | undefined = stopOthers !== true ? undefined : stopTurns === undefined ? { kind: "standing" } : { kind: "named", replies: stopTurns };
-        apply(recs.get(id), { call: "now", ...(consent === undefined ? {} : { consent }), stops: false });
-      }
-      settle();
-      return "ok";
-    },
     windowGone(by) {
-      for (const rec of recs.values()) if (rec.stage === "editing" && rec.by === by) apply(rec, { call: "edit", open: false, by, older: true });
+      for (const rec of recs.values()) if (rec.stage === "editing" && rec.by === by) apply(rec, { call: "edit", open: false, by });
       settle();
     },
     change({ id, base, messageId, ...words }, by) {

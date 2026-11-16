@@ -136,7 +136,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
     try {
       try {
         await new Promise((resolve) => setImmediate(resolve));
-        // waiting for its files, the GPU and the load gate is the record's first stage: turns.active has it, and
+        // waiting for its files, the GPU and the load gate is the record's first stage: reply.list has it, and
         // no event of the turn reaches a socket before chat.send's answer. From here a load of its model that it
         // waits behind (the preload its first key started) is said as loading, also before its start.
         answered(turn);

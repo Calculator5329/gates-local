@@ -29,7 +29,7 @@ it.each([
   drafts.replaceDraft("A", backup); session.editQueued("q"); drafts.editDraft("queued words, edited");
   if (reason === "late confirmation") {
     // Send now, pressed there: the server starts it and saves its question
-    browser.server.queue.change("q", { now: true });
+    browser.server.queue.now("q");
     await until(() => store.getState().editingQueued === null, 2000, "confirmed");
     const late = store.getState().turns["A"]?.turnId;
     expect(late).toBe("q");

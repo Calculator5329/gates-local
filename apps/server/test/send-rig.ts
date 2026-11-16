@@ -3,7 +3,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Channel, Payload, QueuedMessage, ReplyChange, ReplyRecord } from "@gates-local/contracts";
+import type { Channel, Params, Payload, Reply, ReplyChange, ReplyRecord } from "@gates-local/contracts";
 import { afterEach, vi } from "vitest";
 import { createApp } from "../src/app.ts";
 import type { Rules } from "../src/chat/reply.ts";
@@ -21,6 +21,8 @@ export const until = async (ok: () => boolean, what: string) => {
   for (let i = 0; i < 400 && !ok(); i++) await new Promise((r) => setTimeout(r, 5));
   if (!ok()) throw new Error(`timed out waiting for ${what}`);
 };
+
+export const WAITING: ReadonlySet<Reply["stage"]> = new Set(["queued", "held", "next", "editing"]);
 
 export const settle = () => new Promise((r) => setTimeout(r, 50));
 
@@ -122,11 +124,25 @@ export function rig(hooks: RigHooks = {}) {
     const e = (p.payload as Payload<"chat.event">).event;
     return p.channel === "chat.event" && e.type === "start" ? [e.userMessage.content] : [];
   });
-  const queued = (): readonly QueuedMessage[] => (pushes.findLast((p) => p.channel === "queue.changed")?.payload ?? []) as readonly QueuedMessage[];
   /** Every change of a record the windows were sent, in order. */
   const told = (): readonly ReplyChange[] => pushes.flatMap((p) => p.channel === "reply.changed" ? [p.payload as ReplyChange] : []);
-  const entry = (id: string, text: string): QueuedMessage => ({ id, threadId: thread.id, messageId: `m-${id}`, text, at: 1, waitFor: "reply", model: MODEL, numCtx: 16384 });
-  return { app, db, thread, open, openOne, finish, refusals, asked, pushes, events, record, starts, queued, told, entry, h: app.handlers as Required<typeof app.handlers> };
+  /** A record as the windows were last told, or undefined once it left. */
+  const latest = (id: string): Reply | undefined => {
+    const c = told().findLast((t) => (t.kind === "is" ? t.reply.id : t.id) === id);
+    return c?.kind === "is" ? c.reply : undefined;
+  };
+  /** What waits, or waited and is taken and not yet saved, as the windows were last told, in the order each first waited. */
+  const queued = (): readonly Reply[] => [...new Set(told().flatMap((t) => (t.kind === "is" && WAITING.has(t.reply.stage) ? [t.reply.id] : [])))]
+    .flatMap((id) => { const r = latest(id); return r !== undefined && (WAITING.has(r.stage) || r.stage === "starting") ? [r] : []; });
+  /** The turn a taken message's start runs as, from the queue's file: no window is told it. */
+  const takenAs = (id: string): string | undefined => {
+    try {
+      const saved = JSON.parse(readFileSync(path.join(dir, "queue.json"), "utf8")) as { entries: readonly { id: string; sending?: string }[] };
+      return saved.entries.find((e) => e.id === id)?.sending;
+    } catch { return undefined; }
+  };
+  const entry = (id: string, text: string): Params<"reply.send"> => ({ id, threadId: thread.id, messageId: `m-${id}`, text, model: MODEL, numCtx: 16384 });
+  return { app, db, thread, open, openOne, finish, refusals, asked, pushes, events, record, starts, told, latest, queued, takenAs, entry, h: app.handlers as Required<typeof app.handlers> };
 }
 
 export type Rig = ReturnType<typeof rig>;

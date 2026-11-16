@@ -1,5 +1,5 @@
 // Chat admissions, concurrent replies, streaming buffers, and the server's record of every message as this window keeps it.
-import { type AttachedFile, type BlockingTurn, type ImageChoice, type Message, type MethodName, type Params, type Payload, type Reply, type ReplyCall, type ReplyChange, type ReplyListed, type ReplyOutcome, type ReplyTimes, type ResultOf, type SoFar, type StopConsent, WireError } from "@gates-local/contracts";
+import { type AttachedFile, type BlockingTurn, type ImageChoice, type Message, type Params, type Payload, type Reply, type ReplyCall, type ReplyChange, type ReplyListed, type ReplyOutcome, type ReplyTimes, type SoFar, type StopConsent, WireError } from "@gates-local/contracts";
 import { ctxFor, describeModel, k } from "../lib/words/format.ts";
 import { firstChatPull, sendableModel } from "../models/pick.ts";
 import { type LiveTurn, NA, type State, type StopAsk, type TurnClock, type WaitingReply, behindSetup, chatReady, getState, isWaiting, runningTurn, setState, streamingHere, turnOf, waitingReplies } from "../lib/store/store.ts";
@@ -26,7 +26,6 @@ declare global {
 interface ChatEffects {
   /** A function that returns nothing publishes nothing: no selector runs. */
   readonly applyServerEvent: (event: ServerEvent) => void;
-  readonly call: <M extends MethodName>(method: M, params: Params<M>, options?: { readonly timeoutMs?: number }) => Promise<ResultOf<M>>;
   /** A call that names one waiting message, answered with what became of it. */
   readonly reply: <M extends ReplyCall>(method: M, params: Params<M>) => Promise<ReplyOutcome>;
   readonly codeOf: (error: unknown) => string;
@@ -77,6 +76,7 @@ const CLOSING = "Gates Local is closing. The reply written so far was saved.";
 const tooLate = (a: Extract<ReplyOutcome, { answer: "gone" | "sending" }>): string => (a.answer === "sending" ? ON_ITS_WAY : a.why === "sent" ? ALREADY_SENT : REMOVED);
 
 /** The words "restored on hold" a reload put up for this browser's own saved queue, which the server's now replaces. */
+const CHAT_GONE = "The chat this message was waiting in is gone, so it was not sent.";
 const RESTORED_NOTICE = "Your queued messages were restored on hold. Use Send now when you are ready.";
 /** Set once this browser's saved queue (from before the server kept it) has gone to the server. */
 const QUEUE_MOVED_KEY = "gates-local.queue-on-server";
@@ -418,7 +418,7 @@ function handedOver(id: string, restored: boolean): void {
 const shownTurn = (id: string) => Object.values(getState().turns).find((t) => t.turnId === id);
 
 /** History, navigation, fit and RPC operations are wired by session.ts. `rules` is given only by the test that turns one off (records.test.ts). */
-export function createChat({ applyServerEvent, call, reply: askOne, codeOf, createThread, creatingDraft, loadThread, loading, noteMessage, withMessage, untrackedDone, openThread, blockingFor }: ChatEffects, rules?: WindowRules) {
+export function createChat({ applyServerEvent, reply: askOne, codeOf, createThread, creatingDraft, loadThread, loading, noteMessage, withMessage, untrackedDone, openThread, blockingFor }: ChatEffects, rules?: WindowRules) {
   askServer = askOne;
   const records = createRecords(rules);
   /** Image sends that open a new chat, by record id, until the server saves their question. */
@@ -708,12 +708,16 @@ export function createChat({ applyServerEvent, call, reply: askOne, codeOf, crea
         continue;
       }
       handing.add(q.id);
-      void call("queue.add", { ...q, messageId: q.messageId ?? queueId(), waitFor: "reply", held: true, numCtx: s.numCtx, think: s.think }).then(() => true, (e: unknown) => {
-        const code = codeOf(e);
+      const { at: _typed, ...said } = q;
+      void askOne("reply.send", { ...said, messageId: q.messageId ?? queueId(), held: true, numCtx: s.numCtx, think: s.think }).then((a) => {
         // never answered: it stays saved here, and goes at the next connection
-        if (code === "closed" || code === "timeout") return undefined;
+        if (a.answer === "not-reached") return undefined;
+        if (a.answer !== "gone") return true;
         // removed in another window while this one could not hear it: the removal stands, said nowhere twice
-        if (code !== "queue-removed") setState({ notice: "The chat this message was waiting in is gone, so it was not sent." });
+        if (a.why === "chat-deleted") setState({ notice: CHAT_GONE });
+        return false;
+      }, () => {
+        setState({ notice: CHAT_GONE });
         return false;
       }).then((restored) => {
         handing.delete(q.id);

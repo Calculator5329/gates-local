@@ -15,7 +15,7 @@ it("R5: late confirmation restores the words from before the queued edit", async
     // the Edit has not reached the server when another window's Send now starts the message
     void browser.server.hold("reply.edit");
     drafts.editDraft("my unfinished words"); session.editQueued("q");
-    browser.server.queue.change("q", { now: true });
+    browser.server.queue.now("q");
     await until(() => store.getState().editingQueued === null, 2000, "confirmed");
     expect(drafts.getDraft("A").text).toBe("my unfinished words");
     expect(queuedOf(store.getState())).toEqual([]);
@@ -35,7 +35,7 @@ it("late confirmation of a reworded queued edit keeps the new words and drops a 
     session.editQueued("q"); drafts.editDraft("queued words, reworded");
     // a paste or dictation checks this before it lands (paste.ts, Voice.tsx)
     const held = drafts.getDraft("A").version;
-    browser.server.queue.change("q", { now: true });
+    browser.server.queue.now("q");
     await until(() => store.getState().editingQueued === null, 2000, "confirmed");
     expect(drafts.getDraft("A").text).toBe("queued words, reworded");
     expect(drafts.getDraft("A").version, "the edit it was meant for has ended").not.toBe(held);

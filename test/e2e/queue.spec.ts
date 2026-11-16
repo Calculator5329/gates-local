@@ -121,10 +121,10 @@ test("saving an edit to a message a second window removed keeps the typed words 
   await expect(rows(other).first(), "the second window sees the edit").toContainText("Being edited in another window");
 
   // the first window has not heard of the removal when it saves: the answer to the save is all it has
-  t.hold.add("queue.changed");
+  t.hold.add("reply.changed");
   await rows(other).first().locator("[data-unqueue]").click();
   await expect(rows(other)).toHaveCount(0);
-  await expect.poll(() => t.queued("queue.changed")).toBeGreaterThan(0);
+  await expect.poll(() => t.queued("reply.changed")).toBeGreaterThan(0);
 
   await page.locator("#ta").press("Enter");
   const notice = page.getByTestId("chat.composer.notice");
@@ -133,7 +133,7 @@ test("saving an edit to a message a second window removed keeps the typed words 
   await expect(notice, "the line says what happened to the message").toContainText(/removed/i);
   await page.screenshot({ path: test.info().outputPath("told-it-was-removed.png") });
 
-  t.release("queue.changed");
+  t.release("reply.changed");
   await expect(rows(page), "the removal shows here too").toHaveCount(0);
   await expect(page.locator("#ta")).toHaveValue("Waiting message, reworded with care");
   await expect(page.locator(".turn.u"), "nothing was sent").toHaveCount(1);

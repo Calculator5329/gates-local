@@ -1,8 +1,9 @@
 // The window's side of the server's records, without a browser: what it asks the server again after
 // a dropped connection, and an Edit that comes after the message went out.
-import { type QueuedMessage, type Reply, WireError } from "@gates-local/contracts";
+import { type Params, type Reply, WireError } from "@gates-local/contracts";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { State } from "../lib/store/store.ts";
+import type { SavedQueued } from "./chat.ts";
 import { queuedOf, repliesOf } from "../../test/queue.ts";
 
 vi.stubGlobal("window", {});
@@ -52,7 +53,7 @@ afterEach(() => {
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 /** A message this browser saved before the server kept the queue. */
-const row = (id: string): QueuedMessage => ({ id, threadId: "t1", messageId: `m-${id}`, text: `words ${id}`, at: 1, waitFor: "reply" });
+const row = (id: string): SavedQueued => ({ id, threadId: "t1", messageId: `m-${id}`, text: `words ${id}`, at: 1 });
 /** The window with one message waiting in the open chat, as the server's record said. */
 const waiting = (id: string) => ({ view: "thread" as const, threadId: "t1", replies: repliesOf([{ id, threadId: "t1", text: `words ${id}`, at: 1, waitFor: "reply" }]) });
 /** A connection opens and the server lists its records. */
@@ -60,7 +61,7 @@ function listed(...replies: Reply[]): void {
   chat.connected();
   chat.replyListed(replies.map((r) => ({ reply: r })));
 }
-const adds = () => calls.filter((c) => c.method === "queue.add").map((c) => (c.params as QueuedMessage).id);
+const adds = () => calls.filter((c) => c.method === "reply.send").map((c) => (c.params as Params<"reply.send">).id);
 const owed = (id: string) => oldQueueOwed().some((q) => q.id === id);
 const moved = () => storage.get("gates-local.queue-on-server") === "1";
 
@@ -123,9 +124,9 @@ it("an Edit the server takes opens the message in the composer", async () => {
   expect(getDraft("t1").text).toBe("words q1");
 });
 
-it("a queue add whose answer was lost is not asked again once the server's record of it came", async () => {
+it("an old saved message's send whose answer was lost is not asked again once the server's record of it came", async () => {
   // this browser's queue from before the server kept it goes once, on hold
-  answers.set("queue.add", () => new Promise(() => undefined));
+  answers.set("reply.send", () => new Promise(() => undefined));
   oldQueueRead([row("q1")], false);
   listed();
   expect(adds()).toEqual(["q1"]);
@@ -138,8 +139,8 @@ it("a queue add whose answer was lost is not asked again once the server's recor
   expect(queuedOf(getState())).toEqual([]);
 });
 
-it("a queue add the server refuses as removed shows no row, is owed no longer, and says nothing", async () => {
-  answers.set("queue.add", () => Promise.reject(new WireError("queue-removed", "This message was removed from the queue.")));
+it("an old saved message the server answers as removed shows no row, is owed no longer, and says nothing", async () => {
+  answers.set("reply.send", () => Promise.resolve({ answer: "gone", why: "removed" }));
   oldQueueRead([row("q1")], false);
   listed();
   await settle();
@@ -177,7 +178,7 @@ it("a picture the server took a Stop for has nothing left to stop here, while it
 });
 
 it("a message the server sent leaves what this window would ask again", async () => {
-  answers.set("queue.add", () => new Promise(() => undefined));
+  answers.set("reply.send", () => new Promise(() => undefined));
   oldQueueRead([row("q1")], false);
   listed();
   // the server took it and sent it: its record says it is on its way
@@ -190,12 +191,12 @@ it("a message the server sent leaves what this window would ask again", async ()
 // server's list at connect, or this browser's saved queue read back from disk.
 it.each(["the server's list", "the saved queue"])("an old saved queue reaches the server once, on hold, when %s comes first", async (first) => {
   const old = [row("a"), row("b"), row("c")];
-  answers.set("queue.add", () => new Promise(() => undefined));
+  answers.set("reply.send", () => new Promise(() => undefined));
   if (first === "the server's list") listed();
   oldQueueRead(old, false);
   if (first === "the saved queue") listed();
   expect(adds()).toEqual(["a", "b", "c"]);
-  expect(calls.filter((c) => c.method === "queue.add").every((c) => (c.params as QueuedMessage).held === true)).toBe(true);
+  expect(calls.filter((c) => c.method === "reply.send").every((c) => (c.params as Params<"reply.send">).held === true)).toBe(true);
   expect(old.every((q) => owed(q.id)), "kept saved until the server answers").toBe(true);
   expect(moved(), "not marked moved before the server has any").toBe(false);
   // the server has them now; the next connect and a second read of the save add nothing
@@ -212,13 +213,23 @@ it("an old saved queue the server already has is not added again, and is no long
   expect(owed("q1")).toBe(false);
 });
 
-it("an old saved message is owed until the server answers its add", async () => {
+it("an old saved message is owed until the server answers its send", async () => {
   let answer!: () => void;
-  answers.set("queue.add", () => new Promise((yes) => { answer = () => yes(undefined); }));
+  answers.set("reply.send", () => new Promise((yes) => { answer = () => yes({ answer: "done", reply: record("q1", HELD) }); }));
   oldQueueRead([row("q1")], false);
   listed();
   expect(owed("q1")).toBe(true);
   answer();
   await settle();
   expect(owed("q1")).toBe(false);
+});
+
+it("an old saved message whose chat was deleted meanwhile is owed no longer, and says why it was not sent", async () => {
+  answers.set("reply.send", () => Promise.resolve({ answer: "gone", why: "chat-deleted" }));
+  oldQueueRead([row("q1")], false);
+  listed();
+  await settle();
+  expect(queuedOf(getState())).toEqual([]);
+  expect(owed("q1")).toBe(false);
+  expect(getState().notice).toBe("The chat this message was waiting in is gone, so it was not sent.");
 });

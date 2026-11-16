@@ -11,7 +11,6 @@ import {
   CatalogEntry,
   ModelEstimate,
   ChatEvent,
-  ReplyRecord,
   ReplyAnswer,
   ReplyChange,
   ReplyId,
@@ -40,7 +39,6 @@ import {
   MeasureRun,
   PageSeen,
   ThreadPage,
-  QueuedMessage,
   NumCtx,
   MemoryState,
   ModelLoad,
@@ -316,16 +314,6 @@ export const methods = {
     result: S.Struct({ turnId: S.String, userMessage: S.optional(Message), replayed: S.optional(S.Boolean) }),
   },
   /**
-   * Authoritative running replies when a client connects or reconnects, from the moment chat.send
-   * took each (also while it waits to start), each with its reply record as it is now; later
-   * changes use chat.event.
-   */
-  "turns.active": {
-    params: NoParams,
-    result: S.Array(S.Struct({ turnId: S.String, threadId: S.String, reply: ReplyRecord })),
-    phone: "allow",
-  },
-  /**
    * The running turns that would have to stop for `model` at `numCtx` to load as the fit plans
    * it; empty when none (same model, or it fits beside them). Reads only; never loads.
    */
@@ -335,40 +323,6 @@ export const methods = {
     phone: "allow",
   },
   "chat.cancel": { params: S.Struct({ turnId: S.String }), result: S.Struct({ cancelled: S.Boolean }), phone: "allow" },
-  // ---- the queue: kept and sent by the server; queue.changed pushes the whole list after every change
-  "queue.list": { params: NoParams, result: S.Array(QueuedMessage), phone: "allow" },
-  /**
-   * Joins the end of the queue (held when it says so). One with an id already queued, or whose
-   * messageId is saved, changes nothing. Refused with "queue-removed" for an id removed before:
-   * a window that missed the removal does not bring it back.
-   */
-  "queue.add": { params: QueuedMessage, result: S.Array(QueuedMessage), phone: "allow" },
-  /**
-   * Edit (`editing` true, then the new words with `editing` false, or false alone to cancel), Send
-   * now (`now`: it goes first, its hold lifted), on hold (`held`) or a new model after a refusal. Refused with
-   * "queue-sending" once its turn has started.
-   */
-  "queue.update": {
-    params: S.Struct({
-      id: S.String,
-      text: S.optional(S.String),
-      images: S.optional(S.Array(S.String).check(S.isMaxLength(8))),
-      files: S.optional(S.Array(AttachedFile).check(S.isMaxLength(8))),
-      messageId: S.optional(S.String.check(S.isMinLength(1), S.isMaxLength(200))),
-      model: S.optional(S.String),
-      /** With model: the context the person chose for it after a memory refusal. */
-      numCtx: S.optional(NumCtx),
-      editing: S.optional(S.Boolean),
-      now: S.optional(S.Literal(true)),
-      stopOthers: S.optional(S.Literal(true)),
-      stopTurns: S.optional(S.Array(S.String).check(S.isMaxLength(32))),
-      /** On hold: the person stopped the reply it waited behind. */
-      held: S.optional(S.Literal(true)),
-    }),
-    result: S.Array(QueuedMessage),
-    phone: "allow",
-  },
-  "queue.remove": { params: S.Struct({ id: S.String }), result: S.Array(QueuedMessage), phone: "allow" },
   /**
    * Send. The window makes `id` and keeps it from the press to the saved reply. The server decides
    * whether it starts or waits, and a start it then refuses puts the message on hold with the
@@ -383,6 +337,8 @@ export const methods = {
       // why: a person is waiting, so refuse rather than wait behind another chat's reply
       askFirst: S.optional(S.Boolean),
       consent: S.optional(StopConsent),
+      // why: a page's own queue from before the server kept one moves here on hold, never sent unasked
+      held: S.optional(S.Literal(true)),
     }),
     result: ReplyAnswer,
     phone: "allow",
@@ -540,8 +496,6 @@ export const pushes = {
    * messages' number. A window holding an older copy of the messages reads them again when it shows them.
    */
   "threads.changed": { payload: S.Struct({ threadId: S.String, thread: S.NullOr(Thread) }), sync: CHAT },
-  /** The whole queue again, after every change (queue.*). */
-  "queue.changed": { payload: S.Array(QueuedMessage) },
   // Transient provenance, never persisted in Settings. A client can distinguish
   // its older save completing from a new action in another window.
   "settings.changed": { payload: S.Struct({ ...Settings.fields, voiceChange: S.optional(S.String.check(S.isMaxLength(128))) }), sync: SETTINGS },

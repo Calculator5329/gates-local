@@ -14,7 +14,8 @@ import type { Message, ReplyAnswer } from "@gates-local/contracts";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { MODEL, rig, settle, until } from "../../test/send-rig.ts";
 import { callsOf, mentions as mentionsIn, oneArgument, productSource } from "./product-testing.ts";
-import { type Entry, type Ready, type RepliesDeps, createReplies } from "./replies.ts";
+import { entry, waits } from "./queue-testing.ts";
+import { type Ready, type RepliesDeps, createReplies } from "./replies.ts";
 import { SOUND, type Rules } from "./reply.ts";
 
 /** The rule a window keeps on its own calls. The server gives it what that needs: an honest answer. */
@@ -38,14 +39,13 @@ const named = process.env[SWITCH];
 if (named !== undefined && !isRule(named)) throw new Error(`${SWITCH} names no rule: ${named}`);
 const off: Rule | undefined = named;
 
-const entry = (id: string, threadId = "t1", more: Partial<Entry> = {}): Entry => ({ id, threadId, messageId: `m-${id}`, text: id, at: 1, waitFor: "reply", model: "m", numCtx: 4096, ...more });
 const idle: Ready = { chat: true, anyWork: false, busy: () => false };
 const question = (id: string, threadId = "t1"): Message => ({ id, threadId, role: "user", content: id, createdAt: 1 });
 const WARM = { cold: false, drawing: false };
 
 function store({ rules }: Under, file?: string, more: Partial<RepliesDeps> = {}) {
   return createReplies({
-    file, log: () => undefined, changed: () => undefined, told: () => undefined, saved: () => undefined, deleting: () => false, closing: () => false,
+    file, log: () => undefined, told: () => undefined, saved: () => undefined, deleting: () => false, closing: () => false,
     cut: () => undefined, clock: () => undefined, rules, ...more,
   });
 }
@@ -107,7 +107,7 @@ const CASES: readonly Case[] = [
       const q = store(under);
       q.direct("turn-1", "t1", { messageId: "m-1", text: "first", at: 1 }, false, 1);
       expect(q.started("turn-1", 1, question("m-1"), "m", WARM)).toBe(true);
-      q.add(entry("a"));
+      waits(q, entry("a"));
       q.ended("turn-1", { how: "done" }, 2);
       q.left("turn-1");
       q.notify();
@@ -122,7 +122,7 @@ const CASES: readonly Case[] = [
     name: "a message that goes on to be asked was never said to be removed",
     run(under) {
       const q = store(under);
-      q.add(entry("a"));
+      waits(q, entry("a"));
       const attempt = q.take("a", "turn-a", 1);
       q.begun("turn-a");
       const answer = q.remove({ id: "a" });
@@ -135,7 +135,7 @@ const CASES: readonly Case[] = [
     name: "an edit the server did not keep is not answered as done",
     run(under) {
       const q = store(under);
-      q.add(entry("a"));
+      waits(q, entry("a"));
       expect(q.change({ id: "a", base: "m-a", messageId: "m-a1", text: "from one window" }, 1).answer).toBe("done");
       // a second window's save began from the words as first typed
       const late = q.change({ id: "a", base: "m-a", messageId: "m-a2", text: "from another window" }, 2);
@@ -149,7 +149,7 @@ const CASES: readonly Case[] = [
     run(under) {
       const q = store(under, undefined, { saved: (messageId) => (messageId === "m-a" ? question("m-a") : undefined) });
       // a window that missed the start still has the message, and sends it once more
-      expect(q.add(entry("a"))).toBe("ok");
+      expect(waits(q, entry("a"))).toBe("sent");
       expect(q.list()).toEqual([]);
       expect(q.pick(idle)).toBeUndefined();
     },
@@ -160,11 +160,11 @@ const CASES: readonly Case[] = [
     run(under) {
       const file = dataFile();
       const q = store(under, file);
-      q.add(entry("a"));
-      q.add(entry("b", "t2"));
-      q.update("b", { now: true }, 1);
-      q.add(entry("c", "t3"));
-      q.update("c", { editing: true }, 1);
+      waits(q, entry("a"));
+      waits(q, entry("b", "t2"));
+      q.now({ id: "b" });
+      waits(q, entry("c", "t3"));
+      q.edit({ id: "c", open: true }, 1);
       const again = store(under, file);
       expect(again.list().map((e) => [e.id, e.held, e.now, e.editing])).toEqual([["a", true, undefined, undefined], ["b", true, undefined, undefined], ["c", true, undefined, undefined]]);
       expect(again.pick(idle)).toBeUndefined();
@@ -175,7 +175,7 @@ const CASES: readonly Case[] = [
     name: "a window changes what it shows only when the server answers",
     run(under) {
       const q = store(under);
-      q.add(entry("a"));
+      waits(q, entry("a"));
       q.take("a", "turn-a", 1);
       q.begun("turn-a");
       const one = standIn(under.window);
@@ -198,15 +198,15 @@ const CASES: readonly Case[] = [
       let stop: (() => void) | undefined;
       let readsWhileSending = 0;
       const r = rig({ rules, fileOwnersRead: () => {
-        if (r.queued()[0]?.sending === undefined) return;
+        if (r.latest("q1")?.stage !== "starting") return;
         // the first read is the check when the send is taken; the second is inside the save
         if (++readsWhileSending === 2) stop?.();
       } });
       const { turnId } = await r.h["chat.send"]({ threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
       const file = await r.h["files.attach"]({ name: "notes.txt", type: "text/plain", data: "aGVsbG8=" }, { clientId: 1 });
-      await r.h["queue.add"]({ ...r.entry("q1", "second"), files: [file] }, { clientId: 1 });
+      await r.h["reply.send"]({ ...r.entry("q1", "second"), files: [file] }, { clientId: 1 });
       r.openOne();
-      await until(() => r.queued()[0]?.sending !== undefined, "the queued message on its way");
+      await until(() => r.latest("q1")?.stage === "starting", "the queued message on its way");
       let stopped = false;
       stop = () => { stopped = true; void r.h["chat.cancel"]({ turnId }, { clientId: 1 }); };
       r.open();
@@ -214,7 +214,7 @@ const CASES: readonly Case[] = [
       await settle();
       expect(r.db.getMessage("m-q1"), "the message the Stop pulled back was never saved").toBeUndefined();
       expect(r.starts()).toEqual(["first"]);
-      expect(r.queued().map((q) => [q.id, q.held, q.sending])).toEqual([["q1", true, undefined]]);
+      expect(r.queued().map((q) => [q.id, q.stage])).toEqual([["q1", "held"]]);
     },
   },
   {
@@ -222,7 +222,7 @@ const CASES: readonly Case[] = [
     name: "a message open in a composer is never sent",
     run(under) {
       const q = store(under);
-      q.add(entry("a"));
+      waits(q, entry("a"));
       expect(q.edit({ id: "a", open: true }, 1).answer).toBe("done");
       expect(q.pick(idle)).toBeUndefined();
       expect(q.take("a", "turn-a", 1), "nor can a start be taken for it").toBeUndefined();
@@ -235,8 +235,8 @@ const CASES: readonly Case[] = [
     run(under) {
       const file = dataFile();
       const q = store(under, file);
-      q.add(entry("a"));
-      q.add(entry("b"));
+      waits(q, entry("a"));
+      waits(q, entry("b"));
       // the app closed after a's question was saved and before its row left the file
       const again = store(under, file, { saved: (messageId) => (messageId === "m-a" ? question("m-a") : undefined) });
       expect(again.list().map((e) => e.id)).toEqual(["b"]);
@@ -248,9 +248,9 @@ const CASES: readonly Case[] = [
     name: "a removed message is not queued again by a window that missed the removal",
     run(under) {
       const q = store(under);
-      q.add(entry("a"));
+      waits(q, entry("a"));
       expect(q.remove({ id: "a" }).answer).toBe("done");
-      expect(q.add(entry("a"))).toBe("removed");
+      expect(waits(q, entry("a"))).toBe("removed");
       expect(q.list()).toEqual([]);
       expect(q.pick(idle)).toBeUndefined();
     },

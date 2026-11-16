@@ -103,7 +103,7 @@ test("a thinking reply and two waiting messages, one on hold, read the same afte
   const server = new URL(page.url()).searchParams.get("server");
   if (!server) throw new Error("No test server");
   const client = createClient(new WebSocket(server));
-  const gamma = (await client.call("queue.list", {})).find((q) => q.text === "gamma");
+  const gamma = (await client.call("reply.list", {})).map((l) => l.reply).find((r) => "text" in r && r.text === "gamma");
   if (gamma === undefined) throw new Error("gamma is not waiting on the server");
   expect((await client.call("reply.hold", { id: gamma.id })).answer).toBe("done");
   await expect.poll(() => said(page)).toEqual(SAID);

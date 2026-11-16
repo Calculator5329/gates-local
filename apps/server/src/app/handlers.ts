@@ -241,10 +241,6 @@ export function createHandlers({
     // chat.send's plan for every model and context without stopping any turn, from one reading.
     "fit.table": () => fitTable.get(),
 
-    // From the moment chat.send took each turn, also while it waits for the GPU or a load.
-    "turns.active": () => [...turns.values()]
-      .filter((turn) => replies.of(turn.turnId) !== undefined && !turn.controller.signal.aborted)
-      .map(({ turnId, threadId, clock }) => ({ turnId, threadId, reply: clock.record(Date.now()) })),
     "turns.blocking": async ({ model, numCtx }) => {
       if (![...turns.values()].some((t) => t.inMemory)) return [];
       const baseUrl = runtime.baseUrl();
@@ -254,28 +250,6 @@ export function createHandlers({
 
     // `image` is an older client's Image button: accepted and ignored (Tools › Make images decides now).
     "chat.send": (params) => begin(params),
-
-    "queue.list": () => replies.list(),
-    "queue.add": (entry) => {
-      // already saved (a window's copy of a message that went out), or its chat is going: nothing to queue
-      if (store.getMessage(entry.messageId) === undefined && !deleting.has(entry.threadId)) {
-        store.getThread(entry.threadId);
-        if (replies.add(entry) === "removed") throw new AppError("queue-removed", "This message was removed from the queue.");
-        pump();
-      }
-      return replies.list();
-    },
-    // queue.update and queue.remove are the older calls, for a page from before reply.*: the same
-    // records and the same edit locks, answered with the whole list whatever happened
-    "queue.update": ({ id, ...patch }, ctx) => {
-      if (replies.update(id, patch, editor(ctx)) === "sending") throw new AppError("queue-sending", "This message is already being sent.");
-      pump();
-      return replies.list();
-    },
-    "queue.remove": ({ id }) => {
-      replies.remove({ id });
-      return replies.list();
-    },
 
     "reply.send": async (params) => {
       const { threadId, draw, images = [] } = params;

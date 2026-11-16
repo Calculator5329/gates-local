@@ -5,17 +5,18 @@
 // the answer and the record as it now is. It reads no clock, no file and no other record; what
 // it needs to know of the rest of the app comes in with the call. The store (replies.ts) keeps
 // the records and applies what `move` says, also to the other messages of the same chat.
-import type { HeldWhy, Message, QueuedMessage, ReplyStage, StopConsent } from "@gates-local/contracts";
+import type { HeldWhy, Message, ReplyStage, StopConsent } from "@gates-local/contracts";
+import type { SavedEntry } from "./queue-file.ts";
 
 /** What a message was typed behind, as the window that typed it said. */
-export type Behind = QueuedMessage["waitFor"];
+export type Behind = SavedEntry["waitFor"];
 /** What a queued message waits for: what it was typed behind, or the reply before it running once more. */
 export type Waits = Behind | "retry";
 /**
  * The message itself, carried until its question is saved. `tools` and `retryOf` come only with
  * reply.send: the older queue row has no place for them.
  */
-export type Words = Pick<QueuedMessage, "messageId" | "text" | "at" | "images" | "files" | "model" | "numCtx" | "think" | "draw" | "drawCount">
+export type Words = Pick<SavedEntry, "messageId" | "text" | "at" | "images" | "files" | "model" | "numCtx" | "think" | "draw" | "drawCount">
   & { readonly tools?: boolean; readonly retryOf?: string };
 
 interface Common {
@@ -139,9 +140,9 @@ export type Call =
     readonly saved: boolean;
     readonly start?: { readonly turnId: string; readonly at: number; readonly retry: boolean };
   }
-  /** `baseSaved`: a question named `base` is in the chat. `older`: the call from before reply.change, which checks nothing. */
-  | { readonly call: "change"; readonly base: string; readonly messageId: string; readonly words: Partial<Words>; readonly by: number; readonly baseSaved: boolean; readonly older?: true }
-  | { readonly call: "edit"; readonly open: boolean; readonly by: number; readonly older?: true }
+  /** `baseSaved`: a question named `base` is in the chat. */
+  | { readonly call: "change"; readonly base: string; readonly messageId: string; readonly words: Partial<Words>; readonly by: number; readonly baseSaved: boolean }
+  | { readonly call: "edit"; readonly open: boolean; readonly by: number }
   | { readonly call: "remove" }
   /** `stops`: the reply on its way in its chat stops in the same call. */
   | { readonly call: "now"; readonly consent?: StopConsent; readonly stops: boolean }
@@ -313,24 +314,21 @@ function call(r: Rec | undefined, c: Call, rules: Rules): Moved {
   const theirs = r.stage === "editing" && (c.call === "change" || c.call === "edit") && r.by !== c.by;
   switch (c.call) {
     case "change": {
-      if (c.older !== true) {
-        if (theirs) return rules.editAnswersHonestly ? { answer: { answer: "elsewhere", record: r }, next: r } : done(r);
-        // the same change again, after its answer was lost on the way back
-        if (r.words.messageId === c.messageId && c.base !== c.messageId) return done(r);
-        // the words are not the ones this change started from: another window changed them
-        if (r.words.messageId !== c.base) return rules.editAnswersHonestly ? { answer: { answer: "elsewhere", record: r }, next: r } : done(r);
-      }
+      if (theirs) return rules.editAnswersHonestly ? { answer: { answer: "elsewhere", record: r }, next: r } : done(r);
+      // the same change again, after its answer was lost on the way back
+      if (r.words.messageId === c.messageId && c.base !== c.messageId) return done(r);
+      // the words are not the ones this change started from: another window changed them
+      if (r.words.messageId !== c.base) return rules.editAnswersHonestly ? { answer: { answer: "elsewhere", record: r }, next: r } : done(r);
       const words: Words = { ...r.words, ...c.words, messageId: c.messageId };
       if (sameJson(words, r.words)) return done(r);
       // the words are the edit's save, which gives the message back; a new model alone leaves an edit open
-      if (r.stage === "editing" && c.words.text !== undefined && c.older !== true) return done(returned(r, words));
+      if (r.stage === "editing" && c.words.text !== undefined) return done(returned(r, words));
       return done({ ...r, words });
     }
     case "edit": {
       if (r.stage !== "editing") return done(c.open ? { ...unsaved(r), stage: "editing", by: c.by, back: backOf(r) } : r);
-      if (theirs && c.older !== true) return { answer: { answer: "elsewhere", record: r }, next: r };
-      // the older call takes an edit over, and ends anyone's
-      if (c.open) return done(r.by === c.by ? r : { ...r, by: c.by });
+      if (theirs) return { answer: { answer: "elsewhere", record: r }, next: r };
+      if (c.open) return done(r);
       return done(returned(r));
     }
     case "remove":
@@ -473,8 +471,8 @@ export const stillStarting = (r: Rec | undefined, turnId: string, attempt: numbe
 
 // ---------------------------------------------------------------- the older wire shapes, made from the record
 
-/** A message as queue.add and the queue's file have it, as a record: the flags a row can carry say one stage. */
-export function fromQueued(q: QueuedMessage): Queued | Held | Next {
+/** A message as the queue's file has it, as a record: the flags a row can carry say one stage. */
+export function fromQueued(q: SavedEntry): Queued | Held | Next {
   const words: Words = {
     messageId: q.messageId, text: q.text, at: q.at,
     ...(q.images === undefined ? {} : { images: q.images }),
@@ -493,7 +491,7 @@ export function fromQueued(q: QueuedMessage): Queued | Held | Next {
   return { ...base, stage: "queued", waitFor: q.waitFor };
 }
 
-function flags(back: Back): Partial<QueuedMessage> {
+function flags(back: Back): Partial<SavedEntry> {
   if (back.stage === "next") return { now: true, ...(back.consent === undefined ? {} : { stopOthers: true, ...(back.consent.kind === "named" ? { stopTurns: back.consent.replies } : {}) }) };
   if (back.stage === "queued") return back.waitFor === "retry" ? { held: true, retry: "running" } : {};
   if (back.why.why === "refused") {
@@ -504,7 +502,7 @@ function flags(back: Back): Partial<QueuedMessage> {
 }
 
 /** The record as a row of the queue every window is sent; none for a record that is on no list. */
-export function toQueued(r: Rec): QueuedMessage | undefined {
+export function toQueued(r: Rec): SavedEntry | undefined {
   if (!(isWaiting(r) || r.stage === "starting") || r.direct) return undefined;
   const { tools: _tools, retryOf: _retryOf, ...words } = r.words;
   const row = { id: r.id, threadId: r.threadId, ...words, waitFor: r.behind };

@@ -128,7 +128,7 @@ const { noteMessage, loadThread, restoreSaved, loading, createThread, untrackedD
 
 
 const chat = createChat({ applyServerEvent,
-  call, reply, codeOf,
+  reply, codeOf,
   createThread,
   creatingDraft: threadSession.creatingDraft,
   loadThread,

@@ -19,8 +19,6 @@ export type AppErrorCode =
   | "thread-not-found" // the store's code, also thrown while the thread's delete runs
   | "message-not-found" // threads.get before: the message a page starts from is not in the thread
   | "image-input"
-  | "queue-sending" // queue.update: the server has started this message's turn
-  | "queue-removed" // queue.add: this message was removed from the queue before
   | "shutting-down"; // the server is stopping and takes no new turns
 
 export class AppError extends Error {

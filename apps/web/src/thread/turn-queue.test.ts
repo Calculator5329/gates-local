@@ -835,7 +835,7 @@ describe("messages typed while a reply is being written", () => {
     expect(st().queued[0]?.held).toBeUndefined();
     await tick();
     expect(b.server.calls("reply.stop")).toHaveLength(1);
-    expect(b.server.calls("queue.update"), "no hold is sent row by row").toEqual([]);
+    expect(b.server.calls("reply.hold"), "no hold is sent row by row").toEqual([]);
     expect(st().queued, "held before the stopped reply has ended").toMatchObject([{ text: "next", held: true }]);
     chat(turn, "A", { type: "error", code: "cancelled", message: "stopped", ended: { reason: "stopped", at: Date.now() } });
     await tick();

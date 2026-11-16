@@ -6,7 +6,8 @@
 // name. Nothing but this file reads that variable; the last tests check it.
 import type { Reply, ReplyChange } from "@gates-local/contracts";
 import { callsOf, mentions, oneArgument, productSource } from "@gates-local/server/chat/product-testing.ts";
-import { type Entry, createReplies } from "@gates-local/server/chat/replies.ts";
+import { entry, waits as joins } from "@gates-local/server/chat/queue-testing.ts";
+import { createReplies } from "@gates-local/server/chat/replies.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { State } from "../lib/store/store.ts";
 import { KEPT, type WindowRules, createRecords } from "./records.ts";
@@ -29,12 +30,11 @@ const named = process.env[SWITCH];
 if (named !== undefined && !isRule(named)) throw new Error(`${SWITCH} names no rule: ${named}`);
 const off: Rule | undefined = named;
 
-const entry = (id: string): Entry => ({ id, threadId: "t1", messageId: `m-${id}`, text: id, at: 1, waitFor: "reply", model: "m", numCtx: 4096 });
 /** The real store, and what it sends every window, in the order it sends it. */
 function server() {
   const sent: ReplyChange[] = [];
   const q = createReplies({
-    log: () => undefined, changed: () => undefined, told: (change) => void sent.push(change), saved: () => undefined, deleting: () => false, closing: () => false,
+    log: () => undefined, told: (change) => void sent.push(change), saved: () => undefined, deleting: () => false, closing: () => false,
     cut: () => undefined, clock: () => undefined,
   });
   return { q, sent };
@@ -63,7 +63,7 @@ const CASES: readonly Case[] = [
     name: "a list that arrives after a newer push changes nothing a window shows",
     run(rules) {
       const { q, sent } = server();
-      q.add(entry("a"));
+      joins(q, entry("a"));
       const chat = windowUnder(rules);
       chat.connected();
       // the window reads the list as it connects; the answer is slow on its way

@@ -74,7 +74,6 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
   const replies: Replies = createReplies({
     file: deps.dataDir === undefined ? undefined : path.join(deps.dataDir, "queue.json"),
     log,
-    changed: (list) => push("queue.changed", list),
     told: (change) => push("reply.changed", change),
     saved: (messageId) => store.getMessage(messageId),
     deleting: (threadId) => deleting.has(threadId),

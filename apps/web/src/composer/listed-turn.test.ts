@@ -79,10 +79,6 @@ it("a listed turn that fails before its start puts the sidebar's dot out, holds 
   try {
     // another client sent in A; its fit passed, so the server lists the turn
     await admitted.promise;
-    const listActive = app.handlers["turns.active"];
-    if (listActive === undefined) throw new Error("the server has no turns.active");
-    const snapshot = await listActive({}, { clientId: 2 });
-    expect(snapshot).toHaveLength(1);
     // what a window is given at connect: the server's records, with this reply on its way
     const list = app.handlers["reply.list"];
     if (list === undefined) throw new Error("the server has no reply.list");

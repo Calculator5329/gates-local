@@ -205,7 +205,6 @@ async function realChat() {
   return createChat({
     // the session's own, which publishes nothing for an update that returns nothing
     applyServerEvent: createServerState(store.getState, store.setState),
-    call: async () => { throw new Error("unexpected RPC"); },
     reply: async () => { throw new Error("unexpected RPC"); },
     codeOf: () => "unexpected",
     createThread: async () => null,

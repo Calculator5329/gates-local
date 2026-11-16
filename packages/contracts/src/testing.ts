@@ -201,14 +201,6 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
     result: { turnId: "turn-1", userMessage },
   },
   "chat.cancel": { params: { turnId: "turn-1" }, result: { cancelled: true } },
-  "turns.active": { params: {}, result: [] },
-  "queue.list": { params: {}, result: [] },
-  "queue.add": {
-    params: { id: "q-1", threadId: "t1", messageId: "m-q1", text: "and then?", at: 1_700_000_000_000, waitFor: "reply", model: "qwen3:14b", numCtx: 16384 },
-    result: [{ id: "q-1", threadId: "t1", messageId: "m-q1", text: "and then?", at: 1_700_000_000_000, waitFor: "reply", model: "qwen3:14b", numCtx: 16384 }],
-  },
-  "queue.update": { params: { id: "q-1", editing: true }, result: [] },
-  "queue.remove": { params: { id: "q-1" }, result: [] },
   "reply.send": {
     params: { id: "q-2", threadId: "t1", messageId: "m-q3", text: "one more thing", model: "qwen3:14b", numCtx: 8192, think: true, askFirst: true },
     result: { answer: "done", reply: { id: "q-2", threadId: "t1", rev: 2, messageId: "m-q3", text: "one more thing", model: "qwen3:14b", numCtx: 8192, think: true, at: 1_700_000_000_000, stage: "held", held: { why: "refused", code: "wont-fit", message: "it does not fit" } } },
@@ -400,7 +392,6 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
   "models.changed": [models, []],
   "models.suggested": [suggestedList(CHAT_MODELS)],
   "threads.changed": [{ threadId: "t1", thread }, { threadId: "t1", thread: null }],
-  "queue.changed": [[], [{ id: "q-1", threadId: "t1", messageId: "m-q1", text: "and then?", at: 1_700_000_000_000, waitFor: "reply", held: true }]],
   "settings.changed": [settings],
   "gpu.changed": [gpu, { vendor: "none", occupants: [], systemMemoryAvailableBytes: 9_000_000_000, measuredAt: 1 }],
   "fit.changed": [fitTable, { reading: { boot: "sample-process", seq: 4, measuredAt: 1 }, memory: { kind: "cpu" }, rows: [] }],

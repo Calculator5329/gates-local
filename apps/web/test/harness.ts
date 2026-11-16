@@ -4,9 +4,9 @@
 // the few browser globals session.ts touches (location, history, document,
 // localStorage, requestAnimationFrame). Each test imports session.ts fresh.
 import { vi } from "vitest";
-import type { Channel, Message, MethodName, Params, Payload, QueuedMessage, ReplyAnswer, ReplyListed, ReplyRecord, ResultOf, SyncMetadata, ToolStep } from "@gates-local/contracts";
+import type { Channel, Message, MethodName, Params, Payload, ReplyAnswer, ReplyListed, ReplyRecord, ResultOf, SyncMetadata, ToolStep } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
-import { createReplies, type QueuePatch } from "@gates-local/server/chat/replies.ts";
+import { createReplies } from "@gates-local/server/chat/replies.ts";
 import { isLive, type End } from "@gates-local/server/chat/reply.ts";
 
 /** The call a pushed record stands for when it says "tool" and the test pushed no step of its own. */
@@ -267,7 +267,7 @@ export class FakeServer {
     }
     const fn = this.answers.get(req.method);
     try {
-      ok(fn ? fn(req.params as never) : req.method.startsWith("queue.") || req.method.startsWith("reply.") ? this.queueCall(req) : methodSamples[req.method].result);
+      ok(fn ? fn(req.params as never) : req.method.startsWith("reply.") ? this.queueCall(req) : methodSamples[req.method].result);
     } catch (e) {
       const f = e as { code?: string; message?: string; blocking?: unknown };
       err(f.code ?? "internal", f.message ?? "failed", f.blocking);
@@ -354,7 +354,6 @@ export class FakeServer {
   // answered by the same holds and answers.
   private readonly store = createReplies({
     log: () => undefined,
-    changed: (list) => this.broadcast("queue.changed", list),
     told: (change) => this.broadcast("reply.changed", change),
     saved: () => undefined,
     deleting: () => false,
@@ -364,16 +363,25 @@ export class FakeServer {
   });
   /** The waiting messages, for a test that changes them as another window would. */
   readonly queue = {
-    add: (entry: QueuedMessage) => this.store.add(entry),
-    change: (id: string, patch: QueuePatch) => {
-      const answer = this.store.update(id, patch, 0);
-      // another window's call: the server looks at what may start now, as it does after any call
-      this.pump();
-      return answer;
+    /** Sent from another window while its chat is busy, so it waits: on hold with `held`. */
+    add: ({ at = 1, waitFor = "reply", ...said }: Params<"reply.send"> & { readonly at?: number; readonly waitFor?: "setup" | "download" | "reply" }) => {
+      this.store.send(said, { at, behind: waitFor, busy: true, turnId: said.id });
     },
+    /** New words from another window, from the words the server has. */
+    change: (id: string, words: { readonly messageId: string; readonly text?: string }) => this.another(() => {
+      const base = this.store.list().find((e) => e.id === id)?.messageId ?? words.messageId;
+      return this.store.change({ id, base, ...words }, 0);
+    }),
+    now: (id: string) => this.another(() => this.store.now({ id })),
     remove: (id: string) => this.store.remove({ id }).answer === "done",
     list: () => this.store.list(),
   };
+  /** Another window's call: the server looks at what may start now, as it does after any call. */
+  private another(call: () => ReplyAnswer): ReplyAnswer {
+    const answer = call();
+    this.pump();
+    return answer;
+  }
   /** Which connection has each message open in its composer, and which one is calling now. */
   private readonly editing = new Map<string, number>();
   private caller = 0;
@@ -436,7 +444,7 @@ export class FakeServer {
     });
   }
 
-  private queueCall(req: Request): readonly QueuedMessage[] | readonly ReplyListed[] | ReplyAnswer {
+  private queueCall(req: Request): readonly ReplyListed[] | ReplyAnswer {
     if (req.method === "reply.list") return this.listing();
     const p = req.params as { id: string };
     const by = this.caller;
@@ -449,14 +457,7 @@ export class FakeServer {
       this.pump();
       return answer;
     }
-    if (req.method === "queue.add") this.store.add(req.params as QueuedMessage);
-    if (req.method === "queue.update") {
-      const { id, ...patch } = req.params as Params<"queue.update">;
-      if (this.store.update(id, patch, by) === "sending") throw Object.assign(new Error("This message is already being sent."), { code: "queue-sending" });
-    }
-    if (req.method === "queue.remove") this.store.remove({ id: p.id });
-    this.pump();
-    return this.store.list();
+    throw new Error(`the fake server does not answer ${req.method}`);
   }
 
   /** A call on one waiting message, answered by the server's own rules (server chat/replies.ts). */

@@ -25,7 +25,7 @@ export interface TurnClock {
   stop(now: number, thought: string): void;
   /** The attempt failed and runs again from `now`, at the `stage` its record shows: its rounds and first word start over; the work done so far stays counted. */
   retry(now: number, stage: ReplyStage): void;
-  /** The record as of `now`, for a push, a replay or turns.active. */
+  /** The record as of `now`, for a push or a replay. */
   record(now: number): ReplyRecord;
   /** The times once the turn ended; `thought` is all the thinking it sent; `why` the error of a turn that did not finish. */
   end(ended: TurnEnded, thought: string, why?: ReplyTimes["why"]): ReplyTimes;

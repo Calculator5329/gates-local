@@ -160,7 +160,7 @@ describe("Image mode: the typed words go straight to the image model", () => {
     const t = await rig({ hold: true });
     try {
       const { turnId } = await t.send({ draw: DRAWN });
-      expect(await t.app.handlers["turns.active"]!({}, { clientId: 1 })).toEqual([{ turnId, threadId: t.thread.id, reply: expect.objectContaining({ attempt: 1 }) }]);
+      expect(await t.app.handlers["reply.list"]!({}, { clientId: 1 })).toMatchObject([{ reply: { id: turnId, threadId: t.thread.id, stage: "drawing" } }]);
       await expect(t.send({ draw: DRAWN })).rejects.toMatchObject({ code: "turn-active" });
       expect(await t.app.handlers["chat.cancel"]({ turnId }, { clientId: 1 })).toEqual({ cancelled: true });
       await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));

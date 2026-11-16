@@ -638,7 +638,7 @@ describe("chat.send", () => {
 
   it("streams every event, persists the done message before pushing done, and returns at once", async () => {
     let terminalSnapshot: unknown;
-    const r = await rig({ onTerminal: () => { terminalSnapshot = r.app.handlers["turns.active"]?.({}, { clientId: 1 }); } });
+    const r = await rig({ onTerminal: () => { terminalSnapshot = r.app.handlers["reply.list"]?.({}, { clientId: 1 }); } });
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
     let seenBody: unknown;
@@ -655,7 +655,7 @@ describe("chat.send", () => {
     expect(r.app.activeTurns()).toBe(1);
     // a window that opens now gets the reply's record as it is: the model was in memory, but nothing has come back yet,
     // and the runtime may be holding it behind another reply, so it is waiting
-    expect(await r.client.call("turns.active", {})).toEqual([{ threadId: t.id, turnId: sent.turnId, reply: expect.objectContaining({ stage: "waiting", attempt: 1 }) }]);
+    expect(await r.client.call("reply.list", {})).toEqual([{ reply: expect.objectContaining({ id: sent.turnId, threadId: t.id, stage: "thinking", silent: true }), soFar: { text: "", thinking: "", steps: [] } }]);
 
     // The store already has the user message; the turn is streaming.
     expect((await r.client.call("threads.get", { threadId: t.id })).messages.map((m) => m.role)).toEqual(["user"]);
@@ -689,7 +689,7 @@ describe("chat.send", () => {
     expect(got.messages[1]?.id).toBe(done.event.message.id);
     await r.waitFor("threads.changed", (p) => p.threadId === t.id);
     expect(r.app.activeTurns()).toBe(0);
-    expect(await r.client.call("turns.active", {})).toEqual([]);
+    expect(await r.client.call("reply.list", {})).toEqual([]);
   });
 
   it("sends the whole thread as history on the next turn", async () => {

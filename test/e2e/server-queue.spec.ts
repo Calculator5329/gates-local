@@ -78,9 +78,8 @@ test("Stop from a window that closes the moment it is pressed holds every queued
   if (!address) throw new Error("No test server");
   const rpc = createClient(new WebSocket(address));
   try {
-    const queued = await rpc.call("queue.list", {});
-    expect(queued.map((q) => [q.text, q.held])).toEqual([["First in the queue", true], ["Second in the queue", true]]);
-    expect(await rpc.call("turns.active", {})).toEqual([]);
+    const listed = await rpc.call("reply.list", {});
+    expect(listed.map(({ reply: r }) => ["text" in r ? r.text : r.id, r.stage]), "both on hold, and nothing runs").toEqual([["First in the queue", "held"], ["Second in the queue", "held"]]);
     const threadId = new URLSearchParams(new URL(page.url()).hash.slice(1)).get("thread") ?? "";
     const { messages } = await rpc.call("threads.get", { threadId });
     expect(messages.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["How do I check disk space before a download?"]);
@@ -201,8 +200,7 @@ test.describe("a restart", () => {
     if (!address) throw new Error("No test server");
     const rpc = createClient(new WebSocket(address));
     try {
-      expect(await rpc.call("queue.list", {})).toEqual([]);
-      expect(await rpc.call("turns.active", {})).toEqual([]);
+      expect(await rpc.call("reply.list", {}), "nothing waits and nothing runs").toEqual([]);
       const threadId = new URLSearchParams(new URL(page.url()).hash.slice(1)).get("thread") ?? "";
       const { messages } = await rpc.call("threads.get", { threadId });
       expect(messages.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["How do I check disk space before a download?", "Asked from the queue, then the app restarts"]);
