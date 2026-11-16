@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-16: Stop quiets the voice at once
+
+- In talk mode, pressing Stop on a reply now stops the reading at
+  the press. Before, the voice could read on until the server said
+  the reply had stopped.
+
 ## 2026-11-16: one check for a frame's missing numbers
 
 - The server's answer and push checks and the page's check now share

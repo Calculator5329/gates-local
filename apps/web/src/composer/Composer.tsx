@@ -57,7 +57,7 @@ import { PHONE, SheetHead, Skel, closePop, closeTip, esc, isTouch, openTip, plac
  */
 const PHONE_TOUCH = `(pointer: coarse) and ${PHONE}`;
 import { Speaker, Voice } from "../voice/Voice.tsx";
-import { useTalk } from "../voice/talk.ts";
+import { hush, useTalk } from "../voice/talk.ts";
 
 const catalogOf = (s: Pick<State, "catalog">) => (s.catalog === NA ? undefined : s.catalog);
 const imageGenOf = (s: State) => s.settings !== NA && s.settings?.imageGen === true;
@@ -297,7 +297,10 @@ export function Composer() {
   const talk = useTalk().on;
   const stopThisReply = () => {
     const s = getState();
-    if (runningTurn(s, s.threadId)?.turnId === running) stop();
+    if (runningTurn(s, s.threadId)?.turnId !== running) return;
+    // why: the voice goes quiet at the press, not when the server's end of the reply arrives
+    hush();
+    stop();
   };
   const action = showStop ? `stop:${running}` : editing ? `edit:${editingId}` : memRefused ? `memory:${model}:${numCtx}` : isStreaming ? `queue:${running}` : "send";
   // oxlint-disable-next-line gates/effect-needs-reason -- the shared tooltip, drawn outside React, closed before paint once the button it describes does something else
