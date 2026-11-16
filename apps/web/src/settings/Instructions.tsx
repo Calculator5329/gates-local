@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { MODEL_CONTROL_BOUNDS, type ModelDefaults, type ModelSettings, type ModelSettingsPatch } from "@gates-local/contracts";
 import { describeModel } from "../lib/words/format.ts";
 import { handleKey } from "../lib/ui/handles.ts";
 import { Icon } from "../lib/ui/icons.tsx";
-import { applyServerEvent, call, updateModelSettings, updateSettings } from "../lib/session/index.ts";
+import { call, updateModelSettings, updateSettings } from "../lib/session/index.ts";
 import { NA, useStore } from "../lib/store/store.ts";
 import { Grp, Head, Row, Seg2, useOutside, walk } from "../lib/ui/settings-ui.tsx";
 import { closeTip } from "../lib/ui/ui.tsx";
 import { focusFirstOf } from "../lib/ui/kit/focus.ts";
+import { useLoad } from "../lib/ui/kit/async.ts";
 import { controlPatch, controlValues, editControl, type ControlDraft, type ControlKey } from "./instruction-draft.ts";
 
 function Status({ text, error = false }: { text: string; error?: boolean }) {
@@ -119,19 +120,14 @@ function ReplyControls({ model, saved, defaults, locked }: { model: string; save
 }
 
 function ModelEditors({ model, name, saved, shared, locked }: { model: string; name: string; saved: ModelSettings; shared: string | undefined; locked: boolean }) {
-  const [read, setRead] = useState<{ value?: ModelDefaults; error?: string }>({});
   const [retry, setRetry] = useState(0);
-  // oxlint-disable-next-line gates/effect-needs-reason -- reads the model's shipped defaults for the model on show, and drops an answer for one no longer shown
-  useEffect(() => {
-    let current = true;
-    void call("settings.modelDefaults", { model }).then(value => { applyServerEvent(() => { if (current) setRead({ value }); }); }, (error: unknown) => { applyServerEvent(() => { if (current) setRead({ error: error instanceof Error ? error.message : "Could not read model defaults." }); }); });
-    return () => { current = false; };
-  }, [model, retry]);
+  const read: { value?: ModelDefaults; error?: string } = useLoad(`${retry}#${model}`, () => call("settings.modelDefaults", { model })
+    .then(value => ({ value }), (error: unknown) => ({ error: error instanceof Error ? error.message : "Could not read model defaults." }))) ?? {};
   return <>
     <PromptEditor value={saved.systemPrompt} inherited={shared ?? read.value?.system ?? ""} model={model} locked={locked} />
     <ReplyControls model={model} saved={saved} defaults={read.value} locked={locked} />
     <div className="grp box inst-defaults"><details><summary data-testid="settings.model-defaults.toggle">What {name} ships with</summary>
-      <div className="inst-actions"><Status text={read.error ?? (read.value ? "Read only" : "Loading…")} error={read.error !== undefined} /><button type="button" className="btn ghost" data-testid="settings.model-defaults.retry" disabled={!read.error} onClick={() => { setRead({}); setRetry(n => n + 1); }}>Retry</button></div>
+      <div className="inst-actions"><Status text={read.error ?? (read.value ? "Read only" : "Loading…")} error={read.error !== undefined} /><button type="button" className="btn ghost" data-testid="settings.model-defaults.retry" disabled={!read.error} onClick={() => setRetry(n => n + 1)}>Retry</button></div>
       <b>System prompt</b><pre className="inst-shipped" aria-label="Model system prompt">{read.value?.system || (read.value ? "No system prompt reported." : "")}</pre>
       <b>Parameters</b><pre className="inst-shipped" aria-label="Model parameters">{read.value?.parameters || (read.value ? "No parameters reported. Ollama defaults apply." : "")}</pre>
     </details></div>

@@ -27,3 +27,23 @@ export function useDismiss(ref: RefObject<HTMLElement | null>, open: boolean, cl
     if (!ref.current?.contains(e.target as Node)) close();
   }, { when: open });
 }
+
+export interface BoxOptions {
+  readonly also?: readonly Element[];
+  readonly content?: boolean;
+}
+
+// why: a ref callback's body; content changes a box's scroll length with no resize
+export function observeBox(el: HTMLElement, changed: () => void, options: BoxOptions = {}): () => void {
+  changed();
+  el.addEventListener("scroll", changed, { passive: true });
+  const sizes = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => changed());
+  for (const box of [el, ...(options.also ?? [])]) sizes?.observe(box);
+  const content = options.content === true && typeof MutationObserver !== "undefined" ? new MutationObserver(() => changed()) : null;
+  content?.observe(el, { childList: true, subtree: true, characterData: true });
+  return () => {
+    el.removeEventListener("scroll", changed);
+    sizes?.disconnect();
+    content?.disconnect();
+  };
+}

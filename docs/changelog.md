@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-16: settings, sidebar, pages and Measure follow the store instead of their effects
+
+- The sidebar's thread list reads its fade edges again on scroll, resize
+  and content change, from its ref. A drawer closed with Back in a
+  browser that never sends popstate still closes 400 ms on.
+- The pages panel reads its page address and the older pages through
+  the kit's loader, and notes that it covers the chat from its ref.
+- Instructions reads a model's defaults keyed on the model, so a slow
+  answer for the model before never shows under the new one. Retry
+  reads them again.
+- A Measure page that never answers fails at its time, and its frame
+  goes with it.
+- The library's Download fill sweeps on animation frames and shows its
+  check right after it is first drawn full; a landed download's check
+  stays its 900 ms after the sweep.
+- Window effects and timers: 53 to 40.
+
 ## 2026-11-16: models, pickers and first run follow the store instead of their effects
 
 - The entry starts `watchPickerReady()`: an open model picker is marked

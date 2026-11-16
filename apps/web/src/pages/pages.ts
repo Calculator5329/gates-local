@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { type ThreadPage, pageBlocks, pageTitle } from "@gates-local/contracts";
 import { runningTurn, turnOf, useStore } from "../lib/store/store.ts";
 import { drawsPicture } from "../thread/turn.ts";
+import { useLoad } from "../lib/ui/kit/async.ts";
 
 export interface PageReads {
   readonly pages: (threadId: string, before: string) => Promise<readonly ThreadPage[]>;
@@ -39,11 +40,11 @@ const asking = new Set<string>();
 const olderListeners = new Set<() => void>();
 const subscribeOlder = (l: () => void) => { olderListeners.add(l); return () => { olderListeners.delete(l); }; };
 
-function askOlder(threadId: string, before: string): void {
+function askOlder(threadId: string, before: string): Promise<void> {
   const key = `${threadId}\n${before}`;
-  if (older.get(threadId)?.before === before || asking.has(key)) return;
+  if (older.get(threadId)?.before === before || asking.has(key)) return Promise.resolve();
   asking.add(key);
-  void reads.pages(threadId, before)
+  return reads.pages(threadId, before)
     .catch((): readonly ThreadPage[] => older.get(threadId)?.pages ?? [])
     .then((pages) => {
       asking.delete(key);
@@ -64,10 +65,8 @@ export function usePages(threadId: string | null): { versions: PageVersion[]; wr
   const olderNow = () => (threadId === null ? undefined : older.get(threadId));
   const before = useSyncExternalStore(subscribeOlder, olderNow, olderNow);
   const first = messages?.[0]?.id;
-  // oxlint-disable-next-line gates/effect-needs-reason -- asks the server for the pages above the loaded messages once a commit shows there are some
-  useEffect(() => {
-    if (threadId !== null && first !== undefined && earlier > 0) askOlder(threadId, first);
-  }, [threadId, first, earlier]);
+  // why: the pages above the loaded messages, asked once per thread and first message
+  useLoad(threadId !== null && first !== undefined && earlier > 0 ? `${threadId}\n${first}` : null, () => askOlder(threadId ?? "", first ?? ""));
   const versions = useMemo(() => {
     const here = new Set((messages ?? []).map((m) => m.id));
     const prior = earlier > 0 && before !== undefined ? before.pages.filter((p) => !here.has(p.messageId)).map((p) => p.code) : [];

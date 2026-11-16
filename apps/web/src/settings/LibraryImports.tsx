@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useRef, useState, type MouseEvent, type ReactNode } from "react";
 import type { SampleDatabase, Source, SourceImport, SourceImports } from "@gates-local/contracts";
 import { rtOf } from "../runtime/words.tsx";
 import { count, fileSize } from "../lib/words/format.ts";
@@ -12,6 +12,9 @@ import { PathText } from "../lib/ui/settings-controls.tsx";
 import { Fail, Grp, Row, Skel } from "../lib/ui/settings-ui.tsx";
 import { askWith } from "../composer/starter.ts";
 import { NA, useStore } from "../lib/store/store.ts";
+import { useAnimationFrame } from "../lib/ui/kit/frame.ts";
+import { useFlash } from "../lib/ui/kit/flash.ts";
+import { useChange } from "../lib/ui/kit/popover.ts";
 
 const bytes = (n: number) => n < 1_048_576 ? `${Math.ceil(n / 1024)} KiB` : `${(n / 1_048_576).toFixed(1)} MiB`;
 const busy = (j?: SourceImport) => j !== undefined && ["downloading", "cloning", "adding"].includes(j.state);
@@ -74,23 +77,20 @@ function FillButton({ name, handle, real, since, running, done, idle, blocked, o
   const sweeping = !still() && (running || done);
   const shown = sweeping ? shownFill(real, since, performance.now()) : real;
   const behind = shown < real;
-  const drawnFull = useRef(false);
+  const [drawnFull, setDrawnFull] = useState(false);
+  // why: the commit that first draws the fill full swaps the ref, so the check shows after it
+  const [marks] = useState(() => ({ full: (el: HTMLButtonElement | null) => { if (el) setDrawnFull(true); }, empty: (el: HTMLButtonElement | null) => { if (el) setDrawnFull(false); } }));
   const full = done && !behind;
-  const finished = full && drawnFull.current;
-  // oxlint-disable-next-line gates/effect-needs-reason -- notes after each commit whether the fill was drawn full, and draws the sweep's next frame
-  useEffect(() => {
-    drawnFull.current = full;
-    if (!behind && finished === full) return;
-    // oxlint-disable-next-line gates/timer-needs-reason -- the sweep's next frame, until the fill catches up and a full fill has been drawn
-    const id = requestAnimationFrame(() => frame(n => n + 1));
-    return () => cancelAnimationFrame(id);
-  });
+  const finished = full && drawnFull;
+  // why: the sweep's frames, until the drawn fill catches up with the download
+  useAnimationFrame(() => { frame(n => n + 1); return true; }, behind);
   const busyNow = !finished && (running || done);
   const pct = Math.floor(shown * 100);
   const label = finished ? "" : busyNow ? `${pct}%` : idle;
   return (
     <button
       type="button"
+      ref={full ? marks.full : marks.empty}
       className={`btn outline import-action fill-btn${busyNow ? " running" : ""}${finished ? " done" : ""}${behind || done ? " sweep" : ""}`}
       data-testid={`settings.database.download-${handle}`}
       style={{ "--f": finished ? 1 : shown } as React.CSSProperties}
@@ -113,7 +113,8 @@ export default function LibraryImports({ add, clone, clones = [] }: { add: React
   const [url, setUrl] = useState("");
   const [pending, setPending] = useState<string>();
   const [opened, setOpened] = useState<readonly string[]>([]);
-  const [finishing, setFinishing] = useState<readonly string[]>([]);
+  const [finishMs, setFinishMs] = useState(FINISH_MS);
+  const [finishing, finish] = useFlash<readonly string[]>(finishMs);
   const [rowErr, setRowErr] = useState<Readonly<Record<string, string>>>({});
   const sources = useStore(s => s.sources);
   const tools = useStore(s => s.settings === NA || s.settings?.tools === true);
@@ -121,13 +122,7 @@ export default function LibraryImports({ add, clone, clones = [] }: { add: React
   const download = useStore(s => s.unavailable["sources.downloadSample"] !== true);
   const edit = useStore(s => s.unavailable["sources.remove"] !== true);
   const ran = useRef(new Set<string>());
-  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const started = useRef(new Map<string, number>());
-  // oxlint-disable-next-line gates/effect-needs-reason -- stops the finish timers, which outlive React's render, when Library closes
-  useEffect(() => {
-    const held = timers.current;
-    return () => { for (const t of held) clearTimeout(t); held.clear(); };
-  }, []);
   const start = async (key: string, action: () => Promise<SourceImport>) => {
     if (pending !== undefined) return;
     setError(null);
@@ -155,18 +150,17 @@ export default function LibraryImports({ add, clone, clones = [] }: { add: React
     else if (!started.current.has(r.sample.id)) started.current.set(r.sample.id, performance.now());
   }
   const landed = rows.flatMap(r => r.sample && r.source && ran.current.has(r.sample.id) ? [r.sample.id] : []).join(" ");
-  // oxlint-disable-next-line gates/effect-needs-reason -- a download the server reports as a source now starts its finishing check, once per landing
-  useEffect(() => {
-    if (landed === "") return;
-    const ids = landed.split(" ");
+  // why: a download the server now reports as a source holds its check on screen once the sweep ends
+  useChange(landed, now => {
+    if (now === "") return;
+    const ids = now.split(" ");
     for (const id of ids) ran.current.delete(id);
     if (still()) return;
-    setFinishing(f => [...f, ...ids]);
-    const sweep = Math.max(0, ...ids.map(id => MIN_FILL_MS - (performance.now() - (started.current.get(id) ?? -Infinity))));
-    // oxlint-disable-next-line gates/timer-needs-reason -- the check's time on screen, after the fill's sweep ends
-    const t = setTimeout(() => { timers.current.delete(t); setFinishing(f => f.filter(id => !ids.includes(id))); }, FINISH_MS + sweep);
-    timers.current.add(t);
-  }, [landed]);
+    const at = performance.now();
+    const sweep = Math.max(0, ...ids.map(id => MIN_FILL_MS - (at - (started.current.get(id) ?? -Infinity))));
+    setFinishMs(FINISH_MS + sweep);
+    finish([...(finishing ?? []), ...ids]);
+  });
   const toggle = (key: string) => setOpened(o => o.includes(key) ? o.filter(k => k !== key) : [...o, key]);
   const usable = libraryToolCanUse(DB_TOOL, list);
 
@@ -226,7 +220,7 @@ export default function LibraryImports({ add, clone, clones = [] }: { add: React
     const { sample, source } = row;
     const name = sample?.label ?? source?.label ?? "";
     const open = opened.includes(row.key);
-    const done = sample !== undefined && source !== undefined && (finishing.includes(sample.id) || (ran.current.has(sample.id) && !still()));
+    const done = sample !== undefined && source !== undefined && (finishing?.includes(sample.id) === true || (ran.current.has(sample.id) && !still()));
     const own = source !== undefined && sample === undefined;
     return (
       <div className={`srow db-row${open ? " open" : ""}`} key={row.key} data-db={row.key}>

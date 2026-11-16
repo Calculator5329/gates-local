@@ -21,6 +21,7 @@ vi.mock("react", async original => {
       return host.slots[at];
     },
     useEffect: (effect: () => (() => void) | undefined) => { if (host.fresh) { const done = effect(); if (done) host.cleanups.push(done); } },
+    useEffectEvent: <F>(fn: F) => fn,
   };
 });
 vi.mock("../lib/session/index.ts", () => ({ libraryRequest: host.request, applyServerEvent: (run: () => void) => run(), refreshSource: vi.fn(), removeSource: vi.fn(), retryImports: host.retry }));

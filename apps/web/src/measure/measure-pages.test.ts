@@ -110,6 +110,23 @@ describe("Measure's pages and where the window is", () => {
     expect(result).toEqual({ id: "page-total", seen: ["1"] });
   });
 
+  it("a page that never posts back fails at its time, and its frame goes with it", async () => {
+    vi.useFakeTimers();
+    const w = fakeWindow();
+    w.show("visible");
+    let result: unknown;
+    void runPage("page-total", page, script, 50, { origin: SERVER, token: "t" }).then((r) => { result = r; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(w.frames).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(60);
+    expect(result).toEqual({ id: "page-total", seen: [], error: "The page did not finish within 0 seconds." });
+    expect(w.frames[0]!.removed, "the late answer takes the frame away").toBe(true);
+    w.answerIfShown(w.frames[0] as unknown as Parameters<typeof w.answerIfShown>[0]);
+    w.show("hidden");
+    await vi.advanceTimersByTimeAsync(200);
+    expect(w.frames, "no second run after the late answer").toHaveLength(1);
+  });
+
   it("a page frame that takes focus hands it back unscrolled, and a page that loads a second document fails", async () => {
     vi.useFakeTimers();
     const w = fakeWindow();

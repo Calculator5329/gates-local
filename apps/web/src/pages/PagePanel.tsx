@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon, type IconId } from "../lib/ui/icons.tsx";
 import { useStore } from "../lib/store/store.ts";
 import { useMedia } from "../lib/ui/ui.tsx";
 import { COVER, setCovering } from "./cover.ts";
-import { PAGE_MAX, PAGE_SANDBOX, type PageAddress, openPageWindow, pageAddress, pageBytes, pageMb, savePage } from "./page-doc.ts";
+import { PAGE_MAX, PAGE_SANDBOX, openPageWindow, pageAddress, pageBytes, pageMb, savePage } from "./page-doc.ts";
 import { closePanel, follow, showVersion, shownOf, usePages, useView } from "./pages.ts";
 import { useSandboxOff } from "./sandbox.ts";
+import { useLoad } from "../lib/ui/kit/async.ts";
 import "./pages.css";
 
 function HeadButton({ icon, tip, testid, onClick, pressed, disabled, xs, cls }: { icon: IconId; tip: string; testid: string; onClick: () => void; pressed?: boolean; disabled?: boolean; xs?: boolean; cls?: string }) {
@@ -38,30 +39,24 @@ export function PagePanel({ threadId }: { threadId: string }) {
   useEffect(() => { if (loaded) follow(threadId, versions, !cover); }, [threadId, versions, cover, loaded]);
   const shown = shownOf(view, versions);
   const visible = loaded && view?.open === true && shown !== undefined;
-  // oxlint-disable-next-line gates/effect-needs-reason -- tells App the panel covers the chat for exactly as long as it is drawn over it, and clears it on unmount
-  useEffect(() => {
-    setCovering(cover && visible);
+  // why: App hears the panel covers the chat for exactly as long as the panel is drawn over it
+  const covering = useCallback((el: HTMLElement | null) => {
+    if (el === null) return undefined;
+    setCovering(cover);
     return () => setCovering(false);
-  }, [cover, visible]);
+  }, [cover]);
   const big = useMemo(() => shown !== undefined && pageBytes(shown.code) > PAGE_MAX, [shown]);
   const held = sandboxOff === true && ran !== shown?.code;
   const runs = visible && !code && !big && sandboxOff !== undefined && !held;
-  const [address, setAddress] = useState<{ readonly code: string; readonly a: PageAddress } | null>(null);
   const shownCode = shown?.code;
-  // oxlint-disable-next-line gates/effect-needs-reason -- fetches a one-time address for the version on show, and drops an answer that lands after it changed
-  useEffect(() => {
-    if (!runs || shownCode === undefined) return;
-    let live = true;
-    void pageAddress(shownCode, { origin, token }).then((a) => { if (live) setAddress({ code: shownCode, a }); });
-    return () => { live = false; setAddress(null); };
-  }, [runs, shownCode, origin, token]);
+  // why: a one-time address for the version on show; an answer for another version is dropped
+  const a = useLoad(runs && shownCode !== undefined ? `${origin}\n${token}\n${shownCode}` : null, () => pageAddress(shownCode ?? "", { origin, token }));
   if (!visible) return null;
-  const a = address?.code === shown.code ? address.a : undefined;
   const failed = a !== undefined && "error" in a ? a.error : big ? "too-big" : undefined;
   const source = code || held || failed !== undefined;
   const step = (n: number) => showVersion(threadId, n, versions);
   return (
-    <aside className="pg-panel" aria-label="Page" data-testid="pages.panel">
+    <aside ref={covering} className="pg-panel" aria-label="Page" data-testid="pages.panel">
       <div className="pg-head">
         <Icon id="page" />
         <span className="pg-name" data-testid="pages.panel.title">{shown.title}</span>

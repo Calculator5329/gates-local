@@ -1,6 +1,8 @@
 // Layout adapts T3 Code (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt.
 import type { PullProgress } from "@gates-local/contracts";
-import { Fragment, type KeyboardEvent, type MouseEvent, type ReactNode, isValidElement, useEffect, useLayoutEffect, useRef } from "react";
+import { Fragment, type KeyboardEvent, type MouseEvent, type ReactNode, isValidElement, useRef } from "react";
+import { debounce } from "../lib/ui/kit/async.ts";
+import { observeBox } from "../lib/ui/kit/events.ts";
 import { requestFocus } from "../lib/ui/kit/focus.ts";
 import { useNow } from "../lib/ui/kit/now.ts";
 import { booting, rtInfo, rtOf, unread } from "../runtime/words.tsx";
@@ -36,7 +38,6 @@ export function goNew(): void {
 const DRAWER_BELOW_PX = 1024;
 const DRAWER_ENTRY = "gl-drawer";
 let afterClose: (() => void) | null = null;
-let closeTimer: ReturnType<typeof setTimeout> | undefined;
 
 const onDrawerEntry = () => (history.state as { [DRAWER_ENTRY]?: boolean } | null)?.[DRAWER_ENTRY] === true;
 
@@ -56,8 +57,11 @@ function focusShell(): void {
   requestFocus(() => [...document.querySelectorAll<HTMLElement>(".hdr .bk, #menuBtn, .set-bar .set-done")].find((el) => el.getClientRects().length > 0));
 }
 
+// why: a limit on the back's answer: a browser that never sends popstate still closes the drawer
+const lateClose = debounce(() => drawerClosed(false), 400);
+
 function drawerClosed(refocus: boolean): void {
-  clearTimeout(closeTimer);
+  lateClose.cancel();
   setState({ drawer: false });
   const then = afterClose;
   afterClose = null;
@@ -76,8 +80,7 @@ export function closeDrawer(then?: () => void, refocus = then === undefined): vo
     then?.();
   };
   history.back();
-  // oxlint-disable-next-line gates/timer-needs-reason -- a limit on the back's answer: a browser that never sends popstate (none seen) still closes the drawer
-  closeTimer = setTimeout(() => drawerClosed(false), 400);
+  lateClose();
 }
 
 export function onDrawerPop(): void {
@@ -174,32 +177,13 @@ function measureFade(el: HTMLElement): void {
   el.style.setProperty("--fade-end", `${end}px`);
 }
 
-function fadeEdges(el: HTMLElement | null): (() => void) | undefined {
-  if (!el) return undefined;
-  const update = () => measureFade(el);
-  update();
-  el.addEventListener("scroll", update, { passive: true });
-  const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
-  ro?.observe(el);
-  return () => {
-    el.removeEventListener("scroll", update);
-    ro?.disconnect();
-  };
-}
-
 function ThreadList() {
-  const list = useRef<HTMLElement | null>(null);
-  // oxlint-disable-next-line gates/effect-needs-reason -- threads arriving, leaving or filtered change how far the list runs with no scroll or resize, so its edge fades are measured after each commit
-  useLayoutEffect(() => {
-    if (list.current) measureFade(list.current);
-  });
-  // why: one callback for the list's life; a new one each render would re-attach the listeners.
+  // why: one callback for the list's life, which also drops the session's hover preload as it goes
   const ref = useRef((el: HTMLElement | null) => {
-    list.current = el;
-    return fadeEdges(el);
+    if (!el) return undefined;
+    const off = observeBox(el, () => measureFade(el), { content: true });
+    return () => { off(); preloadThread(null); };
   }).current;
-  // oxlint-disable-next-line gates/effect-needs-reason -- drops the hover preload, which lives in the session, when the list unmounts
-  useEffect(() => () => preloadThread(null), []);
   const threads = useStore((s) => s.threads);
   const q = useStore((s) => s.search.trim().toLowerCase());
   const searching = q !== "";

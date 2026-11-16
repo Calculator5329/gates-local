@@ -47,41 +47,45 @@ async function runShown(id: string, page: string, script: readonly PageAction[],
     return address.error === "too-big" ? { id, seen: [], error: `The page is too big to run here (${pageMb(page)} MB).` } : { id, seen: [], skipped: SERVER_REFUSED_SKIP };
   }
   if (!shown()) return HIDDEN;
-  return new Promise((resolve) => {
+  let finish: ((seen: PageSeen | typeof HIDDEN) => void) | undefined;
+  const answer = new Promise<PageSeen | typeof HIDDEN>((resolve) => {
     const frame = document.createElement("iframe");
     frame.setAttribute("aria-hidden", "true");
     frame.setAttribute("data-measure-page", id);
     frame.tabIndex = -1;
     frame.style.cssText = "position:fixed;left:0;top:0;width:400px;height:300px;border:0;opacity:0;pointer-events:none;z-index:-1";
     let loads = 0;
-    let timer = 0;
-    const finish = (seen: PageSeen | typeof HIDDEN) => {
-      clearTimeout(timer);
+    const end = (seen: PageSeen | typeof HIDDEN) => {
       removeEventListener("message", onMessage);
       document.removeEventListener("visibilitychange", onHidden);
       frame.remove();
       resolve(seen);
     };
     const onHidden = () => {
-      if (!shown()) finish(HIDDEN);
+      if (!shown()) end(HIDDEN);
     };
     document.addEventListener("visibilitychange", onHidden);
     const onMessage = (e: MessageEvent) => {
       const data = e.data as { token?: unknown; seen?: unknown; error?: unknown } | null;
       if (e.source !== frame.contentWindow || data?.token !== token) return;
       const seen = Array.isArray(data.seen) ? data.seen.map(String) : [];
-      finish({ id, seen, ...(typeof data.error === "string" ? { error: data.error } : {}) });
+      end({ id, seen, ...(typeof data.error === "string" ? { error: data.error } : {}) });
     };
     addEventListener("message", onMessage);
     frame.addEventListener("load", () => {
       loads += 1;
-      if (loads > 1) finish({ id, seen: [], error: "The page left for another address." });
+      if (loads > 1) end({ id, seen: [], error: "The page left for another address." });
     });
     frame.addEventListener("focus", () => before?.focus({ preventScroll: true }));
-    // oxlint-disable-next-line gates/timer-needs-reason -- a written page may never post back; finish clears this with the frame's listeners
-    timer = window.setTimeout(() => finish({ id, seen: [], error: `The page did not finish within ${Math.round(timeoutMs / 1000)} seconds.` }), timeoutMs);
+    finish = end;
     lockFrame(frame, address.url, "Measure page");
     document.body.append(frame);
+  });
+  // why: a written page may never post back; the late answer takes the frame and its listeners away
+  return withTimeout(answer, timeoutMs, () => {
+    const late: PageSeen = { id, seen: [], error: `The page did not finish within ${Math.round(timeoutMs / 1000)} seconds.` };
+    finish?.(late);
+    return late;
   });
 }
 

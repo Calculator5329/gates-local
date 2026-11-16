@@ -364,6 +364,25 @@ describe("history", () => {
     expect(browser.location.hash).toBe("#thread=t2");
   });
 
+  it("a drawer closed by Back in a browser that never says popstate still closes, and runs what was asked, 400 ms on", async () => {
+    const { closeDrawer, onDrawerPop, openDrawer } = await import("./Sidebar.tsx");
+    browser.history.onPop(onDrawerPop);
+    openDrawer();
+    vi.spyOn(history, "back").mockImplementation(() => undefined);
+    vi.useFakeTimers();
+    const then = vi.fn();
+    try {
+      closeDrawer(then, false);
+      vi.advanceTimersByTime(399);
+      expect(store.getState().drawer).toBe(true);
+      vi.advanceTimersByTime(1);
+      expect(store.getState().drawer).toBe(false);
+      expect(then).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(1000);
+      expect(then).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("Search from Settings on a wide window takes the screen's entry away", async () => {
     const { openSearch } = await import("./Sidebar.tsx");
     const start = browser.history.index();
