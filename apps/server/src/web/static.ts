@@ -1,15 +1,9 @@
-// The built web client on the phone listener. GET / and any path that is not
-// a file answer index.html with the same-origin meta, which tells the client
-// to open its socket on this page's own host (apps/web/src/lib/session/index.ts).
-// Paths are checked twice: lexically on the raw request (no "..", ".",
-// backslash, NUL or doubled slash after decoding) and on the resolved real
-// path, so a symlink under the dist dir cannot reach a file outside it.
 import { readFile, realpath, stat } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 
 export const SAME_ORIGIN_META = '<meta name="gates-local-server" content="same-origin">';
-/** Vite builds with base "./"; this keeps asset URLs right when the fallback serves index.html at a deeper path. */
+// external: Vite builds with base "./", so index.html served at a deeper path needs a root base
 const BASE = '<base href="/">';
 
 const TYPES: Readonly<Record<string, string>> = {
@@ -32,7 +26,6 @@ const TYPES: Readonly<Record<string, string>> = {
   ".wasm": "application/wasm",
 };
 
-/** The path segments a request names under the dist dir, or null when the raw path tries to leave it. */
 export function clientSegments(rawUrl: string): string[] | null {
   const raw = rawUrl.split(/[?#]/, 1)[0] ?? "";
   if (!raw.startsWith("/") || raw.startsWith("//")) return null;
@@ -45,7 +38,7 @@ export function clientSegments(rawUrl: string): string[] | null {
   if (decoded.includes("\0") || decoded.includes("\\") || decoded.startsWith("//")) return null;
   const segments = decoded.slice(1).split("/");
   if (segments.some((s) => s === ".." || s === ".")) return null;
-  // A trailing slash leaves one empty segment; an empty one in the middle is a doubled slash.
+  // why: a trailing slash leaves one empty segment, and one in the middle is a doubled slash
   if (segments.slice(0, -1).some((s) => s === "")) return null;
   return segments.filter((s) => s !== "");
 }
@@ -55,21 +48,10 @@ function inside(root: string, file: string): boolean {
   return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
 }
 
-/**
- * The client's own policy tag in index.html, which as built names this computer's loopback page
- * route. Matched whole and whatever a build did to its attribute order, quotes or closing.
- */
 const POLICY_TAG = /<meta\b[^>]*http-equiv\s*=\s*["']?Content-Security-Policy["']?[^>]*>/gi;
 const policyTag = (origin: string) => `<meta http-equiv="Content-Security-Policy" content="frame-src ${origin}/pages/" />`;
 
-/**
- * index.html with the meta (and a root base) as the first thing in its head. Given `pagesOrigin`,
- * the client's frame policy names that origin's page route and nothing else: a page a model wrote
- * can move its own frame only where this policy lets a frame go, so it never names a wildcard host.
- */
 export function withMeta(html: string, pagesOrigin?: string): string {
-  // the client's tag goes and this listener's own is written in its place: a tag this could not
-  // find would stay beside the listener's header, and then no page would load at all
   const own = pagesOrigin === undefined ? "" : policyTag(pagesOrigin);
   const rest = pagesOrigin === undefined ? html : html.replace(POLICY_TAG, "");
   const head = /<head(\s[^>]*)?>/i;
@@ -94,7 +76,6 @@ async function sendIndex(req: IncomingMessage, res: ServerResponse, realRoot: st
   send(req, res, 200, { "Content-Type": TYPES[".html"] ?? "text/html", "Cache-Control": "no-cache" }, withMeta(html, pagesOrigin));
 }
 
-/** `pagesOrigin` is the listener's own public origin: index.html's frame policy is narrowed to its page route. */
 export async function serveClient(req: IncomingMessage, res: ServerResponse, webRoot: string, pagesOrigin?: string): Promise<void> {
   if (req.method !== "GET" && req.method !== "HEAD") return send(req, res, 405, { Allow: "GET, HEAD" }, "");
   const segments = clientSegments(req.url ?? "/");
@@ -110,7 +91,7 @@ export async function serveClient(req: IncomingMessage, res: ServerResponse, web
   try {
     real = await realpath(path.join(realRoot, ...segments));
   } catch {
-    return sendIndex(req, res, realRoot, pagesOrigin); // not a file: the client's own route
+    return sendIndex(req, res, realRoot, pagesOrigin);
   }
   if (!inside(realRoot, real)) return send(req, res, 403, {}, "");
   if (real === path.join(realRoot, "index.html")) return sendIndex(req, res, realRoot, pagesOrigin);
@@ -122,7 +103,7 @@ export async function serveClient(req: IncomingMessage, res: ServerResponse, web
     return send(req, res, 404, {}, "");
   }
   const type = TYPES[path.extname(real).toLowerCase()] ?? "application/octet-stream";
-  // Vite's /assets/ names carry a content hash.
+  // external: Vite puts a content hash in every /assets/ name
   const cache = segments[0] === "assets" ? "public, max-age=31536000, immutable" : "no-cache";
   send(req, res, 200, { "Content-Type": type, "Cache-Control": cache }, bytes);
 }

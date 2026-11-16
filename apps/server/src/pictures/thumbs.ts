@@ -1,15 +1,9 @@
-// Thumbnails: 384 px on the long edge, WebP, in images/thumbs/<jobId>.webp. Made at save; a missing one
-// (a picture from before thumbnails) is made on its first request, one at a time in the image files'
-// serial queue, so it cannot pass a collect of the same picture.
-//
-// The encoder is libwebp compiled to WebAssembly (@jsquash/webp): the same file runs on every platform,
-// so nothing is built per platform and nothing is rebuilt for Electron. The packaged server keeps the
-// .wasm beside its bundle (apps/desktop/scripts/package.ts); a checkout reads it from the package.
 import { constants } from "node:fs";
 import { mkdir, open, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { PNG } from "pngjs";
+// why: libwebp as WebAssembly is one file for every platform; nothing is rebuilt for Electron.
 import factory from "@jsquash/webp/codec/enc/webp_enc_simd.js";
 import { defaultOptions } from "@jsquash/webp/meta.js";
 
@@ -20,7 +14,7 @@ const JOB = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 type Queue = <T>(work: () => Promise<T>) => Promise<T>;
 interface Encoder { encode(data: Uint8ClampedArray, width: number, height: number, options: typeof defaultOptions): Uint8Array | null }
-// The server's types carry no WebAssembly lib; the few calls made here, by hand.
+// why: the server's types carry no WebAssembly lib, so the few calls made here are typed by hand.
 interface Instance { exports: object }
 interface Wasm {
   compile(bytes: Uint8Array): Promise<object>;
@@ -32,7 +26,7 @@ const { WebAssembly } = globalThis as unknown as { WebAssembly: Wasm };
 let encoder: Promise<Encoder> | undefined;
 function loadEncoder(): Promise<Encoder> {
   encoder ??= (async () => {
-    // Beside the bundle when packaged; in the package in a checkout.
+    // why: the .wasm sits beside the bundle when packaged, and in the package in a checkout.
     const bytes = await readFile(new URL(`./${WEBP_WASM}`, import.meta.url))
       .catch(() => readFile(createRequire(import.meta.url).resolve(`@jsquash/webp/codec/enc/${WEBP_WASM}`)));
     const wasm = await WebAssembly.compile(bytes);
@@ -45,7 +39,6 @@ function loadEncoder(): Promise<Encoder> {
   return encoder;
 }
 
-/** An area average: each thumbnail pixel is the mean of the picture pixels it covers. */
 function shrink(data: Uint8Array, width: number, height: number, toWidth: number, toHeight: number): Uint8ClampedArray {
   const out = new Uint8ClampedArray(toWidth * toHeight * 4);
   const sx = width / toWidth, sy = height / toHeight;
@@ -67,7 +60,6 @@ function shrink(data: Uint8Array, width: number, height: number, toWidth: number
   return out;
 }
 
-/** A PNG's thumbnail as WebP bytes. A picture smaller than the edge keeps its size. Throws for bytes that are not a PNG. */
 export async function encodeThumbnail(png: Buffer): Promise<Buffer> {
   const picture = PNG.sync.read(png);
   const scale = Math.min(1, THUMB_EDGE / Math.max(picture.width, picture.height));
@@ -78,7 +70,6 @@ export async function encodeThumbnail(png: Buffer): Promise<Buffer> {
   return Buffer.from(webp.buffer, webp.byteOffset, webp.byteLength);
 }
 
-/** images/, when it is a real folder in the data dir and not a link out of it. */
 async function imagesRoot(dataDir: string): Promise<string | undefined> {
   try {
     const root = path.join(await realpath(dataDir), "images");
@@ -86,7 +77,6 @@ async function imagesRoot(dataDir: string): Promise<string | undefined> {
   } catch { return undefined; }
 }
 
-/** A regular file's bytes, never through a link; undefined when it is not there. */
 async function readPlain(file: string): Promise<Buffer | undefined> {
   let handle;
   try {
@@ -109,7 +99,6 @@ async function keep(root: string, jobId: string, webp: Buffer): Promise<void> {
   catch (error) { await unlink(pending).catch(() => undefined); throw error; }
 }
 
-/** At save: the new picture's thumbnail, from the bytes just written. */
 export async function makeThumbnail(dataDir: string, jobId: string, png: Buffer): Promise<void> {
   if (!JOB.test(jobId)) throw new Error("Not a picture's job id.");
   const root = await imagesRoot(dataDir);
@@ -117,14 +106,14 @@ export async function makeThumbnail(dataDir: string, jobId: string, png: Buffer)
   await keep(root, jobId, await encodeThumbnail(png));
 }
 
-/** A picture's thumbnail, made now in `queue` when it has none; undefined when there is no such picture. */
 export async function readThumbnail(dataDir: string, jobId: string, queue: Queue): Promise<Buffer | undefined> {
   if (!JOB.test(jobId)) return undefined;
   const root = await imagesRoot(dataDir);
   if (root === undefined) return undefined;
   const thumb = path.join(root, "thumbs", `${jobId}.webp`);
   return await readPlain(thumb) ?? queue(async () => {
-    const made = await readPlain(thumb); // by an earlier request that this one waited behind
+    // why: an earlier request that this one waited behind may have made it.
+    const made = await readPlain(thumb);
     if (made) return made;
     const png = await readPlain(path.join(root, `${jobId}.png`));
     if (!png) return undefined;

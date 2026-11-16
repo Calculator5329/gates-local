@@ -1,20 +1,12 @@
-// The phone listener's knobs, read once at start. Off unless
-// GATES_LOCAL_WEB_LISTEN is set; once it is, every other knob must be right
-// or the server refuses to start (fail closed). LISTEN takes only
-// unix:<absolute path>: a TCP port, even on loopback, is open to every local
-// user, and this listener trusts Serve's headers instead of a token. Messages
-// never repeat the user value.
 import path from "node:path";
 import { exactOrigin, validUser } from "./phone.ts";
 import { parsePeers } from "./source.ts";
 
 export interface PhoneConfig {
-  /** The owner-only Unix socket Tailscale Serve proxies to. */
   readonly socketPath: string;
   readonly origin: string;
   readonly user: string;
   readonly webRoot: string;
-  /** GATES_LOCAL_WEB_PEERS, normalised: when set, the only source addresses admitted. */
   readonly peers?: readonly string[];
 }
 

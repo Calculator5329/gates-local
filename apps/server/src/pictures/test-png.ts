@@ -1,4 +1,3 @@
-// Test PNGs: a real encoded picture, optionally with ComfyUI's `prompt` text chunk (the API graph it ran).
 import { crc32 } from "node:zlib";
 import { PNG } from "pngjs";
 
@@ -11,7 +10,6 @@ function chunk(type: string, data: Buffer): Buffer {
   return Buffer.concat([head, data, crc]);
 }
 
-/** A width × height picture of a gradient, with a tEXt chunk per entry of `text` before its pixels, as ComfyUI saves them. */
 export function testPng(width: number, height: number, text: Record<string, string> = {}): Buffer {
   const png = new PNG({ width, height });
   for (let i = 0; i < width * height; i++) {
@@ -35,7 +33,6 @@ function hsl(h: number, s: number, l: number): [number, number, number] {
   return [f(0), f(8), f(4)];
 }
 
-/** A picture that still reads as one at thumbnail size, for screenshots: a sky in two colours from `hue`, a sun, and ground. */
 export function scenePng(width: number, height: number, hue: number): Buffer {
   const png = new PNG({ width, height });
   const top = hsl(hue, 0.55, 0.2), low = hsl((hue + 35) % 360, 0.65, 0.58), sun = hsl((hue + 60) % 360, 0.9, 0.86), ground = hsl((hue + 190) % 360, 0.3, 0.13);
@@ -55,12 +52,10 @@ export function scenePng(width: number, height: number, hue: number): Buffer {
   return PNG.sync.write(png);
 }
 
-/** ComfyUI's `prompt` chunk for a one-sampler graph. */
 export function promptChunk(seed: number, steps: number): Record<string, string> {
   return { prompt: JSON.stringify({ "3": { class_type: "KSampler", inputs: { seed, steps, cfg: 1, model: ["4", 0] } }, "4": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "x.safetensors" } } }) };
 }
 
-/** The pixel size a WebP file says it is (VP8, VP8L or VP8X). */
 export function webpSize(bytes: Buffer): { width: number; height: number } {
   if (bytes.toString("latin1", 0, 4) !== "RIFF" || bytes.toString("latin1", 8, 12) !== "WEBP") throw new Error("not a WebP");
   const kind = bytes.toString("latin1", 12, 16);

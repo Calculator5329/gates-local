@@ -1,5 +1,3 @@
-// GET /files/thumbs/<jobId>.webp, behind the same admission as /files/images (ws/server.ts admits first).
-// A job id never names two pictures, so a thumbnail is cached for good.
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 const THUMB = /^\/files\/thumbs\/([0-9a-f-]{36})\.webp$/;
@@ -11,5 +9,6 @@ export async function serveThumbnail(req: IncomingMessage, res: ServerResponse, 
   if (req.method !== "GET" || !match?.[1]) { res.writeHead(404).end(); return; }
   const bytes = await thumbnail(match[1]).catch(() => undefined);
   if (!bytes) { res.writeHead(404).end(); return; }
+  // why: a job id never names two pictures, so a thumbnail is cached for good.
   res.writeHead(200, { "Content-Type": "image/webp", "Content-Length": bytes.length, "Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff" }).end(bytes);
 }

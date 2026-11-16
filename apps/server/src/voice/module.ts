@@ -1,5 +1,3 @@
-// Inspired by Milo's milo/server.py transcription flow; implemented here for
-// Gates Local's authenticated RPC, without its companion-specific corrections.
 import * as S from "effect/Schema";
 import { randomUUID } from "node:crypto";
 import { WireError } from "@gates-local/contracts";
@@ -9,7 +7,6 @@ const MAX_BYTES = 44 + 16000 * 2 * 60;
 const Transcript = S.Struct({ text: S.String });
 const error = (message: string) => new WireError("voice", message);
 
-/** IP literals only: no DNS rebinding, redirects, credentials or remote speech APIs. */
 export function whisperAddress(value: string): string {
   try {
     const u = new URL(value);
@@ -19,7 +16,6 @@ export function whisperAddress(value: string): string {
   } catch { throw error("Use a loopback HTTP address such as http://127.0.0.1:8178 in Settings › General."); }
 }
 
-/** Accept exactly the bounded 16 kHz mono PCM format our recorder produces. */
 function audioBytes(audio: string): Buffer {
   if (audio.length > Math.ceil(MAX_BYTES / 3) * 4)
     throw error("The clip is too large or invalid. Record at most 60 seconds.");
@@ -39,8 +35,7 @@ export function createVoiceModule(deps: { settings(): { whisperUrl?: string }; t
     if (!configured) throw error("Connect a local whisper.cpp server in Settings › General first.");
     const url = whisperAddress(configured);
     const bytes = audioBytes(audio);
-    // A fixed byte body also avoids a FormData encoder continuing to enqueue
-    // into an aborted fetch stream during cancellation on Node.
+    // external: Node's FormData encoder keeps enqueueing into a fetch stream that was aborted; fixed bytes do not.
     const boundary = `speech-${randomUUID()}`;
     const body = Buffer.concat([
       Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="response_format"\r\n\r\njson\r\n--${boundary}\r\nContent-Disposition: form-data; name="temperature"\r\n\r\n0\r\n--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="speech.wav"\r\nContent-Type: audio/wav\r\n\r\n`),
@@ -50,7 +45,6 @@ export function createVoiceModule(deps: { settings(): { whisperUrl?: string }; t
     try {
       const response = await fetch(`${url}/inference`, { method: "POST", body, headers: { "Content-Type": `multipart/form-data; boundary=${boundary}` }, redirect: "error", signal: signal ? AbortSignal.any([deadline, signal]) : deadline });
       if (!response.ok) throw error("whisper.cpp did not answer successfully. Check the local server, then retry.");
-      // Bound the response too, including chunked replies, rather than allocating arbitrary JSON.
       const reader = response.body?.getReader();
       if (!reader) throw error("whisper.cpp returned an invalid answer.");
       let result = "";

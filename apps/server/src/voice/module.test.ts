@@ -13,6 +13,13 @@ async function setup(text = "spoken words", timeoutMs = 500) {
   const voice = createVoiceModule({ settings: () => settings, timeoutMs });
   return { fake, settings, voice };
 }
+/** A clip with one header field set to `value`, to stand for a WAV of another format. */
+function changed(offset: number, value: number, bytes: 2 | 4): string {
+  const b = Buffer.from(wav(), "base64");
+  if (bytes === 2) b.writeUInt16LE(value, offset); else b.writeUInt32LE(value, offset);
+  return b.toString("base64");
+}
+
 describe("local dictation", () => {
   it("bounds chunked transcript answers, cancels the response and frees the client's slot", async () => {
     let oversized = false;
@@ -66,6 +73,14 @@ describe("local dictation", () => {
     }
     expect(fake.requests).toBe(0);
     expect(await voice.transcribe(wav(60))).toEqual({ text: "spoken words" });
+  });
+  it("refuses a WAV that is not 16 kHz, one channel, 16-bit PCM", async () => {
+    const { voice, fake } = await setup();
+    const notOurs = { compressed: changed(20, 3, 2), stereo: changed(22, 2, 2), at8kHz: changed(24, 8000, 4), eightBit: changed(34, 8, 2) };
+    for (const [name, audio] of Object.entries(notOurs)) {
+      await expect(voice.transcribe(audio), name).rejects.toThrow(/Invalid WAV/);
+    }
+    expect(fake.requests).toBe(0);
   });
   it("cancels only the requesting client's job and clears its busy slot", async () => {
     const { voice, fake } = await setup();

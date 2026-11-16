@@ -1,48 +1,23 @@
-// A page a model wrote, served to the frame that runs it. The client hands
-// the page's code over with POST /pages (the token and an allowed Origin on
-// the computer's listener; Serve's admission on the phone's) and gets back a
-// one-time id; the frame then loads /pages/<id>, an address with no token in
-// it. The first GET of an id serves the page and forgets it; an unknown, used
-// or expired id gets an empty 404. The page's limits travel as response
-// headers, so a page that replaces its own document cannot take them off:
-// no network, no child frames, no forms, scripts sandboxed to an opaque origin,
-// and no `javascript:` address to swap its document through.
 import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-/** The largest page served, in bytes of UTF-8 (the client checks the same number first: apps/web/src/pages/page-doc.ts). */
 export const PAGE_MAX_BYTES = 2 * 1024 * 1024;
-/** How long a handed-over page waits for its frame. */
 export const PAGE_TTL_MS = 60_000;
-/** Pages waiting for a frame at once; the oldest goes first past this. */
 export const PAGES_KEPT = 32;
 
-/**
- * Everything the page may use: its own scripts and styles, and pictures, fonts and media from
- * data: addresses. Nothing loads from or goes out to anywhere else, it cannot hold a frame of its
- * own (a fresh child window would have the WebRTC constructors back), and the sandbox gives it an
- * opaque origin with scripts only, even if its address is opened on its own.
- *
- * Script elements run by the nonce the server writes onto each one as it serves the page, and
- * handlers written on elements run as before. A `javascript:` address carries no nonce, so the
- * page cannot navigate its frame to one: that would swap in a new document, in a new window
- * with the WebRTC constructors back. `script-src` stays for a browser that does not know the two
- * narrower directives.
- *
- * A nonce lets a script element run whatever its address, and the page's own script can read its
- * nonce and put it on a script it makes. So the nonce alone would let a page load a script from
- * any host: see {@link PAGE_NO_REMOTE_SCRIPT}, the second policy every page is served with.
- */
 export function pagePolicy(nonce: string): string {
   return [
     "default-src 'none'",
+    // external: a browser that does not know script-src-elem and script-src-attr falls back to script-src.
     "script-src 'unsafe-inline'",
+    // external: a browser checks a javascript: address against script-src-elem, and it carries no nonce, so a page cannot navigate its frame to one.
     `script-src-elem 'nonce-${nonce}' 'strict-dynamic'`,
     "script-src-attr 'unsafe-inline'",
     "style-src 'unsafe-inline'",
     "img-src data:",
     "font-src data:",
     "media-src data:",
+    // external: a child frame is a fresh browser window, with the WebRTC constructors back.
     "frame-src 'none'",
     "child-src 'none'",
     "worker-src 'none'",
@@ -52,40 +27,28 @@ export function pagePolicy(nonce: string): string {
   ].join("; ");
 }
 
-/**
- * A second policy, sent beside the first; a script must pass both. This one names no host and no
- * nonce, so a script element with an address fails it however it is marked, while a script written
- * in the page passes. The first policy still refuses a `javascript:` address, which this one alone
- * would allow.
- */
+// why: no nonce and no host here, so a script element with an address fails however it is marked.
 export const PAGE_NO_REMOTE_SCRIPT = "script-src 'unsafe-inline'";
 
-/** A fresh nonce for one served page. */
 export const pageNonce = (): string => randomBytes(16).toString("hex");
 
 const RTC = ["RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel", "RTCSessionDescription", "RTCIceCandidate"];
-/** Runs before the page's own scripts: the WebRTC constructors are gone, and cannot be put back. */
 const head = (nonce: string) => `<script nonce=${nonce}>for(const k of ${JSON.stringify(RTC)}){try{Object.defineProperty(window,k,{value:undefined,writable:false,configurable:false})}catch{}}</script>`;
-/**
- * Every script start tag in the page's code: each gets the nonce, first, so one the page wrote
- * itself is ignored. The nonce is hex and written with no quotes, so a start tag that sits inside
- * a string in the page's own script does not end that string.
- */
 const SCRIPT_TAG = /<script(?=[\s/>])/gi;
 
-/** The page's code with the WebRTC removal first, after its doctype so it keeps standards mode, and the nonce on each of its scripts. */
 export function pageDocument(code: string, nonce: string): string {
+  // external: a browser keeps standards mode only when the doctype comes before everything else.
   const doctype = /^\s*<!doctype[^>]*>/i.exec(code);
+  // why: the nonce is first and unquoted: one the page wrote loses, and no string in its script ends.
   const rest = (doctype === null ? code : code.slice(doctype[0].length)).replace(SCRIPT_TAG, `<script nonce=${nonce} `);
   return `${doctype === null ? "<!doctype html>" : doctype[0]}${head(nonce)}${rest}`;
 }
 
-/** The headers a served page carries; `frameAncestors` names the one origin that may frame it. */
 export function pageHeaders(nonce: string, frameAncestors?: string): Record<string, string> {
   const policy = pagePolicy(nonce);
   return {
     "Content-Type": "text/html; charset=utf-8",
-    // two policies in one header, split by the comma
+    // external: a browser splits this header at the comma, and a script must pass every policy in it.
     "Content-Security-Policy": `${frameAncestors === undefined ? policy : `${policy}; frame-ancestors ${frameAncestors}`}, ${PAGE_NO_REMOTE_SCRIPT}`,
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
@@ -101,20 +64,13 @@ const empty = (res: ServerResponse, status: number, headers: Record<string, stri
 };
 
 export interface PageRouteOptions {
-  /** The origin allowed to frame a served page (the phone listener's own); absent leaves frame-ancestors out. */
   readonly frameAncestors?: string;
   readonly now?: () => number;
 }
 
 export interface PageRoute {
-  /** True for /pages and /pages/<anything>: this route answers it. */
   matches(req: IncomingMessage): boolean;
-  /**
-   * Answers a matching request. `admitted` says the caller passed the listener's own admission,
-   * Origin included (only a POST needs it); an admitted POST's Origin is echoed for CORS.
-   */
   handle(req: IncomingMessage, res: ServerResponse, admitted: boolean): void;
-  /** Pages waiting for their frame. */
   readonly size: number;
 }
 
@@ -176,7 +132,7 @@ export function createPageRoute(options: PageRouteOptions = {}): PageRoute {
       kept.delete(id);
       if (page === undefined) return empty(res, 404);
       const body = Buffer.from(page.doc, "utf8");
-      // the phone listener frames nothing else: its page alone may be framed, by its own origin
+      // why: the phone's listener denies framing on every answer; a page alone is framed, by its origin.
       res.removeHeader("X-Frame-Options");
       res.writeHead(200, { ...pageHeaders(page.nonce, options.frameAncestors), "Content-Length": String(body.length) }).end(body);
     },

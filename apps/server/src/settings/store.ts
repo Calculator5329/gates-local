@@ -1,8 +1,3 @@
-// The user's settings: one JSON file in the data dir, decoded with the
-// contracts Settings Schema on load and written atomically (temp file, then
-// rename). A file that does not decode, or that a newer build wrote, is kept
-// aside as `settings.json.bad-<time>` and defaults load; the user's file is
-// never lost silently. Other modules read settings through SettingsReader.
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { ModelSettings, ModelSettingsPatch, Settings, SettingsPatch, type SyncChange } from "@gates-local/contracts";
@@ -12,47 +7,36 @@ import { canonicalTag } from "../runtime/recommended.ts";
 import { createRevisions } from "../ws/revisions.ts";
 import { boundedModelSettings } from "./turn.ts";
 
-/** The file format version this build writes. A higher one is a newer build's file. */
 export const SETTINGS_FILE_VERSION = 1;
 export const SETTINGS_FILE_NAME = "settings.json";
 
 export type SettingsListener = (next: Settings, previous: Settings) => void;
 
-/** What other modules see: the current settings and a change feed. */
 export interface SettingsReader {
   get(): Settings;
-  /** Called after every update that changed something. Returns the unsubscribe. */
   onChange(listener: SettingsListener): () => void;
 }
 
 export interface SettingsStore extends SettingsReader {
-  /** The revision captured with this immutable value, never the latest revision at serialization. */
   stamp(value: Settings): SyncChange;
-  /** Apply a patch (`null` clears defaultModel, comfyUrl and imageChoice), persist, notify. */
   update(patch: SettingsPatch): Settings;
-  /** Merge fields for one model; null fields inherit again, a null patch resets the model. */
   updateModel(model: string, patch: ModelSettingsPatch | null): Settings;
-  /** Set when the load fell back to defaults: says why and where the old file went. */
   readonly loadNote: string | undefined;
 }
 
 export interface SettingsStoreOptions {
   dataDir: string;
-  /** First run only: true picks runtimeMode "system", false "app". */
   systemOllamaAnswers: () => Promise<boolean>;
   now?: () => number;
-  /** The atomic write's rename (tests inject one that throws). Default fs.renameSync. */
   rename?: (from: string, to: string) => void;
 }
 
-/** Defaults for a first run. runtimeMode comes from whether a system Ollama answers. */
 export function defaultSettings(runtimeMode: Settings["runtimeMode"]): Settings {
   return { defaultNumCtx: 16384, thinking: true, theme: "dark", runtimeMode, tools: true, imageGen: false };
 }
 
 const SettingsFile = S.Struct({ version: S.Number, settings: S.Unknown });
-// File compatibility only: accept finite legacy numeric values, normalize them,
-// then decode the strict wire schema. New writes always use the strict schemas.
+// why: a file from before the limits holds any finite number; it is clamped, then decoded strictly.
 const StoredSettings = S.Struct({
   ...Settings.fields,
   modelSettings: S.optional(S.Record(S.String, S.Struct({
@@ -98,20 +82,17 @@ function writeAtomic(file: string, settings: Settings, rename: (from: string, to
   try {
     rename(tmp, file);
   } catch (e) {
-    // The old file is untouched; do not leave the half-done write behind.
     rmSync(tmp, { force: true });
     throw e;
   }
 }
 
-/** A filename-safe UTC stamp: 2026-11-07T21-04-05-123Z. */
 const stamp = (ms: number) => new Date(ms).toISOString().replace(/[:.]/g, "-");
 
 export function applyPatch(current: Settings, patch: SettingsPatch): Settings {
   const { defaultModel, comfyUrl, imageFolder, whisperUrl, systemPrompt, modelSettings, imageChoice, imageTool, ...rest } = { ...current };
   const next: Settings = { ...rest };
   const model = patch.defaultModel === undefined ? defaultModel : (patch.defaultModel ?? undefined);
-  // null: back to unset, which is on once a setup can run (Reset settings)
   const tool = patch.imageTool === undefined ? imageTool : (patch.imageTool ?? undefined);
   const choice = patch.imageChoice === undefined ? imageChoice : (patch.imageChoice ?? undefined);
   const comfy = patch.comfyUrl === undefined ? comfyUrl : (patch.comfyUrl ?? undefined);
@@ -182,7 +163,7 @@ export async function openSettingsStore(options: SettingsStoreOptions): Promise<
       if (!model.trim()) throw new Error("Choose a model before saving its settings.");
       const decoded = patch === null ? null : S.decodeUnknownSync(ModelSettingsPatch)(patch);
       const entries = new Map(Object.entries(current.modelSettings ?? {}));
-      // Accept an old unqualified tag, but write one canonical key from now on.
+      // why: an old file may hold the unqualified tag; from here on one canonical key is written.
       const previous = entries.get(key) ?? entries.get(model) ?? {};
       if (model !== key) entries.delete(model);
       if (decoded === null) entries.delete(key);

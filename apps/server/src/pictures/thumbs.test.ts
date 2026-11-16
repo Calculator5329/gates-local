@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -53,6 +53,30 @@ it("keeps a thumbnail beside its picture, makes a missing one on request, and go
   expect(await exists(path.join(dir, "images", `${made}.png`))).toBe(false);
   expect(await exists(thumb)).toBe(false);
   expect(await exists(path.join(dir, "images", "thumbs", `${later}.webp`))).toBe(true);
+});
+
+it("reads no thumbnail and no picture through a link, and none from an images folder that is a link", async () => {
+  const dir = await dataDir();
+  const outside = await mkdtemp(path.join(tmpdir(), "gates-thumbs-out-"));
+  dirs.push(outside);
+  await writeFile(path.join(outside, "secret.webp"), "not this app's file");
+  await writeFile(path.join(outside, "secret.png"), testPng(8, 8));
+  const linkedThumb = randomUUID(), linkedPicture = randomUUID();
+  await mkdir(path.join(dir, "images", "thumbs"));
+  await symlink(path.join(outside, "secret.webp"), path.join(dir, "images", "thumbs", `${linkedThumb}.webp`));
+  await symlink(path.join(outside, "secret.png"), path.join(dir, "images", `${linkedPicture}.png`));
+  expect(await readThumbnail(dir, linkedThumb, serial)).toBeUndefined();
+  expect(await readThumbnail(dir, linkedPicture, serial)).toBeUndefined();
+
+  const linked = await mkdtemp(path.join(tmpdir(), "gates-thumbs-linked-"));
+  dirs.push(linked);
+  const job = randomUUID();
+  await mkdir(path.join(outside, "images"));
+  await writeFile(path.join(outside, "images", `${job}.png`), testPng(8, 8));
+  await symlink(path.join(outside, "images"), path.join(linked, "images"));
+  expect(await readThumbnail(linked, job, serial)).toBeUndefined();
+  await expect(makeThumbnail(linked, job, testPng(8, 8))).rejects.toThrow("not available");
+  expect(await exists(path.join(outside, "images", "thumbs"))).toBe(false);
 });
 
 it("serves thumbnails with the same token and Origin admission as pictures, cached for good", async () => {

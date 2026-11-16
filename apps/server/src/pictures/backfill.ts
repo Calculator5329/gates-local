@@ -1,7 +1,3 @@
-// Fills the pictures index from finished cards that have no row: every picture made before the index,
-// and any an older build finished since. The missing rows are the only marker, so a second run finds
-// nothing to do and a run cut short finishes on the next start. Seed and steps come from the file's
-// `prompt` chunk, the done time from its mtime (the rename at save); the run time was never kept.
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import type { ThreadStore } from "../threads/store.ts";
@@ -18,11 +14,10 @@ export async function backfillPictures(deps: { store: Pick<ThreadStore, "picture
     try {
       const [info, png] = await Promise.all([stat(file), readPngFacts(file)]);
       if (!info.isFile() || png === undefined) continue;
-      // Each row is its own write: a kill leaves whole rows and the rest for next time.
       pictures.fill(card.jobId, { ...chunkFacts(png.text), width: png.width, height: png.height, bytes: info.size, doneAt: Math.round(info.mtimeMs) });
       filled++;
     } catch (error) {
-      // A file gone since the card was read is not a picture; anything else is said once per card.
+      // why: a file gone since the card was read is not a picture, so it gets no log line.
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") deps.log?.(`picture ${card.jobId} not indexed: ${(error as Error).message}`);
     }
   }

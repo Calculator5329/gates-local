@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-16: comments in five server folders hold to the six kinds
+
+- Pages, pictures, settings, voice and the phone listener now pass the
+  comment rule with no offenders: 264 comment lines became 44. Each
+  rule a comment stated is a test; five rules no test held now have one
+  (a WAV's format, no reads through a link, a linked images folder, a
+  zoned address of this machine, the phone page's frame policy).
+- Tailscale and Vite join the outside names an `external:` line may give.
+
 ## 2026-11-16: Stop quiets the voice at once
 
 - In talk mode, pressing Stop on a reply now stops the reading at

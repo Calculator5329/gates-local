@@ -391,13 +391,13 @@ function ownAddresses(): string[] {
 }
 
 /** Spellings of a self source Serve or a hand-made request could carry: mapped, expanded and upper-case forms. */
-const SELF_SPELLINGS = ["127.0.0.1", "::1", "0:0:0:0:0:0:0:1", "::ffff:127.0.0.1", "::FFFF:127.0.0.1", "::ffff:7f00:1"];
+const SELF_SPELLINGS = ["127.0.0.1", "::1", "0:0:0:0:0:0:0:1", "::ffff:127.0.0.1", "::FFFF:127.0.0.1", "::ffff:7f00:1", "::1%lo"];
 
 // Serve stamps the owner's login on a connection from this machine too (WhoIs
 // finds the self node by its Tailscale address), so the source address is
 // checked apart from the login: every case here carries the right login.
 describe("phone listener source address (Serve's X-Forwarded-For)", () => {
-  it("refuses a request and an upgrade from any of this machine's own addresses, in every spelling", async () => {
+  it("refuses a request and an upgrade from any of this machine's own addresses, in every spelling, a zone id included", async () => {
     const fx = fixture();
     const logs: string[] = [];
     const s = await start(fx, logs);
@@ -461,7 +461,7 @@ describe("phone listener source address (Serve's X-Forwarded-For)", () => {
 });
 
 describe("phone listener static files", () => {
-  it("GET / and any path that is not a file give index.html with the same-origin meta, no-cache", async () => {
+  it("GET / and any path that is not a file give index.html with the same-origin meta and this listener's frame policy, no-cache", async () => {
     const fx = fixture();
     const s = await start(fx);
     for (const p of ["/", "/index.html", "/thread/42", "/assets/", "/nope.js"]) {
@@ -471,6 +471,7 @@ describe("phone listener static files", () => {
       expect(r.headers["cache-control"], p).toBe("no-cache");
       expect(r.body, p).toMatch(/<head>\s*<meta name="gates-local-server" content="same-origin">/);
       expect(r.body, p).toContain("<title>Gates Local</title>");
+      expect(r.body, p).toContain(`<meta http-equiv="Content-Security-Policy" content="frame-src ${ORIGIN}/pages/" />`);
       expectSecurityHeaders(r);
     }
   });

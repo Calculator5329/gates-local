@@ -1,7 +1,3 @@
-// threads.pages: every page a thread's saved replies wrote, oldest first, each code once. A long
-// thread opens on its newest messages, so its page list cannot come from the messages a window
-// has loaded: the window asks for the pages before the first message it has, and runs any of them
-// from here. The reply still being written is the window's live turn, never a saved page here.
 import { type ThreadPage, pageBlocks } from "@gates-local/contracts";
 import type { ThreadStore } from "../threads/store.ts";
 

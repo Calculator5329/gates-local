@@ -1,4 +1,3 @@
-// A loopback-only whisper stand-in. Never contacts a real speech service.
 import { createServer } from "node:http";
 
 export function wav(seconds = 1): string {

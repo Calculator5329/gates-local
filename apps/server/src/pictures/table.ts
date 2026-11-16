@@ -1,23 +1,15 @@
-// The pictures table: an index of the finished image cards, for the Pictures screen. The card message is
-// the picture's only record; a row here only finds it. Each row references its card with ON DELETE
-// CASCADE, so every path that deletes a card (a message, a thread, a batch, or an older build's own SQL)
-// deletes the row in the same write. No schema version: an older build opens the file and ignores the table.
 import type { DatabaseSync, SQLOutputValue, StatementSync } from "node:sqlite";
 import { WireError, type Picture, type PictureList, type PictureListParams } from "@gates-local/contracts";
 
-/** What the image module knows at done that the card does not keep. */
 export interface PictureFacts {
   seed?: number;
   steps?: number;
-  /** ComfyUI's time making it. */
   runMs?: number;
-  /** The file's size in pixels and bytes. */
   width: number;
   height: number;
   bytes: number;
 }
 
-/** A finished card with no row yet: a picture from before the index, or one an older build finished. */
 export interface Unindexed {
   jobId: string;
   imagePath: string;
@@ -26,11 +18,11 @@ export interface Unindexed {
 export interface PictureIndex {
   list(params: PictureListParams): PictureList;
   unindexed(): Unindexed[];
-  /** Index a card from its file. Leaves a row already there as it is; does nothing when the card is gone. */
   fill(jobId: string, facts: PictureFacts & { doneAt: number }): void;
 }
 
 export function ensurePicturesTable(db: DatabaseSync): void {
+  // why: no schema version is raised, so an older build opens the file and ignores the table.
   db.exec(`
     CREATE TABLE IF NOT EXISTS pictures (
       job_id     TEXT PRIMARY KEY NOT NULL REFERENCES messages (id) ON DELETE CASCADE,
@@ -51,7 +43,7 @@ export function ensurePicturesTable(db: DatabaseSync): void {
 }
 
 const COLUMNS = "job_id, thread_id, prompt, preset, width, height, seed, steps, queued_at, done_at, run_ms, bytes";
-// The prompt, setup and sent time come from the card itself, so the row cannot disagree with it.
+// why: prompt, setup and sent time are read from the card, so the row cannot disagree with it.
 const FROM_CARD = `SELECT id, thread_id, content, json_extract(image_job_json, '$.choice.preset'), ?, ?, ?, ?, created_at, ?, ?, ?
   FROM messages WHERE id = ? AND json_extract(image_job_json, '$.state') = 'done'`;
 const CURSOR = /^(\d{1,16})\.(\d{1,16})$/;
@@ -83,11 +75,9 @@ const clause = (parts: string[]) => (parts.length === 0 ? "" : `WHERE ${parts.jo
 const values = (facts: PictureFacts, doneAt: number, jobId: string) =>
   [facts.width, facts.height, facts.seed ?? null, facts.steps ?? null, doneAt, facts.runMs === undefined ? null : Math.round(facts.runMs), facts.bytes, jobId] as const;
 
-/** `%` and `_` in the words are plain characters. */
 const likeWords = (q: string) => `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
 export function createPictureIndex(db: DatabaseSync): PictureIndex & {
-  /** At done, inside the card's own write: the row with what the job knew. */
   record(jobId: string, facts: PictureFacts, doneAt: number): void;
 } {
   const record = db.prepare(`INSERT OR REPLACE INTO pictures (${COLUMNS}) ${FROM_CARD}`);
@@ -95,7 +85,7 @@ export function createPictureIndex(db: DatabaseSync): PictureIndex & {
   const unindexed = db.prepare(`SELECT m.id, m.images_json FROM messages m
     WHERE m.image_job_json IS NOT NULL AND json_extract(m.image_job_json, '$.state') = 'done'
       AND NOT EXISTS (SELECT 1 FROM pictures p WHERE p.job_id = m.id)`);
-  // One statement per filter shape, so each page is an index range and not a scan from the top.
+  // why: one statement per filter shape, so each page is an index range, not a scan from the top.
   const lists = new Map<string, { page: StatementSync; count: StatementSync }>();
   const statements = (after: boolean, q: boolean, setup: boolean) => {
     const key = `${after}${q}${setup}`;
@@ -134,7 +124,6 @@ export function createPictureIndex(db: DatabaseSync): PictureIndex & {
       const words = q?.trim() ? likeWords(q.trim()) : undefined;
       const { page, count } = statements(cursor !== undefined, words !== undefined, setup !== undefined);
       const filter = { ...words === undefined ? {} : { q: words }, ...setup === undefined ? {} : { setup } };
-      // One more than asked says whether there is a next page.
       const rows = page.all({ ...filter, ...cursor, limit: limit + 1 });
       const shown = rows.slice(0, limit);
       const last = shown.at(-1);
