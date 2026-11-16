@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-16: a reply retried while a window was away shows the new try, and a send on a dead connection ends
+
+- After a reconnect, words that arrive before the list of replies is read wait for it, so a reply the server retried in the meantime shows the new try's words and keeps growing, instead of stopping on the old try's.
+- A send waiting for its model ends after 11 minutes, a minute past the server's own limit, so a connection that died without closing (a laptop that slept) cannot leave it waiting forever.
+- Retry on an update's unread running-work list puts the keyboard focus on Cancel while it reads, instead of dropping it to the page.
+
 ## 2026-11-16: a duplicated tab without Web Locks takes its own window, and a finished tool step stays finished
 
 - A page served without Web Locks (plain http) now asks the other open tabs whether its stored

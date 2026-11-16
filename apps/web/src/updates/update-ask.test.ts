@@ -234,6 +234,15 @@ it("a running-work list that could not be read is read again on Retry, and Go wo
   expect(props(go())["disabled"]).toBe(false);
 });
 
+it("Retry takes its line away as the list is read again, so the focus moves to Cancel and not to the page", async () => {
+  h.readUpdateStatus.mockResolvedValue("Couldn't read what an update would stop; try again.");
+  await push({ ...OFFERED, activity: [] });
+  await click(button());
+  byTestId("sidebar.update.retry")?.focus();
+  await click(byTestId("sidebar.update.retry"));
+  expect(doc.activeElement?.getAttribute("data-testid")).toBe("sidebar.update.cancel");
+});
+
 it("a footer check that failed shows until a newer check answers, and a later status with no check does not bring it back", async () => {
   h.checkForUpdates.mockResolvedValue("Gates Local is not answering.");
   await push({ ...OFFERED, approval: undefined, lastCheck: { state: "up-to-date", checkedAt: 1, channel: "main", current: "abc1234" } });

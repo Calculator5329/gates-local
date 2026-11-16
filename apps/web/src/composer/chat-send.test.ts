@@ -343,6 +343,8 @@ it("a message that waited for setup opens its chat when it goes, and one that wa
 
 it("a reply's second attempt starts over without the first attempt's words still waiting for a frame", () => {
   setState({ ...READY, view: "thread", threadId: "t1" });
+  // why: words are taken as they come only once this connection's list is read
+  chat.replyListed([]);
   chat.recordChanged(is(starting("a1")));
   chat.recordChanged(is(live("a1", 2)));
   chat.onWords({ id: "a1", part: { type: "text", from: 0, text: "first try" } });
@@ -376,6 +378,20 @@ it("a list read before a retry the window already took does not bring back the f
   chat.onWords({ id: "a1", part: { type: "text", from: 10, text: " goes on" } });
   runFrames();
   expect(getState().turns.t1?.text).toBe("New answer goes on");
+});
+
+it("a retry the server took while this window was away replaces the old try's words, and words before the list follow the new try's", () => {
+  setState({ ...READY, view: "thread", threadId: "t1" });
+  chat.recordChanged(is(live("a1", 2)));
+  chat.onWords({ id: "a1", part: { type: "text", from: 0, text: "Discarded words from attempt one" } });
+  runFrames();
+  chat.connected();
+  chat.onWords({ id: "a1", part: { type: "text", from: 10, text: " goes on" } });
+  chat.replyListed([{ reply: live("a1", 3, { try: 2 }), soFar: { text: "New answer", thinking: "", steps: [] } }]);
+  runFrames();
+  chat.onWords({ id: "a1", part: { type: "text", from: 18, text: " and on" } });
+  runFrames();
+  expect(getState().turns.t1?.text).toBe("New answer goes on and on");
 });
 
 it("a reply that ends in the change that first brings its saved question shows the question before the reply", () => {

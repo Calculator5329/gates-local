@@ -4,6 +4,9 @@ import { pinFramePolicy } from "../../pages/frame-policy.ts";
 import { withTimeout } from "../ui/kit/async.ts";
 import { claimWindow, windowTabs } from "./window-id.ts";
 
+// why: a send waits at most the server's 10 minute model load; a dead socket ends after
+const SEND_MS = 11 * 60_000;
+
 interface ConnectionEffects {
   readonly applyServerEvent: typeof setState;
   readonly serverUrl: () => Promise<string | null>;
@@ -141,8 +144,7 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
 
   function reply<M extends ReplyCall>(method: M, params: Params<M>): Promise<ReplyOutcome> {
     if (client === null) return Promise.resolve({ answer: "not-reached", why: "closed" });
-    // why: a send answers once its model loads, minutes at times; a closed socket still ends it
-    return client.reply(method, params, method === "reply.send" ? { timeoutMs: Infinity } : undefined);
+    return client.reply(method, params, method === "reply.send" ? { timeoutMs: SEND_MS } : undefined);
   }
 
   async function probe<M extends MethodName>(method: M, params: Params<M>, options?: CallOptions<M>): Promise<ResultOf<M> | typeof NA | undefined> {

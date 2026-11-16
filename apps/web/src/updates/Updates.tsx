@@ -110,6 +110,8 @@ function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStat
     if (now.join("\n") !== work.join("\n")) return changed(now);
     onGo(work);
   };
+  // why: the line and its button go while the list is read again; focus lands on Cancel, not the page
+  const retry = () => { cancel.current?.focus(); setReads((n) => n + 1); };
   const fresh = wait && prev !== null ? work.filter((w) => !prev.includes(w)) : [];
   return (
     <div className="cfm" role="group" aria-label="Confirm update">
@@ -129,7 +131,7 @@ function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStat
       {typeof read === "string" ? (
         <p className="act-err">
           <span role="alert">{read}</span>{" "}
-          <button type="button" className="btn ghost" data-testid="sidebar.update.retry" onClick={() => setReads((n) => n + 1)}>
+          <button type="button" className="btn ghost" data-testid="sidebar.update.retry" onClick={retry}>
             Retry
           </button>
         </p>

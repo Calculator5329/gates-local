@@ -135,7 +135,8 @@ it.runIf(process.platform === "linux" && existsSync("/usr/bin/python3")).each([f
 it.runIf(process.platform === "linux" && existsSync("/usr/bin/python3"))("AV-04 a zombie leader cannot hide its live descendant from rollback", async () => {
   // The collector adopts and reaps both processes, even after the group
   // leader exits. Its pipe keeps the descendant alive until cleanup.
-  const program = "import ctypes,os,sys\nassert ctypes.CDLL(None).prctl(36,1,0,0,0) == 0\nr,w=os.pipe()\nleader=os.fork()\nif leader == 0:\n os.setsid()\n os.close(w)\n worker=os.fork()\n if worker == 0:\n  print('worker',os.getpid(),flush=True)\n  os.read(r,1)\n  os._exit(0)\n os._exit(0)\nos.close(r)\nprint('leader',leader,flush=True)\nsys.stdin.readline()\nos.close(w)\nos.waitpid(leader,0)\nos.waitpid(-1,0)\n";
+  // why: one os.write per line; an unbuffered print splits a line the other process can cut into
+  const program = "import ctypes,os,sys\nassert ctypes.CDLL(None).prctl(36,1,0,0,0) == 0\nr,w=os.pipe()\nleader=os.fork()\nif leader == 0:\n os.setsid()\n os.close(w)\n worker=os.fork()\n if worker == 0:\n  os.write(1,b'worker %d\\n' % os.getpid())\n  os.read(r,1)\n  os._exit(0)\n os._exit(0)\nos.close(r)\nos.write(1,b'leader %d\\n' % leader)\nsys.stdin.readline()\nos.close(w)\nos.waitpid(leader,0)\nos.waitpid(-1,0)\n";
   const collector = spawn("/usr/bin/python3", ["-u", "-c", program], { stdio: ["pipe", "pipe", "pipe"] });
   const exited = once(collector, "exit");
   let output = "";

@@ -170,3 +170,13 @@ test("a send waiting minutes for its model to load is still answered, and ends o
   socket.close(); await vi.advanceTimersByTimeAsync(0);
   expect(outcome).toEqual({ answer: "not-reached", why: "closed" });
 });
+
+test("a send on a socket that died without closing ends a minute after the server's 10 minute load limit", async () => {
+  await boot();
+  let outcome: unknown;
+  void booted.reply("reply.send", { id: "r1", threadId: "t1", messageId: "m1", text: "hi" }).then((a) => { outcome = a; });
+  await vi.advanceTimersByTimeAsync(10 * 60_000);
+  expect(outcome).toBeUndefined();
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(outcome).toEqual({ answer: "not-reached", why: "timeout" });
+});

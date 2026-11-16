@@ -633,7 +633,10 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
       }
     }
     listedHere = true;
+    const rest = [...ahead];
     ahead.clear();
+    // why: a reply the list gave no newer words for takes what came before the list as they are
+    for (const [id, parts] of rest) for (const part of parts) onWords({ id, part });
     moveOldQueue();
   }
 
@@ -992,13 +995,15 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
       flushWords(threadId);
       return update(threadId, id, part);
     }
-    const w = waiting.get(threadId);
-    const have = turn[part.type].length + (w?.id === id ? w[part.type].length : 0);
-    // why: a part past this window's words follows ones it missed; a connect's list has them
-    if (part.from > have) {
-      if (!listedHere) ahead.set(id, [...ahead.get(id) ?? [], part]);
+    // why: until the list is read this window's words may be a try the server already threw away
+    if (!listedHere) {
+      ahead.set(id, [...ahead.get(id) ?? [], part]);
       return;
     }
+    const w = waiting.get(threadId);
+    const have = turn[part.type].length + (w?.id === id ? w[part.type].length : 0);
+    // why: a part past this window's words follows ones it missed; a reconnect's list has them
+    if (part.from > have) return;
     const fresh = part.text.slice(have - part.from);
     if (fresh !== "") queueWords(turn, part.type, fresh);
   }
