@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { installBrowser, tick, until } from "../../test/harness.ts";
 import type { Message } from "@gates-local/contracts";
 import type { LiveTurn, TurnClock } from "../lib/store/store.ts";
 import { reduceTurn, stopping, unfinished, withTurn, workMsAt } from "./turn.ts";
@@ -116,5 +117,54 @@ describe("the turn map", () => {
     expect(unfinished(turn({ end: { kind: "stopped", secs: 1 }, reply: record({ stage: "stopping", stoppedAt: at(1) }) }))).toBe(true);
     expect(unfinished(turn({ end: { kind: "stopped", secs: 1 }, reply: record({ stage: "ended", stoppedAt: at(1) }) }))).toBe(false);
     expect(unfinished(turn({ end: { kind: "stopped", secs: 1 } }))).toBe(false);
+  });
+});
+
+type Said = import("@gates-local/server/app/turn.ts").TurnSaid["event"];
+const BOTH: readonly Said[] = [
+  { type: "reply", reply: { startedAt: 1, toolMs: 0, attempt: 1, spans: [], callsAt: {}, stage: "thinking", workMs: 1000 } },
+  { type: "tool", step: { callId: "c1", name: "read", state: "running", summary: "Reading" } },
+  { type: "tool", step: { callId: "c1", name: "read", state: "done", summary: "Read" } },
+  { type: "reply", reply: { startedAt: 1, toolMs: 800, attempt: 1, spans: [{ from: 0, ms: 1000 }], callsAt: { c1: 0 }, stage: "writing", workMs: 1800 } },
+];
+const applied = (t: LiveTurn | undefined) => t === undefined ? undefined : { text: t.text, thinking: t.thinking, tools: t.tools, end: t.end, reply: t.reply === undefined ? undefined : { ...t.reply, startedAt: 0 } };
+
+describe("a chat that is not open", () => {
+  it("takes its turn's records and tool steps exactly as the open chat takes the same ones", async () => {
+    const b = installBrowser();
+    vi.resetModules();
+    const session = await import("../lib/session/index.ts");
+    const store = await import("../lib/store/store.ts");
+    const st = () => store.getState();
+    const created = ["A", "B"];
+    b.server.answer("threads.create", ({ title }) => ({ id: created.shift() ?? "Z", title: title ?? "", createdAt: 1, updatedAt: 1 }));
+    b.server.answer("threads.get", ({ threadId }) => ({ thread: { id: threadId, title: threadId, createdAt: 1, updatedAt: 1 }, messages: [] }));
+    b.server.answer("turn.start", ({ threadId, content }) => ({ turnId: `turn-${threadId}`, userMessage: { ...question, id: `u-${threadId}`, threadId, content } }));
+    const disconnect = session.connect();
+    const answering = async (id: string) => {
+      session.newThread();
+      void session.send(`hello ${id}`);
+      await until(() => st().turns[id]?.userMessageId !== undefined, 2000, `the turn in ${id}`);
+      return st().turns[id]?.turnId ?? "";
+    };
+    try {
+      await until(() => st().imageStatus !== undefined && st().conn.kind === "open", 2000, "hydration");
+      const offScreen = await answering("A");
+      const open = await answering("B");
+      expect(st().threadId).toBe("B");
+      for (const event of BOTH) {
+        b.server.push("turn", { turnId: offScreen, threadId: "A", event });
+        b.server.push("turn", { turnId: open, threadId: "B", event });
+        await tick(); b.frame();
+      }
+      expect(applied(st().turns["A"])).toMatchObject({ tools: [{ callId: "c1", state: "done" }], reply: { stage: "writing", workMs: 1800, callsAt: { c1: 0 } } });
+      expect(applied(st().turns["A"])).toEqual(applied(st().turns["B"]));
+    } finally {
+      disconnect();
+      b.server.accepting = false;
+      for (const s of b.server.sockets) s.close();
+      await tick();
+      vi.unstubAllGlobals();
+    }
   });
 });

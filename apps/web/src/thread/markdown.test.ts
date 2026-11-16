@@ -1,4 +1,5 @@
 // Links in a reply: a bare URL is a link, and a long one can wrap only at its separators.
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -140,4 +141,48 @@ it("the renderer and the page reader agree on every fence: the blocks drawn as p
     expect(rendererPages(text), JSON.stringify(text)).toEqual(read);
   }
   expect(FENCE_TEXTS.map((t) => pageBlocks(t).length)).toEqual([1, 0, 2, 1, 1, 1, 1, 0]);
+});
+
+const rulesWith = (css: string, selector: string) => [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+  .filter((m) => (m[1] ?? "").split(",").map((s) => s.trim()).includes(selector))
+  .map((m) => m[2] ?? "");
+
+describe("what a reply's markdown draws", () => {
+  it("text that looks like HTML shows as text in prose, a heading or a quote, and quotes and numbered lists draw as themselves", () => {
+    const prose = html("Say <script>alert(1)</script> and <b>loud</b>");
+    expect(prose).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(prose).toContain("&lt;b&gt;loud&lt;/b&gt;");
+    expect(prose).not.toContain("<script");
+    expect(prose).not.toContain("<b>");
+    const heading = html("# Title <img src=x onerror=alert(1)>");
+    expect(heading).toContain("<h1>Title &lt;img src=x onerror=alert(1)&gt;</h1>");
+    const quote = html("> Quoted <iframe src=https://x.example></iframe>");
+    expect(quote).toContain("<blockquote>Quoted &lt;iframe");
+    expect(quote).not.toContain("<iframe");
+    expect(html("1. one\n2. two")).toContain("<ol><li>one</li><li>two</li></ol>");
+  });
+
+  it("a long URL with no / or - still offers a break every 32 characters", () => {
+    const run = "a".repeat(70);
+    const out = html(`See https://example.com/${run}`);
+    expect(out).toContain(`example.com/<wbr/>${"a".repeat(32)}<wbr/>${"a".repeat(32)}<wbr/>${"a".repeat(6)}</a>`);
+  });
+
+  it("a closed *word* is italic with its asterisks gone, live or saved", () => {
+    for (const live of [false, true]) {
+      const out = html("A *soft* word", live);
+      expect(out).toContain("<em>soft</em>");
+      expect(out).not.toContain("*");
+    }
+  });
+
+  it("a code block names its language at the top left and its copy button sits at the top right, shown on hover or keyboard focus", () => {
+    const css = readFileSync(new URL("../app/styles.css", import.meta.url), "utf8").replaceAll("\r\n", "\n");
+    const out = html("```sh\necho hi\n```");
+    expect(out).toMatch(/<div class="cb-h"><span class="cb-lang">sh<\/span><button[^>]*class="cb-copy"/);
+    expect(rulesWith(css, ".md .cb-h").some((body) => body.includes("display:flex"))).toBe(true);
+    expect(rulesWith(css, ".cb-copy").some((body) => body.includes("margin-left:auto") && body.includes("opacity:0"))).toBe(true);
+    expect(rulesWith(css, ".md .cb:hover .cb-copy").some((body) => body.includes("opacity:1"))).toBe(true);
+    expect(rulesWith(css, ".md .cb:focus-within .cb-copy").some((body) => body.includes("opacity:1"))).toBe(true);
+  });
 });

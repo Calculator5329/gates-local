@@ -205,3 +205,77 @@ describe("chainEnd", () => {
     expect(chainEnd({ ...job, retryJobId: "b" }, loop).jobId).toBe("b");
   });
 });
+
+type CardJob = NonNullable<Message["imageJob"]>;
+const tree = { preset: "z-image-int8", width: 1024, height: 768 };
+
+async function timeline(messages: Message[], more: Partial<State> = {}) {
+  vi.stubGlobal("window", {});
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  const { Timeline } = await import("./Thread.tsx");
+  setState({ threadId: "thread", serverOrigin: "http://server", messages: { thread: messages }, ...more });
+  return renderToStaticMarkup(createElement(Timeline, { threadId: "thread" }));
+}
+
+const asks = (content: string): Message => ({ id: "user", threadId: "thread", role: "user", createdAt: 1, content });
+const drawn = (id: string, content: string, job: Partial<CardJob> = {}): Message =>
+  ({ id, threadId: "thread", role: "assistant", createdAt: 2, content, imageJob: { jobId: id, threadId: "thread", state: "done", imagePath: `images/${id}.png`, choice: tree, ...job } });
+const finished = (runMs?: number): CardJob => ({ jobId: "j", state: "done", ...runMs === undefined ? {} : { runMs } });
+
+describe("the picture card", () => {
+  afterEach(() => setState({ replies: new Map() }));
+
+  it("a several-picture card's top line adds up ComfyUI's time for every finished picture", async () => {
+    const { groupWords } = await import("./Thread.tsx");
+    expect(groupWords([finished(12_000), { jobId: "k", state: "running" }], 2)).toBe("1 of 2 making…");
+    expect(groupWords([finished(12_000), finished(11_400)], 2)).toBe("2 of 2 · 23 s");
+    expect(groupWords([finished(12_000), finished(11_400), { jobId: "k", state: "error" }], 3)).toBe("2 of 3 · 23 s");
+  });
+
+  it("a several-picture card with a picture whose time is unknown says only how many are done, with no seconds", async () => {
+    const { groupWords } = await import("./Thread.tsx");
+    expect(groupWords([finished(12_000), finished()], 2)).toBe("2 of 2");
+  });
+
+  it.each([
+    [{ stage: "queued" }, false, "In the queue"],
+    [{ stage: "loading" }, false, "First run: loading the model"],
+    [{ stage: "loading" }, true, "Loading the model"],
+    [{ stage: "encoding" }, true, "Reading the prompt"],
+    [{ stage: "sampling", steps: { done: 3, total: 8 } }, true, "Sampling 3/8"],
+    [{ stage: "decoding" }, true, "Decoding"],
+    [{}, false, "Working"],
+  ] as const)("a running picture at %o (sampled before: %s) says %s", async (stage, sampled, words) => {
+    const { stageWords } = await import("./Thread.tsx");
+    expect(stageWords({ jobId: "j", state: "running", ...stage }, sampled)).toBe(words);
+  });
+
+  it("the tiles of a several-picture card leave the model and size to the card's top line, which names them once", async () => {
+    const html = await timeline([asks("a tree"), ...[12_000, 11_400].map((runMs, index) => drawn(`tile-${index}`, "a tree", { runMs, group: { id: "send", index, of: 2 } }))]);
+    expect(html).toContain('<p class="image-group-head">z-image-int8 · 1024×768 · 2 of 2 · 23 s</p>');
+    expect(html.match(/<div class="image-job"/g)).toHaveLength(2);
+    expect(html).not.toContain("image-job-model");
+    expect(html.match(/1024×768/g)).toHaveLength(1);
+  });
+
+  it("an Image turn's card has no caption, since its prompt is the message just above; a prompt the chat model wrote is said under its card", async () => {
+    const own = await timeline([asks("a tree"), drawn("own", "a tree")]);
+    expect(own).not.toContain("<figcaption");
+    expect(own).not.toContain("image-job-prompt");
+    const written = await timeline([asks("draw me something calm"), drawn("tool", "a tall oak at dawn, mist on the field")]);
+    expect(written).toContain('<figcaption class="image-job-prompt">a tall oak at dawn, mist on the field</figcaption>');
+  });
+
+  it("an Image turn shows the question it was sent with until its card is saved, and nothing of a chat reply", async () => {
+    const startedAt = Date.now();
+    const replies: State["replies"] = new Map([["turn-1", { id: "turn-1", threadId: "thread", rev: 1, messageId: "m-q", text: "a red fox at dusk", at: startedAt, stage: "starting" as const, attempt: 1, startedAt }]]);
+    const html = await timeline([], {
+      replies,
+      turns: { thread: { threadId: "thread", turnId: "turn-1", model: "z-image-int8", startedAt, thinking: "", text: "", tools: [],
+        reply: { stage: "drawing", startedAt, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {} } } },
+    });
+    expect(html).toContain('data-testid="chat.user-message.turn"');
+    expect(html).toContain('<div class="bubble">a red fox at dusk</div>');
+    expect(html).not.toContain('data-testid="chat.reply.turn"');
+  });
+});

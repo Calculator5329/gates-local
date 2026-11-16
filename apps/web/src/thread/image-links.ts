@@ -1,6 +1,5 @@
 import { linkKey, urlsFromText, type Message, type ToolStep } from "@gates-local/contracts";
 
-/** Undefined preserves ordinary and pre-provenance replies. Queued image turns with metadata check exact URLs. */
 export function imageTurnLinks(messages: readonly Message[], steps: readonly ToolStep[]): ReadonlySet<string> | undefined {
   if (!steps.some(step => step.name === "image" && step.state === "done") || !steps.some(step => step.links !== undefined)) return undefined;
   const allowed = new Set<string>();

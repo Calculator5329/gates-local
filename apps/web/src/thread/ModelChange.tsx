@@ -1,5 +1,3 @@
-// The quiet line above a turn answered by another thing than the turn before: marks and names, old then new, an
-// arrow between, no sentence. model-change.ts finds where.
 import { describeModel } from "../lib/words/format.ts";
 import { Icon } from "../lib/ui/icons.tsx";
 import { ImageMark } from "../image/ImageMark.tsx";
@@ -8,7 +6,6 @@ import { presetOf } from "../image/image-choice.ts";
 import type { Answerer, Change } from "./model-change.ts";
 import { NA, type State, useStore } from "../lib/store/store.ts";
 
-/** A name as the composer's button says it: a chat model's, or an image preset's short name. */
 const nameOf = (s: State, by: Answerer): string => {
   if (by.kind === "chat") return describeModel(by.model, s.catalog === NA ? undefined : s.catalog).name;
   const preset = presetOf(s, by.preset);

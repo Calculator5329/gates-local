@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { act, createElement } from "react";
 import type { Root } from "react-dom/client";
 import type { Message, ReplyChange } from "@gates-local/contracts";
-import { afterAll, beforeAll, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { State } from "../lib/store/store.ts";
 import { editDraft } from "../lib/store/drafts.ts";
 import { FakeDocument, FakeElement, FakeIFrame } from "../../test/fake-dom.ts";
@@ -381,4 +381,19 @@ it("spaces the turns without a rule that looks at the element before a turn", ()
   const selectors = [...css.matchAll(/([^{}]+)\{/g)].flatMap((m) => (m[1] ?? "").split(",")).map((s) => s.trim()).filter((s) => !s.startsWith("@"));
   expect(selectors.filter((s) => sibling(s) && /\.(turn|stop-note|err-line)\b/.test(s)), "sibling combinators on timeline turns").toEqual([]);
   expect(selectors.filter(sibling).length, "the check still finds sibling rules elsewhere").toBeGreaterThan(0);
+});
+
+describe("a long thread's column", () => {
+  it("lets turns out of view skip their rendering from 50 messages on, and not below", async () => {
+    const { Timeline } = await import("./Thread.tsx");
+    act(() => store.setState({ messages: { short: longThread("short", 49), long: longThread("long", 50) }, turns: {} }));
+    idle.length = 0;
+    act(() => root.render(createElement(Timeline, { threadId: "short", key: "short" })));
+    expect(doc.body.querySelector(".col")?.classList, "49 messages").toEqual(["col"]);
+    act(() => root.render(createElement(Timeline, { threadId: "long", key: "long" })));
+    expect(doc.body.querySelector(".col")?.classList, "50 messages").toEqual(["col", "long"]);
+    const css = readFileSync(new URL("../app/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(css).toMatch(/\.col\.long \.turn\{[^}]*content-visibility:auto/);
+    idle.length = 0;
+  });
 });

@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-11-16: the web app's thread folder holds to the six comment kinds
+
+- apps/web/src/thread passes the comment rule: all 252 offenders went,
+  and the folder's comment lines fell from 466 to 27. What stays is
+  three one-line `external:` facts about the browser and ComfyUI, and
+  seventeen `why:` lines. One more why sat over a lint directive, so it
+  went into that directive's reason.
+- Nine comments were stale. Among them: a note that only this session
+  sees why a reply stopped, where every window does; a note that a done
+  event saves the reply's row, where there is no such event; and a list
+  of stop notes that left out the failed kind. One sentence of the slice
+  comment (2,000 turns mount in 17 slices, about 1.7 s) no longer
+  matched the code and was dropped.
+- 95 rules gained 99 unit tests, each watched fail with its rule broken.
+  A few run once per input, so the suite has 105 more cases.
+- Follow-ups found on the way: the perf spec's negative control
+  (bustMemo) is never switched on, so that gate has not been seen
+  failing, and two names would carry what their comment said (paced
+  and secs).
+
 ## 2026-11-16: queued messages no longer show a stray comment
 
 - Since the message box comment pass (58598a1e), each queued message's

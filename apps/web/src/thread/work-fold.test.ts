@@ -220,3 +220,144 @@ describe("a reply that did not finish (decision 7)", () => {
     expect(after).not.toContain('class="stop-mark"');
   });
 });
+
+const styles = async () => (await import("node:fs")).readFileSync(new URL("../app/styles.css", import.meta.url), "utf8");
+const escRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function declsOf(body: string): Record<string, string> {
+  return Object.fromEntries(body.split(";").filter((d) => d.includes(":")).map((d) => [d.slice(0, d.indexOf(":")).trim(), d.slice(d.indexOf(":") + 1).trim()]));
+}
+function ruleOf(css: string, selector: string): Record<string, string> | undefined {
+  const body = new RegExp(`(?:^|[}\\n])${escRe(selector)}\\{([^}]*)\\}`).exec(css)?.[1];
+  return body === undefined ? undefined : declsOf(body);
+}
+function rulesShowing(css: string, target: string, decl: string): string[][] {
+  return [...css.matchAll(/(?:^|[}\n])([^{}\n]+)\{([^{}]*)\}/g)]
+    .filter((m) => (m[2] ?? "").split(";").includes(decl) && (m[1] ?? "").split(",").some((s) => s.trim().endsWith(target)))
+    .map((m) => (m[1] ?? "").split(",").map((s) => s.trim()));
+}
+function mediaBody(css: string, query: string): string {
+  let out = "";
+  for (let at = css.indexOf(`@media ${query}{`); at >= 0; at = css.indexOf(`@media ${query}{`, at + 1)) {
+    let depth = 0;
+    const open = css.indexOf("{", at);
+    for (let i = open; i < css.length; i++) {
+      if (css[i] === "{") depth++;
+      else if (css[i] === "}" && --depth === 0) { out += css.slice(open + 1, i) + "\n"; break; }
+    }
+  }
+  return out;
+}
+const runName = (html: string) => {
+  const opening = /<button[^>]*class="think fold run"[^>]*>/.exec(html)?.[0] ?? "";
+  return /aria-label="([^"]*)"/.exec(opening)?.[1] ?? visible(lineOf(html).replace(/<(\w+)[^>]*aria-hidden="true"[^>]*>[\s\S]*?<\/\1>/g, ""));
+};
+const foldItems = (html: string) => [...(/<ol class="fold-list"[^>]*>([\s\S]*?)<\/ol>/.exec(html)?.[1] ?? "").matchAll(/<li( class="fold-th")?>/g)].map((m) => (m[1] === undefined ? "call" : "think"));
+const roundNames = (html: string) => [...html.matchAll(/data-testid="chat\.fold\.thinking"[^>]*aria-label="([^"]*)"/g)].map((m) => m[1]);
+const roundWords = (html: string) => [...html.matchAll(/data-testid="chat\.fold\.thinking"[\s\S]*?<span class="wr-h">([^<]*)<\/span>/g)].map((m) => m[1]);
+const LONG = "Searching your library for every note that mentions the quarterly plan, its budget and who signed it";
+
+describe("the work line's words, seconds, rounds and name", () => {
+  it("a reply queued behind another says its wait as its own figure, and its work seconds start when the model is ready", async () => {
+    const queued = play(sent(), [push(0, { stage: "waiting" })]);
+    expect(says(await live(5000, queued)), "no clock while it waits its turn").toBe("Waiting");
+    const thinking = play(queued, [push(6000, { stage: "thinking", readyAt: 6000 }), [6000, { type: "thinking", text: "Hm." }]]);
+    expect(says(await live(7000, thinking))).toBe("1 s Thinking");
+    const reply: Message = { id: "a", threadId: T, role: "assistant", createdAt: 2, content: "Done.", thinking: "Hm.",
+      times: { startedAt: 0, readyAt: 6000, workMs: 2000, spans: [], callsAt: {}, ended: { reason: "done", at: 12_000 } } };
+    const html = await saved(reply);
+    expect(bulb(html)).toBe("2");
+    expect(visible(/<span class="meta">([\s\S]*?)<\/span><\/div>/.exec(html)?.[1] ?? "")).toBe("6.0 s · 2.0 s");
+  });
+
+  it("a sent message's actions sit under its bubble at its right edge, in a row whose space is kept while hidden", async () => {
+    const html = await render(99_000, { messages: { [T]: [user] } });
+    expect(html).toMatch(/<div class="u-row"><div class="bubble">Check my notes<\/div><div class="u-act">/);
+    const css = await styles();
+    expect(ruleOf(css, ".u-row")).toMatchObject({ display: "flex", "flex-direction": "column", "align-items": "flex-end" });
+    expect(ruleOf(css, ".u-act")).toMatchObject({ opacity: "0" });
+    expect(ruleOf(mediaBody(css, "(hover:none)"), ".u-act")).toEqual({ visibility: "hidden" });
+    expect(css).not.toMatch(/\.u-act\{[^}]*display:none/);
+  });
+
+  it("a finished reply that worked for less than half a second still says one second, and one with no record of its work says no seconds", async () => {
+    const quick: Message = { id: "a", threadId: T, role: "assistant", createdAt: 2, content: "Done.", thinking: "Hm.", times: stamped("done", 1, 300) };
+    const html = await saved(quick);
+    expect(bulb(html)).toBe("1");
+    expect(chipName(html)).toBe("Thought for 1 s");
+    const unknown = await saved({ id: "a", threadId: T, role: "assistant", createdAt: 2, content: "Done.", thinking: "Hm." });
+    expect(bulb(unknown)).toBeUndefined();
+    expect(chipName(unknown)).toBe("Thought");
+  });
+
+  it("the live line is the sidebar's breathing dot, the seconds in a slot of fixed width, then the words, and a long call's words end in an ellipsis at the line's edge", async () => {
+    const calling = play(sent(), [push(0, { stage: "thinking", readyAt: 0 }), [0, { type: "thinking", text: "Look." }], push(2000, { stage: "tool", readyAt: 0, workMs: 2000 }),
+      [2000, { type: "tool", step: { ...step("a", "running"), summary: LONG } }]]);
+    const line = lineOf(await live(5000, calling));
+    expect(line).toBe(`<span class="run-dot"></span><span class="lv-t" aria-hidden="true">5 s</span><span class="lv-w"><span>${LONG}</span></span>`);
+    const css = await styles();
+    expect(ruleOf(css, ".think.fold .lv-w>span")).toMatchObject({ "white-space": "nowrap", overflow: "hidden", "text-overflow": "ellipsis" });
+    expect(ruleOf(css, ".think.fold .lv-t")).toMatchObject({ flex: "none", "min-width": "4ch" });
+    const dot = ruleOf(css, ".run-dot::before");
+    const sidebar = ruleOf(css, ".sb-row .live");
+    for (const p of ["width", "height", "border-radius", "background", "animation"]) expect(dot?.[p], p).toBe(sidebar?.[p]);
+  });
+
+  it("a running line's name never ticks: Thinking while it thinks, the call count once it calls, never its seconds", async () => {
+    const thinking = play(sent(), [push(0, { stage: "thinking", readyAt: 0 }), [0, { type: "thinking", text: "Look." }]]);
+    for (const at of [3000, 7000]) {
+      const html = await live(at, thinking);
+      expect(says(html), "the seconds are on screen").toBe(`${at / 1000} s Thinking`);
+      expect(runName(html)).toBe("Thinking");
+    }
+    const calling = play(thinking, [push(8000, { stage: "tool", readyAt: 0, workMs: 8000 }), [8000, { type: "tool", step: step("a", "running") }]]);
+    for (const at of [9000, 14_000]) expect(runName(await live(at, calling))).toBe("Working, 1 tool call");
+  });
+
+  it("a finished line's words come back on hover and on keyboard focus, as the same words in the same place", async () => {
+    const reply: Message = { id: "a", threadId: T, role: "assistant", createdAt: 2, content: "Done.", thinking: "Hm.", tools: [step("a", "done", 10)], times: stamped("done", 11, 4500) };
+    const html = await saved(reply);
+    expect(html).toMatch(/<span class="lv-i"><svg[^>]*><use href="#i-check"><\/use><\/svg><\/span><span class="lv-h">5 s · 1 step<\/span><span class="th-x">/);
+    const css = await styles();
+    expect(ruleOf(css, ".lv-h")).toMatchObject({ display: "none" });
+    const shown = rulesShowing(css, ".lv-h", "display:inline");
+    expect(shown).toHaveLength(1);
+    expect(shown[0]).toEqual(expect.arrayContaining([".think.fold:hover .lv-h", ".think.fold:focus-visible .lv-h"]));
+  });
+
+  it("a call still running when the turn ended on an error, or when its save was interrupted, is shown as cut short, not running", async () => {
+    const failed = play(sent(), [push(0, { stage: "thinking", readyAt: 0 }), [0, { type: "thinking", text: "Hm." }], push(1000, { stage: "tool", readyAt: 0, workMs: 1000 }),
+      [1000, { type: "tool", step: step("a", "running") }], [3000, { type: "error", code: "model-error", message: "The model failed." }]]);
+    const ended = await live(4000, failed);
+    expect(ended).toContain('data-st="cut"');
+    expect(ended).toContain("Shell · stopped");
+    expect(ended).not.toContain("running");
+    const interrupted = await saved({ id: "s", threadId: T, role: "assistant", createdAt: 2, content: "Half", thinking: "Hm.", tools: [step("a", "running")], interrupted: true,
+      times: stamped("failed", 3, 1000, { code: "stream-error", message: "model runner has unexpectedly stopped" }) });
+    expect(interrupted).toContain('data-st="cut"');
+    expect(interrupted).toContain("Shell · stopped");
+  });
+
+  it("an older reply with no record of its rounds lists its whole thought first, then its calls, and the thought says no seconds", async () => {
+    const older: Message = { id: "a", threadId: T, role: "assistant", createdAt: 2, content: "Done.", thinking: "First I plan. Then I look.",
+      tools: [step("a", "done", 1000), step("b", "done", 2000)], times: stamped("done", 9, 5000) };
+    const html = await saved(older);
+    expect(foldItems(html)).toEqual(["think", "call", "call"]);
+    expect(html).toMatch(/class="think-body"[^>]*>First I plan\. Then I look\.<\/div>/);
+    expect(roundNames(html)).toEqual(["Thought"]);
+  });
+
+  it("an opened reply splits its work seconds by round: a round shows the sum of its own spans, and a round with none says Thought", async () => {
+    const reply: Message = { id: "a", threadId: T, role: "assistant", createdAt: 2, content: "Done.", thinking: "Look first. Then more.", tools: [step("a", "done", 4000)],
+      times: { startedAt: 0, workMs: 8800, spans: [{ from: 0, ms: 1400 }, { from: 5, ms: 1400 }, { from: 15, ms: 2000 }], callsAt: { a: 11 }, ended: { reason: "done", at: 11_000 } } };
+    const html = await saved(reply);
+    expect(foldItems(html)).toEqual(["think", "call", "think"]);
+    expect(bulb(html)).toBe("9");
+    expect(roundWords(html)).toEqual(["3 s", "2 s"]);
+    expect(html).toContain("4.0 s");
+    const none: Message = { ...reply, times: { startedAt: 0, workMs: 6800, spans: [{ from: 0, ms: 1400 }, { from: 5, ms: 1400 }], callsAt: { a: 11 }, ended: { reason: "done", at: 9000 } } };
+    const quiet = await saved(none);
+    expect(bulb(quiet)).toBe("7");
+    expect(roundWords(quiet)).toEqual(["3 s", "Thought"]);
+    expect(roundNames(quiet)).toEqual(["Thought for 3 s", "Thought"]);
+  });
+});

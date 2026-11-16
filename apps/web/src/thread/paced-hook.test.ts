@@ -121,3 +121,34 @@ it("shows arrivals immediately with reduced motion and cancels pacing on prefere
   expect(render("Paced again, now immediate")).toBe("Paced again, now immediate");
   expect(frames.size).toBe(0);
 });
+
+it("one change of the reduced-motion setting reaches every reply that paces", async () => {
+  vi.doUnmock("react");
+  vi.resetModules();
+  const { act, createElement } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { FakeDocument, FakeElement, FakeIFrame } = await import("../../test/fake-dom.ts");
+  const fresh = await import("./paced.ts");
+  const doc = new FakeDocument();
+  doc.defaultView = { document: doc, HTMLIFrameElement: FakeIFrame, addEventListener() {}, removeEventListener() {} };
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("window", doc.defaultView);
+  vi.stubGlobal("document", doc);
+  vi.stubGlobal("HTMLElement", FakeElement);
+  const Reply = ({ text }: { text: string }) => createElement("p", null, fresh.usePacedText(text, true));
+  const replies = (texts: readonly string[]) => createElement("div", null, ...texts.map((text, i) => createElement(Reply, { key: i, text })));
+  const container = doc.body.appendChild(doc.createElement("div"));
+  const root = createRoot(container as unknown as Element);
+  const shown = () => (container.firstChild?.childNodes ?? []).map((p) => p.textContent);
+  const texts = ["First reply, still arriving", "Second reply, still arriving", "Third reply, still arriving"];
+  try {
+    act(() => root.render(replies(["", "", ""])));
+    act(() => root.render(replies(texts)));
+    expect(shown(), "paced: nothing shown before the first frame").toEqual(["", "", ""]);
+    reduced = true;
+    act(() => motionChange?.());
+    expect(shown()).toEqual(texts);
+  } finally {
+    act(() => root.unmount());
+  }
+});

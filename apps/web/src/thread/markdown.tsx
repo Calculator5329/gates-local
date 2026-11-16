@@ -1,8 +1,3 @@
-// A small Markdown renderer for model replies. It builds React elements and
-// never sets HTML, so model text cannot inject markup. It covers what local
-// models write: paragraphs, headings, lists, fenced code, tables, quotes,
-// inline code, bold, italics and http(s) links. A streaming reply arrives here
-// at a steady pace; incomplete inline spans render without their delimiters.
 import { type ReactNode, memo, useEffect, useRef } from "react";
 import { useCopy } from "../lib/ui/copy.ts";
 import { isPageDoc, linkKey, mayBePage } from "@gates-local/contracts";
@@ -34,8 +29,6 @@ function parse(src: string): { block: Block; start: number; stable: boolean }[] 
   const out: { block: Block; start: number; stable: boolean }[] = [];
   let i = 0;
   let start = 0;
-  // A partial next line can still extend a list/table/quote. Keep that
-  // predecessor mutable until the boundary is known, not just the last row.
   const push = (block: Block, stable = i < lines.length - 1) => out.push({ block, start: offsets[start] ?? 0, stable });
   while (i < lines.length) {
     start = i;
@@ -107,16 +100,13 @@ function parse(src: string): { block: Block; start: number; stable: boolean }[] 
 
 const INLINE = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*\s][^*]*\*)|(\[[^\]]+\]\((https?:\/\/[^)\s]+)\))|(https?:\/\/[^\s<>)\]]+)|!\[([^\]]*)\]\((?:[^()\n]|\([^()]*\))*\)/g;
 
-/** A URL with a break offered after each / and - (and inside a run too long to fit), so a line never ends mid-word. */
 function wrapUrl(url: string): ReactNode[] {
   return (url.match(/[^/-]{1,32}[/-]?|[/-]/g) ?? [url]).flatMap((part, i) => (i === 0 ? [part] : [<wbr key={i} />, part]));
 }
 
-/** Inline spans: code, bold, italics, links and bare URLs. Anything else is text. */
 export function inline(text: string, partial = false, allowedLinks?: ReadonlySet<string>): ReactNode[] {
   if (partial) {
-    // Skip closed inline code and links before looking for a pending destination.
-    // Keep just the label, whose width also matches the eventual anchor.
+    // why: the label alone is as wide as the link it will become
     const pending = /`[^`]*(?:`|$)|\[[^\]]+\]\([^)]*\)|(\[([^\]]+)\]\([^)]*$)/g;
     for (const m of text.matchAll(pending)) if (m[1]) return [...inline(text.slice(0, m.index), true, allowedLinks), m[2]];
   }
@@ -153,11 +143,8 @@ export function inline(text: string, partial = false, allowedLinks?: ReadonlySet
         </a>,
       );
     } else if (m[7] !== undefined) {
-      // Model-authored image URLs are untrusted, including local-looking ones.
-      // Actual generated files render only from the message's server-owned images.
       out.push(m[7] || "Image unavailable");
     } else {
-      // a sentence's closing punctuation stays outside the link
       const url = s.replace(/[.,;:!?]+$/, "");
       out.push(allowedLinks !== undefined && !allowedLinks.has(linkKey(url) ?? "") ? <span key={n++} className="url">{wrapUrl(url)}</span> : (
         <a key={n++} href={url} className="url" data-testid="chat.markdown.url" target="_blank" rel="noreferrer noopener">
@@ -173,13 +160,12 @@ export function inline(text: string, partial = false, allowedLinks?: ReadonlySet
   return out;
 }
 
-/** Marks which sides of a sideways-scrolling block have more to show (`data-more`), for the edge fade on small screens. */
 function useEdges<T extends HTMLElement>(content: unknown) {
   const ref = useRef<T>(null);
   // oxlint-disable-next-line gates/effect-needs-reason -- the block's sideways scroll and size, kept in step with its edge marks
   useEffect(() => {
     const el = ref.current;
-    // only below 1024 px, and measured from the observer: a read here would lay out every block of a long thread at once
+    // why: reading the size here would lay out every block of a long thread at once
     if (el === null || !window.matchMedia("(max-width: 1023px)").matches) return;
     const mark = () => {
       const sides = [el.scrollLeft > 1 ? "start" : "", el.scrollLeft < el.scrollWidth - el.clientWidth - 1 ? "end" : ""].filter((x) => x !== "").join(" ");
@@ -197,7 +183,6 @@ function useEdges<T extends HTMLElement>(content: unknown) {
   return ref;
 }
 
-/** A fenced code block: the fence's language at the top left, its own copy button at the top right (shown on hover or focus). */
 function CodeBlock({ lang, code }: { lang: string; code: string }) {
   const [copied, copy] = useCopy(code);
   const pre = useEdges<HTMLPreElement>(code);
@@ -252,7 +237,6 @@ function Table({ b, partial, allowedLinks }: { b: Extract<Block, { t: "table" }>
   );
 }
 
-// Completed blocks retain their objects and React elements across live frames.
 const MarkdownBlock = memo(function MarkdownBlock({ b, partial, allowedLinks }: { b: Block; partial: boolean; allowedLinks?: ReadonlySet<string> }) {
   switch (b.t) {
     case "p":
@@ -273,8 +257,6 @@ const MarkdownBlock = memo(function MarkdownBlock({ b, partial, allowedLinks }: 
       );
     }
     case "code":
-      // a whole html document is a page (pages/): a chip once it is whole, its name and the working mark while it
-      // arrives; a reply that ended before its block closed shows the code
       if (b.lang.toLowerCase() === "html") {
         if (b.closed && isPageDoc(b.text)) return <PageChip code={b.text} />;
         if (!b.closed && partial && mayBePage(b.text)) return <WritingChip code={b.text} />;
@@ -287,9 +269,6 @@ const MarkdownBlock = memo(function MarkdownBlock({ b, partial, allowedLinks }: 
   }
 });
 
-/** Live text is append-only. Keep a suffix mutable, since its next line
- * can extend a paragraph/list or turn a header into a table. A replacement or
- * historical edit explicitly resets the cache. Offsets refer to raw CRLF too. */
 export function createMarkdownParser() {
   let source = "";
   let offset = 0;
@@ -311,14 +290,11 @@ export function createMarkdownParser() {
   };
 }
 
-/** Only the changing suffix is parsed and given new elements each live frame. */
 export const Markdown = memo(function Markdown({ text, live, allowedLinks }: { text: string; live?: boolean; allowedLinks?: ReadonlySet<string> }) {
   const parser = useRef<ReturnType<typeof createMarkdownParser> | null>(null);
   parser.current ??= createMarkdownParser();
   const previous = useRef<{ live: boolean | undefined; allowedLinks: ReadonlySet<string> | undefined; rows: ReactNode[] }>({ live, allowedLinks, rows: [] });
   const result = parser.current(text, live === true);
-  // A late tool result can grant or revoke a completed block's links. Rebuild
-  // its element too, so memo sees the new provenance even with unchanged text.
   const retained = live === previous.current.live && allowedLinks === previous.current.allowedLinks ? result.retained : 0;
   const rows = previous.current.rows.slice(0, retained);
   for (let i = retained; i < result.blocks.length; i++) rows.push(<MarkdownBlock key={i} b={result.blocks[i]!} partial={live === true} allowedLinks={allowedLinks} />);

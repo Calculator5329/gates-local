@@ -69,3 +69,13 @@ describe("paced Markdown structure", () => {
     for (const text of ["#", "```sh", "| partial", "plain"]) expect(reveal(text, false)).toBe(text);
   });
 });
+
+describe("a last line of only spaces", () => {
+  it("is held back while it could still become an indented fence or list marker, then shows once the line says more", () => {
+    expect(reveal("Prose\n  ", true)).toBe("Prose\n");
+    expect(reveal("- one\n   ", true)).toBe("- one\n");
+    expect(reveal("Prose\n\t", true)).toBe("Prose\n");
+    expect(reveal("Prose\n  more", true)).toBe("Prose\n  more");
+    expect(reveal("Prose\n  ", false)).toBe("Prose\n  ");
+  });
+});

@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { Message } from "@gates-local/contracts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { type Message, PROTOCOL_VERSION } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { installBrowser, tick, until, type Browser } from "../../../test/harness.ts";
 
@@ -177,4 +177,69 @@ it("a new message invalidates a prefetched snapshot, and a confirmed delete cann
   await session.deleteThread("b");
   held.respond(snapshot("b", "deleted")); await vi.advanceTimersByTimeAsync(0);
   expect(store.getState().messages["b"]).toBeUndefined();
+});
+
+const many = (threadId: string, count: number, size = 1) => ({
+  thread: snapshot(threadId).thread,
+  messages: Array.from({ length: count }, (_, i): Message => ({ id: `m-${threadId}-${i}`, threadId, role: "user", content: "x".repeat(size), createdAt: i })),
+});
+const readsOf = (threadId: string) => gets().filter((params) => params.threadId === threadId).length;
+const hoverBothThenOpen = async () => {
+  session.preloadThread("b"); await dwell();
+  session.preloadThread("c"); await dwell();
+  session.openThread("c"); await vi.advanceTimersByTimeAsync(0);
+  session.openThread("b"); await vi.advanceTimersByTimeAsync(0);
+};
+const reconnectAfterRestart = async () => {
+  vi.useRealTimers();
+  browser.server.epoch = "restarted";
+  const lists = browser.server.calls("threads.list").length;
+  browser.server.socket.close();
+  await until(() => browser.server.calls("threads.list").length > lists && store.getState().conn.kind === "open");
+  await tick();
+};
+
+describe("what hover keeps and when it is used", () => {
+  it("two hover histories that together hold more than 4,000 messages keep only the newer", async () => {
+    browser.server.answer("threads.get", ({ threadId }) => many(threadId, 2500));
+    await hoverBothThenOpen();
+    expect(readsOf("c")).toBe(1);
+    expect(readsOf("b")).toBe(2);
+  });
+
+  it("two hover histories that together pass a million characters keep only the newer", async () => {
+    browser.server.answer("threads.get", ({ threadId }) => many(threadId, 1, 600_000));
+    await hoverBothThenOpen();
+    expect(readsOf("c")).toBe(1);
+    expect(readsOf("b")).toBe(2);
+  });
+
+  it("after the server restarted, a history read ahead before it is not used", async () => {
+    session.preloadThread("a"); await dwell();
+    expect(readsOf("a")).toBe(1);
+    await reconnectAfterRestart();
+    session.openThread("a");
+    await until(() => store.getState().messages["a"] !== undefined);
+    expect(readsOf("a")).toBe(2);
+  });
+
+  it("a hover read sent before a restarted server's handshake answers is not used", async () => {
+    vi.useRealTimers();
+    browser.server.epoch = "restarted";
+    const negotiating = browser.server.hold("sync.negotiate");
+    browser.server.socket.close();
+    const handshake = await negotiating;
+    expect(store.getState().conn.kind).toBe("open");
+    const reading = browser.server.hold("threads.get");
+    session.preloadThread("a");
+    const read = await reading;
+    handshake.respond({ epoch: "restarted", ordered: handshake.params.ordered, protocol: PROTOCOL_VERSION });
+    await tick();
+    read.respond(snapshot("a", "before the handshake"));
+    await tick();
+    session.openThread("a");
+    await until(() => store.getState().messages["a"] !== undefined);
+    expect(readsOf("a")).toBe(2);
+    expect(store.getState().messages["a"]?.[0]?.content).toBe("a");
+  });
 });

@@ -1,20 +1,12 @@
-// Where a thread changed what answers it: chat model to chat model, chat to image, image to chat.
-// Read from what each reply already records (its model, or its picture's preset), so threads saved
-// before this show it too and nothing new is stored.
+// why: old threads show it too, and nothing new is stored
 import type { Message } from "@gates-local/contracts";
 import { modelNameKey } from "../models/pick.ts";
 
-/** What answered a question: a chat model by its tag, or an image setup by its preset id. */
 export type Answerer = { readonly kind: "chat"; readonly model: string } | { readonly kind: "image"; readonly preset: string };
 export interface Change { readonly from: Answerer; readonly to: Answerer }
 
-/** The key of a live turn's question before the server saved it. */
 export const LIVE_QUESTION = "live";
 
-/**
- * The questions answered by something other than the turn before them, by question id. `live` is the
- * turn running now: what it was sent to counts from its first frame, before any reply is saved.
- */
 export function modelChanges(messages: readonly Message[], live?: { readonly questionId: string | undefined; readonly by: Answerer }): ReadonlyMap<string, Change> {
   const changes = new Map<string, Change>();
   let before: Answerer | undefined;
@@ -40,7 +32,6 @@ export function modelChanges(messages: readonly Message[], live?: { readonly que
   return changes;
 }
 
-/** What answered one question, from its saved replies: a text reply's model, else its picture's preset. */
 function answeredBy(replies: readonly Message[]): Answerer | undefined {
   const text = replies.find((m) => m.imageJob === undefined && m.model !== undefined);
   if (text?.model !== undefined) return { kind: "chat", model: text.model };

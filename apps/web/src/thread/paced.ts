@@ -11,7 +11,6 @@ export interface Pace {
 
 export const createPace = (length: number, now: number): Pace => ({ shown: length, target: length, at: now, arrival: now, rate: 80 });
 
-/** A 240 ms reservoir absorbs delivery bursts; completion drains within 120 ms. */
 export function advancePace(p: Pace, target: number, streaming: boolean, now: number): number {
   if (target < p.target) Object.assign(p, createPace(0, now), { finish: undefined });
   if (target > p.target) {
@@ -31,8 +30,6 @@ export function advancePace(p: Pace, target: number, streaming: boolean, now: nu
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
-/** Segment a small window, expanding only for a cluster crossing its edges.
- * Regional indicators need their preceding run too, to preserve flag pairing. */
 function graphemeCut(text: string, cut: number): number {
   if (cut >= text.length) return text.length;
   let radius = 32;
@@ -52,11 +49,6 @@ function graphemeCut(text: string, cut: number): number {
   }
 }
 
-/**
- * One reduced-motion query for the module, asked the first time a live reply
- * needs it, and one change listener on it while any reply paces: it is added
- * for the first subscriber, removed with the last, and tells each of them.
- */
 let motion: MediaQueryList | undefined;
 const motionQuery = () => motion ??= matchMedia("(prefers-reduced-motion: reduce)");
 const motionWatchers = new Set<() => void>();
@@ -71,8 +63,6 @@ const onMotion = (change: () => void) => {
 };
 const reducedMotion = () => motionQuery().matches;
 
-/** Received words are ready on mount, including a live prefix restored on a
- * thread switch. Only subsequent arrivals enter the pacing reservoir. */
 export function usePacedText(text: string, streaming: boolean): string {
   const reduced = useSyncExternalStore(onMotion, reducedMotion, reducedMotion);
   const [shown, setShown] = useState(text);

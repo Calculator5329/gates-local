@@ -38,18 +38,7 @@
       "apps/web/src/image/ImageMark.tsx": 1,
       "apps/web/src/image/ImagePicker.tsx": 38,
       "apps/web/src/image/ImageUnset.tsx": 6,
-      "apps/web/src/image/image-choice.ts": 15,
-      "apps/web/src/thread/ModelChange.tsx": 2,
-      "apps/web/src/thread/Thread.tsx": 134,
-      "apps/web/src/thread/image-links.ts": 1,
-      "apps/web/src/thread/markdown.tsx": 15,
-      "apps/web/src/thread/model-change.ts": 5,
-      "apps/web/src/thread/numbers.ts": 13,
-      "apps/web/src/thread/paced.ts": 4,
-      "apps/web/src/thread/reveal.ts": 3,
-      "apps/web/src/thread/threads.ts": 49,
-      "apps/web/src/thread/times.ts": 11,
-      "apps/web/src/thread/turn.ts": 15
+      "apps/web/src/image/image-choice.ts": 15
     },
     "gates/disable-needs-reason": {
       "test/finder/page.ts": 1,
