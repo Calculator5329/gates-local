@@ -6,6 +6,7 @@
   one function, so they cannot drift apart on what a frame must carry.
 - A test fails when a new kind of data is added without being
   numbered: there is no unnumbered kind any more.
+- The rules table in AGENTS.md names that check.
 
 ## 2026-11-16: every connection numbers every kind; the old mode is gone
 
