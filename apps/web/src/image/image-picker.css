@@ -15,6 +15,7 @@
 .image-picker .pk-ctx-row{grid-template-columns:72px minmax(0,1fr) 12px;font-variant-numeric:tabular-nums}
 .image-picker .maker-mark{font-size:9px;font-weight:600;letter-spacing:0}
 /* a bar is green only when the size fits in what is free now: amber needs memory ComfyUI holds or the chat model stopped, red is too big */
+.image-picker .pk-help.pk-choice{color:var(--amber-fg)}
 .image-picker .pk-cost.held .pk-cost-caption,.image-picker .pk-cost.spill .pk-cost-caption{color:var(--amber-fg)}
 .image-picker .pk-cost.no .pk-cost-caption{color:var(--red-fg)}
 .image-picker .pk-cost.held .pk-cost-fill,.image-picker .pk-cost.spill .pk-cost-fill{background:var(--amber)}

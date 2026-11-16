@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-16: three classes the lint rule held back
+
+- A download row's model name cuts off again with an ellipsis and keeps
+  its tag: its layout rule went in an earlier change while the row kept
+  the class. The monospace font it also had stays gone, so the name
+  matches the other model names.
+- The image picker's error reads in amber again, not in the grey of its
+  help text.
+- The sheet header's second line is gone: no screen passed one.
+- gates/class-in-css now has no recorded offenders.
+
 ## 2026-11-16: one table holds the window's sentences
 
 - apps/web/src/lib/words/window-words.test.ts pins 72 sentences the

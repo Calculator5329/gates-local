@@ -1196,6 +1196,7 @@ a.btn{text-decoration:none}
 /* the maker mark leads the name line; the lines under it start where the name does (16 px mark + 8 px gap) */
 .mp-nm>:not(.mp-l1),.mp-thn{padding-left:24px}
 .mp-nmn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:var(--foreground)}
+.mp-tag{display:flex;min-width:0}
 .mp-h{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .mp-t{flex:none}
 .mp-row.cant .mp-nmn{color:var(--muted-foreground)}
