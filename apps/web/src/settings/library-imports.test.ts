@@ -29,6 +29,7 @@ vi.mock("../runtime/words.tsx", () => ({ rtOf: () => host.rt }));
 vi.mock("../composer/starter.ts", () => ({ askWith: host.start }));
 import LibraryImports, { MIN_FILL_MS } from "./LibraryImports.tsx";
 import { PathText } from "../lib/ui/settings-controls.tsx";
+import { fileSize } from "../lib/words/format.ts";
 
 type Props = { children?: ReactNode; onClick?: (event?: { detail: number }) => void; onChange?: (event: { target: { value: string } }) => void; disabled?: boolean; "aria-label"?: string; "data-tip"?: string; className?: string; path?: string };
 function leaveSettings() {
@@ -214,4 +215,100 @@ it("with tools off a question sends nothing and says why", async () => {
   // A disabled button never fires in a browser; even if it did, no chat is started.
   ask[0]!.onClick!();
   expect(host.start).not.toHaveBeenCalled();
+});
+
+it("Settings opened before the samples are read draws the four usual sample rows as placeholders", () => {
+  Object.defineProperty(host.state, "sourceImports", { get: () => undefined });
+  const skeleton = all(render(), (_, p) => (p as { "aria-hidden"?: unknown })["aria-hidden"] === "true" && p.className === "srow db-row");
+  expect(skeleton).toHaveLength(4);
+});
+
+it("a sample's Source link is its repository at the pinned commit, beside its licence", async () => {
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  const pinned = { ...SAMPLE, url: `https://raw.githubusercontent.com/example/chinook-db/${sha}/data/chinook.db` };
+  Object.defineProperty(host.state, "sourceImports", { get: () => ({ samples: [pinned], jobs }) });
+  render(); await settle();
+  all(render(), (_, p) => p.className?.startsWith("db-open") === true)[0]!.onClick!();
+  const links = all(render(), (t) => t === "a") as (Props & { href?: string })[];
+  expect(links.map(l => [text(l.children), l.href])).toEqual([["MIT", "https://example.test/LICENSE"], ["Source", `https://github.com/example/chinook-db/tree/${sha}`]]);
+});
+
+const ownDbLine = (src: object) => {
+  host.state = { ...host.state, sources: [{ ...OWN, ...src }] };
+  leaveSettings(); render();
+  const row = all(render(), (_, p) => (p as { "data-db"?: string })["data-db"] === "db:own")[0]!;
+  const words = all(row.children, (_, p) => (p.className ?? "").split(" ").includes("d"))[0]!;
+  return [text(words.children), (words as { role?: string }).role ?? null];
+};
+it("an own database's line says Refreshing… while it refreshes, and its error or Couldn't read it. when that fails", async () => {
+  expect(ownDbLine({ state: "refreshing" })).toEqual(["Refreshing…", null]);
+  expect(ownDbLine({ state: "error" })).toEqual(["Couldn't read it.", "alert"]);
+  expect(ownDbLine({ state: "error", detail: "The file is gone." })).toEqual(["The file is gone.", "alert"]);
+});
+
+it("a sample's line draws all three of its faces at once with one shown, and before the download its database face holds the catalog's tables and size", async () => {
+  const faces = () => {
+    const row = all(render(), (_, p) => (p as { "data-db"?: string })["data-db"] === "sample:chinook")[0]!;
+    return all(row.children, (_, p) => /^import-(rest|status|db)\b/.test(p.className ?? "")) as (Props & { "aria-hidden"?: unknown })[];
+  };
+  render(); await settle();
+  const before = faces();
+  expect(before.map(f => f.className)).toEqual(["import-rest", "import-status gone", "import-db gone"]);
+  expect(before[2]!["aria-hidden"]).toBe(true);
+  expect(text(before[2]!.children)).toBe(`1 table · ${fileSize(1000)}`);
+  leaveSettings();
+  jobs = [{ id: "job-1", kind: "sample", key: "chinook", label: "Chinook", state: "error", bytes: 10, total: 1000, detail: "The download could not connect." }];
+  render(); await settle();
+  const failed = faces();
+  expect(failed.map(f => f.className)).toEqual(["import-rest gone", "import-status", "import-db gone"]);
+  expect(text(failed[1]!.children)).toBe("The download could not connect.");
+  expect((failed[1] as { role?: string }).role).toBe("alert");
+});
+
+it("Library is the Databases list first, then Clone a repository", () => {
+  expect(all(render(), (_, p) => typeof (p as { title?: unknown }).title === "string").map(p => (p as { title?: string }).title)).toEqual(["Databases", "Clone a repository"]);
+});
+
+const cloneLine = () => {
+  const tree = render();
+  const rest = all(tree, (_, p) => (p.className ?? "").startsWith("import-rest"))[0]!;
+  const status = all(tree, (_, p) => p.className === "import-status")[0]! as Props & { role?: string };
+  return [rest.className, text(rest.children), text(status.children), status.role];
+};
+it("the clone row's line keeps its rest words unseen under the job's, says what the job is doing, and makes a failure an alert", async () => {
+  let repoJobs: unknown[] = [];
+  Object.defineProperty(host.state, "sourceImports", { get: () => ({ samples: [], jobs: repoJobs }) });
+  expect(cloneLine()).toEqual(["import-rest", "Up to 64 MiB and 10,000 files.", "", "status"]);
+  repoJobs = [{ id: "job", kind: "repository", key: "https://github.com/example/docs", label: "example/docs", state: "cloning", bytes: 2048 }];
+  expect(cloneLine()).toEqual(["import-rest gone", "Up to 64 MiB and 10,000 files.", "example/docs · Cloning · 2 KiB received", "status"]);
+  repoJobs = [{ id: "job", kind: "repository", key: "https://github.com/example/docs", label: "example/docs", state: "error", bytes: 0, detail: "Git is not installed. Install Git and try again." }];
+  expect(cloneLine()).toEqual(["import-rest gone", "Up to 64 MiB and 10,000 files.", "example/docs · Git is not installed. Install Git and try again.", "alert"]);
+});
+
+it.each(["error", "cancelled"] as const)("a sample whose download ended %s offers Retry", async state => {
+  jobs = [{ id: "job-1", kind: "sample", key: "chinook", label: "Chinook", state, bytes: 10, total: 1000 }];
+  render(); await settle();
+  expect(text(find(render(), "button", "Retry Chinook").children)).toBe("Retry");
+});
+
+it("on a client that cannot read settings, a downloaded sample's questions count tools as on", async () => {
+  host.state = { ...host.state, sources: [COPY], settings: "na" };
+  render(); await settle();
+  all(render(), (_, p) => p.className?.startsWith("db-open") === true)[0]!.onClick!();
+  const tree = render();
+  expect(all(tree, (t, p) => t === "button" && p.className === "db-q").map(b => b.disabled)).toEqual([false, false, false, false]);
+  expect(all(tree, (_, p) => p.className === "d db-why")).toEqual([]);
+});
+
+it("a pressed Download is running before the server answers: it shows the fill, not Download, and a second press starts nothing", async () => {
+  const server: { answer?: (job: unknown) => void } = {};
+  host.request.mockImplementation(() => new Promise(r => { server.answer = r; }));
+  render(); await settle();
+  find(render(), "button", "Download Chinook").onClick!({ detail: 1 });
+  const pressed = all(render(), (t, p) => t === "button" && (p.className ?? "").includes("fill-btn"))[0]!;
+  expect(pressed["aria-label"]).toBe("Cancel download, 0% done");
+  pressed.onClick!({ detail: 1 });
+  expect(host.request).toHaveBeenCalledTimes(1);
+  server.answer?.({ id: "job-1", kind: "sample", key: "chinook", label: "Chinook", state: "downloading", bytes: 0, total: 1000 });
+  await settle();
 });

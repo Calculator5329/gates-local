@@ -1,10 +1,5 @@
-// Settings (shell.md F20, F27, F45, F46, F59, F62-F66; the S1 council): one
-// page per nav item, wired to settings.get/update and the v2 methods. Three
-// control idioms only: a secondary button, a right-aligned value, and a ⋯ menu
-// for what is rare or destructive. A control the server cannot back is left
-// out instead of being shown switched off.
 import { type CSSProperties, useRef, useState } from "react";
-import { type Accent, type ImageSetupProgress, type ImageStatus, type ShellStatus, type Source, type Theme, cardBytes } from "@gates-local/contracts";
+import { type Accent, type ImageSetupProgress, type ImageStatus, type ShellStatus, type Source, type Theme, cardBytes, MIN_ROOM } from "@gates-local/contracts";
 import { STALLED, failWords, installStep, portOf, rtInfo, rtOf, searching, underTitle, useInstallStall } from "../runtime/words.tsx";
 import { GpuMemory } from "../fit/FitPanel.tsx";
 import { count, folderWords, gb, noGpu, sourceDetail } from "../lib/words/format.ts";
@@ -25,8 +20,6 @@ import { VoiceSettings } from "../voice/VoiceSettings.tsx";
 import { closeTip } from "../lib/ui/ui.tsx";
 import { focusFirstOf, focusOnDraw, requestFocus } from "../lib/ui/kit/focus.ts";
 
-// Voice to text and Instructions ship in the Settings chunk: a section that
-// suspends shows its fallback and then the real cards ~300 ms later (docs/design.md).
 
 const THEMES: readonly (readonly [Theme, string])[] = [
   ["dark", "Dark"],
@@ -43,7 +36,6 @@ const ACCENTS: readonly (readonly [Accent, string])[] = [
   ["red", "Red"],
 ];
 
-/** One dot per accent in this theme's own step of it; the picked one is ringed. */
 function Swatches({ value, onPick }: { value: Accent | undefined; onPick: (a: Accent) => void }) {
   return (
     <span className="swatches" role="group" aria-label="Accent">
@@ -89,7 +81,6 @@ function Runtime() {
   const info = rtInfo({ conn, runtime, settings });
   const port = portOf(runtime?.baseUrl);
   const app = runtime?.owner === "app";
-  // while the app's own Ollama installs, the step and its numbers in the first window's and the banner's words
   const stall = useInstallStall(rt === "installing" ? runtime?.install : undefined);
   const words = rt === "installing" ? stall.words : undefined;
   const stat =
@@ -111,15 +102,12 @@ function Runtime() {
               ? `Something other than Ollama answers on port ${port}.`
               : (underTitle(runtime?.detail, runtime?.failure) ?? info.tip);
   const canSwitch = settings !== NA && settings !== undefined;
-  // A runtime that cannot be used has no owner, so the mode chosen says which way a switch goes.
   const ownCopy = rt === "ready" || !canSwitch ? app : settings.runtimeMode === "app";
   const nothingToSwitchTo = !ownCopy && runtime?.noAppCopy === true;
   const [err, run] = useAct();
   const [openErr, runOpen] = useAct();
   const total = (models ?? []).reduce((a, m) => a + m.sizeBytes, 0);
   const folders = folderWords();
-  // The folder the app's own Ollama runs with, from the server's runtime status; on the desktop,
-  // Open asks main, which checks its ownership record again before opening anything.
   const folder = window.gatesLocal === undefined || (app && runtime?.state === "ready") ? runtime?.modelsDir : undefined;
   const locked = useStore((s) => s.unavailable["settings.update"] === true);
   const noRetry = useStore((s) => s.unavailable["runtime.retry"] === true);
@@ -129,7 +117,6 @@ function Runtime() {
       <Head title="Runtime" />
       <Grp>
         <Row label={<Status dot={info.dot}>{stat}</Status>} desc={statD} err={err}>
-          {/* a failed or stalled download, unpack or start is retried here too, as on the banner and the first window */}
           {(rt === "error" || stall.stalled) && !noRetry ? (
             <button type="button" className="btn outline" data-testid="settings.runtime.retry" onClick={() => (stall.stalled ? stall.retry() : void recheckRuntime())}>
               Retry
@@ -221,13 +208,10 @@ function Runtime() {
 interface ToolState {
   readonly word: string;
   readonly dot: string;
-  /** Not offered to the model right now. */
   readonly dim?: boolean;
-  /** The page that fixes or configures it. */
   readonly go?: () => void;
 }
 
-/** One tool: its own readiness on the right, and the whole row a link to where that is changed. */
 function ToolRow({ tool, name, desc, state }: { tool: LibraryTool; name: string; desc: string; state: ToolState }) {
   const cls = `srow tool${state.dim === true ? " dim" : ""}`;
   const inner = (
@@ -253,24 +237,19 @@ function ToolRow({ tool, name, desc, state }: { tool: LibraryTool; name: string;
 
 const quiet = (word: string): ToolState => ({ word, dot: "off", dim: true });
 
-/** What the server offers (apps/server/src/app.ts): file tools need the switch and a ready Library source that tool can read. */
 function libraryTool(on: boolean, sources: readonly Source[] | "na" | undefined, tool: LibraryTool, missing: string): ToolState {
   if (!on) return quiet("Turned off");
   if (sources === undefined) return { word: "Checking", dot: "run" };
   if (sources === NA) return quiet("Not available");
-  // One word for one state: an empty Library reads the same on every row.
   return { ...(libraryToolCanUse(tool, sources) ? { word: "Ready", dot: "ok" } : quiet(sources.length === 0 ? "Library empty" : missing)), go: () => openSettings("library") };
 }
 
-/** Run commands also needs its sandbox: Ready only after the server's probe ran a command in it (tools.shell). */
 function runTool(on: boolean, sources: readonly Source[] | "na" | undefined, shell: ShellStatus | "na" | undefined): ToolState {
   if (!on) return quiet("Turned off");
   if (shell === undefined) return { word: "Checking", dot: "run" };
   if (shell === NA) return quiet("Not available");
-  // What the machine lacks comes first: adding to the Library would not fix it.
   if (shell.state === "off") return quiet(shell.word ?? "Not available");
   const state = libraryTool(on, sources, "run", "Library empty");
-  // Ready, but short of something (no sqlite3: database reads fail): the server's own words, in amber.
   return shell.word !== undefined && state.word === "Ready" ? { ...state, word: shell.word, dot: "warn" } : state;
 }
 
@@ -282,21 +261,12 @@ function Tools() {
   const [err, run] = useAct();
   const on = settings === NA || settings?.tools === true;
   const windows = /\bWindows\b/.test(navigator.userAgent);
-  // asked again each time Tools is opened (the session's sectionShown)
   const shell = useStore((s) => s.shellStatus);
   const [imageErr, runImage] = useAct();
-  // The chat model's image tool: app-wide, offered only with the master switch on. Unset is on once a
-  // setup can run (ComfyUI listed every file for one, and the card has room), as the server reads it.
-  // The composer's Image button sends to the image model itself and never needs it.
   const image = imageFace(status);
   const presets = useStore((s) => s.imagePresets);
   const runnable = presets !== NA && presets !== undefined && presets.presets.length > 0 && presets.noGpu === undefined;
   const imageTool = settings !== NA && settings !== undefined && (settings.imageTool ?? (settings.imageGen && runnable));
-  // Why it cannot be turned on with the master switch on; both sentences hold one cell, so the
-  // row keeps its height when the switch above flips.
-  // Both fixes are in Image generation: the reason goes there, as every Tools row goes where it is fixed.
-  // The same button in both sentences, so the cell keeps one height on touch (a link is 44 px there);
-  // while its sentence is the hidden one it is invisible and out of the tab order.
   const fixIt = <button type="button" className="link" data-go="images" data-testid="settings.tools.image-setup" tabIndex={on ? undefined : -1} onClick={() => openSettings("images")}>Image generation</button>;
   const onWhy = settings === NA || settings?.imageGen !== true ? <>Needs Generate images, in {fixIt}.</>
     : status === NA ? "Not available in this build."
@@ -306,7 +276,6 @@ function Tools() {
   return (
     <>
       <Head title="Tools" />
-      {/* The switch sits on the title of the one card it turns on; off dims the rows. */}
       <Grp title="Tools" action={settings === NA || settings === undefined ? undefined
         : locked ? <Status dot={on ? "ok" : "off"}>{on ? "On" : "Off"}</Status>
         : <button type="button" className="switch" role="switch" data-testid="settings.tools.enable" aria-checked={on} aria-label="Let the model use tools" data-tip="Use tools" onClick={() => void run(updateSettings({ tools: !on }))} />}>
@@ -327,8 +296,6 @@ function Tools() {
           </span>
           <span className="sv">
             {settings === NA ? null
-              // a phone cannot change settings: the row says what the computer set, and its dot whether
-              // the tool is offered now (the reason why not is the line beside it)
               : locked ? <Status dot={imageTool && imageWhy === null ? "ok" : "off"}>{imageTool ? "On" : "Off"}</Status>
               : <button type="button" className="switch" role="switch" data-testid="settings.tools.make-images" aria-checked={imageTool} aria-label="Make images" disabled={imageWhy !== null} onClick={() => void runImage(updateSettings({ imageTool: !imageTool }))} />}
           </span>
@@ -339,7 +306,6 @@ function Tools() {
   );
 }
 
-/** The picture section of the setup guide for the system the app runs on (Settings is only changed on that computer). */
 const setupUrl = (userAgent: string) =>
   `https://github.com/Calculator5329/gates-local/blob/main/docs/setup/${/\bWindows\b/.test(userAgent) ? "windows" : "linux"}.md#4-optional-image-generation-with-comfyui`;
 
@@ -349,18 +315,10 @@ const SetupLink = () => (
   </a>
 );
 
-/**
- * The setup's download and, when it takes more, the disk it takes on the app's drive (the server's
- * needBytes: the engine unpacked beside its archive, plus the model): "9.6 GB download · 16.5 GB on disk".
- */
 export function setupSize(download: number, need: number | undefined): string {
   return need === undefined || need <= download ? gb(download) : `${gb(download)} download · ${gb(need)} on disk`;
 }
 
-/**
- * The server's why ends "set its address in Settings." for every place that shows it; here the
- * address box is the row under it, so the end says so. Elsewhere the sentence stays whole.
- */
 export const addressBelow = (why: string): string => why.replace(/set its address in Settings\.$/, "set its address below.");
 
 const SETUP_STEP: Record<ImageSetupProgress["step"], string> = {
@@ -371,12 +329,6 @@ const SETUP_STEP: Record<ImageSetupProgress["step"], string> = {
   error: "Setup stopped",
 };
 
-/**
- * No image engine anywhere: in place of the Generate images switch, the one download that sets
- * images up here (the app's own ComfyUI and the recommended model for this card), its size, and
- * Set up images, which turns image generation on (the download needs it) and starts. Where the
- * app cannot set images up here, the one sentence why and the guide for a ComfyUI of one's own.
- */
 function ImageSetUp() {
   const setup = useStore((s) => s.imageSetup);
   const canSetUp = useStore((s) => s.unavailable["image.setup"] !== true);
@@ -392,7 +344,6 @@ function ImageSetUp() {
   const running = progress !== undefined && progress.step !== "done" && progress.step !== "error";
   const total = setup === undefined ? undefined : (setup.engine !== undefined && !setup.engine.installed ? setup.engine.bytes : 0) + (setup.model?.bytes ?? 0);
   const short = setup?.freeBytes !== undefined && setup.needBytes !== undefined && setup.freeBytes < setup.needBytes;
-  // one grey line, the most pressing: the step while it runs, a drive too full, how slow the processor is
   const desc = running || progress?.step === "error" ? SETUP_STEP[progress.step]
     : short ? `Needs ${gb(setup.needBytes!)} free; ${gb(setup.freeBytes!)} is free.`
     : setup?.cpu !== undefined ? `No GPU: a picture takes ${Math.round(setup.cpu.low / 60)} to ${Math.round(setup.cpu.high / 60)} minutes.`
@@ -400,7 +351,6 @@ function ImageSetUp() {
   const go = async () => {
     if (await run(updateSettings({ imageGen: true }))) await run(startImageSetup());
   };
-  // the sizes take their own line under the sentence, so neither squeezes the other or moves the button
   const size = (
     <span className="mono setup-size" data-testid="settings.images.setup-size">
       {total === undefined ? <Skel w="4em" /> : running ? `${gb(progress.completedBytes)} of ${gb(total)}` : setupSize(total, setup?.needBytes)}
@@ -418,11 +368,6 @@ function ImageSetUp() {
   );
 }
 
-/**
- * The processor's build on a computer that has a card for pictures now (the server's toCard): one
- * line and one button, the same setup with its download said before it starts. Pictures keep
- * running on the processor until it is done, and the processor's build stays on disk.
- */
 function CardBuild() {
   const setup = useStore((s) => s.imageSetup);
   const [err, run] = useAct();
@@ -451,31 +396,21 @@ function CardBuild() {
   );
 }
 
-/**
- * ComfyUI's state in words, for this page's status row and the Tools row. Three cases the
- * person can tell apart (WIN-MEM-04): no engine known (Not connected), an address they set that
- * does not answer (Not running), and the engine the app started (Running) beside one it found.
- */
 function imageFace(status: ImageStatus | "na" | undefined) {
   const state = status === undefined || status === NA || status.state === "off" ? "checking" : status.state;
   const set = status !== undefined && status !== NA && status.addressSet === true;
   const mine = status !== undefined && status !== NA && status.owner === "app";
-  // "Found" is for discovering a ComfyUI of someone else's; the app's own engine, stopped, is ready to start
   const own = status !== undefined && status !== NA && status.own === true;
   const word = { checking: "Checking", missing: set ? "Not running" : "Not connected", stopped: own ? "Ready" : "Found", starting: "Starting", ready: mine ? "Running" : "Connected", busy: "Making an image", error: "Something went wrong" }[state];
   const usable = state === "ready" || state === "busy" || state === "stopped";
-  // ComfyUI not being there is a thing to set up; only a real error is red
   return { state, word, usable, dot: usable ? "ok" : state === "error" ? "err" : state === "missing" ? "warn" : "run" };
 }
 
-/** The status row: what ComfyUI is doing now and the one thing to do about it. */
 function ImageState({ address }: { address: string }) {
   const status = useStore((s) => s.imageStatus);
   const [err, run] = useAct();
   if (status === NA) return null;
   const { state, word, dot } = imageFace(status);
-  // Not connected and Not running say no more: the address is in the field below, and
-  // an address that does not answer is retried by Test connection beside it, nothing to install.
   const desc =
     state === "stopped"
         ? "It starts when a chat asks for an image."
@@ -497,9 +432,6 @@ function ImageState({ address }: { address: string }) {
   );
 }
 
-/** The smallest card the server renders pictures on (MIN_ROOM in the server's image presets). */
-const MIN_ROOM = 4 * 1024 ** 3;
-
 const UNLOADS = "The chat model unloads while an image renders.";
 
 function Images() {
@@ -511,19 +443,13 @@ function Images() {
   const [genErr, runGen] = useAct();
   const [urlErr, runUrl] = useAct();
   const none = useStore(noImageEngine);
-  // true only where a picture's fit asks the chat model to leave: this computer's card, never the processor or a ComfyUI elsewhere
   const unloads = useStore((s) => s.imagePresets !== undefined && s.imagePresets !== NA && s.imagePresets.unloadsChat === true);
-  // The list asks ComfyUI first, so it can answer after this section paints. On a card the server
-  // could say it for (one of MIN_ROOM or more, read before Settings opens), the sentence holds its
-  // room unseen (as many lines as it wraps to at this width) from the first frame to the section's
-  // last; anywhere else it is never said, so no room.
   const could = useStore((s) => s.gpu !== undefined && s.gpu !== NA && s.gpu.vendor === "nvidia" && s.gpu.totalBytes !== undefined && cardBytes(s.gpu.totalBytes) >= MIN_ROOM);
   const listed = useStore((s) => s.imagePresets !== undefined);
   const [room] = useState(() => could && !listed);
   const on =settings !== NA && settings?.imageGen === true;
   const comfy = settings === NA ? undefined : settings?.comfyUrl;
   const address = (status !== undefined && status !== NA ? status.baseUrl : undefined) ?? comfy ?? "http://127.0.0.1:8188";
-  // the typed address stays until the server saved it (W-07)
   const save = async (): Promise<boolean> => {
     if (url === null) return true;
     const ok = await runUrl(updateSettings({ comfyUrl: url.trim() === "" ? null : url.trim() }));
@@ -546,8 +472,6 @@ function Images() {
       </button>
     </Row>
   );
-  // No engine anywhere: no switch to a thing that cannot work, the set-up in its place; a ComfyUI
-  // of the person's own elsewhere is still one address away.
   if (none && !locked && settings !== NA && settings !== undefined) {
     return (
       <>
@@ -581,10 +505,6 @@ function Images() {
   );
 }
 
-/**
- * Where image downloads go: empty, ComfyUI's own model folders (the app's own engine's in the
- * app's data); a folder picked here takes every later download. Nothing downloaded moves.
- */
 function ImageFolder() {
   const settings = useStore((s) => s.settings);
   const presets = useStore((s) => s.imagePresets);
@@ -604,7 +524,6 @@ function ImageFolder() {
           </button>
         )}
       </Row>
-      {/* a picked folder and the person's own ComfyUI: the line that makes it read the folder; the app never writes their file */}
       {disk?.line === undefined ? null : (
         <Row label="Add to extra_model_paths.yaml" desc={<code className="mono yaml-line" data-testid="settings.images.folder-line">{disk.line}</code>}>
           <CopyButton text={disk.line} label="Copy the line" handle="image-folder-line" />
@@ -624,11 +543,9 @@ const ADD_WORDS: Record<SourceKind, { noun: string; hint: string }> = {
 
 const KIND_ICON: Record<SourceKind, IconId> = { folder: "folder", file: "file", sqlite: "db" };
 
-/** A cloned repository's line: "Copied from owner/repo on Nov 13". The model reads that copy; it never refreshes. */
 export const copiedFrom = (key: string, at: number) =>
   `Copied from ${key.replace(/^https:\/\/github\.com\//i, "").replace(/\.git\/?$|\/$/g, "")} on ${new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
 
-/** A source's menu, as it opens: its first item takes focus. */
 const focusFirstItem = focusFirstOf("[role=menuitem]");
 
 function SourceRow({ src }: { src: Source }) {
@@ -698,7 +615,7 @@ function SourceRow({ src }: { src: Source }) {
   );
 }
 
-/** The path field an Add button opens: the browser cannot pick a path. */
+// external: a browser cannot hand the page a file's path
 function AddRow({ kind, close }: { kind: SourceKind; close: () => void }) {
   const [path, setPath] = useState("");
   const [err, run] = useAct();
@@ -726,7 +643,6 @@ function AddRow({ kind, close }: { kind: SourceKind; close: () => void }) {
         className="btn outline"
         data-testid={`settings.add-source.add-${kind}`}
         disabled={path.trim() === ""}
-        // the form keeps the typed path until the server added it (W-07)
         onClick={() => void run(addSource(kind, path)).then((ok) => ok && close())}
       >
         Add
@@ -760,7 +676,6 @@ function SourceGroup({ title, kinds, items }: { title: string; kinds: readonly S
       ))}
       <div className="src-entry" ref={entry}>
         {adding === null ? (
-          // the line is what sets folders and files apart (clones sit under Clone), and it keeps this row the add form's height
           <Row label={items.length > 0 ? "Add another source" : "No folders or files yet."} desc={<span className="src-help">The model always sees the latest version.</span>}>
             {locked ? <Na>{COMPUTER_ONLY}</Na> : action}
           </Row>
@@ -770,7 +685,6 @@ function SourceGroup({ title, kinds, items }: { title: string; kinds: readonly S
   );
 }
 
-/** The last row of Databases: a SQLite file of the person's own. */
 function AddDatabase() {
   const locked = useStore((s) => s.unavailable["sources.add"] === true);
   const [adding, setAdding] = useState(false);
@@ -798,14 +712,11 @@ function AddDatabase() {
 function Library() {
   const sources = useStore((s) => s.sources);
   const locked = useStore((s) => s.unavailable["sources.add"] === true);
-  // As the server reads it (app.ts): the Library reaches a turn only while Tools are on.
   const tools = useStore((s) => s.settings === NA || s.settings?.tools === true);
   const list = sources === NA || sources === undefined ? [] : sources;
-  // A clone is a copy made once: it sits under Clone with where and when it came from, not among the folders the model sees change.
   const clones = list.filter((x) => x.managed?.kind === "repository");
   return (
     <>
-      {/* No subtitle; only Tools off, which stops every read, is said, with its fix. */}
       <Head title="Library">
         {tools ? undefined : (
           <>
@@ -824,7 +735,6 @@ function Library() {
   );
 }
 
-/** Only the desktop app has one. Read once per window, before Settings opens (session/index.ts); a placeholder row until it is in. */
 function DataFolder() {
   const read = useStore((s) => s.dataFolder);
   const path = read ?? (window.gatesLocal?.dataFolder === undefined ? null : undefined);
@@ -898,7 +808,6 @@ function Advanced() {
   );
 }
 
-/** The bindings App.tsx, Sidebar.tsx and Composer.tsx really handle. */
 const SHORTCUTS: readonly (readonly [string, readonly (readonly [string, readonly string[]])[]])[] = [
   [
     "Navigation",
@@ -907,6 +816,7 @@ const SHORTCUTS: readonly (readonly [string, readonly (readonly [string, readonl
       ["Search threads", ["Ctrl", "K"]],
       ["Choose a model", ["Ctrl", "M"]],
       ["Settings", ["Ctrl", ","]],
+      ["Open or close Pictures", ["Ctrl", "Shift", "P"]],
       ["Close a menu or Settings", ["Esc"]],
       ["Open a thread's menu", ["Shift", "F10"]],
     ],

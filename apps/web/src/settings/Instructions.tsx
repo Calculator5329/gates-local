@@ -1,4 +1,3 @@
-// Layout A: scope first. Editors and installed defaults stay separate so the page can be rearranged.
 import { useEffect, useRef, useState } from "react";
 import { MODEL_CONTROL_BOUNDS, type ModelDefaults, type ModelSettings, type ModelSettingsPatch } from "@gates-local/contracts";
 import { describeModel } from "../lib/words/format.ts";
@@ -11,7 +10,6 @@ import { closeTip } from "../lib/ui/ui.tsx";
 import { focusFirstOf } from "../lib/ui/kit/focus.ts";
 import { controlPatch, controlValues, editControl, type ControlDraft, type ControlKey } from "./instruction-draft.ts";
 
-/** A fixed-height status slot and constant button labels keep save/error states from moving controls. */
 function Status({ text, error = false }: { text: string; error?: boolean }) {
   return <div className={`inst-status${error ? " act-err" : ""}`} role={error ? "alert" : "status"}>{text || "\u00a0"}</div>;
 }
@@ -33,7 +31,6 @@ function PromptEditor({ value, inherited, model, locked }: { value: string | und
   return <Grp title="System prompt">
     <div className="inst-prompt" aria-busy={busy}>
       <label className="inst-check">
-        {/* the app's own switch, not the browser's checkbox; the label still toggles it */}
         <button type="button" className="switch" role="switch" data-testid="settings.instructions.custom" aria-checked={custom} disabled={busy || locked} onClick={() => { setDraft({ custom: !custom, text }); setStatus({ text: "", error: false }); }} />
         {model === undefined ? "Use custom instructions for all chats" : "Override all-chat instructions for this model"}
       </label>
@@ -47,7 +44,6 @@ function PromptEditor({ value, inherited, model, locked }: { value: string | und
   </Grp>;
 }
 
-/** `unit`: the one grey line a number needs to mean anything; the rest of a control is its label (no tooltips, docs/design.md). */
 const CONTROLS = [
   { key: "temperature", label: "Temperature" },
   { key: "top_p", label: "Top p" },
@@ -59,10 +55,8 @@ const CONTROLS = [
 ] as const;
 const MODES = [["default", "Default"], ["custom", "Custom"]] as const;
 
-/** The open list's chosen model takes focus, else its first. */
 const focusChosen = focusFirstOf("[role=option][aria-selected=true]", "[role=option]");
 
-/** The app's own listbox (as Models' default card): arrows, letters to find, Enter, Escape back to the button. */
 function ModelMenu({ models, value, onPick }: { models: readonly { name: string; text: string }[]; value: string | undefined; onPick: (name: string) => void }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null), btn = useRef<HTMLButtonElement>(null);

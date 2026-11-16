@@ -124,7 +124,7 @@ export class FakeElement extends FakeNode {
     });
   }
   private matchesOne(simple: string): boolean {
-    const parts = /\.([\w-]+)|#([\w-]+)|\[([\w-]+)(?:="([^"]*)")?\]|:not\(:disabled\)/g;
+    const parts = /\.([\w-]+)|#([\w-]+)|\[([\w-]+)(?:="([^"]*)"|=([\w-]+))?\]|:not\(:disabled\)/g;
     const tag = /^[a-z][\w-]*/i.exec(simple)?.[0];
     const rest = simple.slice(tag?.length ?? 0);
     if (rest.replace(parts, "") !== "") throw new Error(`fake-dom cannot match ${simple}`);
@@ -132,7 +132,8 @@ export class FakeElement extends FakeNode {
     for (const m of rest.matchAll(parts)) {
       if (m[1] !== undefined && !this.classList.includes(m[1])) return false;
       if (m[2] !== undefined && this.getAttribute("id") !== m[2]) return false;
-      if (m[3] !== undefined && (m[4] === undefined ? !this.hasAttribute(m[3]) : this.getAttribute(m[3]) !== m[4])) return false;
+      const value = m[4] ?? m[5];
+      if (m[3] !== undefined && (value === undefined ? !this.hasAttribute(m[3]) : this.getAttribute(m[3]) !== value)) return false;
       if (m[0] === ":not(:disabled)" && this.hasAttribute("disabled")) return false;
     }
     return true;

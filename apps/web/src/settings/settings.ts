@@ -1,4 +1,3 @@
-// Saved settings, initial choices and speech-save ownership.
 import type { CallOptions, ClientSync, ContextSize, MethodName, Params, Payload, ResultOf, Settings, SettingsPatch, ModelSettingsPatch, SyncMetadata } from "@gates-local/contracts";
 import type { ServerEvent, SettingsAuthority } from "../lib/session/server-state.ts";
 import { noGpu } from "../lib/words/format.ts";
@@ -17,12 +16,11 @@ interface SettingsEffects {
 
 export function createSettings({ applyServerEvent, authority, sync, act, applyTheme, applyAccent }: SettingsEffects) {
   let staging = false;
-  // A close may clear transport state while the accepted bootstrap batch is
-  // still finishing. Keep its confirmed mode until this hydration is cleaned up.
+  // why: a close clears the connection's sync mode while the accepted batch still finishes
   let negotiated: ClientSync | undefined;
   const connectionSync = () => negotiated = sync() ?? negotiated;
 
-  /** Accept authority now; only initial presentation waits for the coherent ready batch. */
+  // why: authority takes settings at once; the screen waits for the whole ready batch
   function acceptSettings(settings: Settings, metadata: SyncMetadata | undefined, own = false): void {
     applyServerEvent(() => {
       const current = connectionSync();
@@ -38,9 +36,7 @@ export function createSettings({ applyServerEvent, authority, sync, act, applyTh
       if (!staging) applySettings(settings, false, true);
     });
   }
-  /** Thinking is set from settings and the GPU once per page load; after that a reconnect leaves the person's choice alone. */
   let thinkSeeded = false;
-  /** A context choice belongs to this page session, including reconnects. */
   let contextSeeded = false;
 
   // why: a speech save this window made is matched at receipt, so its echo is not another window's
@@ -66,7 +62,6 @@ export function createSettings({ applyServerEvent, authority, sync, act, applyTh
     modelSettings: "reset model settings",
   };
 
-  /** What a new install starts with. Who runs Ollama stays as it is: switching it stops models and can download. */
   const RESET_SETTINGS = {
     defaultModel: null,
     defaultNumCtx: 16384,
@@ -86,8 +81,6 @@ export function createSettings({ applyServerEvent, authority, sync, act, applyTh
     modelSettings: null,
   } as const satisfies SettingsPatch;
 
-  // The default model is not applied here: the server's pick (pick.ts) already honours it when it can chat.
-  // A changed default is the person's latest choice for new chats, so an earlier pick in a thread stops leading them.
   function settingsPatch(_s: State, settings: Settings, first: boolean): Partial<State> {
     const before = _s.settings === NA ? undefined : _s.settings;
     return {
@@ -113,7 +106,6 @@ export function createSettings({ applyServerEvent, authority, sync, act, applyTh
     setState({ numCtx });
   }
 
-  /** Save settings; null on success, else the sentence to show beside the control. Nothing changes locally until the server agrees. */
   async function updateSettings(patch: SettingsPatch, options: { voiceActionStarted?: boolean } = {}): Promise<string | null> {
     const keys = Object.keys(patch) as Array<keyof SettingsPatch>;
     const what = keys.length === 1 && keys[0] !== undefined ? SETTING_WORDS[keys[0]] : "save these settings";
@@ -133,7 +125,6 @@ export function createSettings({ applyServerEvent, authority, sync, act, applyTh
     } finally { if (!saved && voiceChange !== undefined) voiceWrites.delete(voiceChange); }
   }
 
-  /** Save or reset one model; apply only the settings the server accepted. */
   async function updateModelSettings(model: string, patch: ModelSettingsPatch | null): Promise<string | null> {
     const r = await act("settings.model.update", { model, patch }, "save model settings", undefined, {
       onResult: (value, metadata) => acceptSettings(value, metadata),

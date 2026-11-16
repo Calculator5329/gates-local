@@ -363,6 +363,17 @@ describe("sample downloads", () => {
     expect(existsSync(source.path)).toBe(false);
     expect(existsSync(snapshot)).toBe(false);
   });
+  // The web's Download and Clone read the new job from the store as soon as the request returns.
+  it.each(["sample", "repository"] as const)("a new %s job is announced before its request answers", async kind => {
+    const s = setup();
+    const imports = createLibraryImports({ sources: s.sources, samples: [s.sample], fetch: fake(s.bytes), git: pendingClone });
+    const seen: string[][] = [];
+    imports.onChange(value => seen.push(value.jobs.map(j => j.id)));
+    const job = kind === "sample" ? imports.handlers["sources.downloadSample"]({ id: s.sample.id }) : imports.handlers["sources.clone"]({ url: "https://github.com/example/docs" });
+    expect(seen[0]).toEqual([job.id]);
+    imports.close();
+    await stopped(imports);
+  });
   // Not the first sample, and not MIT: a copy that got the first sample's notice, or one text for all, reads wrong here.
   it("writes the downloaded sample's own licence beside its copy", async () => {
     const s = setup("worldcup");

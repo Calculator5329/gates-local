@@ -10,7 +10,7 @@
 // bench's winner for each style at this machine's level, whose words go before the person's. The
 // setups ComfyUI has (its templates and the person's saved workflows, sources.ts) come after them,
 // and then the model files already in its folders (installed.ts).
-import { cardBytes, type ImageChoice, type ImagePreset, type Settings } from "@gates-local/contracts";
+import { cardBytes, MIN_ROOM, type ImageChoice, type ImagePreset, type Settings } from "@gates-local/contracts";
 import * as Option from "effect/Option";
 import * as S from "effect/Schema";
 import { applyControls, findControls } from "./controls.ts";
@@ -129,8 +129,6 @@ export const DEFAULT_ORDER: readonly ImageChoice[] = [
   { preset: "moss-image", width: 1024, height: 1024 },
 ];
 
-/** On a card smaller than this no setup of the app's runs: there is no default and the picker says so. On the CPU there is one. */
-export const MIN_ROOM = 4 * GIB;
 export const NO_GPU = "Image mode needs a GPU with 4 GB.";
 /** The picker's line when ComfyUI runs on the processor: the basic-PC bench's times were 100 to 235 seconds a picture. */
 export const SLOW = "No GPU: a picture takes 2 to 4 minutes.";
@@ -140,7 +138,7 @@ export const SLOW = "No GPU: a picture takes 2 to 4 minutes.";
  * image-fit.ts, which the picker judges sizes by). The tiers and the default go by it, never by
  * what is free now (owner ruling 2026-11-13); the job's own fit check judges what is free when it runs.
  */
-export { cardBytes };
+export { cardBytes, MIN_ROOM };
 
 /**
  * The quality tiers of the owner's picks (2026-11-13): each takes the first of its setups whose

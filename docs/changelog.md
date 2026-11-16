@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-11-16: the settings folder holds to the six comment kinds
+
+- Settings, its Library and Instructions pages, and the session's
+  settings code pass the comment rule: 111 offenders went, and the
+  folder's comment lines fell from 177 to 5. One outside fact stays: a
+  browser cannot hand the page a file's path. Three why lines stay: why
+  Windows reads databases with Query databases, why a close keeps the
+  connection's sync mode, and why the screen waits for the whole ready
+  batch.
+- The 4 GB of graphics memory a picture needs is one constant in the
+  contracts, read by the web and by the server's presets, where each
+  kept its own copy before.
+- The Shortcuts page lists Ctrl Shift P, which opens and closes
+  Pictures. A new test checks every Ctrl binding the app answers
+  against the page, both ways, and found that one missing.
+- Rules the browser specs and the unit tests already held went with
+  their comment. One in five was broken in the source and watched
+  fail: the Instructions switch, a download's pushed progress, the Run
+  commands words, Not running, a Library add with a wrong path, a
+  database past 500 tables, an own database's path, the stalled word,
+  the image setup row, one row per database, a read past its bound,
+  Thinking off with no GPU, and a model save that waits.
+- Fifty-three tests are new. Most render or mount Settings on the fake
+  DOM: Runtime's switch and models folder; every Tools row word, its
+  dot and its link; Image generation's setup row, guide, sizes, status
+  words and one action; the download folder and the address field;
+  the Library's placeholders, lines, faces, Source link, Retry and a
+  pressed Download; the Instructions tabs, status slot, unit lines and
+  model menu; the accents; what a phone is offered. The rest cover a
+  server import job announced before it returns, a hydrate ending
+  while its reads are out, Thinking kept through a reconnect, a save
+  that waits for the server, and Settings opened during a reconnect.
+
 ## 2026-11-16: the app folder holds to the six comment kinds
 
 - The app shell, navigation and the screen loaders pass the comment

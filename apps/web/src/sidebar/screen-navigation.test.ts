@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { methodSamples } from "@gates-local/contracts/testing";
 import { type Browser, installBrowser, tick, until } from "../../test/harness.ts";
 
 let browser: Browser;
@@ -113,6 +114,20 @@ describe("pending navigation exits", () => {
     onKey(Object.assign(new Event("keydown"), { key: "Escape" }) as KeyboardEvent);
     expect(store.getState()).toMatchObject({ view: "thread", threadId: "t1" });
   });
+});
+
+// settings-reads.ts: Settings shows the samples on its first frame, so an open waits for a reconnect's read of them.
+it("Settings asked for while a reconnect's sample read is out opens once that read is in", async () => {
+  await screen.settingsScreen.load();
+  const held = browser.server.hold("sources.imports");
+  browser.server.socket.close();
+  const call = await held;
+  session.openSettings("library");
+  await tick();
+  expect(store.getState().view).toBe("thread");
+  call.respond(methodSamples["sources.imports"].result);
+  await until(() => store.getState().view === "settings");
+  expect(store.getState().sourceImports).toEqual(methodSamples["sources.imports"].result);
 });
 
 it("Escape on Pictures closes the large picture first, then leaves Pictures for the thread under it", async () => {

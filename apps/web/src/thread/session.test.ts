@@ -1072,6 +1072,16 @@ describe("action failures come back to the caller (W-07)", () => {
     expect(store.getState().settings).toEqual(methodSamples["settings.get"].result);
   });
 
+  it("a settings save changes nothing on screen while the server has not answered", async () => {
+    await boot();
+    const held = b.server.hold("settings.update"), saving = session.updateSettings({ theme: "light" }), call = await held;
+    await tick();
+    expect(store.getState().settings).toEqual(methodSamples["settings.get"].result);
+    call.respond({ ...methodSamples["settings.get"].result, theme: "light" });
+    expect(await saving).toBeNull();
+    expect(store.getState().settings).toMatchObject({ theme: "light" });
+  });
+
   it("a model action while disconnected says to try again once it reconnects", async () => {
     await boot();
     b.server.accepting = false;

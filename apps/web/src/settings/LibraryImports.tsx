@@ -15,27 +15,15 @@ import { NA, useStore } from "../lib/store/store.ts";
 
 const bytes = (n: number) => n < 1_048_576 ? `${Math.ceil(n / 1024)} KiB` : `${(n / 1_048_576).toFixed(1)} MiB`;
 const busy = (j?: SourceImport) => j !== undefined && ["downloading", "cloning", "adding"].includes(j.state);
-/** The server's sample list today; the slots a placeholder draws when Settings opens before the list is read. */
 const USUAL_SAMPLES = 4;
-/** How long a finished download shows its check before the row shows the database. */
 const FINISH_MS = 900;
 const still = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-/** The shortest a download button takes to fill, from the press to full, so a quick download is seen to happen. */
 export const MIN_FILL_MS = 800;
-/** The fill a button shows: the real fraction, never ahead of what the time since the run began allows. */
 export const shownFill = (real: number, since: number | undefined, now: number) => since === undefined ? real : Math.min(real, Math.max(0, (now - since) / MIN_FILL_MS));
-/** The pinned file's repository at its commit: raw.githubusercontent.com/o/r/<sha>/… → github.com/o/r/tree/<sha>. */
 const repoOf = (url: string) => url.replace(/^https:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([0-9a-f]{40})\/.*$/, "https://github.com/$1/$2/tree/$3");
-/** On Windows the database tool is Query databases; elsewhere Run commands reads them in its sandbox (Settings › Tools). */
+// why: Windows has no Run commands, so Query databases reads databases there
 const DB_TOOL = typeof navigator !== "undefined" && /\bWindows\b/.test(navigator.userAgent) ? "query" : "run";
 
-/**
- * A row's description line: its description at rest, the job's progress or
- * result once the person started one, drawn over the description it hides so
- * the row keeps the height it had at rest (a phone wraps the description to
- * two lines; progress takes one). Nothing is reserved for a job that has not
- * started; an error may take two lines (a status has no tooltip, docs/design.md).
- */
 const line = (rest: string, job?: SourceImport, added = false, prefix = "") => {
   const error = !added && job?.state === "error";
   const words = !job ? "" : added ? "Ready in Library" : job.detail ? job.detail : job.state === "downloading" ? `Downloading ${bytes(job.bytes)}${job.total ? ` of ${bytes(job.total)}` : ""}` : job.state === "cloning" ? `Cloning · ${bytes(job.bytes)} received` : job.state === "adding" ? "Adding to Library…" : "Ready in Library";
@@ -47,27 +35,18 @@ const line = (rest: string, job?: SourceImport, added = false, prefix = "") => {
   );
 };
 
-/** A database's words: its tables and size, or what its last refresh is doing or hit. */
 const dbWords = (src: Source) =>
   src.state === "refreshing" ? "Refreshing…"
     : src.state === "error" ? src.detail ?? "Couldn't read it."
       : [...(src.tables ? [count(src.tableCount ?? src.tables.length, "table")] : []), ...(src.sizeBytes === undefined ? [] : [fileSize(src.sizeBytes)])].join(" · ");
 
-/** An own database's line. */
 const dbLine = (src: Source) => src.state === "error"
   ? <span className="d act-err" role="alert">{dbWords(src)}</span>
   : <span className="d">{dbWords(src)}</span>;
 
-/**
- * A sample slot's line, in all three of its faces at once, one cell deep:
- * what it holds; how the last try ended; the database it became. Only one is
- * visible, and the row is the height of the tallest from the first frame, so
- * a download that ends, fails or is removed never moves the rows below.
- */
 const sampleLine = (sample: SampleDatabase, job: SourceImport | undefined, source: Source | undefined) => {
   const ended = !source && (job?.state === "error" || job?.state === "cancelled");
   const words = job?.detail ?? (job?.state === "cancelled" ? "Download cancelled." : "Couldn't download it.");
-  // The database face before it exists: its size and tables as the catalog has them.
   const as = source ?? { state: "ready", tables: sample.tables, sizeBytes: sample.sizeBytes } as Source;
   return (
     <span className="d import-line">
@@ -80,27 +59,21 @@ const sampleLine = (sample: SampleDatabase, job: SourceImport | undefined, sourc
 
 interface FillProps {
   name: string;
-  /** The sample's key, the last part of the button's test name. */
   handle: string;
-  /** The fraction really downloaded: 1 once the file is in. */
   real: number;
-  /** When this run began (performance.now()); the fill takes at least MIN_FILL_MS from here. */
   since: number | undefined;
   running: boolean;
   done: boolean;
-  /** What it says at rest: Download, or Retry after a failed or cancelled try. */
   idle: string;
   blocked: boolean;
   onPress: (e: MouseEvent<HTMLButtonElement>) => void;
 }
 
-/** Option A: the button is the progress. It fills with the fraction done and counts; pressing it while it fills cancels. */
 function FillButton({ name, handle, real, since, running, done, idle, blocked, onPress }: FillProps) {
   const [, frame] = useState(0);
   const sweeping = !still() && (running || done);
   const shown = sweeping ? shownFill(real, since, performance.now()) : real;
   const behind = shown < real;
-  // A download is finished only once a frame has drawn the fill full; until then it counts like any other.
   const drawnFull = useRef(false);
   const full = done && !behind;
   const finished = full && drawnFull.current;
@@ -133,10 +106,7 @@ function FillButton({ name, handle, real, since, running, done, idle, blocked, o
   );
 }
 
-/** Settings › Library: one list of databases with the samples in it, then Clone a repository. The imports come with their pushes. */
 export default function LibraryImports({ add, clone, clones = [] }: { add: ReactNode; clone: boolean; clones?: readonly ReactNode[] }) {
-  // Read once per connection before Settings opens (session/settings-reads.ts), then kept current by
-  // sources.imports pushes, so the rows are there on the first frame and a job's progress moves by itself.
   const stored = useStore(s => s.sourceImports);
   const value: SourceImports | undefined = stored === NA ? undefined : stored;
   const [actionError, setError] = useState<string | null>(null);
@@ -146,22 +116,18 @@ export default function LibraryImports({ add, clone, clones = [] }: { add: React
   const [finishing, setFinishing] = useState<readonly string[]>([]);
   const [rowErr, setRowErr] = useState<Readonly<Record<string, string>>>({});
   const sources = useStore(s => s.sources);
-  // As Settings › Tools reads it: a client that cannot read settings (the phone) leaves the switch to the computer.
   const tools = useStore(s => s.settings === NA || s.settings?.tools === true);
   const chat = useStore(s => rtOf(s) === "ready" && chatModels(s.models ?? []).length > 0);
   const download = useStore(s => s.unavailable["sources.downloadSample"] !== true);
   const edit = useStore(s => s.unavailable["sources.remove"] !== true);
-  // Samples whose download this visit saw running: when one lands, its row shows the finish once.
   const ran = useRef(new Set<string>());
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
-  // When each sample's current run began, for the shortest fill.
   const started = useRef(new Map<string, number>());
   // oxlint-disable-next-line gates/effect-needs-reason -- stops the finish timers, which outlive React's render, when Library closes
   useEffect(() => {
     const held = timers.current;
     return () => { for (const t of held) clearTimeout(t); held.clear(); };
   }, []);
-  // The server announces a new job before it answers with it, so the job is in the store by the time this returns.
   const start = async (key: string, action: () => Promise<SourceImport>) => {
     if (pending !== undefined) return;
     setError(null);
@@ -181,8 +147,6 @@ export default function LibraryImports({ add, clone, clones = [] }: { add: React
   };
   const list = sources === NA || sources === undefined ? [] : sources;
   const rows = value ? databaseRows(value.samples, list, value.jobs) : databaseRows([], list.filter(s => s.managed?.kind !== "sample"), []);
-  // A sample's run: pressed, downloading, or done and landing. A finished job is landing only for a download this
-  // visit saw run; the server keeps it after its database is removed.
   const runs = (r: DbRow) => r.sample !== undefined && (busy(r.job) || pending === r.sample.id || (r.job?.state === "ready" && ran.current.has(r.sample.id)));
   for (const r of rows) {
     if (!r.sample || r.source) continue;
@@ -198,7 +162,6 @@ export default function LibraryImports({ add, clone, clones = [] }: { add: React
     for (const id of ids) ran.current.delete(id);
     if (still()) return;
     setFinishing(f => [...f, ...ids]);
-    // The check shows for FINISH_MS once the fill is full, and a quick download's fill is still sweeping.
     const sweep = Math.max(0, ...ids.map(id => MIN_FILL_MS - (performance.now() - (started.current.get(id) ?? -Infinity))));
     // oxlint-disable-next-line gates/timer-needs-reason -- the check's time on screen, after the fill's sweep ends
     const t = setTimeout(() => { timers.current.delete(t); setFinishing(f => f.filter(id => !ids.includes(id))); }, FINISH_MS + sweep);
@@ -221,13 +184,11 @@ export default function LibraryImports({ add, clone, clones = [] }: { add: React
         done={done}
         idle={job?.state === "error" || job?.state === "cancelled" ? "Retry" : "Download"}
         blocked={pending !== undefined && pending !== sample.id}
-        // A double click's second press (detail 2) lands on the running button; only a single press cancels. Enter and Space have detail 0.
         onPress={e => { if (job && busy(job)) { if (e.detail <= 1) void cancel(job); } else if (!running && !done) void start(sample.id, () => libraryRequest("sources.downloadSample", { id: sample.id })); }}
       />
     );
   };
 
-  /** What an opened row shows: an own database's path, its tables, and for a sample its questions and licence. */
   const more = (row: DbRow) => {
     const tables = row.source?.tables ?? row.sample?.tables;
     const why = row.sample ? askWhy({ downloaded: row.source?.state === "ready", chat, tools, tool: usable }) : null;
@@ -305,13 +266,11 @@ export default function LibraryImports({ add, clone, clones = [] }: { add: React
     const shownKey = key.replace(/\.git\/?$|\/$/g, "");
     return list.some(s => s.managed?.kind === "repository" && s.managed.key.toLowerCase() === shownKey.toLowerCase());
   };
-  // Once the copy is listed above, its own row says so; the URL row goes back to its rest line.
   const shownJob = repoJob !== undefined && repoReady(repoJob.key) ? undefined : repoJob;
   const cloneAdded = repoReady(url);
   return (
     <>
       <Grp title="Databases" busy={stored === undefined}>
-        {/* a failed read names its cause and reads again on Retry; no push brings the list otherwise */}
         {stored === NA ? (
           <Row label="Sample databases" err="Couldn't read the available samples.">
             <button type="button" className="btn outline" data-testid="settings.database.retry-samples" onClick={() => void retryImports()}>Retry</button>

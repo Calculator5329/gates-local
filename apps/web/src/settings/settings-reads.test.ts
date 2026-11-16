@@ -77,6 +77,20 @@ it("a hydrate that ends before its reads lets Settings open", async () => {
   expect(await settled(open)).toBe(true);
 });
 
+// The session ends a hydrate after its last response, while the reads it started can still be out.
+it("a hydrate that ends while its reads are out still waits for them", async () => {
+  const folder = deferred<string | null>();
+  const reads = createSettingsReads({ readImports: async () => IMPORTS, readFolder: () => folder.promise });
+  reads.begin();
+  const open = reads.ready();
+  const reading = reads.read();
+  reads.end();
+  expect(await settled(open), "the folder is still out").toBe(false);
+  folder.resolve("/data");
+  await reading;
+  expect(await settled(open)).toBe(true);
+});
+
 it("an open waits at most the bound for a slow read", async () => {
   const reads = createSettingsReads({ readImports: () => new Promise(() => {}), readFolder: async () => null });
   reads.begin();

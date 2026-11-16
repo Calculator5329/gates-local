@@ -12,6 +12,9 @@ const GIB = 1024 ** 3;
  */
 export const cardBytes = (totalBytes: number): number => Math.round(totalBytes / GIB) * GIB;
 
+/** On a card smaller than this no setup of the app's runs: there is no default and the picker says so. On the CPU there is one. */
+export const MIN_ROOM = 4 * GIB;
+
 export interface ImageFitInput {
   /** The preset's estimate at the job's size. */
   readonly estimateBytes: number;

@@ -129,6 +129,14 @@ describe("a stalled engine download is one reading: the first window, the banner
     for (const where of ["banner", "first", "settings"]) expect(p[where], where).toContain("Retry");
   });
 
+  it("Settings › Runtime shows a running download's figures in the same words as the banner and the first window", async () => {
+    const p = await places({ ...installing(500_000_000), install: { receivedBytes: 500_000_000, totalBytes: 1_543_547_172, bytesPerSecond: 10e6 } });
+    const figures = /0\.5\sof\s1\.4\sGB[^.]*left/.exec(p["banner"] ?? "")?.[0];
+    expect(figures).toBeDefined();
+    expect(p["first"]).toContain(figures);
+    expect(p["settings"]).toContain(figures);
+  });
+
   it("a stalled download drops the time left, and the gear's tip names where to act and never the figures", async () => {
     const { rtInfo } = await import("./words.tsx");
     const now = { ...installing(500_000_000), install: { receivedBytes: 500_000_000, totalBytes: 1_543_547_172, bytesPerSecond: 10e6 } };

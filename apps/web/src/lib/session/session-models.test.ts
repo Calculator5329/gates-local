@@ -650,6 +650,21 @@ describe("Thinking at the start", () => {
     await settled();
     expect(store.getState().think).toBe(true);
   });
+
+  // The saved setting says on; the person turned it off for this page, and a reconnect reads settings again.
+  it("keeps a choice that differs from the saved setting across a reconnect", async () => {
+    const dropped = defer<void>();
+    const { store, calls, hydrated } = await boot({ "gpu.status": async () => ({ vendor: "nvidia" }) }, [dropped.promise]);
+    await hydrated();
+    await vi.waitFor(() => expect(calls).toContain("gpu.status"));
+    await settled();
+    expect(store.getState().think).toBe(true);
+    store.setState({ think: false });
+    dropped.resolve();
+    await vi.waitFor(() => expect(calls.filter((m) => m === "settings.get")).toHaveLength(2), { timeout: 3000 });
+    await settled();
+    expect(store.getState().think).toBe(false);
+  });
 });
 
 describe("the phone's image pick, which cannot write Settings (IR3-62, IR3-63)", () => {
