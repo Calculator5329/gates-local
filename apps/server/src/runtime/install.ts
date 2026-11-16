@@ -1,9 +1,3 @@
-// Own-folder Ollama install (D1): download the pinned asset into a staging
-// directory, verify sha256 while streaming, extract, then rename the tree
-// into runtime/ollama/<version>/ in one step. A failure removes staging, so
-// no half-installed version is ever visible, except a refused final move:
-// its checked tree stays in staging (still invisible) for the Retry to move.
-// No root, no package manager.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
@@ -18,7 +12,6 @@ import { binaryIn, installRoot, installedBinary, runtimeDir } from "@gates-local
 import type { InstallManifest } from "./schemas.ts";
 import type { InstallProgress } from "./types.ts";
 
-/** A drive without room for a download: both sizes in GB to one decimal (image setup says it the same way). */
 const diskGb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 export const shortDisk = (need: number, free: number) => `Needs ${diskGb(need)} free; ${diskGb(free)} is free on this drive.`;
 
@@ -40,21 +33,11 @@ export class InstallError extends Error {
   }
 }
 
-/**
- * What a pinned release installs into. Ollama is the default; the image
- * engine (image/engine.ts) is the other. Each target's staging folders sit
- * where only its own installs clear them.
- */
 export type InstallTarget = {
-  /** Its name in "The … download": "Ollama", "image engine". */
   label: string;
-  /** Its name mid-sentence: "Ollama", "the image engine". */
   name: string;
-  /** One folder per version. */
   root: string;
-  /** Where staging folders go; stale ones there are cleared on each install. */
   stagingRoot: string;
-  /** Rejects unless an unpacked tree is whole. */
   check(tree: string): Promise<void>;
 };
 
@@ -71,29 +54,17 @@ export function ollamaTarget(appDataDir: string): InstallTarget {
 export type InstallOptions = {
   appDataDir: string;
   manifest: InstallManifest;
-  /** Ollama when absent. */
   target?: InstallTarget;
   onProgress?: (p: InstallProgress) => void;
   signal?: AbortSignal;
-  /** Progress events during download fire at most this often. */
   progressIntervalMs?: number;
-  /** The download ends as interrupted after this long with no bytes (DOWNLOAD_IDLE_MS when absent). */
   idleMs?: number;
-  /** Free bytes on the drive that holds `dir`; tests pretend a short disk. The real volume when absent. */
   freeBytes?: (dir: string) => Promise<number>;
-  /** Whether a refused final move is tried again, as a scanner on Windows refuses one (process.platform when absent). */
   windows?: boolean;
-  /** How long a refused move is tried again (MOVE_RETRY_MS when absent). */
   moveRetryMs?: number;
 };
 
-/**
- * The final move. On Windows a scanner may hold a fresh .exe or .dll open for a moment and the
- * move is refused (EPERM, EACCES or EBUSY), so it is tried again for MOVE_RETRY_MS, as the update
- * download does with its own (update/installed/download.ts renameLast). A tree of hundreds of
- * libraries gives a scanner more to read than one release folder, so the bound is longer.
- * Elsewhere the same codes are a real permission problem and fail at once.
- */
+// external: on Windows a scanner may hold a fresh .exe or .dll open, so the move is refused
 export const MOVE_RETRY_MS = 5_000;
 const MOVE_WAIT_MS = 100;
 const MOVE_RETRY_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
@@ -112,7 +83,6 @@ async function moveLast(from: string, to: string, windows: boolean, retryMs: num
   }
 }
 
-/** In a staging folder whose tree was checked: which release it is, so a Retry after a refused move uses it with no download. */
 const CHECKED_NOTE = "checked.json";
 type CheckedNote = { version: string; sha256: string };
 
@@ -122,13 +92,8 @@ const hashFile = async (file: string): Promise<string> => {
   return hash.digest("hex");
 };
 
-/** What a kept staging folder still holds for this release: its tree whole, or only its archive. */
 type Kept = { staging: string; tree: boolean };
 
-/**
- * The staging folder a refused move left for this release: its tree, when it is still whole, or
- * its archive, when it still hashes to the pin. Undefined when there is none.
- */
 async function keptStaging(stagingRoot: string, manifest: InstallManifest, target: InstallTarget): Promise<Kept | undefined> {
   let entries: string[];
   try {
@@ -147,23 +112,14 @@ async function keptStaging(stagingRoot: string, manifest: InstallManifest, targe
   return undefined;
 }
 
-/**
- * The disk an install takes at once: the archive and, beside it until staging goes, the unpacked
- * copy. Where the unpacked size was never measured, at least the archive's size again.
- */
 export const installNeed = (m: Pick<InstallManifest, "sizeBytes" | "unpackedBytes">): number => m.sizeBytes + (m.unpackedBytes ?? m.sizeBytes);
 
-/** A write refused for a full disk (or a full quota), as an error code or in tar's words. */
 const diskFull = (e: unknown): boolean => {
   const code = (e as { code?: unknown } | undefined)?.code;
   return code === "ENOSPC" || code === "EDQUOT" || /no space left on device|disk quota exceeded/i.test(String((e as Error | undefined)?.message));
 };
 
-
-/**
- * No bytes for this long ends a download. Node's fetch would wait 300 s (undici's bodyTimeout and
- * headersTimeout), with the speed and time left frozen on screen and Retry handed the stalled attempt.
- */
+// external: Node's fetch waits 300 s on a stalled body (undici's bodyTimeout)
 export const DOWNLOAD_IDLE_MS = 30_000;
 
 export type InstallResult = { version: string; dir: string; binary: string; alreadyInstalled: boolean };
@@ -188,7 +144,6 @@ async function removeStaleStaging(stagingRoot: string, keep?: string): Promise<v
   );
 }
 
-/** "0.6 of 1.5 GB": how far a download got, in the figures the app counted it in while it ran (gb, the one size helper); one piece that never wraps. */
 const sofar = (received: number, total: number) => `${(received / 1024 ** 3).toFixed(1)}${NBSP}of${NBSP}${gb(total)}`;
 
 async function download(opts: InstallOptions & { target: InstallTarget }, file: string): Promise<string> {
@@ -196,7 +151,6 @@ async function download(opts: InstallOptions & { target: InstallTarget }, file: 
   const { label, name } = opts.target;
   const interval = opts.progressIntervalMs ?? 250;
   const retry = "Check the network and retry; nothing was installed.";
-  // An idle bound, re-armed by every chunk: the connection that stops sending ends here, not at fetch's own 300 s.
   const idleMs = opts.idleMs ?? DOWNLOAD_IDLE_MS;
   const idle = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -244,7 +198,6 @@ async function download(opts: InstallOptions & { target: InstallTarget }, file: 
     }
   } catch (e) {
     if (e instanceof InstallError) throw e;
-    // the disk, not the network: installPinned says how much it needs once staging is gone
     if (diskFull(e)) throw new InstallError("disk-full", "The disk is full.");
     throw new InstallError(
       "interrupted",
@@ -264,20 +217,12 @@ async function download(opts: InstallOptions & { target: InstallTarget }, file: 
   return hash.digest("hex");
 }
 
-/**
- * Windows' own bsdtar (System32, Windows 10 1803 and later) reads ZIP and
- * refuses absolute and `..` entry paths. It is named by full path: a `tar`
- * earlier on PATH (Git's GNU tar) cannot read ZIP and takes "C:" for a host.
- */
+// external: Windows' System32 tar reads ZIP; Git's GNU tar earlier on PATH cannot
 export function windowsTar(env: Readonly<Record<string, string | undefined>> = process.env): string {
   return path.win32.join(env["SystemRoot"] ?? env["SYSTEMROOT"] ?? "C:\\Windows", "System32", "tar.exe");
 }
 
-/**
- * ZIP and 7z go through libarchive: Windows' own tar.exe there (the image
- * engine's portable is a 7z with the BCJ2 filter, which libarchive reads),
- * bsdtar elsewhere (tests, and the 7z proof on Linux).
- */
+// external: the image engine's 7z (BCJ2 filter) unpacks only with libarchive, Windows' tar.exe
 function extractWithLibarchive(archive: string, into: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const tar = spawn(process.platform === "win32" ? windowsTar() : "bsdtar", ["-x", "-f", archive, "-C", into], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
@@ -313,10 +258,6 @@ function extract(archive: string, format: InstallManifest["format"], into: strin
   });
 }
 
-/**
- * Install the pinned version unless it is already present. Throws
- * InstallError with a message a user can act on.
- */
 export async function installPinned(opts: InstallOptions): Promise<InstallResult> {
   const { appDataDir, manifest } = opts;
   const target = opts.target ?? ollamaTarget(appDataDir);
@@ -335,10 +276,8 @@ export async function installPinned(opts: InstallOptions): Promise<InstallResult
     );
   }
   await mkdir(target.stagingRoot, { recursive: true });
-  // a refused move's checked tree (or archive) is used again; any other staging is an earlier crash's
   const kept = await keptStaging(target.stagingRoot, manifest, target);
   await removeStaleStaging(target.stagingRoot, kept?.staging);
-  // the archive and the unpacked copy sit on the disk together: a disk short of both is said before a byte downloads
   const need = kept === undefined ? installNeed(manifest) : kept.tree ? 0 : installNeed(manifest) - manifest.sizeBytes;
   const free = () => (opts.freeBytes ?? volumeFree)(target.stagingRoot).catch(() => undefined);
   const before = need === 0 ? undefined : await free();
@@ -349,7 +288,7 @@ export async function installPinned(opts: InstallOptions): Promise<InstallResult
     return await placed(opts, staging, place, kept);
   } catch (e) {
     if (!diskFull(e) && !(e instanceof InstallError && e.code === "disk-full")) throw e;
-    // what the attempt wrote goes first, so the free figure is the disk's own
+    // why: what the attempt wrote goes first, so the free figure is the disk's own
     place.keep = false;
     await rm(staging, { recursive: true, force: true });
     const now = await free();
@@ -359,10 +298,8 @@ export async function installPinned(opts: InstallOptions): Promise<InstallResult
   }
 }
 
-/** Where one release goes, whether it is there, and whether its staging is kept for a Retry. */
 type Place = { target: InstallTarget; dir: string; binary: string; present: () => Promise<boolean>; keep: boolean };
 
-/** Download, check, unpack and move one release through its staging folder; `kept` skips what a refused move left. */
 async function placed(opts: InstallOptions, staging: string, place: Place, kept: Kept | undefined): Promise<InstallResult> {
   const { appDataDir, manifest, onProgress } = opts;
   const { target, dir, binary, present } = place;
@@ -382,7 +319,7 @@ async function placed(opts: InstallOptions, staging: string, place: Place, kept:
   }
   onProgress?.({ phase: "extract", ...whole });
   if (kept?.tree !== true) {
-    // a kept archive's tree was not whole: it unpacks again from the start
+    // why: a kept archive's tree was not whole, so it unpacks again from the start
     await rm(tree, { recursive: true, force: true });
     await mkdir(tree);
     try {
@@ -402,9 +339,8 @@ async function placed(opts: InstallOptions, staging: string, place: Place, kept:
   try {
     await moveLast(tree, dir, opts.windows ?? process.platform === "win32", opts.moveRetryMs ?? MOVE_RETRY_MS);
   } catch (e) {
-    // Another install finished first; keep its tree.
+    // why: another install may have finished first, and its tree stays
     if (!(await present())) {
-      // the checked tree stays in staging, so a Retry moves it without downloading again
       place.keep = true;
       throw new InstallError(
         "move-failed",
@@ -416,7 +352,6 @@ async function placed(opts: InstallOptions, staging: string, place: Place, kept:
   return { version: manifest.version, dir, binary, alreadyInstalled: false };
 }
 
-/** Newest version directory under runtime/ollama/ that holds a binary. */
 export async function findAnyInstalled(appDataDir: string): Promise<{ version: string; binary: string } | undefined> {
   let entries: string[];
   try {

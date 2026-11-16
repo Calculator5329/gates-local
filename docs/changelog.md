@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-16: the runtime folder's install and discovery hold to the six comment kinds
+
+- The Ollama install and the runtime's discovery and start pass the
+  comment rule: 107 offenders went, and the runtime folder's comment
+  lines fell from 462 to 228. The compiled code is unchanged. One
+  rule no test held now has one: with starts off, the app never
+  installs Ollama and its status never promises an install.
+
 ## 2026-11-16: the runtime folder's model list, downloads, switch and wiring hold to the six comment kinds
 
 - The model list, downloads, the runtime switch and the services wiring

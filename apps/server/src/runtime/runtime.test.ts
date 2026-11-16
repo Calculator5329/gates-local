@@ -269,6 +269,14 @@ describe("missing", () => {
     expect(s.owner).toBe("none");
   });
 
+  it("with starts off, installs allowed and no Ollama anywhere, nothing is installed and the status never promises an install", async () => {
+    const { rt } = await makeRuntime({ externalBaseUrl: await nothingAt(), allowStart: false, allowInstall: true });
+    const s = await rt.ensure();
+    expect(s.state).toBe("missing");
+    expect(s.detail).not.toContain("will install");
+    expect(existsSync(installedBinary(appDataDir, manifest().version))).toBe(false);
+  });
+
   it("with Ollama off PATH, first launch installs the pinned version and runs it", async () => {
     const tarball = buildFakeRelease(work);
     const release = await startReleaseServer(tarball);

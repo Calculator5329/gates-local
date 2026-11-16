@@ -1,36 +1,3 @@
-// Ollama discovery and the app-owned server.
-//
-// Order: a healthy Ollama on the system port is reused (owner "external").
-// Otherwise the app's own loopback port is checked: an Ollama there that
-// matches the ownership record is ours, any other Ollama there is reused as
-// external, and a non-Ollama there blocks starting. Only when nothing answers
-// does the app start a server, from its own install, then PATH, then a fresh
-// pinned install. On Windows only the pinned app install is ever launched
-// (its runners die with it); older installs and PATH binaries are skipped,
-// and where no build is pinned (arm64) nothing is installed or started.
-// A non-Ollama on the system port never gets a second server
-// on that port; the app-owned server lives on its own port.
-//
-// With a runtime mode (Settings › Runtime) the order narrows:
-// - "system" uses only the Ollama on the system port and never starts one.
-// - "app" skips the system port and runs the app's own copy with its own
-//   models folder (<app data dir>/models). A record that is still ours names
-//   the port to adopt. Otherwise an Ollama it did not start is never reused:
-//   it takes the first of ports 11435..11444 (appPort and the nine after it)
-//   with no listener, and records that base URL.
-// Without a mode the full order above applies.
-//
-// Files: the ownership record and the serve log are per instance and live
-// under `stateDir`. The installed Ollama and the app's models folder live
-// under `appDataDir` (default ~/.local/share/gates-local,
-// %LOCALAPPDATA%\GatesLocal on Windows). services.ts sets both to the
-// server's --data-dir, so two data dirs never share a mutable model store.
-//
-// Stopping: Linux and macOS signal the recorded process group after the
-// PID, start time and command still match. Windows never kills by PID
-// number: a child this object spawned is stopped through its retained
-// handle after its models are unloaded; one adopted from an earlier run is
-// left running ("adopted").
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import os from "node:os";
@@ -60,89 +27,46 @@ import type { InstallProgress, Listener, RuntimeStatus } from "./types.ts";
 
 export const DEFAULT_EXTERNAL_BASE_URL = "http://127.0.0.1:11434";
 export const DEFAULT_APP_PORT = 11435;
-/** "app" mode looks for a free port in appPort .. appPort + APP_PORT_SPAN - 1 (11435..11444). */
 export const APP_PORT_SPAN = 10;
-/** Windows stop: how long to wait for /api/ps to empty after unloading, so the runners exit. */
 const UNLOAD_WAIT_MS = 10_000;
-/** Windows stop: the polite kill's grace before the hard one. */
 const STOP_GRACE_MS = 5000;
 
 export const ADOPTED_WINDOWS_DETAIL = "The app's Ollama from an earlier run keeps running; quit it from the tray icon or Task Manager.";
 
 export type RuntimeOptions = {
-  /** Shared, large files: the installed Ollama and the app's models folder. */
   appDataDir?: string;
-  /** Per-instance state: the ownership record and the serve log. Default appDataDir. */
   stateDir?: string;
-  /** Where a system Ollama would answer. */
   externalBaseUrl?: string;
-  /** Loopback port for the app-owned server. */
   appPort?: number;
   probeTimeoutMs?: number;
   startTimeoutMs?: number;
-  /** Environment for PATH lookup, models-dir detection and the child. */
   env?: Env;
   home?: string;
-  /** System-service model stores to look in; default SYSTEM_MODELS_DIRS. */
   systemModelsDirs?: readonly string[];
   manifest?: InstallManifest;
-  /**
-   * Install the pinned version when no binary is found. Default true where
-   * a release is pinned (manifest.ts): Linux x64 and Windows x64. With no
-   * manifest for the platform (none injected, none pinned) true still never
-   * installs, so another platform's build is never put on this one.
-   */
   allowInstall?: boolean;
-  /**
-   * false: never look for an Ollama binary (the app's install, PATH), as on a
-   * machine with none, so tests do not depend on the host. Default true.
-   */
   searchBinary?: boolean;
-  /**
-   * Start an Ollama when none answers. Default true. False makes ensure()
-   * report like discover(): a pinned URL is the only Ollama the app may use.
-   */
   allowStart?: boolean;
-  /** Settings' runtimeMode; undefined uses the full discovery order. */
   mode?: RuntimeMode;
   platform?: NodeJS.Platform;
   arch?: string;
-  /** Runs Windows' process queries (tests inject a fake). */
   procRun?: SyncRunner;
-  /**
-   * Whether a file is a runnable binary, for the system Ollama lookup (PATH, then on Windows the
-   * official installer's ollama.exe); default executableCheck(platform). On Windows that lookup only
-   * names an installed-but-quit Ollama in "system" mode: a PATH binary is never launched there.
-   * Tests inject one so a Windows PATH resolves on Linux.
-   */
   isExecutable?: (file: string) => boolean;
-  /** No bytes of the Ollama download for this long: the status drops its speed, and a Retry starts again. Default STALL_MS. */
   stallMs?: number;
 };
 
-/**
- * Windows where no build is pinned (arm64 today), in "app" mode: there is no
- * build of the app's own Ollama for it, so nothing can be installed or started.
- */
 export const WINDOWS_APP_MODE_DETAIL =
   "The app's own Ollama is not available on Windows yet. Run Ollama and choose Automatic or System in Settings › Runtime.";
-/** Windows where no build is pinned, automatic mode, nothing answering at the system port. */
 export const windowsAutomaticDetail = (externalBaseUrl: string) =>
   `No Ollama answers at ${externalBaseUrl}, and the app's own Ollama is not available on Windows yet. Run Ollama, then check again.`;
 
 export type OllamaRuntime = {
   status(): RuntimeStatus;
-  /** Base URL to talk to, only while ready. */
   baseUrl(): string | undefined;
-  /** Read-only: classify what is there; never starts or installs. */
   discover(): Promise<RuntimeStatus>;
-  /** Discover, then install and start an app-owned server when none answers. */
   ensure(): Promise<RuntimeStatus>;
-  /** Stop the app-owned server, only if it still matches its record. */
   stop(): Promise<StopResult>;
-  /** This runtime object started the app-owned server that is running now (not adopted from an earlier run). */
   startedByThisProcess(): boolean;
-  /** Stop this process's owned child immediately when shutdown runs out of time. */
   killNow(): void;
   readonly mode: RuntimeMode | undefined;
   onChange(listener: Listener<RuntimeStatus>): () => void;
@@ -156,25 +80,16 @@ type Classified =
   | { kind: "blocked"; status: RuntimeStatus }
   | { kind: "startable"; binary: Binary | undefined; note: Note | undefined };
 
-/** Words about the ports the app routed around, and which of them a non-Ollama holds. */
 type Note = { text: string; busy: readonly string[] };
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** How often the installing status says how far Ollama's download is. */
 const INSTALL_PUSH_MS = 1000;
 
-/**
- * No bytes of Ollama's download for this long is a stall: the speed (and the time left built on it)
- * leaves the status, since it is no longer true, and a Retry ends the attempt and starts a new one.
- * The download ends itself after install.ts's DOWNLOAD_IDLE_MS.
- */
 const STALL_MS = 5000;
 
-/** Why an attempt was ended for a Retry; its failure is not shown, the new attempt's status is. */
 class Restart extends Error {}
 
-/** The status with the note in front of its detail and the note's busy ports. */
 function noted(status: RuntimeStatus, note: Note | undefined): RuntimeStatus {
   if (!note) return status;
   return { ...status, detail: status.detail ? `${note.text} ${status.detail}` : note.text, ...withBusy(note.busy) };
@@ -184,8 +99,8 @@ const withBusy = (busy: readonly string[]): { busyPorts?: readonly string[] } =>
 
 const urlFor = (port: number) => `http://127.0.0.1:${port}`;
 
-/** Every model in the app's own Ollama is the app's: unload them all, then wait for /api/ps to empty. */
 async function unloadAll(baseUrl: string): Promise<void> {
+  // why: an unreadable /api/ps changes nothing, the kill that follows still ends the server
   try {
     const models = await listLoaded(baseUrl, 2000);
     await Promise.all(
@@ -204,9 +119,7 @@ async function unloadAll(baseUrl: string): Promise<void> {
     forgetGpuReadings();
     const deadline = Date.now() + UNLOAD_WAIT_MS;
     while (Date.now() < deadline && (await listLoaded(baseUrl, 2000)).length > 0) await sleep(200);
-  } catch {
-    // Unreadable: the kill that follows still ends the server.
-  }
+  } catch {}
 }
 
 function tail(file: string, chars = 2000): string {
@@ -218,35 +131,10 @@ function tail(file: string, chars = 2000): string {
 }
 
 const inFolder = (modelsDir: string | undefined) => (modelsDir === undefined ? {} : { modelsDir });
-/** An adopted copy holds one model only when its record says it was started so (older records do not). */
 const oneIn = (record: OwnedRecord) => (record.holdsOne === true ? { holdsOne: true } : {});
 
-/** The home folder an Ollama the app starts is given, inside the app's runtime folder. */
 export const childHome = (appDataDir: string): string => path.join(runtimeDir(appDataDir), "home");
 
-/**
- * The environment of an Ollama the app starts. Ollama keeps its key pair at <home>/.ollama with no
- * setting of its own (it asks Go for the home folder), and that key is what `ollama signin`
- * registered for cloud models and private pulls. So the home moves only when `ownHome`: the app
- * runs the Ollama it fetched on its own models folder, and what it writes stays in the app's data
- * and leaves with it (HOME, or USERPROFILE on Windows, points at childHome; anything else it would
- * write under a home, such as a graphics driver's shader cache, moves with it). The person's own
- * install, or any copy on the person's store, keeps the person's home and so their sign-in. The
- * models folder never moves with the home, since the caller always names OLLAMA_MODELS. The CUDA
- * kernel cache goes in the app's data unless the person named one. One model is held at a time
- * (the owner's ruling, RuntimeStatus.holdsOne): a second model's turn waits for the first to
- * finish rather than loading beside it. An Ollama already running when the app looks is used as
- * it is: it never gets this.
- */
-/**
- * What an install failure is, for the status (RuntimeStatus.failure): the network ("download"),
- * a file that is not the pinned one ("checksum"), a disk short of room ("disk"), or the unpack or
- * move ("install", and anything that is not an InstallError).
- */
-/**
- * The words for a look or a start that threw: a file error names the path it could not use, so the
- * person can put it right; anything else is said as it came.
- */
 export function stoppedOn(e: unknown): string {
   const { path: file, code } = (typeof e === "object" && e !== null ? e : {}) as NodeJS.ErrnoException;
   if (typeof file === "string" && typeof code === "string") return `The app could not use ${file} (${code}). Check that it can be written to, then retry.`;
@@ -272,6 +160,7 @@ export function failureOf(e: unknown): NonNullable<RuntimeStatus["failure"]> {
 
 export function ownedChildEnv(env: Env, appDataDir: string, appPort: number, platform: NodeJS.Platform, ownHome: boolean): Record<string, string | undefined> {
   const child: Record<string, string | undefined> = { ...env, OLLAMA_HOST: `127.0.0.1:${appPort}`, OLLAMA_MAX_LOADED_MODELS: "1" };
+  // external: Ollama keeps its sign-in key under <home>/.ollama, so only the app's copy moves home
   if (ownHome) child[platform === "win32" ? "USERPROFILE" : "HOME"] = childHome(appDataDir);
   child.CUDA_CACHE_PATH ??= path.join(runtimeDir(appDataDir), "cuda-cache");
   return child;
@@ -286,7 +175,6 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
   const externalBaseUrl = options.externalBaseUrl ?? DEFAULT_EXTERNAL_BASE_URL;
   const stateDir = options.stateDir ?? appDataDir;
   const firstAppPort = options.appPort ?? DEFAULT_APP_PORT;
-  /** The app-owned server's port: firstAppPort, or in "app" mode the free one classify() picked. */
   let appPort = firstAppPort;
   let appBaseUrl = urlFor(appPort);
   const useAppPort = (baseUrl: string) => {
@@ -296,27 +184,20 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
   const probeTimeoutMs = options.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
   const startTimeoutMs = options.startTimeoutMs ?? 30_000;
   const pinned = pinnedOllamaFor(platform, options.arch ?? process.arch);
-  /** What may be installed here: an injected manifest, or this platform's pinned build. Never another platform's. */
   const installable = options.manifest ?? pinned;
   const manifest = installable ?? PINNED_OLLAMA;
   const allowStart = options.allowStart ?? true;
-  // Install needs start allowed and a build for this platform, whatever allowInstall says.
   const allowInstall = installable !== undefined && allowStart && (options.allowInstall ?? pinned !== undefined);
   const stateFile = ownedStateFile(stateDir);
-  /** The pid this object spawned and recorded, while it runs. */
   let startedPid: number | undefined;
-  /** The process this object spawned, kept so Windows stops it through its handle, never a PID number. */
   let spawned: ChildProcess | undefined;
 
-  // Before the first look nothing is known: a window that connects now reads a search, never a stopped Ollama nobody saw.
   let current: RuntimeStatus = { state: "starting", owner: "none", baseUrl: externalBaseUrl, detail: "Looking for Ollama." };
   const statusListeners = new Set<Listener<RuntimeStatus>>();
   const progressListeners = new Set<Listener<InstallProgress>>();
   let inFlight: Promise<RuntimeStatus> | undefined;
   const stallMs = options.stallMs ?? STALL_MS;
-  /** The Ollama install running now: how to end it, when its last bytes came, and whether it is still downloading (a check or unpack is never cut short). */
   let download: { abort: AbortController; lastBytesAt: number; fetching: boolean } | undefined;
-  /** Nothing to install here, and nothing on this computer the app could run as its own. Set by `classify`. */
   let noAppCopy = installable === undefined;
 
   const setStatus = (status: RuntimeStatus): RuntimeStatus => {
@@ -330,10 +211,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
 
   async function locateBinary(): Promise<Binary | undefined> {
     if (options.searchBinary === false) return undefined;
-    // Windows: only the pinned build puts its runners in a kill-on-close Job Object, so stopping the
-    // parent stops them (https://raw.githubusercontent.com/ollama/ollama/v0.40.15/llm/runner_job_windows.go).
-    // Only that install is launched there: never a PATH ollama.exe, an older install, or anything
-    // where no build is pinned for the platform.
+    // external: on Windows only the pinned Ollama puts its runners in a kill-on-close Job Object
     if (platform === "win32" && installable === undefined) return undefined;
     if (isInstalled(appDataDir, manifest.version)) return { path: installedBinary(appDataDir, manifest.version), origin: "app-install" };
     if (platform === "win32") return undefined;
@@ -343,34 +221,14 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     return onPath ? { path: onPath, origin: "path" } : undefined;
   }
 
-  /**
-   * Windows, "system" mode, nothing answering: the official installer's
-   * ollama.exe, if present. Then Ollama is installed but quit (from its tray
-   * icon, or not started yet), and the words say so instead of "install it".
-   */
   function quitWindowsOllama(): string | undefined {
     if (platform !== "win32" || options.searchBinary === false) return undefined;
     return findSystemOllama(env, options.home, platform, options.isExecutable);
   }
 
-  /**
-   * "app" mode: the recorded copy if it is still ours and answers; otherwise
-   * the first port in the span with no listener. Never the system port, and
-   * never an Ollama the app did not start.
-   */
-  /**
-   * `pid` holds the listening socket that serves `baseUrl` (false when that
-   * cannot be read): on its address or a wildcard, never another loopback
-   * address with the same port.
-   */
   const holdsPort = async (baseUrl: string, pid: number) =>
     (await listenerPid(Number(portOf(baseUrl)), { ...on, pids: [pid], host: new URL(baseUrl).hostname })) === pid;
 
-  /**
-   * The recorded copy's version when it is ours to adopt: identity matches,
-   * it holds the recorded port, and an Ollama answers there; identity and
-   * listener are checked again once the probe returns.
-   */
   async function adoptable(record: OwnedRecord): Promise<string | undefined> {
     if (!(await holdsPort(record.baseUrl, record.pid))) return undefined;
     const there = await probe(record.baseUrl, probeTimeoutMs);
@@ -389,7 +247,6 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
         useAppPort(own.record.baseUrl);
         return { kind: "ready", status: { state: "ready", owner: "app", baseUrl: appBaseUrl, version, ...inFolder(own.record.modelsDir), ...oneIn(own.record) } };
       }
-      // Otherwise its port counts as another program's; the scan below moves past it.
     }
     const last = firstAppPort + APP_PORT_SPAN - 1;
     const taken: { port: number; result: ProbeResult }[] = [];
@@ -421,7 +278,6 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
 
   async function classify(): Promise<Classified> {
     if (installable === undefined) noAppCopy = (await locateBinary()) === undefined;
-    // "app" mode never looks at (or reuses) the system port.
     if (mode === "app") return classifyApp();
     const ext: ProbeResult = await probe(externalBaseUrl, probeTimeoutMs);
     if (ext.kind === "ollama") {
@@ -463,7 +319,6 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       if (app.kind === "ollama") {
         const own = checkOwnership(stateFile, on);
         const version = own.kind === "ours" && own.record.baseUrl === appBaseUrl ? await adoptable(own.record) : undefined;
-        // A non-Ollama on the system port is still busy, as on a fresh start.
         const busy = withBusy(note?.busy ?? []);
         if (version !== undefined) {
           return { kind: "ready", status: { state: "ready", owner: "app", baseUrl: appBaseUrl, version, ...busy, ...(own.kind === "ours" ? { ...inFolder(own.record.modelsDir), ...oneIn(own.record) } : {}) } };
@@ -498,8 +353,6 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       return noted({ state: "stopped", owner: "none", baseUrl: appBaseUrl, detail }, c.note);
     }
     if (platform === "win32" && installable === undefined) {
-      // No build pinned for this Windows (arm64 today). The note's text says which port the app runs
-      // its own copy on, which it cannot do here; its busy ports still hold.
       const detail = mode === "app" ? WINDOWS_APP_MODE_DETAIL : windowsAutomaticDetail(externalBaseUrl);
       return { state: "missing", owner: "none", baseUrl: appBaseUrl, detail, ...withBusy(c.note?.busy ?? []) };
     }
@@ -519,28 +372,21 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     if (ownHome) mkdirSync(childHome(appDataDir), { recursive: true });
     let models: { path: string; hasModels?: boolean } | undefined;
     if (mode === "app") {
-      // Its own models folder, so it never writes into a system install's store.
-      // Like installedBinary and runtimeDir, a supplied data folder uses the
-      // host filesystem's paths, even when a test injects Windows policy.
       models = { path: appModelsDir(appDataDir) };
       mkdirSync(models.path, { recursive: true });
     } else {
       models = detectModelsDir(env, options.home, options.systemModelsDirs);
     }
     if (models) childEnv.OLLAMA_MODELS = models.path;
-    // Ollama's own default store, named outright: the home this child is given (ownedChildEnv)
-    // need not be the person's.
+    // why: the child's home need not be the person's, so Ollama's default store is named outright
     else childEnv.OLLAMA_MODELS ??= path.join(options.home ?? os.homedir(), ".ollama", "models");
     const readOnly =
       mode === "app" ? undefined : findModelsDirs(env, options.home, options.systemModelsDirs).find((d) => d.hasModels && !d.writable && !models?.hasModels);
     let exited: string | undefined;
-    // Windows: start in the binary's own folder. A process holds its working
-    // folder open there, and an adopted copy can outlive the app, so
-    // inheriting the server's (the clone) would block deleting the clone.
+    // external: a Windows process holds its working folder open, and an adopted copy outlives the app
     const cwd = platform === "win32" ? { cwd: path.dirname(binary.path) } : {};
     const child = spawn(binary.path, ["serve"], { detached: true, windowsHide: true, stdio: ["ignore", log, log], env: childEnv, ...cwd });
     closeSync(log);
-    // Kept from the first moment: a shutdown that runs out of time during the start must still reach it (killNow).
     spawned = child;
     child.on("error", (e) => {
       exited = e.message;
@@ -554,15 +400,11 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     const fail = (why: string) => {
       if (child.pid && exited === undefined) {
         try {
-          // Our own child, still running: its group on POSIX; on Windows there are no groups.
           if (platform === "win32") child.kill();
           else process.kill(-child.pid, "SIGKILL");
-        } catch {
-          // gone
-        }
+        } catch {}
       }
       const logTail = tail(logFile, 600);
-      // The ports measured before the start are still held by what holds them.
       return setStatus(
         noted(
           {
@@ -589,7 +431,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       await sleep(100);
     }
     if (version === undefined) return fail(`Ollama (${binary.path}) did not answer on port ${appPort} within ${startTimeoutMs} ms.`);
-    // The answer must come from our child, not something that grabbed the port.
+    // why: the answer must come from our child, not something that grabbed the port
     const proc = child.pid ? readProc(child.pid, on) : undefined;
     if (exited !== undefined || !proc) return fail(`Ollama (${binary.path}) ${exited ?? "vanished"} while another process answered on port ${appPort}.`);
     if (!(await holdsPort(appBaseUrl, proc.pid)) || exited !== undefined) {
@@ -635,12 +477,9 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       const installing = noted({ state: "installing", owner: "app", baseUrl: appBaseUrl, detail: "Installing Ollama." }, c.note);
       const disk = manifest.unpackedBytes === undefined ? {} : { diskBytes: manifest.unpackedBytes };
       setStatus({ ...installing, install: { receivedBytes: 0, totalBytes: manifest.sizeBytes, ...disk } });
-      // The status carries the download's size and progress, at most once a second, with the speed since the last one.
       let said = { at: Date.now(), bytes: 0 };
       const mine = { abort: new AbortController(), lastBytesAt: Date.now(), bytes: 0, fetching: true };
       download = mine;
-      // no bytes for stallMs: the status says the stall, once, and the speed (with the time left) leaves it, being no longer true;
-      // the same bound lets a Retry end this attempt (ensure), so the status is said when a Retry would take effect
       const watch = setInterval(() => {
         const i = current.state === "installing" ? current.install : undefined;
         if (i === undefined || i.stalled === true || !mine.fetching || Date.now() - mine.lastBytesAt < stallMs) return;
@@ -667,7 +506,6 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
         });
         binary = { path: r.binary, origin: "app-install" };
       } catch (e) {
-        // ended for a Retry: the next attempt runs inside this one's promise, so every caller gets its status, and no error shows between
         if (mine.abort.signal.reason instanceof Restart) {
           clearInterval(watch);
           return ensureOnce();
@@ -682,7 +520,6 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     return start(binary, c.note);
   }
 
-  /** Stop our retained child: its handle on Windows, its detached group on Linux. */
   async function stopSpawned(): Promise<StopResult> {
     const child = spawned;
     if (child === undefined || child.exitCode !== null || child.signalCode !== null) {
@@ -699,7 +536,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     const pid = child.pid ?? 0;
     const kill = (signal: NodeJS.Signals) => {
       if (platform === "win32") child.kill(signal);
-      else { try { process.kill(-pid, signal); } catch { /* The group already ended. */ } }
+      else { try { process.kill(-pid, signal); } catch {} }
     };
     const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
     const exitWithin = (ms: number) => Promise.race([exited.then(() => true), sleep(ms).then(() => false)]);
@@ -716,24 +553,16 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     return { stopped: true, pid };
   }
 
-  /** Ends the process this object spawned, if it still runs: its group on POSIX, its handle on Windows. */
   const killSpawned = () => {
     const child = spawned;
     if (!child || child.exitCode !== null || child.signalCode !== null) return;
     if (platform === "win32") child.kill("SIGKILL");
     else if (child.pid !== undefined) {
       try { process.kill(-child.pid, "SIGKILL"); }
-      catch { /* The owned group already ended. */ }
+      catch {}
     }
   };
 
-  /**
-   * Every look and every start ends in a status the person can act on. A step that throws outside
-   * the guarded ones (a data folder that cannot be written, a spawn the system refuses) would
-   * leave the search or the start on screen for ever: it is an error instead, which the window
-   * shows with Retry. `starting`: the run could have spawned an Ollama, which is ended unless it
-   * was recorded as the app's (a recorded one is found again by the next look).
-   */
   const ended = (fn: () => Promise<RuntimeStatus>, starting: boolean) => async (): Promise<RuntimeStatus> => {
     try {
       return await fn();
@@ -756,7 +585,6 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     baseUrl: () => (current.state === "ready" ? current.baseUrl : undefined),
     discover: () => serial(ended(async () => setStatus(statusFor(await classify())), false)),
     ensure: () => {
-      // Retry while the download has stalled ends that attempt; a moving download is left to finish
       if (inFlight !== undefined && download?.fetching === true && Date.now() - download.lastBytesAt >= stallMs) download.abort.abort(new Restart("Retry"));
       return serial(ended(ensureOnce, true));
     },
