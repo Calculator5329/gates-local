@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-16: a duplicated tab without Web Locks takes its own window, and a finished tool step stays finished
+
+- A page served without Web Locks (plain http) now asks the other open tabs whether its stored
+  window is taken, so a duplicated tab takes its own window there too.
+- A tool step's running part that reached a window late, after its result, no longer turns the
+  finished step back into a spinner.
+
 ## 2026-11-16: an update's running-work list that could not be read has a Retry
 
 - When the update ask could not read what an update would stop, it said to try again but kept

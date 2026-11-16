@@ -57,6 +57,13 @@ describe("reduceTurn", () => {
     expect(t?.tools).toEqual([done]);
   });
 
+  it.each(["done", "error"] as const)("a late running part never takes back a step that is %s", (state) => {
+    const running = { callId: "c", name: "read", state: "running", summary: "Reading" } as const;
+    const ended = { ...running, state, summary: "Read" } as const;
+    const t = reduceTurn(reduceTurn(turn(), { type: "tool", step: ended }, T0)!, { type: "tool", step: running }, T0);
+    expect(t?.tools).toEqual([ended]);
+  });
+
   it("ends with an error that saved a partial: the saved row takes its place", () => {
     expect(reduceTurn(turn(), { type: "error", code: "internal", message: "x", partial: { ...answer, interrupted: true } }, T0)).toBeNull();
   });

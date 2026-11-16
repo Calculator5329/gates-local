@@ -35,6 +35,8 @@ export const endReason = (event: TurnFailure): TurnEnded["reason"] => event.ende
 
 function upsertStep(steps: readonly ToolStep[], step: ToolStep): ToolStep[] {
   const i = steps.findIndex((x) => x.callId === step.callId);
+  // why: a step only moves forward; a running part that arrives late never takes back its result
+  if (i >= 0 && steps[i]?.state !== "running" && step.state === "running") return [...steps];
   return i < 0 ? [...steps, step] : steps.map((x, j) => (j === i ? step : x));
 }
 

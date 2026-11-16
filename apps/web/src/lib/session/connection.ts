@@ -2,7 +2,7 @@ import { type CallOptions, type Client, type MethodName, type Params, type Reply
 import { NA, setState } from "../store/store.ts";
 import { pinFramePolicy } from "../../pages/frame-policy.ts";
 import { withTimeout } from "../ui/kit/async.ts";
-import { claimWindow } from "./window-id.ts";
+import { claimWindow, windowTabs } from "./window-id.ts";
 
 interface ConnectionEffects {
   readonly applyServerEvent: typeof setState;
@@ -17,7 +17,7 @@ let thisWindow: Promise<string> | undefined;
 function windowId(): Promise<string> {
   let storage: Storage | undefined;
   try { storage = sessionStorage; } catch {}
-  return thisWindow ??= claimWindow(storage, typeof navigator === "undefined" ? undefined : navigator.locks);
+  return thisWindow ??= claimWindow(storage, typeof navigator === "undefined" ? undefined : navigator.locks, windowTabs());
 }
 
 export const isNA = (e: unknown): boolean => e instanceof WireError && e.code === "not-implemented";
