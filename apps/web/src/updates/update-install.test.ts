@@ -79,3 +79,39 @@ it("UW-05 an installed copy that cannot restart says the server's words and asks
   expect(await installUpdate(act, start, "1.3.0", () => undefined)).toBe("Gates Local cannot replace its own file because its folder is read-only.");
   expect(start).not.toHaveBeenCalled();
 });
+
+it("a clone with no checked target checks first and installs what that check answered, reading nothing again", async () => {
+  const calls: string[] = [];
+  const act = (async (method: string) => {
+    calls.push(method);
+    if (method === "update.status") return { ok: true, value: { ...OFFERED, approval: undefined, lastCheck: null } };
+    if (method === "update.check") return { ok: true, value: OFFERED };
+    if (method === "update.prepare") return { ok: true, value: { state: "ready", reservation: "reservation-b", target: "b".repeat(40) } };
+    throw new Error(`unexpected ${method}`);
+  }) as unknown as ActionCall;
+  const start = vi.fn(async () => ({ ok: true as const }));
+  expect(await installUpdate(act, start, "b".repeat(40), () => undefined, "approval-b")).toBeNull();
+  expect(calls).toEqual(["update.status", "update.check", "update.prepare"]);
+  expect(start).toHaveBeenCalledWith({ reservation: "reservation-b", target: "b".repeat(40) });
+});
+
+it("the footer's ask for an approval the server has moved on from installs nothing and asks nothing more", async () => {
+  const calls: string[] = [];
+  const act = (async (method: string) => {
+    calls.push(method);
+    if (method === "update.status") return { ok: true, value: { ...OFFERED, approval: "approval-c", activity: ["1 running reply"] } };
+    throw new Error(`unexpected ${method}`);
+  }) as unknown as ActionCall;
+  const confirm = vi.fn(() => true);
+  vi.stubGlobal("window", { confirm });
+  const start = vi.fn(async () => ({ ok: true as const }));
+  const applied: Record<string, unknown>[] = [];
+  try {
+    expect(await installUpdate(act, start, "b".repeat(40), (patch) => { applied.push(patch as Record<string, unknown>); }, "approval-b")).toBeNull();
+  } finally { vi.unstubAllGlobals(); }
+  expect(calls).toEqual(["update.status"]);
+  expect(confirm).not.toHaveBeenCalled();
+  expect(start).not.toHaveBeenCalled();
+  expect(applied[0]).toMatchObject({ update: { approval: "approval-c" } });
+  expect(applied.at(-1)).toEqual({ updateInstalling: false, updateError: null });
+});

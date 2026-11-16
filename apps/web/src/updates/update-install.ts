@@ -1,9 +1,3 @@
-// Rare install interaction, loaded on click while the shell reserves the UI action.
-//
-// A clone installs a checked commit; an installed copy restarts into the
-// version it downloaded and checked. Both reserve the server's approval and
-// hand the desktop app the exact target the server pinned: the commit, or
-// `<version>:<SHA-512 of the signed list>`.
 import type { UpdateCheck, UpdateInstallRequest, UpdateStatus } from "@gates-local/contracts";
 import type { ActionCall, ActionResult } from "../lib/session/connection.ts";
 import type { setState } from "../lib/store/store.ts";
@@ -11,9 +5,7 @@ import { updateWork, workLines } from "./update-work.ts";
 
 type StartUpdate = (request: UpdateInstallRequest) => Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }>;
 
-/** What the click would install, and whether the server's target matches it. */
 interface Offer {
-  /** The version or commit the person saw. */
   readonly seen: string;
   readonly ask: string;
   readonly matches: (target: string) => boolean;
@@ -37,7 +29,6 @@ function offerOf(status: UpdateStatus): Offer | undefined {
   return undefined;
 }
 
-/** Why there is nothing to install: the server's own words when it has some. */
 function nothing(check: UpdateCheck | null): string {
   if (check?.state === "cannot-check" || (check?.state === "newer" && check.lines.length > 0)) return check.lines.join(" ");
   return "Check for updates and review the target before installing.";
@@ -54,9 +45,7 @@ export async function installUpdate(act: ActionCall, start: StartUpdate, prior: 
     let snapshot = status.value;
     if (snapshot.installing === true) { error = "Gates Local is already closing to update. Try again after it reopens."; return error; }
     installed = snapshot.version.kind === "installed";
-    // A clone checks first; an installed copy's approval comes only with its checked download.
     if (!installed && offerOf(snapshot) === undefined) {
-      // The check answers with the status it left, so there is nothing to read again.
       const checked = await act("update.check", {}, "check the update target");
       if (!checked.ok) { error = checked.message; return error; }
       snapshot = checked.value;
@@ -69,11 +58,8 @@ export async function installUpdate(act: ActionCall, start: StartUpdate, prior: 
         error = nothing(snapshot.lastCheck);
         return error;
       }
-      // The footer asked once, for this approval: if the server's moved on, nothing installs and its ask shows the new words.
       if (approved !== undefined && snapshot.approval !== approved) return null;
       const work = updateWork(snapshot.activity);
-      // the footer's ask's lines (update-work.ts), so both say the same once; it asks only when something
-      // running would stop, or the target changed since the person saw it
       const stops = (snapshot.activity?.length ?? 1) > 0;
       if (approved === undefined && (changed || stops) && !window.confirm([offer.ask, ...(work?.length === 0 ? [] : ["", ...workLines(work)])].join("\n"))) return null;
       const prepared = await act("update.prepare", { approval: snapshot.approval }, "reserve the approved update");

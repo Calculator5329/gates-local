@@ -1,10 +1,8 @@
-// The startup note stays eager; Settings update controls load with Settings.
 import type { UpdateResult } from "@gates-local/contracts";
 import { Icon } from "../lib/ui/icons.tsx";
 import { dismissUpdateResult } from "../lib/session/index.ts";
 import { NA, useStore } from "../lib/store/store.ts";
 
-/** Keep unsuccessful update results visible until dismissed; successful updates stay silent. */
 export function UpdateNoteView({ result, onDismiss }: { result: UpdateResult; onDismiss: () => void }) {
   if (result.outcome === "updated") return null;
   return (

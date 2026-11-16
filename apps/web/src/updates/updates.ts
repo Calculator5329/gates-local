@@ -1,6 +1,3 @@
-// Update status and the desktop action. The installer stays deferred until approval. The status is
-// ordered data: every read, push and action answer carries its number, and `newer` lets through
-// only a status newer than the one the window shows.
 import type { SyncMetadata, UpdateStatus } from "@gates-local/contracts";
 import { getState, NA, setState } from "../lib/store/store.ts";
 import type { ActionCall, ActionResult } from "../lib/session/connection.ts";
@@ -8,42 +5,34 @@ import type { ActionCall, ActionResult } from "../lib/session/connection.ts";
 interface UpdatesDeps {
   readonly applyServerEvent: typeof setState;
   readonly act: ActionCall;
-  /** True when a status numbered `sync` is newer than the one applied (always, on a connection that did not order updates). */
   readonly newer: (sync: SyncMetadata | undefined) => boolean;
 }
 
 export function createUpdates({ applyServerEvent, act, newer }: UpdatesDeps) {
-  /** A status the ordering let through: a push, a read, or an action's answer. */
   function receiveUpdate(update: UpdateStatus): void {
     applyServerEvent(s => {
       const known = s.update === undefined || s.update === NA ? undefined : s.update;
-      // a check that answered anywhere since (hourly, Settings, another window) clears a failed install's words, unless an install runs
       const before = known?.lastCheck?.checkedAt;
       const answered = update.lastCheck != null && (before === undefined || update.lastCheck.checkedAt > before);
       const clear = answered && !s.updateInstalling && update.installing !== true && s.updateError !== null;
       return { update: known?.canControl === false ? { ...update, canControl: false } : update, ...(clear ? { updateError: null } : {}) };
     });
   }
-  /** An action's answer is the numbered status it left, applied like a read. */
   const answered = { onResult: (update: UpdateStatus, sync: SyncMetadata | undefined) => { if (newer(sync)) receiveUpdate(update); } };
 
-  /** Manual checks share the desktop server's checked target and activity. */
   async function checkForUpdates(): Promise<ActionResult> {
     if (getState().updateChecking || getState().updateInstalling) return null;
     setState({ updateChecking: true });
     const r = await act("update.check", {}, "check for updates", "try again", answered);
-    // a check that answered clears a failed install click's stale words
     applyServerEvent(r.ok ? { updateChecking: false, updateError: null } : { updateChecking: false });
     return r.ok ? null : r.message;
   }
 
-  /** An installed copy's Download click: the server answers with the status, now downloading; progress follows as update.changed. */
   async function downloadUpdate(): Promise<ActionResult> {
     const r = await act("update.download", {}, "download the update", "try again", answered);
     return r.ok ? null : r.message;
   }
 
-  /** A phone dismisses its own note without writing through the desktop listener. */
   async function dismissUpdateResult(): Promise<void> {
     const current = getState().update;
     if (current !== undefined && current !== NA && current.canControl === false) {
@@ -53,18 +42,11 @@ export function createUpdates({ applyServerEvent, act, newer }: UpdatesDeps) {
     await act("update.dismissResult", {}, "hide the update note", "try again", answered);
   }
 
-  /** Re-read the status (target, approval and running work) for an ask that is about to show it. */
   async function readUpdateStatus(): Promise<ActionResult> {
     const r = await act("update.status", {}, "read what an update would stop", "try again", answered);
     return r.ok ? null : r.message;
   }
 
-  /**
-   * Reserve once locally, then load the existing checked-commit installer.
-   * approved: the server approval the footer's ask showed; that ask was the
-   * only one, and if the approval moved on nothing installs (the ask shows the
-   * new words). Without it, the installer asks natively.
-   */
   async function updateAndRestart(approved?: string): Promise<ActionResult> {
     const bridge = window.gatesLocal;
     if (bridge?.updateAndRestart === undefined) return "Updating from here needs the desktop app. Run pnpm run app-update in the Gates Local folder instead.";
@@ -72,7 +54,6 @@ export function createUpdates({ applyServerEvent, act, newer }: UpdatesDeps) {
     if (getState().updateInstalling) return null;
     const before = getState().update;
     const check = before === NA ? undefined : before?.lastCheck;
-    // What the person last saw: a clone's commit, or an installed copy's version.
     const prior = check?.state === "available" ? check.targetCommit : check?.state === "newer" ? check.target : undefined;
     setState({ updateInstalling: true, updateError: null });
     try {

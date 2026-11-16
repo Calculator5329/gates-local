@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-11-16: the web updates folder holds to the six comment kinds
+
+- The update footer button, its ask, Settings › Updates and the install
+  step pass the comment rule: 103 offenders went, and the folder's
+  comment lines fell from 176 to none. Rules a named test already held
+  went with the comment; one in five was broken in the source and
+  watched fail.
+- Twelve rules no test held now have one. The footer's ask marks a line
+  that changed while it was open, holds Go a second and moves focus to
+  Cancel; Go that finds the approval moved on installs nothing and asks
+  again; the ask closes with its click and the drawer, and Escape closes
+  one layer at a time; an unreadable work list keeps Go off and says
+  why; a footer check error stays gone once a newer check answers; a
+  stopped update's note goes with the press that acts on it; a busy
+  button stays focusable. In Settings a failed check or download is an
+  alert. A check clears a failed install's words. A clone checks first
+  and installs what that check answered; an approval the server moved
+  on from installs nothing; and a retry needs a checked commit as well
+  as the approval.
+
 ## 2026-11-16: the web measure folder holds to the six comment kinds
 
 - Measure's row, detail, pages and page harness pass the comment rule:

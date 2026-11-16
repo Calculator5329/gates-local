@@ -1,4 +1,3 @@
-// Eager update surfaces only. Settings controls live in SettingsUpdates.tsx.
 import type { UpdateCheck, UpdateStatus } from "@gates-local/contracts";
 import { useEffect, useRef, useState } from "react";
 import { Icon, type IconId } from "../lib/ui/icons.tsx";
@@ -10,7 +9,6 @@ import { useChange } from "../lib/ui/kit/popover.ts";
 import { RESTART, restartable, type UpdateClick, type UpdateIcon, type UpdateInput, outdated, updateIcon, ver } from "./update-state.ts";
 import { updateWork, workLines } from "./update-work.ts";
 
-/** A progress ring around a footer icon: a share from 0 to 1, or null for a turning arc. It sits inside the box and never changes it. */
 export function Ring({ progress }: { progress: number | null }) {
   return (
     <svg className={`ring${progress === null ? " spin" : ""}`} viewBox="0 0 26 26" aria-hidden="true">
@@ -21,7 +19,6 @@ export function Ring({ progress }: { progress: number | null }) {
 }
 
 export interface FootProps {
-  /** Its stable test name, written whole at each call site so the registry reads it there. */
   readonly testId: `sidebar.foot.${string}`;
   readonly icon: IconId;
   readonly label: string;
@@ -30,16 +27,13 @@ export interface FootProps {
   readonly dot?: "amber" | "red" | "green" | null;
   readonly ring?: number | null | undefined;
   readonly spin?: boolean;
-  /** Busy: focusable and keeps its tooltip, but a click does nothing. */
   readonly busy?: boolean;
   readonly cls?: string;
   readonly current?: boolean;
-  /** A toggle (Settings, Models, Usage open and close what they name): aria-pressed, true while that is open. */
   readonly pressed?: boolean;
   readonly onClick: () => void;
 }
 
-/** One 32 px footer button: the icon, an optional ring and an optional dot, words only in data-tip and aria-label. */
 export function FootButton({ testId, icon, label, tip, tone, dot = null, ring, spin = false, busy = false, cls, current = false, pressed, onClick }: FootProps) {
   const ringed = ring !== undefined;
   return (
@@ -66,38 +60,22 @@ const LOOK: Record<UpdateIcon["state"], { icon: IconId; tone?: FootProps["tone"]
   checking: { icon: "refresh", spin: true },
   available: { icon: "fetch", tone: "fg" },
   downloading: { icon: "fetch", tone: "fg" },
-  // Ready to restart: the green up-arrow alone, no dot.
   ready: { icon: "up", tone: "green" },
-  // Downloaded for a copy that cannot install it: the same up-arrow, plain, with the amber dot; the click opens Settings.
   waiting: { icon: "up", tone: "fg" },
   updating: { icon: "spin", spin: true },
   failed: { icon: "alert", tone: "red" },
   external: { icon: "external", tone: "fg" },
 };
 
-/** How long the confirm's button waits after its words change, so a click meant for the old words cannot land on the new. */
 const SETTLE_MS = 1000;
 
-/** Heard by a screen reader, never seen: the ask's "Changed" note takes no room, so the mark never moves the panel. */
 const UNSEEN = { position: "absolute", width: 1, height: 1, overflow: "hidden", clipPath: "inset(50%)", whiteSpace: "nowrap" } as const;
 const BRIGHT = { color: "var(--foreground)" } as const;
 
-/**
- * The ask before the app closes, shown only when something would stop:
- * the target and one line for each piece of
- * work the update stops (update-work.ts, the same lines as the installer's
- * native prompt), read fresh from the server when it opens. With nothing
- * running the click restarts at once. When those lines change while it is
- * open (a new approval, or this window's queue or drafts, read again at Go)
- * the new ones show brighter, a screen reader hears "Changed", and Go waits a
- * moment; nothing installs on that press. before: the lines shown when it
- * last closed for that reason.
- */
 function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStatus; check: Extract<UpdateCheck, { state: "available" | "newer" }>; before: readonly string[] | null; onCancel: () => void; onGo: (shown: readonly string[]) => void }) {
   const cancel = useRef<HTMLButtonElement>(null);
   const goButton = useRef<HTMLButtonElement>(null);
   const lines = () => workLines(updateWork(status.activity));
-  // undefined: reading; null: read; a string: the server's words for why it could not
   const [read, setRead] = useState<string | null | undefined>(undefined);
   const [work, setWork] = useState(lines);
   const [prev, setPrev] = useState(before);
@@ -105,7 +83,6 @@ function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStat
   const [wait, setWait] = useState(before !== null);
   const seen = useRef(status.approval);
   const changed = (next: string[]) => {
-    // Go is about to turn off: focus moves to Cancel, never to the page
     if (document.activeElement === goButton.current) cancel.current?.focus();
     setPrev(work);
     setWork(next);
@@ -132,7 +109,6 @@ function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStat
   }, [settle]);
   const press = () => {
     const now = lines();
-    // a press that lands before the effect above has seen a new approval installs nothing either
     if (status.approval !== seen.current) {
       seen.current = status.approval;
       return changed(now);
@@ -173,7 +149,6 @@ function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStat
   );
 }
 
-/** The update icon at the far right of the sidebar footer: always there in the desktop app, absent in a browser tab and on the phone. */
 export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
   const status = useStore((s) => s.update);
   const checking = useStore((s) => s.updateChecking);
@@ -181,7 +156,6 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
   const error = useStore((s) => s.updateError);
   const drawer = useStore((s) => s.drawer);
   const [asking, setAsking] = useState(false);
-  // the lines the ask showed when Go found the approval moved on; it opens again with them as "before"
   const [before, setBefore] = useState<readonly string[] | null>(null);
   const [clickError, setClickError] = useState<UpdateInput["clickError"]>(null);
   const [downloading, setDownloading] = useState(false);
@@ -190,16 +164,13 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
   const desktop = canUpdateHere();
   const u = updateIcon({ status: known, desktop, checking, installing, error, clickError, downloading, canRestart: restartable(known, desktop) });
   const click = u?.click ?? null;
-  // The ask belongs to an Update or Restart click: it closes when the click stops being one, and with the drawer.
   useChange(click, (now) => { if (now !== "update" && now !== "restart") setAsking(false); });
   useChange(drawer, (now) => { if (!now) setAsking(false); });
-  // once good news has arrived the error is gone for good, so a later state it does not cover cannot bring it back
   const lastCheck = known?.lastCheck;
   if (clickError != null && outdated(clickError, lastCheck)) setClickError(null);
   useDocumentEvent("pointerdown", (e) => {
     if (!(e.target instanceof Element && e.target.closest(".sb-foot .cfm, .sb-foot .upd"))) setAsking(false);
   }, { capture: true, when: asking });
-  // Escape closes the top layer only: an open menu or picker (App's onKey), then a tooltip, then the ask, then the drawer
   useDocumentEvent("keydown", (e) => {
     if (e.key !== "Escape" || getState().pop !== null) return;
     e.stopPropagation();
@@ -212,15 +183,11 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
   const check = known?.lastCheck;
   const approval = known?.approval;
   const focusButton = () => button.current?.querySelector("button")?.focus();
-  // the check this footer saw when it clicked: a newer one that answers anywhere clears the click's error (update-state.ts)
   const since = check?.checkedAt ?? null;
-  // Update (a clone) and Restart (an installed copy): with nothing running one click restarts; the ask shows
-  // only when a reply, a download, an image job or an import would stop.
   const restart = async () => {
     closeTip();
     setBefore(null);
     if (asking) return setAsking(false);
-    // the running work, read fresh: an unreadable list asks, and the ask says why
     const read = await readUpdateStatus();
     const s = getState();
     const now = s.update === NA ? undefined : s.update;
@@ -251,10 +218,8 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
   const go = async (shown: string, lines: readonly string[], dismiss: boolean) => {
     setAsking(false);
     focusButton();
-    // the shown result goes with the press that acts on it; Cancel left it
     if (dismiss) void dismissUpdateResult();
     await updateAndRestart(shown);
-    // Nothing installed and nothing failed: the server's approval moved on, so the one ask shows its new words.
     const s = getState();
     const now = s.update === NA ? undefined : s.update;
     const again = now?.lastCheck?.state === "available" || (now?.lastCheck?.state === "newer" && now.lastCheck.restart === true);
@@ -292,7 +257,6 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
           cls="upd"
           onClick={() => {
             if (u.click === null) return;
-            // a shown result goes once the click acts on it; an Update click only asks, so its Go dismisses it
             if (u.dismiss === true && u.click !== "update" && u.click !== "restart") void dismissUpdateResult();
             run[u.click]();
           }}

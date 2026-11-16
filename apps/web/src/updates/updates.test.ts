@@ -63,6 +63,8 @@ const offer = (checkedAt: number, download?: "downloading") => ({ status: { vers
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replaceAll("&#x27;", "'").replace(/\s+/g, " ");
 /** Row 1's grey line: one element, holding the state's line or the failure in its place. */
 const stateLine = (html: string) => /<span class="(src-help(?: act-err)?)"[^>]*>([^<]*)<\/span>/.exec(html);
+/** The role of row 1's grey line while it holds the state's line. */
+const role = (html: string) => /<span class="src-help"[^>]*role="(\w+)"/.exec(html)?.[1];
 /** Every row of the card. */
 const rows = (html: string) => (html.match(/class="srow"/g) ?? []).length;
 /** Rows above the first switch: what the version and its state take up. */
@@ -251,6 +253,14 @@ describe("the Updates group", () => {
     const found = withCheck({ state: "available", checkedAt: AT, channel: "release", current: "abc1234", target: "def5678", total: 1, changes: ["One"] });
     expect(stateLine(view({ canUpdate: true, checkErr: callFailed, checkErrSince: AT, updateErr: "The update could not start.", ...found }))?.[2]).toBe("The update could not start.");
     expect(stateLine(view({ checkErr: callFailed, checkErrSince: AT, downloadErr: "The download stopped.", downloadErrSince: AT, ...found }))?.[2]).toBe("The download stopped.");
+  });
+
+  it("a check that failed, or a download that did, is said as an alert; any other line is a status", () => {
+    expect(role(view(withCheck({ state: "cannot-check", checkedAt: AT, reason: "unreachable", lines: ["Could not reach the update server."] })))).toBe("alert");
+    expect(role(view(withCheck({ state: "up-to-date", checkedAt: AT, channel: "release", current: "abc1234" })))).toBe("status");
+    for (const download of ["bad", "failed", "disk"] as const) expect(role(view({ status: { ...offer(AT).status, lastCheck: { ...offer(AT).status.lastCheck, download, lines: ["It stopped."] } } })), download).toBe("alert");
+    expect(role(view(offer(AT, "downloading")))).toBe("status");
+    expect(role(view(offer(AT)))).toBe("status");
   });
 
   it("row 11 a failed Download gives way to a newer check, or to the server saying it downloads", () => {
@@ -511,6 +521,16 @@ describe("the check runs only on a click", () => {
     store.setState({ updateInstalling: false });
     b.server.broadcast("update.changed", at(4));
     await tick();
+    expect(store.getState().updateError).toBeNull();
+  });
+
+  it("a check that answers clears a failed install's words, even when it found nothing newer", async () => {
+    b.server.answer("update.status", () => OFFERED);
+    b.server.answer("update.check", () => OFFERED);
+    disconnect = session.connect();
+    await until(hydrated, 2000, "hydration");
+    store.setState({ updateError: "Couldn't start the update." });
+    expect(await session.checkForUpdates()).toBeNull();
     expect(store.getState().updateError).toBeNull();
   });
 

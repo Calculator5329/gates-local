@@ -108,6 +108,9 @@ describe("failed", () => {
     expect(icon(fresh, { error: "Could not start the updater" })).toMatchObject({ state: "failed", click: "update", dot: null });
     expect(icon(withCheck(clone, available), { error: "x" })).toMatchObject({ state: "failed", click: "check" });
   });
+  it("a click that could not start, with the server's approval but no checked commit, checks first rather than install a target nobody checked", () => {
+    expect(icon({ ...clone, approval: "a1", lastCheck: available }, { error: "Could not start the updater" })).toMatchObject({ state: "failed", click: "check" });
+  });
   it("the last run stopped: the click dismisses it as it acts", () => {
     expect(icon({ ...clone, result: { at: 1, outcome: "stopped", line: "Build failed; still on abc1234.", logPath: "update-logs/run.log", commands: ["git reset --hard abc1234"] } })).toMatchObject({ state: "failed", click: "check", dismiss: true });
     expect(icon({ ...fresh, result: { at: 1, outcome: "refused", line: "Refused." } })).toMatchObject({ state: "failed", click: "update", dismiss: true });
