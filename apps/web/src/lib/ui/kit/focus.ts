@@ -1,5 +1,6 @@
 import { useLayoutEffect } from "react";
 import { type CommitJob, setState, useStore } from "../../store/store.ts";
+import { frameLoop } from "./frame.ts";
 
 export type FocusTarget = string | (() => HTMLElement | null | undefined);
 
@@ -12,12 +13,13 @@ const unqueue = (jobs: readonly CommitJob[]) => setState((s) => ({ afterCommit: 
 
 export function afterCommit(job: CommitJob): void {
   setState((s) => ({ afterCommit: [...s.afterCommit, job] }));
-  // oxlint-disable-next-line gates/timer-needs-reason -- the frame the old hand-written focus calls waited: the last try for a job whose node no commit drew yet
-  requestAnimationFrame(() => {
-    if (done.has(job)) return;
+  // why: one frame later is the last try for a job whose node no commit drew yet
+  frameLoop(() => {
+    if (done.has(job)) return false;
     done.add(job);
     unqueue([job]);
     job();
+    return false;
   });
 }
 

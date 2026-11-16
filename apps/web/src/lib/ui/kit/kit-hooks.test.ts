@@ -272,3 +272,21 @@ it("a pop-up with nothing to watch is placed after every commit while open, and 
   act(() => root.render(createElement(Pop, { open: false, n: 6 })));
   expect(placed).toEqual([3, 4, 5]);
 });
+
+it("a frame loop asks for one frame at a time, stops when its step says so, and a stop drops the frame it asked for", () => {
+  const times: number[] = [];
+  kit.frame.frameLoop((t) => { times.push(t); return t < 2; });
+  expect(frames).toHaveLength(1);
+  runFrames(1);
+  expect(frames).toHaveLength(1);
+  runFrames(2);
+  expect(frames).toHaveLength(0);
+  expect(times).toEqual([1, 2]);
+  const other = vi.fn(() => true);
+  const stop = kit.frame.frameLoop(other);
+  runFrames(3);
+  expect(other).toHaveBeenCalledTimes(1);
+  stop();
+  runFrames(4);
+  expect(other).toHaveBeenCalledTimes(1);
+});

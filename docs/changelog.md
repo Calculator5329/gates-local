@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-16: the web client asks for frames in one place
+
+- The kit's new `frameLoop` is the client's one frame request: it asks
+  for one frame at a time while its step says go on, and its stop drops
+  the frame it asked for. `useAnimationFrame`, a focus request's
+  one-frame retry and idle work's two frames now all run on it.
+- Idle work no longer keeps its own pause: after its two frames it waits
+  through `whenIdle`, which now takes the pause to use where there is no
+  idle callback.
+- Window effects and timers in the web client: 103 to 97.
+- The deferred-screen test checked that idle work was handed to the
+  idle callback as the very same function; it now gets whenIdle's
+  wrapper, so the test checks for a function with the 1500 ms limit and,
+  as before, that the work runs when idle time comes.
+- 1 new test, watched fail twice: once with the loop asking again after
+  a step that said stop, once with a stop that left the asked frame.
+
 ## 2026-11-16: the server's entry and app files hold to the six comment kinds
 
 - The comment rule now has no recorded offenders anywhere: the last 64

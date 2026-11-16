@@ -57,7 +57,7 @@ describe("deferred screens", () => {
     expect(idle).toBeUndefined();
     frames.shift()!(16);
     expect(work).not.toHaveBeenCalled();
-    expect(requestIdleCallback).toHaveBeenCalledWith(work, { timeout: 1500 });
+    expect(requestIdleCallback).toHaveBeenCalledWith(expect.any(Function), { timeout: 1500 });
     idle!({ didTimeout: false, timeRemaining: () => 20 });
     expect(work).toHaveBeenCalledTimes(1);
     cancel();
