@@ -6,6 +6,7 @@ import { Schema as S } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../app.ts";
 import { sendStarted } from "../chat/send-started.ts";
+import { chatCatalog } from "../../test/send-rig.ts";
 import { streamTurn } from "../chat/stream.ts";
 import { PAGE_RULE } from "../chat/pages.ts";
 import { fitToWindow } from "../chat/window.ts";
@@ -160,7 +161,7 @@ async function rig(native = true) {
   const events: unknown[] = [];
   const app = createApp({ store, settings, sources, toolsEnabled: () => true,
     runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: fake.baseUrl }), baseUrl: () => fake.baseUrl, onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: fake.baseUrl }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: fake.baseUrl }) },
-    catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
+    catalog: chatCatalog(MODEL),
     push: (_channel, payload) => events.push(payload),
     fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
   });

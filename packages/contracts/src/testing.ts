@@ -196,11 +196,6 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "runtime.retry": { params: {}, result: runtime },
   "runtime.discover": { params: {}, result: runtime },
   "fit.table": { params: {}, result: fitTable },
-  "chat.send": {
-    params: { threadId: "t1", content: "hello", model: "qwen3:14b", numCtx: 16384 },
-    result: { turnId: "turn-1", userMessage },
-  },
-  "chat.cancel": { params: { turnId: "turn-1" }, result: { cancelled: true } },
   "reply.send": {
     params: { id: "q-2", threadId: "t1", messageId: "m-q3", text: "one more thing", model: "qwen3:14b", numCtx: 8192, think: true, askFirst: true },
     result: { answer: "done", reply: { id: "q-2", threadId: "t1", rev: 2, messageId: "m-q3", text: "one more thing", model: "qwen3:14b", numCtx: 8192, think: true, at: 1_700_000_000_000, stage: "held", held: { why: "refused", code: "wont-fit", message: "it does not fit" } } },

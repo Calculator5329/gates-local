@@ -131,7 +131,7 @@ test.describe("a send refused for memory", () => {
     let sends = 0;
     page.on("websocket", socket => socket.on("framesent", frame => {
       const request = decodeRequest(frame.payload);
-      if (request.ok && (request.value.method === "reply.send" || request.value.method === "chat.send")) sends++;
+      if (request.ok && request.value.method === "reply.send") sends++;
     }));
     // An 8 GB computer: 5 GiB of spill, and Gemma 4 12B at 64k needs about 18.6 GiB by the server's
     // estimate. Beside the whole card (15.4 GiB) it spills; beside what the card has free now (11.5,

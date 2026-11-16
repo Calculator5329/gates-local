@@ -207,7 +207,7 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     listLoaded: (url, signal) => listLoaded(url, undefined, signal),
     // The runtime the load captured, never whatever baseUrl() says by the time the fit runs.
     // `signal` (shutdown, a switch) ends every request and child process of the check.
-    // The planner chat.send uses (fit/planLoad), after the handoff: the reading alone decides.
+    // The planner reply.send uses (fit/planLoad), after the handoff: the reading alone decides.
     // A preload stops nothing: models a turn or another preload holds are busy.
     fit: async (model, numCtx, baseUrl, signal) =>
       (await planLoad({ ...options.fit, baseUrl, model, numCtx, signal, busy: loader?.busyModels() ?? [], measured: true })).report,

@@ -12,7 +12,7 @@ export interface ToolTurnInput extends StreamTurnInput {
   sources: readonly LibraryEntry[];
   platform?: NodeJS.Platform;
   queueImage?: (prompt: string, signal: AbortSignal) => Promise<{ jobId: string }>;
-  /** `chat.send` `image`; the image tool is offered only when this is true and queueImage exists. */
+  /** The send's `image`; the image tool is offered only when this is true and queueImage exists. */
   image?: boolean;
   /** The shell sandbox's probe on this machine; off leaves the shell tool out and says so in the turn. */
   shell?: ShellStatus;

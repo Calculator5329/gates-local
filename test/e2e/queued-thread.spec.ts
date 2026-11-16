@@ -2,7 +2,7 @@
 // Chat row 23, a bug that happened (2026-11-13): thread A was replying on a crowded GPU; the
 // owner sent a message in a new thread B. The server admits B's reply only once A's cold load
 // lets go of the load gate, and saved B's question 3 min 7 s after B was made. The client gave
-// chat.send the 30 s every call gets, dropped B's send and later met it again as a stranger's
+// reply.send the 30 s every call gets, dropped B's send and later met it again as a stranger's
 // reply. The owner: "tool call does not show during it only shows after. queued thread didn't
 // work and working one did not stay most recent".
 import { writeFile } from "node:fs/promises";

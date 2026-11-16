@@ -62,7 +62,7 @@ test("a dropped text file is read by the model by its name, survives a reload, a
     const model = (await rpc.call("models.list", {})).models.find(m => m.capabilities?.includes("completion"))!.name;
     const ends: string[] = [];
     rpc.subscribe("chat.event", p => { if (p.threadId === other.id && p.event.type === "error") ends.push(p.event.message); });
-    await rpc.call("chat.send", { threadId: other.id, content: "again", model, numCtx: 4096, files: [file] });
+    await rpc.call("reply.send", { id: "again", threadId: other.id, messageId: "again", text: "again", model, numCtx: 4096, files: [file] });
     await expect.poll(() => ends).toEqual([expect.stringContaining("notes.txt is no longer attached")]);
     expect((await rpc.call("threads.get", { threadId: other.id })).messages).toEqual([]);
   } finally { rpc.close(); }

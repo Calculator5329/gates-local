@@ -14,8 +14,8 @@ export type AppErrorCode =
   | "wont-fit" // the fit check refused this model at this num_ctx; the message names the numbers
   | "cancelled" // the turn was cancelled (or its thread deleted) before it started
   | "runtime-changed" // a runtime switch ended the turn (any text sent is saved, event.partial); the client sends the message again
-  | "preempted" // chat.send stopOthers ended the turn: another model's load needed its GPU (event.neededBy, event.partial)
-  | "would-stop" // chat.send askFirst: running turns are in the way (error.blocking); nothing was saved or stopped
+  | "preempted" // a send with stopOthers ended the turn: another model's load needed its GPU (event.neededBy, event.partial)
+  | "would-stop" // a send with askFirst: running turns are in the way (error.blocking); nothing was saved or stopped
   | "thread-not-found" // the store's code, also thrown while the thread's delete runs
   | "message-not-found" // threads.get before: the message a page starts from is not in the thread
   | "image-input"
@@ -51,7 +51,7 @@ export const imageError = (error: unknown): never => { throw new AppError("image
 export const RUNTIME_CHANGED_TURN_MESSAGE = "The Ollama runtime changed while this reply was running, so it stopped. Send the message again.";
 export const runtimeChangedTurn = (): AppError => new AppError("runtime-changed", RUNTIME_CHANGED_TURN_MESSAGE);
 
-/** chat.send stopOthers ended this turn: `model`'s load needed the GPU memory `held` was using. */
+/** A send with stopOthers ended this turn: `model`'s load needed the GPU memory `held` was using. */
 export const preemptedBy = (model: string, numCtx: number, held: string): AppError =>
   new AppError("preempted", `${model} at num_ctx ${numCtx} needed the GPU memory ${held} was using, so this reply stopped. Send the message again.`, undefined, model);
 export const threadGoing = (threadId: string) => new AppError("thread-not-found", `thread ${threadId} is being deleted`);

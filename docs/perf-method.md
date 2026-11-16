@@ -141,7 +141,7 @@ Even in a one-core box, unassigned work must not be relabelled as waiting.
 The existing DevTools `.cpu-*` rows retain their wider before/after windows.
 
 Server transport instrumentation records request/thread IDs and epoch times
-only: receive of `chat.send`, admission through the fit checks to the streaming
+only: receive of `reply.send`, admission through the fit checks to the streaming
 model fetch, first nonempty model-stream bytes, and first socket delta just
 before WebSocket.send. It appends the record at that first delta, so teardown
 cannot discard an exit-only buffer. These are elapsed stages, including waits,

@@ -268,8 +268,10 @@ require("./out/main.cjs");
         await expect(page.getByText("Gates Local is preparing an update. New replies", { exact: false })).toBeVisible();
         const imported = path.join(scratch, "admission-import.txt");
         writeFileSync(imported, "A local import fixture\n");
+        const sent = await control.call("reply.send", { id: "update-admission", threadId: thread.id, messageId: "update-admission", text: "Do not start", model: "qwen3.5:9b", numCtx: 16384 });
+        assert.equal(sent.reply?.held?.code, "update-installing");
+        await control.call("reply.remove", { id: "update-admission" });
         const requests = await Promise.allSettled([
-          control.call("chat.send", { threadId: thread.id, content: "Do not start", model: "qwen3.5:9b", numCtx: 16384 }),
           control.call("image.generate", { prompt: "Do not start" }),
           control.call("models.pull", { name: "never-download-test" }),
           control.call("sources.add", { kind: "file", path: imported, label: "Admission import" }),
@@ -318,7 +320,7 @@ require("./out/main.cjs");
       assert.ok(model);
       let sawText = false;
       const off = control.subscribe("chat.event", (event) => { if (event.threadId === thread.id && event.event.type === "delta") sawText = true; });
-      await control.call("chat.send", { threadId: thread.id, content: "Keep a partial answer", model: model.name, numCtx: 16384 });
+      await control.call("reply.send", { id: "partial-answer", threadId: thread.id, messageId: "partial-answer", text: "Keep a partial answer", model: model.name, numCtx: 16384 });
       await expect.poll(() => sawText, { timeout: 60_000 }).toBe(true);
       off();
     } finally { control.close(); }

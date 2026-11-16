@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BlockingTurn, Message, Payload, ReplyTimes } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
-import { type Browser, type Held, installBrowser, tick, until } from "../../test/harness.ts";
+import { type Browser, type HeldStart, installBrowser, tick, until } from "../../test/harness.ts";
 import { replay } from "../../test/ordering-replay.ts";
 import { gpuReadFailure } from "@gates-local/server/fit/gpu.ts";
 import { draftView } from "../../test/draft-view.ts";
@@ -30,7 +30,7 @@ const chat = (turnId: string, threadId: string, event: Payload<"chat.event">["ev
 const BLOCKING: BlockingTurn[] = [{ threadId: "A", title: "First chat", model: "qwen3:14b", turnId: "turn-A-1" }];
 // the model the sample list makes the pick
 const MODEL = "gemma3:4b";
-const sends = () => b.server.calls("chat.send").map((r) => r.params as { threadId: string; content: string; model: string; stopOthers?: boolean });
+const sends = () => b.server.calls("turn.start").map((r) => r.params as { threadId: string; content: string; model: string; stopOthers?: boolean });
 
 it("CO-06 replay: a refused GPU send is held with the server explanation, not put back in the box", async () => {
   const sentence = gpuReadFailure("nvidia-smi timed out");
@@ -38,7 +38,7 @@ it("CO-06 replay: a refused GPU send is held with the server explanation, not pu
     name: "GPU read refusal holds the message with its reason",
     create: async () => {
       type("keep these words");
-      const waiting = b.server.hold("chat.send");
+      const waiting = b.server.hold("turn.start");
       const sent = session.send(st().draft);
       return { request: await waiting, sent };
     },
@@ -78,7 +78,7 @@ it.each(["Settings", "another thread"])("round 4: a refused send's retry keeps i
     }
     expect(st()).toMatchObject({ view: "thread", threadId: "A", draft: "same recovered words" });
     await session.send(st().draft);
-    expect(b.server.calls("chat.send").at(-1)?.params).toHaveProperty("messageId", original);
+    expect(b.server.calls("turn.start").at(-1)?.params).toHaveProperty("messageId", original);
   } finally { load.mockRestore(); }
 });
 
@@ -101,7 +101,7 @@ it("round 4: sending the recovered words in B never uses A's identity", async ()
   expect(drafts.getDraft("B").text).toBe("recovered words");
   check.respond([]);
   await sendInB;
-  const retry = b.server.calls("chat.send").at(-1)?.params as { threadId: string; messageId: string };
+  const retry = b.server.calls("turn.start").at(-1)?.params as { threadId: string; messageId: string };
   expect(retry.threadId).toBe("B");
   expect(retry.messageId).not.toBe(original.params.messageId);
 });
@@ -131,7 +131,7 @@ it("round 4: editing recovered words after navigation creates a new identity", a
   session.openThread("A");
   draftSource.editDraft("edited words");
   await session.send(st().draft);
-  expect(b.server.calls("chat.send").at(-1)?.params).not.toHaveProperty("messageId", original.params.messageId);
+  expect(b.server.calls("turn.start").at(-1)?.params).not.toHaveProperty("messageId", original.params.messageId);
 });
 
 it("PC-04: second Enter during thread creation sends the visible draft once", async () => {
@@ -170,11 +170,11 @@ it("PC-03: reconnect retry keeps the identity of the unacknowledged send", async
   await sent;
   await until(() => st().conn.kind === "open", 2000, "reconnected");
   await session.send(st().draft);
-  expect(b.server.calls("chat.send").at(-1)?.params).toHaveProperty("messageId", id);
+  expect(b.server.calls("turn.start").at(-1)?.params).toHaveProperty("messageId", id);
 });
 
 it("chat row 32: Send answers at once; the words wait as the question until the start brings the saved row", async () => {
-  b.server.answer("chat.send", () => ({ turnId: "turn-A-1" }));
+  b.server.answer("turn.start", () => ({ turnId: "turn-A-1" }));
   type("slow admission");
   await session.send(st().draft);
   // answered while the server still admits it: no timer, no words back in the box; the record names the question
@@ -186,7 +186,7 @@ it("chat row 32: Send answers at once; the words wait as the question until the 
   type("next words");
   await session.send(st().draft);
   expect(st().queued.map(q => q.text), "a second Send queues behind the admitted turn").toEqual(["next words"]);
-  const id = (b.server.calls("chat.send")[0]!.params as { messageId: string }).messageId;
+  const id = (b.server.calls("turn.start")[0]!.params as { messageId: string }).messageId;
   chat("turn-A-1", "A", { type: "start", model: MODEL, userMessage: userMsg(id, "A", "slow admission") });
   await tick();
   expect(live()).toMatchObject({ turnId: rid, userMessageId: id });
@@ -195,7 +195,7 @@ it("chat row 32: Send answers at once; the words wait as the question until the 
 });
 
 it("chat row 32: a refusal after the answer holds the message with the server's reason", async () => {
-  b.server.answer("chat.send", () => ({ turnId: "turn-A-1" }));
+  b.server.answer("turn.start", () => ({ turnId: "turn-A-1" }));
   draftSource.replaceDraft(st().threadId, { text: "keep these", images: ["data:image/png;base64,cGl4ZWw="] });
   await session.send(st().draft);
   const sentence = gpuReadFailure("nvidia-smi timed out");
@@ -208,7 +208,7 @@ it("chat row 32: a refusal after the answer holds the message with the server's 
 });
 
 it("chat row 32: a dropped connection before the start leaves the message with the server, sent once", async () => {
-  b.server.answer("chat.send", () => ({ turnId: "turn-A-1" }));
+  b.server.answer("turn.start", () => ({ turnId: "turn-A-1" }));
   type("not started yet");
   await session.send(st().draft);
   const rid = (b.server.calls("reply.send")[0]!.params as { id: string }).id;
@@ -234,7 +234,7 @@ it.each(["timeout", "closed"])("returns an unconfirmed %s send to view with its 
 it("holds a send the model cannot take pictures for, with its images and the reason", async () => {
   const images = ["data:image/png;base64,cGl4ZWw="];
   draftSource.replaceDraft(st().threadId, { text: "keep my words", images });
-  const waiting = b.server.hold("chat.send");
+  const waiting = b.server.hold("turn.start");
   const sent = session.send("keep my words");
   (await waiting).fail("image-input", "This model cannot read images");
   await sent;
@@ -287,7 +287,7 @@ beforeEach(async () => {
   turnsOf = {};
   b.server.answer("threads.create", ({ title }) => ({ id: created.shift() ?? "Z", title: title ?? "", createdAt: 1, updatedAt: 1 }));
   b.server.answer("threads.get", ({ threadId }) => ({ thread: { id: threadId, title: threadId, createdAt: 1, updatedAt: 1 }, messages: [] }));
-  b.server.answer("chat.send", ({ threadId, content }) => {
+  b.server.answer("turn.start", ({ threadId, content }) => {
     const n = (turnsOf[threadId] = (turnsOf[threadId] ?? 0) + 1);
     return { turnId: `turn-${threadId}-${n}`, userMessage: userMsg(`u-${threadId}-${n}`, threadId, content) };
   });
@@ -315,8 +315,8 @@ it("snapshots attached images into a queued send and restores them for editing",
   expect(st().draftImages).toEqual(["data:image/png;base64,cGl4ZWw="]);
   await session.send("edited image");
   chat("turn-A-1", "A", { type: "done", message: asstMsg("a-A-1", "A"), stopReason: "stop" });
-  await until(() => b.server.calls("chat.send").length === 2, 2000, "queued image send");
-  expect(b.server.calls("chat.send")[1]?.params).toMatchObject({ images: ["data:image/png;base64,cGl4ZWw="] });
+  await until(() => b.server.calls("turn.start").length === 2, 2000, "queued image send");
+  expect(b.server.calls("turn.start")[1]?.params).toMatchObject({ images: ["data:image/png;base64,cGl4ZWw="] });
 });
 
 it("sends an image-only first message with a usable thread title", async () => {
@@ -324,7 +324,7 @@ it("sends an image-only first message with a usable thread title", async () => {
   draftSource.replaceDraft(st().threadId, { images: ["data:image/png;base64,cGl4ZWw="] });
   await session.send("");
   expect(b.server.calls("threads.create").at(-1)?.params).toEqual({ title: "Attached images" });
-  expect(b.server.calls("chat.send").at(-1)?.params).toMatchObject({ content: "", images: ["data:image/png;base64,cGl4ZWw="] });
+  expect(b.server.calls("turn.start").at(-1)?.params).toMatchObject({ content: "", images: ["data:image/png;base64,cGl4ZWw="] });
 });
 
 /** A new chat with this id, answering; the turn id is known when this returns. */
@@ -541,7 +541,7 @@ describe("the chat that got stopped", () => {
 
     it("of an unfinished reply names the question, and the old rows go once the server has saved the new one", async () => {
       const question = await ask(unfinished);
-      const held = b.server.hold("chat.send");
+      const held = b.server.hold("turn.start");
       session.retry();
       const h = await held;
       expect(h.params).toMatchObject({ retryOf: question, content: "hello A" });
@@ -553,7 +553,7 @@ describe("the chat that got stopped", () => {
 
     it("of a finished reply is a new question and names nothing", async () => {
       await ask({ type: "done", message: asstMsg("whole", "A"), stopReason: "stop" });
-      const held = b.server.hold("chat.send");
+      const held = b.server.hold("turn.start");
       session.retry();
       const h = await held;
       expect(h.params).not.toHaveProperty("retryOf");
@@ -561,7 +561,7 @@ describe("the chat that got stopped", () => {
 
     it("that the server refuses leaves the unfinished words where they were", async () => {
       const question = await ask(unfinished);
-      const held = b.server.hold("chat.send");
+      const held = b.server.hold("turn.start");
       session.retry();
       (await held).fail("wont-fit", "no");
       await tick();
@@ -721,7 +721,7 @@ describe("a turn left running behind another chat", () => {
 
 describe("picking a model while another is answering", () => {
   it.each([false, true])("a replayed parked acknowledgement frees its slot and the automatic queue (finished before acknowledgement: %s)", async finishedFirst => {
-    const waiting = b.server.hold("chat.send");
+    const waiting = b.server.hold("turn.start");
     const sending = session.send("recovered A");
     const request = await waiting;
     const second = await answering("B");
@@ -760,7 +760,7 @@ describe("picking a model while another is answering", () => {
     chat(a, "A", { type: "error", code: "cancelled", message: "stopped", ended: { reason: "stopped", at: Date.now() } });
     await until(() => sends().length === 3, 1000, "the explicit Send now");
     expect(sends()[2]).toMatchObject({ threadId: "A", content: "send now" });
-    expect(b.server.calls("chat.send")[2]?.params).toMatchObject({ images, messageId });
+    expect(b.server.calls("turn.start")[2]?.params).toMatchObject({ images, messageId });
     expect(b.server.calls("reply.now").map((r) => r.params)).toEqual([{ id }]);
     expect(b.server.calls("reply.stop")).toEqual([]);
   });
@@ -924,7 +924,7 @@ describe("messages typed while a reply is being written", () => {
   it("a queued message that fails to send goes back in the queue with the reason, the box untouched", async () => {
     const turn = await answering("A");
     await session.send("next");
-    b.server.answer("chat.send", () => {
+    b.server.answer("turn.start", () => {
       throw { code: "internal", message: "no" };
     });
     type("still typing");
@@ -1081,7 +1081,7 @@ async function onHold(...words: string[]): Promise<string[]> {
 async function admitting(): Promise<{ fail(code: string, message: string): void }> {
   const turn = await answering("A");
   await session.send("next");
-  const held = b.server.hold("chat.send");
+  const held = b.server.hold("turn.start");
   chat(turn, "A", done("a1", "A"));
   (await held).respond({ turnId: "turn-next" });
   await until(() => store.unsavedQuestion(store.getState(), live() ?? undefined)?.text === "next", 2000, "the queued message on its way");
@@ -1090,9 +1090,9 @@ async function admitting(): Promise<{ fail(code: string, message: string): void 
 }
 
 /** "typed" is at admission in chat A, the first turn this session. */
-async function typed(): Promise<Held<"chat.send">> {
+async function typed(): Promise<HeldStart> {
   session.newThread();
-  const held = b.server.hold("chat.send");
+  const held = b.server.hold("turn.start");
   void session.send("typed");
   const h = await held;
   expect(st().draft).toBe("");
@@ -1113,7 +1113,7 @@ async function editedThroughDone(): Promise<void> {
 const WOULD_STOP_MESSAGE = "this would stop another reply";
 
 /** Typed in A and stopped at admission; then B sent, which took the live slot, and the person came back to A. */
-async function stoppedThenReplaced(): Promise<Held<"chat.send">> {
+async function stoppedThenReplaced(): Promise<HeldStart> {
   const h = await typed();
   session.stop();
   await answering("B");
@@ -1133,7 +1133,7 @@ async function refusedAfterSetup(): Promise<string> {
   session.newThread();
   await session.send("typed during setup");
   expect(st().queued).toMatchObject([{ waitFor: "setup" }]);
-  const held = b.server.hold("chat.send");
+  const held = b.server.hold("turn.start");
   b.server.push("runtime.changed", ready);
   (await held).fail("internal", "no");
   await until(() => st().queued.length === 1, 2000, "the message back");
@@ -1151,7 +1151,7 @@ describe("a message the person typed is never lost", () => {
     it("goes back at its own place, on hold with the reason, and the box keeps what is in it", async () => {
       const ids = await onHold("one", "two", "three");
       type("something else");
-      const held = b.server.hold("chat.send");
+      const held = b.server.hold("turn.start");
       session.sendQueuedNow(ids[1] ?? "");
       const h = await held;
       // the server sends it; until its turn is taken it waits first in line
@@ -1165,7 +1165,7 @@ describe("a message the person typed is never lost", () => {
 
     it("the row says why, and nothing says the box has it", async () => {
       const ids = await onHold("one");
-      const held = b.server.hold("chat.send");
+      const held = b.server.hold("turn.start");
       session.sendQueuedNow(ids[0] ?? "");
       (await held).fail("closed", "gone");
       await until(() => st().queued[0]?.why !== undefined, 2000, "the message back");
@@ -1179,7 +1179,7 @@ describe("a message the person typed is never lost", () => {
     chat(turn, "A", done("a1", "A"));
     await until(() => live() === null, 2000, "A done");
     type("half a thought");
-    const held = b.server.hold("chat.send");
+    const held = b.server.hold("turn.start");
     session.retry();
     (await held).fail("internal", "no");
     // a finished reply's Regenerate is a new question: refused, it is held with the reason like any other
@@ -1215,7 +1215,7 @@ describe("a message the person typed is never lost", () => {
       const turn = await answering("A");
       await session.send("first");
       await session.send("second");
-      const held = b.server.hold("chat.send");
+      const held = b.server.hold("turn.start");
       chat(turn, "A", done("a1", "A"));
       (await held).fail("wont-fit", "no");
       await until(() => st().queued.length === 2, 2000, "the message back");
@@ -1233,7 +1233,7 @@ describe("a message the person typed is never lost", () => {
     await session.send("for B");
     chat(a, "A", done("a1", "A"));
     await tick();
-    const held = b.server.hold("chat.send");
+    const held = b.server.hold("turn.start");
     chat(c, "B", done("b1", "B"));
     (await held).fail("wont-fit", "no");
     await until(() => sends().some((s) => s.content === "for B"), 2000, "B's queued message");
@@ -1244,7 +1244,7 @@ describe("a message the person typed is never lost", () => {
     it("behind another chat, it is held in its own chat with the reason, and the open chat is left alone", async () => {
       const drafts = await import("../lib/store/drafts.ts");
       session.newThread();
-      const held = b.server.hold("chat.send");
+      const held = b.server.hold("turn.start");
       void session.send("typed");
       const h = await held;
       await answering("B");
@@ -1403,9 +1403,9 @@ describe("a message the person typed is never lost", () => {
   describe("a blocker the preflight missed (CFS-07)", () => {
     const WOULD_STOP = { code: "would-stop", message: "this would stop another reply", blocking: BLOCKING };
 
-    /** The next chat.send is refused for a blocker; the ones after it go through as usual. */
+    /** The next reply.send is refused for a blocker; the ones after it go through as usual. */
     function refusedOnce(): void {
-      void b.server.hold("chat.send").then((h) => h.fail(WOULD_STOP.code, WOULD_STOP.message, WOULD_STOP.blocking));
+      void b.server.hold("turn.start").then((h) => h.fail(WOULD_STOP.code, WOULD_STOP.message, WOULD_STOP.blocking));
     }
 
     it("a person's send asks the server to refuse rather than wait", async () => {
@@ -1498,7 +1498,7 @@ describe("a message the person typed is never lost", () => {
     it("with other words in the box, the message waits in the queue instead of taking the box", async () => {
       await answering("A");
       session.newThread();
-      const held = b.server.hold("chat.send");
+      const held = b.server.hold("turn.start");
       void session.send("for B");
       const h = await held;
       type("newer words");
@@ -1513,7 +1513,7 @@ describe("a message the person typed is never lost", () => {
       const drafts = await import("../lib/store/drafts.ts");
       await answering("A");
       session.newThread();
-      const held = b.server.hold("chat.send");
+      const held = b.server.hold("turn.start");
       void session.send("for B");
       const h = await held;
       session.openThread("A");
@@ -1562,7 +1562,7 @@ describe("a message the person typed is never lost", () => {
     it("what queued behind a stopped send stays on hold once another chat has taken the slot (CFT-01, CFT-02)", async () => {
       const drafts = await import("../lib/store/drafts.ts");
       session.newThread();
-      const held = b.server.hold("chat.send");
+      const held = b.server.hold("turn.start");
       void session.send("typed");
       const h = await held;
       await session.send("behind it");
@@ -1607,7 +1607,7 @@ describe("a message the person typed is never lost", () => {
 
     it("a different turn in the way by then holds the message naming it, and the next yes carries its id", async () => {
       await warned();
-      const held = b.server.hold("chat.send");
+      const held = b.server.hold("turn.start");
       session.confirmStopAsk(false);
       (await held).fail("would-stop", WOULD_STOP_MESSAGE, OTHER);
       await until(() => st().queued.length === 1, 2000, "the message held");

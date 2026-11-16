@@ -111,17 +111,17 @@ export class OrderingServer extends FakeServer {
     } else if (request.method === "reply.send" && this.modelsSnapshot.length === 0) {
       // no model yet: the server keeps it waiting for the download, as the base server's queue does
       super.handle(socket, request);
-    } else if (request.method === "chat.send" || request.method === "reply.send") {
+    } else if (request.method === "reply.send") {
       this.log.push(request);
-      const { threadId, content, text, messageId, id, retryOf } = request.params as { threadId: string; content?: string; text?: string; messageId?: string; id?: string; retryOf?: string };
+      const { threadId, text, messageId, id, retryOf } = request.params as Params<"reply.send">;
       const turnId = `turn-${++this.nextTurn}`;
       // saved under the id the send asked for, as app.ts saves it
-      const userMessage: Message = { id: messageId ?? `user-${this.nextTurn}`, threadId, role: "user", content: content ?? text ?? "", createdAt: this.nextTurn };
+      const userMessage: Message = { id: messageId, threadId, role: "user", content: text, createdAt: this.nextTurn };
       this.admissions.set(turnId, userMessage);
-      if (id !== undefined) this.recordOf.set(turnId, id);
+      this.recordOf.set(turnId, id);
       if (retryOf !== undefined) this.retries.set(turnId, retryOf);
       // answered once it is taken (chat row 32); the start brings the saved question
-      save(turnId, id === undefined ? { turnId } : { answer: "done", reply: this.startingRecord(turnId, userMessage) });
+      save(turnId, { answer: "done", reply: this.startingRecord(turnId, userMessage) });
       if (!this.holdChat) this.response(turnId);
       if (!this.deferAdmission) this.admit(turnId);
     } else if (request.method === "reply.list") {

@@ -637,7 +637,7 @@ export async function createWorld(options: WorldOptions) {
           reservation = loader.reserve(model);
           const baseUrl = reservation.baseUrl;
           if (baseUrl === undefined) throw new Error("no runtime is ready");
-          // chat.send ties its runtime's end to the turn
+          // reply.send ties its runtime's end to the turn
           const gone = reservation.signal;
           gone.addEventListener("abort", () => { if (endsWhenTold) turn.abort(gone.reason); }, { once: true });
           const plan = async (signal: AbortSignal, context?: AdmitContext): Promise<FitReport> => {

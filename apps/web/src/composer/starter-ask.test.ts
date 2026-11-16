@@ -29,8 +29,8 @@ afterEach(async () => { disconnect(); browser.server.accepting = false; for (con
 
 it("sends the question alone to a new chat and leaves the person's waiting words and picture as they were", async () => {
   starter.askWith(QUESTION);
-  await until(() => browser.server.calls("chat.send").length === 1, 2000, "chat.send");
-  const sent = browser.server.calls("chat.send")[0]!.params as { content: string; images?: unknown };
+  await until(() => browser.server.calls("turn.start").length === 1, 2000, "the turn start");
+  const sent = browser.server.calls("turn.start")[0]!.params as { content: string; images?: unknown };
   expect(sent.content).toBe(QUESTION);
   expect(sent.images).toBeUndefined();
   const thread = store.getState().threadId;
@@ -63,6 +63,6 @@ it("a refused send leaves the person in the new chat, with the reason and their 
   expect(store.getState().view).toBe("new");
   // The question is not in the composer, so the reason does not say it is; it is still on its button in Settings, Library.
   expect(store.getState().notice).toBe("The message didn't send. Gates Local isn't answering.");
-  expect(browser.server.calls("chat.send")).toHaveLength(0);
+  expect(browser.server.calls("turn.start")).toHaveLength(0);
   expect(drafts.getDraft(null)).toMatchObject({ text: "my half-written question", images: [PICTURE] });
 });

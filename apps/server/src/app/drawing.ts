@@ -76,33 +76,32 @@ export interface DrawTurnDeps extends Pick<AppContext, "deps" | "store" | "log" 
   readonly refused: (turn: Turn, e: unknown, stoppedAt: number | undefined) => void;
 }
 
-/** `taken`: the start the picker took for a waiting message. `direct`: gives a window's own send its record, once its work is reserved. */
-export type DrawTurn = (threadId: string, content: string, choice: ImageChoice, count: { now: number; saved: number }, messageId: string | undefined, replaced: readonly string[], attached: boolean, replacedFiles: readonly string[], taken: Taken | undefined, direct: (turn: Turn) => void) => { turnId: string };
+/** `taken`: the start the picker took for a waiting message. */
+export type DrawTurn = (threadId: string, content: string, choice: ImageChoice, count: { now: number; saved: number }, messageId: string | undefined, replaced: readonly string[], attached: boolean, replacedFiles: readonly string[], taken: Taken) => { turnId: string };
 
 export function createDrawTurn({ deps, store, log, push, reserve, replies, queueImage, admitting, refused }: DrawTurnDeps): DrawTurn {
   /**
-   * Image mode (chat.send draw): the words go to the image module as its prompt and no chat model
+   * Image mode (a send's draw): the words go to the image module as its prompt and no chat model
    * runs, so there is no fit, no load and no chat claim; the job claims the GPU alone. The turn
    * lasts as long as the job: a second send in the thread waits, Stop (or deleting the thread or
    * the question, or shutdown) cancels the job, and the card ends the turn as its reply. A job
    * that fails says why on its card, the way a tool-made picture does.
    *
-   * `count` pictures (the thread's count, chat.send drawCount): one job after another, seeds one
+   * `count` pictures (the thread's count, a send's drawCount): one job after another, seeds one
    * apart, in one group the client shows as tiles of one card. The turn lasts until the last one
    * settles; Stop cancels those not done and keeps the finished ones.
    */
-  const drawTurn: DrawTurn = (threadId, content, choice, count, messageId, replaced, attached, replacedFiles, taken, direct) => {
+  const drawTurn: DrawTurn = (threadId, content, choice, count, messageId, replaced, attached, replacedFiles, taken) => {
     const image = deps.image;
     if (attached) throw new AppError("image-input", "Image mode makes a picture from words alone. Remove the attachments, or turn Image off to ask a chat model about them.");
     if (image === undefined) throw new AppError("image-input", "Image generation is not available in this build.");
     // An Image mode turn never counts as a chat model in GPU memory: the job's own GPU claim covers it.
     const { turn, end } = reserve(threadId, choice.preset, taken);
-    direct(turn);
     admitting(turn, queueDrawing(image, turn, end, { threadId, content, choice, count, messageId, replaced }), replacedFiles);
     return { turnId: turn.turnId };
   };
 
-  /** An Image mode turn chat.send answered: its question and its jobs, then its start; a refusal is its error event. */
+  /** An Image mode turn just taken: its question and its jobs, then its start; a refusal is its error event. */
   const queueDrawing = async (
     image: ImageModule,
     turn: Turn,

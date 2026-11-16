@@ -32,7 +32,7 @@ it("TD-13: reload preserves stranded edited words and sending them reveals the b
     const session = await import("../lib/session/index.ts"); disconnect = session.connect();
     await until(() => b.getState().conn.kind === "open" && b.getState().models !== undefined, 2000, "connected");
     await session.send("queued words, edited");
-    expect(browser.server.calls("chat.send").at(-1)?.params).toMatchObject({ content: "queued words, edited" });
+    expect(browser.server.calls("turn.start").at(-1)?.params).toMatchObject({ content: "queued words, edited" });
     expect(b.getDraft("A")).toMatchObject(backup);
     expect(b.getDraft("A").beforeEdit).toBeUndefined();
   } finally {

@@ -1,6 +1,6 @@
 // The work of one start as the app holds it from reserve to its end, how it ended, and the
 // state the app's jobs share (app.ts builds it once and hands it to each).
-import type { Message, Payload, ToolStep, TurnEnded } from "@gates-local/contracts";
+import type { AttachedFile, ImageChoice, ImageCount, Message, Payload, ToolStep, TurnEnded } from "@gates-local/contracts";
 import type { fileLifecycle } from "../chat/files.ts";
 import type { imageLifecycle } from "../chat/image-lifecycle.ts";
 import type { Replies } from "../chat/replies.ts";
@@ -66,6 +66,30 @@ export interface Taken {
   readonly attempt: number;
 }
 
+export interface StartParams {
+  readonly threadId: string;
+  readonly content: string;
+  readonly model: string;
+  readonly numCtx: number;
+  readonly messageId?: string;
+  readonly retryOf?: string;
+  readonly images?: readonly string[];
+  readonly files?: readonly AttachedFile[];
+  readonly think?: boolean;
+  readonly tools?: boolean;
+  readonly draw?: ImageChoice;
+  readonly drawCount?: ImageCount;
+  readonly stopOthers?: boolean;
+  readonly stopTurns?: readonly string[];
+  readonly askFirst?: boolean;
+}
+
+export interface StartAnswer {
+  readonly turnId: string;
+  readonly userMessage?: Message;
+  readonly replayed?: boolean;
+}
+
 /**
  * The work of one start, from the moment it is taken until it has given back everything it took:
  * what it holds (its abort, its model's memory, its words so far), never which stage its reply
@@ -93,7 +117,7 @@ export interface Turn {
    * Set inside the load gate when its fit passes, before the user message is saved.
    */
   inMemory: boolean;
-  /** Its saved question once it starts; rejects with its refusal (App.admission). */
+  /** Its saved question once it starts; rejects with its refusal (App.started). */
   admission?: Promise<Message>;
   /** The reply's row on disk while it streams. threads.get hides it: this reply reaches clients as its live turn. */
   draftId: string | undefined;
@@ -115,7 +139,7 @@ export interface AppContext {
   readonly log: (line: string) => void;
   /** deps.push, logging a failure; a chat.event also moves the queue. */
   readonly push: Push;
-  /** Turns from chat.send's reserve to their end, by turn id. */
+  /** Turns from their reserve to their end, by turn id. */
   readonly turns: Map<string, Turn>;
   /** The same turns by thread: one at a time in each. */
   readonly byThread: Map<string, Turn>;
@@ -135,12 +159,12 @@ export interface AppContext {
   readonly fitTable: FitTableSource;
   /** The turn's reply record as it is now, to every window. */
   readonly pushReply: (turn: Turn) => void;
-  /** chat.send's answer has gone out for this turn: from here a load of its own model that it waits behind is said as "loading". */
+  /** The start's answer has gone out for this turn: from here a load of its own model that it waits behind is said as "loading". */
   readonly answered: (turn: Turn) => void;
   /** The measured speeds, after a finished reply is saved or replies are deleted. */
   readonly pushSpeeds: () => void;
   /** Claims the thread synchronously so a second send cannot slip in during the fit check. `taken`: the start the picker took. */
-  readonly reserve: (threadId: string, model: string, taken?: Taken) => { turn: Turn; end: () => void };
+  readonly reserve: (threadId: string, model: string, taken: Taken) => { turn: Turn; end: () => void };
   /** Look at the queue once the current work settles. */
   readonly pump: () => void;
 }

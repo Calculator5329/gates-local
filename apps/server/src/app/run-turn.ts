@@ -282,7 +282,7 @@ export function createTurnRunner({ deps, store, log, push, pushReply, draftEvery
       }
     } catch (e) {
       if (turn.halted) finish(haltedEnd(turn.halted));
-      // chat.cancel aborted a wait before the chat request (the system prompt's /api/show): the person's cancel, not a failure
+      // a Stop aborted a wait before the chat request (the system prompt's /api/show): the person's cancel, not a failure
       else if (controller.signal.aborted) finish({ type: "error", code: "cancelled", message: "cancelled before the reply started" });
       else {
         log(`turn ${turnId} failed: ${(e as Error).message}`);

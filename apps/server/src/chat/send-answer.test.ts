@@ -1,6 +1,6 @@
-// chat.send answers once the turn is taken (chat row 32): its id at once, before the fit, the
-// load and saving the question. reply.list lists the turn from then. A refusal from then on
-// is the turn's error event, the one way every window hears of it.
+// A send into a free chat is answered once its start is taken (chat row 32): before the fit, the
+// load and saving the question. reply.list lists it from then. A refusal from then on is the
+// turn's error event.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +8,8 @@ import type { Channel, Payload } from "@gates-local/contracts";
 import { afterEach, expect, it, vi } from "vitest";
 import { AppError, createApp } from "../app.ts";
 import { openThreadStore } from "../threads/store.ts";
+import { sendTaken } from "./send-started.ts";
+import { chatCatalog } from "../../test/send-rig.ts";
 
 const MODEL = "qwen3.5:9b";
 const cleanups: (() => void | Promise<void>)[] = [];
@@ -50,7 +52,7 @@ function rig(admit: () => Promise<void> = async () => {}) {
   const app = createApp({
     store: db,
     runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
-    catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
+    catalog: chatCatalog(),
     push: (channel, payload) => { pushes.push({ channel, payload }); },
     fit: { runNvidiaSmi: async (args) => (args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : ""), readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
     models: { handlers: {}, loader: { reserve: () => ({
@@ -72,18 +74,18 @@ function rig(admit: () => Promise<void> = async () => {}) {
   return { app, db, thread, gate, events };
 }
 
-it("chat.send answers with the turn id while the turn waits to be admitted, and reply.list lists it from then", async () => {
+it("a send is answered while its start waits to be admitted, and reply.list lists it from then", async () => {
   mkdirSync(path.join(os.homedir(), ".cache", "gates-local-tests"), { recursive: true });
   const r = rig();
-  const sending = Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 }));
+  const sending = Promise.resolve(sendTaken(r.app, { threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 }));
   const answer = await Promise.race([sending, new Promise<"waiting">((done) => setTimeout(() => done("waiting"), 300))]);
-  if (answer === "waiting") throw new Error("chat.send waited for the admission");
-  expect(answer).toEqual({ turnId: expect.any(String) });
+  if (answer === "waiting") throw new Error("the send waited for the admission");
+  expect(answer).toMatchObject({ id: expect.any(String), turnId: expect.any(String) });
   expect(r.events(answer.turnId), "nothing has started yet").toEqual([]);
   const list = r.app.handlers["reply.list"];
   if (list === undefined) throw new Error("the server has no reply.list");
   // with the record as it is: taken, its start not through yet (decision 33)
-  expect(await list({}, { clientId: 2 }), "another window sees the reply coming").toEqual([{ reply: expect.objectContaining({ id: answer.turnId, threadId: r.thread.id, stage: "starting", attempt: 1 }) }]);
+  expect(await list({}, { clientId: 2 }), "another window sees the reply coming").toEqual([{ reply: expect.objectContaining({ id: answer.id, threadId: r.thread.id, stage: "starting", attempt: 1 }) }]);
   r.gate.resolve();
   await until(() => r.events(answer.turnId).some((e) => e.type === "start"), "the start");
   expect(r.events(answer.turnId)[0]).toMatchObject({ type: "start", model: MODEL, userMessage: { role: "user", content: "hi" } });
@@ -93,7 +95,7 @@ it("a refusal after the answer is the turn's error event, before any start, with
   mkdirSync(path.join(os.homedir(), ".cache", "gates-local-tests"), { recursive: true });
   const blocking = [{ threadId: "B", title: "B", model: "gemma3:4b", turnId: "turn-b" }];
   const r = rig(async () => { throw new AppError("would-stop", "needs the GPU memory of a running reply", undefined, undefined, blocking); });
-  const answer = await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384, askFirst: true }, { clientId: 1 });
+  const answer = await sendTaken(r.app, { threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384, askFirst: true }, { clientId: 1 });
   r.gate.resolve();
   await until(() => r.events(answer.turnId).length > 0, "the refusal");
   expect(r.events(answer.turnId)).toEqual([{ type: "error", code: "would-stop", message: "needs the GPU memory of a running reply", blocking, ended: { reason: "failed", at: expect.any(Number) } }]);
@@ -104,8 +106,8 @@ it("a refusal after the answer is the turn's error event, before any start, with
 it("a Stop before the turn started ends it as stopped, with nothing saved", async () => {
   mkdirSync(path.join(os.homedir(), ".cache", "gates-local-tests"), { recursive: true });
   const r = rig();
-  const answer = await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 });
-  expect(r.app.handlers["chat.cancel"]({ turnId: answer.turnId }, { clientId: 1 })).toEqual({ cancelled: true });
+  const answer = await sendTaken(r.app, { threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+  expect(r.app.handlers["reply.stop"]({ id: answer.turnId }, { clientId: 1 })).toMatchObject({ answer: "done" });
   r.gate.resolve();
   await until(() => r.events(answer.turnId).length > 0, "the end");
   expect(r.events(answer.turnId)).toEqual([{ type: "error", code: "cancelled", message: "the turn was cancelled before it started", ended: { reason: "stopped", at: expect.any(Number) } }]);

@@ -11,6 +11,7 @@ import { sendStarted } from "./send-started.ts";
 import { openThreadStore, type ThreadStore } from "../threads/store.ts";
 import { createGpuLease, type GpuLease } from "../gpu/lease.ts";
 import type { ImageModule } from "../image/module.ts";
+import { chatCatalog } from "../../test/send-rig.ts";
 const { streamToolTurn } = toolTransport;
 
 const dirs: string[] = [];
@@ -26,7 +27,7 @@ const sentMessages = (bodies: Record<string, unknown>[]) => (bodies[0]?.["messag
 const ndjson = (items: unknown[]) => new Response(items.map(i => JSON.stringify(i)).join("\n") + "\n");
 /** A whole reply in one stream line, then the done line. */
 const big = (text: string) => ndjson([{ message: { content: text } }, { message: { content: "" }, done: true }]);
-/** No ComfyUI is up, so chat.send has nothing to free before its claim. */
+/** No ComfyUI is up, so reply.send has nothing to free before its claim. */
 const noComfy = () => ({ state: "stopped", owner: "none" });
 /** An image module over the app's real lease, shaped like image/module.ts: generate returns the id at once and the job claims the GPU alone. */
 const fakeImage = (lease: GpuLease, store: ThreadStore, gate?: Promise<void>) => {
@@ -80,7 +81,7 @@ const imageApp = async (second: (signal: AbortSignal | undefined) => Response | 
   vi.stubGlobal("fetch", fetcher);
   const app = createApp({ store, sources, toolsEnabled: () => true, image: fake.image, imageTool: () => (imageTool ? TOOL_CHOICE : undefined), lease,
     runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
-    catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
+    catalog: chatCatalog(),
     push: (channel, payload) => pushed.push({ channel, payload }), fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
   });
   return { app, store, lease, fake, chatBodies, pushed, atSecond: () => atSecond, close: async () => { await app.shutdown(); store.close(); vi.unstubAllGlobals(); } };
@@ -253,7 +254,7 @@ describe("tool chat transport", () => {
       expect(events.filter(e => e.type === "tool")).toHaveLength(1);
     }
   });
-  it("persists a chat.send tool step through app.ts with fake fetch and no listeners", async () => {
+  it("persists a reply.send tool step through app.ts with fake fetch and no listeners", async () => {
     const root = scratch("gl-app-tools-");
     const sources = createSources({ dataDir: path.join(root, "data") });
     const file = path.join(root, "notes.txt"); writeFileSync(file, "hello library");
@@ -271,7 +272,7 @@ describe("tool chat transport", () => {
     const pushed: unknown[] = [];
     const app = createApp({ store, sources, toolsEnabled: () => true,
       runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
-      catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
+      catalog: chatCatalog(),
       push: (channel, payload) => pushed.push({ channel, payload }),
       fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
     });
@@ -284,7 +285,7 @@ describe("tool chat transport", () => {
     } finally { await app.shutdown(); store.close(); vi.unstubAllGlobals(); }
   });
   for (const image of [true, false]) {
-    it(`chat.send ${image ? "offers the image tool and queues the job, which runs after the reply" : "neither offers nor runs the image tool"} when Tools › Make images is ${image ? "on" : "off"}`, async () => {
+    it(`reply.send ${image ? "offers the image tool and queues the job, which runs after the reply" : "neither offers nor runs the image tool"} when Tools › Make images is ${image ? "on" : "off"}`, async () => {
       const t = await imageApp(() => ndjson([{ message: { content: "Here's an image: ![Star Trek Ship](https://example.com/invented.png)" }, done: true }]), undefined, undefined, image);
       try {
         const thread = t.store.createThread();
@@ -320,7 +321,7 @@ describe("tool chat transport", () => {
         const thread = t.store.createThread();
         const { turnId } = await sendStarted(t.app, { threadId: thread.id, content: "draw", model: "m", numCtx: 16384 }, { clientId: 1 });
         await vi.waitFor(() => expect(t.fake.generate).toHaveBeenCalledTimes(1));
-        expect(await t.app.handlers["chat.cancel"]({ turnId }, { clientId: 1 })).toEqual({ cancelled: true });
+        expect(await t.app.handlers["reply.stop"]({ id: turnId }, { clientId: 1 })).toMatchObject({ answer: "done" });
         open?.();
         await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
         await vi.waitFor(() => expect(t.lease.status()).toEqual({ holder: null, holders: 0, waiting: [] }));
@@ -342,7 +343,7 @@ describe("tool chat transport", () => {
         const thread = t.store.createThread();
         const { turnId } = await sendStarted(t.app, { threadId: thread.id, content: "draw", model: "m", numCtx: 16384, image: true }, { clientId: 1 });
         await vi.waitFor(() => expect(t.pushed).toContainEqual(expect.objectContaining({ payload: expect.objectContaining({ event: { type: "thinking", text: "drawing" } }) })));
-        expect(await t.app.handlers["chat.cancel"]({ turnId }, { clientId: 1 })).toEqual({ cancelled: true });
+        expect(await t.app.handlers["reply.stop"]({ id: turnId }, { clientId: 1 })).toMatchObject({ answer: "done" });
         await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
         expect(t.pushed).toContainEqual(expect.objectContaining({ payload: expect.objectContaining({ event: { type: "delta", text: held } }) }));
         expect(t.store.getThread(thread.id).messages).toMatchObject([{ role: "user" }, { role: "assistant", content: held, interrupted: true }]);
@@ -369,7 +370,7 @@ describe("tool chat transport", () => {
       vi.stubGlobal("fetch", fetcher);
       const app = createApp({ store, sources, think: true, toolsEnabled: () => scenario !== "tools default off",
         runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
-        catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
+        catalog: chatCatalog(),
         push: () => {}, fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
       });
       try {
@@ -398,7 +399,7 @@ describe("tool chat transport", () => {
       }));
       const app = createApp({ store, sources, think: true, toolsEnabled: () => true, shellStatus: async () => ({ state }),
         runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
-        catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
+        catalog: chatCatalog(),
         push: () => {}, fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
       });
       try {
@@ -428,7 +429,7 @@ describe("tool chat transport", () => {
     }));
     const app = createApp({ store, sources, think: true, toolsEnabled: () => true, shellStatus: async () => ({ state: "ready" }),
       runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
-      catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
+      catalog: chatCatalog(),
       push: (method, payload) => { const event = (payload as { event?: { type?: string; text?: string } }).event; if (method === "chat.event" && event?.type === "delta") deltas.push(event.text ?? ""); },
       fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
     });

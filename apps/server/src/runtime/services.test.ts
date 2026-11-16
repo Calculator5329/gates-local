@@ -705,7 +705,7 @@ describe("a turn's stream ends once", () => {
   });
 });
 
-describe("R2-02: chat.send's ask to ComfyUI ends with the turn", () => {
+describe("R2-02: reply.send's ask to ComfyUI ends with the turn", () => {
   /**
    * Little free VRAM, with the idle app-owned ComfyUI (MainPID 4242) listed holding 8000 MiB.
    */
@@ -781,7 +781,7 @@ describe("R2-02: chat.send's ask to ComfyUI ends with the turn", () => {
   });
 });
 
-describe("a load that needs a busy model's GPU: turns.blocking and chat.send stopOthers", () => {
+describe("a load that needs a busy model's GPU: turns.blocking and reply.send consent", () => {
   const Y = "gemma3:12b";
   const X_VRAM = 9_000_000_000;
   /** The resident rows of the last twoModels: what an unload of each gives back to nvidia-smi. */
@@ -867,7 +867,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     await sleep(300);
     expect(t.terminal(t.x.turnId)).toEqual([]);
     expect(t.of(y.turnId).filter((e) => e.type === "delta")).toEqual([]);
-    t.r.app.handlers["chat.cancel"]({ turnId: t.x.turnId }, ctx);
+    t.r.app.handlers["reply.stop"]({ id: t.x.turnId }, ctx);
     await until(() => t.of(y.turnId).some((e) => e.type === "delta"));
     expect(t.terminal(t.x.turnId)).toMatchObject([{ type: "error", code: "cancelled" }]);
     expect(t.of(y.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
@@ -881,7 +881,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     expect(sent).toMatchObject({ rejected: { code: "would-stop", blocking: [{ threadId: t.xThread.id, title: "Long answer", model: MODEL }] } });
     expect(t.terminal(t.x.turnId)).toEqual([]);
     expect(t.r.store.getThread(t.r.thread.id).messages).toEqual([]);
-    t.r.app.handlers["chat.cancel"]({ turnId: t.x.turnId }, ctx);
+    t.r.app.handlers["reply.stop"]({ id: t.x.turnId }, ctx);
     await t.r.done();
   });
 
@@ -901,7 +901,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     expect(sent).toMatchObject({ rejected: { code: "would-stop", blocking: [{ threadId: t.xThread.id, title: "Long answer", model: MODEL, turnId: t.x.turnId }] } });
     expect(t.terminal(t.x.turnId)).toEqual([]);
     expect(t.r.store.getThread(t.r.thread.id).messages).toEqual([]);
-    t.r.app.handlers["chat.cancel"]({ turnId: t.x.turnId }, ctx);
+    t.r.app.handlers["reply.stop"]({ id: t.x.turnId }, ctx);
     await t.r.done();
   });
 
@@ -917,8 +917,8 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     expect(named.toSorted()).toEqual([t.x.turnId, x2.turnId].toSorted());
     expect(t.terminal(t.x.turnId)).toEqual([]);
     expect(t.terminal(x2.turnId)).toEqual([]);
-    t.r.app.handlers["chat.cancel"]({ turnId: t.x.turnId }, ctx);
-    t.r.app.handlers["chat.cancel"]({ turnId: x2.turnId }, ctx);
+    t.r.app.handlers["reply.stop"]({ id: t.x.turnId }, ctx);
+    t.r.app.handlers["reply.stop"]({ id: x2.turnId }, ctx);
     await t.r.done();
   });
 
@@ -944,7 +944,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     expect(await settled(xAsked.promise, "held request readiness")).toEqual({ resolved: undefined });
     const sent = await settled(Promise.resolve(sendStarted(r.app, { threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384, askFirst: true }, ctx)), "chat send admission");
     expect(sent).toMatchObject({ rejected: { code: "would-stop", blocking: [{ model: MODEL }] } });
-    r.app.handlers["chat.cancel"]({ turnId: x.turnId }, ctx);
+    r.app.handlers["reply.stop"]({ id: x.turnId }, ctx);
     await r.done();
   });
 
@@ -954,7 +954,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     const sent = await settled(Promise.resolve(sendStarted(t.r.app, { threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, askFirst: true }, ctx)), "chat send admission");
     expect(sent).toMatchObject({ rejected: { code: "would-stop", blocking: [{ model: MODEL }] } });
     expect(t.terminal(t.x.turnId)).toEqual([]);
-    t.r.app.handlers["chat.cancel"]({ turnId: t.x.turnId }, ctx);
+    t.r.app.handlers["reply.stop"]({ id: t.x.turnId }, ctx);
     await t.r.done();
   });
 
@@ -1027,13 +1027,15 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     const r = await rig(
       {
         "GET /api/tags": (_b, res) => json(res, 200, { models: [Y, Z].map((name) => ({ name, size: 6_600_000_000, digest: name, modified_at: "2026-11-01T00:00:00Z" })) }),
-        "GET /api/ps": (_b, res) => json(res, 200, { models: [...loaded].map((name) => entry(name, X_VRAM)) }),
+        // a model asked to leave is gone until it loads again
+        "GET /api/ps": (_b, res) => json(res, 200, { models: here([...loaded].map((name) => entry(name, X_VRAM))) }),
         // Each model loads once nothing else streams, then streams until its connection closes.
         "POST /api/chat": async (b, res) => {
           const { model } = b as { model: string };
           res.writeHead(200, ndjson);
           while ([...streaming.keys()].some((m) => m !== model)) await Promise.all([...streaming].filter(([m]) => m !== model).map(([, p]) => p));
           loaded.add(model);
+          gone.delete(model);
           const closed = new Promise<void>((resolve) => res.on("close", () => resolve()));
           streaming.set(model, closed);
           res.write(line({ model, message: { role: "assistant", content: `${model} here` }, done: false }));
@@ -1060,7 +1062,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     expect(sent).toMatchObject({ rejected: { code: "would-stop", blocking: [{ model: MODEL }] } });
     // asked, never stopped by the app itself
     expect(t.terminal(t.x.turnId)).toEqual([]);
-    t.r.app.handlers["chat.cancel"]({ turnId: t.x.turnId }, ctx);
+    t.r.app.handlers["reply.stop"]({ id: t.x.turnId }, ctx);
     await t.r.done();
   });
 
@@ -1174,7 +1176,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     await r.done();
   });
 
-  it("R5-03: ~1 GB free, an idle 9 GB model, RAM under its margin: the fit table, a preload and chat.send give one verdict", async () => {
+  it("R5-03: ~1 GB free, an idle 9 GB model, RAM under its margin: the fit table, a preload and reply.send give one verdict", async () => {
     const Z = "llama3.1:8b";
     const r = await rig(
       {

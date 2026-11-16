@@ -74,7 +74,7 @@ test("an address set in Settings that does not answer: Image opens a pop-up sayi
     const before = (await client.call("threads.get", { threadId })).messages.length;
     const ends: string[] = [];
     client.subscribe("chat.event", p => { if (p.threadId === threadId && p.event.type === "error") ends.push(p.event.message); });
-    await client.call("chat.send", { threadId, content: "a ship", model: "qwen3.5:9b", numCtx: 16384, draw: { preset: "flux2-klein-4b", width: 1024, height: 1024 } });
+    await client.call("reply.send", { id: "a-ship", threadId, messageId: "a-ship", text: "a ship", model: "qwen3.5:9b", numCtx: 16384, draw: { preset: "flux2-klein-4b", width: 1024, height: 1024 } });
     await expect.poll(() => ends).toEqual([expect.stringContaining(`ComfyUI at ${comfy.url} is not running.`)]);
     expect((await client.call("threads.get", { threadId })).messages).toHaveLength(before);
     // Settings says the same: Not running, the address with Test connection as the one retry, and no install guide

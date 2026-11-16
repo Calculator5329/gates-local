@@ -4,10 +4,10 @@
 import type { AttachedFile, ImageChoice, Reply } from "@gates-local/contracts";
 import type { FakeServer } from "./harness.ts";
 
-/** Every chat.send is answered with a turn of its own, and its question saved under the id the send named, as the app's server does. */
+/** Every turn.start is answered with a turn of its own, and its question saved under the id the send named, as the app's server does. */
 export function answerSends(server: Pick<FakeServer, "answer">): void {
   let turn = 0;
-  server.answer("chat.send", (p) => ({ turnId: `sent-${++turn}`, userMessage: { id: p.messageId ?? `asked-${turn}`, threadId: p.threadId, role: "user", content: p.content, createdAt: 1 } }));
+  server.answer("turn.start", (p) => ({ turnId: `sent-${++turn}`, userMessage: { id: p.messageId ?? `asked-${turn}`, threadId: p.threadId, role: "user", content: p.content, createdAt: 1 } }));
 }
 
 /** A message the server holds for a chat, once this window's records show its row. */

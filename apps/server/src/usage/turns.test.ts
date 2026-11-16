@@ -12,6 +12,7 @@ import { sendStarted } from "../chat/send-started.ts";
 import { createSources } from "../sources/index.ts";
 import { openThreadStore, type ThreadStore } from "../threads/store.ts";
 import { createUsage, type Usage } from "./index.ts";
+import { chatCatalog } from "../../test/send-rig.ts";
 
 const dirs: string[] = [];
 const scratch = () => {
@@ -52,7 +53,7 @@ async function rig(chat: Chat) {
   const app = createApp({
     store, sources, usage, toolsEnabled: () => false,
     runtime: { status: () => READY, baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => READY, lookIfDown: async () => READY },
-    catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
+    catalog: chatCatalog(),
     push: () => {},
     fit: { runNvidiaSmi: async (args) => (args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : ""), readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
   });
@@ -100,7 +101,7 @@ describe("usage from turns", () => {
       const thread = t.store.createThread();
       const { turnId } = await t.send(thread.id);
       await vi.waitFor(() => expect(t.app.activeTurns()).toBe(1));
-      await t.app.handlers["chat.cancel"]({ turnId }, { clientId: 1 });
+      await t.app.handlers["reply.stop"]({ id: turnId }, { clientId: 1 });
       await t.settle();
       expect(await t.read()).toEqual([]);
     } finally { await close(t); }
@@ -114,7 +115,7 @@ describe("usage from turns", () => {
       const thread = t.store.createThread();
       const { turnId } = await t.send(thread.id, { tools: true });
       await vi.waitFor(async () => expect(await t.read()).toEqual([["m:latest", 100, 10, 1]]));
-      await t.app.handlers["chat.cancel"]({ turnId }, { clientId: 1 });
+      await t.app.handlers["reply.stop"]({ id: turnId }, { clientId: 1 });
       await t.settle();
       expect(await t.read()).toEqual([["m:latest", 100, 10, 1]]);
     } finally { await close(t); }

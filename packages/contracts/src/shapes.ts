@@ -116,7 +116,7 @@ export type ImageEvent = typeof ImageEvent.Type;
 
 /**
  * How a turn ended, as the server decided it: done; stopped by a person's Stop
- * (chat.cancel), or by deleting its question; preempted, the server stopping it to make way for
+ * (reply.stop), or by deleting its question; preempted, the server stopping it to make way for
  * something (another model's load, a runtime change, the app closing); or failed. `at` is when it
  * ended: for a Stop, when the cancel came. Rides on the one terminal event, done or error.
  */
@@ -131,7 +131,7 @@ export type TurnEnded = typeof TurnEnded.Type;
  * and every reload shows the same seconds. Absent on rows saved before 2026-11-14 and on pictures.
  */
 export const ReplyTimes = S.Struct({
-  /** When chat.send took the turn. */
+  /** When the server took the turn. */
   startedAt: Millis,
   /**
    * When the model was ready: the start for a model in memory, the first token after a load. The
@@ -615,7 +615,7 @@ export const BlockingTurn = S.Struct({
   threadId: S.String,
   title: S.String,
   model: S.String,
-  /** Which turn this is, for chat.send's stopTurns: a thread can be running a different turn by the time the person answers. */
+  /** Which turn this is, for a send's named consent: a thread can be running a different turn by the time the person answers. */
   turnId: S.optional(S.String),
 });
 export type BlockingTurn = typeof BlockingTurn.Type;
@@ -645,7 +645,7 @@ export const ChatEvent = S.Union([
     question: S.optional(Message),
     /** code "preempted": the model whose load needed the GPU this turn's model held. */
     neededBy: S.optional(S.String),
-    /** Refused before its start, code "would-stop" (chat.send askFirst or stopTurns): the running turns in the way. */
+    /** Refused before its start, code "would-stop" (askFirst, or consent for other replies): the running turns in the way. */
     blocking: S.optional(S.Array(BlockingTurn)),
     /** code "wont-fit": the fit that refused, with the GPU and system memory of the reading it was decided from. */
     fit: S.optional(FitReport),

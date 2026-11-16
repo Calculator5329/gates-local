@@ -106,7 +106,7 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
 
   /** Models a models.load says are loading now (a preload the first key started, or another window's). */
   const loadingModels = new Set<string>();
-  /** Works whose chat.send has answered: a record of theirs may be pushed before the start. */
+  /** Works whose start was answered: a record of theirs may be pushed before the start. */
   const answeredTurns = new WeakSet<Turn>();
   /** A start that waits while its own model loads says "loading", not "waiting". */
   const waitsOnLoad = (turn: Turn) => {
@@ -181,14 +181,14 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
   const offImports = libraryImports?.onChange(value => push("sources.imports", value, [libraryImports.stamp(value)]));
 
   /** Claims the thread synchronously so a second send cannot slip in during the fit check. */
-  const reserve = (threadId: string, model: string, taken?: Taken): { turn: Turn; end: () => void } => {
+  const reserve = (threadId: string, model: string, taken: Taken): { turn: Turn; end: () => void } => {
     let end!: () => void;
     const ended = new Promise<void>((resolve) => (end = resolve));
     let wake!: (h: typeof HALTED) => void;
     const onHalt = new Promise<typeof HALTED>((resolve) => (wake = resolve));
     const turn: Turn = {
-      turnId: taken?.turnId ?? newId(),
-      attempt: taken?.attempt ?? 1,
+      turnId: taken.turnId,
+      attempt: taken.attempt,
       threadId,
       model,
       controller: new AbortController(),
@@ -198,7 +198,7 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
       halt(reason) {
         if (turn.halted !== undefined) return;
         turn.halted = reason;
-        // A turn chat.cancel already aborted keeps that reason on its signal; halted still wins.
+        // A turn a Stop already aborted keeps that reason on its signal; halted still wins.
         turn.controller.abort(reason);
         wake(HALTED);
       },
@@ -258,7 +258,10 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
       replies.windowGone(window);
       pump();
     },
-    admission: (turnId) => turns.get(turnId)?.admission,
+    started(id) {
+      for (const t of turns.values()) if (t.admission !== undefined && replies.of(t.turnId)?.id === id) return { turnId: t.turnId, admission: t.admission };
+      return undefined;
+    },
     async shutdown() {
       closing = true;
       attachedFiles?.stop();

@@ -17,6 +17,12 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+/** A catalog with one chat model installed, so a send does not wait for a first download. */
+export function chatCatalog(name = MODEL) {
+  const model = { name, digest: "d", sizeBytes: 6_600_000_000, modifiedAt: "2026-11-01T00:00:00Z", capabilities: ["completion" as const] };
+  return { current: () => [model], refresh: async () => ({ models: [model], changed: false }), onChange: () => () => {}, stop: () => {} };
+}
+
 export const until = async (ok: () => boolean, what: string) => {
   for (let i = 0; i < 400 && !ok(); i++) await new Promise((r) => setTimeout(r, 5));
   if (!ok()) throw new Error(`timed out waiting for ${what}`);

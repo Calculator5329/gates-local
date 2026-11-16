@@ -80,7 +80,7 @@ describe("boundary refusals", () => {
       ["threads.rename", { threadId: "t1" }],
       ["turns.blocking", { model: "m", numCtx: 0 }],
       ["turns.blocking", { model: "m", numCtx: 1.5 }],
-      ["chat.send", { threadId: "t1", content: "x", model: "m" }],
+      ["reply.send", { id: "q1", threadId: "t1", text: "x" }],
       ["threads.list", null],
     ];
     for (const [method, params] of cases) {

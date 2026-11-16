@@ -11,10 +11,12 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { type Channel, type Client, type ImageEvent, type Message, type Params, type Payload, type ReplyListed, type SocketLike, ORDERED_DOMAINS, WireError, createClient } from "@gates-local/contracts";
+import { type Channel, type Client, type ImageEvent, type Message, type Payload, type Reply, type ReplyListed, type SocketLike, ORDERED_DOMAINS, WireError, createClient } from "@gates-local/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { type App, type AppDeps, createApp } from "../src/app.ts";
+import type { AppHandlers } from "../src/app/types.ts";
+import { replySend, type Sending } from "../src/chat/send-started.ts";
 import * as imageFiles from "../src/chat/image-lifecycle.ts";
 import { saveAttachments } from "../src/chat/attachments.ts";
 import { createGpuLease, type GpuLease } from "../src/gpu/lease.ts";
@@ -129,6 +131,8 @@ interface Rig {
   memory: MemoryOwner | undefined;
   loader: ModelLoader | undefined;
   waitFor<C extends Channel>(channel: C, match: (p: Payload<C>) => boolean, timeoutMs?: number): Promise<Payload<C>>;
+  /** The start a message sent over the socket was taken for, read in process as the send was answered. */
+  turnOf(id: string): string | undefined;
 }
 
 /**
@@ -271,7 +275,18 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
   });
   cleanups.push(() => app.shutdown());
   // Every kind ordered, as the app runs: a writer that pushes without its number fails here.
-  server = await startWsServer({ port: 0, token: TOKEN, allowedOrigins: [], ordered: ORDERED_DOMAINS, handlers: app.handlers, log: () => undefined });
+  const taken = new Map<string, string>();
+  const send = app.handlers["reply.send"];
+  const handlers: AppHandlers = {
+    ...app.handlers,
+    "reply.send": async (params, ctx) => {
+      const answer = await send(params, ctx);
+      const started = app.started(params.id);
+      if (started !== undefined) taken.set(params.id, started.turnId);
+      return answer;
+    },
+  };
+  server = await startWsServer({ port: 0, token: TOKEN, allowedOrigins: [], ordered: ORDERED_DOMAINS, handlers, log: () => undefined });
   const ws = server;
   cleanups.push(() => ws.close());
 
@@ -313,7 +328,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
   // The pushes below come from this discover(): runtime.changed, then the
   // catalog refresh it triggers, then models.changed.
   await runtime.discover();
-  return { app, server, client, store, runtime, ollama, gpu, lease, setChat: (r) => (chat = r), setShow: (r) => (show = r), pushes, storedAtDonePush, listedAtDone, catalog, setTags: (t) => (tags = t), waitFor, ps, memory, loader };
+  return { app, server, client, store, runtime, ollama, gpu, lease, setChat: (r) => (chat = r), setShow: (r) => (show = r), pushes, storedAtDonePush, listedAtDone, catalog, setTags: (t) => (tags = t), waitFor, ps, memory, loader, turnOf: (id) => taken.get(id) };
 }
 
 const turnEvents = (r: Rig, turnId: string) =>
@@ -324,17 +339,40 @@ const events = (r: Rig, turnId: string) => turnEvents(r, turnId).filter((e) => e
 const stages = (r: Rig, turnId: string) => turnEvents(r, turnId).flatMap((e) => (e.type === "reply" ? [e.reply.stage] : []));
 
 /**
- * chat.send over the socket, then the turn's start (chat row 32): the answer names the turn, its
- * start brings the saved question, and a refusal after the answer is its error event, thrown here
- * as the WireError a refused answer would be.
+ * reply.send over the socket into a chat with nothing on its way, answered once its start is
+ * taken (chat row 32). A message held as refused, or one that would wait, is the WireError a
+ * refused send was; one already asked is that question.
  */
-async function sendStarted(r: Rig, params: Params<"chat.send">): Promise<{ turnId: string; userMessage: Message; replayed?: boolean }> {
-  const answer = await r.client.call("chat.send", params);
-  if (answer.userMessage !== undefined) return { ...answer, userMessage: answer.userMessage };
-  const first = await r.waitFor("chat.event", (p) => p.turnId === answer.turnId && (p.event.type === "start" || p.event.type === "error"), 10_000);
+async function sendTurn(r: Rig, params: Sending): Promise<{ id: string; turnId: string; question?: Message }> {
+  const send = replySend(params);
+  const answer = await r.client.call("reply.send", send);
+  if (answer.answer === "gone") {
+    if (answer.question !== undefined) return { id: send.id, turnId: `saved-${answer.question.id}`, question: answer.question };
+    if (answer.why === "chat-deleted") throw new WireError("thread-not-found", `thread ${params.threadId} is being deleted`);
+    throw new Error(`the message is gone: ${answer.why}`);
+  }
+  const { reply } = answer;
+  if (reply.stage === "held" && reply.held.why === "refused") throw new WireError(reply.held.code, reply.held.message, reply.held.blocking);
+  const turnId = r.turnOf(send.id);
+  if (turnId !== undefined && reply.stage !== "queued" && reply.stage !== "held" && reply.stage !== "next" && reply.stage !== "editing") return { id: send.id, turnId };
+  await r.client.call("reply.remove", { id: send.id });
+  throw new WireError("turn-active", `thread ${params.threadId} already has a reply on its way${behind(reply)}`);
+}
+
+/** The reply a waiting message waits behind, for the error that names it. */
+function behind(reply: Reply): string {
+  const w = reply.stage === "queued" ? reply.waitFor : undefined;
+  return w?.what === "reply" || w?.what === "retry" ? `: ${w.reply}` : "";
+}
+
+/** sendTurn, then the start: its saved question, or its refusal (the turn's error event) as a WireError. */
+async function sendStarted(r: Rig, params: Sending): Promise<{ id: string; turnId: string; userMessage: Message; replayed?: true }> {
+  const { question, ...sent } = await sendTurn(r, params);
+  if (question !== undefined) return { ...sent, userMessage: question, replayed: true };
+  const first = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && (p.event.type === "start" || p.event.type === "error"), 10_000);
   if (first.event.type === "error") throw new WireError(first.event.code, first.event.message, first.event.blocking);
   if (first.event.type !== "start") throw new Error("unreachable");
-  return { turnId: answer.turnId, userMessage: first.event.userMessage };
+  return { ...sent, userMessage: first.event.userMessage };
 }
 
 it("vision paste reaches the model, saves paths, and survives Retry and thread reload", async () => {
@@ -383,7 +421,9 @@ it.each([false, true])("PC-03: retrying after a lost acknowledgement returns the
   expect(r.store.getThread(thread.id).messages.filter(m => m.role === "user")).toHaveLength(1);
   expect(retry.userMessage.id).toBe(first.userMessage.id);
   expect(r.ollama.requests.filter(q => q.path === "/api/chat")).toHaveLength(1);
-  await expect(sendStarted(r, { ...input, content: "different words" })).rejects.toMatchObject({ code: "image-input" });
+  // the same message id again is that question, whatever the words: nothing more is asked
+  expect((await sendStarted(r, { ...input, content: "different words" })).userMessage).toEqual(retry.userMessage);
+  expect(r.ollama.requests.filter(q => q.path === "/api/chat")).toHaveLength(1);
 });
 
 it("tells the model, and only the model, when a text-only follow-up omits earlier images", async () => {
@@ -560,7 +600,7 @@ describe("threads.*", () => {
   });
 });
 
-describe("chat.send", () => {
+describe("a send", () => {
   it("answers with the turn id before any event of that turn reaches the socket (chat row 32)", async () => {
     const r = await rig();
     const thread = await r.client.call("threads.create", { title: "answer first" });
@@ -568,8 +608,8 @@ describe("chat.send", () => {
     const firstEvent: Array<{ type: string; answered: boolean }> = [];
     const off = r.client.subscribe("chat.event", (p) => { if (firstEvent.length === 0) firstEvent.push({ type: p.event.type, answered }); });
     cleanups.push(off);
-    const answer = await r.client.call("chat.send", { threadId: thread.id, content: "hello", model: MODEL, numCtx: 16384 }).then((a) => { answered = true; return a; });
-    expect(answer).toEqual({ turnId: expect.any(String) });
+    const answer = await sendTurn(r, { threadId: thread.id, content: "hello", model: MODEL, numCtx: 16384 }).then((a) => { answered = true; return a; });
+    expect(answer).toEqual({ id: expect.any(String), turnId: expect.any(String) });
     await r.waitFor("chat.event", (p) => p.turnId === answer.turnId && p.event.type === "done");
     expect(firstEvent).toEqual([{ type: "start", answered: true }]);
   });
@@ -644,7 +684,7 @@ describe("chat.send", () => {
     let seenBody: unknown;
     r.setChat(async (res, body) => {
       seenBody = body;
-      await gate; // hold the reply until chat.send has returned
+      await gate; // hold the reply until reply.send has returned
       await stream(res, [piece("Two plus "), piece("two is four."), doneLine]);
     });
     const t = await r.client.call("threads.create", {});
@@ -655,7 +695,7 @@ describe("chat.send", () => {
     expect(r.app.activeTurns()).toBe(1);
     // a window that opens now gets the reply's record as it is: the model was in memory, but nothing has come back yet,
     // and the runtime may be holding it behind another reply, so it is waiting
-    expect(await r.client.call("reply.list", {})).toEqual([{ reply: expect.objectContaining({ id: sent.turnId, threadId: t.id, stage: "thinking", silent: true }), soFar: { text: "", thinking: "", steps: [] } }]);
+    expect(await r.client.call("reply.list", {})).toEqual([{ reply: expect.objectContaining({ id: sent.id, threadId: t.id, stage: "thinking", silent: true }), soFar: { text: "", thinking: "", steps: [] } }]);
 
     // The store already has the user message; the turn is streaming.
     expect((await r.client.call("threads.get", { threadId: t.id })).messages.map((m) => m.role)).toEqual(["user"]);
@@ -719,7 +759,7 @@ describe("chat.send", () => {
     const first = await sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     const err = await rejection(sendStarted(r, { threadId: t.id, content: "y", model: MODEL, numCtx: 16384 }));
     expect(err.code).toBe("turn-active");
-    expect(err.message).toContain(first.turnId);
+    expect(err.message).toContain(first.id);
     const parallel = await sendStarted(r, { threadId: other.id, content: "z", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === first.turnId && p.event.type === "done");
     await r.waitFor("chat.event", (p) => p.turnId === parallel.turnId && p.event.type === "done");
@@ -860,7 +900,7 @@ describe("a model with a 2,048 context window", () => {
   });
 });
 
-describe("chat.send and the think flag", () => {
+describe("a send and the think flag", () => {
   it("sends think as asked to a model that can think", async () => {
     expect(await sendWith(caps(["completion", "thinking"]), true)).toMatchObject({ think: true });
     expect(await sendWith(caps(["completion", "thinking"]), false)).toMatchObject({ think: false });
@@ -876,7 +916,7 @@ describe("chat.send and the think flag", () => {
 
   it("cancel ends a turn whose think probe stalls at once and releases its GPU claim", async () => {
     const { r, sent } = await stalledThinkTurn();
-    expect(await r.client.call("chat.cancel", { turnId: sent.turnId })).toEqual({ cancelled: true });
+    expect(await r.client.call("reply.stop", { id: sent.turnId })).toMatchObject({ answer: "done" });
     const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error", 1000);
     expect(end.event).toMatchObject({ type: "error", code: "cancelled" });
     expect(r.app.activeTurns()).toBe(0);
@@ -886,7 +926,7 @@ describe("chat.send and the think flag", () => {
 
   it("cancel during the installed system prompt's read ends the turn as cancelled, not as a failure", async () => {
     const { r, sent } = await stalledThinkTurn({ settings: { get: () => defaultSettings("system") } }, undefined);
-    expect(await r.client.call("chat.cancel", { turnId: sent.turnId })).toEqual({ cancelled: true });
+    expect(await r.client.call("reply.stop", { id: sent.turnId })).toMatchObject({ answer: "done" });
     const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error", 1000);
     expect(end.event).toMatchObject({ type: "error", code: "cancelled" });
     expect(r.app.activeTurns()).toBe(0);
@@ -981,7 +1021,7 @@ function idleComfy(owner: "app" | "external" | "none", onStop: () => void, onFre
   return { build, stops: () => stops, frees: () => frees, setOwner: (next: typeof owner) => (current = next) };
 }
 
-describe("chat.send frees an idle ComfyUI the app started", () => {
+describe("a send frees an idle ComfyUI the app started", () => {
   it("asks it to free its memory (never stops it) and measures again when the turn would not fit beside it", async () => {
     let gpu: Gpu | undefined;
     const comfy = idleComfy("app", () => undefined, () => { if (gpu) { gpu.freeMib = 15000; delete gpu.apps; } });
@@ -1178,7 +1218,7 @@ const gate = () => {
   return { shut, open };
 };
 
-describe("chat.send asks an app-started ComfyUI to free its memory, never stops it", () => {
+describe("a send asks an app-started ComfyUI to free its memory, never stops it", () => {
   it("a second image queued behind the turn waits; the turn's handoff frees ComfyUI once, measures and is admitted", async () => {
     let gpu: Gpu | undefined;
     const comfy = managedComfy({
@@ -1211,7 +1251,7 @@ describe("chat.send asks an app-started ComfyUI to free its memory, never stops 
     expect(r.lease!.status().waiting).toEqual(["chat", "image"]);
 
     holdA.open();
-    const sent = await within(3000, sending, "chat.send");
+    const sent = await within(3000, sending, "the send");
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
     await image.wait(b.jobId);
     expect(comfy.states(a.jobId).at(-1)).toBe("done");
@@ -1237,7 +1277,7 @@ describe("chat.send asks an app-started ComfyUI to free its memory, never stops 
     comfy.ctl.busy = true;
     const mark = comfy.calls.length;
     const t = await r.client.call("threads.create", {});
-    const err = await rejection(within(3000, sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }), "chat.send"));
+    const err = await rejection(within(3000, sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }), "the send"));
     expect(err.code).toBe("wont-fit");
     expect(err.message).toContain(ENGINE_BUSY_NOTE);
     // The handoff read the queue, saw another client's job and sent nothing.
@@ -1279,7 +1319,7 @@ describe("chat.send asks an app-started ComfyUI to free its memory, never stops 
     expect(r.lease!.status().holder).toBe("chat");
 
     await within(1000, r.app.shutdown(), "shutdown");
-    expect((await within(1000, sending, "chat.send")).code).toBe("cancelled");
+    expect((await within(1000, sending, "the send")).code).toBe("cancelled");
     expect(r.app.activeTurns()).toBe(0);
     expect(r.lease!.status()).toEqual({ holder: null, holders: 0, waiting: [] });
     // The late answer changes nothing: the turn already ended as cancelled.
@@ -1323,7 +1363,7 @@ describe("one thing in memory: a send asks the rest to leave, then measures", ()
     });
     gpu = r.gpu;
     const t = await r.client.call("threads.create", {});
-    const { turnId } = await r.client.call("chat.send", { threadId: t.id, content: "hello", model: "gemma4:e4b", numCtx: 16384 });
+    const { turnId } = await sendTurn(r, { threadId: t.id, content: "hello", model: "gemma4:e4b", numCtx: 16384 });
     const { event } = await r.waitFor("chat.event", (p) => p.turnId === turnId && p.event.type === "error", 10_000);
     if (event.type !== "error") throw new Error("unreachable");
     expect(event.code).toBe("wont-fit");
@@ -1483,7 +1523,7 @@ describe("threads.delete marks the thread before it waits", () => {
     await until(() => comfy.states(jobId).includes("cancelled"));
     expect(r.lease!.status().holders).toBe(0);
 
-    const send = await rejection(within(3000, sendStarted(r, { threadId: t.id, content: "draw", model: MODEL, numCtx: 16384, tools: true }), "chat.send"));
+    const send = await rejection(within(3000, sendStarted(r, { threadId: t.id, content: "draw", model: MODEL, numCtx: 16384, tools: true }), "the send"));
     expect(send.code).toBe("thread-not-found");
     const generate = await rejection(within(3000, r.client.call("image.generate", { prompt: "another", threadId: t.id }), "image.generate"));
     expect(generate.code).toBe("thread-not-found");
@@ -1609,14 +1649,14 @@ const stoppedReply = async (r: Rig) => {
   const t = await r.client.call("threads.create", {});
   const sent = await sendStarted(r, { threadId: t.id, content: "the question", model: MODEL, numCtx: 16384 });
   await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "delta");
-  await r.client.call("chat.cancel", { turnId: sent.turnId });
+  await r.client.call("reply.stop", { id: sent.turnId });
   await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
   r.setChat(quickReply);
   return { threadId: t.id, sent };
 };
 
-describe("chat.cancel and threads.delete during a turn", () => {
-  it("AU-01 every client's chat.send passes the server admission boundary", async () => {
+describe("Stop and threads.delete during a turn", () => {
+  it("AU-01 every client's send passes the server admission boundary", async () => {
     const r = await rig({ admit: () => { throw Object.assign(new Error("Gates Local is closing to update. Try again after it reopens."), { code: "update-installing" }); } });
     const thread = await r.client.call("threads.create", {});
     const error = await rejection(sendStarted(r, { threadId: thread.id, content: "Do not start", model: MODEL, numCtx: 16384 }));
@@ -1630,7 +1670,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
     const t = await r.client.call("threads.create", {});
     const sent = await sendStarted(r, { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "delta");
-    expect(await r.client.call("chat.cancel", { turnId: sent.turnId })).toEqual({ cancelled: true });
+    expect(await r.client.call("reply.stop", { id: sent.turnId })).toMatchObject({ answer: "done" });
     const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
     expect(end.event).toMatchObject({ type: "error", code: "cancelled", partial: { role: "assistant", interrupted: true } });
     await sleep(800); // past where the fake would have sent done
@@ -1642,8 +1682,8 @@ describe("chat.cancel and threads.delete during a turn", () => {
     expect(messages[1]).toMatchObject({ content: shown, interrupted: true });
     expect(r.app.activeTurns()).toBe(0);
     // A finished or unknown turn is not cancellable; the thread takes a new turn.
-    expect(await r.client.call("chat.cancel", { turnId: sent.turnId })).toEqual({ cancelled: false });
-    expect(await r.client.call("chat.cancel", { turnId: "no-such-turn" })).toEqual({ cancelled: false });
+    expect(await r.client.call("reply.stop", { id: sent.turnId })).toMatchObject({ answer: "gone", why: "sent" });
+    expect(await r.client.call("reply.stop", { id: "no-such-turn" })).toEqual({ answer: "gone", why: "unknown" });
     r.setChat((res) => stream(res, [piece("fine"), doneLine]));
     const again = await sendStarted(r, { threadId: t.id, content: "again", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === again.turnId && p.event.type === "done");
@@ -1703,7 +1743,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
       const r = await rig();
       const { threadId, sent } = await startReply(r, heldReply().route);
       await untilWords(r, sent.turnId);
-      await r.client.call("chat.cancel", { turnId: sent.turnId });
+      await r.client.call("reply.stop", { id: sent.turnId });
       const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
       expect(onDisk(r, threadId).map((m) => m.id)).toEqual([end.event.type === "error" ? end.event.partial?.id : undefined]);
     });
@@ -1859,7 +1899,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
     const t = await r.client.call("threads.create", {});
     const sent = await sendStarted(r, { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
     await reached.shut;
-    await r.client.call("chat.cancel", { turnId: sent.turnId });
+    await r.client.call("reply.stop", { id: sent.turnId });
     const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
     expect(end.event).toMatchObject({ type: "error", code: "cancelled" });
     expect(end.event).not.toHaveProperty("partial");
@@ -1868,7 +1908,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
 
   it("Stop that lands with the last token keeps the finished reply, not marked interrupted", async () => {
     let r: Rig;
-    const r2 = await rig({ onDelta: (turnId) => { void r.app.handlers["chat.cancel"]({ turnId }, { clientId: 1 }); } });
+    const r2 = await rig({ onDelta: (turnId) => { void r.app.handlers["reply.stop"]({ id: turnId }, { clientId: 1 }); } });
     r = r2;
     // One chunk: the last word and the done line are parsed with no await on the socket between them.
     r.setChat((res) => stream(res, [piece("all of it") + doneLine]));
@@ -1925,8 +1965,8 @@ describe("chat.cancel and threads.delete during a turn", () => {
     expect(r.app.activeTurns()).toBe(0);
     const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
     expect(end.event).toMatchObject({ type: "error", code: "cancelled" });
-    const err = await rejection(sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
-    expect(err.code).toBe("shutting-down");
+    // a message sent while the server stops is kept on hold for after the restart
+    expect(await r.client.call("reply.send", replySend({ threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }))).toMatchObject({ answer: "done", reply: { stage: "held", held: { why: "restart" } } });
   });
 
   it("shutdown for an update saves the reply already shown before reopening", async () => {
@@ -2107,7 +2147,7 @@ describe("turn failures", () => {
     const sent = await sendStarted(r, { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "delta");
     const before = Date.now();
-    await r.client.call("chat.cancel", { turnId: sent.turnId });
+    await r.client.call("reply.stop", { id: sent.turnId });
     const after = Date.now();
     const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
     expect(end.event).toMatchObject({ type: "error", code: "cancelled", ended: { reason: "stopped" } });
@@ -2192,7 +2232,7 @@ describe("attached files (chat row 3: the model reads a copy by its label, never
 
     const seen = reader(r, "notes-2026-txt");
     const t = await r.client.call("threads.create", {});
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "what does it say?", model: MODEL, numCtx: 16384, tools: true, files: [file] });
+    const sent = await sendTurn(r, { threadId: t.id, content: "what does it say?", model: MODEL, numCtx: 16384, tools: true, files: [file] });
     await r.waitFor("chat.event", p => p.turnId === sent.turnId && p.event.type === "done");
     expect(seen.prompts[0]).toContain('[Attached file "Notes 2026.txt" (24 B, text/plain): read it with the read tool at /library/notes-2026-txt.]');
     expect(seen.prompts[0]).not.toContain("SECRET-WORDS");
@@ -2205,7 +2245,7 @@ describe("attached files (chat row 3: the model reads a copy by its label, never
     const other = await r.client.call("threads.create", {});
     const own = await r.client.call("files.attach", { name: "other.txt", type: "text/plain", data: body64("other") });
     const elsewhere = reader(r, "notes-2026-txt");
-    const nope = await r.client.call("chat.send", { threadId: other.id, content: "and here?", model: MODEL, numCtx: 16384, tools: true, files: [own] });
+    const nope = await sendTurn(r, { threadId: other.id, content: "and here?", model: MODEL, numCtx: 16384, tools: true, files: [own] });
     await r.waitFor("chat.event", p => p.turnId === nope.turnId && p.event.type === "done");
     expect(elsewhere.results).toEqual([expect.stringContaining("Path is outside your Library")]);
 
@@ -2219,7 +2259,7 @@ describe("attached files (chat row 3: the model reads a copy by its label, never
     const prompts: string[] = [];
     r.setChat(async (res, body) => { prompts.push((body as Sent).messages.at(-1)!.content); return stream(res, [piece("ok"), doneLine]); });
     const t = await r.client.call("threads.create", {});
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "", model: MODEL, numCtx: 16384, tools: false, files: [file] });
+    const sent = await sendTurn(r, { threadId: t.id, content: "", model: MODEL, numCtx: 16384, tools: false, files: [file] });
     await r.waitFor("chat.event", p => p.turnId === sent.turnId && p.event.type === "done");
     expect(prompts[0]).toBe('[Attached file "data.csv" (8 B, text/csv): you cannot open it in this reply, because tools are off.]');
   });
@@ -2229,17 +2269,17 @@ describe("attached files (chat row 3: the model reads a copy by its label, never
     const file = await r.client.call("files.attach", { name: "plan.txt", type: "text/plain", data: body64("the plan") });
     r.setChat(async res => stream(res, [piece("ok"), doneLine]));
     const first = await r.client.call("threads.create", {});
-    const sent = await r.client.call("chat.send", { threadId: first.id, content: "read this", model: MODEL, numCtx: 16384, files: [file] });
+    const sent = await sendTurn(r, { threadId: first.id, content: "read this", model: MODEL, numCtx: 16384, files: [file] });
     await r.waitFor("chat.event", p => p.turnId === sent.turnId && p.event.type === "done");
 
     const second = await r.client.call("threads.create", {});
-    // chat.send answers first (chat row 32): the refusal is the turn's error event, like every other refusal
-    const other = await r.client.call("chat.send", { threadId: second.id, content: "and here", model: MODEL, numCtx: 16384, files: [file] });
+    // reply.send answers first (chat row 32): the refusal is the turn's error event, like every other refusal
+    const other = await sendTurn(r, { threadId: second.id, content: "and here", model: MODEL, numCtx: 16384, files: [file] });
     const refused = (await r.waitFor("chat.event", p => p.turnId === other.turnId && p.event.type === "error")).event;
     expect(refused).toMatchObject({ code: "image-input", message: "plan.txt is attached in another chat. Attach it here again; your words are kept.", ended: { reason: "failed" } });
     expect((await r.client.call("threads.get", { threadId: second.id })).messages).toEqual([]);
 
-    const again = await r.client.call("chat.send", { threadId: first.id, content: "once more", model: MODEL, numCtx: 16384, files: [file] });
+    const again = await sendTurn(r, { threadId: first.id, content: "once more", model: MODEL, numCtx: 16384, files: [file] });
     await r.waitFor("chat.event", p => p.turnId === again.turnId && p.event.type === "done");
     expect((await r.client.call("threads.get", { threadId: first.id })).messages.filter(m => m.files?.length)).toHaveLength(2);
   });
@@ -2256,7 +2296,7 @@ describe("attached files (chat row 3: the model reads a copy by its label, never
     r.setChat(async res => stream(res, [piece("ok"), doneLine]));
     const t = await r.client.call("threads.create", {});
     const [turn] = await Promise.all([
-      r.client.call("chat.send", { threadId: t.id, content: "read this", model: MODEL, numCtx: 16384, files: [sent] }),
+      sendTurn(r, { threadId: t.id, content: "read this", model: MODEL, numCtx: 16384, files: [sent] }),
       r.client.call("files.release", { paths: [sent.path] }),
     ]);
     await r.waitFor("chat.event", p => p.turnId === turn.turnId && p.event.type === "done");
@@ -2292,8 +2332,8 @@ describe("attached files (chat row 3: the model reads a copy by its label, never
     mkdirSync(path.join(dataDir, "files"), { recursive: true });
     symlinkSync(outside, path.join(dataDir, linked));
     const t = await r.client.call("threads.create", {});
-    // chat.send answers first (chat row 32): the refusal is the turn's error event
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "read", model: MODEL, numCtx: 16384, files: [{ path: linked, name: "outside.txt", size: 7, type: "" }] });
+    // reply.send answers first (chat row 32): the refusal is the turn's error event
+    const sent = await sendTurn(r, { threadId: t.id, content: "read", model: MODEL, numCtx: 16384, files: [{ path: linked, name: "outside.txt", size: 7, type: "" }] });
     const refused = (await r.waitFor("chat.event", p => p.turnId === sent.turnId && p.event.type === "error")).event;
     expect(refused).toMatchObject({ code: "image-input", message: "outside.txt is no longer attached. Attach it again; your words are kept.", ended: { reason: "failed" } });
     expect((await r.client.call("threads.get", { threadId: t.id })).messages, "the question was not saved").toEqual([]);

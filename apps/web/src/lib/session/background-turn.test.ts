@@ -27,7 +27,7 @@ beforeEach(async () => {
   created = ["A", "B"];
   b.server.answer("threads.create", ({ title }) => ({ id: created.shift() ?? "Z", title: title ?? "", createdAt: 1, updatedAt: 1 }));
   b.server.answer("threads.get", ({ threadId }) => ({ thread: { id: threadId, title: threadId, createdAt: 1, updatedAt: 1 }, messages: [] }));
-  b.server.answer("chat.send", ({ threadId, content }) => ({ turnId: `turn-${threadId}`, userMessage: userMsg(`u-${threadId}`, threadId, content) }));
+  b.server.answer("turn.start", ({ threadId, content }) => ({ turnId: `turn-${threadId}`, userMessage: userMsg(`u-${threadId}`, threadId, content) }));
   disconnect = session.connect();
   await until(() => st().imageStatus !== undefined && st().conn.kind === "open", 2000, "hydration");
 });

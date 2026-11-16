@@ -111,7 +111,7 @@ function ended(outcome: "done" | "error" | "cancelled", firstModel: boolean, ava
         expect(w.wire.a.session.sendsBeforeReady(state), "first-model messages cannot wait for a nonexistent download").toBe(false);
         if (firstModel && outcome === "done") {
           expect(waiting(w.wire.a), "a first-model send resumes after the installed snapshot").toEqual([]);
-          expect(w.wire.server.calls("chat.send")).toHaveLength(1);
+          expect(w.wire.server.calls("turn.start")).toHaveLength(1);
         }
       }
       if (firstModel && (outcome !== "done" || !order.includes("hydration.release") || !available)) {

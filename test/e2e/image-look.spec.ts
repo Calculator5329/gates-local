@@ -140,7 +140,7 @@ test("the button keeps its width on a thread switch with Image on", async ({ pag
     // two threads on installed chat models that fit, whose names differ in length
     for (const [title, model] of [["Short", "qwen3.5:9b"], ["Long", "gemma4:12b"]] as const) {
       const id = (await client.call("threads.create", { title })).id;
-      await client.call("chat.send", { threadId: id, content: "hello", model, numCtx: 4096 });
+      await client.call("reply.send", { id: `look-${title}`, threadId: id, messageId: `look-${title}`, text: "hello", model, numCtx: 4096 });
       await expect.poll(async () => (await client.call("threads.get", { threadId: id })).messages.length, { timeout: 30_000 }).toBeGreaterThanOrEqual(2);
       threads.push(id);
     }

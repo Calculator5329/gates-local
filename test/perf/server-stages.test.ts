@@ -25,7 +25,7 @@ test("server stages persist at the first delta with only times and ids, across c
         socket.send(frame); socket.send(frame);
       })());
     });
-    for (const threadId of ["a", "b"]) socket.emit("message", JSON.stringify({ id: `req-${threadId}`, method: "chat.send", params: { threadId, content: "private input" } }));
+    for (const threadId of ["a", "b"]) socket.emit("message", JSON.stringify({ id: `req-${threadId}`, method: "reply.send", params: { id: `q-${threadId}`, threadId, text: "private input" } }));
     await Promise.all(tasks);
     expect(saved).toHaveLength(2);
     expect(saved.map(record => record.requestId)).toEqual(["req-a", "req-b"]);

@@ -33,6 +33,7 @@ function cacheTmp(): string {
 }
 
 const noop = () => {};
+const qwen = { name: "qwen3.5:9b", digest: "d", sizeBytes: 6_600_000_000, modifiedAt: "2026-11-01T00:00:00Z", capabilities: ["completion" as const] };
 const never = () => { throw new Error("a list of records asks the server nothing"); };
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -41,7 +42,7 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 
-it("a listed turn that fails before its start puts the sidebar's dot out, holds no queue, and stays gone after hydration", async () => {
+it("a listed turn that fails before its start puts the sidebar's dot out, waits on hold, and stays gone after hydration", async () => {
   const b = installBrowser();
   const db = openThreadStore(path.join(cacheTmp(), "threads.sqlite"));
   const a = db.createThread({ title: "A" });
@@ -60,7 +61,7 @@ it("a listed turn that fails before its start puts the sidebar's dot out, holds 
   const app = createApp({
     store: db,
     runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
-    catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
+    catalog: { current: () => [qwen], refresh: async () => ({ models: [qwen], changed: false }), onChange: () => () => {}, stop: () => {} },
     push: (channel, payload) => { pushes.push({ channel, payload }); },
     fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
     models: { handlers: {}, loader: { reserve: () => ({
@@ -90,7 +91,7 @@ it("a listed turn that fails before its start puts the sidebar's dot out, holds 
     b.server.answer("threads.list", () => [a]);
     b.server.answer("threads.create", () => ({ id: "B", title: "B", createdAt: 1, updatedAt: 1 }));
     b.server.answer("threads.get", ({ threadId }) => ({ thread: { id: threadId, title: threadId, createdAt: 1, updatedAt: 1 }, messages: [] }));
-    b.server.answer("chat.send", ({ threadId, content }) => ({ turnId: `turn-${threadId}`, userMessage: { id: `u-${threadId}`, threadId, role: "user", content, createdAt: 1 } }));
+    b.server.answer("turn.start", ({ threadId, content }) => ({ turnId: `turn-${threadId}`, userMessage: { id: `u-${threadId}`, threadId, role: "user", content, createdAt: 1 } }));
     vi.resetModules();
     const session = await import("../lib/session/index.ts");
     const store = await import("../lib/store/store.ts");
@@ -107,9 +108,9 @@ it("a listed turn that fails before its start puts the sidebar's dot out, holds 
     const since = pushes.slice(told);
     const said = since.filter((p): p is { channel: "chat.event"; payload: Payload<"chat.event"> } => (p as { channel: string }).channel === "chat.event");
     expect(said.map((p) => p.payload.event)).toEqual([expect.objectContaining({ type: "error", code: "internal", ended: { reason: "failed", at: expect.any(Number) } })]);
-    // and its record ends in every window, with no question saved
+    // its message waits on hold in every window with the reason, its question never saved
     const ended = since.filter((p): p is { channel: "reply.changed"; payload: Payload<"reply.changed"> } => (p as { channel: string }).channel === "reply.changed");
-    expect(ended.map((p) => p.payload)).toEqual([expect.objectContaining({ kind: "is", reply: expect.objectContaining({ id: theirs, stage: "failed", code: "internal" }) })]);
+    expect(ended.map((p) => p.payload)).toEqual([expect.objectContaining({ kind: "is", reply: expect.objectContaining({ id: theirs, stage: "held", held: expect.objectContaining({ why: "refused", code: "internal" }) }) })]);
     expect(ended[0]!.payload).not.toHaveProperty("reply.questionId");
     b.server.push("chat.event", said[0]!.payload);
     b.server.push("reply.changed", ended[0]!.payload);
@@ -121,8 +122,8 @@ it("a listed turn that fails before its start puts the sidebar's dot out, holds 
     await session.send("after B");
     b.server.push("chat.event", { threadId: "B", turnId: "turn-B", event: { type: "done", message: { id: "aB", threadId: "B", role: "assistant", content: "B finished", createdAt: 2 }, stopReason: "stop" } });
     await tick(); b.frame();
-    expect.soft(b.server.calls("chat.send").map(call => call.params), "the queue goes on once B finishes").toHaveLength(2);
-    expect.soft(queuedOf(store.getState())).toEqual([]);
+    expect.soft(b.server.calls("turn.start").map(call => call.params), "the queue goes on once B finishes").toHaveLength(2);
+    expect.soft(queuedOf(store.getState()), "only A's message waits, on hold").toEqual([expect.objectContaining({ threadId: a.id, held: true, why: expect.objectContaining({ code: "internal" }) })]);
     // the person opens A; the next list no longer names its reply, and the mark stays gone
     session.openThread(a.id);
     await tick();

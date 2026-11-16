@@ -29,7 +29,7 @@ const SETTINGS: Settings = { ...methodSamples["settings.get"].result, imageGen: 
 const st = () => store.getState();
 const type = (text: string) => drafts.replaceDraft(st().threadId, { text });
 const userMsg = (id: string, threadId: string, content: string): Message => ({ id, threadId, role: "user", content, createdAt: 1 });
-const sends = () => b.server.calls("chat.send").map((r) => r.params as Record<string, unknown>);
+const sends = () => b.server.calls("turn.start").map((r) => r.params as Record<string, unknown>);
 
 async function start(settings: Settings = SETTINGS): Promise<void> {
   b = installBrowser();
@@ -44,7 +44,7 @@ async function start(settings: Settings = SETTINGS): Promise<void> {
   b.server.answer("image.presets", () => PRESETS);
   b.server.answer("threads.create", ({ title }) => ({ id: created.shift() ?? "Z", title: title ?? "", createdAt: 1, updatedAt: 1 }));
   b.server.answer("threads.get", ({ threadId }) => ({ thread: { id: threadId, title: threadId, createdAt: 1, updatedAt: 1 }, messages: [] }));
-  b.server.answer("chat.send", ({ threadId, content }) => {
+  b.server.answer("turn.start", ({ threadId, content }) => {
     const n = (turnsOf[threadId] = (turnsOf[threadId] ?? 0) + 1);
     return { turnId: `turn-${threadId}-${n}`, userMessage: userMsg(`u-${threadId}-${n}`, threadId, content) };
   });
@@ -64,7 +64,7 @@ async function stopSession(): Promise<void> {
 beforeEach(() => start());
 afterEach(stopSession);
 
-it("Image on: one chat.send that carries the image choice and no chat-model check", async () => {
+it("Image on: one reply.send that carries the image choice and no chat-model check", async () => {
   store.setState({ image: true });
   type("a lighthouse at dusk");
   const blockingBefore = b.server.calls("turns.blocking").length;

@@ -74,7 +74,7 @@ export const stopsChat = (fit: TableFit | undefined): boolean => (fit?.stops.len
 
 /**
  * The row as a send reads it says no: not enough memory right now, with nothing a stop would free.
- * The same row and rule chat.send's admission plans with (fit/planWith on the table's reading), so a
+ * The same row and rule reply.send's admission plans with (fit/planWith on the table's reading), so a
  * model marked this way is the one the send refuses, whatever the card's own verdict.
  */
 export const refusedNow = (fit: TableFit | undefined): boolean => fit !== undefined && fit.verdict === "refuse" && !stopsChat(fit);

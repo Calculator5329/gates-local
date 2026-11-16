@@ -56,7 +56,7 @@ export async function saveFile(dataDir: string, input: { name: string; type: str
 export interface Holder { threadId: string; owners: ReadonlyMap<string, string>; }
 
 /**
- * chat.send: every file is a regular file under files/ (never a link), sized as stored, and
+ * a send: every file is a regular file under files/ (never a link), sized as stored, and
  * not one another thread's message holds.
  */
 export async function checkFiles(dataDir: string, files: readonly AttachedFile[], holder?: Holder): Promise<AttachedFile[]> {
@@ -118,7 +118,7 @@ export function fileLifecycle(dataDir: string, store: References, options: { fir
     tail = result.catch(() => undefined);
     return result;
   };
-  /** Copies a chat.send names whose admission has not settled: its row may be about to hold them. */
+  /** Copies a send names whose admission has not settled: its row may be about to hold them. */
   const carried = new Map<string, number>();
   const collect = async (paths: readonly string[]) => {
     let root: string;
@@ -164,7 +164,7 @@ export function fileLifecycle(dataDir: string, store: References, options: { fir
       }
       return { missing };
     }),
-    /** A chat.send carries these until its admission settles: no release or sweep removes them meanwhile. Call the answer when it has. */
+    /** A send carries these until its admission settles: no release or sweep removes them meanwhile. Call the answer when it has. */
     sending: (paths: readonly string[]): (() => void) => {
       for (const file of paths) carried.set(file, (carried.get(file) ?? 0) + 1);
       let done = false;

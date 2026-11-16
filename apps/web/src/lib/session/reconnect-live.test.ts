@@ -17,7 +17,7 @@ beforeEach(async () => {
   session = await import("./index.ts");
   store = await import("../store/store.ts");
   browser.server.answer("threads.get", () => history([question]));
-  browser.server.answer("chat.send", () => ({ turnId: "turn-live", userMessage: question }));
+  browser.server.answer("turn.start", () => ({ turnId: "turn-live", userMessage: question }));
   disconnect = session.connect();
   await until(() => store.getState().imageStatus !== undefined);
   await session.send(question.content);

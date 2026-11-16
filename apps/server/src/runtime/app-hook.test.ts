@@ -1,6 +1,6 @@
 // app.ts's models deps field in process: a chat turn on a model that is not
 // in /api/ps pushes models.load "loading", then "ready" once the reply
-// starts, the turn holds its model from chat.send's first line (so
+// starts, the turn holds its model from reply.send's first line (so
 // models.remove sees it), and the module handlers are reachable through
 // app.handlers.
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -230,9 +230,7 @@ it("R-07: a send while the model's DELETE is pending refuses before any fit", as
   const removing = remove();
   await until(() => ollama.requests.some((r) => r.path === "/api/delete"));
   const refused = await send().catch((e: unknown) => e);
-  expect(refused).toBeInstanceOf(ModelActionError);
-  expect((refused as ModelActionError).code).toBe("model-removing");
-  expect((refused as Error).message).toMatch(/is being removed/);
+  expect(refused).toMatchObject({ code: "model-removing", message: expect.stringMatching(/is being removed/) });
   expect(ollama.requests.some((r) => r.path === "/api/show" || r.path === "/api/chat")).toBe(false);
   expect(app.activeTurns()).toBe(0);
   del.release();

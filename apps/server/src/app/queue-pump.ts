@@ -1,19 +1,19 @@
 // The pump: it asks the records (chat/replies.ts) which waiting message goes next, takes it,
 // and begins its start. It listens to nothing: what happens to a start or a reply is said to
 // the record by the work itself.
-import type { Message, Params, ResultOf } from "@gates-local/contracts";
+import type { Message } from "@gates-local/contracts";
 import type { Picked, Replies } from "../chat/replies.ts";
 import type { Behind } from "../chat/reply.ts";
 import { rankChatModels } from "../runtime/pick.ts";
 import { refusalOf } from "./errors.ts";
-import type { AppContext, Taken } from "./turn.ts";
+import type { AppContext, StartAnswer, StartParams, Taken } from "./turn.ts";
 
 export interface QueuePumpDeps extends Pick<AppContext, "turns" | "byThread" | "closing" | "catalog" | "runtime" | "store"> {
   readonly replies: Replies;
   readonly settings: AppContext["deps"]["settings"];
   readonly newId: () => string;
-  /** Begins the start of a taken message: the same work a window's chat.send begins. */
-  readonly begin: (params: Params<"chat.send">, taken: Taken) => ResultOf<"chat.send"> | Promise<ResultOf<"chat.send">>;
+  /** Begins the start of a taken message. */
+  readonly begin: (params: StartParams, taken: Taken) => StartAnswer | Promise<StartAnswer>;
 }
 
 export interface QueuePump {
@@ -91,7 +91,9 @@ export function createQueuePump({ replies, turns, byThread, closing, catalog, ru
   const behind: QueuePump["behind"] = () => {
     const { state } = runtime.status();
     if (state === "installing") return "setup";
-    return state === "ready" && rankChatModels(catalog.current() ?? [])[0] === undefined ? "download" : "reply";
+    const models = catalog.current();
+    // why: a list not read yet says nothing; only a read list with no chat model means a download first
+    return state === "ready" && models !== undefined && rankChatModels(models)[0] === undefined ? "download" : "reply";
   };
   return { pump, start, behind };
 }

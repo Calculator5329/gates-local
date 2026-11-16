@@ -42,7 +42,7 @@ it("keeps rendered link permissions after Stop followed by Send", async () => {
     await tick();
     check();
     await session.send("Read the next report");
-    expect(browser.server.calls("chat.send")).toHaveLength(2);
+    expect(browser.server.calls("turn.start")).toHaveLength(2);
     check();
     const retained = renderToStaticMarkup(createElement(Timeline, { threadId: live.threadId }));
     expect(retained).not.toContain("Read · running");

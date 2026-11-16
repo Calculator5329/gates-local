@@ -110,14 +110,14 @@ export interface AdmitOptions {
   readonly signal?: AbortSignal;
 }
 
-/** A chat turn's hold on its model, from chat.send's first line to the turn's end. */
+/** A chat turn's hold on its model, from reply.send's first line to the turn's end. */
 export interface TurnReservation extends TurnLoad {
   /** The runtime captured at reserve(): the turn's fit and chat go here (undefined: none ready). */
   readonly baseUrl: string | undefined;
   /**
    * Aborts once that runtime is gone (a switch began, or the loader closed)
    * and stays aborted until end(): at admission, the capability lookup,
-   * streaming and tool rounds alike. chat.send ties it to the turn.
+   * streaming and tool rounds alike. reply.send ties it to the turn.
    */
   readonly signal: AbortSignal;
   /**
@@ -140,7 +140,7 @@ export interface ModelLoader {
   /** Throws ModelActionError while the model is removed, the runtime switches or the loader closed. */
   load(model: string, numCtx: number): Promise<ModelLoad>;
   /**
-   * Synchronous so the turn counts toward inUse() before chat.send's first
+   * Synchronous so the turn counts toward inUse() before reply.send's first
    * await. Throws ModelActionError("model-removing") while the model's DELETE
    * runs, "runtime-switching" during a switch, "shutting-down" after close().
    */

@@ -1,4 +1,4 @@
-// Image mode (chat.send draw) and Tools › Make images (the imageTool dep), over a fake Ollama
+// Image mode (reply.send draw) and Tools › Make images (the imageTool dep), over a fake Ollama
 // and an image module shaped like image/module.ts: generate saves the card at once and the
 // job claims the GPU alone.
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -12,6 +12,7 @@ import { createGpuLease } from "../gpu/lease.ts";
 import type { ImageModule } from "../image/module.ts";
 import { createSources } from "../sources/index.ts";
 import { openThreadStore } from "../threads/store.ts";
+import { chatCatalog } from "../../test/send-rig.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -72,7 +73,7 @@ async function rig(options: { imageTool?: ImageChoice; hold?: boolean; firstDone
   const app = createApp({
     store, sources, image, lease, toolsEnabled: () => true, imageTool: () => options.imageTool,
     runtime: { status: () => ready, baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ready, lookIfDown: async () => ready },
-    catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
+    catalog: chatCatalog(),
     push: (channel, payload) => {
       // the turn's events; its reply records (decision 33) are not what these cases read
       if (channel === "chat.event" && (payload as { event: { type: string } }).event.type !== "reply") events.push((payload as { event: { type: string } }).event);
@@ -159,10 +160,10 @@ describe("Image mode: the typed words go straight to the image model", () => {
   it("is a running turn until the image ends: a second send waits its turn, and Stop cancels the job", async () => {
     const t = await rig({ hold: true });
     try {
-      const { turnId } = await t.send({ draw: DRAWN });
-      expect(await t.app.handlers["reply.list"]!({}, { clientId: 1 })).toMatchObject([{ reply: { id: turnId, threadId: t.thread.id, stage: "drawing" } }]);
+      const { id, turnId } = await t.send({ draw: DRAWN });
+      expect(await t.app.handlers["reply.list"]!({}, { clientId: 1 })).toMatchObject([{ reply: { id, threadId: t.thread.id, stage: "drawing" } }]);
       await expect(t.send({ draw: DRAWN })).rejects.toMatchObject({ code: "turn-active" });
-      expect(await t.app.handlers["chat.cancel"]({ turnId }, { clientId: 1 })).toEqual({ cancelled: true });
+      expect(await t.app.handlers["reply.stop"]({ id: turnId }, { clientId: 1 })).toMatchObject({ answer: "done" });
       await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
       expect(t.cancel).toHaveBeenCalledWith("job-1");
       expect(t.store.getThread(t.thread.id).messages.at(-1)!.imageJob).toMatchObject({ state: "cancelled" });
@@ -190,7 +191,7 @@ describe("Image mode: the typed words go straight to the image model", () => {
     const t = await rig({ hold: true });
     try {
       const first = await t.send({ draw: DRAWN });
-      await t.app.handlers["chat.cancel"]({ turnId: first.turnId }, { clientId: 1 });
+      await t.app.handlers["reply.stop"]({ id: first.turnId }, { clientId: 1 });
       await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
       t.release();
       await t.send({ draw: DRAWN, retryOf: first.userMessage.id });
@@ -210,7 +211,7 @@ describe("Image mode: the typed words go straight to the image model", () => {
       expect(sent.map((p) => (p.seed - sent[0]!.seed + 2 ** 32) % 2 ** 32)).toEqual([0, 1, 2]);
       expect(t.store.getThread(t.thread.id).thread.imageCount).toBe(3);
       await vi.waitFor(() => expect(t.store.getMessage("job-1")?.imageJob?.state).toBe("done"));
-      await t.app.handlers["chat.cancel"]({ turnId }, { clientId: 1 });
+      await t.app.handlers["reply.stop"]({ id: turnId }, { clientId: 1 });
       await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
       expect(t.store.getThread(t.thread.id).messages.map((m) => m.imageJob?.state)).toEqual([undefined, "done", "cancelled", "cancelled"]);
       // the thread's next send makes three again without saying so

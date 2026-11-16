@@ -64,7 +64,7 @@ test("Stop from a window that closes the moment it is pressed holds every queued
   await expect(stop(pressing)).toBeVisible();
 
   // every frame after the stop call is lost, and the window is gone
-  t.lastWords(["chat.cancel", "reply.stop"]);
+  t.lastWords(["reply.stop"]);
   await stop(pressing).click();
   await expect.poll(() => t.cut()).toBe(true);
   await pressing.close();

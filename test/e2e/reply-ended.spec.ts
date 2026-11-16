@@ -101,11 +101,11 @@ test("a reply that fails before it starts puts out the sidebar's working dot in 
   try {
     const first = await rpc.call("threads.create", { title: "Loads the model" });
     const second = await rpc.call("threads.create", { title: "Asks a missing model" });
-    await rpc.call("chat.send", { threadId: first.id, content: "hello", model: MODEL, numCtx: 4096 });
+    await rpc.call("reply.send", { id: "loads", threadId: first.id, messageId: "loads", text: "hello", model: MODEL, numCtx: 4096 });
     const ends: string[] = [];
     rpc.subscribe("chat.event", (p) => { if (p.threadId === second.id && p.event.type === "error") ends.push(p.event.code); });
     // answered at once, while it waits for the load gate
-    await rpc.call("chat.send", { threadId: second.id, content: "hello", model: "not-installed:1b", numCtx: 4096 });
+    await rpc.call("reply.send", { id: "missing", threadId: second.id, messageId: "missing", text: "hello", model: "not-installed:1b", numCtx: 4096 });
     // this window hears of both only from reply.list, at its reload
     await page.reload(); await waitReady(page);
     const dot = page.locator(".sb-row").filter({ hasText: "Asks a missing model" }).getByLabel("Reply in progress", { exact: true });

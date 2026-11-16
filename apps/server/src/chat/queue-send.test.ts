@@ -5,10 +5,11 @@ import * as S from "effect/Schema";
 import { expect, it, onTestFinished, vi } from "vitest";
 import { AppError } from "../app.ts";
 import { MODEL, WAITING, rig, settle, until } from "../../test/send-rig.ts";
+import { sendTaken } from "./send-started.ts";
 
 it("a message queued behind a reply goes when that reply ends, and leaves the queue at its start", async () => {
   const r = rig();
-  await r.h["chat.send"]({ threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+  await sendTaken(r.app, { threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
   expect(await r.h["reply.send"](r.entry("q1", "second"), { clientId: 1 })).toMatchObject({ answer: "done", reply: { stage: "queued" } });
   await settle();
   expect(r.queued()).toMatchObject([{ id: "q1", text: "second" }]);
@@ -23,22 +24,23 @@ it("a message queued behind a reply goes when that reply ends, and leaves the qu
 
 it("a Stop before the reply started holds what queued behind it; Send now sends it", async () => {
   const r = rig();
-  const { turnId } = await r.h["chat.send"]({ threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+  const { id, turnId } = await sendTaken(r.app, { threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
   await r.h["reply.send"](r.entry("q1", "second"), { clientId: 1 });
-  await r.h["chat.cancel"]({ turnId }, { clientId: 1 });
+  await r.h["reply.stop"]({ id: turnId }, { clientId: 1 });
   r.open();
   await until(() => r.latest("q1")?.stage === "held", "the queue held");
   await settle();
   expect(r.starts()).toEqual([]);
   await r.h["reply.now"]({ id: "q1" }, { clientId: 2 });
-  await until(() => r.starts().length === 1 && r.queued().length === 0, "Send now sent it");
+  await until(() => r.starts().length === 1 && r.queued().every((q) => q.id !== "q1"), "Send now sent it");
   expect(r.starts()).toEqual(["second"]);
+  expect(r.queued().map((q) => [q.id, q.stage]), "the stopped message waits on hold").toEqual([[id, "held"]]);
 });
 
 it.each(["the hold first, as a window sends them", "the Stop first"])("a Stop that lands just after the reply ended still holds what queued behind it, and pulls back the one already on its way (%s)", async (order) => {
   const r = rig();
   const hold = async (id: string) => r.h["reply.hold"]({ id }, { clientId: 1 });
-  const { turnId } = await r.h["chat.send"]({ threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+  const { turnId } = await sendTaken(r.app, { threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
   await r.h["reply.send"](r.entry("q1", "second"), { clientId: 1 });
   await r.h["reply.send"](r.entry("q2", "third"), { clientId: 1 });
   // the reply's last word reaches the server before the Stop: the queue moves on and q1 goes out
@@ -47,14 +49,14 @@ it.each(["the hold first, as a window sends them", "the Stop first"])("a Stop th
   expect(r.starts()).toEqual(["first"]);
   // the Stop and the window's holds, a round trip after the reply ended
   if (order === "the Stop first") {
-    await r.h["chat.cancel"]({ turnId }, { clientId: 1 });
+    await r.h["reply.stop"]({ id: turnId }, { clientId: 1 });
     await hold("q1");
     await hold("q2");
   } else {
     // q1 is on its way when its hold comes: the hold is answered as too late, the Stop pulls it back
     expect(await hold("q1")).toMatchObject({ answer: "sending" });
     await hold("q2");
-    await r.h["chat.cancel"]({ turnId }, { clientId: 1 });
+    await r.h["reply.stop"]({ id: turnId }, { clientId: 1 });
   }
   r.open();
   await settle();
@@ -71,13 +73,13 @@ it("a Stop that lands while a queued message's file is being saved still holds i
     // the first read is the check when the send is taken; the second is inside the save
     if (++readsWhileSending === 2) stop?.();
   } });
-  const { turnId } = await r.h["chat.send"]({ threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+  const { turnId } = await sendTaken(r.app, { threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
   const file = await r.h["files.attach"]({ name: "notes.txt", type: "text/plain", data: "aGVsbG8=" }, { clientId: 1 });
   await r.h["reply.send"]({ ...r.entry("q1", "second"), files: [file] }, { clientId: 1 });
   r.openOne();
   await until(() => r.latest("q1")?.stage === "starting", "the queued message on its way");
   let stopped = false;
-  stop = () => { stopped = true; void r.h["chat.cancel"]({ turnId }, { clientId: 1 }); };
+  stop = () => { stopped = true; void r.h["reply.stop"]({ id: turnId }, { clientId: 1 }); };
   r.open();
   await until(() => stopped, "the Stop during the save");
   await settle();
@@ -89,7 +91,7 @@ it("a Stop that lands while a queued message's file is being saved still holds i
 it("a Stop long after the reply ended still holds what waits in its chat, and leaves the reply being written alone", async () => {
   const r = rig({ drip: true });
   r.open();
-  const first = await r.h["chat.send"]({ threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+  const first = await sendTaken(r.app, { threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
   await until(() => r.record(first.turnId)?.stage === "writing", "the first reply being written");
   r.finish();
   await until(() => r.events(first.turnId).some((e) => e.type === "done"), "the first reply's end");
@@ -98,14 +100,12 @@ it("a Stop long after the reply ended still holds what waits in its chat, and le
   const clock = vi.spyOn(Date, "now").mockImplementation(() => Math.round(performance.timeOrigin + performance.now()) + 3_600_000);
   onTestFinished(() => clock.mockRestore());
   expect(Date.now() - ended).toBeGreaterThanOrEqual(3_600_000);
-  const second = await r.h["chat.send"]({ threadId: r.thread.id, content: "second", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+  const second = await sendTaken(r.app, { threadId: r.thread.id, content: "second", model: MODEL, numCtx: 16384 }, { clientId: 1 });
   await until(() => r.record(second.turnId)?.stage === "writing", "the second reply being written");
   await r.h["reply.send"](r.entry("q1", "third"), { clientId: 1 });
   await r.h["reply.send"](r.entry("q2", "fourth"), { clientId: 1 });
-  // the older call says no reply was stopped; what waits holds all the same
-  expect(await r.h["chat.cancel"]({ turnId: first.turnId }, { clientId: 2 })).toEqual({ cancelled: false });
-  expect(r.queued().map((q) => [q.id, q.stage])).toEqual([["q1", "held"], ["q2", "held"]]);
   expect(await r.h["reply.stop"]({ id: first.turnId }, { clientId: 2 })).toMatchObject({ answer: "gone", why: "sent", question: { content: "first" } });
+  expect(r.queued().map((q) => [q.id, q.stage])).toEqual([["q1", "held"], ["q2", "held"]]);
   expect(r.record(second.turnId)).toMatchObject({ stage: "writing" });
   expect(r.record(second.turnId)?.stoppedAt).toBeUndefined();
   r.finish();
@@ -118,7 +118,7 @@ it("a Stop long after the reply ended still holds what waits in its chat, and le
 it("a row left open in a composer stays open through a dropped connection, and goes on once its window is gone", async () => {
   const r = rig();
   const dropped = new AbortController();
-  await r.h["chat.send"]({ threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+  await sendTaken(r.app, { threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
   await r.h["reply.send"](r.entry("q1", "second"), { clientId: 1 });
   expect(await r.h["reply.edit"]({ id: "q1", open: true }, { clientId: 5, window: 3, signal: dropped.signal })).toMatchObject({ answer: "done", reply: { stage: "editing" } });
   r.open();
@@ -137,7 +137,7 @@ it("a row left open in a composer stays open through a dropped connection, and g
 
 it("a row open in one window is not opened by a second, and the second window's going leaves the edit alone", async () => {
   const r = rig();
-  await r.h["chat.send"]({ threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+  await sendTaken(r.app, { threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
   await r.h["reply.send"](r.entry("q1", "second"), { clientId: 1 });
   await r.h["reply.edit"]({ id: "q1", open: true }, { clientId: 5, window: 3 });
   expect(await r.h["reply.edit"]({ id: "q1", open: true }, { clientId: 6, window: 4 })).toMatchObject({ answer: "elsewhere", reply: { stage: "editing", by: "3" } });

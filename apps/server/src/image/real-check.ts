@@ -61,7 +61,7 @@ async function loadChatModel(swap: SwapOptions): Promise<ModelLoader> {
 
 /**
  * The owner's restart: the chat model is resident and the loader did not load it. One chat turn
- * runs on it through the loader's reservation, as chat.send does, so the image may unload it.
+ * runs on it through the loader's reservation, as reply.send does, so the image may unload it.
  */
 async function warmTurn(swap: SwapOptions, loader: ModelLoader): Promise<ModelLoader> {
   const resident = (await listLoaded(swap.ollamaUrl)).map((m) => canonicalTag(m.name));

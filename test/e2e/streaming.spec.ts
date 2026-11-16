@@ -209,7 +209,7 @@ test("Stop on a slow connection shows the same seconds in the pressing window, a
   test.setTimeout(60_000);
   const t = await tap(page);
   // the press reaches the server a second and a half after the click
-  for (const method of ["chat.cancel", "reply.stop"]) t.late.set(method, 1500);
+  t.late.set("reply.stop", 1500);
   await open();
   await waitReady(page);
   await stack.scenario("slow-drip", { holdAfterTokens: 46 });

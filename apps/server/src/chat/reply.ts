@@ -31,10 +31,7 @@ interface Unsaved extends Common {
   readonly behind: Behind;
   /** How many times a start was taken for it. */
   readonly starts: number;
-  /**
-   * It never waits in the queue: sent by a window that keeps the words itself (the older
-   * chat.send), or a Retry, whose question is in the chat already. The server lists no row for it.
-   */
+  /** A Retry, whose question is in the chat already: it never waits in the queue and no row is listed for it. */
   readonly direct: boolean;
 }
 export interface Queued extends Unsaved { readonly stage: "queued"; readonly waitFor: Waits }
@@ -440,7 +437,7 @@ function event(r: Rec | undefined, e: Event, rules: Rules): Moved {
         return { next: held(r, { why: "refused", ...LEFT_START }, "reply"), ahead: "stopped" };
       }
       if (isAsked(r) && r.turnId === e.turnId) return { next: { ...over, questionId: r.question.id, stage: "failed", ...LEFT_REPLY }, ahead: "stopped" };
-      // the window that sent it keeps its words: the server's record of a start that never saved ends here
+      // a Retry's question is in the chat: the record of a start that never saved ends here
       if (r.stage !== "held" || !r.direct) return same;
       const why = r.why;
       return { next: why.why === "refused" ? { ...over, stage: "failed", code: why.code, message: why.message } : { ...over, stage: "stopped", by: { who: "person" } } };

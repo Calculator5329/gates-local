@@ -7,7 +7,6 @@ import type { Message, Payload, RuntimeStatus } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { type Browser, type Held, installBrowser, tick, until } from "../../test/harness.ts";
 import { numberServer } from "../../test/numbered-server.ts";
-import { draftView } from "../../test/draft-view.ts";
 import { queuedOf } from "../../test/queue.ts";
 import { drawTimes } from "./times.ts";
 
@@ -172,7 +171,7 @@ it.each([
   expect(store.getState().voiceConnectionVersion).toBe(afterReceipt);
 });
 
-/** Send "hi" from a new thread and wait until chat.send answered turn-1. */
+/** Send "hi" from a new thread and wait until reply.send answered turn-1. */
 async function startFirstTurn(): Promise<void> {
   void session.send("hi");
   await until(() => openTurn(store.getState())?.turnId === b.server.replyOf("turn-1"), 2000, "turn-1");
@@ -203,7 +202,7 @@ describe("Settings review: session choices and fit refreshes", () => {
     expect(store.getState().numCtx).toBe(8192);
     expect(published.slice(afterChoice).every(s => s.numCtx === 8192)).toBe(true);
     await startFirstTurn();
-    expect(b.server.calls("chat.send").at(-1)?.params).toMatchObject({ numCtx: 8192 });
+    expect(b.server.calls("turn.start").at(-1)?.params).toMatchObject({ numCtx: 8192 });
   });
 
   it("SQ-02: opening the app afresh still starts at its saved default", async () => {
@@ -251,11 +250,11 @@ describe("Stop then Retry (W-02)", () => {
     session.retry(); // at once: the old turn has not ended on the server yet
     await tick();
     expect(b.server.calls("reply.stop")).toHaveLength(1);
-    expect(b.server.calls("chat.send")).toHaveLength(1);
+    expect(b.server.calls("turn.start")).toHaveLength(1);
 
     chat("turn-1", { type: "error", code: "cancelled", message: "cancelled", ended: { reason: "stopped", at: Date.now() } });
     await tick();
-    const held = b.server.hold("chat.send");
+    const held = b.server.hold("turn.start");
     session.retry();
     (await held).respond({ turnId: "turn-2", userMessage: userMsg("m3") });
     await tick();
@@ -276,7 +275,7 @@ describe("Stop then Retry (W-02)", () => {
     session.stop();
     // the server's record says it took the Stop
     await tick();
-    const held = b.server.hold("chat.send");
+    const held = b.server.hold("turn.start");
     void session.send("next question");
     await tick();
     // it waits for the stopped reply to end, then is held with the rest; Send now starts it, and the old turn's end never reaches it
@@ -298,7 +297,7 @@ describe("Stop then Retry (W-02)", () => {
 
   it("Stop before the send is answered holds the message, and its late start saves nothing", async () => {
     await boot();
-    const first = b.server.hold("chat.send");
+    const first = b.server.hold("turn.start");
     void session.send("hi");
     const h1 = await first;
     const id = (b.server.calls("reply.send")[0]!.params as { id: string }).id;
@@ -311,7 +310,7 @@ describe("Stop then Retry (W-02)", () => {
     await tick();
     expect(openTurn(store.getState())).toBeNull();
     expect(store.getState().replies.get(id)?.stage).toBe("held");
-    expect(b.server.calls("chat.send")).toHaveLength(1);
+    expect(b.server.calls("turn.start")).toHaveLength(1);
   });
 });
 
@@ -444,7 +443,7 @@ describe("reconnect reconciles cached threads (W-04)", () => {
     expect(session.canRetry(store.getState())).toBe(false);
     session.retry();
     await tick();
-    expect(b.server.calls("chat.send")).toHaveLength(1);
+    expect(b.server.calls("turn.start")).toHaveLength(1);
     chat("turn-1", { type: "delta", text: "Still here" });
     await tick();
     b.frame();
@@ -493,7 +492,7 @@ describe("Retry after a reconnect (WF-01)", () => {
     (await reconnectHeld()).respond(snapshot([userMsg("m1", "t1", "hi")]));
     await until(() => openTurn(store.getState()) === null, 2000, "the ended reply gone");
 
-    const send = b.server.hold("chat.send");
+    const send = b.server.hold("turn.start");
     session.retry();
     const pending = await send;
     // events of turn-1 that were on their way come around the Retry's answer and start
@@ -520,32 +519,6 @@ describe("Retry after a reconnect (WF-01)", () => {
     await tick();
     expect(openTurn(store.getState())).toBeNull();
     expect(store.getState().messages["t1"]?.at(-1)).toMatchObject({ id: "m4", content: "Fresh and whole" });
-  });
-});
-
-describe("events while a send waits for its id (WF-01)", () => {
-  it("another client's whole turn while this send waits is the chat's; the refusal holds the message with its reason", async () => {
-    await boot();
-    session.openThread("t1");
-    await until(() => store.getState().messages["t1"] !== undefined);
-    const send = b.server.hold("chat.send");
-    void session.send("mine");
-    const pending = await send;
-    const before = store.getState().messages["t1"]?.map((m) => m.id) ?? [];
-    // another client's turn in this thread starts and finishes before the server refuses this send
-    chat("turn-9", { type: "start", model: "gemma3:4b", userMessage: userMsg("u9", "t1", "theirs?") });
-    chat("turn-9", { type: "delta", text: "theirs" });
-    chat("turn-9", { type: "done", message: asstMsg("m9", "t1", "theirs"), stopReason: "stop" });
-    await tick();
-    // the server's records said so: their question and reply are in the chat, and nothing of this send was saved
-    expect(openTurn(store.getState())).toBeNull();
-    expect(store.getState().messages["t1"]?.map((m) => m.id)).toEqual([...before, "u9", "m9"]);
-    pending.fail("turn-active", "thread t1 already has turn turn-9 streaming");
-    await tick();
-    const id = (b.server.calls("reply.send")[0]!.params as { id: string }).id;
-    expect(store.getState().replies.get(id)).toMatchObject({ stage: "held", text: "mine" });
-    expect(draftView(store, await import("../lib/store/drafts.ts"))).toMatchObject({ draft: "" });
-    expect(store.getState().turns, "no reply is left waiting in any chat").toEqual({});
   });
 });
 
@@ -838,12 +811,12 @@ async function secondClient(): Promise<{ session: Session; store: Store }> {
 describe("background turn endings", () => {
   it.each([false, true])("TE-01: pending parked send stays unique and frees the automatic queue (completion before acknowledgment: %s)", async (doneFirst) => {
     await boot();
-    const aHold = b.server.hold("chat.send");
+    const aHold = b.server.hold("turn.start");
     void session.send("A");
     const a = await aHold;
     session.newThread();
     b.server.answer("threads.create", () => ({ ...methodSamples["threads.create"].result, id: "t2" }));
-    const bHold = b.server.hold("chat.send");
+    const bHold = b.server.hold("turn.start");
     void session.send("B");
     const second = await bHold;
     second.respond({ turnId: "turn-B", userMessage: userMsg("uB", "t2", "B") });
@@ -855,13 +828,13 @@ describe("background turn endings", () => {
     chat("turn-A", { type: "delta", text: "one two" });
     expect.soft(running(store.getState(),"t1")).toBe(1);
     const finishA = () => chat("turn-A", { type: "done", message: asstMsg("aA", "t1", "one two"), stopReason: "stop" });
-    const next = b.server.hold("chat.send");
+    const next = b.server.hold("turn.start");
     const finishB = () => chat("turn-B", { type: "done", message: asstMsg("aB", "t2", "B finished"), stopReason: "stop" }, "t2");
     if (doneFirst) {
       finishA(); finishB();
       await tick();
       // both ended: the queue goes, also before A's answer is read
-      expect(b.server.calls("chat.send")).toHaveLength(3);
+      expect(b.server.calls("turn.start")).toHaveLength(3);
     }
     a.respond({ turnId: "turn-A" });
     await tick();
@@ -872,7 +845,7 @@ describe("background turn endings", () => {
     expect.soft(running(store.getState(),"t2")).toBe(doneFirst ? 0 : 1);
     if (!doneFirst) finishB();
     await tick();
-    expect(b.server.calls("chat.send").map((call) => call.params)).toMatchObject([{ content: "A" }, { content: "B" }, { content: "queued after B" }]);
+    expect(b.server.calls("turn.start").map((call) => call.params)).toMatchObject([{ content: "A" }, { content: "B" }, { content: "queued after B" }]);
     (await next).respond({ turnId: "turn-queued", userMessage: userMsg("uQ", "t2", "queued after B") });
     await tick();
     expect(queuedOf(store.getState())).toHaveLength(0);
@@ -880,34 +853,12 @@ describe("background turn endings", () => {
     expect(running(store.getState(),"t2")).toBe(1);
   });
 
-  it("TE-01: rejecting a pending parked send replays the other client's buffered start and words", async () => {
-    await boot();
-    const aHold = b.server.hold("chat.send");
-    void session.send("A");
-    const a = await aHold;
-    session.newThread();
-    b.server.answer("threads.create", () => ({ ...methodSamples["threads.create"].result, id: "t2" }));
-    const bHold = b.server.hold("chat.send");
-    void session.send("B");
-    const second = await bHold;
-    second.respond({ turnId: "turn-B", userMessage: userMsg("uB", "t2", "B") });
-    await tick();
-    chat("foreign-A", { type: "start", model: a.params.model, userMessage: userMsg("foreign", "t1", "Another client's question") });
-    chat("foreign-A", { type: "delta", text: "The other client's words" });
-    a.fail("turn-active", "Another client already started this reply");
-    await tick();
-    expect(running(store.getState(),"t1")).toBe(1);
-    session.openThread("t1");
-    await tick(); b.frame();
-    expect(openTurn(store.getState())).toMatchObject({ turnId: "foreign-A", text: "The other client's words" });
-  });
-
   it("keeps both sidebar running marks when another reply takes the live slot, and clears each at its end", async () => {
     await boot(); await startFirstTurn();
     expect(running(store.getState(),"t1")).toBe(1);
     session.newThread();
     b.server.answer("threads.create", () => ({ ...methodSamples["threads.create"].result, id: "t2" }));
-    const held = b.server.hold("chat.send");
+    const held = b.server.hold("turn.start");
     void session.send("another thread");
     const pending = await held;
     pending.respond({ turnId: "turn-2", userMessage: userMsg("other-user", "t2", "another thread") });
@@ -945,7 +896,7 @@ describe("background turn endings", () => {
       await tick(); b.frame();
       session.newThread();
       b.server.answer("threads.create", () => ({ ...methodSamples["threads.create"].result, id: "t2" }));
-      const send = b.server.hold("chat.send");
+      const send = b.server.hold("turn.start");
       void session.send("another thread");
       const pending = await send;
       pending.respond({ turnId: "turn-2", userMessage: userMsg("other-user", "t2", "another thread") });
@@ -995,12 +946,12 @@ describe("the same thread open in two clients (PH-02)", () => {
     await until(() => other.store.getState().messages["t1"] !== undefined, 1000, "t1 in the second client");
     const saved = other.store.getState().messages["t1"]?.length ?? 0;
 
-    const send = b.server.hold("chat.send");
+    const send = b.server.hold("turn.start");
     void session.send("hello");
     const pending = await send;
     const asked = pending.params.messageId!;
     const userMessage = { ...userMsg(asked, "t1", "hello"), createdAt: 5 };
-    // the real server pushes start before chat.send answers (apps/server/src/app.ts runTurn), naming the model sent: the server's pick
+    // the real server pushes start before reply.send answers (apps/server/src/app.ts runTurn), naming the model sent: the server's pick
     b.server.broadcast("chat.event", { turnId: "turn-7", threadId: "t1", event: { type: "start", model: "qwen3:14b", userMessage } });
     pending.respond({ turnId: "turn-7", userMessage });
     await tick();
@@ -1025,7 +976,7 @@ describe("the same thread open in two clients (PH-02)", () => {
     await boot();
     session.openThread("t1");
     await until(() => store.getState().messages["t1"] !== undefined);
-    const send = b.server.hold("chat.send");
+    const send = b.server.hold("turn.start");
     void session.send("mine");
     const pending = await send;
     session.stop();

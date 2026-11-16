@@ -43,7 +43,7 @@ beforeEach(async () => {
   b.server.answer("threads.list", () => IDS.map(thread));
   b.server.answer("threads.get", ({ threadId }) => ({ thread: thread(threadId), messages: [] }));
   let n = 0;
-  b.server.answer("chat.send", ({ threadId, model }) => {
+  b.server.answer("turn.start", ({ threadId, model }) => {
     const turnId = `turn-${++n}`;
     const userMessage = user(`user-${n}`, threadId);
     // The real server broadcasts start before answering the sender's RPC.
@@ -75,7 +75,7 @@ async function answering(id: string): Promise<string> {
 /** Deliver the server's start while its send response is still in flight. */
 async function awaitingAcknowledgment(outcome: "accepted" | "turn-active" = "accepted"): Promise<() => Promise<void>> {
   session.openThread("A");
-  const held = b.server.hold("chat.send");
+  const held = b.server.hold("turn.start");
   const sending = session.send("Question awaiting its acknowledgment");
   const rpc = await held;
   // accepted: the server saved the question under the id this send asked for, and its start can
@@ -179,21 +179,10 @@ describe("sidebar running replies", () => {
     expect(marked()).toEqual([]);
   });
 
-  it("another client's reply starting while this send waits stays marked when this send is refused (chat row 32)", async () => {
-    // one turn per chat: another client's start here means this send will be refused
-    const acknowledge = await awaitingAcknowledgment("turn-active");
-    expect(marked()).toEqual(["A"]);
-    await acknowledge();
-    expect(marked()).toEqual(["A"]);
-    session.stop();
-    await tick();
-    expect(marked()).toEqual([]);
-  });
-
   it("a reply ending before acknowledgment stays unmarked after replay and reopening its chat", async () => {
     const acknowledge = await awaitingAcknowledgment();
     session.openThread("B");
-    const held = b.server.hold("chat.send");
+    const held = b.server.hold("turn.start");
     const sending = session.send("Another pending acknowledgment");
     const rpc = await held;
     const userMessage = user(rpc.params.messageId!, "B");
@@ -244,18 +233,6 @@ describe("sidebar running replies", () => {
     }
     expect(openTurn()?.text).toBe("b".repeat(101));
     expect(changed, "token publishes change no slice read by the sidebar").toBe(0);
-  });
-
-  it("a late terminal cannot clear a newer reply's mark in the same chat", async () => {
-    session.openThread("B");
-    await tick();
-    chat("older-A", "A", { type: "start", model: MODEL, userMessage: user("older-user", "A") });
-    chat("newer-A", "A", { type: "start", model: MODEL, userMessage: user("newer-user", "A") });
-    expect(marked()).toEqual(["A"]);
-    chat("older-A", "A", { type: "error", code: "cancelled", message: "cancelled", ended: { reason: "stopped", at: Date.now() } });
-    expect(marked()).toEqual(["A"]);
-    chat("newer-A", "A", { type: "done", message: reply("A"), stopReason: "stop" });
-    expect(marked()).toEqual([]);
   });
 
   it("clears observed off-screen activity when the connection drops with no live turn", async () => {

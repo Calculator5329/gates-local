@@ -1,7 +1,7 @@
 // The request handlers: every contracts method the app answers, on the thread store, the
-// runtime, the catalog, the fit table and the queue. chat.send takes a turn here and hands it
+// runtime, the catalog, the fit table and the queue. A picked message's start is taken here and handed
 // to admit.ts (a chat model) or drawing.ts (Image mode).
-import type { Params, ReplyAnswer, ResultOf, SoFar } from "@gates-local/contracts";
+import type { Params, ReplyAnswer, SoFar } from "@gates-local/contracts";
 import { checkAttachments } from "../chat/attachments.ts";
 import { saveFile } from "../chat/files.ts";
 import { withSendTimes } from "../chat/send-times.ts";
@@ -18,7 +18,7 @@ import type { Admission } from "./admit.ts";
 import type { DrawTurn, ThreadImages } from "./drawing.ts";
 import { AppError, refusalOf, threadGoing } from "./errors.ts";
 import type { QueuePump } from "./queue-pump.ts";
-import type { AppContext, Taken, Turn } from "./turn.ts";
+import type { AppContext, StartAnswer, StartParams, Taken } from "./turn.ts";
 import type { AppHandlers } from "./types.ts";
 
 /** What a Retry of `questionId` replaces: that question and the unfinished rows after it. None once something else was asked or a finished reply followed: then it is a new question. */
@@ -63,11 +63,11 @@ export function createHandlers({
   };
 
   /**
-   * The start of one message: chat.send from a window, or a waiting message the picker took
-   * (`taken`: its record is starting already, for that turn). Everything checked here is checked
+   * The start of a waiting message the picker took (`taken`: its record is starting already, for
+   * that turn). Everything checked here is checked
    * before any work is reserved; the work itself runs after the answer (admit.ts, drawing.ts).
    */
-  const begin = (params: Params<"chat.send">, taken?: Taken): Promise<ResultOf<"chat.send">> => withSendTimes(async () => {
+  const begin = (params: StartParams, taken: Taken): Promise<StartAnswer> => withSendTimes(async () => {
     const { threadId, content, model, numCtx, messageId, retryOf, images = [], files: attaching = [], tools, think, draw, drawCount, stopOthers, stopTurns, askFirst } = params;
     if (closing()) throw new AppError("shutting-down", "the server is stopping; no new turns");
     deps.admit?.();
@@ -86,30 +86,15 @@ export function createHandlers({
     }
     const active = byThread.get(threadId);
     if (active !== undefined) throw new AppError("turn-active", `thread ${threadId} already has turn ${active.turnId} streaming; cancel it or wait`);
-    /** A window's own send has no waiting record: it gets one here, starting at once, for the work just reserved. */
-    const direct = (turn: Turn) => {
-      if (taken !== undefined) return;
-      const at = Date.now();
-      replies.direct(turn.turnId, threadId, {
-        messageId: messageId ?? turn.turnId, text: content, at,
-        ...(images.length ? { images } : {}),
-        ...(attaching.length ? { files: attaching } : {}),
-        ...(model === "" ? {} : { model }),
-        ...(draw === undefined ? { numCtx } : { draw, ...(drawCount === undefined ? {} : { drawCount }) }),
-        ...(think === undefined ? {} : { think }),
-        ...(retryOf === undefined ? {} : { retryOf }),
-      }, retryOf !== undefined, at);
-    };
     if (draw !== undefined) {
       const kept = loaded.thread.imageCount ?? 1;
-      return drawTurn(threadId, content, draw, { now: drawCount ?? kept, saved: kept }, messageId, replaced, images.length > 0 || attaching.length > 0, replacedFiles, taken, direct);
+      return drawTurn(threadId, content, draw, { now: drawCount ?? kept, saved: kept }, messageId, replaced, images.length > 0 || attaching.length > 0, replacedFiles, taken);
     }
     try { checkAttachments(images); }
     catch (e) { throw new AppError("image-input", e instanceof Error ? e.message : "Could not attach these images."); }
     if (attaching.length && deps.dataDir === undefined) throw new AppError("image-input", "File storage is not available.");
     const settings = turnSettings(deps.settings?.get(), model);
     const { turn, end } = reserve(threadId, model, taken);
-    direct(turn);
     let load: TurnReservation | undefined;
     try {
       // Before the answer, so models.remove sees this turn at once (throws while a removal runs).
@@ -238,7 +223,7 @@ export function createHandlers({
     "runtime.retry": () => runtime.ensure(),
     "runtime.discover": () => runtime.lookIfDown(),
 
-    // chat.send's plan for every model and context without stopping any turn, from one reading.
+    // a send's plan for every model and context without stopping any turn, from one reading.
     "fit.table": () => fitTable.get(),
 
     "turns.blocking": async ({ model, numCtx }) => {
@@ -247,9 +232,6 @@ export function createHandlers({
       if (baseUrl === undefined) throw notReady();
       return blockingTurns((await planBeside(baseUrl, model, numCtx)).stop);
     },
-
-    // `image` is an older client's Image button: accepted and ignored (Tools › Make images decides now).
-    "chat.send": (params) => begin(params),
 
     "reply.send": async (params) => {
       const { threadId, draw, images = [] } = params;
@@ -291,14 +273,6 @@ export function createHandlers({
         if (id !== undefined && replies.question(t.turnId) !== undefined) soFar.set(id, { text: t.text, thinking: t.thinking, steps: [...t.steps.values()] });
       }
       return replies.records().map((l) => { const words = soFar.get(l.reply.id); return words === undefined ? l : { ...l, soFar: words }; });
-    },
-
-    // the older Stop, for a page from before reply.stop: the same one step, answered yes or no
-    "chat.cancel": ({ turnId }) => {
-      const turn = turns.get(turnId);
-      const cancelled = turn !== undefined && replies.of(turnId) !== undefined && !turn.controller.signal.aborted;
-      moved(replies.stop({ id: turnId }));
-      return { cancelled };
     },
   } satisfies AppHandlers;
   return { handlers, begin };

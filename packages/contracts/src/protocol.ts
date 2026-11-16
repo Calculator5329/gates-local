@@ -80,7 +80,7 @@ export type WireErrorCode =
 export class WireError extends Error {
   override readonly name = "WireError";
   readonly code: WireErrorCode | (string & {});
-  /** For chat.send's "would-stop": the running turns in the way. */
+  /** For a send's "would-stop": the running turns in the way. */
   readonly blocking?: readonly BlockingTurn[];
   /** For a turn's "wont-fit": what runs instead, from the reading that refused it. */
   readonly offer?: FitOffer;
@@ -213,7 +213,7 @@ export const methods = {
   "messages.delete": { params: S.Struct({ threadId: S.String, messageId: S.String }), result: S.Struct({ messageId: S.String }), phone: "deny" },
   /**
    * Copy a non-image file the person attached into the server's data folder (up to 50 MB, base64 `data`).
-   * The answer goes in chat.send's `files`; a copy no message holds is removed after a day.
+   * The answer goes in reply.send's `files`; a copy no message holds is removed after a day.
    */
   "files.attach": {
     params: S.Struct({ name: S.String.check(S.isMinLength(1), S.isMaxLength(255)), type: S.String.check(S.isMaxLength(200)), data: S.String }),
@@ -249,70 +249,6 @@ export const methods = {
   "runtime.discover": { params: NoParams, result: RuntimeStatus, phone: "allow", sync: RUNTIME },
   /** The server's current fit table (built now if it has none); fit.changed pushes each newer one. */
   "fit.table": { params: NoParams, result: FitTable, phone: "allow", sync: FIT_TABLE },
-  "chat.send": {
-    phone: "allow",
-    params: S.Struct({
-      threadId: S.String,
-      content: S.String,
-      model: S.String,
-      numCtx: NumCtx,
-      /** A new send chooses its saved user-message id; retries reuse it. */
-      messageId: S.optional(S.String.check(S.isMaxLength(200))),
-      /** Retry: the question this send repeats. It goes, with the unfinished words after it, so the thread does not ask twice. */
-      retryOf: S.optional(S.String.check(S.isMaxLength(200))),
-      /** Up to eight pasted image data URLs (10 MiB each), or this thread's saved user-image paths for Retry. */
-      images: S.optional(S.Array(S.String).check(S.isMaxLength(8))),
-      /** Up to eight files copied by files.attach. The model gets a line naming each; with tools on it can read them in this thread. */
-      files: S.optional(S.Array(AttachedFile).check(S.isMaxLength(8))),
-      /** Thinking for this turn; omitted means the settings default. */
-      think: S.optional(S.Boolean),
-      /** Tool calls for this turn; omitted means the settings default. */
-      tools: S.optional(S.Boolean),
-      /**
-       * Older clients' Image button. Accepted and ignored: a chat model is offered the image
-       * tool only when Settings › Tools › Make images is on (settings.imageTool).
-       */
-      image: S.optional(S.Boolean),
-      /**
-       * Image mode: `content` is the prompt of one image job with this preset and size. No chat
-       * model runs; `model` and `numCtx` are not used. The turn ends when the job does; its card
-       * is the reply. Refused with attachments or while image generation is off.
-       */
-      draw: S.optional(ImageChoice),
-      /**
-       * With draw: how many pictures this send makes (1 to 4), one job after another with seeds
-       * one apart, shown as tiles of one card. The thread keeps it for its next sends. Omitted: the
-       * thread's saved count, else 1.
-       */
-      drawCount: S.optional(ImageCount),
-      /**
-       * When this turn's load needs GPU memory a model with a running turn holds (turns.blocking),
-       * end those turns first: each saves its partial reply and ends with error code "preempted"
-       * (neededBy: this model). Omitted or false: this turn waits for them.
-       */
-      stopOthers: S.optional(S.Boolean),
-      /**
-       * With stopOthers: the turns the person agreed to stop (BlockingTurn.turnId). Only these
-       * stop; if the load needs any other, the send is refused with code "would-stop" and every
-       * turn it would need in `blocking`, so the next yes covers them all. Omitted: standing
-       * consent, any turn in the way stops.
-       */
-      stopTurns: S.optional(S.Array(S.String)),
-      /**
-       * A person is waiting on this send: when such turns are in the way, refuse with code
-       * "would-stop" and the turns in the error's `blocking`, instead of waiting behind them.
-       * The client warns and sends again with stopOthers. Ignored with stopOthers.
-       */
-      askFirst: S.optional(S.Boolean),
-    }),
-    /**
-     * Answered once the turn is taken, before its fit, its load and saving the
-     * question: the turn's id. Its `start` event follows with the saved question; a refusal from
-     * then on comes as its `error` event, before any start. `replayed`: this messageId was
-     * already saved, nothing new runs, and `userMessage` is that saved question.
-     */
-    result: S.Struct({ turnId: S.String, userMessage: S.optional(Message), replayed: S.optional(S.Boolean) }),
-  },
   /**
    * The running turns that would have to stop for `model` at `numCtx` to load as the fit plans
    * it; empty when none (same model, or it fits beside them). Reads only; never loads.
@@ -322,7 +258,6 @@ export const methods = {
     result: S.Array(BlockingTurn),
     phone: "allow",
   },
-  "chat.cancel": { params: S.Struct({ turnId: S.String }), result: S.Struct({ cancelled: S.Boolean }), phone: "allow" },
   /**
    * Send. The window makes `id` and keeps it from the press to the saved reply. The server decides
    * whether it starts or waits, and a start it then refuses puts the message on hold with the
@@ -443,7 +378,7 @@ export const methods = {
     /** `choice` omitted: Settings' imageChoice. A retry runs its failed job's choice. */
     params: S.Struct({
       prompt: S.String, threadId: S.optional(S.String), retryOf: S.optional(S.String), choice: S.optional(ImageChoice),
-      /** Image mode's several pictures from one send (chat.send drawCount): the card's tile. */
+      /** Image mode's several pictures from one send (reply.send drawCount): the card's tile. */
       group: S.optional(ImageGroup),
       /** The seed to run; omitted: a random one. */
       seed: S.optional(S.Int.check(S.isBetween({ minimum: 0, maximum: 2 ** 32 - 1 }))),

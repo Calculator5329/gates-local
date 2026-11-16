@@ -7,6 +7,7 @@ import { createSources } from "../sources/index.ts";
 import { openThreadStore } from "../threads/store.ts";
 import { PAGE_RULE, condensePages, pageStandIn } from "./pages.ts";
 import { sendStarted } from "./send-started.ts";
+import { chatCatalog } from "../../test/send-rig.ts";
 import { estimateTokens } from "./window.ts";
 
 const page = (title: string, body = "<p>x</p>") => `<!doctype html>\n<html><head><title>${title}</title></head><body>${body}</body></html>`;
@@ -66,7 +67,7 @@ it("a chat turn sends the model the newest page in full and the older one as a s
   const store = openThreadStore(path.join(root, "threads.db"));
   const app = createApp({ store, sources: createSources({ dataDir: path.join(root, "data") }), think: true, toolsEnabled: () => false,
     runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
-    catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
+    catalog: chatCatalog("m"),
     push: () => {}, fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
   });
   try {

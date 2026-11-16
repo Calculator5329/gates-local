@@ -42,19 +42,20 @@ async function shot(page: Page, name: string, path: (name: string) => string, to
 
 test("image card: waiting, making, done", async ({ page, open }, info) => {
   const { client, threadId } = await start(page, open);
-  let turnId: string | undefined;
+  let sent: string | undefined;
   try {
     comfy.gpu();
     // another thread's chat holds the GPU
     const other = await client.call("threads.create", {});
     await stack.scenario("slow-first-token", { firstTokenDelayMs: 60_000, tokenDelayMs: 0 });
-    ({ turnId } = await client.call("chat.send", { threadId: other.id, content: "Hold the chat GPU claim", model: "qwen3.5:9b", numCtx: 16384 }));
+    sent = "hold-gpu";
+    await client.call("reply.send", { id: sent, threadId: other.id, messageId: sent, text: "Hold the chat GPU claim", model: "qwen3.5:9b", numCtx: 16384 });
     await open(`#thread=${threadId}`); await waitReady(page);
     await client.call("image.generate", { threadId, prompt: "a sci fi background" });
     const card = page.locator("[data-image-job]");
     await expect(card).toContainText("Waiting for the GPU");
     await shot(page, "image-card-waiting.png", n => info.outputPath(n));
-    await client.call("chat.cancel", { turnId }); turnId = undefined;
+    await client.call("reply.stop", { id: sent }); sent = undefined;
     await expect(card.getByRole("status", { name: /Making image/ })).toBeVisible();
     // the server's socket to ComfyUI may open after the prompt: send until the card shows it, as
     // the stage ComfyUI reports with its steps (WIN-MEM-06)
@@ -67,7 +68,7 @@ test("image card: waiting, making, done", async ({ page, open }, info) => {
     await expect(card.getByRole("img", { name: "Generated image" })).toBeVisible();
     await shot(page, "image-card-done.png", n => info.outputPath(n));
   } finally {
-    if (turnId) await client.call("chat.cancel", { turnId });
+    if (sent) await client.call("reply.stop", { id: sent });
     client.close();
   }
 });

@@ -684,7 +684,7 @@ describe("the phone's image pick, which cannot write Settings (IR3-62, IR3-63)",
     await session.pickImage(moss);
     void session.send("a lighthouse").catch(noop);
     await vi.waitFor(() => expect(draws).toEqual([moss]));
-    const { userMessage } = methodSamples["chat.send"].result;
+    const [userMessage] = methodSamples["threads.get"].result.messages;
     const id = asked!.id;
     sent.resolve({ answer: "done", reply: { id, threadId: asked!.threadId, rev: 1, messageId: asked!.messageId, text: asked!.text, at: 1, draw: moss, stage: "starting", attempt: 1, startedAt: 1 } });
     await settled();

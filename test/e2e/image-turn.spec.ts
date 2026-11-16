@@ -210,7 +210,7 @@ test("after a restart, one chat turn on the model that stayed loaded lets the ne
   try {
     await first.call("settings.update", { imageGen: true });
     threadId = (await first.call("threads.create", {})).id;
-    await first.call("chat.send", { threadId, content: "hello", model: "qwen3.5:9b", numCtx: 16384 });
+    await first.call("reply.send", { id: "warm-1", threadId, messageId: "warm-1", text: "hello", model: "qwen3.5:9b", numCtx: 16384 });
     await replies(first, threadId, 2);
   } finally { first.close(); }
   // The app restarts; the chat model stays in Ollama, which the new process never loaded.
@@ -219,7 +219,7 @@ test("after a restart, one chat turn on the model that stayed loaded lets the ne
   expect(await loaded()).toContain("qwen3.5:9b");
   const again = connect();
   try {
-    await again.call("chat.send", { threadId, content: "and again", model: "qwen3.5:9b", numCtx: 16384 });
+    await again.call("reply.send", { id: "warm-2", threadId, messageId: "warm-2", text: "and again", model: "qwen3.5:9b", numCtx: 16384 });
     await replies(again, threadId, 4);
     // Before Send the picker judges by the card (decision 15): the chat model leaves first, so no size says Too big.
     await page.getByTestId("chat.composer.image").click();
@@ -247,12 +247,13 @@ test("a waiting card survives a reload and cancellation leaves a reason", async 
   const server = new URL(page.url()).searchParams.get("server");
   if (!server) throw new Error("No test server URL");
   const client = createClient(new WebSocket(server));
-  let turnId: string | undefined;
+  let sent: string | undefined;
   try {
     await client.call("settings.update", { imageGen: true });
     const thread = await client.call("threads.create", {});
     await stack.scenario("slow-first-token", { firstTokenDelayMs: 60_000, tokenDelayMs: 0 });
-    ({ turnId } = await client.call("chat.send", { threadId: thread.id, content: "Hold the chat GPU claim", model: "qwen3.5:9b", numCtx: 16384 }));
+    sent = "hold-gpu";
+    await client.call("reply.send", { id: sent, threadId: thread.id, messageId: sent, text: "Hold the chat GPU claim", model: "qwen3.5:9b", numCtx: 16384 });
     await open(`#thread=${thread.id}`);
     await client.call("image.generate", { threadId: thread.id, prompt: "a ship" });
     const card = page.locator("[data-image-job]");
@@ -265,7 +266,7 @@ test("a waiting card survives a reload and cancellation leaves a reason", async 
     await expect(card.getByRole("button", { name: "Try again" })).toBeVisible();
     await page.screenshot({ path: info.outputPath("cancelled.png"), animations: "disabled" });
   } finally {
-    if (turnId) await client.call("chat.cancel", { turnId });
+    if (sent) await client.call("reply.stop", { id: sent });
     client.close();
   }
 });

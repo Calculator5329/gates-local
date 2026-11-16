@@ -339,7 +339,7 @@ describe("createClient", () => {
     socket.open();
     const client = createClient(socket);
     const a = client.call("threads.list", {});
-    const b = client.call("chat.cancel", { turnId: "x" });
+    const b = client.call("reply.stop", { id: "x" });
     socket.readyState = 3;
     socket.fire("close", {});
     await expect(a).rejects.toMatchObject({ code: "closed" });

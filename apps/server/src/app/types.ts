@@ -29,8 +29,14 @@ type CoreMethod =
   | "models.refresh"
   | "runtime.status"
   | "fit.table"
-  | "chat.send"
-  | "chat.cancel";
+  | "reply.send"
+  | "reply.change"
+  | "reply.edit"
+  | "reply.remove"
+  | "reply.now"
+  | "reply.hold"
+  | "reply.stop"
+  | "reply.list";
 export type AppHandlers = Pick<Handlers, CoreMethod> & Partial<Handlers>;
 
 export interface AppDeps {
@@ -62,7 +68,7 @@ export interface AppDeps {
    * (admit), which pushes models.load around a turn whose model is not resident.
    */
   readonly models?: { readonly handlers: Partial<Handlers>; readonly loader?: Pick<ModelLoader, "reserve"> };
-  /** Image jobs: chat.send draw (Image mode) and a chat turn's image tool queue them here for their thread. */
+  /** Image jobs: a send's draw (Image mode) and a chat turn's image tool queue them here for their thread. */
   readonly image?: ImageModule;
   /** Set up images: the app's own ComfyUI and this card's setup, one download (image/setup.ts). */
   readonly imageSetup?: ImageSetupModule;
@@ -95,10 +101,10 @@ export interface App {
   activeTurns(): number;
   windowGone(window: number): void;
   /**
-   * For in-process callers (tests, the crash server): the saved question of a turn chat.send has
-   * just answered, once it starts, or its refusal. Undefined once the turn has ended.
+   * For in-process callers (tests, the crash server): the work of the message with this id, and
+   * its saved question once it starts, or its refusal. Undefined once the work has ended.
    */
-  admission(turnId: string): Promise<Message> | undefined;
+  started(id: string): { readonly turnId: string; readonly admission: Promise<Message> } | undefined;
   /** The fit table: main feeds it the GPU watcher's gpu.changed and the loader's models.load. */
   readonly fitTable: Pick<FitTableSource, "changed" | "load">;
   /** Refuse new turns, cancel the active ones and wait for them to end. Idempotent. */

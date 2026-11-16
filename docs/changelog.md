@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-16: chat.send and chat.cancel are gone
+
+- The window already sent with `reply.send` and stopped with
+  `reply.stop`; the older `chat.send` and `chat.cancel` are removed
+  from the server and the contract. A page from v0.2.4 left open across
+  the update has its Send refused as an unknown call: its words go back
+  in the draft with the error, and a reload brings the new page.
+- Every send goes through the server's list of messages, as the
+  window's already did. For any other caller that changes three things:
+  a message stopped before it starts stays on hold (the old direct send
+  was dropped), a send that arrives while the server is closing is held
+  for after the restart, and a message id that was already saved is
+  answered with the saved question instead of starting a second turn.
+- A send in the first moment after the server starts, before it has
+  read the list of installed models, no longer waits as if no chat
+  model were installed.
+
 ## 2026-11-16: the old queue calls are gone
 
 - A window sends, changes and lists waiting messages only through the

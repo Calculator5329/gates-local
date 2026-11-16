@@ -124,7 +124,7 @@ describe("BG-01: pending navigation agrees with the displayed thread", () => {
         const whileLoading = store.getState();
         await session.send("Keep this conversation's context");
         expect(browser.server.calls("threads.create")).toHaveLength(0);
-        expect(browser.server.calls("chat.send").at(-1)?.params).toMatchObject({ threadId: "t1" });
+        expect(browser.server.calls("turn.start").at(-1)?.params).toMatchObject({ threadId: "t1" });
         expect(whileLoading).toMatchObject({ view: "thread", threadId: "t1" });
         release();
         await tick();

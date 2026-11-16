@@ -46,7 +46,7 @@ it.each([
   if (queued) { browser.server.push("runtime.changed", { ...methodSamples["runtime.status"].result, state: "installing" }); await tick(); }
   await session.send("queued words, edited");
   if (queued) expect(queuedOf(store.getState())).toMatchObject([{ threadId: "A", text: "queued words, edited" }]);
-  else expect(browser.server.calls("chat.send").at(-1)?.params).toMatchObject({ threadId: "A", content: "queued words, edited" });
+  else expect(browser.server.calls("turn.start").at(-1)?.params).toMatchObject({ threadId: "A", content: "queued words, edited" });
   expect(drafts.getDraft("A")).toMatchObject(backup);
   expect(drafts.getDraft("A").beforeEdit).toBeUndefined();
 });

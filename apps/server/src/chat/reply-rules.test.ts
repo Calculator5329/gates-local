@@ -14,9 +14,10 @@ import type { Message, ReplyAnswer } from "@gates-local/contracts";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { MODEL, rig, settle, until } from "../../test/send-rig.ts";
 import { callsOf, mentions as mentionsIn, oneArgument, productSource } from "./product-testing.ts";
-import { entry, waits } from "./queue-testing.ts";
+import { entry, sentFree, waits } from "./queue-testing.ts";
 import { type Ready, type RepliesDeps, createReplies } from "./replies.ts";
 import { SOUND, type Rules } from "./reply.ts";
+import { sendTaken } from "./send-started.ts";
 
 /** The rule a window keeps on its own calls. The server gives it what that needs: an honest answer. */
 const WINDOW_RULES = ["windowWaitsForAnswer"] as const;
@@ -105,7 +106,7 @@ const CASES: readonly Case[] = [
     name: "a Stop that reaches the server after the reply's last word still holds what waits in its chat",
     run(under) {
       const q = store(under);
-      q.direct("turn-1", "t1", { messageId: "m-1", text: "first", at: 1 }, false, 1);
+      sentFree(q, "turn-1", { messageId: "m-1", text: "first" });
       expect(q.started("turn-1", 1, question("m-1"), "m", WARM)).toBe(true);
       waits(q, entry("a"));
       q.ended("turn-1", { how: "done" }, 2);
@@ -202,13 +203,13 @@ const CASES: readonly Case[] = [
         // the first read is the check when the send is taken; the second is inside the save
         if (++readsWhileSending === 2) stop?.();
       } });
-      const { turnId } = await r.h["chat.send"]({ threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+      const { turnId } = await sendTaken(r.app, { threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 }, { clientId: 1 });
       const file = await r.h["files.attach"]({ name: "notes.txt", type: "text/plain", data: "aGVsbG8=" }, { clientId: 1 });
       await r.h["reply.send"]({ ...r.entry("q1", "second"), files: [file] }, { clientId: 1 });
       r.openOne();
       await until(() => r.latest("q1")?.stage === "starting", "the queued message on its way");
       let stopped = false;
-      stop = () => { stopped = true; void r.h["chat.cancel"]({ turnId }, { clientId: 1 }); };
+      stop = () => { stopped = true; void r.h["reply.stop"]({ id: turnId }, { clientId: 1 }); };
       r.open();
       await until(() => stopped, "the Stop during the save");
       await settle();

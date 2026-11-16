@@ -1,7 +1,7 @@
 // Taking a send in: the fit beside the running turns, the GPU claim and the load gate, the saved
 // question, then the start and the reply (run-turn.ts). A refusal on the way is the turn's one
 // error event.
-import type { AttachedFile, BlockingTurn, FitOffer, Message, Params } from "@gates-local/contracts";
+import type { AttachedFile, BlockingTurn, FitOffer, Message } from "@gates-local/contracts";
 import { accountImages, imagePrompt, saveAttachments, visionHistory } from "../chat/attachments.ts";
 import { checkFiles, fileLine, fileSources } from "../chat/files.ts";
 import { condensePages } from "../chat/pages.ts";
@@ -19,7 +19,7 @@ import type { turnSettings } from "../settings/turn.ts";
 import { threadChanged } from "../threads/sync.ts";
 import { AppError, attachError, cancelledBeforeStart, imageError, preemptedBy, refusalOf, runtimeChangedTurn } from "./errors.ts";
 import type { RunTurn, TurnOptions } from "./run-turn.ts";
-import { endedOf, type AppContext, type Turn, type TurnFailure } from "./turn.ts";
+import { endedOf, type AppContext, type StartParams, type Turn, type TurnFailure } from "./turn.ts";
 
 /** A Library entry as a turn takes its thread's files (the harness's type, through run-turn.ts). */
 type LibraryEntry = NonNullable<TurnOptions["files"]>[number];
@@ -31,12 +31,12 @@ export interface Admission {
   blockingTurns(stop: readonly Turn[]): BlockingTurn[];
   /** Keeps the admission on the turn for App.admission (below). */
   admitting(turn: Turn, admission: Promise<Message>, replacedFiles?: readonly string[], carrying?: readonly string[]): void;
-  /** A turn chat.send took and answered (below). */
+  /** A start taken and answered (below). */
   admitTurn(
     turn: Turn,
     end: () => void,
     load: TurnReservation | undefined,
-    params: Params<"chat.send"> & { images: readonly string[] },
+    params: StartParams & { images: readonly string[] },
     context: { replaced: readonly string[]; prior: readonly Message[]; settings: ReturnType<typeof turnSettings> },
   ): Promise<Message>;
   /** A turn that ended before its start: its one error event (below). `stoppedAt`: when a Stop cut it, read before its work left. */
@@ -110,7 +110,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
   };
 
   /**
-   * A turn chat.send took and answered: its fit, its load, its GPU claim and its saved question,
+   * A start taken and answered: its fit, its load, its GPU claim and its saved question,
    * then its start and its reply. A refusal on the way is its one error event, before any start,
    * so every window hears of it. It begins after the answer has gone out: no event
    * of this turn reaches a client before the answer that names it.
@@ -119,7 +119,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
     turn: Turn,
     end: () => void,
     load: TurnReservation | undefined,
-    { threadId, content, model, numCtx, messageId, images, files: attaching = [], tools, think, stopOthers, stopTurns, askFirst }: Params<"chat.send"> & { images: readonly string[] },
+    { threadId, content, model, numCtx, messageId, images, files: attaching = [], tools, think, stopOthers, stopTurns, askFirst }: StartParams & { images: readonly string[] },
     { replaced, prior, settings }: { replaced: readonly string[]; prior: readonly Message[]; settings: ReturnType<typeof turnSettings> },
   ): Promise<Message> {
     let releaseGpu: (() => void) | undefined;
@@ -137,7 +137,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
       try {
         await new Promise((resolve) => setImmediate(resolve));
         // waiting for its files, the GPU and the load gate is the record's first stage: reply.list has it, and
-        // no event of the turn reaches a socket before chat.send's answer. From here a load of its model that it
+        // no event of the turn reaches a socket before the start's answer. From here a load of its model that it
         // waits behind (the preload its first key started) is said as loading, also before its start.
         answered(turn);
         await imageReady;
@@ -148,7 +148,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
         const fileEntries = wantsTools && deps.dataDir ? await fileSources(deps.dataDir, [...prior.flatMap(m => m.files ?? []), ...files], deps.sources?.entries() ?? []).catch(attachError) : new Map<string, LibraryEntry>();
         const withFiles = (text: string, attached: readonly AttachedFile[] | undefined) => attached?.length ? [text, ...attached.map(f => fileLine(f, fileEntries.get(f.path)))].filter(Boolean).join("\n") : text;
         // A runtime switch ends this turn now, at every phase; the switch waits for its end().
-        // The loader's close (shutdown) cancels it the way chat.cancel does.
+        // The loader's close (shutdown) cancels it the way a Stop does.
         const reservation = load;
         if (reservation !== undefined) {
           const runtimeGone = () => {

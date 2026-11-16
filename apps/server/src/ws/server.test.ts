@@ -273,7 +273,7 @@ describe("refused at the boundary, connection stays usable", () => {
   it("carries a handler's blocking list to the client, and only a well-formed one", async () => {
     const blocking = [{ threadId: "t1", title: "First", model: "qwen3.5:9b", turnId: "turn-1" }];
     const server = await start({
-      "chat.send": () => {
+      "reply.now": () => {
         throw Object.assign(new Error("in the way"), { code: "would-stop", blocking });
       },
       "threads.get": () => {
@@ -281,8 +281,7 @@ describe("refused at the boundary, connection stays usable", () => {
       },
     });
     const { client: c } = await client(server);
-    const params = { threadId: "t1", content: "hi", model: "m", numCtx: 8192 } as const;
-    await expect(c.call("chat.send", params)).rejects.toMatchObject({ code: "would-stop", message: "in the way", blocking });
+    await expect(c.call("reply.now", { id: "q1" })).rejects.toMatchObject({ code: "would-stop", message: "in the way", blocking });
     const odd: unknown = await c.call("threads.get", { threadId: "t1" }).catch((e: unknown) => e);
     expect(odd).toMatchObject({ code: "odd" });
     expect((odd as { blocking?: unknown }).blocking).toBeUndefined();

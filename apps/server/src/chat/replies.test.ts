@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { Message, ReplyChange } from "@gates-local/contracts";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { entry, waits } from "./queue-testing.ts";
+import { entry, sentFree, waits } from "./queue-testing.ts";
 import { type Ready, type RepliesDeps, createReplies } from "./replies.ts";
 
 const idle: Ready = { chat: true, anyWork: false, busy: () => false };
@@ -19,9 +19,11 @@ function store(file?: string, more: Partial<RepliesDeps> = {}) {
     file, log: () => undefined, told: (c) => heard.push(c), saved: () => undefined, deleting: () => false, closing: () => false,
     cut: (turnId) => cuts.push(turnId), clock: () => undefined, ...more,
   });
-  /** A reply a window sent itself in `threadId`, with its question saved: what a waiting message waits behind. */
+  /** A reply in `threadId` with its question saved, taken past what waits there: what a waiting message waits behind. */
   const running = (turnId: string, threadId = "t1") => {
-    q.direct(turnId, threadId, { messageId: `m-${turnId}`, text: turnId, at: 1 }, false, 1);
+    waits(q, entry(turnId, threadId));
+    expect(q.take(turnId, turnId, 1)).toBe(1);
+    q.begun(turnId);
     expect(q.started(turnId, 1, question(`m-${turnId}`, threadId), "m", WARM)).toBe(true);
   };
   return { q, heard, cuts, running };
@@ -270,7 +272,7 @@ describe("a picture's record", () => {
     const told: ReplyChange[] = [];
     const clock = { stage: "waiting", startedAt: 5, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {} } as const;
     const { q } = store(undefined, { told: (c) => told.push(c), clock: () => clock });
-    q.direct("p1", "t1", { messageId: "m-p1", text: "a lighthouse", at: 1 }, false, 1);
+    sentFree(q, "p1", { text: "a lighthouse" });
     q.begun("p1");
     expect(q.started("p1", 1, question("m-p1"), "preset", { cold: false, drawing: true, jobs: ["job-1", "job-2"] })).toBe(true);
     q.notify();

@@ -3,7 +3,6 @@
 // reply finishes, and never re-read while words stream in.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelSpeed } from "@gates-local/contracts";
-import { methodSamples } from "@gates-local/contracts/testing";
 import { type Browser, installBrowser, tick, until } from "../../../test/harness.ts";
 import { type Numbering, numberServer } from "../../../test/numbered-server.ts";
 
@@ -58,7 +57,7 @@ describe("measured speed in the store", () => {
   it("a finished reply's push changes the number; streaming words cause no read", async () => {
     b.server.answer("models.speed", () => [fast]);
     await boot();
-    const { turnId } = methodSamples["chat.send"].result;
+    const turnId = "turn-1";
     for (const text of ["one ", "two ", "three "]) b.server.broadcast("chat.event", { turnId, threadId: "t1", event: { type: "delta", text } });
     await tick();
     expect(b.server.calls("models.speed")).toHaveLength(1);

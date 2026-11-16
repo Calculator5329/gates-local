@@ -76,8 +76,6 @@ export interface Replies {
   records(): readonly ReplyListed[];
   // why: the same send again is answered as the message now is, never taken twice
   send(params: Params<"reply.send">, now: SendNow): Sent;
-  /** A message an older page sent itself (chat.send), taken at once for `turnId`: that page keeps its words. */
-  direct(turnId: string, threadId: string, words: Words, retry: boolean, at: number): void;
   /** A window is gone for good: the messages it had open to edit go back to where they were. */
   windowGone(by: number): void;
   change(params: Params<"reply.change">, by: number): ReplyAnswer;
@@ -194,7 +192,7 @@ function over(r: Ended, rows: readonly Message[]): Reply | undefined {
   return { ...common, stage: "stopped", questionId: r.questionId, by: r.by, ...(words === undefined ? {} : { replyId: words.id }) };
 }
 
-// why: the older chat.send keeps its own words, so no window lists its record
+// why: a Retry's question is in the chat already, so no window lists its record
 const keptBySender = (r: Rec): boolean => isWaiting(r) && r.direct;
 
 const revOf = (c: ReplyChange): number => (c.kind === "is" ? c.reply.rev : c.rev);
@@ -352,7 +350,7 @@ export function createReplies({ file, log, told, saved, deleting, closing, cut, 
     if (r.behind === "setup") return { what: "setup" };
     if (r.behind === "download") return { what: "download", ...(r.words.model === undefined ? {} : { model: r.words.model }) };
     const reply = going(r.threadId, r.id);
-    return reply === undefined ? undefined : { what: r.waitFor === "retry" ? "retry" : "reply", reply: reply.turnId };
+    return reply === undefined ? undefined : { what: r.waitFor === "retry" ? "retry" : "reply", reply: reply.id };
   }
 
   /** A reply whose question is saved, with its times from its work's clock. `id`: the one the caller asked with. */
@@ -495,14 +493,6 @@ export function createReplies({ file, log, told, saved, deleting, closing, cut, 
       settle();
       const { attempt, words, now } = taken;
       return { kind: "start", attempt, picked: { id, threadId, words, now, ...(taken.consent === undefined ? {} : { consent: taken.consent }) }, answer: () => answered(m, id) };
-    },
-    direct(turnId, threadId, words, retry, at) {
-      const record: Queued = { id: turnId, threadId, rev: 0, words, behind: "reply", starts: 0, direct: true, stage: "queued", waitFor: "reply" };
-      apply(undefined, {
-        call: "send", record, saved: saved(words.messageId) !== undefined, start: { turnId, at, retry },
-        chat: { deleting: deleting(threadId), closing: closing(), busy: false },
-      });
-      settle();
     },
     windowGone(by) {
       for (const rec of recs.values()) if (rec.stage === "editing" && rec.by === by) apply(rec, { call: "edit", open: false, by });

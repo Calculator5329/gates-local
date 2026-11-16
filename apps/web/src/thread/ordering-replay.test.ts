@@ -271,7 +271,7 @@ it("ordered bootstrap missing its required settings stamp retains failed-startup
   } finally { timers.mockRestore(); await w.dispose(); }
 });
 
-// app.ts stores the user row and broadcasts start before chat.send returns.
+// app.ts stores the user row and broadcasts start before reply.send returns.
 // Closed sockets receive no broadcast; a reconnect never resends an old start.
 function chatFrames(turn: string, prefix: readonly string[], reconnecting = false): ReplayFrame[] {
   const target = !reconnecting ? "A" : prefix.includes("socket.reconnect") ? "A2" : prefix.includes("socket.drop") ? undefined : "A1";
@@ -282,7 +282,7 @@ function chatFrames(turn: string, prefix: readonly string[], reconnecting = fals
 }
 
 /**
- * chat.send's answer (chat row 32): app.ts answers with the turn id once the request is taken,
+ * reply.send's answer (chat row 32): app.ts answers with the turn id once the request is taken,
  * and its admission waits a turn of the event loop first, so on the sender's socket the answer
  * always comes before the start. An admission depends on this event.
  */
@@ -462,7 +462,7 @@ export function retryThroughHistory(): ReplayScenario<World> {
     events: [
       event("A.Retry", [], (w) => w.step(() => w.a.session.retry())),
       event("A.history", ["A.Retry"], (w) => w.step(() => w.a.session.reloadThread("t1"))),
-      // chat.send with retryOf drops the old question and its unfinished rows as it saves the new question.
+      // reply.send with retryOf drops the old question and its unfinished rows as it saves the new question.
       // answered with the turn id once taken; the start with the saved question follows the admission
       event("A.retry.response", ["A.Retry"], (w) => w.step(() => w.server.response("turn-2"))),
       event("server.retry.admitted", ["A.history", "A.retry.response"], (w) => w.step(() => { w.server.messages.length = 0; w.server.admit("turn-2"); })),

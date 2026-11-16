@@ -24,7 +24,7 @@ export function observeServerStages(socket: SocketPrototype, save: (record: Serv
   const emit = socket.emit, send = socket.send, fetch = globalThis.fetch;
   socket.emit = function(event, ...args) {
     const message = event === "message" ? frame(args[0]) : undefined;
-    if (message?.["method"] === "chat.send" && typeof message["id"] === "string" && object(message["params"]) && typeof message["params"]["threadId"] === "string") {
+    if (message?.["method"] === "reply.send" && typeof message["id"] === "string" && object(message["params"]) && typeof message["params"]["threadId"] === "string") {
       const record = { requestId: message["id"], threadId: message["params"]["threadId"], receive: clock() };
       sends.set(record.threadId, record);
       return context.run(record, () => emit.call(this, event, ...args));

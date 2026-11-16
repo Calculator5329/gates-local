@@ -96,7 +96,7 @@ test("'Don't show this again' survives a reload and later sends stop the other c
   await expect(page.locator(".turn.u").last()).toContainText("A question for the other model");
   // "Writing" is the running reply's one line since the one-live-line change; no separate label
   await expect(page.locator(".turn.a .think.run .lv-w > span").first()).toHaveText("Writing", { timeout: 15_000 });
-  // Stop hides immediately, even before chat.send returns its turn id.
+  // Stop hides immediately, even before reply.send returns its turn id.
   // Regenerate appears only after the server has ended that turn and saved its words.
   await page.getByRole("button", { name: "Stop" }).click();
   await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0);
