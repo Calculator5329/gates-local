@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 
-/** Controllable transactions exercise the real watcher while commits are held. */
+// why: commits wait for the test, so tests drive the real watcher's transaction order
 export function draftDatabase() {
   const records = new Map<string, unknown>();
   const writes: { key: unknown; value: unknown; bytes: number }[] = [];
@@ -34,7 +34,7 @@ export function draftDatabase() {
             return request;
           },
           put(value: unknown, key: unknown) {
-            // Retain references instead of cloning the stress fixture again in this fake.
+            // why: the fake keeps references, so the large stress fixture is not cloned again
             writes.push({ key, value, bytes: bytes(value) });
             changes.push({ key: JSON.stringify(key), value });
           },
@@ -44,7 +44,7 @@ export function draftDatabase() {
         const item = {
           commit,
           finish() {
-            // Requests already queued in this transaction finish before commit.
+            // external: a browser's IndexedDB runs a transaction's queued requests before commit
             // oxlint-disable-next-line gates/timer-needs-reason -- the fake commits after the requests already queued, as IndexedDB does
             queueMicrotask(() => {
               pending.splice(pending.indexOf(item), 1);

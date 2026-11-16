@@ -407,6 +407,7 @@ describe("the catalog follows the model list", () => {
   });
 });
 
+const endedOrSaved = (s: ReturnType<Store["getState"]>) => s.turns["t1"] !== undefined || (s.messages["t1"] ?? []).some((m) => m.id === "m2");
 /** A reply's work gone with nothing saved for it. */
 const GONE: TurnSaid["event"] = { type: "error", code: "internal", message: "the reply ended without finishing", ended: { reason: "failed", at: 5 } };
 
@@ -438,6 +439,7 @@ describe("reconnect reconciles cached threads (W-04)", () => {
   it("a reply the server is still writing after the reconnect is the chat's turn again, and its words and its end land", async () => {
     await boot();
     await startFirstTurn();
+    await until(() => openTurn(store.getState())?.userMessageId !== undefined, 2000, "the question saved");
     b.server.answer("threads.get", () => ({ thread: methodSamples["threads.create"].result, messages: [userMsg("m1", "t1", "hi")] }));
     await reconnect();
     // the server's record says it is being written: no Retry is offered beside it
@@ -471,6 +473,43 @@ describe("reconnect reconciles cached threads (W-04)", () => {
     await reconnect();
     session.openThread("a");
     await until(() => store.getState().messages["a"]?.length === 2, 1000, "thread a reloaded");
+  });
+
+  it("a reply that ended unheard stays on screen until its chat's saved rows land, so the chat is never without either", async () => {
+    await boot();
+    await startFirstTurn();
+    await until(() => openTurn(store.getState())?.userMessageId !== undefined, 2000, "the question saved");
+    b.server.unheard(() => chat("turn-1", { type: "done", message: asstMsg("m2", "t1", "Finished unheard"), stopReason: "stop" }));
+    b.server.answer("threads.get", () => snapshot([userMsg("m1", "t1", "hi"), asstMsg("m2", "t1", "Finished unheard")]));
+    const from = published.length;
+    const held = await reconnectHeld();
+    await tick();
+    expect(store.getState().turns["t1"], "the ended reply still shows while its rows are read").toBeDefined();
+    held.respond(snapshot([userMsg("m1", "t1", "hi"), asstMsg("m2", "t1", "Finished unheard")]));
+    await until(() => store.getState().turns["t1"] === undefined, 2000, "the ended reply gone");
+    expect(store.getState().messages["t1"]?.map((m) => m.id)).toContain("m2");
+    expect(published.slice(from).every(endedOrSaved)).toBe(true);
+  });
+
+  it("a reply that ended unheard in a chat whose rows this window has not read yet leaves at once, and the chat is read by its own visit, once", async () => {
+    b.server.unheard(() => chat("turn-5", { type: "start", model: "gemma3:4b", userMessage: userMsg("m1", "t1", "hi") }));
+    await boot();
+    await until(() => store.getState().turns["t1"] !== undefined, 2000, "their reply shown");
+    const firstRead = b.server.hold("threads.get");
+    session.openThread("t1");
+    await firstRead;
+    expect(store.getState().messages["t1"]).toBeUndefined();
+    b.server.unheard(() => chat("turn-5", { type: "done", message: asstMsg("m2", "t1", "Theirs"), stopReason: "stop" }));
+    const rows = snapshot([userMsg("m1", "t1", "hi"), asstMsg("m2", "t1", "Theirs")]);
+    b.server.answer("threads.get", () => rows);
+    const visit = await reconnectHeld();
+    await tick();
+    expect(store.getState().turns["t1"]).toBeUndefined();
+    expect(b.server.calls("threads.get")).toHaveLength(2);
+    visit.respond(rows);
+    await until(() => store.getState().messages["t1"] !== undefined, 2000, "the chat read");
+    expect(store.getState().messages["t1"]?.map((m) => m.id)).toEqual(["m1", "m2"]);
+    expect(b.server.calls("threads.get")).toHaveLength(2);
   });
 });
 

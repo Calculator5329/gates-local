@@ -2,6 +2,8 @@
 // says how the turn ended (chat row 32), a real failure that lands after a
 // Stop is said, on screen or off it, and the rows it saved say it once the
 // turn leaves the screen, in place of the copies here.
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Message, ReplyTimes } from "@gates-local/contracts";
 import { drawTimes } from "./times.ts";
@@ -78,6 +80,27 @@ it("a failure that lands after Stop, off screen, leaves its note under the quest
   expect(st().turns["A"]).toBeUndefined();
   // the note a failure off screen leaves without a Stop
   expect(noteOn("A", "u-A")).toEqual({ kind: "failed", why: notFoundWhy.message });
+});
+
+const quietMedia = () => ({ matches: false, addEventListener: () => undefined, removeEventListener: () => undefined });
+const failNotesIn = async (threadId: string) => {
+  vi.stubGlobal("matchMedia", quietMedia);
+  const { Timeline } = await import("./Thread.tsx");
+  const html = renderToStaticMarkup(createElement(Timeline, { threadId }));
+  return html.split('class="stop-note under-u"').length - 1;
+};
+
+it("a failed question's note stays hidden while its ended turn is on screen, and shows once the turn leaves", async () => {
+  const a = await answering("A");
+  session.stop();
+  await tick();
+  chat(a, "A", notFound);
+  await tick();
+  expect(st().turns["A"]?.end).toMatchObject({ kind: "error" });
+  expect(await failNotesIn("A")).toBe(0);
+  await answering("B");
+  expect(st().turns["A"]).toBeUndefined();
+  expect(await failNotesIn("A")).toBe(1);
 });
 
 const cancelled = { type: "error", code: "cancelled", message: "cancelled mid-stream; no done event", ended: { reason: "stopped", at: 4_000 }, question: { ...userMsg("u-A", "A", "hello A"), times: stamped("stopped") } } as const;

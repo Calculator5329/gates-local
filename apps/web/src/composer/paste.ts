@@ -24,7 +24,6 @@ export const MAX_IMAGES = 8;
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 export const MAX_FILES = 8;
-/** The server's cap (apps/server/src/chat/files.ts): larger files are refused at their chip, never read. */
 export const MAX_FILE_BYTES = 50 * 1024 * 1024;
 
 export function pasteKind(paths: readonly string[], files: readonly Pick<File, "type">[]): "paths" | "images" | "files" | "text" {
@@ -46,14 +45,12 @@ const readImage = (file: File): Promise<string> => new Promise((resolve, reject)
   reader.readAsDataURL(file);
 });
 
-/** Capture clipboard data during the event: browsers clear the DataTransfer after it returns. */
+// external: a browser empties a paste event's DataTransfer once the handler returns
 export function paste(e: ClipboardEvent<HTMLTextAreaElement>): void {
   const files = Array.from(e.clipboardData.files);
-  // Native text paste is one undoable edit. Multiline insertText is slow and
-  // emits thousands of input events for a large paste.
+  // external: in a browser a long multiline insertText is slow, with thousands of inputs
   if (!files.length) return;
   e.preventDefault();
-  // a copied file attaches as a drop does; a clipboard with a picture in it pastes only its pictures
   if (pasteKind([], files) === "files") { void attachFiles(files); return; }
   const key = currentDraftKey();
   const version = getDraft(key).version;
@@ -65,7 +62,6 @@ export function paste(e: ClipboardEvent<HTMLTextAreaElement>): void {
 const SENDABLE = /^image\/(png|jpeg|webp|gif)$/;
 const BY_EXTENSION: Readonly<Record<string, string>> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", jfif: "image/jpeg", webp: "image/webp", gif: "image/gif" };
 
-/** A file's image type, from the browser or, when it gives none, from the name (T3 Code does the same). */
 export function imageTypeOf(file: Pick<File, "name" | "type">): string {
   if (file.type && file.type !== "application/octet-stream") return file.type;
   return BY_EXTENSION[file.name.split(".").pop()?.toLowerCase() ?? ""] ?? file.type;
@@ -77,11 +73,7 @@ interface DroppedItem {
   webkitGetAsEntry(): { readonly isDirectory: boolean } | null;
 }
 
-/**
- * T3 Code's splitTransferredFiles (chat/workspaceFileDrop.ts at c55db3e9c7,
- * MIT): a dropped folder arrives as a File too, named like a file and sized
- * by the platform, and only its entry says it is a folder.
- */
+// external: a browser gives a dropped folder as a File; webkitGetAsEntry() says which
 export function splitDropped(data: { readonly files: ArrayLike<File>; readonly items?: ArrayLike<DroppedItem> }): { files: File[]; folders: string[] } {
   if (data.items === undefined) return { files: Array.from(data.files), folders: [] };
   const files: File[] = [];
@@ -96,13 +88,6 @@ export function splitDropped(data: { readonly files: ArrayLike<File>; readonly i
   return { files, folders };
 }
 
-/**
- * Files from the "+" menu's chooser, a drop or a paste. Images the model reads
- * take the pasted-image path (same limits, compression and chips). Any other
- * file is copied to the server and the message names it; the model opens it
- * with its read tool. A folder or an over-50 MB file is refused
- * at a chip that says why.
- */
 export function attachFiles(files: readonly File[], folders: readonly string[] = []): Promise<void> {
   if (!files.length && !folders.length) return Promise.resolve();
   const key = currentDraftKey();
@@ -135,7 +120,6 @@ async function readBase64(file: File): Promise<string> {
   return btoa(binary);
 }
 
-/** Non-image files: each is copied to the server now, and the draft keeps the reference the server gives back. */
 async function addFiles(key: DraftKey, version: number, candidates: readonly File[]): Promise<void> {
   const room = MAX_FILES - (getDraft(key).files?.length ?? 0) - reservedFiles;
   const accepted = candidates.slice(0, Math.max(0, room));
@@ -153,9 +137,8 @@ async function addFiles(key: DraftKey, version: number, candidates: readonly Fil
 }
 let reservedFiles = 0;
 
-/** The one image path for paste, the chooser and drops. */
+// why: paste, the chooser and drops share one function, so limits and compression match
 async function addImages(key: DraftKey, version: number, candidates: readonly File[]): Promise<void> {
-  // Reserve slots before image reads, so overlapping pastes and drops cannot overfill the composer.
   const room = MAX_IMAGES - getDraft(key).images.length - reserved;
   const accepted = candidates.slice(0, Math.max(0, room));
   if (accepted.length < candidates.length) setState({ notice: `Attach up to ${MAX_IMAGES} images per message.` });

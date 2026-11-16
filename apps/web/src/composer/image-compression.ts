@@ -1,7 +1,6 @@
 // Adapted from T3 Code lib/imageCompression.ts at d137c5081ac5efb2b8ea9aec8b334e1bb4d0182a (MIT).
 import { MAX_IMAGE_BYTES } from "./paste.ts";
 
-/** Keep small images verbatim; shrink oversized images using T3's resolution and quality ladder. */
 export async function compressImage(file: File): Promise<File> {
   if (file.size <= MAX_IMAGE_BYTES) return file;
   if (file.size > 50 * 1024 * 1024) throw new Error("This image is too large to attach. Use an image under 50 MB; pasted images are compressed to 10 MB.");

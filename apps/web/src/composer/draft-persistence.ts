@@ -1,15 +1,13 @@
-// IndexedDB can hold image drafts larger than localStorage's small text quota.
+// external: a browser gives localStorage a small text quota; IndexedDB holds large drafts
 import type { AttachedFile } from "@gates-local/contracts";
 import { getState, setState, subscribe } from "../lib/store/store.ts";
 import { type DraftKey, type DraftWords, cancelQueuedDraft, draftRevision, restoreDrafts, savedDrafts, subscribeDrafts } from "../lib/store/drafts.ts";
 import { type SavedQueued, oldQueueOwed, oldQueueRead } from "./chat.ts";
 
 interface Slot { key: DraftKey; draft: DraftWords & { beforeEdit?: DraftWords }; }
-/** `owed`: the queue saved is one the server has yet to take, kept only until it does. */
 interface Saved { draft: string; images: readonly string[]; queued: readonly SavedQueued[]; owed?: true; editing: string | null; sendId?: string; sendThreadId?: string; threadId?: DraftKey; slots?: readonly Slot[]; }
 const record = (v: unknown): Record<string, unknown> | undefined => typeof v === "object" && v !== null ? v as Record<string, unknown> : undefined;
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.length <= 8 && v.every(i => typeof i === "string" && i.length <= 14 * 1024 * 1024);
-/** Attached files are small references to the server's copies; anything malformed is dropped, never sent. */
 const attachedFiles = (v: unknown): AttachedFile[] => Array.isArray(v) ? v.flatMap(i => {
   const f = record(i);
   return f && typeof f["path"] === "string" && /^files\/att-[a-f0-9-]{36}$/.test(f["path"]) && typeof f["name"] === "string" && f["name"] !== ""
@@ -22,7 +20,6 @@ const attachmentRevision = (value: unknown): string | undefined => {
   return saved?.["format"] === 2 && typeof saved["attachmentsRevision"] === "string" ? saved["attachmentsRevision"] : undefined;
 };
 
-/** A queue restored after a reload waits for Send now, so startup never sends it unexpectedly. */
 export function recoverDraft(value: unknown): Saved | undefined {
   const saved = record(value);
   if (!saved || typeof saved["draft"] !== "string" || !strings(saved["images"]) || !Array.isArray(saved["queued"])) return;
@@ -32,7 +29,6 @@ export function recoverDraft(value: unknown): Saved | undefined {
     if (!q || typeof q["id"] !== "string" || typeof q["threadId"] !== "string" || typeof q["text"] !== "string" || typeof q["at"] !== "number" || !Number.isFinite(q["at"]) || (q["images"] !== undefined && !strings(q["images"]))) continue;
     queued.push({ id: q["id"], threadId: q["threadId"], text: q["text"], at: q["at"], images: q["images"] ?? [], ...withFiles(q["files"]), ...(typeof q["messageId"] === "string" ? { messageId: q["messageId"] } : {}), ...(typeof q["model"] === "string" ? { model: q["model"] } : {}) });
   }
-  // the queue is the server's: an edit open at the reload names its row, which this save need not hold
   const editing = typeof saved["editing"] === "string" ? saved["editing"] : null;
   const words = (input: unknown): DraftWords | undefined => {
     const w = record(input);
@@ -53,8 +49,6 @@ export function recoverDraft(value: unknown): Saved | undefined {
   return { draft: saved["draft"], images: saved["images"], queued, editing, ...(typeof saved["sendId"] === "string" ? { sendId: saved["sendId"] } : {}), ...(typeof saved["sendThreadId"] === "string" ? { sendThreadId: saved["sendThreadId"] } : {}), ...(saved["threadId"] === null || typeof saved["threadId"] === "string" ? { threadId: saved["threadId"] } : {}), ...(slots ? { slots } : {}) };
 }
 
-/** Format 2 keeps large strings under a separate compound key in the same store.
- * Legacy combined records remain readable and migrate atomically on an edit. */
 function recoverStored(value: unknown, attachments: unknown): Saved | undefined {
   const saved = record(value);
   if (saved?.["format"] !== 2) return recoverDraft(value);
@@ -106,19 +100,12 @@ export async function watchDraft(key: string): Promise<() => void> {
     const restored = restoreDrafts(recovered.slots ?? [{ key: draftKey, draft: { text: recovered.draft, images: recovered.images, sendId: recovered.sendId ?? null,
       ...(recovered.editing !== null ? { beforeEdit: { text: "", images: [], sendId: null } } : {}) } }]);
     const current = getState();
-    // the edit's chat: its row's when an old save holds it, else the chat open at the save (an edit ends on leaving its chat)
     const editThread = recovered.editing === null ? undefined : savedEditor?.threadId ?? recovered.threadId ?? undefined;
     const editing = editThread !== undefined && restored.has(editThread) && current.threadId === editThread &&
       (current.editingQueued === null || current.editingQueued === recovered.editing) ? recovered.editing : null;
     if (editThread !== undefined && restored.has(editThread) && editing === null) cancelQueuedDraft(editThread);
     if (editing !== null) setState({ editingQueued: editing });
   }
-  /**
-   * A queue this browser saved before the server kept it goes to the server once, on hold
-   * (chat.ts oldQueueRead), and is kept here until the server has answered for each message, so
-   * an update never drops one that was waiting. Once the browser's queue is the server's, a
-   * save's copy of it is stale and read as nothing, unless the save says the server still owes it.
-   */
   let owed = oldQueueRead(recovered?.queued ?? [], record(saved)?.["owed"] === true);
   let last = getState();
   let lastRevision = draftRevision();
@@ -138,9 +125,9 @@ export async function watchDraft(key: string): Promise<() => void> {
       let commitRequested = false;
       requestCommit = () => {
         commitRequested = true;
-        // A metadata read may still need to enqueue its writes. Committing
-        // before its success callback would prevent those puts from running.
-        if (writesQueued) { try { transaction.commit(); } catch { /* Already committing or finished. */ } }
+        // external: after a browser's IDBTransaction.commit(), no request can be queued on it
+        // external: a browser's IDBTransaction.commit() throws once it is committing or done
+        if (writesQueued) { try { transaction.commit(); } catch {} }
       };
       transaction.addEventListener("complete", () => resolve(revision), { once: true });
       transaction.addEventListener("abort", () => reject(transaction.error ?? new Error("The message could not be saved.")), { once: true });
@@ -160,13 +147,10 @@ export async function watchDraft(key: string): Promise<() => void> {
           } catch { transaction.abort(); }
         };
         if (cachedRevision !== undefined && sameAttachments(committed, snapshot)) {
-          // Other tabs can replace this scope's payload. Confirm the cache in
-          // this serialized transaction, reading only the small metadata row.
           const request = store.get(key);
           request.addEventListener("success", () => submit(attachmentRevision(request.result) === cachedRevision), { once: true });
         } else submit(false);
       } catch {
-        // Wait for abort before allowing the next transaction to start.
         transaction.abort();
       }
     });
@@ -183,7 +167,6 @@ export async function watchDraft(key: string): Promise<() => void> {
   const update = () => {
     const s = getState();
     const revision = draftRevision();
-    // an old saved queue is forgotten here once the server has answered for each message (a refusal said so)
     const stillOwed = oldQueueOwed();
     if (lastRevision === revision && owed === stillOwed && last.editingQueued === s.editingQueued) return;
     lastRevision = revision;
@@ -197,9 +180,7 @@ export async function watchDraft(key: string): Promise<() => void> {
   oldQueueOwed(update);
   const off = subscribe(update);
   const offDrafts = subscribeDrafts(update);
-  // Request an early commit, without a parallel write. Unload can still abort
-  // this transaction or discard the pending snapshot; only completed writes
-  // are durable. Neither lifecycle event can guarantee an immediate reload.
+  // external: a browser may abort an IndexedDB write at unload; only finished writes last
   const commit = () => requestCommit?.();
   const hidden = () => { if (document.visibilityState === "hidden") commit(); };
   window.addEventListener("pagehide", commit);

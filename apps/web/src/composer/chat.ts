@@ -1,4 +1,3 @@
-// Chat admissions, concurrent replies, streaming buffers, and the server's record of every message as this window keeps it.
 import { type AttachedFile, type BlockingTurn, type ImageChoice, type Message, type Params, type Payload, type Reply, type ReplyCall, type ReplyChange, type ReplyListed, type ReplyOutcome, type ReplyTimes, type SoFar, type StopConsent, WireError } from "@gates-local/contracts";
 import { ctxFor, describeModel, k } from "../lib/words/format.ts";
 import { firstChatPull, sendableModel } from "../models/pick.ts";
@@ -14,22 +13,14 @@ import { type WindowRules, createRecords } from "./records.ts";
 
 declare global {
   interface Window {
-    /**
-     * Counters the performance spec reads. terminalFlush is that spec's
-     * negative control (test/e2e/perf.spec.ts): the done event makes one
-     * extra store publish of the open chat's turn before the saved row replaces it.
-     */
     glPerf?: { deltas: number; flushes: number; terminalFlush?: boolean };
   }
 }
 
 interface ChatEffects {
-  /** A function that returns nothing publishes nothing: no selector runs. */
   readonly applyServerEvent: (event: ServerEvent) => void;
-  /** A call that names one waiting message, answered with what became of it. */
   readonly reply: <M extends ReplyCall>(method: M, params: Params<M>) => Promise<ReplyOutcome>;
   readonly codeOf: (error: unknown) => string;
-  /** `fromDraft` false: the words are not in the composer, so a refusal does not say they are. */
   readonly createThread: (content: string, model: string | undefined, fromDraft?: boolean) => Promise<string | null>;
   readonly creatingDraft: (version: number) => boolean;
   readonly loadThread: (threadId: string, force?: boolean) => Promise<void>;
@@ -48,21 +39,10 @@ const STOP_OTHERS_KEY = "gates-local.stop-others-ok";
 
 const queueId = () => `q-${crypto.randomUUID()}`;
 
-/**
- * Every message is the server's record (it keeps it, moves it and sends every change); a window
- * keeps each record as last sent (State.replies) and asks for changes, and a record changes here
- * only when the server sends it. `askServer` is the connection's calls on one message, once
- * createChat has them.
- */
 let askServer: ChatEffects["reply"] | undefined;
 
-/** The edit open in this window's composer: the words it started from, and a save whose answer never came. */
 let edited: { readonly id: string; readonly base: string; readonly text: string; tried?: string } | null = null;
 
-/**
- * Messages this window opened for editing. The record says who edits it only once the server has
- * answered, and still says so for a moment after the edit ended here: neither is an edit elsewhere.
- */
 const editsHere = new Set<string>();
 
 export const editedElsewhere = (q: WaitingReply): boolean => q.stage === "editing" && !editsHere.has(q.id);
@@ -73,16 +53,12 @@ const REMOVED = "That message was removed.";
 const OPEN_ELSEWHERE = "That message is open in another window.";
 const NOT_REACHED = "Gates Local stopped answering.";
 const CLOSING = "Gates Local is closing. The reply written so far was saved.";
-/** Where a message went, for a call that came too late for it. */
 const tooLate = (a: Extract<ReplyOutcome, { answer: "gone" | "sending" }>): string => (a.answer === "sending" ? ON_ITS_WAY : a.why === "sent" ? ALREADY_SENT : REMOVED);
 
-/** The words "restored on hold" a reload put up for this browser's own saved queue, which the server's now replaces. */
 const CHAT_GONE = "The chat this message was waiting in is gone, so it was not sent.";
 const RESTORED_NOTICE = "Your queued messages were restored on hold. Use Send now when you are ready.";
-/** Set once this browser's saved queue (from before the server kept it) has gone to the server. */
 const QUEUE_MOVED_KEY = "gates-local.queue-on-server";
 
-/** A message of this browser's own saved queue, from before the server kept it: it goes to the server once, on hold. */
 export interface SavedQueued {
   readonly id: string;
   readonly threadId: string;
@@ -91,37 +67,23 @@ export interface SavedQueued {
   readonly messageId?: string;
   readonly images?: readonly string[];
   readonly files?: readonly AttachedFile[];
-  /** The model it was typed for; a queue from before any model was installed has none. */
   readonly model?: string;
 }
 
-/**
- * This browser's own saved queue, from before the server kept it, not yet handed over: null until
- * the reload has read it. A message leaves it when the server has answered for it.
- */
 let oldQueue: readonly SavedQueued[] | null = null;
 let onOldQueue: (() => void) | undefined;
 let oldQueueChanged: (() => void) | undefined;
 
-/**
- * The reload read this browser's saved queue. It goes to the server once the server's records are
- * in too, whichever of the two comes first. A save from after the hand-over is the server's own
- * queue as it then was, and counts for nothing unless it says the server still owes it (`owed`).
- * Returns what is still to hand over.
- */
 export function oldQueueRead(queued: readonly SavedQueued[], owed: boolean): readonly SavedQueued[] {
   let moved = false;
   try {
     moved = localStorage.getItem(QUEUE_MOVED_KEY) === "1";
-  } catch {
-    // unknown: a saved queue is handed over rather than lost, and the server takes each message once
-  }
+  } catch {}
   oldQueue = moved && !owed ? [] : queued;
   onOldQueue?.();
   return oldQueue;
 }
 
-/** The old saved queue's messages the server has not answered for: a save keeps them until it has. `changed` runs when one leaves. */
 export function oldQueueOwed(changed?: () => void): readonly SavedQueued[] {
   if (changed !== undefined) oldQueueChanged = changed;
   return oldQueue ?? [];
@@ -131,18 +93,13 @@ function queueMoved(): void {
   try {
     localStorage.setItem(QUEUE_MOVED_KEY, "1");
   } catch {
-    // private windows may refuse storage: what was handed over stays the server's all the same
+    // external: a browser's private window may throw on localStorage.setItem
   }
 }
 
-/**
- * A record's times as a turn draws them. A message taken and not yet saved has no clock: it
- * waits, or loads. A reply whose model has sent nothing yet waits too, with no work to time.
- */
 function clockOf(r: Exclude<Reply, WaitingReply | { readonly stage: "done" | "stopped" | "failed" }>): TurnClock {
   const none = { workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {} };
   if (r.stage === "starting") return { ...none, stage: r.draw !== undefined ? "drawing" : r.loading === true ? "loading" : "waiting", startedAt: r.startedAt };
-  // a stopped picture's turn is over in the composer while its card says the engine is letting go
   if (r.stage === "drawing") return { ...none, stage: "drawing", startedAt: r.startedAt, ...(r.stoppedAt === undefined ? {} : { stoppedAt: r.stoppedAt }) };
   return {
     stage: r.stage === "thinking" && r.silent === true ? "waiting" : r.stage,
@@ -155,13 +112,11 @@ function clockOf(r: Exclude<Reply, WaitingReply | { readonly stage: "done" | "st
 
 type Outgoing = Omit<StopAsk, "blocking">;
 
-/** Send is on before any model can answer, while setup or the first download runs: the server keeps the message until it can go. */
 export function sendsBeforeReady(s: State): boolean {
   if (s.conn.kind !== "open") return false;
   return s.runtime?.state === "installing" || (s.runtime?.state === "ready" && firstPull(s) !== undefined);
 }
 
-/** The download that will become the first chat model, while none is installed (an embedding model does not count). */
 export function firstPull(s: State): string | undefined {
   return firstChatPull(s.models, s.pulls);
 }
@@ -174,10 +129,8 @@ function stopOthersOk(): boolean {
   }
 }
 
-/** What a `keepDraft` send reads in place of the composer's draft: no pictures, no copy identity, no create in flight. */
 const APART: Draft = { text: "", images: [], sendId: null, version: -1 };
 
-/** A Send now waits on the server and on the warning: meanwhile the person may have removed its message or opened it for editing. */
 function gone(out: Outgoing): boolean {
   const s = getState();
   return out.queuedId !== undefined && (s.editingQueued === out.queuedId || !waitingReplies(s).some((q) => q.id === out.queuedId));
@@ -196,7 +149,6 @@ function draftElsewhere(threadId: string): string {
   return `Your message didn't send. Your words are in the draft in ${title ? `“${title}”` : "another chat"}.`;
 }
 
-/** Plain words for a send that did not go; `where`: its words are back in the box (null: they were already in the chat). */
 function refusal(code: string, model: string, where: "box" | null, numCtx?: number): string {
   const name = describeModel(model, catalogOf(getState())).name;
   const back = where === null ? "" : " Your message is back in the box.";
@@ -218,18 +170,12 @@ function refusal(code: string, model: string, where: "box" | null, numCtx?: numb
 }
 
 
-/** Retry stays off while the server is still stopping a reply: it refuses a second turn in a thread, and the old turn's events must not land on the new one. */
 export function canRetry(s: State): boolean {
   return s.threadId !== null && !streamingHere(s) && !stopping(s.turns[s.threadId]);
 }
 
-/** One plain sentence for a reply the server stopped to make way for something else. */
 const stopReason = (event: { readonly code: string; readonly neededBy?: string | undefined }): string | undefined => stopWords(event, catalogOf(getState()));
 
-/**
- * The times a row of words kept here carries when the server saved none: its record as the turn
- * ended, every figure the server's. None when the record never said how the turn ended.
- */
 function recordTimes(l: LiveTurn): ReplyTimes | undefined {
   const r = l.reply;
   const ended = r?.ended ?? (r?.stoppedAt === undefined ? undefined : { reason: "stopped" as const, at: r.stoppedAt });
@@ -242,27 +188,22 @@ function recordTimes(l: LiveTurn): ReplyTimes | undefined {
     callsAt: r.callsAt,
     workMs: r.workMs,
     ended,
-    // a failure keeps the runtime's text for its tip
     ...(l.end?.kind === "error" ? { why: { code: l.end.code, message: l.end.message } } : {}),
   };
 }
 
-/** A row Retry replaces: a stopped reply, or a picture that failed or was cancelled (the server's retriedRows). */
 const retriable = (m: Message) => m.interrupted === true || m.imageJob?.state === "error" || m.imageJob?.state === "cancelled";
 
-/** What a Retry replaces on the server: the last question and the unfinished rows after it. None when a finished reply followed: Regenerate is then a new question. */
 function retriedRows(messages: readonly Message[]): readonly Message[] {
   const rows = messages.slice(messages.findLastIndex((m) => m.role === "user"));
   return rows[0]?.role === "user" && rows.slice(1).every(retriable) ? rows : [];
 }
 
-/** Remove: the message is gone, from every window. Edit is the way to get its words back. */
 export function removeQueued(id: string): void {
   void askServer?.("reply.remove", { id }).then((a) => {
     switch (a.answer) {
       case "done":
         dropped(id);
-        // after its row is gone from here: a file the queue still names is kept
         return releaseFiles(("files" in a.reply ? a.reply.files ?? [] : []).map((f) => f.path));
       case "gone":
         return dropped(id, a.why === "sent" ? ALREADY_SENT : undefined);
@@ -285,7 +226,6 @@ function dropped(id: string, notice?: string): void {
   }));
 }
 
-/** Edit: the words go in the composer and the message keeps its place, unsent, until the next Send updates it. */
 export function editQueued(id: string): void {
   const q = waitingReplies(getState()).find((x) => x.id === id);
   if (!q) return;
@@ -296,14 +236,12 @@ export function editQueued(id: string): void {
   openEdit(id, q.threadId, q.text);
 }
 
-/** The server is asked to keep the message for this window's composer. */
 function openEdit(id: string, threadId: string, text: string): void {
   void askServer?.("reply.edit", { id, open: true }).then((a) => {
     switch (a.answer) {
       case "done":
         return;
       case "not-reached":
-        // the edit stays open here, and the next connection asks again
         return;
       case "sending":
       case "gone":
@@ -314,7 +252,6 @@ function openEdit(id: string, threadId: string, text: string): void {
   });
 }
 
-/** An edit that cannot go on closes, saying why; words typed into it stay in the composer as a new message. `text`: the words it opened with, when known. */
 function closeEdit(id: string, threadId: DraftKey, text: string | undefined, why: string): void {
   if (getState().editingQueued !== id) return;
   const draft = getDraft(threadId);
@@ -325,10 +262,6 @@ function closeEdit(id: string, threadId: DraftKey, text: string | undefined, why
   setState({ editingQueued: null, notice: typed ? `${why} Your new words are still in the composer.` : why });
 }
 
-/**
- * A memory refusal's offer taken for a held message: the model and context it now goes with, on
- * the server, which sends it. True once the message has them.
- */
 export async function chooseForQueued(id: string, model: string, numCtx: number): Promise<boolean> {
   const q = waitingReplies(getState()).find((x) => x.id === id);
   if (q === undefined || askServer === undefined) return false;
@@ -350,34 +283,25 @@ export async function chooseForQueued(id: string, model: string, numCtx: number)
   }
 }
 
-/** A held message's refusal in a whole sentence, for its row's tip: the row itself says it in a few words. */
 export function heldSentence(q: WaitingReply): string | undefined {
   const at = q.stage === "editing" ? q.back : q;
   if (at.stage !== "held" || at.held.why !== "refused") return undefined;
   const { code, message } = at.held;
-  // these two are written to be shown
   if (code === "gpu-unreadable" || code === "image-input") return message;
   return refusal(code, q.model ?? getState().model ?? "", null, q.numCtx);
 }
 
-/** Words that came since the last frame, for the turn of one reply. */
 interface Waiting {
   readonly id: string;
   text: string;
   thinking: string;
 }
 
-/** The turn with the words that waited for a frame. */
 function withWaiting(turn: LiveTurn, w: Waiting, now: number): LiveTurn {
   const thought = reduceTurn(turn, { type: "thinking", text: w.thinking }, now) ?? turn;
   return reduceTurn(thought, { type: "delta", text: w.text }, now) ?? thought;
 }
 
-/**
- * Words the server did not take go back in their chat's composer, above anything typed there
- * since. Alone there they keep their name, so sending them again asks once: if the server has
- * them after all, its record takes them out.
- */
 function backInBox(entry: Pick<Params<"reply.send">, "threadId" | "messageId" | "text" | "images" | "files">): void {
   const draft = getDraft(entry.threadId);
   const empty = draft.text === "" && draft.images.length === 0 && !draft.files?.length;
@@ -408,7 +332,6 @@ function endOf(r: Extract<Reply, { readonly stage: "stopped" | "failed" }>, at: 
   }
 }
 
-/** The server answered for an old saved message: it is the server's (`restored`), or was already, or was refused, which said so. */
 function handedOver(id: string, restored: boolean): void {
   oldQueue = (oldQueue ?? []).filter((q) => q.id !== id);
   queueMoved();
@@ -418,28 +341,19 @@ function handedOver(id: string, restored: boolean): void {
 
 const shownTurn = (id: string) => Object.values(getState().turns).find((t) => t.turnId === id);
 
-/** History, navigation, fit and RPC operations are wired by session.ts. `rules` is given only by the test that turns one off (records.test.ts). */
 export function createChat({ applyServerEvent, reply: askOne, codeOf, createThread, creatingDraft, loadThread, loading, noteMessage, rowsSaved, withMessage, untrackedDone, openThread, blockingFor }: ChatEffects, rules?: WindowRules) {
   askServer = askOne;
   const records = createRecords(rules);
-  /** Image sends that open a new chat, by record id, until the server saves their question. */
   const firstDraws = new Map<string, { readonly draw: NonNullable<Params<"reply.send">["draw"]>; readonly drawCount: number | undefined }>();
 
-  /**
-   * One record changed, or left: the only way a message changes in this window. A change older
-   * than the one held is dropped. A message held by a refusal says so on its own row, in every
-   * window, so nothing is said here. `listed`: the list at connect.
-   */
   function recordChanged(change: ReplyChange, listed = false): void {
     const id = change.kind === "is" ? change.reply.id : change.id;
     if (!records.takes(getState().replies.get(id), change)) return;
-    // an old saved message the server says anything of is the server's: its add is not asked again
     if (oldQueue?.some((q) => q.id === id) === true) handedOver(id, false);
     pickTaken(change);
     if (change.kind === "left") return recordLeft(change.id, change.why);
     const r = change.reply;
     const saved = change.saved ?? [];
-    // an edit open here (also one a reload brought back) is this window's, whatever the record says yet
     if (getState().editingQueued === r.id) editsHere.add(r.id);
     else if (r.stage !== "editing") editsHere.delete(r.id);
     if (isWaiting(r)) return waits(r, listed);
@@ -450,11 +364,6 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     if (change.chatNumber !== undefined) rowsSaved(r.threadId, change.chatNumber);
   }
 
-  /**
-   * The phone's pick for a new chat went with its first send: once the server saved that question
-   * the thread keeps the pick and its count, and the next new chat starts from Settings. A send held
-   * or gone leaves the pick for the next try.
-   */
   function pickTaken(change: ReplyChange): void {
     const id = change.kind === "is" ? change.reply.id : change.id;
     const first = firstDraws.get(id);
@@ -471,12 +380,9 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     }));
   }
 
-  /** A turn of this record whose question was never saved: when the record waits again, or leaves, nothing of the turn shows. */
 
-  /** It waits: a row of its chat's tray. One that was on its way is back (refused, or a Stop pulled it back), and nothing of a turn shows. */
   function waits(r: WaitingReply, listed: boolean): void {
     const s = getState();
-    // words an unanswered send put back in the composer: the server has them after all, and they are the row
     const draft = getDraft(r.threadId);
     const putBack = draft.sendId === r.messageId && draft.beforeEdit === undefined && s.editingQueued !== r.id;
     if (putBack) clearDraft(r.threadId);
@@ -487,41 +393,34 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
       ...(unstarted(st.turns[r.threadId], r.id) ? { turns: withTurn(st.turns, r.threadId, null) } : {}),
       ...said,
     }));
-    // an edit open here the server let go (the window was gone past its grace): asked again
     if (listed && s.editingQueued === r.id && r.stage !== "editing") openEdit(r.id, r.threadId, edited?.id === r.id ? edited.text : r.text);
   }
 
-  /** A turn that gives way to another record's in its chat: words it showed that no saved row will bring stay there, and its late words reach nothing. */
   function givesWay(turn: LiveTurn | undefined, to: string, keepWords: boolean): void {
     if (turn === undefined || turn.turnId === to) return;
     if (keepWords) keepStoppedWords(turn);
     waiting.delete(turn.threadId);
   }
 
-  /** It is on its way: its chat's turn. Its question shows from the record itself until the saved one takes its place. */
   function starts(r: Extract<Reply, { readonly stage: "starting" }>): void {
     const now = Date.now();
     const { threadId } = r;
     const s = getState();
     const was = s.replies.get(r.id);
-    // the server lets one reply run in a chat, and this is the one. A Retry replaces what it stopped: nothing of that stays under its question.
     givesWay(s.turns[threadId], r.id, r.retryOf === undefined);
     const made: LiveTurn = { threadId, turnId: r.id, model: r.draw?.preset ?? r.model ?? "", startedAt: now, thinking: "", text: "", tools: [] };
     applyServerEvent((st) => {
       const at = st.turns[threadId];
       return { replies: kept(st, r), turns: withTurn(st.turns, threadId, reduceTurn(at?.turnId === r.id ? at : made, { type: "reply", reply: clockOf(r) }, now)) };
     });
-    // setup and the first download are the whole app waiting: a message that waited for them opens its chat when it goes
     if (was !== undefined && isWaiting(was) && behindSetup(was) && s.threadId !== threadId) openThread(threadId);
   }
 
-  /** A saved question confirms its exact copy in the composer; edited words already have a new identity. */
   function questionSaved(id: string, threadId: string, questionId: string): void {
     const draft = getDraft(threadId);
     if (draft.sendId === questionId) {
       if (draft.beforeEdit) cancelQueuedDraft(threadId);
       else clearDraft(threadId);
-      // reworded while it sent: the new words stay, and a paste or dictation meant for the edit is dropped
     } else if (getState().editingQueued === id) renewDraft(threadId);
     if (edited?.id === id) edited = null;
     applyServerEvent((s) => {
@@ -532,7 +431,6 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     });
   }
 
-  /** Its question is saved and its reply is being written (or drawn, or stopped and not yet ended): the chat's turn, with the record's clock. */
   function answers(r: Exclude<Reply, WaitingReply | { readonly stage: "starting" | "done" | "stopped" | "failed" }>, saved: readonly Message[]): void {
     const now = Date.now();
     const { threadId } = r;
@@ -546,24 +444,19 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     givesWay(turn, r.id, retried === undefined);
     const clock = clockOf(r);
     if (mine) {
-      // a second attempt starts over: the first one's waiting words are dropped (the server holds the queue behind it)
       if (turn.reply !== undefined && clock.attempt > turn.reply.attempt) waiting.delete(threadId);
-      // the words that were waiting for a frame when the server took a Stop stay (W-05);
-      // the open chat's words land in their own frame, a chat off screen takes them at the phase change
       else if (s.threadId !== threadId || clock.stoppedAt !== undefined) flushWords(threadId);
     }
     if (question !== undefined) noteMessage(threadId, question);
     const made: LiveTurn = { threadId, turnId: r.id, model: "", startedAt: now, thinking: "", text: "", tools: [] };
     applyServerEvent((st) => {
       const at = st.turns[threadId];
-      // the saved question takes the place of the record's words
       const base = at?.turnId === r.id ? at : made;
       const started: LiveTurn = { ...base, userMessageId: base.userMessageId ?? r.questionId, model: r.stage === "drawing" ? r.preset : r.model };
       return { replies: kept(st, r), ...(question === undefined ? {} : withQuestion(st, threadId, question, retried)), turns: withTurn(st.turns, threadId, reduceTurn(started, { type: "reply", reply: clock }, now)) };
     });
   }
 
-  /** A chat's rows with a question the server just saved, cached once its chat is open. It took a Retry's old rows out in the same write. */
   function withQuestion(st: State, threadId: string, question: Message, retried: string | undefined): Partial<State> {
     const rows = st.messages[threadId];
     if (rows === undefined) return st.threadId === threadId ? { messages: withMessage(st, threadId, question) } : {};
@@ -572,7 +465,6 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     return { messages: withMessage(base, threadId, question) };
   }
 
-  /** A reply that ends in the change that first brings its saved question: the question goes in its chat before the end does. */
   function askedLate(r: { readonly id: string; readonly threadId: string }, question: Message | undefined): void {
     const s = getState();
     const turn = s.turns[r.threadId];
@@ -583,7 +475,6 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     applyServerEvent((st) => ({ ...withQuestion(st, r.threadId, question, was?.stage === "starting" ? was.retryOf : undefined), turns: withTurn(st.turns, r.threadId, { ...turn, userMessageId: question.id }) }));
   }
 
-  /** Its reply is saved: the row takes the turn's place, and the record is kept no longer. */
   function done(r: Extract<Reply, { readonly stage: "done" }>, saved: readonly Message[]): void {
     const { threadId } = r;
     askedLate(r, saved.find((m) => m.id === r.questionId));
@@ -596,31 +487,25 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
       if (msg !== undefined) untrackedDone(threadId, msg);
       return;
     }
-    // the saved message has every word: drop the waiting ones instead of
-    // publishing them a moment before the row that replaces them (W-09)
     if (open && window.glPerf?.terminalFlush === true) {
       perf.flushes++;
       applyServerEvent((st) => ({ turns: { ...st.turns, [threadId]: { ...turn } } }));
     }
     waiting.delete(threadId);
-    // the row carries the server's times: its thought, first token and rounds draw from them
     if (open) noteMessage(threadId, msg);
     applyServerEvent((st) => ({
       replies: without(st, r.id),
       ...(open ? { messages: withMessage(st, threadId, msg) } : {}),
       turns: withTurn(st.turns, threadId, null),
     }));
-    // a chat not on screen reloads: its cached history may be behind
     if (!open) untrackedDone(threadId, msg);
   }
 
-  /** It ended with no finished reply: what it saved is in its chat, with how it ended, and the record is kept no longer. */
   function over(r: Extract<Reply, { readonly stage: "stopped" | "failed" }>, saved: readonly Message[]): void {
     const { threadId } = r;
     const question = r.questionId === undefined ? undefined : saved.find((m) => m.id === r.questionId);
     askedLate(r, question);
     const partial = saved.find((m) => m.role === "assistant");
-    // a failure that landed after a Stop: the record ends as stopped, the rows it saved are stamped with the failure, and the failure is what is said
     const stamp = r.stage === "stopped" && r.by.who === "person" ? (partial ?? question)?.times : undefined;
     const event: TurnFailure = stamp?.ended.reason === "failed" && stamp.why !== undefined
       ? { type: "error", code: stamp.why.code, message: stamp.why.message, ended: stamp.ended }
@@ -630,9 +515,6 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     const turn = s.turns[threadId];
     const open = s.threadId === threadId;
     if (r.questionId === undefined) {
-      // A Retry refused after it began to start saved nothing, and has no row to say so: every window
-      // that showed it starting says why, where its chat is in view. One refused before that was
-      // told to the window that pressed it, by its call.
       const was = s.replies.get(r.id);
       const here = s.view === "thread" && open;
       const notice = r.stage === "failed" && was?.stage === "starting" && was.retryOf !== undefined && here
@@ -650,7 +532,6 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
       return keepStopped(threadId, said);
     }
     if (partial !== undefined) {
-      // the saved partial has every word the turn showed, and how and when it ended: it takes the turn's place
       waiting.delete(threadId);
       noteMessage(threadId, partial);
       applyServerEvent((st) => ({
@@ -661,22 +542,18 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
       return;
     }
     flushWords(threadId);
-    // the question, stamped with how its turn ended: its note shows once the ended turn leaves the screen
     keepQuestion(threadId, said);
     applyServerEvent((st) => {
       const at = st.turns[threadId];
       return { replies: without(st, r.id), ...(at?.turnId === r.id ? { turns: withTurn(st.turns, threadId, reduceTurn(at, said, Date.now())) } : {}) };
     });
-    // on screen the ended turn stays with its Retry; elsewhere it settles into its chat now
     const ended = getState().turns[threadId];
     if (!open && ended !== undefined && ended.turnId === r.id) settle(ended);
   }
 
-  /** It is on no list any more: removed, its chat deleted, or settled with nothing more to show. */
   function recordLeft(id: string, why: Extract<ReplyChange, { kind: "left" }>["why"]): void {
     editsHere.delete(id);
     const was = getState().replies.get(id);
-    // settled while open here: the edit has nothing left to change (a removal is said by the edit's own next answer)
     if (why === "settled" && was !== undefined && getState().editingQueued === id) {
       renewDraft(was.threadId);
       if (edited?.id === id) edited = null;
@@ -697,11 +574,6 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
   const ahead = new Map<string, Array<Payload<"reply.words">["part"]>>();
   const handing = new Set<string>();
 
-  /**
-   * This browser's queue from before the server kept one goes to the server once, on hold, when
-   * both are known: what was saved, and the server's records. Each message stays saved here until
-   * the server answers for it; one it never answered goes at the next connection.
-   */
   function moveOldQueue(): void {
     if (oldQueue === null || !listedHere) return;
     const s = getState();
@@ -714,10 +586,8 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
       handing.add(q.id);
       const { at: _typed, ...said } = q;
       void askOne("reply.send", { ...said, messageId: q.messageId ?? queueId(), held: true, numCtx: s.numCtx, think: s.think }).then((a) => {
-        // never answered: it stays saved here, and goes at the next connection
         if (a.answer === "not-reached") return undefined;
         if (a.answer !== "gone") return true;
-        // removed in another window while this one could not hear it: the removal stands, said nowhere twice
         if (a.why === "chat-deleted") setState({ notice: CHAT_GONE });
         return false;
       }, () => {
@@ -737,12 +607,6 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     records.connected(getState().replies.keys());
   }
 
-  /**
-   * The server's records at connect: every message waiting or on its way. One held from before
-   * that the list does not name is gone. A reply of one, still shown as being written, ended while
-   * this window could not hear it: its chat's saved rows are read again and take its place, with
-   * no moment between in which neither shows. An edit open here keeps its message from going.
-   */
   function replyListed(list: readonly ReplyListed[]): void {
     for (const { reply } of list) recordChanged({ kind: "is", reply }, true);
     for (const { reply, soFar } of list) if (soFar !== undefined) caughtUp(reply.id, soFar);
@@ -751,13 +615,11 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     if (unlisted.size > 0) {
       const before = getState();
       const ended = Object.values(before.turns).filter((t) => unlisted.has(t.turnId) && t.end === undefined);
-      // rows to read again: a reply whose question was saved, in a chat this window has read
       const reads = (t: LiveTurn) => t.userMessageId !== undefined && before.messages[t.threadId] !== undefined;
       for (const t of ended) waiting.delete(t.threadId);
       applyServerEvent((s) => {
         const replies = new Map(s.replies);
         for (const id of unlisted) replies.delete(id);
-        // nothing of these was saved, or their chat is read on its next visit
         const turns = ended.filter((t) => !reads(t)).reduce((all, t) => (all[t.threadId]?.turnId === t.turnId ? withTurn(all, t.threadId, null) : all), s.turns);
         return { replies, turns };
       });
@@ -771,32 +633,22 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     moveOldQueue();
   }
 
-  /** An edit ended without a Send (Cancel, or leaving the chat): the message goes on as it was. */
   function editEnded(id: string): void {
     if (edited?.id === id) edited = null;
-    // whatever the answer, the edit is over in this window: the message left, another window has
-    // it, or the server frees it when it sees this connection close
     void askOne("reply.edit", { id, open: false });
   }
 
-  /** An Update asked and not yet answered: a second press in that moment is the same save. */
   let saving: string | null = null;
 
-  /**
-   * Update: the edited words go to the server, and stay in the composer until it says they are
-   * the message's. Any other answer leaves them there and says what became of the message.
-   */
   async function saveEdit(id: string, key: DraftKey, words: { readonly content: string; readonly images: readonly string[]; readonly files: readonly AttachedFile[]; readonly messageId: string }): Promise<void> {
     if (saving === id) return;
     saving = id;
     const started = edited?.id === id ? edited : undefined;
     const row = getState().replies.get(id);
     const has = row !== undefined && isWaiting(row) ? row.messageId : undefined;
-    // the words this edit started from, unless the record shows an earlier save of this edit landed after all
     const base = has !== undefined && has === started?.tried ? has : started?.base ?? has ?? words.messageId;
     const a = await askOne("reply.change", { id, base, messageId: words.messageId, text: words.content, images: [...words.images], files: [...words.files] });
     saving = null;
-    // the chat was left meanwhile, which ended the edit
     if (getState().editingQueued !== id) return;
     switch (a.answer) {
       case "done":
@@ -804,7 +656,6 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
         edited = null;
         return setState({ editingQueued: null, notice: null });
       case "not-reached":
-        // the same words saved again are the same change, done once
         if (started !== undefined) started.tried = words.messageId;
         replaceDraft(key, { sendId: words.messageId });
         return setState({ notice: `${NOT_REACHED} Your edit is still open. Press Update again.` });
@@ -818,7 +669,6 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
   const perf: NonNullable<Window["glPerf"]> = { deltas: 0, flushes: 0 };
   window.glPerf = perf;
 
-  /** Apply one of the server's events to a thread's turn, if that turn is still the one of the record `id`. */
   function update(threadId: string, id: string, event: TurnEvent): void {
     applyServerEvent((s) => {
       const turn = s.turns[threadId];
@@ -946,10 +796,6 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     }
   }
 
-  /**
-   * The message shows from the press, as the server will most likely take it: on its way in a quiet
-   * chat, waiting behind a reply in a busy one. The server's first word on it (rev 1 and up) replaces it.
-   */
   function pressed(p: Params<"reply.send">): void {
     const { id, threadId, askFirst: _ask, consent: _consent, ...said } = p;
     const at = Date.now();
@@ -961,7 +807,6 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     recordChanged({ kind: "is", reply, saved: [] });
   }
 
-  /** The server made no record of the press: what showed for it goes. */
   function unpressed(id: string): void {
     const was = getState().replies.get(id);
     if (was === undefined || was.rev !== 0) return;
@@ -995,7 +840,6 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     setState({ notice, noticeOffer: offer === undefined ? null : { notice, model, numCtx: p.numCtx ?? ctxFor(s.numCtx, s.models, model), offer } });
   }
 
-  // why: Send now with nothing in the way, or a yes given: the server sends it first when its chat is free
   function queueNow(id: string, stopOthers: boolean, stopTurns?: readonly string[]): void {
     if (!waitingReplies(getState()).some((x) => x.id === id)) return;
     setState({ stopAsk: null, notice: null });
@@ -1079,7 +923,6 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     });
   }
 
-  // why: words land once per frame and only for the open chat; a chat off screen takes them at a phase
   const waiting = new Map<string, Waiting>();
   let raf = 0;
 
@@ -1166,23 +1009,17 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     for (const part of parts) onWords({ id, part });
   }
 
-  /** A reply that ended without a saved row while its chat was not open: its words become a row; its question already says how it ended. */
   function settle(turn: LiveTurn): void {
     applyServerEvent((s) => ({ turns: withTurn(s.turns, turn.threadId, null) }));
     if (turn.text !== "" || turn.thinking !== "" || turn.tools.length > 0) keepStoppedWords(turn);
   }
 
-  /**
-   * The question of a turn that saved no reply, stamped by the server with how the turn ended, in
-   * place of its copy here. Only in place: a Retry may have taken the row out on the server already.
-   */
   function keepQuestion(threadId: string, event: TurnFailure): void {
     const { question } = event;
     if (question === undefined) return;
     applyServerEvent((s) => s.messages[threadId]?.some((m) => m.id === question.id) === true ? { messages: withMessage(s, threadId, question) } : {});
   }
 
-  /** A turn that ended without being on screen: what it saved goes into its thread, with how it ended on the row. */
   function keepStopped(threadId: string, event: TurnFailure): void {
     const { partial } = event;
     if (partial === undefined) return keepQuestion(threadId, event);
@@ -1190,18 +1027,11 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     applyServerEvent((s) => (s.messages[threadId] !== undefined ? { messages: withMessage(s, threadId, partial) } : {}));
   }
 
-  /**
-   * Send now, T3 Code's interrupt: one call, in which the server stops a reply running in this
-   * message's chat and sends the message first once that has ended. With nothing running there it
-   * goes at once; a load that would stop another chat's reply comes back as the warning, as any
-   * other send's does.
-   */
   function sendQueuedNow(id: string): void {
     const s = getState();
     const q = waitingReplies(s).find((x) => x.id === id);
     if (!q || behindSetup(q)) return;
     if (unfinished(s.turns[q.threadId])) return queueNow(id, stopOthersOk());
-    // nothing running in its chat: the same question first, and the same warning, as any other send
     void admit({ content: q.text, images: q.images ?? [], ...(q.files ? { files: q.files } : {}), messageId: q.messageId, model: q.model ?? s.model ?? "", threadId: q.threadId, keepDraft: true, queuedId: q.id, ...(q.draw === undefined ? {} : { draw: q.draw }) });
   }
 

@@ -1,8 +1,10 @@
+import type { ClipboardEvent } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { methodSamples } from "@gates-local/contracts/testing";
-import { attachFiles, imageReason, pasteKind, splitDropped } from "./paste.ts";
+import { attachFiles, imageReason, paste, pasteKind, splitDropped } from "./paste.ts";
 import { getRefused, removeRefused } from "./refused-files.ts";
 import { getDraft, replaceDraft } from "../lib/store/drafts.ts";
+import { getState, setState } from "../lib/store/store.ts";
 import { compressImage } from "./image-compression.ts";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -102,4 +104,87 @@ it("compresses oversized images, releases their bitmap, and reports unreadable i
   expect(close).toHaveBeenCalledOnce();
   vi.stubGlobal("createImageBitmap", vi.fn().mockRejectedValue(new Error("decode")));
   await expect(compressImage(big)).rejects.toThrow("could not be read");
+});
+
+class ImageReader extends EventTarget {
+  result: string | null = null;
+  readAsDataURL(file: File): void {
+    queueMicrotask(() => {
+      this.result = `data:${file.type};base64,${file.name}`;
+      this.dispatchEvent(new Event("load"));
+    });
+  }
+}
+
+function sized(name: string, size: number, type = ""): File {
+  const file = new File(["x"], name, { type });
+  Object.defineProperty(file, "size", { value: size });
+  return file;
+}
+
+function pasted(files: File[]): ClipboardEvent<HTMLTextAreaElement> & { preventDefault: ReturnType<typeof vi.fn> } {
+  return { clipboardData: { files }, preventDefault: vi.fn() } as unknown as ClipboardEvent<HTMLTextAreaElement> & { preventDefault: ReturnType<typeof vi.fn> };
+}
+
+const CAP = 50 * 1024 * 1024;
+const pictures = (from: string) => Array.from({ length: 5 }, (_, i) => new File(["png"], `${from}-${i}.png`, { type: "image/png" }));
+
+it("a file one byte under 50 MB is read and attached, while one a byte over is refused at its chip and never read", async () => {
+  const attached = { path: "files/att-0f8b5c1e-3a2d-4c7e-9b1a-2d3e4f5a6b7c", name: "under.log", size: CAP - 1, type: "" };
+  const call = vi.fn().mockResolvedValue(attached);
+  vi.doMock("../lib/session/index.ts", () => ({ call }));
+  const under = sized("under.log", CAP - 1), over = sized("over.log", CAP + 1);
+  const readUnder = vi.spyOn(under, "arrayBuffer"), readOver = vi.spyOn(over, "arrayBuffer");
+  await attachFiles([under, over]);
+  expect(readUnder).toHaveBeenCalledOnce();
+  expect(call).toHaveBeenCalledWith("files.attach", expect.objectContaining({ name: "under.log" }));
+  expect(getDraft().files).toEqual([attached]);
+  expect(readOver).not.toHaveBeenCalled();
+  expect(getRefused().map(f => f.name)).toEqual(["over.log"]);
+  for (const f of getRefused()) removeRefused(null, f.id);
+  replaceDraft(null, { files: [] });
+  vi.doUnmock("../lib/session/index.ts");
+});
+
+it("a pasted file that is not a picture attaches as a drop does; with a picture beside it, only the picture is pasted", async () => {
+  vi.stubGlobal("FileReader", ImageReader);
+  const attached = { path: "files/att-0f8b5c1e-3a2d-4c7e-9b1a-2d3e4f5a6b7c", name: "report.pdf", size: 1, type: "application/pdf" };
+  const call = vi.fn().mockResolvedValue(attached);
+  vi.doMock("../lib/session/index.ts", () => ({ call }));
+  const alone = pasted([new File(["%PDF"], "report.pdf", { type: "application/pdf" })]);
+  paste(alone);
+  expect(alone.preventDefault).toHaveBeenCalledOnce();
+  await vi.waitFor(() => expect(getDraft().files).toEqual([attached]));
+  expect(call).toHaveBeenCalledWith("files.attach", expect.objectContaining({ name: "report.pdf", type: "application/pdf" }));
+  replaceDraft(null, { files: [] });
+  call.mockClear();
+  const mixed = pasted([new File(["png"], "shot.png", { type: "image/png" }), new File(["%PDF"], "report.pdf", { type: "application/pdf" })]);
+  paste(mixed);
+  expect(mixed.preventDefault).toHaveBeenCalledOnce();
+  await vi.waitFor(() => expect(getState().pasting).toBe(0));
+  expect(getDraft().images).toEqual(["data:image/png;base64,shot.png"]);
+  expect(call).not.toHaveBeenCalled();
+  expect(getDraft().files ?? []).toEqual([]);
+  replaceDraft(null, { images: [] });
+  vi.doUnmock("../lib/session/index.ts");
+});
+
+it("a picture the browser gives no type, or only octet-stream, is attached as the picture its name says", async () => {
+  vi.stubGlobal("FileReader", ImageReader);
+  const call = vi.fn();
+  vi.doMock("../lib/session/index.ts", () => ({ call }));
+  await attachFiles([new File(["png"], "shot.png"), new File(["jpg"], "photo.jfif", { type: "application/octet-stream" })]);
+  expect(getDraft().images).toEqual(["data:image/png;base64,shot.png", "data:image/jpeg;base64,photo.jfif"]);
+  expect(call).not.toHaveBeenCalled();
+  replaceDraft(null, { images: [] });
+  vi.doUnmock("../lib/session/index.ts");
+});
+
+it("two attaches that overlap cannot hold more than 8 pictures together, and the second says so", async () => {
+  vi.stubGlobal("FileReader", ImageReader);
+  await Promise.all([attachFiles(pictures("paste")), attachFiles(pictures("drop"))]);
+  expect(getDraft().images).toHaveLength(8);
+  expect(getState().notice).toBe("Attach up to 8 images per message.");
+  replaceDraft(null, { images: [] });
+  setState({ notice: null });
 });

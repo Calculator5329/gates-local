@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-11-16: the message box holds to the six comment kinds
+
+- apps/web/src/composer passes the comment rule: all 261 offenders went,
+  and the folder's comment lines fell from 469 to 62. What stays is
+  twenty one-line `external:` facts about browsers and Ollama and five
+  `why:` lines.
+- Ten comments were stale or only restated the code and went. Among
+  them: a pointer to a session.ts that does not exist; a note that a
+  queue brought back by a reload waits for Send now, where only the old
+  browser queue does; and a doc comment with no declaration under it.
+- 103 rules gained 100 unit tests, each watched fail with its rule broken.
+- Three follow-ups found on the way: heldSentence has no caller, the
+  perf spec never sets terminalFlush, and one guard in the word handler
+  can never be reached.
+- One session test failed about half the time under load, on dev too: it
+  dropped the socket before the question's save had come back. It now
+  waits for the save first, as its neighbour does. The gap it hid is a
+  follow-up: a question whose save is lost in a drop stays off screen,
+  because a reconnect does not read the open chat again.
+
 ## 2026-11-16: the web app's shared library holds to the six comment kinds
 
 - apps/web/src/lib passes the comment rule: all 323 offenders went, and

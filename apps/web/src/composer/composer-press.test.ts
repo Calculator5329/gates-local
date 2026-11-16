@@ -1,7 +1,21 @@
-import { expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import { useActionPress } from "./composer-press.ts";
 
-vi.mock("react", () => ({ useRef: (current: unknown) => ({ current }) }));
+const hooks = vi.hoisted(() => ({ refs: [] as { current: unknown }[], next: 0 }));
+vi.mock("react", () => ({
+  useRef: (current: unknown) => {
+    const ref = hooks.refs[hooks.next] ?? { current };
+    hooks.refs[hooks.next] = ref;
+    hooks.next += 1;
+    return ref;
+  },
+}));
+beforeEach(() => { hooks.refs = []; hooks.next = 0; });
+
+function rerender(action: string, activate: () => void): ReturnType<typeof useActionPress> {
+  hooks.next = 0;
+  return useActionPress(action, activate);
+}
 
 function click(detail: number): Parameters<ReturnType<typeof useActionPress>["onClick"]>[0] {
   return { detail, preventDefault: vi.fn() } as unknown as Parameters<ReturnType<typeof useActionPress>["onClick"]>[0];
@@ -75,3 +89,45 @@ for (const action of ["send", "stop:1"]) {
     expect(activate).toHaveBeenCalledOnce();
   });
 }
+
+function key(name: "Enter" | " "): Parameters<ReturnType<typeof useActionPress>["onKeyDown"]>[0] {
+  return { key: name, repeat: false, defaultPrevented: false, preventDefault: vi.fn() } as unknown as Parameters<ReturnType<typeof useActionPress>["onKeyDown"]>[0];
+}
+
+it("a press that starts on one action and is released after the button changed activates nothing", () => {
+  const activate = vi.fn();
+  rerender("stop:1", activate).onPointerDown();
+  rerender("stop:2", activate).onClick(click(1));
+  rerender("queue:1", activate).onKeyDown(key(" "));
+  rerender("send", activate).onKeyUp(key(" "));
+  expect(activate).not.toHaveBeenCalled();
+  rerender("send", activate).onPointerDown();
+  rerender("send", activate).onClick(click(1));
+  expect(activate).toHaveBeenCalledOnce();
+});
+
+it("a Space whose release went to another window does not stall the next Space press, which activates once", () => {
+  const same = vi.fn();
+  rerender("send", same).onKeyDown(key(" "));
+  rerender("send", same).onKeyDown(key(" "));
+  rerender("send", same).onKeyUp(key(" "));
+  expect(same).toHaveBeenCalledOnce();
+  const changed = vi.fn();
+  rerender("stop:1", changed).onKeyDown(key(" "));
+  rerender("send", changed).onKeyDown(key(" "));
+  rerender("send", changed).onKeyUp(key(" "));
+  expect(changed).toHaveBeenCalledOnce();
+});
+
+it("Enter or Space followed by the browser's own click activates once, and a lone accessible click still works", () => {
+  for (const name of ["Enter", " "] as const) {
+    const activate = vi.fn();
+    const press = rerender("queue:1", activate);
+    press.onKeyDown(key(name));
+    press.onClick(click(0));
+    press.onKeyUp(key(name));
+    expect(activate, name).toHaveBeenCalledOnce();
+    press.onClick(click(0));
+    expect(activate, name).toHaveBeenCalledTimes(2);
+  }
+});

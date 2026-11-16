@@ -1,6 +1,3 @@
-// Files a person chose or dropped that a message cannot carry. Messages hold
-// text and images only, so these stay as chips that say why until removed.
-// Held in memory per draft and never saved: the file itself was never read.
 import { useSyncExternalStore } from "react";
 import { type DraftKey, currentDraftKey } from "../lib/store/drafts.ts";
 import { useStore } from "../lib/store/store.ts";
@@ -9,11 +6,8 @@ export interface RefusedFile {
   readonly id: number;
   readonly name: string;
   readonly size: number;
-  /** Plain words for the chip's tooltip. */
   readonly reason: string;
-  /** The Library can hold it, so the chip offers that way in. */
   readonly library: boolean;
-  /** A dropped folder: the chip says so instead of a size. */
   readonly folder?: boolean;
 }
 
@@ -44,7 +38,6 @@ function subscribe(listener: () => void): () => void {
   return () => { listeners.delete(listener); };
 }
 
-/** The refused files of the draft on screen. */
 export function useRefused(): readonly RefusedFile[] {
   const key = useStore(s => s.threadId);
   const snapshot = () => getRefused(key);

@@ -51,10 +51,7 @@ import { drawsPicture } from "../thread/turn.ts";
 import { editDraft, getDraft, useDraft } from "../lib/store/drafts.ts";
 import { PHONE, SheetHead, Skel, closePop, closeTip, esc, isTouch, openTip, place, togglePop, useMedia } from "../lib/ui/ui.tsx";
 
-/**
- * A phone-sized touch screen: the one place Enter adds a new line and the Send arrow sends.
- * Everywhere a keyboard is likely, a remote desktop with no hover included, Enter sends.
- */
+// external: a remote desktop's browser can report (hover: none) with a keyboard present
 const PHONE_TOUCH = `(pointer: coarse) and ${PHONE}`;
 import { Speaker, Voice } from "../voice/Voice.tsx";
 import { hush, useTalk } from "../voice/talk.ts";
@@ -63,48 +60,36 @@ const catalogOf = (s: Pick<State, "catalog">) => (s.catalog === NA ? undefined :
 const imageGenOf = (s: State) => s.settings !== NA && s.settings?.imageGen === true;
 const pctOf = (done: number, total: number | undefined) => (total ? Math.round((done / total) * 100) : 0);
 
-// The first send replaces Draft's composer with the thread's in the same commit.
-// Transfer primary-action focus only to that immediate replacement.
 let primaryFocus = false;
 const NO_FILES: readonly AttachedFile[] = [];
-/** The field in Image mode: what to type for a picture. */
 export const IMAGE_PLACEHOLDER = "Describe a picture…";
 
-/** Tokens the open thread holds: the last reply's prompt plus its answer. */
 function usedTokens(s: State): number {
   if (s.view !== "thread" || s.threadId === null) return 0;
   const last = (s.messages[s.threadId] ?? []).findLast((m) => m.role === "assistant" && m.stats !== undefined);
   return (last?.stats?.promptTokens ?? 0) + (last?.stats?.completionTokens ?? 0);
 }
 
-/**
- * Why the Thinking pill cannot be used now, as its tip in a few words, or null when it can. It
- * depends on the model's "thinking" capability, so it waits for a chat
- * model to be installed (F70) and greys for a model without it.
- */
 export function thinkUnavailable(model: ModelInfo | undefined, downloading: boolean): string | null {
   if (downloading || model === undefined) return "Thinking: after the download";
   return canThink(model) ? null : "Thinking: not on this model";
 }
 
-/** The same answer as plain words for a phone's menu row, which has no tooltip. */
 function thinkNote(model: ModelInfo | undefined, name: string, downloading: boolean): string | null {
   if (downloading || model === undefined) return "Available when the model finishes downloading";
   return canThink(model) ? null : `${name} does not reason before answering`;
 }
 
-/** Which model, as the model button's tip: its name and its tag; a tag the catalog does not know is its own name, said once. */
 function tagTip(name: string, tag: string): string {
   return name === tag ? `<b class="mono">${esc(tag)}</b>` : `<b>${esc(name)}</b> · <span class="mono">${esc(tag)}</span>`;
 }
 
-/** Someone is about to open the picker: load its code. Its fit values are already in the last fit table. */
 function pickerIntent(): void {
   if (imageMode(getState())) { void imagePickerScreen.load(); return; }
   void pickerScreen.load();
 }
 
-/** Focus is intent only with a focus ring, that is from the keyboard; a sheet closing on phone hands focus back by script. */
+// external: a browser's script focus() after a tap does not match :focus-visible
 function pickerFocus(e: FocusEvent<HTMLElement>): void {
   if (e.currentTarget.matches(":focus-visible")) pickerIntent();
 }
@@ -135,7 +120,6 @@ export function Composer() {
   const editing = editingId !== null;
   const running = useStore((s) => runningTurn(s, s.threadId)?.turnId ?? null);
   const drawingNow = useStore(runningKind) === "image";
-  // Enter adds a new line only on a phone-sized touch screen; with no hover over a remote desktop it still sends
   const touch = useMedia(PHONE_TOUCH);
   const freed = stopsChat(fit);
   const early = useStore(sendsBeforeReady);
@@ -156,13 +140,10 @@ export function Composer() {
   const drawing = useStore(imageMode);
   const pictured = useStore(chosenImage);
   const unset = useStore(imagesUnset);
-  // a default ComfyUI does not list is still sent (the server settles it) but never named
   const named = pictured?.listed === true ? pictured : undefined;
   const online = useStore((s) => s.conn.kind === "open");
   const ta = useRef<HTMLTextAreaElement>(null);
   const primary = useRef<HTMLButtonElement>(null);
-  // Preparing a reply is user intent, not an idle startup download. The
-  // renderer can arrive while the person types, before the first Send.
   // oxlint-disable-next-line gates/effect-needs-reason -- the thread screen's code, loaded once the draft holds anything (typed, pasted, dropped, dictated or restored)
   useEffect(() => {
     if (hasText || images.length || files.length) void threadScreen.load();
@@ -190,24 +171,17 @@ export function Composer() {
   const name = shownTag === undefined ? "No model" : pickerLabels([...chatModels(models ?? []).map(m => m.name), shownTag], catalog).get(shownTag) ?? shownTag;
   const loading = loadState === "loading";
   const loadingNow = loading && first === undefined;
-  // a message of this chat is waiting for its model to load: the one time a load is shown, on the button being waited on
   const waitsOnLoad = loadingNow && isStreaming && !drawingNow;
-  // The fit table's row: the server builds none while a load runs, so a loading model keeps the verdict from before it.
   const v = fit === undefined ? undefined : verdictOf(fit);
-  // A send now runs partly in system memory: why, in the table's words. The card holds it and another
-  // program is in the way ("Slower now · Whisper in the way"), else the row's own ("Partly in system memory, slower").
   const slowWhy = v?.k !== "spill" ? undefined : slowReason(cardFit(fit)?.slowNow)?.short ?? (v.mark || undefined);
   const text = hasText || images.length > 0 || files.length > 0;
   const imageNo = imageReason(models, model, images, tag => describeModel(tag, catalog).name);
-  // the first model is offered right above the composer: the placeholder does not say it a second time
   const offered = useStore((s) => firstModelOffer(s) !== undefined);
-  const why = chatBlockedReason(models, model); // a download would not help: old Ollama, or the model is still being checked
+  // external: older Ollama builds omit a model's capabilities field
+  const why = chatBlockedReason(models, model);
   const noModel = (model === undefined || why !== undefined) && !queueable;
-  // During setup the gate style already greys every control; otherwise the pill says why it is off.
   const thinkNa = blocked ? null : thinkUnavailable(models?.find((m) => m.name === model), first !== undefined);
 
-  // the label is the name and nothing else, so the button keeps its width: a download
-  // is the bar on its edge, and its percent, like a download still to come, is in the tip
   const modelTip =
     shownTag === undefined
       ? "Model"
@@ -223,52 +197,34 @@ export function Composer() {
   const pct = Math.min(1, used / ctx);
   const meterHidden = pct < 0.5 || blocked || view !== "thread";
 
-  // before the first read nothing is known: the words of a ready app, never a problem not yet seen;
-  // past the boot bound with still nothing read, one neutral word until the runtime answers
-  // a message typed during the first download says when it goes once, in its queue row
-  // Image on: Send goes to the picture model, whatever the chat engine is doing; only a dropped server stops it
   const needsModel = why ?? "Download a model to start chatting";
   const placeholder = drawing && !boot && !none && rt !== "offline" ? IMAGE_PLACEHOLDER
     : noModel && ready ? (offered ? PLACEHOLDER.ready : needsModel) : boot ? PLACEHOLDER.ready : none ? CONNECTING : PLACEHOLDER[rt];
 
-  // A message queued behind a reply is checked when it goes, and memory a reply holds may be freed by stopping it.
   const memNo = v?.k === "no" && !isStreaming && !freed && !editing;
-  // The tip names the button and its key, as the app's other tips do ("New thread · Ctrl N"). A refusal says why
-  // in a few words only where nothing else on screen does: the placeholder already says what setup, Ollama or a
-  // missing model is waiting for, and a queued message's row says when it goes.
   const enter = touch ? "" : " · Enter";
   let sendTip = `Send${enter}`;
   if (editing) sendTip = `Update${enter}`;
   else if (isStreaming && !blocked) sendTip = `Queue${enter}`;
   else if (!queueable && !boot && !none && !blocked && !noModel) {
-    // the click opens the why, with its numbers
     if (memNo) sendTip = `Not enough memory at ${k(ctx)}`;
     else if (text && freed) sendTip = `Send${enter}. Another chat's reply stops first`;
   }
-  // Not ready and nothing queues: once typed words hide the placeholder, the tip is what it said is awaited;
-  // with the box empty the placeholder says it
   if (!drawing && text && ((blocked && !queueable) || noModel)) sendTip = boot ? CONNECTING : noModel && ready ? needsModel : placeholder;
-  // the model list not read yet, or the model not in it: send() would hold the message with nothing said
   const unlisted = !drawing && ready && !queueable && !noModel && model !== undefined && sendableModel(models, model) === undefined;
   if (unlisted) sendTip = models === undefined ? "Reading the models…" : models.some((m) => m.name === model) ? `${name} can't chat` : `${name} isn't installed`;
   if (imageNo !== null) sendTip = "This model can't see images";
   if (refused) sendTip = `Remove the file${refused === 1 ? "" : "s"} marked not sent`;
   if (pasting) sendTip = "Attaching…";
-  // Image on: the words go to the image model, so the chat model's readiness, memory and sight do not count.
   const drawNo = !drawing ? null : images.length > 0 || files.length > 0 ? "Image takes words only" : !online ? "Gates Local isn't answering" : unset ? "Images are not set up" : pictured === undefined ? "Reading the image models…" : null;
   if (drawing && !editing && !isStreaming && !refused && !pasting) sendTip = drawNo ?? `Make image${enter}`;
   const sendDisabled = drawing ? !text || drawNo !== null || refused > 0 || pasting > 0
     : (blocked && !queueable) || (!blocked && memNo) || noModel || unlisted || !text || imageNo !== null || refused > 0 || pasting > 0;
-  // Refused for memory: the button stays focusable and clickable, and the click opens the why.
   const memRefused = !drawing && !blocked && !queueable && !noModel && !unlisted && memNo && imageNo === null && !refused && !pasting;
-  // T3 Code's composer: Enter never stops a reply; the words queue behind it.
   const sendLabel = editing ? "Update queued message" : isStreaming ? "Queue message" : "Send message";
-  // Touch Enter inserts a newline, so a draft needs the queue arrow: on touch, Stop and the arrow hold
-  // their own slots for the whole reply, so the first character moves nothing under the finger.
   const showStop = isStreaming && !editing && !touch;
-  // Editing a queued message on desktop: Stop leaves the main button for Dictate's square, so the row holds still.
   const stopForVoice = isStreaming && editing && !touch;
-  // The note that said why Dictate waited is untrue once Dictate is back. Cleared here, not in Voice: Voice remounts when an edit is cancelled.
+  // why: cleared here, not in Voice, because Voice remounts when an edit is cancelled
   const wasStopForVoice = useRef(stopForVoice);
   // oxlint-disable-next-line gates/effect-needs-reason -- the store's notice, cleared once Dictate is back, whichever of the reply's end or the edit's end brought it back
   useEffect(() => {
@@ -280,16 +236,13 @@ export function Composer() {
     if (sendDisabled) return;
     void send(getDraft().text);
   };
-  // Enter is never met by nothing: with words typed it does what a click on Send does, and where Send is off it says why
   const enterSend = () => {
     const answer = enterAnswer({ sendDisabled, memRefused, text, showStop });
     if (answer === "send") submit();
     else if (answer === "fit") openFit();
     else if (answer === "tip") openTip(primary.current);
-    // Stop holds Send's place while a reply runs: the reason goes in the note over the box, which the next edit clears
     else if (answer === "note") setState({ notice: sendTip });
   };
-  // talk mode sends after the transcript is drawn, with Send's latest judgement of the draft
   const latestSubmit = useRef(submit);
   // oxlint-disable-next-line gates/effect-needs-reason -- the committed draft's Send, kept in step for Dictate, which sends after the draft is drawn; a write during render could hold a render React drops
   useLayoutEffect(() => { latestSubmit.current = submit; });
@@ -314,7 +267,6 @@ export function Composer() {
     stopThisReply();
     primary.current?.focus();
   }, { ignoreRepeatedClicks: true });
-  // the square stops what runs; it names the picture when a picture is what it stops
   const stopTip = drawingNow ? "Cancel image" : "Stop";
   const stopSquare = <button type="button" className="ctl sq stop-sq" data-testid="chat.composer.stop-square" aria-label="Stop" data-tip={stopTip} {...compactStopPress}><span className="sqr" /></button>;
 
@@ -331,10 +283,8 @@ export function Composer() {
           submit();
         }}
       >
-        {/* the queue is a shelf inside the box, at its width */}
         <QueueTray />
         <div className="att"><AttachmentImages images={images} removable /><AttachedFiles files={files} removable /><RefusedFiles /></div>
-        {/* "+ › Attach a file" opens this; like T3 Code's paperclip it takes any file, and each is sorted at its chip */}
         <input
           type="file"
           id="attachInput"
@@ -374,7 +324,6 @@ export function Composer() {
                 aria-expanded={!image && unset ? pop === "unset" : undefined}
                 data-tip={!image && unset ? undefined : "Image"}
                 onClick={(e) => {
-                  // nothing here can draw: say so instead of entering a mode whose Send cannot work
                   if (!image && unset) { togglePop("unset", e.detail === 0); return; }
                   setState({ image: !image });
                   closeTip();
@@ -394,7 +343,6 @@ export function Composer() {
                 <span>Context {Math.round(pct * 100)}% used</span>
               </button>
             )}
-            {/* Image on: the Thinking circle's place holds how many pictures a send makes; off, the bulb is back */}
             {drawing ? <CountButton open={pop === "count"} /> : <button
               type="button"
               className={`pill gate thinking${thinkNa !== null ? " unavail" : ""}`}
@@ -414,7 +362,6 @@ export function Composer() {
             </button>}
           </div>
           <div className="cf-r">
-            {/* Stop takes Dictate's square while a queued message is edited; Dictate stays mounted under it, so its shortcut still answers */}
             {stopForVoice ? stopSquare : null}
             <Suspense fallback={stopForVoice ? null : <span className="ctl sq voice" />}><Voice key={`${view}:${voiceThread}:${replacement}`} textarea={ta} held={stopForVoice ? VOICE_HELD : null} send={talkSend} /></Suspense>
             {talk ? <Speaker /> : null}
@@ -426,13 +373,8 @@ export function Composer() {
               aria-haspopup="dialog"
               aria-expanded={drawing ? pop === "images" : pop === "picker" && !pickerPending}
               aria-busy={!drawing && (boot || loading || pickerPending) || undefined}
-              // the placeholder has no text, so the button needs a name of its own
               aria-label={!drawing && boot && shownTag === undefined ? "Model" : undefined}
-              // Image on: the button says the short name beside the family mark, the tip the full one
               data-tip={drawing ? (named === undefined ? undefined : esc(named.preset.name)) : modelTip}
-              // Load the picker's code on intent: hover, keyboard focus, or the press
-              // before a click (touch has no hover). Its fit values are already in the
-              // last fit table, so nothing is asked of the server here.
               onPointerEnter={pickerIntent}
               onFocus={pickerFocus}
               onPointerDown={pickerIntent}
@@ -444,24 +386,20 @@ export function Composer() {
               }}
               onClick={() => togglePop(drawing ? "images" : "picker")}
             >
-              {/* Image on: the image model and size Send uses, in the same box */}
               {drawing ? <>
                 {named === undefined ? null : <ImageMark family={named.preset.family} />}
                 <span className="t">{named === undefined ? "Image model" : named.preset.short ?? named.preset.name}</span>
                 {named === undefined ? null : <small className="picker-trigger-ctx">{sizeLabel(named.width, named.height)}</small>}
               </> : boot && shownTag === undefined ? <Skel w="8.5em" /> : <>
-                {/* a load changes nothing here: it is the ring around Send, and its time is in this button's tip */}
                 {shownTag === undefined ? null : <MakerMark tag={shownTag} busy={pickerPending} />}
                 <span className="picker-trigger-name">{name}</span>
                 <small className="picker-trigger-ctx">{k(ctx)}</small>
                 {first === undefined ? null : <DownloadBar pct={firstProgress} />}
               </>}
             </button>
-            {/* a phone has no room for the pills and the meter: they live in this sheet */}
             <button type="button" className="ctl sq gate" id="optBtn" data-testid="chat.composer.options" aria-haspopup="menu" aria-expanded={pop === "opts"} aria-label="Chat options" onClick={() => togglePop("opts")}>
               <Icon id="sliders" />
             </button>
-            {/* a reply on touch: the main button is the queue arrow, and Stop holds its own slot one press away */}
             {isStreaming && !showStop && !stopForVoice ? stopSquare : null}
             <button
               ref={primary}
@@ -470,7 +408,6 @@ export function Composer() {
               data-testid="chat.composer.send"
               aria-label={showStop ? "Stop" : sendLabel}
               data-tip={showStop ? stopTip : sendTip}
-              // Keep the same focusable node through empty, running and finished states.
               aria-disabled={!showStop && sendDisabled ? true : undefined}
               aria-busy={askingNow && !showStop ? true : undefined}
               {...primaryPress}
@@ -490,19 +427,13 @@ export function Composer() {
   );
 }
 
-/**
- * A browser that sizes the field to its text (styles.css `.ta`, `field-sizing`)
- * needs no measuring here. Measuring reads the height back, which lays out the
- * whole page inside the key's own task: a streaming reply's new text too, and
- * 40 freshly mounted turns when a long thread opens.
- */
+// external: a browser sizes field-sizing:content itself; reading scrollHeight forces layout
 const sizesItself = typeof CSS !== "undefined" && CSS.supports("field-sizing", "content");
 
 function DraftTextarea({ textarea, placeholder, submit }: { textarea: RefObject<HTMLTextAreaElement | null>; placeholder: string; submit: () => void }) {
   const newlineOnEnter = useMedia(PHONE_TOUCH);
   const draft = useDraft(d => d.text);
   const version = useDraft(d => d.version);
-  // a restored draft opens with the caret at its end
   const attach = useCallback((el: HTMLTextAreaElement | null) => {
     textarea.current = el;
     el?.setSelectionRange(el.value.length, el.value.length);
@@ -517,21 +448,14 @@ function DraftTextarea({ textarea, placeholder, submit }: { textarea: RefObject<
   return <textarea ref={attach} id="ta" data-testid="chat.composer.message" data-draft-version={version} className="ta" rows={1} placeholder={placeholder} aria-label="Message" value={draft} onPaste={paste}
     onChange={e => {
       editDraft(e.target.value);
-      // the first key starts the thread's model loading while the person writes
       if (e.target.value !== "") typedInComposer();
     }} onKeyDown={e => {
       if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !newlineOnEnter) { e.preventDefault(); submit(); }
     }} />;
 }
 
-/** Why Ctrl+Shift+Space does not start dictation while Stop holds Dictate's square. */
 const VOICE_HELD = "Dictate comes back when this reply ends or you finish editing the queued message.";
 
-/**
- * What Enter in the message box does: with Send on, send; with words typed and Send off for memory, what the click does
- * (the memory panel); otherwise Send's reason at Send, or in the note over the box while Stop holds
- * Send's place. Nothing only with nothing typed.
- */
 export function enterAnswer(s: { readonly sendDisabled: boolean; readonly memRefused: boolean; readonly text: boolean; readonly showStop: boolean }): "send" | "fit" | "tip" | "note" | null {
   if (!s.sendDisabled) return "send";
   if (!s.text) return null;
@@ -539,20 +463,13 @@ export function enterAnswer(s: { readonly sendDisabled: boolean; readonly memRef
   return s.showStop ? "note" : "tip";
 }
 
-/**
- * A queued message's state in a word or two, only where being in the queue does not already say it: null while it waits
- * for this chat's reply, and while it is edited here (the pressed pencil says that). `elsewhere`: no reply runs in this
- * chat but one runs in another, and the queue sends one reply at a time, so that one is what it waits for.
- */
 export function queueWords(q: WaitingReply, editing: boolean, first: string | undefined, model: string | undefined, installing: boolean, elsewhere = false): string | null {
   if (editing) return null;
-  // open in another window's composer, it does not go until that edit ends or that window closes
   if (editedElsewhere(q)) return EDITED_ELSEWHERE;
   // why: an edit that just ended here: the message is as it was before it
   const at = q.stage === "editing" ? q.back : q;
   const wait = q.stage === "queued" ? q.waitFor : undefined;
   if (wait?.what === "download") return first === undefined && (q.model ?? model) === undefined ? "Download stopped" : AFTER_DOWNLOAD;
-  // setup has ended: a download that runs is what it waits for now; with none, the offer above the composer says a model is needed
   if (wait?.what === "setup") return installing ? AFTER_SETUP : first !== undefined ? AFTER_DOWNLOAD : null;
   if (wait?.what === "retry") return RETRYING;
   if (at.stage === "held") return at.held.why === "failed" ? RETRY_FAILED : at.held.why === "refused" ? HELD_FOR[at.held.code] ?? "On hold" : "On hold";
@@ -560,32 +477,20 @@ export function queueWords(q: WaitingReply, editing: boolean, first: string | un
   return elsewhere && at.stage === "queued" ? AFTER_OTHER_REPLY : null;
 }
 
-/** A chat reply runs in another chat and none in this one (a picture is not a reply). */
 export const replyElsewhere = (s: State): boolean => {
-  // a turn here that only another window started counts too: the row then waits behind its own chat
   const here = s.threadId === null ? undefined : s.turns[s.threadId];
   return (here === undefined || here.end !== undefined) && Object.entries(s.turns).some(([id, t]) => id !== s.threadId && t.end === undefined && !drawsPicture(t));
 };
 
 export const EDITED_ELSEWHERE = "Being edited in another window";
-/** In Send's words for another chat's reply ("Another chat's reply stops first"). */
 const AFTER_OTHER_REPLY = "Sends when another chat's reply ends";
-/** The words for a queue behind a failed reply the server runs once more. */
 const RETRYING = "Retrying the reply before it";
 const RETRY_FAILED = "On hold: the reply before it didn't finish";
 const HELD_FOR: Partial<Record<string, string>> = { "wont-fit": "On hold: not enough memory", "would-stop": "On hold: another chat's reply is using the memory" };
-/** A message waiting for the first download: the row shows a clock, and this is its tip and its spoken words. */
 export const AFTER_DOWNLOAD = "Sends when the download finishes";
-/** The same clock for a message waiting for setup. */
 export const AFTER_SETUP = "Sends when setup finishes";
-/** The clock is the row's only mark for these, so its tip names it; a word on the row has no tip. */
 const CLOCKED = new Set<string | null>([AFTER_DOWNLOAD, AFTER_SETUP]);
 
-/**
- * What a clocked row waits for, as numbers beside its clock (fresh-install round, 2026-11-14): the
- * percent and, once the download gives a speed, the time left, as "42%|2 min"; one word once every
- * byte is in; "" before a size is known. A string, so the row re-renders only when the words change.
- */
 export function waitNumbers(p: { done: number; total?: number | undefined; rate?: number | undefined; checking?: boolean } | undefined, last: string): string {
   if (p === undefined || !p.total) return "";
   if (p.checking === true || p.done >= p.total) return last;
@@ -593,19 +498,16 @@ export function waitNumbers(p: { done: number; total?: number | undefined; rate?
   return `${Math.floor((p.done / p.total) * 100)}%|${left}`;
 }
 
-/** The first model download's numbers, for a message waiting on it. */
 const downloadNumbers = (s: State): string => {
   const p = s.pulls[firstPull(s) ?? ""];
   return waitNumbers(p === undefined ? undefined : { done: p.completedBytes, total: p.totalBytes, rate: p.bytesPerSecond, checking: p.state === "verifying" || p.state === "done" }, "Checking");
 };
 
-/** The app's own Ollama download's numbers, for a message waiting on setup. */
 const setupNumbers = (s: State): string => {
   const i = s.runtime?.state === "installing" ? s.runtime.install : undefined;
   return waitNumbers(i === undefined ? undefined : { done: i.receivedBytes, total: i.totalBytes, rate: i.bytesPerSecond }, "Unpacking");
 };
 
-/** The numbers in a slot of fixed width, the percent right-aligned in its own, so nothing moves as they change. Read aloud as the clock's words, not number by number. */
 function WaitNumbers({ value }: { value: string }) {
   const [pct, left] = value.split("|");
   return (
@@ -615,7 +517,7 @@ function WaitNumbers({ value }: { value: string }) {
   );
 }
 
-/** What is running in the open chat, as a word, so a reader re-renders when that changes and not at every token. */
+// why: a coarse kind keeps token streaming from re-rendering the composer
 const runningKind = (s: State): "image" | "reply" | null => {
   const turn = runningTurn(s, s.threadId);
   return turn === undefined ? null : drawsPicture(turn) ? "image" : "reply";
@@ -623,7 +525,6 @@ const runningKind = (s: State): "image" | "reply" | null => {
 
 const SEND_NOW = { image: "Send now. Cancels the image", reply: "Send now. Stops the reply" } as const;
 
-/** A click handler that leaves the typing cursor in the composer, where the next words go. */
 const andFocus = (act: () => void) => () => {
   closeTip();
   act();
@@ -657,14 +558,8 @@ function QueueOffer({ q, n }: { q: WaitingReply; n: number }) {
   );
 }
 
-/** More queued than this fold to the next two and a count. */
 const SHELF_ROWS = 3;
 
-/**
- * Messages waiting in this chat, on a shelf at the top of the message box. One line
- * each: what it will make (a picture when it was queued with Image on), its words, then icons to
- * send it now, edit it in the composer, or remove it. More than three fold to a count.
- */
 function QueueTray() {
   const [open, setOpen] = useState(false);
   const queued = useStore(waitingReplies);
@@ -692,10 +587,9 @@ function QueueTray() {
         const words = queueWords(q, editing, first, model, installing, elsewhere);
         return (
           <li key={q.id} className="qt-r" aria-label={`Queued ${q.draw === undefined ? "message" : "image"} ${i + 1} of ${n}`}>
-            {/* a chat is the default, so only a picture marks its kind */}
             {q.draw === undefined ? null : <span className="qt-k" data-tip="Image"><Icon id="image" cls="s14" /></span>}
             <span className="qt-t">{q.text}{q.images?.length ? ` · ${q.images.length} image${q.images.length === 1 ? "" : "s"}` : ""}{q.files?.length ? ` · ${q.files.length} file${q.files.length === 1 ? "" : "s"}` : ""}</span>
-            {/* always there, empty while the message just waits, so a reader announces the word when it appears */}
+            // external: a browser announces changes in a live region, not one added already filled
             <span className="qt-s" role="status" data-tip={CLOCKED.has(words) ? words ?? undefined : undefined}>
               {CLOCKED.has(words) ? <><Icon id="clock" cls="s14" /><span className="vh">{words}</span><WaitNumbers value={words === AFTER_SETUP ? setupAt : downloadAt} /></> : words ?? ""}
             </span>
@@ -733,18 +627,15 @@ function QueueTray() {
   );
 }
 
-/** "Qwen 3.5 9B in “Trip plans”", the one thing the warning has to name for each chat it would stop. */
 function stopNames(blocking: NonNullable<State["stopAsk"]>["blocking"], catalog: ReturnType<typeof catalogOf>): string[] {
   return blocking.map((t) => `${describeModel(t.model, catalog).name} in ${t.title === "" ? "another chat" : `“${t.title}”`}`);
 }
 
-/** Shown once: a send needs a load that stops another chat's reply. */
 function StopWarning() {
   const ask = useStore((s) => s.stopAsk);
   const matches = useDraft(d => ask === null || ask.keepDraft || d.text.trim() === ask.content && d.images === ask.images);
   const catalog = useStore(catalogOf);
   const [never, setNever] = useState(false);
-  // a new ask starts unticked
   useChange(ask, () => setNever(false));
   if (ask === null || !matches) return null;
   const names = stopNames(ask.blocking, catalog);
@@ -757,7 +648,7 @@ function StopWarning() {
       aria-label="Stop the other reply?"
       onKeyDown={(e) => {
         if (e.key === "Escape") andFocus(cancelStopAsk)();
-        // a held Enter from the message box must not answer the warning
+        // external: a held key repeats keydown in the browser with event.repeat true
         else if (e.key === "Enter" && e.repeat) e.preventDefault();
       }}
     >
@@ -780,20 +671,16 @@ function StopWarning() {
   );
 }
 
-// ---------------------------------------------------------------- picture count (Image on)
 
 const images = (n: number) => (n === 1 ? "1 image" : `${n} images`);
 
-/** About how long `n` pictures take at `ms` each: seconds, minutes from 90 s. */
 function about(ms: number, n: number): string {
   const secs = (ms * n) / 1000;
   return secs < 90 ? `~${Math.max(1, Math.round(secs))} s` : `~${Math.round(secs / 60)} min`;
 }
 
-/** How long the menu waits for a setup's first time (readImageRun) before it opens without one. */
 const READ_WAIT_MS = 400;
 
-/** This computer's time for the setup and size Send uses, as the store keeps it (State.imageRuns). */
 function runOf(s: State): number | undefined {
   const p = chosenImage(s);
   return p === undefined ? undefined : s.imageRuns[runKey({ preset: p.preset.id, width: p.width, height: p.height })];
@@ -804,7 +691,6 @@ function pickCount(n: number): void {
   void pickImageCount(n).then((error) => { if (error !== null) setState({ notice: error }); });
 }
 
-/** Up and Down move between the counts. */
 function countArrows(e: ReactKeyboardEvent<HTMLDivElement>): void {
   const items = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
   const at = items.indexOf(document.activeElement as HTMLElement);
@@ -818,8 +704,6 @@ function CountButton({ open }: { open: boolean }) {
   const count = useStore(imageCount);
   const pictured = useStore(chosenImage);
   const toggle = async (kb: boolean) => {
-    // a setup with no time in the store yet is read before the menu opens, so its rows never change
-    // under the pointer; never longer than a moment: without an answer the rows show no times
     if (!open && pictured !== undefined) await withTimeout(readImageRun({ preset: pictured.preset.id, width: pictured.width, height: pictured.height }), READ_WAIT_MS, () => undefined);
     togglePop("count", kb);
   };
@@ -841,7 +725,6 @@ function CountButton({ open }: { open: boolean }) {
   );
 }
 
-/** One to four pictures per send, each with this computer's time for the setup Send uses; keys 1 to 4 pick while it is open. */
 export function CountMenu() {
   const open = useStore((s) => s.pop?.id === "count");
   const kb = useStore((s) => s.pop?.id === "count" && s.pop.kb);
@@ -849,7 +732,6 @@ export function CountMenu() {
   const ms = useStore(runOf);
   const drawing = useStore(imageMode);
   const ref = useRef<HTMLDivElement>(null);
-  // Image off takes the button away, and its menu with it
   // oxlint-disable-next-line gates/effect-needs-reason -- the store's open menu, closed once Image goes off, from whichever control turned it off
   useEffect(() => { if (open && !drawing) closePop(); }, [open, drawing]);
   usePopover(ref, open, (el) => {
@@ -876,7 +758,6 @@ export function CountMenu() {
   );
 }
 
-/** A menu's Image row: on or off, or, with nothing here that can draw, the pop-up that says so in the menu's place. */
 function menuImage(image: boolean, close: boolean): void {
   const unset = !image && imagesUnset(getState());
   if (close || unset) closePop();
@@ -972,7 +853,6 @@ export function PlusMenu() {
   );
 }
 
-// ---------------------------------------------------------------- chat options (a phone's overflow)
 
 export function OptsMenu() {
   const open = useStore((s) => s.pop?.id === "opts");
@@ -991,7 +871,7 @@ export function OptsMenu() {
     const anchor = document.getElementById("optBtn");
     if (anchor) place(el, anchor, "end");
   }, []);
-  const ctx = ctxFor(numCtx, models, model); // what the model runs at, which a small one holds below what was asked for
+  const ctx = ctxFor(numCtx, models, model);
   const pct = Math.min(1, used / ctx);
   const tag = first ?? model;
   const thinkNa = ready ? thinkNote(models?.find((m) => m.name === model), tag === undefined ? "No model" : describeModel(tag, catalog).name, first !== undefined) : null;

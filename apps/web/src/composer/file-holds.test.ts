@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import type { AttachedFile } from "@gates-local/contracts";
+import type { AttachedFile, Reply } from "@gates-local/contracts";
 import { queuedOf, repliesOf } from "../../test/queue.ts";
 
 const file = (n: string): AttachedFile => ({ path: `files/att-${n.repeat(8)}-0000-0000-0000-${"0".repeat(12)}`, name: `${n}.txt`, size: 1, type: "text/plain" });
@@ -59,4 +59,27 @@ it("keep names every file the drafts, their earlier words and the queue hold, an
   store.setState({ replies: repliesOf([{ id: "q1", threadId: "t", text: "z", at: 0, images: [], files: [b, c], waitFor: "reply" }]) });
   await holds.keepHeldFiles();
   expect(calls).toEqual([["files.keep", { paths: [a.path, b.path, c.path] }]]);
+});
+
+const numbered = (i: number): AttachedFile => ({ path: `files/att-${String(i).padStart(4, "0")}`, name: `${i}.txt`, size: 1, type: "text/plain" });
+
+it("more than 512 held files are kept in several calls, none naming more than 512", async () => {
+  const { holds, store, calls } = await fresh();
+  const rows = Array.from({ length: 130 }, (_row, r) => ({ id: `q${r}`, threadId: "t", text: "z", at: 0, images: [], files: Array.from({ length: 8 }, (_file, f) => numbered(r * 8 + f)), waitFor: "reply" as const }));
+  store.setState({ replies: repliesOf(rows) });
+  await holds.keepHeldFiles();
+  const sent = calls.map(([method, params]) => { expect(method).toBe("files.keep"); return (params as { paths: string[] }).paths; });
+  expect(sent.length).toBeGreaterThan(1);
+  for (const paths of sent) expect(paths.length).toBeLessThanOrEqual(512);
+  expect(sent.flat().toSorted()).toEqual(rows.flatMap(r => r.files.map(f => f.path)).toSorted());
+});
+
+it("a message already on its way holds its files: keep names them and removing a chip does not release them", async () => {
+  const { holds, store, calls } = await fresh();
+  const [a, b] = [file("a"), file("b")];
+  const starting: Reply = { id: "s1", threadId: "t", rev: 1, messageId: "m-s1", text: "z", at: 0, files: [a], stage: "starting", attempt: 1, startedAt: 1 };
+  store.setState({ replies: new Map([[starting.id, starting]]) });
+  await holds.keepHeldFiles();
+  holds.releaseFiles([a.path, b.path]);
+  expect(calls).toEqual([["files.keep", { paths: [a.path] }], ["files.release", { paths: [b.path] }]]);
 });

@@ -224,6 +224,69 @@ it("an old saved message is owed until the server answers its send", async () =>
   expect(owed("q1")).toBe(false);
 });
 
+it("an old saved message the server never answered stays saved, and goes again at the next connection", async () => {
+  answers.set("reply.send", () => Promise.resolve({ answer: "not-reached", why: "closed" }));
+  oldQueueRead([row("q1")], false);
+  listed();
+  await settle();
+  expect(owed("q1")).toBe(true);
+  expect(moved()).toBe(false);
+  expect(adds()).toEqual(["q1"]);
+  listed();
+  await settle();
+  expect(adds()).toEqual(["q1", "q1"]);
+  expect(calls.filter((c) => c.method === "reply.send").every((c) => (c.params as Params<"reply.send">).held === true)).toBe(true);
+  expect(owed("q1")).toBe(true);
+});
+
+const startedRetry = () => record("r1", { stage: "starting", attempt: 1, startedAt: 1, retryOf: "u0", model: "qwen3:14b" }, 3);
+const refusedRetry = { id: "r1", threadId: "t1", rev: 4, stage: "failed", at: 2, code: "runtime-not-ready", message: "Ollama is not ready" } as Reply;
+
+it.each([
+  ["showed it starting with its chat open", "t1", true, "Chat starts when Ollama is ready."],
+  ["showed it starting with another chat open", "t2", true, null],
+  ["never showed it starting", "t1", false, null],
+] as const)("a Retry refused after it began to start is explained by a window that %s only when both hold", (_what, open, sawStart, said) => {
+  setState({ view: "thread", threadId: open, replies: sawStart ? new Map([["r1", startedRetry()]]) : new Map() });
+  chat.recordChanged({ kind: "is", reply: refusedRetry, saved: [] });
+  expect(getState().notice).toBe(said);
+  expect(getState().replies.has("r1")).toBe(false);
+});
+
+it.each([
+  ["settled", null, true],
+  ["removed", "q1", false],
+] as const)("a message that leaves as %s while open for editing here keeps the typed words, and only a settled one ends the edit", async (why, editing, renewed) => {
+  setState(waiting("q1"));
+  editQueued("q1");
+  await settle();
+  replaceDraft("t1", { text: "words q1, better" });
+  const before = getDraft("t1").version;
+  chat.recordChanged({ kind: "left", id: "q1", threadId: "t1", rev: 5, why });
+  expect(getState().editingQueued).toBe(editing);
+  expect(getDraft("t1").text).toBe("words q1, better");
+  expect(getDraft("t1").version > before).toBe(renewed);
+  expect(queuedOf(getState())).toEqual([]);
+});
+
+it.each([
+  ["removed", { answer: "gone", why: "removed" }],
+  ["open in another window", { answer: "elsewhere", reply: record("q1", { stage: "editing", by: "2", back: { stage: "queued" } }) }],
+  ["never heard", { answer: "not-reached", why: "closed" }],
+])("closing an edit ends it here whatever the server answers (%s): nothing is said and it does not open again", async (_what, closed) => {
+  setState(waiting("q1"));
+  replaceDraft("t1", { text: "half a thought" });
+  answers.set("reply.edit", (p) => Promise.resolve((p as Params<"reply.edit">).open ? { answer: "done", reply: record("q1") } : closed));
+  editQueued("q1");
+  await settle();
+  chat.cancelQueuedEdit();
+  await settle();
+  expect(getState().editingQueued).toBeNull();
+  expect(getState().notice).toBeNull();
+  expect(getDraft("t1").text).toBe("half a thought");
+  expect(calls.filter((c) => c.method === "reply.edit").map((c) => c.params)).toEqual([{ id: "q1", open: true }, { id: "q1", open: false }]);
+});
+
 it("an old saved message whose chat was deleted meanwhile is owed no longer, and says why it was not sent", async () => {
   answers.set("reply.send", () => Promise.resolve({ answer: "gone", why: "chat-deleted" }));
   oldQueueRead([row("q1")], false);

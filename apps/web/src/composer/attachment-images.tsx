@@ -7,11 +7,8 @@ import { removeRefused, sizeOf, useRefused } from "./refused-files.ts";
 import { esc } from "../lib/ui/ui.tsx";
 import { releaseFiles } from "./file-holds.ts";
 
-/** Chosen or dropped files a message cannot carry: name, size, the reason in the tooltip, and a way out. */
 export function RefusedFiles() {
   const files = useRefused();
-  // The reason is a hover tip on the chip and, for the keyboard and screen
-  // readers, the description of both its buttons through a hidden line.
   return files.map(f => (
     <span className="attachment file" key={f.id} data-tip={esc(f.reason)}>
       <Icon id="clip" />
@@ -23,10 +20,6 @@ export function RefusedFiles() {
   ));
 }
 
-/**
- * Files the message names: the server holds the copy, the chip shows the name and
- * size. In the composer with tools off, the chip says the model cannot open it yet.
- */
 export function AttachedFiles({ files, removable = false }: { files: readonly AttachedFile[]; removable?: boolean }) {
   const toolsOff = useStore(s => s.settings !== NA && s.settings?.tools === false);
   const off = removable && toolsOff;
@@ -43,7 +36,6 @@ export function AttachedFiles({ files, removable = false }: { files: readonly At
   });
 }
 
-/** Data URLs while composing; authenticated server paths after the turn is saved. */
 export function AttachmentImages({ images, removable = false }: { images: readonly string[]; removable?: boolean }) {
   const origin = useStore(s => s.serverOrigin);
   const token = useStore(s => s.fileToken);

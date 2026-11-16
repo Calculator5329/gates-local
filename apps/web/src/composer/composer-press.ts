@@ -1,6 +1,5 @@
 import { type KeyboardEvent, type MouseEvent, useRef } from "react";
 
-/** Bind a button press to its starting action identity, including its turn. */
 export function useActionPress(action: string, activate: () => void, options: { ignoreRepeatedClicks?: boolean } = {}) {
   const pointer = useRef<string | null>(null);
   const keyboard = useRef<{ key: "Enter" | " "; action: string } | null>(null);
@@ -18,7 +17,6 @@ export function useActionPress(action: string, activate: () => void, options: { 
       }
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
-      // A fresh press also recovers a keyup delivered to another window.
       if (event.repeat) return;
       keyboard.current = { key: event.key, action };
       if (event.key === "Enter") run(action);
@@ -33,12 +31,9 @@ export function useActionPress(action: string, activate: () => void, options: { 
     },
     onClick: (event: MouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
-      // Keyboard activation is handled explicitly; a standalone accessible click still works.
       if (event.detail === 0 && keyboard.current !== null) return;
       const started = event.detail === 0 ? action : pointer.current;
       pointer.current = null;
-      // Stop rejects Send's second click. Queue/Update still accept a fresh
-      // press when the browser carries a click count across a draft edit.
       if ((options.ignoreRepeatedClicks && event.detail > 1) || started === null) return;
       run(started);
     },

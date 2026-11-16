@@ -387,3 +387,58 @@ it("a lifecycle commit waits for the metadata read to submit its writes", async 
   expect(reloaded.getDraft().text).toBe("last");
   stopReloaded();
 });
+
+function failFirstSave(fixture: ReturnType<typeof draftDatabase>) {
+  const open = fixture.db.transaction.bind(fixture.db);
+  const abort = vi.fn();
+  let failing = true;
+  fixture.db.transaction = (store: string, mode?: string) => {
+    const transaction = open(store, mode);
+    if (mode !== "readwrite" || !failing) return transaction;
+    failing = false;
+    return Object.assign(transaction, { abort, objectStore: () => { throw new DOMException("The database is closing.", "InvalidStateError"); } });
+  };
+  return abort;
+}
+
+it("a save that fails while it is being set up is aborted, and the next save starts only once that abort is done", async () => {
+  const fixture = draftDatabase(), abort = failFirstSave(fixture);
+  const a = await freshWatcher();
+  const stop = await a.watchDraft("setup-throws");
+  a.editDraft("first");
+  expect(abort).toHaveBeenCalledOnce();
+  a.editDraft("latest"); await settled();
+  expect(fixture.pending).toHaveLength(1);
+  fixture.pending[0]!.abort(); await settled();
+  expect(a.getState().notice).toBe("This message could not be saved on this device. Keep this window open until you send it.");
+  expect(fixture.pending).toHaveLength(1);
+  fixture.pending[0]!.finish(); await settled();
+  expect(fixture.maximum).toBe(1);
+  stop();
+  const reloaded = await freshWatcher();
+  const resume = await reloaded.watchDraft("setup-throws");
+  expect(reloaded.getDraft().text).toBe("latest");
+  resume();
+});
+
+it("once the server has answered for each message of an old saved queue, the next save keeps neither the queue nor its owed mark", async () => {
+  const fixture = draftDatabase();
+  fixture.records.set(JSON.stringify("answered"), { draft: "", images: [], queued: [{ id: "q", threadId: "A", text: "waiting", at: 1 }], owed: true, editing: null });
+  const a = await freshWatcher(); a.setState({ threadId: "A" });
+  const stop = await a.watchDraft("answered");
+  a.editDraft("words");
+  while (fixture.pending.length) { fixture.pending[0]!.finish(); await settled(); }
+  expect(fixture.records.get(JSON.stringify("answered"))).toMatchObject({ owed: true, queued: [expect.objectContaining({ id: "q" })] });
+  const { createChat } = await import("./chat.ts");
+  const chat = createChat({
+    applyServerEvent: (patch: Parameters<typeof a.setState>[0]) => a.setState(patch),
+    reply: () => Promise.resolve({ answer: "done" }),
+    codeOf: () => "internal", loading: () => false, creatingDraft: () => false, blockingFor: () => Promise.resolve([]),
+  } as unknown as Parameters<typeof createChat>[0]);
+  chat.connected(); chat.replyListed([]);
+  await settled();
+  while (fixture.pending.length) { fixture.pending[0]!.finish(); await settled(); }
+  stop();
+  expect(fixture.records.get(JSON.stringify("answered"))).toMatchObject({ draft: "words", queued: [] });
+  expect(fixture.records.get(JSON.stringify("answered"))).not.toHaveProperty("owed");
+});

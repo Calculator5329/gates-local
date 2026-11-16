@@ -3,9 +3,9 @@
 // keeps, a turn left running behind another chat, and the queue of messages
 // typed while a reply is being written.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { BlockingTurn, Message, ReplyTimes } from "@gates-local/contracts";
+import type { BlockingTurn, Message, Reply, ReplyAnswer, ReplyTimes } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
-import { type Browser, type HeldStart, installBrowser, tick, until } from "../../test/harness.ts";
+import { type Browser, type Held, type HeldStart, installBrowser, tick, until } from "../../test/harness.ts";
 import { replay } from "../../test/ordering-replay.ts";
 import { gpuReadFailure } from "@gates-local/server/fit/gpu.ts";
 import { draftView } from "../../test/draft-view.ts";
@@ -1672,4 +1672,91 @@ it("a Retry of a stopped reply that waits on the warning still replaces that rep
   session.confirmStopAsk(false);
   const h = await held;
   expect(h.params).toMatchObject({ retryOf: question, content: "hello A", stopOthers: true });
+});
+
+it("a second Update pressed before the first is answered is the same save: one change goes to the server", async () => {
+  await reworded();
+  const held = b.server.hold("reply.change");
+  const first = session.send(st().draft);
+  const h = await held;
+  await session.send(st().draft);
+  await tick();
+  expect(b.server.calls("reply.change")).toHaveLength(1);
+  h.fail("timeout");
+  await first;
+  expect(b.server.calls("reply.change")).toHaveLength(1);
+});
+
+const takenBy = (id: string): Reply => ({ id, threadId: "A", rev: 50, messageId: "m", text: "one", at: 1, stage: "starting", attempt: 1, startedAt: 1 });
+const openElsewhere = (id: string): Reply => ({ id, threadId: "A", rev: 50, messageId: "m", text: "one", at: 1, stage: "editing", by: "2", back: { stage: "queued" } });
+
+it.each([
+  ["the server is already sending it", (id: string): ReplyAnswer => ({ answer: "sending", reply: takenBy(id) }), "This message is already on its way. Your new words are still in the composer."],
+  ["another window changed it", (id: string): ReplyAnswer => ({ answer: "elsewhere", reply: openElsewhere(id) }), "That message was changed in another window. Your new words are still in the composer."],
+])("an Update answered that %s keeps the typed words in the composer and says what became of the message", async (_what, answer, said) => {
+  const id = await reworded();
+  const held = b.server.hold("reply.change");
+  const pressed = session.send(st().draft);
+  (await held).respond(answer(id));
+  await pressed;
+  expect(st().draft).toBe("one, better");
+  expect(st().editingQueued).toBeNull();
+  expect(st().notice).toBe(said);
+});
+
+it("an Update whose chat was left before the answer came changes nothing when the answer comes", async () => {
+  await reworded();
+  const held = b.server.hold("reply.change");
+  const pressed = session.send(st().draft);
+  const h = await held;
+  session.openThread("B");
+  expect(st().editingQueued).toBeNull();
+  h.fail("timeout");
+  await pressed;
+  expect(st().notice).toBeNull();
+  expect(st().editingQueued).toBeNull();
+  expect(draftSource.getDraft("A").sendId ?? null).not.toBe(h.params.messageId);
+});
+
+it("a message sent while its chat is answering shows as waiting from the press, before the server answers", async () => {
+  const turn = await answering("A");
+  const held = b.server.hold("reply.send");
+  const pressed = session.send("next");
+  const h = await held;
+  expect(texts()).toEqual(["next"]);
+  expect(st().replies.get(h.params.id)).toMatchObject({ stage: "queued", rev: 0 });
+  expect(live()).toMatchObject({ threadId: "A", turnId: turn });
+  h.fail("timeout");
+  await pressed;
+});
+
+it.each([
+  ["says the message was removed", (h: Held<"reply.send">) => h.respond({ answer: "gone", why: "removed" })],
+  ["never answers", (h: Held<"reply.send">) => h.fail("timeout")],
+])("a send the server made no record of takes away what showed for it when the server %s", async (_what, end) => {
+  session.newThread();
+  const held = b.server.hold("reply.send");
+  const pressed = session.send("typed");
+  const h = await held;
+  expect(live()).not.toBeNull();
+  expect(st().replies.has(h.params.id)).toBe(true);
+  end(h);
+  await pressed;
+  expect(live()).toBeNull();
+  expect(st().replies.has(h.params.id)).toBe(false);
+});
+
+it("a chat off screen takes its words when it is opened again, not at every frame", async () => {
+  const a = await answering("A");
+  chat(a, "A", { type: "delta", text: "one " });
+  b.frame();
+  const c = await answering("B");
+  chat(a, "A", { type: "delta", text: "two" });
+  chat(c, "B", { type: "delta", text: "beta" });
+  b.frame();
+  b.frame();
+  expect(st().turns["A"]).toMatchObject({ turnId: a, text: "one " });
+  expect(st().turns["B"]).toMatchObject({ turnId: c, text: "beta" });
+  session.openThread("A");
+  expect(live()).toMatchObject({ threadId: "A", turnId: a, text: "one two" });
 });

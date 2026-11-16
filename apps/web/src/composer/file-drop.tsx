@@ -6,18 +6,11 @@ import { Icon } from "../lib/ui/icons.tsx";
 import { attachFiles, splitDropped } from "./paste.ts";
 import { getState, setState, useStore } from "../lib/store/store.ts";
 
-// Chromium lists "Files" when an image already in the page is dragged (a
-// reply's image, a draft chip). Such a drag starts with a dragstart in this
-// window; a file from outside never does. Those are left to the browser.
+// external: Chromium lists Files when an in-page image is dragged, after dragstart
 let inPage = false;
 const carriesFiles = (e: DragEvent) => !inPage && (e.dataTransfer?.types.includes("Files") ?? false);
 
-/**
- * A drag from outside the window that carries no files (a link, some text)
- * lands only where the person could type. Anywhere else the window would
- * follow a dropped link, and a page in a frame can offer one to drag: the
- * drag is refused there, so nothing navigates.
- */
+// external: a browser window follows a dropped link
 export function refusesDrop(target: EventTarget | null): boolean {
   const el = target as { closest?: (selector: string) => unknown } | null;
   if (el === null || typeof el.closest !== "function") return true;
@@ -25,9 +18,7 @@ export function refusesDrop(target: EventTarget | null): boolean {
   if (field === null || field.disabled === true || field.readOnly === true) return true;
   return field.tagName === "INPUT" && !TYPED.has((field.type ?? "").toLowerCase());
 }
-/** The inputs a person types text into. A checkbox, a slider or a button takes none, so the window would follow a link dropped there. */
 const TYPED = new Set(["", "text", "search", "url", "email", "tel", "password", "number"]);
-/** Refuses a drag this window does not take; true when it did. */
 function refuse(e: DragEvent): boolean {
   if (inPage || carriesFiles(e) || !refusesDrop(e.target)) return false;
   e.preventDefault();
@@ -35,15 +26,12 @@ function refuse(e: DragEvent): boolean {
   return true;
 }
 
-/** The marker's place in the store (State.dropAt), or null to take it down; the same place again changes nothing. */
 function mark(at: { x: number; y: number } | null): void {
   const was = getState().dropAt;
   if (was === at || (was !== null && at !== null && was.x === at.x && was.y === at.y)) return;
   setState({ dropAt: at });
 }
-// A drag that ends outside the window without a leave event (Esc, a lost
-// pointer) must not leave the marker up. Browsers repeat dragover at least
-// every 550 ms while files are over the window, so 3 s of silence means gone.
+// external: a browser repeats dragover every few hundred ms while a drag is over it
 let stale: ReturnType<typeof setTimeout> | undefined;
 const hide = () => { clearTimeout(stale); mark(null); };
 
@@ -53,13 +41,6 @@ function where(): { x: number; y: number } {
   return { x: composer.left + composer.width / 2, y: Math.max(48, composer.top / 2) };
 }
 
-/**
- * A drop attaches only where the person could type: a composer on screen with
- * no inert ancestor (the first-run cover, the thread drawer, a phone sheet)
- * and no popover open. T3 Code drops onto the chat canvas and never closes a
- * popover for it; here an open popover owns the window, so the drop waits.
- * With no composer a drop is still claimed, and nothing is attached.
- */
 function usable(): boolean {
   if (getState().pop !== null) return false;
   const composer = document.querySelector(".composer");
@@ -82,7 +63,7 @@ function over(e: DragEvent): void {
 function leave(e: DragEvent): void {
   if (!carriesFiles(e)) return;
   e.preventDefault();
-  // Moving between elements inside the window names the next one; leaving the window names none.
+  // external: a browser's dragleave names the next element, or null on leaving the window
   if (e.relatedTarget === null) hide();
 }
 
@@ -107,7 +88,6 @@ if (typeof window !== "undefined" && typeof window.addEventListener === "functio
   window.addEventListener("dragend", () => { inPage = false; hide(); }, true);
 }
 
-/** The composer's drop marker: shown while files are over the window and a drop would attach to its draft. */
 export function DropMarker() {
   const at = useStore((s) => s.dropAt);
   if (!at) return null;
