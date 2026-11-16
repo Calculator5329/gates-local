@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-16: the speed check can time 0.2.4 and the releases before it again
+
+- The thread journey's mounted-window reading took the turns held back
+  from the earlier button's tip, which 0.2.4's button does not have, so
+  every timing pair with 0.2.4 in it waited for all 2,000 turns until
+  the five-minute limit. It now reads the button's "of 1,800" part when
+  there is no tip.
+- The one test that holds every repetition now gets five minutes per
+  sample: a release without windowing mounts all 2,000 turns on every
+  visit, and with two samples 0.2.3 ran past five minutes.
+- 1 new test, watched fail with the old tip-only reading.
+
 ## 2026-11-16: the web client asks for frames in one place
 
 - The kit's new `frameLoop` is the client's one frame request: it asks

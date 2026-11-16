@@ -68,8 +68,10 @@ export function browserProbe(setup: boolean) {
             if (end.mode === "window-count") {
               // A build that windows long threads names the turns it holds back on its "show earlier" button; one without the button mounts them all.
               // EARLIER_BUTTON written out: this function runs in the page, without the module around it.
-              const tip = document.querySelector('[data-testid="chat.thread.earlier"]')?.getAttribute("data-tip") ?? "0";
-              return document.getElementsByClassName(end.selector).length === Number(end.text) - Number(tip.replace(/\D/g, ""));
+              const button = document.querySelector('[data-testid="chat.thread.earlier"]');
+              // why: 0.2.4's button has no tip; its "of 1,800" part names the turns held back
+              const held = button?.getAttribute("data-tip") ?? button?.querySelector(".earlier-of")?.textContent ?? "0";
+              return document.getElementsByClassName(end.selector).length === Number(end.text) - Number(held.replace(/\D/g, ""));
             }
             const el = document.querySelector<HTMLElement>(end.selector);
             const visible = el !== null && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";

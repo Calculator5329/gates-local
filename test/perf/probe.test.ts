@@ -9,7 +9,7 @@ function fixture() {
   let mutation = noop;
   let done = false;
   const turns = { length: 0 };
-  let earlier: { getAttribute(name: string): string | null } | null = null;
+  let earlier: { getAttribute(name: string): string | null; querySelector?: (selector: string) => { textContent: string } | null } | null = null;
   const element ={ value: "", textContent: "", disabled: false, getClientRects: () => [{}], getBoundingClientRect: () => ({ top: 10, bottom: 100 }) };
   const document = Object.assign(new EventTarget(), {
     activeElement: element,
@@ -97,6 +97,18 @@ test("the mounted window ends at the turns a windowing build keeps, and at every
     expect((await window.perfJourney.later).elapsed).toBeGreaterThan(64);
     expect(mounted).toBe(true);
   }
+});
+
+test("on 0.2.4's button, with no tip and the held turns in its \"of\" part, the window ends at the turns it keeps", async () => {
+  const f = fixture(); f.element.textContent = "Last turn";
+  f.earlier({ getAttribute: () => null, querySelector: (selector: string) => selector === ".earlier-of" ? { textContent: " of 1,800" } : null });
+  window.perfJourney.arm("click", ".md", "Last turn", "text", { selector: "turn", text: "2000", mode: "window-count" });
+  f.turns.length = 40; f.input("click", 0); f.tick(4); await window.perfJourney.result;
+  let mounted = false; void window.perfJourney.later.then(() => { mounted = true; });
+  f.turns.length = 199; f.tick(3); await Promise.resolve(); expect(mounted).toBe(false);
+  f.turns.length = 200; f.tick(3);
+  expect((await window.perfJourney.later).elapsed).toBeGreaterThan(64);
+  expect(mounted).toBe(true);
 });
 
 test("a window with no second end gives the first result as the later one", async () => {
