@@ -94,16 +94,14 @@ export class FakeElement extends FakeNode {
     const top = FakeElement.topOf?.(this) ?? 0;
     return { top, left: 0, right: 0, bottom: top, width: 0, height: 0, x: 0, y: top };
   }
-  /** Class selectors only (".turn"), in document order. */
+  /** Selectors as `matches` takes them (".turn", "#ta", ".sb button:not(:disabled)", '[role="dialog"]'), in document order. */
   querySelector(selector: string): FakeElement | null { return this.querySelectorAll(selector)[0] ?? null; }
   querySelectorAll(selector: string): FakeElement[] {
-    if (!/^\.[\w-]+$/.test(selector)) throw new Error(`fake-dom supports class selectors only, not ${selector}`);
-    const cls = selector.slice(1);
     const out: FakeElement[] = [];
     const walk = (n: FakeNode) => {
       for (const c of n.childNodes) {
         if (c instanceof FakeElement) {
-          if (c.classList.includes(cls)) out.push(c);
+          if (c.matches(selector)) out.push(c);
           walk(c);
         }
       }
@@ -111,8 +109,52 @@ export class FakeElement extends FakeNode {
     walk(this);
     return out;
   }
-  focus(): void {}
-  blur(): void {}
+  /** Compound selectors joined by spaces (descendants), in a comma list; no other combinators. */
+  matches(selector: string): boolean {
+    return selector.split(",").some((part) => {
+      const chain = part.trim().split(/\s+/);
+      if (!this.matchesOne(chain.at(-1) ?? "")) return false;
+      let at: FakeNode | null = this.parentNode;
+      for (const step of chain.slice(0, -1).toReversed()) {
+        while (at instanceof FakeElement && !at.matchesOne(step)) at = at.parentNode;
+        if (!(at instanceof FakeElement)) return false;
+        at = at.parentNode;
+      }
+      return true;
+    });
+  }
+  private matchesOne(simple: string): boolean {
+    const parts = /\.([\w-]+)|#([\w-]+)|\[([\w-]+)(?:="([^"]*)")?\]|:not\(:disabled\)/g;
+    const tag = /^[a-z][\w-]*/i.exec(simple)?.[0];
+    const rest = simple.slice(tag?.length ?? 0);
+    if (rest.replace(parts, "") !== "") throw new Error(`fake-dom cannot match ${simple}`);
+    if (tag !== undefined && tag.toUpperCase() !== this.tagName) return false;
+    for (const m of rest.matchAll(parts)) {
+      if (m[1] !== undefined && !this.classList.includes(m[1])) return false;
+      if (m[2] !== undefined && this.getAttribute("id") !== m[2]) return false;
+      if (m[3] !== undefined && (m[4] === undefined ? !this.hasAttribute(m[3]) : this.getAttribute(m[3]) !== m[4])) return false;
+      if (m[0] === ":not(:disabled)" && this.hasAttribute("disabled")) return false;
+    }
+    return true;
+  }
+  closest(selector: string): FakeElement | null {
+    if (this.matches(selector)) return this;
+    return this.parentNode instanceof FakeElement ? this.parentNode.closest(selector) : null;
+  }
+  get id(): string { return this.getAttribute("id") ?? ""; }
+  /** Focusable by default as the browser has it: controls, links and anything with a tabindex. */
+  get tabIndex(): number {
+    const set = this.getAttribute("tabindex");
+    return set !== null ? Number(set) : /^(BUTTON|A|INPUT|TEXTAREA|SELECT)$/.test(this.tagName) ? 0 : -1;
+  }
+  /** One empty box at 0,0: every element counts as drawn. */
+  getClientRects(): unknown[] { return [this.getBoundingClientRect()]; }
+  offsetWidth = 0;
+  offsetHeight = 0;
+  scrollTo(): void {}
+  get isConnected(): boolean { return this.ownerDocument?.contains(this) ?? false; }
+  focus(): void { if (this.ownerDocument !== null) this.ownerDocument.activeElement = this; }
+  blur(): void { if (this.ownerDocument?.activeElement === this) this.ownerDocument.activeElement = null; }
 }
 
 /** React looks for focus inside iframes with `instanceof window.HTMLIFrameElement`; no fake element is one. */
@@ -135,4 +177,7 @@ export class FakeDocument extends FakeNode {
   createElementNS(ns: string, tag: string): FakeElement { return new FakeElement(tag, ns, this); }
   createTextNode(text: string): FakeText { return new FakeText(text, this); }
   getSelection(): null { return null; }
+  getElementById(id: string): FakeElement | null { return this.documentElement.querySelector(`#${id}`); }
+  querySelector(selector: string): FakeElement | null { return this.documentElement.querySelector(selector); }
+  querySelectorAll(selector: string): FakeElement[] { return this.documentElement.querySelectorAll(selector); }
 }

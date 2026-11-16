@@ -38,6 +38,17 @@ describe("desktop window title", () => {
     expect(document.title).toBe("Gates Local");
   });
 
+  it("hands the desktop bridge the page's own background and text colours for the window buttons", async () => {
+    const { overlay, document } = await desktop();
+    const syncTitleBar = vi.fn(async () => undefined);
+    vi.stubGlobal("window", { gatesLocal: { syncTitleBar } });
+    const tokens: Record<string, string> = { "--background": " #101112 ", "--foreground": " #e8e8e8" };
+    vi.stubGlobal("getComputedStyle", () => ({ getPropertyValue: (name: string) => tokens[name] ?? "" }));
+    overlay.dispatchEvent(new Event("geometrychange"));
+    expect(syncTitleBar).toHaveBeenLastCalledWith({ color: "#101112", symbolColor: "#e8e8e8" });
+    expect(document.documentElement.classList.toggle).toHaveBeenLastCalledWith("wco", true);
+  });
+
   it("leaves an ordinary browser's title unchanged even when it exposes the overlay API", async () => {
     const { overlay, document, syncWindowTitle } = await desktop();
     vi.stubGlobal("window", {});

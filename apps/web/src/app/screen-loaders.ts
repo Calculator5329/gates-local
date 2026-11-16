@@ -4,7 +4,6 @@ export const settingsScreen = deferred(() => import("../settings/Settings.tsx"))
 export const firstRunScreen = deferred(() => import("../first-run/FirstRun.tsx"));
 export const pickerScreen = deferred(() => import("../picker/Picker.tsx"));
 export const imagePickerScreen = deferred(() => import("../image/ImagePicker.tsx"));
-// the page panel beside the chat comes with the chat
 export const threadScreen = deferred(async () => {
   const [thread, pages] = await Promise.all([import("../thread/Thread.tsx"), import("../pages/PagePanel.tsx")]);
   return { ...thread, PagePanel: pages.PagePanel };

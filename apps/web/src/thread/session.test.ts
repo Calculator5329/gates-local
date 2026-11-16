@@ -622,6 +622,19 @@ describe("thread loads against newer pushes and navigation (WF-02, WF-03)", () =
     expect(store.getState()).toMatchObject({ view: "thread", threadId: "t1" });
   });
 
+  it("a thread found gone after Settings opened and closed over its load stays on screen: a navigation came between (WF-03)", async () => {
+    await bootSettingsReady();
+    const first = b.server.hold("threads.get");
+    session.openThread("t1");
+    const held = await first;
+    session.openSettings();
+    session.leaveSettings();
+    expect(store.getState()).toMatchObject({ view: "thread", threadId: "t1" });
+    held.fail("thread-not-found", "no thread t1");
+    await tick();
+    expect(store.getState()).toMatchObject({ view: "thread", threadId: "t1" });
+  });
+
   it("a load that fails for the thread still open goes to a new thread", async () => {
     await boot();
     b.server.answer("threads.get", refuse("thread-not-found", "no thread a"));

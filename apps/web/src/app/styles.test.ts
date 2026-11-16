@@ -26,7 +26,17 @@ function ratio(a: string, b: string): number {
   return ((hi ?? 0) + 0.05) / ((lo ?? 0) + 0.05);
 }
 
+/** The declarations of each rule in `sheet` whose selectors include `.pop-scrim`. */
+const scrimRules = (sheet: string) => [...sheet.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(m => m[1]?.trim().split(",").includes(".pop-scrim")).map(m => m[2]?.trim());
+
 describe("styles.css", () => {
+  it("draws the scrim under an open sheet at phone width only", () => {
+    const phone = css.slice(css.indexOf("@media (max-width:640px){"));
+    const wide = css.slice(0, css.indexOf("@media (max-width:640px){"));
+    expect(scrimRules(wide)).toContain("display:none");
+    expect(scrimRules(wide)).not.toContain("display:block");
+    expect(scrimRules(phone.slice(0, phone.indexOf("\n}\n")))).toEqual(["display:block;z-index:49"]);
+  });
   it("keeps Dictate a square icon button: nothing gives it its own width or a visible label", () => {
     expect(css).not.toMatch(/\.voice\s*\{[^}]*(?:^|[;{\s])(?:width|flex(?:-basis)?):\s*[^;}]*\d+px/m);
     expect(css).not.toMatch(/\.voice span[,{\s]/);

@@ -427,6 +427,16 @@ describe("a thread restored from storage takes the model of its latest saved rep
     expect(store.getState().threadModels["S"]).toBe(GEMMA);
   });
 
+  it("reopening a thread puts back the model last used in it before its history answers", async () => {
+    const history = defer<unknown>();
+    const { session, store, hydrated } = await boot({ "models.list": async () => qwenPicked, "threads.get": () => history.promise });
+    await hydrated();
+    store.setState({ threadModels: { S: GEMMA } });
+    expect(store.getState().model).toBe(QWEN);
+    session.openThread("S");
+    expect(store.getState().model).toBe(GEMMA);
+  });
+
   it("an unsent pick made in the thread before its history loads wins", async () => {
     const history = defer<unknown>();
     const { session, store, hydrated } = await boot({ "models.list": async () => qwenPicked, "threads.get": () => history.promise });

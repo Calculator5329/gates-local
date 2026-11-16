@@ -105,6 +105,90 @@ describe("the footer icons are toggles", () => {
   });
 });
 
+describe("Pictures and the Models download page", () => {
+  it("Pictures waits for its code and its first page, and comes up only then, on an entry of its own", async () => {
+    const loaders = await import("../app/screen-loaders.ts");
+    let arrive!: () => void;
+    vi.spyOn(loaders.picturesScreen, "load").mockReturnValue(new Promise<void>((r) => { arrive = r; }));
+    const page = browser.server.hold("pictures.list");
+    const start = browser.history.index();
+    session.togglePictures();
+    await tick();
+    expect(view()).toMatchObject({ view: "thread" });
+    arrive();
+    await tick();
+    expect(view()).toMatchObject({ view: "thread" });
+    (await page).respond({ pictures: [], count: 0 });
+    await until(() => store.getState().view === "pictures");
+    expect(browser.history.index()).toBe(start + 1);
+  });
+
+  it("a destination picked while Pictures still loads wins, and Pictures never lands on top", async () => {
+    const loaders = await import("../app/screen-loaders.ts");
+    vi.spyOn(loaders.picturesScreen, "load").mockResolvedValue(undefined);
+    const page = browser.server.hold("pictures.list");
+    session.togglePictures();
+    await tick();
+    session.openSettings();
+    (await page).respond({ pictures: [], count: 0 });
+    await tick();
+    await tick();
+    expect(view()).toMatchObject({ view: "settings" });
+  });
+
+  it("the Pictures icon, or Ctrl Shift P, closes Pictures and takes its entry away", async () => {
+    const loaders = await import("../app/screen-loaders.ts");
+    vi.spyOn(loaders.picturesScreen, "load").mockResolvedValue(undefined);
+    const start = browser.history.index();
+    session.togglePictures();
+    await until(() => store.getState().view === "pictures");
+    session.togglePictures();
+    await tick();
+    expect(view()).toMatchObject({ view: "thread" });
+    expect(browser.history.index()).toBe(start);
+  });
+
+  it("Esc and Done on Settings take its entry away as the icon does", async () => {
+    const start = browser.history.index();
+    session.openSettings("general");
+    expect(browser.history.index()).toBe(start + 1);
+    session.leaveSettings();
+    await tick();
+    expect(view()).toMatchObject({ view: "thread" });
+    expect(browser.history.index()).toBe(start);
+  });
+
+  it("Models asked for with its download page opens there; the plain icon and the gear open the installed list", () => {
+    session.toggleModels(true);
+    expect(store.getState()).toMatchObject({ view: "settings", section: "models", addPage: true });
+    session.toggleModels();
+    session.toggleModels();
+    expect(store.getState()).toMatchObject({ view: "settings", section: "models", addPage: false });
+    session.toggleModels();
+    session.openSettings();
+    expect(store.getState()).toMatchObject({ view: "settings", section: "general", addPage: false });
+  });
+});
+
+const refuse = () => { throw new Error("SecurityError"); };
+
+describe("first run", () => {
+  it("opens on first run with nothing saved, on a new chat once it is done, and on the thread an address names", () => {
+    expect(session.initialView(null)).toEqual({ view: "firstrun", threadId: null });
+    localStorage.setItem("gates-local.first-run-done", "1");
+    expect(session.initialView(null)).toEqual({ view: "new", threadId: null });
+    expect(session.initialView("t9")).toEqual({ view: "thread", threadId: "t9" });
+  });
+
+  it("storage that refuses still lets first run finish onto a chat, and first run shows again next start", () => {
+    vi.stubGlobal("localStorage", { getItem: refuse, setItem: refuse });
+    store.setState({ view: "firstrun", threadId: null });
+    session.finishFirstRun();
+    expect(store.getState().view).toBe("new");
+    expect(session.initialView(null)).toEqual({ view: "firstrun", threadId: null });
+  });
+});
+
 describe("closing returns to the chat as it was", () => {
   it("keeps the thread and its draft and asks for the thread no second time", async () => {
     drafts.editDraft("half a thought");

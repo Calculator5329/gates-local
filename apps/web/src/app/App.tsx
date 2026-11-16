@@ -32,15 +32,9 @@ import { downloadBlob, withTimeout } from "../lib/ui/kit/async.ts";
 import { CommitJobs } from "../lib/ui/kit/focus.ts";
 import { usePopover } from "../lib/ui/kit/popover.ts";
 
-/** Which setup icons show under the start screen's bar: library search's and image generation's, each only while it is not set up. */
 interface Unset { readonly lib: boolean; readonly img: boolean }
 
-/**
- * This browser's last known setup, so the first frame has the icons before the reads land (docs/design.md).
- * The key and its libLink/imgLink fields are the old starter cards', so an update keeps what was seen.
- */
 const SHAPE_KEY = "gates-local:card-shape";
-/** No setup seen yet: a new install has neither set up. */
 const NEW_UNSET: Unset = { lib: true, img: true };
 
 function savedUnset(): Unset {
@@ -53,7 +47,6 @@ function savedUnset(): Unset {
   }
 }
 
-/** Setup from the reads that have landed, the saved one for the rest; `known` once both have. A failed read shows no ring. */
 function unsetNow(s: State, saved: Unset): Unset & { readonly known: boolean } {
   return {
     lib: s.sources === undefined ? saved.lib : Array.isArray(s.sources) && s.sources.length === 0,
@@ -62,11 +55,6 @@ function unsetNow(s: State, saved: Unset): Unset & { readonly known: boolean } {
   };
 }
 
-/**
- * The start screen's setup icons: the library's while library search is not set up, the image's
- * while image generation is not; each opens its Settings section and wears an amber ring. Empty, at its height,
- * on a set-up machine, so the bar never moves when the reads land.
- */
 function SetupIcons() {
   const [saved] = useState(savedUnset);
   const lib = useStore((s) => unsetNow(s, saved).lib);
@@ -78,7 +66,7 @@ function SetupIcons() {
     try {
       localStorage.setItem(SHAPE_KEY, JSON.stringify({ libLink: lib, imgLink: img }));
     } catch {
-      // no storage here: the next start shows the new-install icons until the reads land
+      // external: a browser's private window may refuse storage
     }
   }, [known, lib, img]);
   const icons: [Section, IconId, string][] = [];
@@ -106,7 +94,6 @@ function Draft({ under }: { under: boolean }) {
           </svg>
         </h1>
         <div className="banner-slot">
-          {/* under Settings the note shows on Settings' own surface, once */}
           {under ? null : <UpdateNote />}
           <Banner />
         </div>
@@ -119,7 +106,6 @@ function Draft({ under }: { under: boolean }) {
   );
 }
 
-/** Below 1024 px: opens the thread drawer. Hidden on the desktop, where the sidebar is always there. */
 function MenuButton() {
   const open = useStore((s) => s.drawer);
   return (
@@ -129,13 +115,11 @@ function MenuButton() {
   );
 }
 
-/** A phone's Settings Back: every section goes to the list, and the Models page's two tabs are one section. */
 function settingsBack(): void {
   document.querySelector(".set")?.scrollTo(0, 0);
   setState({ setList: true });
 }
 
-/** Settings' top bar below 1024 px: the drawer button on a tablet; on a phone the page's name, a Back that says where it goes, and Done on the list. */
 function SettingsBar() {
   const phone = useMedia(PHONE);
   const root = useStore((s) => s.setList);
@@ -166,7 +150,6 @@ function SettingsBar() {
 
 const RT_WORD: Record<Rt, string> = { ready: "Running", installing: "Installing", starting: "Starting", missing: "Not installed", wrong: "Port busy", stopped: "Stopped", error: "Didn't start", offline: "Reconnecting" };
 
-/** What a section is set to, at the end of its row in a phone's Settings list. */
 function listValue(s: State, id: Section): string {
   const settings = s.settings === NA ? undefined : s.settings;
   switch (id) {
@@ -177,7 +160,6 @@ function listValue(s: State, id: Section): string {
       return tag === undefined ? "" : describeModel(tag, s.catalog === NA ? undefined : s.catalog).name;
     }
     case "runtime": {
-      // the step and the cause in the words the banner and Settings › Runtime use
       const rt = rtOf(s);
       return rt === "installing" ? installStep(s.runtime?.install) : rt === "error" ? failWords(s.runtime?.failure).stat : RT_WORD[rt];
     }
@@ -197,7 +179,6 @@ function ListValue({ id }: { id: Section }) {
   return v === "" ? null : <span className="val">{v}</span>;
 }
 
-/** A phone's Settings home: the sections as one list; a tap opens one with Back to here. */
 function SettingsList() {
   return (
     <nav className="set-list" aria-label="Settings sections">
@@ -276,7 +257,6 @@ function exportThread(threadId: string, messages: readonly Message[]): void {
   downloadBlob(new Blob([threadMarkdown(threadId, messages)], { type: "text/markdown" }), `${title.replace(/[^\w\- ]+/g, "").trim() || "thread"}.md`);
 }
 
-/** Close a thread menu, then act on the row it opened from. */
 const act = (fn: (threadId: string) => void) => () => {
   const s = getState();
   const id = s.pop?.id === "thread" ? s.pop.thread : null;
@@ -284,21 +264,14 @@ const act = (fn: (threadId: string) => void) => () => {
   if (id !== null) fn(id);
 };
 
-/** Rename edits the header title, so a thread from the sidebar opens first. */
 function renameFromMenu(id: string): void {
   const s = getState();
   if (s.view !== "thread" || s.threadId !== id) openThread(id);
   setState({ renaming: true });
 }
 
-/** How long Export as Markdown waits for its thread to load before it gives up. */
 const EXPORT_WAIT_MS = 8000;
 
-/**
- * Export loads the thread it was asked for and makes the file from that load, even when a copy
- * is cached: another client may have added to it. A failed or slow load, or a thread deleted
- * meanwhile, says so instead.
- */
 async function exportFromMenu(id: string): Promise<void> {
   preloadThread(null);
   const title = getState().threads.find((t) => t.id === id)?.title ?? "this thread";
@@ -311,7 +284,6 @@ async function exportFromMenu(id: string): Promise<void> {
   exportThread(id, got.messages);
 }
 
-/** Opened at a point (a right-click or a row's menu key): below it, or above when it would leave the window. */
 function placeAt(pop: HTMLElement, at: { x: number; y: number }): void {
   const pw = pop.offsetWidth;
   const ph = pop.offsetHeight;
@@ -356,10 +328,8 @@ function ThreadMenu() {
   );
 }
 
-/** Wider than a phone, Settings is a pop-up over the chat, and Settings › Models a pop-up of its own. */
 const settingsDialog = (s: Pick<State, "view">, phone: boolean) => s.view === "settings" && !phone;
 
-/** What Tab must stay inside right now: a phone's sheet, a pop-up (Usage, Settings, Models) or the drawer. */
 function modalBox(s: State): HTMLElement | null {
   if (s.pop !== null) return isPhone() ? document.getElementById(POP_EL[s.pop.id]) : null;
   if (s.panel !== null || settingsDialog(s, isPhone())) return document.querySelector<HTMLElement>(".dlg");
@@ -382,7 +352,6 @@ function trapTab(e: Pick<KeyboardEvent, "shiftKey" | "preventDefault">, box: HTM
   }
 }
 
-/** Where a swipe started, when it started on a sheet's title row. */
 let swipeFrom: number | null = null;
 
 function onTouchStart(e: TouchEvent): void {
@@ -392,7 +361,6 @@ function onTouchStart(e: TouchEvent): void {
   swipeFrom = e.touches[0]?.clientY ?? null;
 }
 
-/** A swipe of 48 px or more down a sheet's title row closes the sheet. */
 function onTouchEnd(e: TouchEvent): void {
   const from = swipeFrom;
   swipeFrom = null;
@@ -461,7 +429,6 @@ function onMouseDown(e: MouseEvent): void {
 }
 
 let lastWidth = window.innerWidth;
-/** A resize closes popovers (they would sit in the wrong place), except a touch keyboard opening: it changes only the height, and sheets sit on the bottom edge. */
 function onResize(): void {
   if (window.innerWidth === lastWidth && isTouch()) return;
   lastWidth = window.innerWidth;
@@ -479,14 +446,10 @@ export function App() {
   const view = useStore((s) => s.view);
   const threadId = useStore((s) => s.threadId);
   const noServer = useStore((s) => s.conn.kind === "no-server");
-  // this connection's first reads settled, loaded or not (session.ts hydrate; not the open thread's
-  // threads.get); the browser tests wait for it
   const hydrated = useStore((s) => s.hydrationSettled);
   const drawer = useStore((s) => s.drawer);
-  // a page's panel lies over the chat in a narrow window: what is under it takes no keys (pages/cover.ts)
   const pageCover = useCovering();
   const setList = useStore((s) => s.setList);
-  // talk mode reads replies here, above both message boxes, so a new chat's first reply is read whole
   useReadAloud();
   const popId = useStore((s) => s.pop?.id ?? null);
   const settings = useScreen(settingsScreen, view === "settings");
@@ -502,7 +465,6 @@ export function App() {
   // oxlint-disable-next-line gates/effect-needs-reason -- fetches the other screens' code once the first paint is out of the way
   useEffect(preloadScreens, []);
   const phone = useMedia(PHONE);
-  // A phone's sheet stays modal through live updates; Ctrl+M's search focuses itself after opening.
   // oxlint-disable-next-line gates/effect-needs-reason -- a focus trap on the open sheet's node, held for as long as the sheet is drawn
   useEffect(() => {
     if (popId === null || !isPhone()) return;
@@ -530,35 +492,28 @@ export function App() {
       window.removeEventListener("popstate", onScreenPop);
     };
   }, []);
-  // A cold click keeps the existing chat layout until the whole screen is ready.
   const dialog = useStore((s) => settingsDialog(s, phone));
   const section = useStore((s) => s.section);
-  // Settings as a page over the chat on a phone; wider, a pop-up that leaves the chat in view
   const isSet = view === "settings" && !dialog;
   const isPics = view === "pictures";
   const under = isSet || isPics;
-  // the section list is a phone's Settings home; leaving Settings forgets it
   // oxlint-disable-next-line gates/effect-needs-reason -- Settings is left by several paths in lib/session (back, Escape, a link); the reset follows the view whichever ran
   useEffect(() => {
     if (view !== "settings" && getState().setList) setState({ setList: false });
   }, [view]);
   const isNew = view === "new" || threadId === null;
-  // first run covers the app; what is underneath takes no focus or clicks
   const covered = noServer || view === "firstrun";
   return (
     <>
       <Sprite />
-      {/* under a pop-up (Settings, Models, Usage) the whole window stays mounted and takes no focus, keys or clicks, and is out of the accessibility tree */}
       <div className={`app${drawer ? " drawer" : ""}`} id="app" data-ready={hydrated ? "" : undefined} inert={(popOpen && phone) || dialog || panel !== null}>
         <div style={{ display: "contents" }} inert={covered || pageCover}>
           <Sidebar />
         </div>
         {drawer ? <div className="scrim" data-testid="sidebar.drawer.scrim" aria-hidden="true" onClick={() => { cancelPendingSettings(); closeDrawer(); }} /> : null}
         <main className="main" inert={covered || drawer || pageCover}>
-          {/* Pictures draws its own bar, in its own chunk */}
           {isSet ? <SettingsBar /> : isPics ? null : <Header isNew={isNew} />}
           <div className="work">
-            {/* a phone's Settings and Pictures lie over the chat, which stays mounted and hidden: closing gives back its scroll, draft, caret and a reply still following */}
             <div className={`stage${under ? " under" : ""}`} inert={under}>
                 {isNew || threadId === null ? (
                   <Draft under={under || view === "settings"} />
@@ -593,7 +548,6 @@ export function App() {
             {isPics ? pics.kind === "ready" ? <pics.value.Pictures /> : <div className="pics"><ScreenError /></div> : null}
           </div>
         </main>
-        {/* a page the chat's replies wrote runs beside it (pages/) */}
         {!isNew && !under && threadId !== null && thread.kind === "ready" ? (
           <div style={{ display: "contents" }} inert={covered || drawer}>
             <thread.value.PagePanel threadId={threadId} />
@@ -607,7 +561,6 @@ export function App() {
       </div>
       {dialog && section === "models" ? (
         <Dialog label="Models" onClose={leaveSettings}>
-          {/* Models brings its own header row: its tabs are the header's controls */}
           {settings.kind === "ready" ? <settings.value.SettingsView /> : <><DialogHead title="Models" onClose={leaveSettings} /><ScreenError /></>}
         </Dialog>
       ) : dialog ? (
@@ -627,7 +580,6 @@ export function App() {
           {usage.kind === "ready" ? <usage.value.Usage /> : <><DialogHead title="Usage" onClose={() => closeUsage()} /><ScreenError /></>}
         </Dialog>
       ) : null}
-      {/* a phone's sheets sit over a scrim; on the desktop it is not drawn */}
       {popOpen ? <div className="scrim pop-scrim" data-testid="ui.pop.scrim" aria-hidden="true" onClick={() => closePop(true)} /> : null}
       {popId === "picker" ? picker.kind === "ready" ? <picker.value.Picker /> : picker.kind === "error" ? <div id="picker" className="model-picker open picker-error" role="dialog" aria-label="Choose a model"><button className="btn" data-testid="models.picker.back-to-chat" onClick={() => closePop(true)}>Back to chat</button><ScreenError /></div> : null : null}
       {popId === "images" ? imagePicker.kind === "ready" ? <imagePicker.value.ImagePicker /> : imagePicker.kind === "error" ? <div id="imagePicker" className="model-picker open picker-error" role="dialog" aria-label="Choose an image model"><button className="btn" data-testid="image.picker.back-to-chat" onClick={() => closePop(true)}>Back to chat</button><ScreenError /></div> : null : null}
@@ -637,7 +589,6 @@ export function App() {
       <OptsMenu />
       <ThreadMenu />
       <Tip />
-      {/* last, so a focus move asked for in a handler runs after the rest of that commit is drawn */}
       <CommitJobs />
     </>
   );

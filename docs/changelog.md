@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-11-16: the app folder holds to the six comment kinds
+
+- The app shell, navigation and the screen loaders pass the comment
+  rule: 79 offenders went, and the folder's comment lines fell from 113
+  to 11. Two outside facts stay: a browser's private window may refuse
+  storage, both for the start screen's setup icons and for first run.
+  One why line stays: draft saving and the copy helper are imported
+  where the app starts, so drafts are back before it connects.
+- Rules the browser specs and the unit tests already held went with
+  their comment. One in five was broken in the source and watched fail:
+  the setup icons' rings, a phone's Settings list, the ready mark the
+  browser tests wait for, the window under Settings, the thread in the
+  address, Settings' two reads, a waiting Settings dismissed, and
+  closing back onto the chat.
+- Thirty-seven tests are new, most with the whole app mounted on the
+  fake DOM: the setup icons before and after the reads; a phone's
+  Settings list, its Back and its values; Export's own load, its
+  failure and its eight-second bound; where a menu opened at a point
+  goes; the Tab trap; the sheet swipe; what a resize closes; what lies
+  over what and takes nothing; the scrim. Navigation gained tests for
+  an edit ended by leaving a chat, the notice dropped, a reopened
+  thread's model, a gone thread kept after Settings came and went,
+  Pictures' loading and its history entry, the Models download page,
+  how the app starts, refused storage on first run, screens fetched
+  only when needed, the Reload offered when one fails, and the title
+  bar's colours.
+
 ## 2026-11-16: the pages folder holds to the six comment kinds
 
 - The page chip, the page panel and what runs a page pass the comment

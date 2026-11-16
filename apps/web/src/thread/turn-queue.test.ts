@@ -479,6 +479,15 @@ describe("a send that would stop another chat", () => {
     expect(st().draft).toBe("half a thought");
   });
 
+  it("leaving the chat drops its notice", async () => {
+    store.setState({ notice: "Couldn't export “A”: it didn't load. Try again." });
+    session.openThread("B");
+    expect(store.getState().notice).toBeNull();
+    store.setState({ notice: "Couldn't export “B”: it didn't load. Try again." });
+    session.newThread();
+    expect(store.getState().notice).toBeNull();
+  });
+
   it("leaving the chat drops the warning", async () => {
     await warned();
     session.openThread("A");
@@ -969,6 +978,20 @@ describe("messages typed while a reply is being written", () => {
     expect(sends()[1]?.content).toBe("two");
     expect(st().queued.map((q) => q.text)).toEqual(["one"]);
   });
+
+  for (const leave of ["another chat", "a new chat"] as const) {
+    it(`leaving for ${leave} with a message open for editing ends the edit, so the server may send it again`, async () => {
+      await answering("A");
+      await session.send("one");
+      const id = st().queued[0]?.id ?? "";
+      session.editQueued(id);
+      if (leave === "another chat") session.openThread("B");
+      else session.newThread();
+      expect(st().editingQueued).toBeNull();
+      await until(() => b.server.calls("reply.edit").length === 2, 2000, "the edit's end");
+      expect(b.server.calls("reply.edit").map((c) => c.params)).toEqual([{ id, open: true }, { id, open: false }]);
+    });
+  }
 
   it("Cancel editing puts the box back", async () => {
     await answering("A");

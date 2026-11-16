@@ -19,9 +19,6 @@ function Failure({ error, scope, retry, reload }: { error: string; scope: Props[
   );
 }
 
-/** Retry remounts the failed subtree; the external store keeps the unsent draft.
- * React's root reports each caught error once through its default console handler.
- */
 export class ErrorBoundary extends Component<Props, State> {
   override state: State = { error: null, retried: false };
 

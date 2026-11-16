@@ -7,14 +7,12 @@ import { computerOnlyMethods } from "../lib/session/platform.ts";
 import { setState } from "../lib/store/store.ts";
 import { syncTitleBar } from "./titlebar.ts";
 import "./styles.css";
-// Draft restoration is required before connecting. These tiny shared helpers
-// use startup's gzip dictionary instead of two separate chunk wrappers.
+// why: static imports put these in the startup chunk, so drafts restore before connect()
 import "../composer/draft-persistence.ts";
 import "../lib/ui/copy.ts";
 
 syncTitleBar();
 
-// a reload keeps the open thread: #thread=<id>
 setState({ ...initialView(threadFromHash()), unavailable: computerOnlyMethods() });
 connect();
 

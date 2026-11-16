@@ -5,12 +5,6 @@ export { firstRunScreen, imagePickerScreen, pickerScreen, settingsScreen, thread
 
 const unwatched = () => () => {};
 
-/**
- * Only a screen on show listens for its code landing. A preload (the thread
- * screen once a new chat has text, settings after the first paint) would
- * otherwise re-render the whole app, sidebar and all, inside someone's key;
- * the render that shows the screen reads where its load got to.
- */
 export function useScreen<T>(screen: ReturnType<typeof deferred<T>>, needed: boolean) {
   const state = useSyncExternalStore(needed ? screen.subscribe : unwatched, screen.get, screen.get);
   // oxlint-disable-next-line gates/effect-needs-reason -- starts a screen's code fetch once a commit needs it; the store change that needs it has many senders
@@ -27,7 +21,6 @@ export function preloadScreens(): () => void {
   });
 }
 
-/** Old tabs may request a chunk removed by an update. Leave a usable way back. */
 export function ScreenError() {
   return (
     <p role="alert" className="na">
