@@ -1,4 +1,3 @@
-// One connection's reconnect loop, RPCs and draft-persistence lifetime.
 import { type CallOptions, type Client, type MethodName, type Params, type ReplyCall, type ReplyOutcome, type ResultOf, WireError, createClient } from "@gates-local/contracts";
 import { NA, setState } from "../store/store.ts";
 import { pinFramePolicy } from "../../pages/frame-policy.ts";
@@ -28,16 +27,11 @@ function windowId(): string {
 export const isNA = (e: unknown): boolean => e instanceof WireError && e.code === "not-implemented";
 export const codeOf = (e: unknown): string => (e instanceof WireError ? e.code : "internal");
 
-/**
- * What an action hands back to the control that ran it: null when it worked,
- * else one calm sentence saying what failed and what to do, shown beside it.
- */
 export type ActionResult = string | null;
 
 type Acted<M extends MethodName> = { readonly ok: true; readonly value: ResultOf<M> } | { readonly ok: false; readonly message: string };
 export type ActionCall = <M extends MethodName>(method: M, params: Params<M>, what: string, todo?: string, options?: CallOptions<M>) => Promise<Acted<M>>;
 
-/** "Couldn't <what> because <reason>; <todo>." in plain words, never the raw stack. */
 export function failure(what: string, e: unknown, todo = "try again"): string {
   const code = codeOf(e);
   if (code === "closed") return `Couldn't ${what} because Gates Local isn't connected; try again once it reconnects.`;
@@ -56,9 +50,7 @@ function reasonOf(message: string): string {
   return `Gates Local refused it (${short.length > 120 ? `${short.slice(0, 117)}…` : short})`;
 }
 
-/** Domain cleanup stays with the session; its hook runs once the current client is cleared. */
 export function createConnection({ applyServerEvent, serverUrl, webServerUrl, desktopBridge, hydrate, afterDisconnect }: ConnectionEffects) {
-  /** Resolves on the bridge's next ready state, or after ms when there is no bridge. */
   function nextChance(ms: number): Promise<void> {
     return new Promise((resolve) => {
       const bridge = desktopBridge();
@@ -78,10 +70,8 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
   let client: Client | null = null;
   let stopped = false;
 
-  /** Start the connection loop. Called once at boot; the returned function ends it (the session tests use it). */
   function connect(): () => void {
     stopped = false;
-    // Booting holds placeholders for at most two seconds (runtime/words.tsx booting).
     // oxlint-disable-next-line gates/timer-needs-reason -- the two seconds the window shows placeholders before it says it is connecting
     const boot = setTimeout(() => applyServerEvent({ bootWaited: true }), 2000);
     if (!desktopBridge() && webServerUrl() === null) applyServerEvent({ conn: { kind: "no-server" } });
@@ -109,9 +99,8 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
         continue;
       }
       const parsed = new URL(url);
-      // Image URLs follow the socket's scheme: wss gives https.
       const serverOrigin = `${parsed.protocol === "wss:" ? "https:" : "http:"}//${parsed.host}`;
-      // a browser tab has no main process guarding its frames: the page route's one address is all a frame may load
+      // why: in the desktop app Electron's main process guards frames; a tab has nothing else
       if (!desktopBridge() && typeof document !== "undefined") pinFramePolicy(serverOrigin);
       applyServerEvent({ serverOrigin, fileToken: parsed.searchParams.get("token") });
       if (!stopDrafts && typeof indexedDB !== "undefined") {
@@ -134,9 +123,7 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
       if (opened) {
         client = c;
         applyServerEvent({ conn: { kind: "open" }, hydrationSettled: false });
-        // An open socket may still fail negotiation or its startup reads.
         await hydrate(c).then(() => { delay = 250; hydrated = ws.readyState === 1; }, () => undefined).finally(() => {
-          // Only this still-open, negotiated connection may settle preparation.
           if (!stopped && client === c && ws.readyState === 1 && c.sync !== undefined) applyServerEvent({ hydrationSettled: true });
         });
         await c.closed;
@@ -144,8 +131,6 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
         afterDisconnect();
       }
       applyServerEvent((s) => ({ conn: s.conn.kind === "down" ? s.conn : { kind: "down", since: Date.now() } }));
-      // Give the offline state a frame, then retry a healthy connection promptly.
-      // Cap fast retries at once per second; failed attempts keep their backoff.
       if (hydrated && Date.now() >= nextImmediateAt) {
         nextImmediateAt = Date.now() + 1000;
         await nextChance(16);
@@ -157,19 +142,16 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
     }
   }
 
-  /** Call a server method; rejects with WireError("closed") while disconnected. */
   function call<M extends MethodName>(method: M, params: Params<M>, options?: CallOptions<M>): Promise<ResultOf<M>> {
     if (client === null) return Promise.reject(new WireError("closed", `not connected; ${method} not sent`));
     return client.call(method, params, options);
   }
 
-  /** A call that names one reply: the server's answer, or "not-reached" while disconnected. */
   function reply<M extends ReplyCall>(method: M, params: Params<M>): Promise<ReplyOutcome> {
     if (client === null) return Promise.resolve({ answer: "not-reached", why: "closed" });
     return client.reply(method, params);
   }
 
-  /** A v2 read: its result, NA when the server lacks it, undefined on any other failure. */
   async function probe<M extends MethodName>(method: M, params: Params<M>, options?: CallOptions<M>): Promise<ResultOf<M> | typeof NA | undefined> {
     try {
       return await call(method, params, options);
@@ -178,7 +160,6 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
     }
   }
 
-  /** Run an action method; NA marks it unavailable for the rest of the session. `what` completes "Couldn't …". */
   async function act<M extends MethodName>(method: M, params: Params<M>, what: string, todo = "try again", options?: CallOptions<M>): Promise<Acted<M>> {
     try {
       return { ok: true, value: await call(method, params, options) };
@@ -188,7 +169,6 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
     }
   }
 
-  /** Library-only RPCs use the same connection as manual additions. */
   async function libraryRequest<M extends "sources.imports" | "sources.downloadSample" | "sources.clone" | "sources.cancelImport">(method: M, params: import("@gates-local/contracts").Params<M>): Promise<import("@gates-local/contracts").ResultOf<M>> {
     if (!client) throw new Error("Gates Local isn't connected. Try again once it reconnects.");
     return client.call(method, params);

@@ -5,7 +5,9 @@
 // tests need the real createClient this file mocks.
 import { type CallOptions, type Channel, type ClientSync, type MethodName, type ModelInfo, type Params, type SyncMetadata, type SyncRow, methodNames, methodSync, phoneMay, pushSync, scopesOf } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
+import { act, createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { FakeDocument, FakeElement, FakeIFrame } from "../../../test/fake-dom.ts";
 
 const fake = vi.hoisted(() => ({ client: undefined as unknown }));
 vi.mock("@gates-local/contracts", async (orig) => ({ ...(await orig<typeof import("@gates-local/contracts")>()), createClient: () => fake.client }));
@@ -793,4 +795,93 @@ describe("the model button starts on the chat model in memory", () => {
     await hydrated();
     expect(store.getState().model).toBe(LLAMA);
   });
+});
+
+it("a reconnect while Ollama does not answer keeps the list shown before it", async () => {
+  const stopped = { state: "stopped", owner: "none", baseUrl: "http://127.0.0.1:11434" };
+  const dropped = defer<void>();
+  let reads = 0;
+  const { store, calls, hydrated } = await boot({
+    "runtime.status": async () => (reads === 0 ? defaults["runtime.status"] : stopped),
+    "models.list": async () => (reads++ === 0 ? defaults["models.list"] : listed([], stopped)),
+  }, [dropped.promise]);
+  await hydrated();
+  expect(store.getState().models?.map((m) => m.name)).toEqual([QWEN, GEMMA, LLAMA]);
+  dropped.resolve();
+  await vi.waitFor(() => expect(calls.filter((m) => m === "models.list")).toHaveLength(2), { timeout: 3000 });
+  await vi.waitFor(() => expect(store.getState().runtime?.state).toBe("stopped"));
+  await settled();
+  expect(store.getState().models?.map((m) => m.name)).toEqual([QWEN, GEMMA, LLAMA]);
+});
+
+const findAll = (from: FakeElement, pred: (el: FakeElement) => boolean): FakeElement[] =>
+  from.childNodes.flatMap((c) => (c instanceof FakeElement ? [...(pred(c) ? [c] : []), ...findAll(c, pred)] : []));
+const reactProps = (el: FakeElement): Record<string, unknown> => {
+  const key = Object.keys(el).find((k) => k.startsWith("__reactProps$"));
+  return key === undefined ? {} : (el as unknown as Record<string, Record<string, unknown>>)[key] ?? {};
+};
+
+const thinking = (name: string): ModelInfo => ({ ...info(name, name === LLAMA), capabilities: ["completion", "thinking"] });
+
+it("with no GPU Thinking starts off, and the composer's Thinking button still turns it on, and it stays on", async () => {
+  const { store, push, calls, hydrated } = await boot({
+    "gpu.status": async () => ({ vendor: "none" }),
+    "models.list": async () => listed([thinking(QWEN), thinking(GEMMA), thinking(LLAMA)]),
+  });
+  await hydrated();
+  await vi.waitFor(() => expect(calls).toContain("gpu.status"));
+  await vi.waitFor(() => expect(store.getState().think).toBe(false));
+  const doc = new FakeDocument();
+  const win = { document: doc, HTMLIFrameElement: FakeIFrame, matchMedia: () => ({ matches: false, addEventListener: noop, removeEventListener: noop }), addEventListener: noop, removeEventListener: noop };
+  doc.defaultView = win;
+  Object.assign(doc, { addEventListener: noop, removeEventListener: noop });
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("window", win);
+  vi.stubGlobal("document", doc);
+  vi.stubGlobal("HTMLElement", FakeElement);
+  vi.stubGlobal("matchMedia", win.matchMedia);
+  vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (X11; Linux x86_64)" });
+  Object.assign(FakeElement.prototype, { value: "", selectionStart: 0, selectionEnd: 0, setSelectionRange: noop });
+  const { createRoot } = await import("react-dom/client");
+  const { Composer } = await import("../../composer/Composer.tsx");
+  const root = createRoot(doc.body.appendChild(doc.createElement("div")) as unknown as Element);
+  try {
+    await act(async () => { root.render(createElement(Composer)); });
+    const button = () => findAll(doc.body, (el) => el.getAttribute("data-testid") === "chat.composer.thinking")[0];
+    const pill = button();
+    if (pill === undefined) throw new Error("no Thinking button");
+    expect(pill.getAttribute("aria-pressed")).toBe("false");
+    expect(pill.getAttribute("aria-disabled")).toBeNull();
+    await act(async () => { (reactProps(pill)["onClick"] as () => void)(); });
+    expect(store.getState().think).toBe(true);
+    expect(button()?.getAttribute("aria-pressed")).toBe("true");
+    push("gpu.changed", { vendor: "none", measuredAt: 2 });
+    push("settings.changed", defaults["settings.get"]);
+    await act(async () => { await settled(); });
+    expect(store.getState().think, "the choice sticks").toBe(true);
+  } finally {
+    await act(async () => { root.unmount(); });
+  }
+});
+
+it("a new chat starts on the model used last, with the one app-wide context size chosen with it", async () => {
+  const { session, store, hydrated } = await boot();
+  await hydrated();
+  expect(store.getState().numCtx).toBe(16384);
+  session.openThread("A");
+  session.pickModel(GEMMA);
+  session.setContext(8192);
+  session.newThread();
+  expect(store.getState().model).toBe(GEMMA);
+  expect(store.getState().numCtx).toBe(8192);
+});
+
+it("what is in memory is unknown until something says, and a memory.changed push alone says it", async () => {
+  const { store, push, calls, hydrated } = await boot({ "memory.status": () => Promise.reject(new Error("no answer")) });
+  await hydrated();
+  await vi.waitFor(() => expect(calls).toContain("gpu.status"));
+  await settled();
+  expect(store.getState().memory).toBeUndefined();
+  push("memory.changed", inMemory(QWEN));
+  expect(store.getState().memory).toEqual(inMemory(QWEN));
 });

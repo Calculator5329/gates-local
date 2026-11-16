@@ -19,7 +19,6 @@ export function Icon({ id, cls }: { id: IconId; cls?: string }) {
   );
 }
 
-/** The send arrow, drawn inline at 14 px like the design's ARROW constant. */
 export function SendArrow() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
@@ -74,20 +73,15 @@ export function Sprite() {
         <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10" /></symbol>
         <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M20 7h-9" /><path d="M14 17H5" /><circle cx="17" cy="17" r="3" /><circle cx="7" cy="7" r="3" /></symbol>
         <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M12 20h9" /><path d="M16.4 3.6a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></symbol>
-        {/* client addition: the phone top bar's drawer button, two lines like T3's and Claude's */}
         <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 8h16" /><path d="M4 16h10" /></symbol>
         <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" /></symbol>
         <symbol id="i-gauge" viewBox="0 0 24 24"><path d="m12 14 4-4" /><path d="M3.3 19a10 10 0 1 1 17.4 0" /></symbol>
         <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 15h10l1-15" /></symbol>
         <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5zM3 8l9 5 9-5M12 13v8" /></symbol>
-        {/* client addition: measured speed (Lucide circle-gauge), apart from the context gauge above */}
         <symbol id="i-speed" viewBox="0 0 24 24"><path d="M15.6 2.7a10 10 0 1 0 5.7 5.7" /><circle cx="12" cy="12" r="2" /><path d="M13.4 10.6 19 5" /></symbol>
-        {/* client addition: a measured model too slow to use (Lucide snail) */}
         <symbol id="i-snail" viewBox="0 0 24 24"><path d="M2 13a6 6 0 1 0 12 0 4 4 0 1 0-8 0 2 2 0 0 0 4 0" /><circle cx="10" cy="13" r="8" /><path d="M2 21h12c4.4 0 8-3.6 8-8V7a2 2 0 1 0-4 0v6" /><path d="M18 3 19.1 5.2" /><path d="M22 3 20.9 5.2" /></symbol>
-        {/* client addition: Models everywhere (Lucide bot) and the footer's Usage (Lucide chart-no-axes-column) */}
         <symbol id="i-bot" viewBox="0 0 24 24"><path d="M12 8V4H8" /><rect width="16" height="12" x="4" y="8" rx="2" /><path d="M2 14h2M20 14h2M15 13v2M9 13v2" /></symbol>
         <symbol id="i-bars" viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6" /></symbol>
-        {/* client addition: the sidebar footer's update icon (idle and ready, available, cannot update itself) */}
         <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></symbol>
         <symbol id="i-fetch" viewBox="0 0 24 24"><path d="M12 4v11" /><path d="m7 11 5 5 5-5" /><path d="M5 20h14" /></symbol>
         <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6" /><path d="m20 4-9 9" /><path d="M19 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4" /></symbol>

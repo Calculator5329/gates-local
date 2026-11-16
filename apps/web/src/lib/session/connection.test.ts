@@ -4,6 +4,11 @@ import { type State, getState } from "../store/store.ts";
 import { createConnection } from "./connection.ts";
 
 vi.mock("./index.ts", () => ({ recheckRuntime: () => undefined }));
+const pinFrames = vi.hoisted(() => vi.fn());
+vi.mock("../../pages/frame-policy.ts", () => ({ pinFramePolicy: pinFrames }));
+
+type Bridge = NonNullable<Window["gatesLocal"]>;
+type BridgeState = Parameters<Parameters<Bridge["onState"]>[0]>[0];
 
 class Socket extends EventTarget {
   static all: Socket[] = [];
@@ -100,4 +105,57 @@ test("a connection stopped before the boot bound does not end booting two second
   end();
   await vi.advanceTimersByTimeAsync(2000);
   expect(state.bootWaited).toBe(false);
+});
+
+function desktopBridge(): { bridge: Bridge; say: (state: BridgeState) => void } {
+  const listeners = new Set<(state: BridgeState) => void>();
+  const bridge: Bridge = {
+    getServerUrl: async () => "ws://127.0.0.1:5286/ws",
+    onState: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+  };
+  return { bridge, say: (state) => { for (const listener of listeners) listener(state); } };
+}
+
+async function reachServer(bridge: Bridge | undefined): Promise<void> {
+  const connection = createConnection({
+    applyServerEvent: () => {}, serverUrl: async () => "ws://127.0.0.1:5286/ws", webServerUrl: () => "ws://127.0.0.1:5286/ws", desktopBridge: () => bridge,
+    hydrate: async () => {}, afterDisconnect: () => {},
+  });
+  stop = connection.connect(); await vi.advanceTimersByTimeAsync(0);
+  stop();
+}
+
+test("while the desktop app has no server yet, the next try comes as soon as it says its server is ready, not a minute later", async () => {
+  vi.useFakeTimers(); vi.setSystemTime(0);
+  Socket.all = []; vi.stubGlobal("WebSocket", Socket); vi.stubGlobal("indexedDB", undefined);
+  const { bridge, say } = desktopBridge();
+  let asked = 0;
+  const connection = createConnection({
+    applyServerEvent: () => {}, serverUrl: async () => { asked++; return null; }, webServerUrl: () => null, desktopBridge: () => bridge,
+    hydrate: async () => {}, afterDisconnect: () => {},
+  });
+  stop = connection.connect(); await vi.advanceTimersByTimeAsync(0);
+  expect(asked).toBe(1);
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(asked).toBe(1);
+  say({ status: "starting" }); await vi.advanceTimersByTimeAsync(0);
+  expect(asked).toBe(1);
+  say({ status: "ready", serverUrl: "ws://127.0.0.1:5286/ws" }); await vi.advanceTimersByTimeAsync(0);
+  expect(asked).toBe(2);
+  await vi.advanceTimersByTimeAsync(59_999);
+  expect(asked).toBe(2);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(asked).toBe(3);
+});
+
+test("a browser tab pins its frames to the server it talks to; the desktop app leaves its frames to its own main process", async () => {
+  vi.useFakeTimers(); vi.setSystemTime(0);
+  Socket.all = []; vi.stubGlobal("WebSocket", Socket); vi.stubGlobal("indexedDB", undefined); vi.stubGlobal("document", {});
+  pinFrames.mockClear();
+  await reachServer(desktopBridge().bridge);
+  expect(Socket.all).toHaveLength(1);
+  expect(pinFrames).not.toHaveBeenCalled();
+  await reachServer(undefined);
+  expect(Socket.all).toHaveLength(2);
+  expect(pinFrames.mock.calls).toEqual([["http://127.0.0.1:5286"]]);
 });

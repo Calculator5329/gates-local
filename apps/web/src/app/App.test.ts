@@ -357,3 +357,34 @@ it("an open sheet sits over a scrim that closes it", async () => {
   await click("[data-testid=\"ui.pop.scrim\"]");
   expect(store.getState().pop).toBeNull();
 });
+
+it("under the Usage pop-up the chat stays mounted: the same timeline and composer nodes as before it opened", async () => {
+  await mount(OPEN);
+  const timeline = one(".stage .tl");
+  const composer = one(".stage .cw");
+  expect([timeline, composer]).not.toContain(null);
+  await set({ panel: "usage" });
+  expect(one(".dlg")).not.toBeNull();
+  expect(one(".stage .tl")).toBe(timeline);
+  expect(one(".stage .cw")).toBe(composer);
+});
+
+interface Fiber { readonly type: unknown; readonly child: Fiber | null; readonly sibling: Fiber | null; readonly stateNode: { readonly current?: Fiber } | null }
+const children = (fiber: Fiber): Fiber[] => {
+  const out: Fiber[] = [];
+  for (let c = fiber.child; c !== null; c = c.sibling) out.push(c);
+  return out;
+};
+const everyFiber = (fiber: Fiber): Fiber[] => [fiber, ...children(fiber).flatMap(everyFiber)];
+
+it("the app's after-commit work is drawn once, as the last thing the app draws", async () => {
+  const { CommitJobs } = await import("../lib/ui/kit/focus.ts");
+  await mount(OPEN);
+  const container = doc.body.childNodes[0] as unknown as Record<string, Fiber>;
+  const key = Object.keys(container).find((k) => k.startsWith("__reactContainer$"));
+  const app = key === undefined ? undefined : container[key]?.stateNode?.current?.child;
+  if (app === undefined || app === null) throw new Error("no app drawn");
+  expect(app.type).toBe(App);
+  expect(children(app).at(-1)?.type).toBe(CommitJobs);
+  expect(everyFiber(app).filter((f) => f.type === CommitJobs)).toHaveLength(1);
+});

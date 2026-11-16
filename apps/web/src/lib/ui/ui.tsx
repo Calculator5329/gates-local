@@ -1,7 +1,3 @@
-// Shared pieces: the tooltip layer, popover placement and the verdict label.
-// Tooltips follow the design: any element with data-tip (HTML built by the
-// client, data always escaped with esc) or data-tipt (plain text, shown only
-// when the anchor's .t or .pk-nm is truncated).
 import { type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import type { Verdict } from "../words/format.ts";
 import { Icon } from "./icons.tsx";
@@ -10,24 +6,18 @@ import { requestFocus } from "./kit/focus.ts";
 
 type PopId = NonNullable<State["pop"]>["id"];
 type FixedPopId = Exclude<PopId, "thread">;
-/** The control each popover opens from; Escape and outside clicks return focus there. */
 const POP_ANCHOR: Record<FixedPopId, string> = { picker: "modelBtn", images: "modelBtn", plus: "plusBtn", opts: "optBtn", count: "countBtn", unset: "imageBtn" };
-/** The popover each element is drawn as. */
 export const POP_EL: Record<PopId, string> = { picker: "picker", images: "imagePicker", plus: "plusMenu", thread: "threadMenu", opts: "optsMenu", count: "countMenu", unset: "imageUnset" };
 
-/** A phone-width window (styles.css: 640 px and below), where popovers are bottom sheets. */
 export const PHONE = "(max-width: 640px)";
 export const isPhone = () => matchMedia(PHONE).matches;
 
-/** Modal wrapping skips hidden, disabled and inert descendants, including a visible inactive rail. */
 export function tabStops(root: HTMLElement | null): HTMLElement[] {
   return [...(root?.querySelectorAll<HTMLElement>("button:not(:disabled),a[href],input:not(:disabled),textarea,select,[tabindex]") ?? [])]
     .filter(el => el.tabIndex >= 0 && el.getClientRects().length > 0 && el.closest("[inert]") === null);
 }
-/** A device with no hover (a phone or tablet): tooltips open by tap, and focus never pops the keyboard on its own. */
 export const isTouch = () => matchMedia("(hover: none)").matches;
 
-/** A media query as render state, for markup that differs by width and not only by style. */
 export function useMedia(query: string): boolean {
   const subscribe = useCallback(
     (changed: () => void) => {
@@ -40,20 +30,17 @@ export function useMedia(query: string): boolean {
   return useSyncExternalStore(subscribe, () => matchMedia(query).matches, () => false);
 }
 
-/** A popover's control; each thread menu has its own row button. */
 export function anchorOf(id: PopId): HTMLElement | null {
   if (id !== "thread") return document.getElementById(POP_ANCHOR[id]);
   const p = getState().pop;
   return p?.id === "thread" ? document.querySelector<HTMLElement>(`.sb-row[data-thread="${CSS.escape(p.thread)}"] .sb-menu`) : null;
 }
 
-/** Open a popover, or close it when it is already open from the same control. */
 export function togglePop(id: FixedPopId, kb = false): void {
   closeTip();
   setState((s) => ({ pop: s.pop?.id === id ? null : { id, kb } }));
 }
 
-/** "if-inside" is a resize: a popover that held focus gives it back the way a phone's sheet does, and one that did not leaves focus alone. */
 export function closePop(refocus: boolean | "if-inside" = false): void {
   const p = getState().pop;
   if (p === null) return;
@@ -61,14 +48,13 @@ export function closePop(refocus: boolean | "if-inside" = false): void {
   const anchor = anchorOf(p.id);
   const sheet = isPhone() || (refocus === "if-inside" && el?.contains(document.activeElement) === true) ? el : null;
   setState({ pop: null });
-  // A context-menu key returns to the thread control; a button-opened menu returns to that button.
   const target = () =>
     (p.id === "thread" && p.at !== undefined ? document.querySelector<HTMLElement>(`.sb-row[data-thread="${CSS.escape(p.thread)}"] .sb-thread`) : null) ??
     (anchor?.isConnected ? anchor : null) ??
     document.querySelector<HTMLElement>(".set-bar .bk") ??
     document.getElementById("menuBtn");
   if (sheet !== null) {
-    // the app stays inert until this close has rendered, and focus must not stay in a hidden sheet
+    // why: the app stays inert until the close renders, so focus waits for that commit
     requestFocus(() => {
       const a = document.activeElement;
       return a === null || a === document.body || sheet.contains(a) ? target() : null;
@@ -78,7 +64,6 @@ export function closePop(refocus: boolean | "if-inside" = false): void {
   if (refocus === true) target()?.focus();
 }
 
-/** Up, Down, Home and End move between a menu's items. */
 export function menuKeys(e: ReactKeyboardEvent<HTMLDivElement>): void {
   const items = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
   const at = items.indexOf(document.activeElement as HTMLElement);
@@ -88,32 +73,18 @@ export function menuKeys(e: ReactKeyboardEvent<HTMLDivElement>): void {
   items[(to + items.length) % items.length]?.focus();
 }
 
-/** Escape text for a data-tip string. Every server or model value passes through it. */
 export function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] ?? c);
 }
 
 export const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-/**
- * Stands in for a value still on its way, at the height of the line it stands
- * for (docs/design.md). The look lives in the one `.skel` class. Its container
- * says aria-busy while one shows; the block itself is hidden from assistive tech.
- */
 export const Skel = ({ w = "8em" }: { w?: string }) => <span className="skel" data-skel="" aria-hidden="true" style={{ width: w }} />;
 
-/** A fit value before the first fit table: the same placeholder, named so a test can find the fit's own. */
 export const FitSkel = ({ w = "40px" }: { w?: string }) => <span className="skel fit-skel" data-skel="" aria-hidden="true" style={{ width: w }} />;
 
-/** Line widths of the placeholder turns: a short question, a reply a few lines long. */
 const TURN_SKEL = [["38%"], ["94%", "88%", "62%"], ["26%"], ["90%", "71%"]] as const;
 
-/**
- * A conversation whose turns are still being read: turn-shaped placeholders
- * at the text's line height, a question on the right and a reply under it,
- * since how many turns and how long is the data's (docs/design.md). The
- * timeline around it says aria-busy.
- */
 export const TurnSkel = () => (
   <div className="tl-skel" data-skel="" aria-hidden="true" data-thread-loading="" data-flicker-box="thread-loading">
     {TURN_SKEL.map((lines, i) => (
@@ -124,7 +95,6 @@ export const TurnSkel = () => (
   </div>
 );
 
-/** The verdict label: a dot and the words in the verdict color (F35). */
 export function VLabel({ v, cls = "vl", hidden }: { v: Verdict; cls?: string; hidden?: boolean }) {
   return (
     <span className={`${cls} ${v.k}`} aria-hidden={hidden ? true : undefined}>
@@ -134,7 +104,6 @@ export function VLabel({ v, cls = "vl", hidden }: { v: Verdict; cls?: string; hi
   );
 }
 
-/** A bottom sheet's title row with its close button. Drawn only on a phone (styles.css .sh-h). */
 export function SheetHead({ title, sub }: { title: string; sub?: string }) {
   return (
     <div className="sh-h">
@@ -149,24 +118,20 @@ export function SheetHead({ title, sub }: { title: string; sub?: string }) {
   );
 }
 
-/** What counts as a control for tap-to-explain: its tap is its own action. */
 const CONTROL = "button, a, input, textarea, [role=button], [role=switch], [role=menuitem]";
 
 const TIP_DELAY_MS = 400;
 const TIP_WARM_MS = 300;
 
 let hideTip: (within?: string) => void = () => undefined;
-/** Hide an open or pending tooltip, optionally only within the changed control. */
 export function closeTip(within?: string): void {
   hideTip(within);
 }
 let showTipAt: (anchor: Element) => void = () => undefined;
-/** Open an anchor's tooltip now, as focus would: a row the keyboard highlights without focusing it. */
 export function openTip(anchor: Element | null | undefined): void {
   if (anchor) showTipAt(anchor);
 }
 
-/** The one tooltip element and its document listeners. Mount once. */
 export function Tip() {
   const ref = useRef<HTMLDivElement>(null);
   // oxlint-disable-next-line gates/effect-needs-reason -- the one tooltip's document listeners and the observer that follows its anchor while React rewrites it
@@ -197,7 +162,6 @@ export function Tip() {
       if (!within || tipFor?.closest(within) || waitingFor?.closest(within)) hide();
     };
     const over = (e: Event) => {
-      // with no hover (touch), a tap on a control is its action; tap() below opens tooltips instead
       if (isTouch()) return;
       const target = e.target instanceof Element ? e.target : null;
       const t = target?.closest("[data-tip],[data-tipt]") ?? null;
@@ -221,7 +185,6 @@ export function Tip() {
       if (next !== null && (next === tipFor || next === waitingFor)) return;
       hide();
     };
-    // stay: the same anchor's new words; the left edge holds unless the tip would leave the screen
     const show = (t: Element, stay = false) => {
       const was = stay ? parseFloat(el.style.left) : NaN;
       cancelWait();
@@ -239,8 +202,7 @@ export function Tip() {
       el.innerHTML = html;
       el.classList.add("open");
       const r = t.getBoundingClientRect();
-      // Measure at the left edge: left where the last tip was (near the window's
-      // right edge) it shrinks to fit, then widens once moved and covers its row.
+      // external: a browser shrinks a fixed box near the window's right edge to fit
       el.style.left = "0px";
       const w = el.offsetWidth;
       const h = el.offsetHeight;
@@ -248,13 +210,11 @@ export function Tip() {
       let left = r.left + r.width / 2 - w / 2;
       const picker = t.closest(".pk-foot") ? null : t.closest("#picker");
       if (picker || (t.closest(".sb") && t.classList.contains("sb-row"))) {
-        // Outside the picker (F72): its context column also contains names and costs.
         const side = picker?.getBoundingClientRect() ?? r;
         top = r.top + r.height / 2 - h / 2;
         left = side.right + 8;
         if (left + w > window.innerWidth - 6) left = side.left - w - 8;
         if (picker && left < 6) {
-          // No room on either side (a narrow window): outside the picker, above it or else below.
           const p = picker.getBoundingClientRect();
           left = p.left;
           top = p.top - h - 6 >= 6 ? p.top - h - 6 : p.bottom + 6;
@@ -270,8 +230,6 @@ export function Tip() {
       const t = target.closest("[data-tip]");
       if (t) show(t);
     };
-    // touch: a tap on text that only explains (a legend row, a dotted term, a row that can't be
-    // picked) opens its tooltip; a tap on a control does what the control does
     const tap = (e: MouseEvent) => {
       if (!isTouch()) return;
       const target = e.target instanceof Element ? e.target : null;
@@ -282,16 +240,12 @@ export function Tip() {
     const scrolled = () => {
       if (isTouch()) hide();
     };
-    // React may move, replace or rewrite an anchor without a pointer event.
-    // Unrelated mutations leave the same explanation at the same anchor open.
     const changes = new MutationObserver(records => {
       const target = tipFor ?? waitingFor;
       if (!target) return;
       const now = target.getAttribute("data-tip") || target.getAttribute("data-tipt");
       if (!target.isConnected || !now) return hide();
-      // new words at the same anchor (a download's percentage): the open tip follows in place; a pending one shows the newest
       if (source !== now) {
-        // an anchor with no box (hidden, collapsed) has nowhere to point
         const box = target.getBoundingClientRect();
         if (box.width === 0 || box.height === 0) return hide();
         return target === tipFor ? show(target, true) : remember(target);
@@ -326,10 +280,6 @@ export function Tip() {
   return <div className="tip" id="tip" ref={ref} />;
 }
 
-/**
- * Place a popover next to its anchor (the design's place()). Composer popovers
- * open above the composer; "below" opens under the anchor; "end" aligns right edges.
- */
 export function place(pop: HTMLElement, anchor: HTMLElement, align: "start" | "end", dir?: "below"): void {
   const r = anchor.getBoundingClientRect();
   const ph = pop.offsetHeight;

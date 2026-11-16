@@ -1,13 +1,12 @@
 import { useRef } from "react";
 import { useFlash } from "./kit/flash.ts";
 
-/** Use the native API when allowed, otherwise copy a temporary plain-text selection. */
 export async function copyText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
     return true;
   } catch {
-    // Desktop permissions and plain HTTP can make the native API unavailable.
+    // external: browsers refuse navigator.clipboard over plain HTTP or without permission
   }
   const active = document.activeElement;
   const field = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement ? active : null;
@@ -19,9 +18,6 @@ export async function copyText(text: string): Promise<boolean> {
   const anchorOffset = selection?.anchorOffset ?? 0;
   const focus = selection?.focusNode;
   const focusOffset = selection?.focusOffset ?? 0;
-  // With a field focused, the document selection is only a caret (one point)
-  // at or around it; any real range, even one starting in an ancestor such as
-  // the page body, is a reader's selection and is what gets restored.
   const caret = anchor === focus && anchorOffset === focusOffset;
   const inField = field != null && (!anchor || (caret && (anchor === field || anchor.contains(field))));
   const ta = document.createElement("textarea");
@@ -47,7 +43,6 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
-/** A success flash starts only after copying succeeds; a failure stays until retried. */
 export function useCopy(text: string, ms = 1500) {
   const [copied, setCopied] = useFlash<boolean>(ms, (ok) => !ok);
   const attempt = useRef(0);

@@ -19,9 +19,9 @@ class FakeSocket {
   removeEventListener(): void {}
 }
 
-function page(href: string, meta: boolean): void {
+function page(href: string, meta: boolean, bridge?: Window["gatesLocal"]): void {
   const url = new URL(href);
-  vi.stubGlobal("window", {});
+  vi.stubGlobal("window", bridge === undefined ? {} : { gatesLocal: bridge });
   vi.stubGlobal("location", { href, host: url.host, protocol: url.protocol, search: url.search, hash: url.hash, pathname: url.pathname });
   vi.stubGlobal("document", {
     querySelector: (selector: string) =>
@@ -88,5 +88,31 @@ describe("same-origin server discovery", () => {
     expect(st.serverOrigin).toBe("http://127.0.0.1:5286");
     expect(st.fileToken).toBe("abc");
     expect(s.fileUrl(st.serverOrigin ?? "", st.fileToken, "images/x.png")).toBe("http://127.0.0.1:5286/files/images/x.png?token=abc");
+  });
+
+  it("the desktop app's own server wins over ?server=", async () => {
+    const desktop = "ws://127.0.0.1:5290/?token=desk";
+    page(`http://127.0.0.1:5287/?server=${encodeURIComponent("ws://127.0.0.1:5286/?token=abc")}`, true, { getServerUrl: async () => desktop, onState: () => () => undefined });
+    const s = await boot();
+    expect(openedAt()).toEqual([desktop]);
+    expect(s.store.getState().fileToken).toBe("desk");
+  });
+
+  it("?server= wins over the build's VITE_GATES_LOCAL_SERVER, and that wins over the page's own host", async () => {
+    const built = "ws://127.0.0.1:5291/?token=built";
+    vi.stubEnv("VITE_GATES_LOCAL_SERVER", built);
+    try {
+      const asked = "ws://127.0.0.1:5286/?token=abc";
+      page(`http://127.0.0.1:5287/?server=${encodeURIComponent(asked)}`, true);
+      await boot();
+      expect(openedAt()).toEqual([asked]);
+      vi.resetModules();
+      FakeSocket.opened = [];
+      page("https://hub.example.ts.net:8456/", true);
+      await boot();
+      expect(openedAt()).toEqual([built]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

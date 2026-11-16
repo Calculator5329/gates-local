@@ -1,7 +1,5 @@
-// Work done once a frame while something animates (a paced reveal).
 import { useEffect, useEffectEvent } from "react";
 
-/** Calls `tick` every frame while `active`; `tick` returns false to stop until `active` turns on again. */
 export function useAnimationFrame(tick: (time: number) => boolean, active: boolean): void {
   const step = useEffectEvent(tick);
   // oxlint-disable-next-line gates/effect-needs-reason -- holds the frame loop while active and cancels it on stop or unmount

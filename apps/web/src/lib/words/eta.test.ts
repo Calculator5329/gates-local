@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PullProgress } from "@gates-local/contracts";
-import { etaText } from "./format.ts";
+import { etaText, timeLeft } from "./format.ts";
 
 const GB = 1e9;
 const SP = String.fromCharCode(160);
@@ -24,5 +24,19 @@ describe("download time left", () => {
   it("says what has arrived, with no total and no time left, while the whole size is unknown", () => {
     expect(etaText(p({ completedBytes: 0.2 * 1024 ** 3, bytesPerSecond: 15e6 }))).toBe(`0.2${SP}GB so far · 15 MB/s`);
     expect(etaText(p({ completedBytes: 0 }))).toBe("Starting");
+  });
+});
+
+describe("time left on its own", () => {
+  it("says whole seconds under 10 s and rounds up to the next 5 s from there to a minute", () => {
+    expect(timeLeft(0.2)).toBe("1 s");
+    expect(timeLeft(3)).toBe("3 s");
+    expect(timeLeft(7.4)).toBe("7 s");
+    expect(timeLeft(9)).toBe("9 s");
+    expect(timeLeft(10)).toBe("10 s");
+    expect(timeLeft(11)).toBe("15 s");
+    expect(timeLeft(21)).toBe("25 s");
+    expect(timeLeft(54)).toBe("55 s");
+    expect(timeLeft(56)).toBe("1 min");
   });
 });

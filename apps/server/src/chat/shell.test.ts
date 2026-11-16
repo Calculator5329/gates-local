@@ -41,3 +41,11 @@ it("asks the sandbox again only after a failed check has stood a while, and neve
   expect(await status()).toEqual({ state: "ready" });
   expect(runs).toHaveLength(2);
 });
+
+it("on Windows Run commands is off as Linux only, and the probe runs no command", async () => {
+  const runs: string[] = [];
+  const windows: SandboxHost = { ...sandboxHost(() => true, runs), platform: "win32", run: async (command) => { runs.push(command); return { code: 0, output: "" }; } };
+  const status = createShellStatus(createProbe(windows), () => undefined);
+  expect(await status()).toEqual({ state: "off", word: "Linux only", reason: "The shell tool runs only on Linux." });
+  expect(runs).toEqual([]);
+});

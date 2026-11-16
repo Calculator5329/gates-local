@@ -129,6 +129,14 @@ it("opening a queued editor makes an old draft recent enough to persist its imag
   expect(drafts.savedDrafts().at(-1)).toMatchObject({ key: "0", draft: { text: "queued edit", images: ["edit-image"], beforeEdit: { text: "words 0", images: ["image 0"] } } });
 });
 
+it("typing in an old draft makes it the newest, so it persists with its images", async () => {
+  vi.resetModules();
+  const drafts = await import("../lib/store/drafts.ts");
+  for (let i = 0; i < 34; i++) drafts.replaceDraft(String(i), { text: `words ${i}`, images: [`image ${i}`] });
+  drafts.replaceDraft("0", { text: "words 0, more" }, true);
+  expect(drafts.savedDrafts().at(-1)).toMatchObject({ key: "0", draft: { text: "words 0, more", images: ["image 0"] } });
+});
+
 it("keeps a restored draft or queued copy's saved-message identity for a safe retry", () => {
   expect(recoverDraft({ draft: "retry words", images: [], sendId: "draft-send", sendThreadId: "A", queued: [{ id: "q", messageId: "queued-send", threadId: "t", text: "queued words", images: [], at: 1 }] })).toMatchObject({ sendId: "draft-send", sendThreadId: "A", queued: [expect.objectContaining({ messageId: "queued-send" })] });
 });

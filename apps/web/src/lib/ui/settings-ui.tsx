@@ -1,5 +1,3 @@
-// The building blocks every Settings section uses: the section head, a
-// group, a row with its failure line, and the keyboard rules of a popover.
 import { type KeyboardEvent, type ReactNode, useCallback, useState } from "react";
 import { useDismiss } from "./kit/events.ts";
 import { handleKey } from "./handles.ts";
@@ -16,13 +14,7 @@ export function Head({ title, children }: { title: string; children?: ReactNode 
 
 export { Skel } from "./ui.tsx";
 
-/*
- * Tooltips (docs/design.md): a label, a row, a group title or a value has none. An icon-only
- * button has a name of one to three words; a disabled button may say why in a few words. A
- * sentence the screen is wrong without is a line in the panel, never a tip.
- */
 
-/** A group is a title and a card, never a line under the title (docs/design.md). `busy` while a placeholder in it shows. */
 export function Grp({ title, action, busy = false, children }: { title?: string; action?: ReactNode; busy?: boolean; children: ReactNode }) {
   return (
     <div className="grp" aria-busy={busy || undefined}>
@@ -39,10 +31,6 @@ export function Grp({ title, action, busy = false, children }: { title?: string;
   );
 }
 
-/**
- * The failure of the last action a control ran (W-07): null until one fails,
- * cleared when the next try starts. run resolves true on success.
- */
 export function useAct(): [string | null, (action: Promise<ActionResult>) => Promise<boolean>] {
   const [err, setErr] = useState<string | null>(null);
   const run = useCallback(async (action: Promise<ActionResult>) => {
@@ -54,7 +42,6 @@ export function useAct(): [string | null, (action: Promise<ActionResult>) => Pro
   return [err, run];
 }
 
-/** One calm sentence beside the control that failed. */
 export const Fail = ({ err, line = false }: { err: string | null; line?: boolean }) =>
   err === null ? null : (
     <span className={line ? "act-err line" : "act-err"} role="alert">
@@ -62,7 +49,6 @@ export const Fail = ({ err, line = false }: { err: string | null; line?: boolean
     </span>
   );
 
-/** A row: its label and at most one short grey line that the label and control do not already say. */
 export function Row({ label, desc, err = null, busy = false, children }: { label: ReactNode; desc?: ReactNode; err?: string | null; busy?: boolean; children?: ReactNode }) {
   return (
     <div className="srow" aria-busy={busy || undefined}>
@@ -78,13 +64,10 @@ export function Row({ label, desc, err = null, busy = false, children }: { label
 
 export const Na = ({ children }: { children: ReactNode }) => <span className="na">{children}</span>;
 
-/** Stands in for a control the phone listener refuses. */
 export const COMPUTER_ONLY = "Available on the computer.";
 
-/** Close a popover on a press outside it. */
 export const useOutside = useDismiss;
 
-/** Two choices side by side; the app's control for a short fixed set, never a native select. */
 export function Seg2<T extends string | number>({ value, options, onPick, label, handle, disabled = false }: { value: T | undefined; options: readonly (readonly [T, string])[]; onPick: (v: T) => void; label: string; handle: string; disabled?: boolean }) {
   return (
     <span className="seg2" role="group" aria-label={label}>
@@ -99,7 +82,6 @@ export function Seg2<T extends string | number>({ value, options, onPick, label,
 
 const typed = { text: "", at: 0 };
 const nameOf = (el: HTMLElement) => (el.getAttribute("aria-label") ?? el.textContent ?? "").trim().toLowerCase();
-/** Letters typed within a moment of each other find the next item whose name starts with them. */
 function find(items: HTMLElement[], at: number, key: string): HTMLElement | undefined {
   const now = Date.now();
   typed.text = now - typed.at < 800 ? typed.text + key.toLowerCase() : key.toLowerCase();
@@ -108,7 +90,6 @@ function find(items: HTMLElement[], at: number, key: string): HTMLElement | unde
   return [...items.slice(from), ...items.slice(0, from)].find((el) => nameOf(el).startsWith(typed.text));
 }
 
-/** Arrow keys walk the items of a menu or list, skipping disabled ones; letters find one by name; Escape closes it. */
 export function walk(e: KeyboardEvent<HTMLElement>, box: HTMLElement | null, selector: string, close: () => void): void {
   if (e.key.length !== 1) typed.text = "";
   if (e.key === "Escape") {

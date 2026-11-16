@@ -1132,3 +1132,41 @@ describe("action failures come back to the caller (W-07)", () => {
     expect(await session.addSource("sqlite", "/home/me/library.db")).toBeNull();
   });
 });
+
+describe("Library's samples, Usage and Tools across a connection", () => {
+  it("Library's Retry after the samples could not be read shows the placeholder while it reads again, then the new answer", async () => {
+    b.server.answer("sources.imports", refuse("not-implemented", "sources.imports is not in this build"));
+    await boot();
+    await until(() => store.getState().sourceImports === store.NA, 1000, "the failed samples read");
+    const held = b.server.hold("sources.imports");
+    const retrying = session.retryImports();
+    const request = await held;
+    expect(store.getState().sourceImports, "the placeholder while the read goes again").toBeUndefined();
+    const answer = { samples: [{ id: "chinook", label: "Chinook", description: "A music store", sizeBytes: 1_000_000, url: "https://example.invalid/chinook.db", license: "MIT", licenseUrl: "https://example.invalid/license", tables: [{ name: "albums", rows: 347 }], questions: ["Which artist has the most albums?"] }], jobs: [] };
+    request.respond(answer);
+    await retrying;
+    expect(store.getState().sourceImports).toEqual(answer);
+  });
+
+  it("a reconnect reads Usage again while it is open, since turns may have ended while the connection was down", async () => {
+    await boot();
+    store.setState({ panel: "usage" });
+    const reads = b.server.calls("usage.read").length;
+    const sockets = b.server.sockets.length;
+    b.server.socket.close();
+    await until(() => b.server.sockets.length > sockets, 3000, "a new socket");
+    await until(() => b.server.calls("usage.read").length === reads + 1, 3000, "Usage read again after the reconnect");
+    await tick();
+    expect(b.server.calls("usage.read")).toHaveLength(reads + 1);
+  });
+
+  it("on Windows the window never asks for the sandbox probe, at connect or when Tools opens", async () => {
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36" });
+    await bootSettingsReady();
+    session.openSettings("tools");
+    await until(() => store.getState().view === "settings" && store.getState().section === "tools", 1000, "Settings on Tools");
+    await tick();
+    expect(b.server.calls("tools.shell")).toHaveLength(0);
+    expect(store.getState().shellStatus).toBeUndefined();
+  });
+});

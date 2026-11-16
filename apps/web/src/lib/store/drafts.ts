@@ -15,19 +15,17 @@ export function getDraft(key: DraftKey = currentDraftKey()): Draft {
   if (!draft) { draft = { text: "", images: emptyImages, sendId: null, version: ++version }; slots.set(key, draft); }
   return draft;
 }
-/** The draft has words, images or files in it: the person is writing. */
 export const draftHolds = (key: DraftKey): boolean => holds(getDraft(key));
 
 export function replaceDraft(key: DraftKey, patch: Partial<DraftWords>, typing = false): void {
   const previous = getDraft(key);
   const edited = patch.text !== undefined && patch.text !== previous.text || patch.images !== undefined && patch.images !== previous.images
     || patch.files !== undefined && patch.files !== previous.files;
-  slots.delete(key); // insertion order is last edit order, never navigation order
+  slots.delete(key);
   slots.set(key, { ...previous, ...patch, sendId: patch.sendId !== undefined ? patch.sendId : edited ? null : previous.sendId,
     version: typing && patch.text !== "" ? previous.version : ++version });
   changed();
 }
-/** Typing publishes the application store only to dismiss a notice or warning. */
 export function editDraft(text: string): void {
   const state = getState();
   if (state.notice !== null || state.stopAsk !== null) setState({ notice: null, stopAsk: null });
@@ -37,12 +35,10 @@ export function clearDraft(key: DraftKey): void {
   slots.set(key, { ...(getDraft(key).beforeEdit ?? { text: "", images: emptyImages, sendId: null }), version: ++version });
   changed();
 }
-/** Same words, new identity: a paste or dictation still being read was meant for the draft before this. */
 export function renewDraft(key: DraftKey): void {
   slots.set(key, { ...getDraft(key), version: ++version });
   changed();
 }
-/** A first send creates a thread; later typing belongs to that thread too. */
 export function moveDraft(from: DraftKey, to: DraftKey): void {
   const draft = getDraft(from);
   slots.delete(from);
@@ -66,14 +62,12 @@ export function cancelQueuedDraft(key: DraftKey): void {
   changed();
 }
 
-/** The attached-file paths every slot names, its words before a queued edit included. */
 export function draftFilePaths(): Set<string> {
   const paths = new Set<string>();
   for (const draft of slots.values()) for (const f of [...draft.files ?? [], ...draft.beforeEdit?.files ?? []]) paths.add(f.path);
   return paths;
 }
 
-/** Persist the 32 most recently edited nonempty slots, with images in the newest two. */
 export function savedDrafts(): readonly { key: DraftKey; draft: Draft }[] {
   const drafts = [...slots].filter(([, d]) => holds(d) || d.beforeEdit !== undefined).slice(-32);
   let imageSlots = 0;
@@ -96,7 +90,7 @@ export function restoreDrafts(drafts: readonly { key: DraftKey; draft: DraftWord
   return restored;
 }
 
-/** Text readers and boolean readers share the source, each selecting only their value. */
+// why: one subscription feeds every draft reader, so typing reruns only cheap selectors
 export function useDraft<T>(selector: (draft: Draft) => T): T {
   const key = useStore(s => s.threadId);
   const snapshot = () => selector(getDraft(key));

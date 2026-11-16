@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-16: the web app's shared library holds to the six comment kinds
+
+- apps/web/src/lib passes the comment rule: all 323 offenders went, and
+  the folder's comment lines fell from 535 to 30. What stays is five
+  one-line `external:` facts about browsers and Ollama and fourteen
+  `why:` lines.
+- Thirteen comments were stale or only restated the code and went.
+  Among them: a pointer to session/pictures.ts, which does not exist;
+  an update note naming `pnpm run app-update`, where the desktop runs
+  node scripts/update.ts; and a note that the model button changes
+  during a load, where a ring around Send fills instead.
+- 111 rules gained a unit test, each watched fail with its rule broken.
+- Two comments the map called held turned out not to be: the test
+  named for each never reached its rule. Both now count as held only
+  by their new tests.
+
 ## 2026-11-16: the wire contract package holds to the six comment kinds
 
 - packages/contracts/src passes the comment rule: all 318 offenders

@@ -1,20 +1,15 @@
-// Words and numbers the design fixes (shell.md F16, F34, F35, F62): one
-// decimal for GB, three verdict labels, the friendly model name first.
 import { NBSP, gb, k, type CatalogEntry, type ContextSize, type FitReport, type FitWords, type GpuOccupant, type Message, type ModelInfo, type PullProgress, type Source } from "@gates-local/contracts";
 
-// "6.6 GB" (GiB, a no-break space before the unit) and "16k": the units the server's fit words use too.
 export { NBSP, gb, k };
 
 export const CONTEXT_SIZES: readonly ContextSize[] = [8192, 16384, 32768, 65536];
 
 const GIB = 1024 ** 3;
 
-/** A whole card's size, the same on every surface: "16 GB" (16303 MiB is a 16 GB card, never "15.9 GB"). */
 export function cardGb(bytes: number): string {
   return `${Math.round(bytes / GIB)}${NBSP}GB`;
 }
 
-/** The drawer's one time format: "now", "5m", "3h", "2d", "3w", "5mo", "2y". */
 export function shortAge(ms: number, now: number): string {
   const s = Math.floor((now - ms) / 1000);
   if (s < 60) return "now";
@@ -29,16 +24,13 @@ export function shortAge(ms: number, now: number): string {
   return `${Math.floor(d / 365)}y`;
 }
 
-/** A Library file's size: "223 bytes", "39 KB", "5 MB", "3.0 GB". */
 export function fileSize(bytes: number): string {
-  // Compared after rounding, so 1023.5 KB reads "1 MB", never "1024 KB" (LS-01).
   if (Math.round(bytes / 1024 ** 2) >= 1024) return gb(bytes);
   if (Math.round(bytes / 1024) >= 1024) return `${Math.round(bytes / 1024 ** 2)} MB`;
   if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${bytes} ${bytes === 1 ? "byte" : "bytes"}`;
 }
 
-/** A Library row's detail: "Refreshing…", the error, "223 bytes · copied Nov 7", or nothing for a folder (its size is the folder entry's, not its contents'). */
 export function sourceDetail(src: Source): string {
   if (src.state === "refreshing") return "Refreshing…";
   if (src.state === "error") return src.detail ?? "Couldn't read it.";
@@ -48,52 +40,33 @@ export function sourceDetail(src: Source): string {
   return parts.join(" · ");
 }
 
-/** The context `tag` runs at: the size asked for, never past the most it takes. */
 export function ctxFor(numCtx: number, models: readonly { readonly name: string; readonly maxContext?: number }[] | undefined, tag: string | undefined): number {
   const max = models?.find((m) => m.name === tag)?.maxContext;
   return max === undefined ? numCtx : Math.min(numCtx, max);
 }
 
-/**
- * The GPU status says there is no GPU the app can read (no nvidia-smi, as on
- * a Windows or Linux machine with only Intel or AMD graphics): every model
- * is planned in system memory, and the words must not promise a GPU.
- */
 export function noGpu(gpu: { readonly vendor: string } | undefined | "na"): boolean {
   return gpu !== undefined && gpu !== "na" && gpu.vendor === "none";
 }
 
-/**
- * Folder names as this machine spells them. The server listens on loopback
- * only, so the client's OS is the server's; the desktop window's user agent
- * names Windows there.
- */
 export function folderWords(userAgent: string = typeof navigator === "undefined" ? "" : navigator.userAgent): { models: string; appCopy: string; appModels: string } {
   return /\bWindows\b/.test(userAgent)
     ? { models: "%USERPROFILE%\\.ollama\\models", appCopy: "%LOCALAPPDATA%\\GatesLocal\\runtime\\ollama", appModels: "%LOCALAPPDATA%\\GatesLocal\\models" }
     : { models: "~/.ollama/models", appCopy: "~/.local/share/gates-local/runtime/ollama", appModels: "~/.local/share/gates-local/models" };
 }
 
-/** "1 model", "3 models". */
 export const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-/** What the app says when noGpu() holds. */
 export const NO_GPU_TEXT = "No supported GPU was found (Gates Local reads NVIDIA cards). Replies are slower than on a GPU.";
 
 export type VerdictKind = FitWords["k"];
 
-/**
- * A fit report as the screen prints it: the server's words for its verdict (FitReport.words, made
- * where the server judged it, on the basis it judged), and the numbers beside them. The client
- * makes no verdict and no fit sentence of its own.
- */
 export interface Verdict extends FitWords {
   readonly need: number;
   readonly avail: number;
   readonly measured: boolean;
 }
 
-/** A report from a server too old to send words: the kind its verdict names, and no words. */
 const UNSAID: Record<FitReport["verdict"], VerdictKind> = { fits: "gpu", spills: "spill", refuse: "no" };
 
 export function verdictOf(r: FitReport): Verdict {
@@ -101,26 +74,15 @@ export function verdictOf(r: FitReport): Verdict {
   return { ...words, need: r.needVramBytes, avail: r.freeVramBytes, measured: r.source === "measured" };
 }
 
-/** A GPU holder in the app's words, as the GPU memory panel's legend names it: "Whisper", "ComfyUI", a program's name, "Other". */
 export function holderName(o: Pick<GpuOccupant, "kind" | "label">): string {
   return o.kind === "whisper" ? "Whisper" : o.kind === "unknown" ? "Other" : o.label;
 }
 
-/** Why a model the card holds runs slower right now: the row's short form and the sentence behind it. */
 export interface SlowReason {
-  /** "Slower now · Whisper in the way", with the measured speed when there is one: "Slower now, 7.3 tok/s · Whisper in the way". */
   readonly short: string;
-  /** "Fits this card with Whisper (2.0 GB) and others (1.4 GB) off it. 3.3 GB is in system memory now." */
   readonly sentence: string;
 }
 
-/**
- * The words for a row whose card verdict fits while right now it spills (fit-table slowNow): who is
- * in the way, the biggest program by name and the rest summed. `tps`: the measured speed as the
- * row shows it ("7.3 tok/s"), only where the row has no speed of its own beside it. `said`: the
- * programs a line on the same screen already names (the list's "blender is using 9.7 GB" line);
- * one of them in the way is not named again in the short form, which then reads "Slower now".
- */
 export function slowReason(slow: { readonly inTheWay: readonly GpuOccupant[]; readonly spillRamBytes: number } | undefined, tps?: string, said: readonly string[] = []): SlowReason | undefined {
   if (slow === undefined || slow.inTheWay.length === 0) return undefined;
   const first = slow.inTheWay.find((o) => o.kind !== "unknown");
@@ -134,13 +96,8 @@ export function slowReason(slow: { readonly inTheWay: readonly GpuOccupant[]; re
   };
 }
 
-/** Tag words that read after the size ("Gemma 4 26B abliterated"); others read before it ("Qwen 3.5 VL 9B"). */
 const AFTER_SIZE = new Set(["abliterated", "uncensored", "instruct", "chat", "coder"]);
 
-/**
- * The friendly name for an Ollama tag when the catalog has no label:
- * "qwen3.5:9b" → "Qwen 3.5 9B", "qwen3.8-abliterated:27b" → "Qwen 3.8 27B abliterated".
- */
 export function friendlyName(tag: string): string {
   const [base = tag, variant = ""] = tag.split(":");
   const parts = base.split("-");
@@ -159,25 +116,15 @@ export function friendlyName(tag: string): string {
   return [lead, ...before, sizeText, ...after].filter((s) => s !== "").join(" ");
 }
 
-/** The name and purpose phrase for a tag: the catalog's when it has one. */
 export function describeModel(tag: string, catalog: readonly CatalogEntry[] | undefined): { name: string; purpose: string } {
   const c = catalog?.find((e) => e.name === tag);
   return { name: c?.label ?? friendlyName(tag), purpose: c?.purpose ?? "" };
 }
 
-/** "Q4_K_M · 6.6 GB on disk" pieces for a model's tooltip. */
 export function modelFacts(m: ModelInfo | undefined): { quant: string; disk: string } {
   return { quant: m?.quantization ?? "", disk: m ? `${gb(m.sizeBytes)} on disk` : "" };
 }
 
-/**
- * The meta line under a finished reply, numbers only: "4.5 s · 38 tok/s". The seconds
- * are the reply's work (thinking and tool time); a reply that did no work has none.
- */
-/**
- * A reply's wait for its model, from Enter to ready: a load, or a turn queued behind another.
- * Its own figure beside the work seconds, which never count it; none under a second.
- */
 export function replyWait(waitMs: number | undefined): string | undefined {
   return waitMs === undefined || waitMs < 1000 ? undefined : `${(waitMs / 1000).toFixed(1)} s`;
 }
@@ -190,19 +137,12 @@ export function replyMeta(msg: Pick<Message, "stats">, workMs?: number): string 
   return parts.join(" · ");
 }
 
-/**
- * Tokens per second of decoding: completion tokens over Ollama's
- * eval_duration. durationMs is the whole call, model load and prompt
- * included, so it is only the fallback for replies saved before decode time
- * was kept.
- */
 export function decodeSpeed(s: { completionTokens?: number; durationMs?: number; evalDurationMs?: number } | undefined): number | undefined {
   if (s?.completionTokens === undefined) return undefined;
   const ms = s.evalDurationMs ?? s.durationMs;
   return ms !== undefined && ms > 0 ? Math.round(s.completionTokens / (ms / 1000)) : undefined;
 }
 
-/** "2:14 PM". */
 export function clock(ms: number): string {
   const d = new Date(ms);
   const h = d.getHours();
@@ -222,7 +162,6 @@ function startOfDay(ms: number): number {
 
 export type Group = "Today" | "Yesterday" | "Previous 7 days" | "Older";
 
-/** The sidebar group and the short "ago" text for a thread's last update. */
 export function when(ms: number, now = Date.now()): { group: Group; ago: string } {
   const today = startOfDay(now);
   if (ms >= today) {
@@ -235,36 +174,27 @@ export function when(ms: number, now = Date.now()): { group: Group; ago: string 
   return { group: "Older", ago: `${MONTHS[d.getMonth()] ?? ""} ${d.getDate()}` };
 }
 
-/** The time on a user turn: a clock today, else the sidebar's short form. */
 export function turnTime(ms: number, now = Date.now()): string {
   const w = when(ms, now);
   return w.group === "Today" ? clock(ms) : w.group === "Yesterday" ? "Yesterday" : w.ago;
 }
 
-/** A thread title from its first message: about 46 characters, then an ellipsis. */
 export function titleFrom(text: string): string {
   const t = text.replace(/\s+/g, " ").trim();
   return t.length > 48 ? `${t.slice(0, 46)}…` : t;
 }
 
-/** Seconds rounded up to 5 under a minute ("about 25 s"), whole minutes from there. */
 export function timeLeft(seconds: number): string {
   const whole = Math.max(1, Math.round(seconds));
   const s = whole < 10 ? whole : Math.ceil(whole / 5) * 5;
   return s < 60 ? `${s} s` : `${Math.ceil(seconds / 60)} min`;
 }
 
-/**
- * The line under a download bar: bytes, speed, time left. Once every byte
- * is in, Ollama is verifying or writing the model, so the line names that
- * phase instead of a time worked out from download speed (G7-03).
- */
-/** `speed: false` leaves out MB/s: a download row's second line says only bytes and time left. */
 export function etaText(p: PullProgress, { speed = true }: { speed?: boolean } = {}): string {
   if (p.state === "verifying") return "Verifying the download";
   const total = p.totalBytes;
   if (total && p.completedBytes >= total) return "Finishing the download";
-  // no total: Ollama has not named every file yet and the registry gave no size, so only what arrived is true
+  // external: Ollama names a pull's files one by one; the total is unknown till then
   const parts = [total ? `${(p.completedBytes / 1024 ** 3).toFixed(1)} of ${gb(total)}` : p.completedBytes > 0 ? `${gb(p.completedBytes)} so far` : "Starting"];
   if (p.bytesPerSecond) {
     if (speed) parts.push(`${Math.round(p.bytesPerSecond / 1e6)} MB/s`);

@@ -1,17 +1,7 @@
-// Pop-ups over the app: Settings, Models and Usage. Dialog is T3 Code's Settings dialog: one
-// box of one size for all three, centred on the window, over a backdrop that dims the whole
-// window (no blur, panel.css); its content brings the header row
-// (DialogHead) and a body that scrolls (.dlg-body). A click on the dim layer closes it (press and
-// release both on it, as a click is); App's Escape and Tab rules close it and hold focus inside.
 import type { ReactNode } from "react";
 import { Icon } from "./icons.tsx";
 import "./panel.css";
 
-/**
- * The footer icon drawn at this point, under the dim. The icons stay in view beside the box
- * and are toggles, so a click on one does what it does: Settings, Models
- * and Usage switch straight to each other, and the lit one closes its own.
- */
 function footIconAt(x: number, y: number): HTMLElement | null {
   for (const b of document.querySelectorAll<HTMLElement>(".sb-foot .ibtn")) {
     const r = b.getBoundingClientRect();
@@ -20,7 +10,6 @@ function footIconAt(x: number, y: number): HTMLElement | null {
   return null;
 }
 
-/** Focus moves in as the box is drawn, so a key pressed next lands here. */
 function focusBox(el: HTMLDivElement | null): void {
   el?.focus({ preventScroll: true });
 }
@@ -36,7 +25,6 @@ export function Dialog({ label, onClose, children }: { label: string; onClose: (
   );
 }
 
-/** A Dialog's header row: the title at the left, the controls and Close at the right. */
 export function DialogHead({ title, onClose, children }: { title: string; onClose: () => void; children?: ReactNode }) {
   return (
     <div className="dlg-head">

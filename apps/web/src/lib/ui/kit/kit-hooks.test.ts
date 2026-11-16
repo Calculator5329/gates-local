@@ -50,6 +50,7 @@ beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "se
 afterEach(() => { act(() => root.render(null)); vi.useRealTimers(); });
 afterAll(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
 
+const WindowWatch = () => { kit.events.useDocumentEvent("keydown", () => undefined, { on: "window" }); return null; };
 const runFrames = (t = 0) => { const now = frames; frames = []; for (const f of now) f(t); };
 
 it("two readers of the same interval share one timer, and it stops when the last unmounts", () => {
@@ -228,4 +229,46 @@ it("a focus request with nothing drawing still runs a frame later, once, and lea
   expect(store.getState().afterCommit).toHaveLength(0);
   runFrames();
   expect(focused).toEqual(["alone"]);
+});
+
+it("a listener asked for on the window attaches to the window, not the document, and leaves it on unmount", () => {
+  const added = vi.spyOn(window, "addEventListener");
+  const removed = vi.spyOn(window, "removeEventListener");
+  act(() => root.render(createElement(WindowWatch)));
+  expect(added.mock.calls.map(([type]) => type)).toEqual(["keydown"]);
+  expect(mine()).toHaveLength(0);
+  act(() => root.render(null));
+  expect(removed.mock.calls.map(([type]) => type)).toEqual(["keydown"]);
+  expect(removed.mock.calls[0]?.[1]).toBe(added.mock.calls[0]?.[1]);
+  vi.restoreAllMocks();
+});
+
+it("a reader that joins a running clock starts from the time it mounted, never an older one", () => {
+  const seen: { name: string; at: number }[] = [];
+  const Reader = ({ name }: { name: string }) => { seen.push({ name, at: kit.now.useNow(30_000) }); return null; };
+  act(() => root.render(createElement("div", null, createElement(Reader, { key: "a", name: "a" }))));
+  const first = seen.find((s) => s.name === "a")!.at;
+  act(() => vi.advanceTimersByTime(10_000));
+  const joined = Date.now();
+  act(() => root.render(createElement("div", null, createElement(Reader, { key: "a", name: "a" }), createElement(Reader, { key: "b", name: "b" }))));
+  expect(kit.now.clockCount()).toBe(1);
+  expect(joined).toBe(first + 10_000);
+  expect(seen.find((s) => s.name === "b")!.at).toBe(joined);
+});
+
+it("a pop-up with nothing to watch is placed after every commit while open, and never while closed", () => {
+  const placed: number[] = [];
+  const Pop = ({ open, n }: { open: boolean; n: number }) => {
+    const ref = useRef<HTMLElement | null>(doc.createElement("div") as unknown as HTMLElement);
+    kit.popover.usePopover(ref, open, () => placed.push(n));
+    return null;
+  };
+  act(() => root.render(createElement(Pop, { open: false, n: 1 })));
+  act(() => root.render(createElement(Pop, { open: false, n: 2 })));
+  expect(placed).toEqual([]);
+  act(() => root.render(createElement(Pop, { open: true, n: 3 })));
+  act(() => root.render(createElement(Pop, { open: true, n: 4 })));
+  act(() => root.render(createElement(Pop, { open: true, n: 5 })));
+  act(() => root.render(createElement(Pop, { open: false, n: 6 })));
+  expect(placed).toEqual([3, 4, 5]);
 });

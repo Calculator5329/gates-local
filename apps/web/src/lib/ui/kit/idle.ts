@@ -1,9 +1,5 @@
-// Work that must not cost the first paint (a preload, a warm-up), and work cut into idle slices.
-
-/** Idle work may wait this long on a busy page before it runs anyway. */
 export const IDLE_LIMIT_MS = 1500;
 
-/** Runs `work` after the next two frames, in idle time (or straight after, with no idle callback). Returns a cancel. */
 export function scheduleIdle(work: () => void): () => void {
   let idle: number | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -24,14 +20,9 @@ export function scheduleIdle(work: () => void): () => void {
   };
 }
 
-/** With no idle callback, a slice waits this long, then runs with no idle time to spend. */
 export const NO_IDLE_WAIT_MS = 50;
 
-/**
- * Runs `slice` once the browser is idle, or after `within` ms at most, with how long it may still
- * work (`timeLeft`, 0 once the wait ran out). For work cut into slices, each scheduling the next.
- * Returns a cancel.
- */
+// external: once a browser's idle callback times out, timeRemaining() is 0
 export function whenIdle(slice: (timeLeft: () => number) => void, within: number): () => void {
   if (typeof requestIdleCallback === "function") {
     // oxlint-disable-next-line gates/timer-needs-reason -- idle time, bounded so a page that is never idle still gets the slice

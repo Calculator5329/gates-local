@@ -1,6 +1,5 @@
 export type DeferredState<T> = { kind: "pending" } | { kind: "ready"; value: T } | { kind: "error" };
 
-/** One import shared by idle preloading and navigation. Failures stay local to the requested screen. */
 export function deferred<T>(importScreen: () => Promise<T>) {
   let state: DeferredState<T> = { kind: "pending" };
   let promise: Promise<void> | undefined;
@@ -25,5 +24,4 @@ export function deferred<T>(importScreen: () => Promise<T>) {
   };
 }
 
-/** Two frames leave the first paint alone; the idle timeout also warms a busy page. */
 export { scheduleIdle as afterFirstPaint } from "../ui/kit/idle.ts";

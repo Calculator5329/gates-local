@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { fitWords, type FitReport, type Message } from "@gates-local/contracts";
-import { CONTEXT_SIZES, cardGb, ctxFor, decodeSpeed, fileSize, gb, k, replyMeta, replyWait, shortAge, sourceDetail, verdictOf } from "./format.ts";
+import { fitWords, type CatalogEntry, type FitReport, type GpuOccupant, type Message, type Source } from "@gates-local/contracts";
+import { CONTEXT_SIZES, cardGb, ctxFor, decodeSpeed, describeModel, fileSize, folderWords, gb, holderName, k, replyMeta, replyWait, shortAge, slowReason, sourceDetail, titleFrom, turnTime, verdictOf, when } from "./format.ts";
 import { drawTimes } from "../../thread/times.ts";
 import { homeTilde, libraryToolCanUse } from "./settings-rules.ts";
 
@@ -185,5 +185,106 @@ describe("fileSize", () => {
     expect(fileSize(1023)).toBe("1023 bytes");
     expect(fileSize(1_047_552)).toBe("1023 KB");
     expect(fileSize(1_072_693_248)).toBe("1023 MB");
+  });
+});
+
+const library = (over: Partial<Source>): Source => ({ id: "s", kind: "file", label: "notes.txt", path: "notes.txt", addedAt: 0, state: "ready", ...over });
+
+describe("a Library file's detail line", () => {
+  it("says Refreshing… while it refreshes, the error when reading failed, and its size and copy date once it is read", () => {
+    expect(sourceDetail(library({ state: "refreshing", sizeBytes: 223, snapshotAt: 1 }))).toBe("Refreshing…");
+    expect(sourceDetail(library({ state: "error", detail: "The file is gone.", sizeBytes: 223 }))).toBe("The file is gone.");
+    expect(sourceDetail(library({ state: "error" }))).toBe("Couldn't read it.");
+    const at = new Date(2026, 10, 7, 9).getTime();
+    const day = new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    expect(sourceDetail(library({ sizeBytes: 223, snapshotAt: at }))).toBe(`223 bytes · copied ${day}`);
+    expect(sourceDetail(library({ snapshotAt: at }))).toBe(`copied ${day}`);
+  });
+});
+
+describe("folder names in the app's words", () => {
+  it("spells the folders the Windows way when the window says it runs on Windows, and as home paths everywhere else", () => {
+    const win = folderWords("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36");
+    expect(win).toEqual({ models: "%USERPROFILE%\\.ollama\\models", appCopy: "%LOCALAPPDATA%\\GatesLocal\\runtime\\ollama", appModels: "%LOCALAPPDATA%\\GatesLocal\\models" });
+    const home = { models: "~/.ollama/models", appCopy: "~/.local/share/gates-local/runtime/ollama", appModels: "~/.local/share/gates-local/models" };
+    expect(folderWords("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36")).toEqual(home);
+    expect(folderWords("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15")).toEqual(home);
+  });
+});
+
+describe("a fit report from a server too old to send words", () => {
+  it("keeps the colour of a spill or a refusal from its verdict alone", () => {
+    expect(verdictOf({ ...base, verdict: "spills" }).k).toBe("spill");
+    expect(verdictOf({ ...base, verdict: "refuse" }).k).toBe("no");
+  });
+});
+
+const holder = (kind: GpuOccupant["kind"], label: string, gib: number): GpuOccupant => ({ kind, label, bytes: gib * GIB, protected: kind !== "chat-model" });
+
+describe("who holds the card, in the app's words", () => {
+  it("names Whisper, a program by its own name, and a holder nobody can name as Other", () => {
+    expect(holderName({ kind: "whisper", label: "whisper-server" })).toBe("Whisper");
+    expect(holderName({ kind: "other-app", label: "blender" })).toBe("blender");
+    expect(holderName({ kind: "unknown", label: "pid 4312" })).toBe("Other");
+  });
+});
+
+describe("why a model the card holds is slower right now", () => {
+  it("names the first program it can name and sums every other holder, unnamed ones too", () => {
+    const why = slowReason({ inTheWay: [holder("unknown", "pid 4312", 3), holder("other-app", "blender", 2), holder("whisper", "whisper-server", 1)], spillRamBytes: 1.5 * GIB });
+    expect(why).toEqual({ short: "Slower now · blender in the way", sentence: `Fits this card with blender (2.0${SP}GB) and others (4.0${SP}GB) off it. 1.5${SP}GB is in system memory now.` });
+  });
+
+  it("says other programs when no holder in the way can be named", () => {
+    const why = slowReason({ inTheWay: [holder("unknown", "pid 4312", 1), holder("unknown", "pid 977", 0.5)], spillRamBytes: 1 * GIB });
+    expect(why).toEqual({ short: "Slower now · other programs in the way", sentence: `Fits this card with other programs (1.5${SP}GB) off it. 1.0${SP}GB is in system memory now.` });
+  });
+});
+
+const entry = (name: string, label: string, purpose: string): CatalogEntry => ({ name, label, purpose, downloadBytes: 6 * GIB, installed: false, recommended: true });
+
+describe("a model's name and purpose", () => {
+  it("takes the catalog's purpose for a model it lists, and has none for a model it does not", () => {
+    const catalog = [entry("qwen3.5:9b", "Qwen 3.5 9B", "Everyday chat and writing")];
+    expect(describeModel("qwen3.5:9b", catalog)).toEqual({ name: "Qwen 3.5 9B", purpose: "Everyday chat and writing" });
+    expect(describeModel("gemma4:26b", catalog)).toEqual({ name: "Gemma 4 26B", purpose: "" });
+    expect(describeModel("qwen3.5:9b", undefined).purpose).toBe("");
+  });
+});
+
+describe("when a thread was last updated, in the sidebar", () => {
+  const now = new Date(2026, 10, 12, 15, 0).getTime();
+  it.each([
+    ["half a minute ago", new Date(2026, 10, 12, 14, 59, 30).getTime(), "Today", "now"],
+    ["five minutes ago", new Date(2026, 10, 12, 14, 55).getTime(), "Today", "5m"],
+    ["just after midnight today", new Date(2026, 10, 12, 0, 30).getTime(), "Today", "14h"],
+    ["last night", new Date(2026, 10, 11, 21, 5).getTime(), "Yesterday", "9:05 PM"],
+    ["on Monday this week", new Date(2026, 10, 9, 10, 0).getTime(), "Previous 7 days", "Mon"],
+    ["a week ago today", new Date(2026, 10, 5, 10, 0).getTime(), "Previous 7 days", "Thu"],
+    ["eight days ago", new Date(2026, 10, 4, 12, 0).getTime(), "Older", "Nov 4"],
+    ["early last year", new Date(2025, 0, 20, 12, 0).getTime(), "Older", "Jan 20"],
+  ])("an update made %s sits under %s and reads %s", (_when, ms, group, ago) => {
+    expect(when(ms, now)).toEqual({ group, ago });
+  });
+});
+
+describe("the time on a user turn", () => {
+  it("is the clock for a turn sent today, and the sidebar's short form for an older one", () => {
+    const now = new Date(2026, 10, 12, 15, 0).getTime();
+    expect(turnTime(new Date(2026, 10, 12, 14, 14).getTime(), now)).toBe("2:14 PM");
+    expect(turnTime(new Date(2026, 10, 12, 0, 5).getTime(), now)).toBe("12:05 AM");
+    expect(turnTime(new Date(2026, 10, 11, 21, 5).getTime(), now)).toBe("Yesterday");
+    expect(turnTime(new Date(2026, 10, 9, 10, 0).getTime(), now)).toBe("Mon");
+    expect(turnTime(new Date(2026, 10, 4, 12, 0).getTime(), now)).toBe("Nov 4");
+  });
+});
+
+describe("a thread's title from its first message", () => {
+  it("cuts a long first message at about 46 characters and ends it with an ellipsis", () => {
+    expect(titleFrom("Can you help me plan a week of dinners for a family of four on a budget?")).toBe("Can you help me plan a week of dinners for a f…");
+    expect(titleFrom("  Can you help me plan\n a week of dinners?  ")).toBe("Can you help me plan a week of dinners?");
+    const fits = "Plan a week of dinners for four on a lean budget";
+    expect(fits.length).toBe(48);
+    expect(titleFrom(fits)).toBe(fits);
   });
 });

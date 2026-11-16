@@ -1,11 +1,10 @@
-// Deferred Settings controls live apart from the primitives the startup update notice shares.
+// why: the startup update notice must not load the deferred Settings controls
 import { type ReactNode, useState } from "react";
 import { copyText } from "./copy.ts";
 import { handleKey } from "./handles.ts";
 import { homeTilde } from "../words/settings-rules.ts";
 import { splitTail } from "../../models/models-rules.ts";
 
-/** One status: a dot carries the colour, the words stay body colour. */
 export const Status = ({ dot, children }: { dot: string; children: ReactNode }) => (
   <span className="stat">
     <span className={`dot ${dot}`} />
@@ -13,7 +12,6 @@ export const Status = ({ dot, children }: { dot: string; children: ReactNode }) 
   </span>
 );
 
-/** A path on one line, home as ~, cut in the middle; the whole path on hover only while it is cut (data-tipt measures the .t). */
 export function PathText({ path, shown = homeTilde(path) }: { path: string; shown?: string }) {
   const [head, tail] = splitTail(shown);
   return (
@@ -24,7 +22,6 @@ export function PathText({ path, shown = homeTilde(path) }: { path: string; show
   );
 }
 
-/** A Copy button that says what happened until focus leaves it. */
 export function CopyButton({ text, label, handle }: { text: string; label: string; handle: string }) {
   const [done, setDone] = useState<boolean | null>(null);
   return (

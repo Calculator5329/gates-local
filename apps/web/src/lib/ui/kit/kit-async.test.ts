@@ -97,3 +97,25 @@ it("a saved file's address lives until the download has started, then is let go"
   vi.advanceTimersByTime(1);
   expect(revoked).toEqual(["blob:one"]);
 });
+
+it("with no idle callback, idle work runs as the next task after the two frames, and a cancel then still stops it", () => {
+  const frames: FrameRequestCallback[] = [];
+  vi.stubGlobal("requestAnimationFrame", (f: FrameRequestCallback) => frames.push(f));
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => { frames[id - 1] = () => undefined; });
+  vi.stubGlobal("requestIdleCallback", undefined);
+  const work = vi.fn();
+  scheduleIdle(work);
+  frames.shift()!(0);
+  expect(vi.getTimerCount()).toBe(0);
+  frames.shift()!(0);
+  expect(work).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(0);
+  expect(work).toHaveBeenCalledTimes(1);
+  const other = vi.fn();
+  const cancel = scheduleIdle(other);
+  frames.shift()!(0);
+  frames.shift()!(0);
+  cancel();
+  vi.advanceTimersByTime(1000);
+  expect(other).not.toHaveBeenCalled();
+});

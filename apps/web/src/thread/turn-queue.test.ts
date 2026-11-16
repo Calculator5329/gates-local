@@ -1662,3 +1662,14 @@ describe("a message the person typed is never lost", () => {
     });
   });
 });
+
+it("a Retry of a stopped reply that waits on the warning still replaces that reply once confirmed", async () => {
+  const question = await ask({ type: "error", code: "cancelled", message: "stopped", partial: { ...asstMsg("p9", "A", "so far"), interrupted: true }, ended: { reason: "stopped", at: 4_000 } });
+  b.server.answer("turns.blocking", () => BLOCKING);
+  session.retry();
+  await until(() => st().stopAsk !== null, 2000, "the warning");
+  const held = b.server.hold("turn.start");
+  session.confirmStopAsk(false);
+  const h = await held;
+  expect(h.params).toMatchObject({ retryOf: question, content: "hello A", stopOthers: true });
+});

@@ -1509,6 +1509,21 @@ describe("image presets (fake ComfyUI file lists)", () => {
     await f.presetsSent(f.presets.length + 1);
   });
 
+  it("ComfyUI coming up or turning off sends every window the presets read again; asking again while nothing changed sends nothing", async () => {
+    const f = await fixture();
+    await f.module.status();
+    await vi.waitFor(() => expect(f.presets, "ComfyUI came up").toHaveLength(1));
+    await f.module.status();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(f.presets, "ready again").toHaveLength(1);
+    f.configure({ enabled: false });
+    await f.module.status();
+    await vi.waitFor(() => expect(f.presets, "generation turned off").toHaveLength(2));
+    f.configure({ enabled: true });
+    await f.module.status();
+    await vi.waitFor(() => expect(f.presets, "ComfyUI came up again").toHaveLength(3));
+  });
+
   it("Start ComfyUI says why when there is nothing to start", async () => {
     const f = await fixture();
     f.configure({ answering: false, present: false });

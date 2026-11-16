@@ -7,7 +7,7 @@ vi.mock("react", async original => ({
   useRef: () => ({ current: p.tip }),
   useEffect: (effect: () => void | (() => void)) => { p.effects.push(effect); },
 }));
-import { Tip } from "./ui.tsx";
+import { Tip, closeTip, openTip } from "./ui.tsx";
 import { setState } from "../store/store.ts";
 
 class ElementFixture {
@@ -124,4 +124,151 @@ it.each([["cut by its row", 260, true], ["shown whole", 180, false]] as const)("
   expect(tip.classes.has("open")).toBe(opens);
   // the full name, as text: never markup from the model's name
   if (opens) expect(tip.innerHTML).toBe("Qwen 3.5 &lt;9B&gt; Instruct");
+});
+
+class Part extends ElementFixture {
+  parent: Part | null = null;
+  tag: string;
+  role: string | null = null;
+  id = "";
+  tipped = false;
+  constructor(tag: string, parent: Part | null = null) {
+    super();
+    this.tag = tag;
+    this.parent = parent;
+  }
+  override getAttribute(name: string) { return name === "data-tip" && this.tipped ? this.text : null; }
+  matches(selector: string): boolean {
+    return selector.split(",").map(part => part.trim()).some(part =>
+      part === "[data-tip]" ? this.tipped
+        : part.startsWith("#") ? this.id === part.slice(1)
+          : part.startsWith("[role=") ? this.role === part.slice(6, -1)
+            : this.tag === part);
+  }
+  override closest(selector: string): this | null {
+    return this.matches(selector) ? this : (this.parent?.closest(selector) ?? null) as this | null;
+  }
+  override contains(target: ElementFixture) {
+    for (let at: Part | null = target instanceof Part ? target : null; at !== null; at = at.parent) if (at === this) return true;
+    return false;
+  }
+}
+
+const touchScreen = (query: string) => ({ matches: query === "(hover: none)" });
+
+function tapOn(target: Part) {
+  const event = { target, preventDefault: vi.fn(), stopPropagation: vi.fn() };
+  listeners.get("mousedown")!(event);
+  listeners.get("click")!(event);
+  return event;
+}
+
+it("on a touch screen, hovering over explaining text opens no tooltip", async () => {
+  vi.stubGlobal("matchMedia", touchScreen);
+  listeners.get("mouseover")!({ target: anchor });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(tip.classes.has("open")).toBe(false);
+});
+
+it("on a touch screen, a tap on text that only explains opens its tooltip at once", () => {
+  vi.stubGlobal("matchMedia", touchScreen);
+  const legend = new Part("div");
+  legend.tipped = true;
+  legend.text = "Fits in memory with room to spare";
+  const word = new Part("span", legend);
+  tapOn(word);
+  expect(tip.classes.has("open")).toBe(true);
+  expect(tip.innerHTML).toBe("Fits in memory with room to spare");
+});
+
+it.each([
+  ["a button", "button", null],
+  ["a link", "a", null],
+  ["a text box", "input", null],
+  ["a text area", "textarea", null],
+  ["a role=button element", "div", "button"],
+  ["a switch", "div", "switch"],
+  ["a menu item", "div", "menuitem"],
+] as const)("on a touch screen, a tap on %s does the control's action and opens no tooltip", (_, tag, role) => {
+  vi.stubGlobal("matchMedia", touchScreen);
+  const control = new Part(tag);
+  control.role = role;
+  control.tipped = true;
+  const row = new Part("div");
+  row.tipped = true;
+  const inner = new Part(tag, row);
+  inner.role = role;
+  for (const target of [control, inner]) {
+    const event = tapOn(target);
+    expect(tip.classes.has("open")).toBe(false);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(event.stopPropagation).not.toHaveBeenCalled();
+  }
+});
+
+it("closeTip hides an open tooltip and one still waiting to show", async () => {
+  listeners.get("mouseover")!({ target: anchor });
+  await vi.advanceTimersByTimeAsync(400);
+  expect(tip.classes.has("open")).toBe(true);
+  closeTip();
+  expect(tip.classes.has("open")).toBe(false);
+  await vi.advanceTimersByTimeAsync(1000);
+  const other = new ElementFixture();
+  listeners.get("mouseover")!({ target: other });
+  await vi.advanceTimersByTimeAsync(100);
+  expect(tip.classes.has("open")).toBe(false);
+  closeTip();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(tip.classes.has("open")).toBe(false);
+});
+
+it("closeTip within a control closes only a tooltip whose anchor is inside that control", async () => {
+  const picker = new Part("div");
+  picker.id = "picker";
+  const row = new Part("div", picker);
+  row.tipped = true;
+  listeners.get("mouseover")!({ target: row });
+  await vi.advanceTimersByTimeAsync(400);
+  expect(tip.classes.has("open")).toBe(true);
+  closeTip("#plusMenu");
+  expect(tip.classes.has("open")).toBe(true);
+  closeTip("#picker");
+  expect(tip.classes.has("open")).toBe(false);
+  await vi.advanceTimersByTimeAsync(1000);
+  const outside = new Part("div");
+  outside.tipped = true;
+  listeners.get("mouseover")!({ target: outside });
+  await vi.advanceTimersByTimeAsync(100);
+  expect(tip.classes.has("open")).toBe(false);
+  closeTip("#picker");
+  await vi.advanceTimersByTimeAsync(300);
+  expect(tip.classes.has("open"), "a waiting tooltip outside the control still opens").toBe(true);
+  listeners.get("mouseover")!({ target: picker });
+  await vi.advanceTimersByTimeAsync(1000);
+  listeners.get("mouseover")!({ target: row });
+  await vi.advanceTimersByTimeAsync(100);
+  expect(tip.classes.has("open")).toBe(false);
+  closeTip("#picker");
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(tip.classes.has("open"), "a waiting tooltip inside the control never opens").toBe(false);
+});
+
+it("openTip shows an anchor's tooltip at once, with no hover delay, and ignores a missing anchor", () => {
+  openTip(null);
+  openTip(undefined);
+  expect(tip.classes.has("open")).toBe(false);
+  openTip(anchor as unknown as Element);
+  expect(tip.classes.has("open")).toBe(true);
+  expect(tip.innerHTML).toBe("Whisper explanation");
+});
+
+it("a tooltip still waiting to show opens with the anchor's newest words, after the same delay", async () => {
+  listeners.get("mouseover")!({ target: anchor });
+  await vi.advanceTimersByTimeAsync(100);
+  anchor.text = "Downloading, 42%";
+  for (const changed of observers) changed([{ target: anchor }]);
+  expect(tip.classes.has("open")).toBe(false);
+  await vi.advanceTimersByTimeAsync(300);
+  expect(tip.classes.has("open")).toBe(true);
+  expect(tip.innerHTML).toBe("Downloading, 42%");
 });

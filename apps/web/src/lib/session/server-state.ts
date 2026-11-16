@@ -1,16 +1,9 @@
 import type { State } from "../store/store.ts";
 import { revisionOf, type ClientSync, type FixedScope, type Settings, type SyncMetadata, type SyncRow } from "@gates-local/contracts";
 
-/**
- * The window's side of ordered data: the last number it applied per thing. A value applies only
- * when its number is newer; a new server process (a new epoch) forgets every number.
- */
 export interface Ordering {
-  /** After each negotiation. Returns true when the numbers were forgotten. */
   begin(sync: ClientSync): boolean;
-  /** True, and remembered, when `metadata` numbers `row`'s thing newer than the last applied. */
   accept(row: SyncRow, metadata: SyncMetadata | undefined): boolean;
-  /** True while `metadata`'s number for `row`'s thing is still the last one applied: nothing newer came since it was accepted. */
   newest(row: SyncRow, metadata: SyncMetadata | undefined): boolean;
 }
 
@@ -20,7 +13,6 @@ export interface SettingsAuthority {
   current(): Settings | undefined;
 }
 
-/** An accepted value or a change of the window's own, applied in its current JavaScript task. */
 export type ServerEvent = Partial<State> | ((state: State) => Partial<State> | void);
 
 export function createOrdering(): Ordering {
@@ -48,7 +40,6 @@ export function createOrdering(): Ordering {
 
 const SETTINGS_ROW: SyncRow = { domain: "settings", scope: "settings" };
 
-/** No queue, promise or batching: each kind's accepted value is applied in the task it arrived in. */
 export function createServerState(read: () => State, publish: (patch: Partial<State>) => void) {
   const ordering = createOrdering();
   let current: Settings | undefined;
