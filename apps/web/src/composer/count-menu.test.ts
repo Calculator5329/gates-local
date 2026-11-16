@@ -49,6 +49,7 @@ beforeAll(async () => {
   const { createRoot } = await import("react-dom/client");
   store = await import("../lib/store/store.ts");
   composer = await import("./Composer.tsx");
+  composer.watchComposer();
   root = createRoot(doc.body.appendChild(doc.createElement("div")) as unknown as Element);
 });
 afterAll(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });

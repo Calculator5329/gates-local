@@ -20,7 +20,7 @@ vi.mock("../app/screen-loaders.ts", async (original) => ({
   ...await original<typeof import("../app/screen-loaders.ts")>(),
   pickerScreen: { load: loads.picker },
   imagePickerScreen: { load: loads.image },
-  threadScreen: { load: loads.thread },
+  threadScreen: { load: loads.thread, get: () => undefined, need: () => { loads.thread(); return () => undefined; } },
 }));
 vi.mock("../fit/fit-actions.ts", () => ({ openFit: fit.open }));
 vi.mock("../lib/ui/ui.tsx", async (original) => ({ ...await original<typeof import("../lib/ui/ui.tsx")>(), openTip: fit.tip }));
@@ -74,7 +74,9 @@ beforeAll(async () => {
   store = await import("../lib/store/store.ts");
   drafts = await import("../lib/store/drafts.ts");
   session = await import("../lib/session/index.ts");
-  ({ Composer } = await import("./Composer.tsx"));
+  const composer = await import("./Composer.tsx");
+  ({ Composer } = composer);
+  composer.watchComposer();
   initial = store.getState();
   root = createRoot(doc.body.appendChild(doc.createElement("div")) as unknown as Element);
 });

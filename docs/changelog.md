@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-16: the composer follows the store instead of its effects
+
+- The entry starts `watchComposer()` beside the shell's watches: the
+  message box takes the focus nobody holds once the runtime is ready,
+  Dictate's held notice clears when its reason ends, and the picture
+  count menu closes when pictures are turned off. Each now follows its
+  value whichever path changed it.
+- Send keeps its focus across the first send, which swaps this composer
+  for the thread's, through a ref on the button.
+- The thread screen's code is fetched through `useScreen` once there is
+  something to send.
+- A tooltip closes when its anchor names a new action (`data-tipkey`), so
+  Send turning into Stop drops the old button's tooltip.
+- The stream's words go into the store once a frame through `frameLoop`,
+  and a drag left over the window clears through a debounce.
+- The IndexedDB fake the draft tests share moves to `test/draft-database.ts`.
+
 ## 2026-11-16: the app shell follows the store instead of its effects
 
 - A new kit piece, `watch`, follows one store value outside render and

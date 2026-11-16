@@ -841,6 +841,7 @@ it("with no GPU Thinking starts off, and the composer's Thinking button still tu
   vi.stubGlobal("HTMLElement", FakeElement);
   vi.stubGlobal("matchMedia", win.matchMedia);
   vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (X11; Linux x86_64)" });
+  vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) => setTimeout(() => cb(0), 0));
   Object.assign(FakeElement.prototype, { value: "", selectionStart: 0, selectionEnd: 0, setSelectionRange: noop });
   const { createRoot } = await import("react-dom/client");
   const { Composer } = await import("../../composer/Composer.tsx");

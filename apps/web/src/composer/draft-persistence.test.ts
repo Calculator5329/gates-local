@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { recoverDraft, watchDraft } from "./draft-persistence.ts";
-import { draftDatabase } from "./draft-persistence-testing.ts";
+import { draftDatabase } from "../../test/draft-database.ts";
 import { getState, setState } from "../lib/store/store.ts";
 import { clearDraft, editDraft, getDraft, replaceDraft, type Draft } from "../lib/store/drafts.ts";
 import type { State } from "../lib/store/store.ts";

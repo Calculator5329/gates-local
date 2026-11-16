@@ -2,7 +2,7 @@
 // The composer (shell.md F01, F02, F15, F28-F31, F34, F37b, F43b): the text
 // box, model and context chips, Thinking and Image pills, the context meter,
 // Send or Stop, and the popovers it opens (model picker, + menu).
-import { type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type RefObject, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type RefObject, Suspense, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { type AttachedFile, IMAGE_COUNT_MAX, type ModelInfo } from "@gates-local/contracts";
 import { useActionPress } from "./composer-press.ts";
 import { firstModelOffer } from "../runtime/Banner.tsx";
@@ -26,6 +26,9 @@ import { DropMarker } from "./file-drop.tsx";
 import { useChange, usePopover } from "../lib/ui/kit/popover.ts";
 import { useDocumentEvent } from "../lib/ui/kit/events.ts";
 import { withTimeout } from "../lib/ui/kit/async.ts";
+import { requestFocus } from "../lib/ui/kit/focus.ts";
+import { watch } from "../lib/ui/kit/watch.ts";
+import { useScreen } from "../app/screens.tsx";
 import { attachFiles, imageReason, paste } from "./paste.ts";
 import { useRefused } from "./refused-files.ts";
 import {
@@ -60,7 +63,6 @@ const catalogOf = (s: Pick<State, "catalog">) => (s.catalog === NA ? undefined :
 const imageGenOf = (s: State) => s.settings !== NA && s.settings?.imageGen === true;
 const pctOf = (done: number, total: number | undefined) => (total ? Math.round((done / total) * 100) : 0);
 
-let primaryFocus = false;
 const NO_FILES: readonly AttachedFile[] = [];
 export const IMAGE_PLACEHOLDER = "Describe a picture…";
 
@@ -144,28 +146,12 @@ export function Composer() {
   const online = useStore((s) => s.conn.kind === "open");
   const ta = useRef<HTMLTextAreaElement>(null);
   const primary = useRef<HTMLButtonElement>(null);
-  // oxlint-disable-next-line gates/effect-needs-reason -- the thread screen's code, loaded once the draft holds anything (typed, pasted, dropped, dictated or restored)
-  useEffect(() => {
-    if (hasText || images.length || files.length) void threadScreen.load();
-  }, [hasText, images.length, files.length]);
-  // oxlint-disable-next-line gates/effect-needs-reason -- focus on Send carried from the composer that unmounts to the one that mounts in its place (a first send opens the thread)
-  useLayoutEffect(() => {
-    const button = primary.current;
-    if (primaryFocus) button?.focus();
-    primaryFocus = false;
-    return () => {
-      primaryFocus = document.activeElement === button;
-      // oxlint-disable-next-line gates/timer-needs-reason -- the hand-off lasts only until the new composer's commit, never into a later mount
-      queueMicrotask(() => { primaryFocus = false; });
-    };
-  }, []);
+  // why: anything in the draft (typed, pasted, dropped, dictated or restored) means a send is near
+  useScreen(threadScreen, hasText || images.length > 0 || files.length > 0);
+  const primaryRef = useMemo(() => keepSendFocus(primary), []);
 
   const ready = rt === "ready";
   const blocked = !ready;
-  // oxlint-disable-next-line gates/effect-needs-reason -- the message box takes the focus nobody holds once the runtime the server reports is ready
-  useEffect(() => {
-    if (!blocked && !isTouch() && document.activeElement === document.body) ta.current?.focus({ preventScroll: true });
-  }, [blocked]);
   const queueable = early;
   const shownTag = first ?? model;
   const name = shownTag === undefined ? "No model" : pickerLabels([...chatModels(models ?? []).map(m => m.name), shownTag], catalog).get(shownTag) ?? shownTag;
@@ -224,13 +210,6 @@ export function Composer() {
   const sendLabel = editing ? "Update queued message" : isStreaming ? "Queue message" : "Send message";
   const showStop = isStreaming && !editing && !touch;
   const stopForVoice = isStreaming && editing && !touch;
-  // why: cleared here, not in Voice, because Voice remounts when an edit is cancelled
-  const wasStopForVoice = useRef(stopForVoice);
-  // oxlint-disable-next-line gates/effect-needs-reason -- the store's notice, cleared once Dictate is back, whichever of the reply's end or the edit's end brought it back
-  useEffect(() => {
-    if (wasStopForVoice.current && !stopForVoice && getState().notice === VOICE_HELD) setState({ notice: null });
-    wasStopForVoice.current = stopForVoice;
-  }, [stopForVoice]);
 
   const submit = () => {
     if (sendDisabled) return;
@@ -256,8 +235,6 @@ export function Composer() {
     stop();
   };
   const action = showStop ? `stop:${running}` : editing ? `edit:${editingId}` : memRefused ? `memory:${model}:${numCtx}` : isStreaming ? `queue:${running}` : "send";
-  // oxlint-disable-next-line gates/effect-needs-reason -- the shared tooltip, drawn outside React, closed before paint once the button it describes does something else
-  useLayoutEffect(() => closeTip(), [action]);
   const primaryPress = useActionPress(!showStop && sendDisabled && !memRefused ? `off:${action}` : action, () => {
     if (showStop) stopThisReply();
     else if (memRefused) openFit();
@@ -402,10 +379,11 @@ export function Composer() {
             </button>
             {isStreaming && !showStop && !stopForVoice ? stopSquare : null}
             <button
-              ref={primary}
+              ref={primaryRef}
               type="button"
               className={showStop ? "send stop" : "send"}
               data-testid="chat.composer.send"
+              data-tipkey={action}
               aria-label={showStop ? "Stop" : sendLabel}
               data-tip={showStop ? stopTip : sendTip}
               aria-disabled={!showStop && sendDisabled ? true : undefined}
@@ -437,6 +415,7 @@ function DraftTextarea({ textarea, placeholder, submit }: { textarea: RefObject<
   const attach = useCallback((el: HTMLTextAreaElement | null) => {
     textarea.current = el;
     el?.setSelectionRange(el.value.length, el.value.length);
+    if (el !== null) focusIdleBox();
   }, [textarea]);
   // oxlint-disable-next-line gates/effect-needs-reason -- the box's height measured from its text, where the browser cannot size it itself
   useLayoutEffect(() => {
@@ -455,6 +434,50 @@ function DraftTextarea({ textarea, placeholder, submit }: { textarea: RefObject<
 }
 
 const VOICE_HELD = "Dictate comes back when this reply ends or you finish editing the queued message.";
+
+const SEND = '[data-testid="chat.composer.send"]';
+
+// why: a first send swaps this composer for the thread's; Send's focus goes to the one drawn next
+function keepSendFocus(primary: RefObject<HTMLButtonElement | null>) {
+  return (el: HTMLButtonElement | null): (() => void) | undefined => {
+    primary.current = el;
+    if (el === null) return;
+    return () => {
+      if (document.activeElement === el) requestFocus(SEND);
+    };
+  };
+}
+
+const idleBox = (): HTMLElement | null =>
+  rtOf(getState()) === "ready" && !isTouch() && document.activeElement === document.body ? document.getElementById("ta") : null;
+
+// why: the message box takes the focus nobody holds, on first draw and once the runtime is ready
+function focusIdleBox(): void {
+  requestFocus(idleBox, { preventScroll: true });
+}
+
+// why: Dictate is held while a reply streams here and a queued edit is open; touch has no Stop
+const stopForVoiceNow = (s: State): boolean => streamingHere(s) && s.editingQueued !== null && !matchMedia(PHONE_TOUCH).matches;
+
+function dictateBack(now: boolean): void {
+  if (!now && getState().notice === VOICE_HELD) setState({ notice: null });
+}
+
+function closeCountOff(drawing: boolean): void {
+  if (!drawing && getState().pop?.id === "count") closePop();
+}
+
+// why: started once by the entry, so a change from any path in lib/session is heard
+export function watchComposer(): () => void {
+  const stops = [
+    watch((s) => rtOf(s) === "ready", (ready) => { if (ready) focusIdleBox(); }),
+    watch(stopForVoiceNow, dictateBack),
+    watch(imageMode, closeCountOff),
+  ];
+  return () => {
+    for (const off of stops) off();
+  };
+}
 
 export function enterAnswer(s: { readonly sendDisabled: boolean; readonly memRefused: boolean; readonly text: boolean; readonly showStop: boolean }): "send" | "fit" | "tip" | "note" | null {
   if (!s.sendDisabled) return "send";
@@ -730,10 +753,7 @@ export function CountMenu() {
   const kb = useStore((s) => s.pop?.id === "count" && s.pop.kb);
   const count = useStore(imageCount);
   const ms = useStore(runOf);
-  const drawing = useStore(imageMode);
   const ref = useRef<HTMLDivElement>(null);
-  // oxlint-disable-next-line gates/effect-needs-reason -- the store's open menu, closed once Image goes off, from whichever control turned it off
-  useEffect(() => { if (open && !drawing) closePop(); }, [open, drawing]);
   usePopover(ref, open, (el) => {
     const anchor = document.getElementById("countBtn");
     if (anchor) place(el, anchor, "start");

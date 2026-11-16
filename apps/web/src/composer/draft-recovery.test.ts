@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { draftDatabase } from "./draft-persistence-testing.ts";
+import { draftDatabase } from "../../test/draft-database.ts";
 import { installBrowser, tick, until } from "../../test/harness.ts";
 import { queuedOf, repliesOf } from "../../test/queue.ts";
 

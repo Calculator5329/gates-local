@@ -22,7 +22,7 @@ class ElementFixture {
   getBoundingClientRect() { return { x: 10, y: this.top, left: 10, top: this.top, right: 10 + this.width, bottom: this.top + 20, width: this.width, height: this.width === 0 ? 0 : 20 }; }
 }
 let listeners: Map<string, (event: { target: ElementFixture }) => void>;
-let observers: Set<(records: { target: ElementFixture }[]) => void>;
+let observers: Set<(records: { target: ElementFixture; attributeName?: string }[]) => void>;
 let cleanups: (() => void)[];
 let anchor: ElementFixture, tip: ElementFixture;
 beforeEach(() => {
@@ -33,8 +33,8 @@ beforeEach(() => {
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   vi.stubGlobal("Element", ElementFixture);
   vi.stubGlobal("MutationObserver", class {
-    readonly changed: (records: { target: ElementFixture }[]) => void;
-    constructor(changed: (records: { target: ElementFixture }[]) => void) { this.changed = changed; }
+    readonly changed: (records: { target: ElementFixture; attributeName?: string }[]) => void;
+    constructor(changed: (records: { target: ElementFixture; attributeName?: string }[]) => void) { this.changed = changed; }
     observe() { observers.add(this.changed); }
     disconnect() { observers.delete(this.changed); }
   });
@@ -79,6 +79,17 @@ it("follows a changed data-tip in place", async () => {
   tip.offsetWidth = 1420;
   for (const changed of observers) changed([{ target: anchor }]);
   expect(tip.style["left"]).toBe("6px");
+});
+
+// Send that turns into Stop keeps its place and may keep its words; the tooltip it showed is for the old button.
+it("closes when its anchor names a new action, with the same words and box, and not for another control's", async () => {
+  listeners.get("mouseover")!({ target: anchor });
+  await vi.advanceTimersByTimeAsync(400);
+  expect(tip.classes.has("open")).toBe(true);
+  for (const changed of observers) changed([{ target: new ElementFixture(), attributeName: "data-tipkey" }]);
+  expect(tip.classes.has("open"), "another control's action").toBe(true);
+  for (const changed of observers) changed([{ target: anchor, attributeName: "data-tipkey" }]);
+  expect(tip.classes.has("open")).toBe(false);
 });
 
 it("closes instead of moving when the anchor's new words come with no box", async () => {

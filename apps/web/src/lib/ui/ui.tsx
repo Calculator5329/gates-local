@@ -237,6 +237,7 @@ const holdTip = (el: HTMLDivElement | null): (() => void) | undefined => {
   const changes = new MutationObserver(records => {
     const target = tipFor ?? waitingFor;
     if (!target) return;
+    if (records.some(record => record.attributeName === "data-tipkey" && record.target === target)) return hide();
     const now = target.getAttribute("data-tip") || target.getAttribute("data-tipt");
     if (!target.isConnected || !now) return hide();
     if (source !== now) {
@@ -248,7 +249,7 @@ const holdTip = (el: HTMLDivElement | null): (() => void) | undefined => {
     const box = target.getBoundingClientRect();
     if (!at || box.x !== at.x || box.y !== at.y || box.width !== at.width || box.height !== at.height) hide();
   });
-  changes.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-tip", "data-tipt"] });
+  changes.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-tip", "data-tipt", "data-tipkey"] });
   showTipAt = t => show(t);
   document.addEventListener("mouseover", over);
   document.addEventListener("mouseout", out);

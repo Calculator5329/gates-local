@@ -5,6 +5,7 @@
 import { Icon } from "../lib/ui/icons.tsx";
 import { attachFiles, splitDropped } from "./paste.ts";
 import { getState, setState, useStore } from "../lib/store/store.ts";
+import { debounce } from "../lib/ui/kit/async.ts";
 
 // external: Chromium lists Files when an in-page image is dragged, after dragstart
 let inPage = false;
@@ -32,8 +33,8 @@ function mark(at: { x: number; y: number } | null): void {
   setState({ dropAt: at });
 }
 // external: a browser repeats dragover every few hundred ms while a drag is over it
-let stale: ReturnType<typeof setTimeout> | undefined;
-const hide = () => { clearTimeout(stale); mark(null); };
+const staleHide = debounce(() => mark(null), 3000);
+const hide = () => { staleHide.cancel(); mark(null); };
 
 function where(): { x: number; y: number } {
   const composer = document.querySelector(".composer")?.getBoundingClientRect();
@@ -55,9 +56,7 @@ function over(e: DragEvent): void {
   if (e.dataTransfer) e.dataTransfer.dropEffect = ok ? "copy" : "none";
   if (!ok) { hide(); return; }
   mark(where());
-  clearTimeout(stale);
-  // oxlint-disable-next-line gates/timer-needs-reason -- the next dragover, which a drag still over the window sends within 550 ms
-  stale = setTimeout(hide, 3000);
+  staleHide();
 }
 
 function leave(e: DragEvent): void {

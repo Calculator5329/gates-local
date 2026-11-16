@@ -5,6 +5,7 @@ import { type LiveTurn, NA, type State, type StopAsk, type TurnClock, type Waiti
 import { imageReason } from "./paste.ts";
 import { drawChoice, imageMode } from "../image/image-choice.ts";
 import { releaseFiles } from "./file-holds.ts";
+import { frameLoop } from "../lib/ui/kit/frame.ts";
 import { type Draft, type DraftKey, beginQueuedDraft, cancelQueuedDraft, clearDraft, currentDraftKey, getDraft, moveDraft, renewDraft, replaceDraft } from "../lib/store/drafts.ts";
 import type { ServerEvent } from "../lib/session/server-state.ts";
 import { type TurnEvent, type TurnFailure, reduceTurn, stopping, unfinished, withTurn } from "../thread/turn.ts";
@@ -924,7 +925,7 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
   }
 
   const waiting = new Map<string, Waiting>();
-  let raf = 0;
+  let framed = false;
 
   function flushWords(threadId: string): void {
     const w = waiting.get(threadId);
@@ -938,10 +939,11 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     });
   }
 
-  function frame(): void {
-    raf = 0;
+  function frame(): boolean {
+    framed = false;
     const open = getState().threadId;
     if (open !== null) flushWords(open);
+    return false;
   }
 
   function queueWords(turn: LiveTurn, kind: "text" | "thinking", t: string): void {
@@ -954,8 +956,10 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
       waiting.set(turn.threadId, w);
     }
     w[kind] += t;
-    // oxlint-disable-next-line gates/timer-needs-reason -- the next frame: the stream's words since the last one go into the store in one write
-    if (getState().threadId === turn.threadId && raf === 0) raf = requestAnimationFrame(frame);
+    if (getState().threadId !== turn.threadId || framed) return;
+    framed = true;
+    // why: the next frame: the stream's words since the last one go into the store in one write
+    frameLoop(frame);
   }
 
   function catchUp(threadId: string): void {
