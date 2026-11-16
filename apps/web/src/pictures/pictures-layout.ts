@@ -1,8 +1,3 @@
-// Pictures' contact sheet: day headers, then justified rows at each picture's true shape.
-// Every row's height comes from the pictures' sizes alone, so the sheet's whole layout is
-// known before a thumbnail arrives: nothing moves as they land, and only the rows on screen
-// are drawn.
-
 export interface Sized { readonly width: number; readonly height: number; readonly doneAt: number }
 
 export interface Tile { readonly index: number; readonly x: number; readonly w: number }
@@ -14,7 +9,6 @@ export interface Sheet { readonly rows: readonly Row[]; readonly height: number 
 
 export interface SheetSize {
   readonly width: number;
-  /** A full row's height before it is stretched to the width; a day's last row keeps it. */
   readonly target: number;
   readonly gap: number;
   readonly dayH: number;
@@ -30,7 +24,6 @@ function startOfDay(ms: number): number {
   return d.getTime();
 }
 
-/** "Today", "Yesterday", "Wed 12" this month, "Wed 12 Oct" this year, "12 Oct 2025" before. */
 export function dayLabel(ms: number, now = Date.now()): string {
   const day = startOfDay(ms);
   const today = startOfDay(now);
@@ -45,7 +38,6 @@ export function dayLabel(ms: number, now = Date.now()): string {
   return `${wd} ${d.getDate()}`;
 }
 
-/** Tiles laid left to right at height h, the last one ending exactly at `right` when the row is full. */
 function place(items: readonly Sized[], first: number, count: number, h: number, gap: number, right: number | null): Tile[] {
   const tiles: Tile[] = [];
   let x = 0;
@@ -58,7 +50,6 @@ function place(items: readonly Sized[], first: number, count: number, h: number,
   return tiles;
 }
 
-/** The whole sheet for pictures newest first. */
 export function layoutSheet(items: readonly Sized[], size: SheetSize, now = Date.now()): Sheet {
   const { width, target, gap, dayH } = size;
   const rows: Row[] = [];
@@ -71,7 +62,6 @@ export function layoutSheet(items: readonly Sized[], size: SheetSize, now = Date
     y += dayH;
     let start = i;
     let ratio = 0;
-    // the day's pictures, a row at a time: a row closes once it is at least as wide as the sheet at the target height
     while (i < items.length && (i === start || dayLabel(items[i]!.doneAt, now) === label)) {
       const p = items[i]!;
       ratio += p.width / p.height;
@@ -96,7 +86,6 @@ export function layoutSheet(items: readonly Sized[], size: SheetSize, now = Date
   return { rows, height: y };
 }
 
-/** The rows that cross [top, bottom], by binary search on y. */
 export function rowsIn(sheet: Sheet, top: number, bottom: number): readonly Row[] {
   const { rows } = sheet;
   let lo = 0;
@@ -112,7 +101,6 @@ export function rowsIn(sheet: Sheet, top: number, bottom: number): readonly Row[
   return out;
 }
 
-/** Where a picture sits: its row's y, or undefined when it is not laid out. */
 export function yOf(sheet: Sheet, index: number): number | undefined {
   for (const r of sheet.rows) if (r.kind === "tiles" && r.tiles.some((t) => t.index === index)) return r.y;
   return undefined;

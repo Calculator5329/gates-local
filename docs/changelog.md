@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-16: the pictures folder holds to the six comment kinds
+
+- The Pictures screen, its list and its contact sheet pass the comment
+  rule: 45 offenders went, and the folder's comment lines fell from 53
+  to none. The browser journey already held the grid, the inspector,
+  Again and the phone sheet; its check that the newest is picked was
+  broken in the source and watched fail.
+- The folder had no unit tests. Thirty-one rules now have one: the day
+  labels, the justified rows and the drawn window; the list's count,
+  loading, open bound, late answers, search pause, kept picks, paging
+  and finished pictures; and on the screen, Made and Took, Again's
+  setup, Edit prompt, the saved file's name, Save's flash, the phone's
+  facts line, several picked, the large view, the arrows, Enter,
+  Escape, clicks with Ctrl and Shift, and where the sheet scrolls.
+
 ## 2026-11-16: the picker folder holds to the six comment kinds
 
 - The model picker passes the comment rule: 37 offenders went, and the

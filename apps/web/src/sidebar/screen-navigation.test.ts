@@ -115,6 +115,19 @@ describe("pending navigation exits", () => {
   });
 });
 
+it("Escape on Pictures closes the large picture first, then leaves Pictures for the thread under it", async () => {
+  store.setState({ view: "pictures" });
+  session.pictures.select(["j1"]);
+  session.pictures.setLarge(true);
+  const { onKey } = await import("../app/App.tsx");
+  const escape = () => onKey(Object.assign(new Event("keydown", { cancelable: true }), { key: "Escape" }) as KeyboardEvent);
+  escape();
+  expect(session.pictures.get().large).toBe(false);
+  expect(store.getState().view).toBe("pictures");
+  escape();
+  expect(store.getState()).toMatchObject({ view: "thread", threadId: "t1" });
+});
+
 describe("BG-01: pending navigation agrees with the displayed thread", () => {
   for (const section of ["general", "models"] as const) {
     it(`keeps view and sends in the existing thread while ${section} is loading`, async () => {

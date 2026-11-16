@@ -1,8 +1,3 @@
-// Pictures (direction D, the contact sheet): every finished picture, newest first, in day
-// groups of justified rows at true shape; an inspector beside them that is always open.
-// One picture: its prompt, facts and Again, Edit prompt, Copy, Save. Several: how many.
-// Enter shows the picked one large; Esc goes back. On a phone: two to a row and the
-// inspector as a sheet on the bottom edge. It lies over the chat as Settings does.
 import "./pictures.css";
 import type { ImageChoice, Picture } from "@gates-local/contracts";
 import { type MouseEvent, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -27,9 +22,7 @@ const GAP = 6;
 const ROW_H = 180;
 const DAY_H = 44;
 const PHONE_DAY_H = 40;
-/** Rows drawn past each edge of the window, so a fast scroll does not show blank space. */
 const OVERDRAW = 800;
-/** The next page is asked for this far before the end. */
 const MORE_AT = 1600;
 
 function usePictures<T>(read: (v: PicturesView) => T): T {
@@ -44,33 +37,28 @@ function useFiles(): (path: string) => string {
 
 const thumbPath = (p: Picture) => `thumbs/${p.jobId}.webp`;
 
-/** The time it was made: the clock today, else its day too. */
 function made(ms: number): string {
   const day = dayLabel(ms);
   return day === "Today" ? clock(ms) : `${day} · ${clock(ms)}`;
 }
 
-/** "19 s"; one decimal under ten seconds. */
 function took(ms: number): string {
   const s = ms / 1000;
   return s < 10 ? `${s.toFixed(1)} s` : `${Math.round(s)} s`;
 }
 
-/** The setup Again runs: the picture's own, else (a card from before setups) what an image send runs now in its thread. */
 function againChoice(p: Picture): ImageChoice | undefined {
   if (p.preset !== undefined) return { preset: p.preset, width: p.width, height: p.height };
   const now = chosenImage(getState());
   return now === undefined ? undefined : { preset: now.preset.id, width: now.width, height: now.height };
 }
 
-/** Again: the same prompt and setup in its thread, a new seed; queued there like any image send. */
 function again(p: Picture): void {
   openThread(p.threadId);
   const draw = againChoice(p);
   void send(p.prompt, { reuseThread: true, keepDraft: true, ...(draw === undefined ? {} : { draw }) });
 }
 
-/** Edit prompt: its thread, with the prompt in the message box and Image on. */
 function editPrompt(p: Picture): void {
   openThread(p.threadId);
   replaceDraft(p.threadId, { text: p.prompt });
@@ -89,7 +77,6 @@ async function copyPicture(url: string): Promise<void> {
   await navigator.clipboard.write([new ClipboardItem({ [blob.type || "image/png"]: blob })]);
 }
 
-/** A file name from the prompt's first words and the seed. */
 function fileName(p: Picture): string {
   const words = p.prompt.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48).replace(/-+$/, "");
   return `${words || "picture"}-${p.seed ?? p.jobId.slice(0, 8)}.png`;
@@ -99,7 +86,6 @@ async function savePicture(url: string, name: string): Promise<void> {
   downloadBlob(await pictureBlob(url), name);
 }
 
-/** An icon button that does a thing once: a check when it worked, the alert when it did not, then its icon again. Same size throughout. */
 function DoButton({ icon, label, act }: { icon: IconId; label: string; act: () => Promise<void> }) {
   const [flash, show] = useFlash<"ok" | "failed">(1500);
   const state = flash ?? "idle";
@@ -125,7 +111,6 @@ function Actions({ p, phone }: { p: Picture; phone: boolean }) {
       </button>
       <DoButton icon="copy" label="Copy" act={() => copyPicture(full)} />
       <DoButton icon="download" label="Save" act={() => savePicture(full, fileName(p))} />
-      {/* the phone's sheet has no facts list, so its thread is a button here */}
       {phone ? (
         <button type="button" className="ibtn" data-testid="pictures.actions.open-thread" aria-label="Open thread" data-tip="Open thread" onClick={() => openThread(p.threadId)}>
           <Icon id="chat" />
@@ -167,7 +152,6 @@ function One({ p }: { p: Picture }) {
   );
 }
 
-/** A phone's sheet: the picture small, its prompt, one line of facts, the actions. */
 function PhoneOne({ p }: { p: Picture }) {
   const file = useFiles();
   const style = useStore((s) => (p.preset === undefined ? undefined : presetName(s, p.preset)));
@@ -217,7 +201,6 @@ function Inspector({ picked, phone }: { picked: readonly Picture[]; phone: boole
   );
 }
 
-/** Enter's view: the picked picture as large as the sheet's room allows, the original file. */
 function Large({ p, list }: { p: Picture; list: readonly Picture[] }) {
   const file = useFiles();
   const at = list.findIndex((x) => x.jobId === p.jobId);
@@ -241,7 +224,6 @@ function Large({ p, list }: { p: Picture; list: readonly Picture[] }) {
   );
 }
 
-/** The arrow keys: the next or previous picture becomes the one selected. */
 function step(list: readonly Picture[], by: 1 | -1): string | undefined {
   const sel = pictures.get().sel;
   const at = list.findIndex((p) => p.jobId === sel.at(-1));
@@ -251,7 +233,6 @@ function step(list: readonly Picture[], by: 1 | -1): string | undefined {
   return next.jobId;
 }
 
-/** A click picks one; Ctrl or Cmd adds or takes away; Shift picks the run from the last plain pick. */
 function pick(list: readonly Picture[], id: string, e: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }, anchor: { current: string | null }, phone: boolean): void {
   const sel = pictures.get().sel;
   if (phone || !(e.ctrlKey || e.metaKey || e.shiftKey)) {
@@ -264,7 +245,6 @@ function pick(list: readonly Picture[], id: string, e: { ctrlKey: boolean; metaK
     const [a, b] = from < to ? [from, to] : [to, from];
     pictures.select(list.slice(a, b + 1).map((p) => p.jobId));
   } else if (sel.includes(id)) {
-    // the last one stays: the inspector always shows a pick
     if (sel.length > 1) pictures.select(sel.filter((x) => x !== id));
   } else {
     anchor.current = id;
@@ -327,7 +307,6 @@ function SheetView({ list, sel, phone, q, next }: { list: readonly Picture[]; se
     [list, width, phone],
   );
 
-  // A picture joining the top keeps the rows on screen where they were (no reflow above the window).
   const prev = useRef<{ list: readonly Picture[]; sheet: Sheet; q: string } | null>(null);
   // oxlint-disable-next-line gates/effect-needs-reason -- corrects the scroll offset against the new layout before the browser paints it
   useLayoutEffect(() => {
@@ -348,13 +327,11 @@ function SheetView({ list, sel, phone, q, next }: { list: readonly Picture[]; se
     if (y !== undefined) el.scrollTop = top + (y - row.y);
   }, [list, sheet, q]);
 
-  // the next page, once the window nears the end (or the first page does not fill it)
   // oxlint-disable-next-line gates/effect-needs-reason -- the window's place comes from scrolling and resizing as well as from new pages; asks once per change
   useEffect(() => {
     if (next !== undefined && win.h > 0 && win.top + win.h > sheet.height - MORE_AT) void pictures.more();
   }, [next, win, sheet.height]);
 
-  // the arrow keys keep the picked picture in view
   const last = sel.at(-1);
   // oxlint-disable-next-line gates/effect-needs-reason -- scrolls the drawn sheet to the pick, which moves from keys, clicks and a page landing alike
   useEffect(() => {
@@ -426,7 +403,6 @@ function Bar({ phone }: { phone: boolean }) {
 }
 
 function Empty({ status, q }: { status: PicturesView["status"]; q: string }) {
-  // images not set up: there is no Image control to turn on, so the line points at the setup row instead
   const unset = useStore((s) => s.settings !== undefined && s.settings !== NA && s.settings.imageGen !== true);
   if (status === "loading") return <div className="pics-sheet" />;
   return (
@@ -468,7 +444,6 @@ export function Pictures() {
     return () => pictures.shown(false);
   }, []);
 
-  // Enter shows the picked picture large; the arrows move the pick (and the large view with it)
   useDocumentEvent("keydown", (e) => {
     const t = e.target instanceof HTMLElement ? e.target : null;
     if (e.ctrlKey || e.metaKey || e.altKey || t?.closest("input,textarea,[contenteditable]")) return;
