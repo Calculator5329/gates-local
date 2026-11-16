@@ -221,6 +221,19 @@ it("a running-work list that cannot be read still asks, with nothing running kno
   expect(h.updateAndRestart).not.toHaveBeenCalled();
 });
 
+it("a running-work list that could not be read is read again on Retry, and Go works once it reads", async () => {
+  h.readUpdateStatus.mockResolvedValue("Couldn't read what an update would stop; try again.");
+  await push({ ...OFFERED, activity: [] });
+  await click(button());
+  expect(props(go())["disabled"]).toBe(true);
+  h.readUpdateStatus.mockResolvedValue(null);
+  const reads = h.readUpdateStatus.mock.calls.length;
+  await click(byTestId("sidebar.update.retry"));
+  expect(h.readUpdateStatus).toHaveBeenCalledTimes(reads + 1);
+  expect(find((el) => el.getAttribute("role") === "alert")).toBeNull();
+  expect(props(go())["disabled"]).toBe(false);
+});
+
 it("a footer check that failed shows until a newer check answers, and a later status with no check does not bring it back", async () => {
   h.checkForUpdates.mockResolvedValue("Gates Local is not answering.");
   await push({ ...OFFERED, approval: undefined, lastCheck: { state: "up-to-date", checkedAt: 1, channel: "main", current: "abc1234" } });

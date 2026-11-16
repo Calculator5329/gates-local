@@ -81,7 +81,8 @@ function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStat
   const [work, setWork] = useState(lines);
   const [prev, setPrev] = useState(before);
   const [settle, setSettle] = useState(before === null ? 0 : 1);
-  const read = useLoad("status", readUpdateStatus);
+  const [reads, setReads] = useState(0);
+  const read = useLoad(`status#${reads}`, readUpdateStatus);
   // why: a changed list is read before Go works again
   const settled = useAfter(SETTLE_MS, settle === 0 ? null : settle);
   const wait = settle !== 0 && !settled;
@@ -126,8 +127,11 @@ function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStat
         {wait && prev !== null ? ["Changed:", ...fresh].join(" ") : ""}
       </span>
       {typeof read === "string" ? (
-        <p className="act-err" role="alert">
-          {read}
+        <p className="act-err">
+          <span role="alert">{read}</span>{" "}
+          <button type="button" className="btn ghost" data-testid="sidebar.update.retry" onClick={() => setReads((n) => n + 1)}>
+            Retry
+          </button>
         </p>
       ) : null}
       <div className="ca">

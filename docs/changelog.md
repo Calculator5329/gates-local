@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-16: an update's running-work list that could not be read has a Retry
+
+- When the update ask could not read what an update would stop, it said to try again but kept
+  Restart off until the ask was closed and opened again. A Retry beside the message reads it again.
+
 ## 2026-11-16: a queue the disk refused once is saved at the next step
 
 - When saving the waiting messages failed once, as on a full disk, the server did not try again
