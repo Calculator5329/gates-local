@@ -23,14 +23,15 @@ afterEach(async () => {
   stop(); for (const socket of Socket.all) socket.close();
   await vi.runOnlyPendingTimersAsync(); vi.useRealTimers(); vi.unstubAllGlobals();
 });
+let booted: ReturnType<typeof createConnection>;
 async function boot(hydrate = async () => {}) {
   vi.useFakeTimers(); vi.setSystemTime(0);
   Socket.all = []; vi.stubGlobal("WebSocket", Socket); vi.stubGlobal("indexedDB", undefined);
-  const connection = createConnection({
+  booted = createConnection({
     applyServerEvent: () => {}, serverUrl: async () => "ws://fixture", webServerUrl: () => "ws://fixture", desktopBridge: () => undefined,
     hydrate, afterDisconnect: () => {},
   });
-  stop = connection.connect(); await vi.advanceTimersByTimeAsync(0);
+  stop = booted.connect(); await vi.advanceTimersByTimeAsync(0);
   const first = Socket.all[0]; if (!first) throw new Error("Missing initial socket");
   first.open(); await vi.advanceTimersByTimeAsync(0);
   return first;
@@ -158,4 +159,14 @@ test("a browser tab pins its frames to the server it talks to; the desktop app l
   await reachServer(undefined);
   expect(Socket.all).toHaveLength(2);
   expect(pinFrames.mock.calls).toEqual([["http://127.0.0.1:5286"]]);
+});
+
+test("a send waiting minutes for its model to load is still answered, and ends only when the socket does", async () => {
+  const socket = await boot();
+  let outcome: unknown;
+  void booted.reply("reply.send", { id: "r1", threadId: "t1", messageId: "m1", text: "hi" }).then((a) => { outcome = a; });
+  await vi.advanceTimersByTimeAsync(5 * 60_000);
+  expect(outcome).toBeUndefined();
+  socket.close(); await vi.advanceTimersByTimeAsync(0);
+  expect(outcome).toEqual({ answer: "not-reached", why: "closed" });
 });

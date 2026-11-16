@@ -58,7 +58,7 @@ interface Pending {
   readonly params: unknown;
   readonly resolve: (value: never) => void;
   readonly reject: (error: WireError) => void;
-  readonly timer: ReturnType<typeof setTimeout>;
+  readonly timer: ReturnType<typeof setTimeout> | undefined;
   readonly onMetadata?: CallOptions["onMetadata"];
   readonly onResult?: (value: never, sync: SyncMetadata | undefined) => void;
   readonly offered?: readonly SyncDomain[];
@@ -203,10 +203,11 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
         const frame = encodeRequest(id, method, params);
         if (!frame.ok) return reject(frame.error);
         const timeoutMs = callOptions?.timeoutMs ?? defaultTimeout;
-        const timer = setTimeout(() => {
+        // why: Infinity waits for the answer or the socket's close, never a timer
+        const timer = Number.isFinite(timeoutMs) ? setTimeout(() => {
           pending.delete(id);
           reject(new WireError("timeout", `${method} (${id}) got no response in ${timeoutMs} ms`));
-        }, timeoutMs);
+        }, timeoutMs) : undefined;
         pending.set(id, { method, params, resolve: resolve as (value: never) => void, reject, timer, onMetadata: callOptions?.onMetadata,
           onResult: callOptions?.onResult as Pending["onResult"],
           ...(method === "sync.negotiate" ? { offered: (params as Params<"sync.negotiate">).ordered } : {}),

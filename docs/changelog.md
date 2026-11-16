@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-16: a message waiting for its model is not called unsent
+
+- A message sent while its model loaded, or while a picture held the graphics card, came back
+  after 30 seconds as not sent and returned to the box, though the server went on and sent it.
+  A send now waits for its answer while the connection is open; a dropped connection still ends it.
+
 ## 2026-11-16: a reply opened mid-stream keeps growing
 
 - Words that reach a window after it connects but before its list of records is read now wait

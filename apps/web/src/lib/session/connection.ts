@@ -141,7 +141,8 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
 
   function reply<M extends ReplyCall>(method: M, params: Params<M>): Promise<ReplyOutcome> {
     if (client === null) return Promise.resolve({ answer: "not-reached", why: "closed" });
-    return client.reply(method, params);
+    // why: a send answers once its model loads, minutes at times; a closed socket still ends it
+    return client.reply(method, params, method === "reply.send" ? { timeoutMs: Infinity } : undefined);
   }
 
   async function probe<M extends MethodName>(method: M, params: Params<M>, options?: CallOptions<M>): Promise<ResultOf<M> | typeof NA | undefined> {
