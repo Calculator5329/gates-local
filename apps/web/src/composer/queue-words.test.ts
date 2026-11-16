@@ -39,7 +39,7 @@ it("a message that waits only for a reply in another chat says so, once, in Send
   expect(replyElsewhere({ threadId: "t1", turns: { t1: turn("t1"), t2: turn("t2") } } as unknown as S), "its own chat's reply comes first").toBe(false);
   expect(replyElsewhere({ threadId: "t1", turns: { t1: { ...turn("t1"), turnId: "another-windows" }, t2: turn("t2") } } as unknown as S), "one another window started here").toBe(false);
   expect(replyElsewhere({ threadId: "t1", turns: { t2: turn("t2", { kind: "stopped", secs: 1 }) } } as unknown as S)).toBe(false);
-  expect(replyElsewhere({ threadId: "t1", turns: { t2: { ...turn("t2"), image: true } } } as unknown as S), "a picture is not a reply").toBe(false);
+  expect(replyElsewhere({ threadId: "t1", turns: { t2: { ...turn("t2"), reply: { stage: "drawing" } } } } as unknown as S), "a picture is not a reply").toBe(false);
 });
 
 it("a message waiting for a download keeps its own words whatever setup does", () => {

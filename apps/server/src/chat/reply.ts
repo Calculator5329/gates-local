@@ -75,8 +75,8 @@ export interface Live extends Asked {
   /** The runtime has sent something for this try. */
   readonly heard: boolean;
 }
-export interface Drawing extends Asked { readonly stage: "drawing" }
-export interface Stopping extends Asked { readonly stage: "stopping"; readonly stoppedAt: number; readonly drawing: boolean }
+export interface Drawing extends Asked { readonly stage: "drawing"; readonly jobs: readonly string[] }
+export interface Stopping extends Asked { readonly stage: "stopping"; readonly stoppedAt: number; readonly drawing: boolean; readonly jobs?: readonly string[] }
 export type StoppedBy = { readonly who: "person" } | { readonly who: "preempted"; readonly neededBy?: string } | { readonly who: "runtime" } | { readonly who: "closing" };
 interface Over extends Common { readonly at: number; readonly turnId?: string; readonly questionId?: string }
 export interface Done extends Over { readonly stage: "done"; readonly replyId?: string }
@@ -155,7 +155,7 @@ export type Event =
   /** Its model is loading, before its start. */
   | { readonly event: "load"; readonly turnId: string }
   /** Its start work ended well: its question was saved in this same step. */
-  | { readonly event: "start"; readonly turnId: string; readonly attempt: number; readonly question: Message; readonly model: string; readonly cold: boolean; readonly drawing: boolean }
+  | { readonly event: "start"; readonly turnId: string; readonly attempt: number; readonly question: Message; readonly model: string; readonly cold: boolean; readonly drawing: boolean; readonly jobs?: readonly string[] }
   /** Its start was refused, or cut before anything was saved. */
   | { readonly event: "refuse"; readonly turnId: string; readonly attempt: number; readonly why: Refusal }
   /** A call started or ended. */
@@ -297,7 +297,7 @@ function call(r: Rec | undefined, c: Call, rules: Rules): Moved {
     if (r.stage === "starting") return done(held(r, STOPPED, "reply"), { ahead: "stopped", cut: { turnId: r.turnId, at: c.at } });
     if (isLive(r) || r.stage === "drawing") {
       const { id, threadId, rev, turnId, question, model } = r;
-      return done({ id, threadId, rev, turnId, question, model, try: r.try, stage: "stopping", stoppedAt: c.at, drawing: r.stage === "drawing" }, { ahead: "stopped", cut: { turnId, at: c.at } });
+      return done({ id, threadId, rev, turnId, question, model, try: r.try, stage: "stopping", stoppedAt: c.at, drawing: r.stage === "drawing", ...(r.stage === "drawing" ? { jobs: r.jobs } : {}) }, { ahead: "stopped", cut: { turnId, at: c.at } });
     }
     if (r.stage === "stopping") return done(r);
     // its last word beat the Stop: Stop still means stop for what waits in its chat
@@ -367,7 +367,7 @@ function event(r: Rec | undefined, e: Event, rules: Rules): Moved {
       // the work of an older start finds the record moved on: nothing changes, and it saves nothing
       if (r.stage !== "starting" || r.turnId !== e.turnId || r.attempt !== e.attempt) return same;
       const asked = { ...common(r), turnId: e.turnId, question: e.question, model: e.model, try: 1 };
-      if (e.drawing) return { next: { ...asked, stage: "drawing" } };
+      if (e.drawing) return { next: { ...asked, stage: "drawing", jobs: e.jobs ?? [] } };
       return { next: { ...asked, stage: e.cold ? "loading" : "thinking", calls: [], heard: false } };
     }
     case "refuse": {

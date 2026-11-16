@@ -1,8 +1,8 @@
 // Chat admissions, concurrent replies, streaming buffers, and the server's record of every message as this window keeps it.
-import { type AttachedFile, type BlockingTurn, type ImageChoice, type Message, type MethodName, type Params, type Payload, type Reply, type ReplyCall, type ReplyChange, type ReplyListed, type ReplyOutcome, type ReplyRecord, type ReplyTimes, type ResultOf, type SoFar, type StopConsent, WireError } from "@gates-local/contracts";
+import { type AttachedFile, type BlockingTurn, type ImageChoice, type Message, type MethodName, type Params, type Payload, type Reply, type ReplyCall, type ReplyChange, type ReplyListed, type ReplyOutcome, type ReplyTimes, type ResultOf, type SoFar, type StopConsent, WireError } from "@gates-local/contracts";
 import { ctxFor, describeModel, k } from "../lib/words/format.ts";
 import { firstChatPull, sendableModel } from "../models/pick.ts";
-import { type LiveTurn, NA, type State, type StopAsk, type WaitingReply, behindSetup, chatReady, getState, isWaiting, runningTurn, setState, streamingHere, turnOf, waitingReplies } from "../lib/store/store.ts";
+import { type LiveTurn, NA, type State, type StopAsk, type TurnClock, type WaitingReply, behindSetup, chatReady, getState, isWaiting, runningTurn, setState, streamingHere, turnOf, waitingReplies } from "../lib/store/store.ts";
 import { imageReason } from "./paste.ts";
 import { drawChoice, imageMode } from "../image/image-choice.ts";
 import { releaseFiles } from "./file-holds.ts";
@@ -138,11 +138,11 @@ function queueMoved(): void {
  * A record's times as a turn draws them. A message taken and not yet saved has no clock: it
  * waits, or loads. A reply whose model has sent nothing yet waits too, with no work to time.
  */
-function clockOf(r: Exclude<Reply, WaitingReply | { readonly stage: "done" | "stopped" | "failed" }>): ReplyRecord {
+function clockOf(r: Exclude<Reply, WaitingReply | { readonly stage: "done" | "stopped" | "failed" }>): TurnClock {
   const none = { workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {} };
-  if (r.stage === "starting") return { ...none, stage: r.loading === true ? "loading" : "waiting", startedAt: r.startedAt };
+  if (r.stage === "starting") return { ...none, stage: r.draw !== undefined ? "drawing" : r.loading === true ? "loading" : "waiting", startedAt: r.startedAt };
   // a stopped picture's turn is over in the composer while its card says the engine is letting go
-  if (r.stage === "drawing") return { ...none, startedAt: r.startedAt, ...(r.stoppedAt === undefined ? { stage: "waiting" } : { stage: "stopping", stoppedAt: r.stoppedAt }) };
+  if (r.stage === "drawing") return { ...none, stage: "drawing", startedAt: r.startedAt, ...(r.stoppedAt === undefined ? {} : { stoppedAt: r.stoppedAt }) };
   return {
     stage: r.stage === "thinking" && r.silent === true ? "waiting" : r.stage,
     startedAt: r.startedAt, workMs: r.workMs, toolMs: r.toolMs, attempt: r.try, spans: r.spans, callsAt: r.callsAt,
@@ -504,7 +504,7 @@ export function createChat({ applyServerEvent, call, reply: askOne, codeOf, crea
     const was = s.replies.get(r.id);
     // the server lets one reply run in a chat, and this is the one. A Retry replaces what it stopped: nothing of that stays under its question.
     givesWay(s.turns[threadId], r.id, r.retryOf === undefined);
-    const made: LiveTurn = { threadId, turnId: r.id, model: r.draw?.preset ?? r.model ?? "", startedAt: now, thinking: "", text: "", tools: [], ...(r.draw === undefined ? {} : { image: true as const }) };
+    const made: LiveTurn = { threadId, turnId: r.id, model: r.draw?.preset ?? r.model ?? "", startedAt: now, thinking: "", text: "", tools: [] };
     applyServerEvent((st) => {
       const at = st.turns[threadId];
       return { replies: kept(st, r), turns: withTurn(st.turns, threadId, reduceTurn(at?.turnId === r.id ? at : made, { type: "reply", reply: clockOf(r) }, now)) };
@@ -556,7 +556,7 @@ export function createChat({ applyServerEvent, call, reply: askOne, codeOf, crea
       const at = st.turns[threadId];
       // the saved question takes the place of the record's words
       const base = at?.turnId === r.id ? at : made;
-      const started: LiveTurn = { ...base, userMessageId: base.userMessageId ?? r.questionId, ...(r.stage === "drawing" ? { image: true as const, model: r.preset } : { model: r.model }) };
+      const started: LiveTurn = { ...base, userMessageId: base.userMessageId ?? r.questionId, model: r.stage === "drawing" ? r.preset : r.model };
       return { replies: kept(st, r), ...(question === undefined ? {} : withQuestion(st, threadId, question, retried)), turns: withTurn(st.turns, threadId, reduceTurn(started, { type: "reply", reply: clock }, now)) };
     });
   }

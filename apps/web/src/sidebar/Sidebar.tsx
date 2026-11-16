@@ -10,6 +10,7 @@ import { Icon, type IconId } from "../lib/ui/icons.tsx";
 import { focusComposer } from "../composer/focus.ts";
 import { cancelPendingSettings, closeSettings, closeUsage, leavePictures, leaveSettings, newThread, openSettings, openThread, preloadThread, spareScreenEntry, toggleModels, togglePictures, toggleUsage } from "../lib/session/index.ts";
 import { NA, type Section, getState, overChat, runningThreads, setState, useStore, waitingReplies } from "../lib/store/store.ts";
+import { drawsPicture } from "../thread/turn.ts";
 import { PHONE, closePop, closeTip, isTouch, useMedia } from "../lib/ui/ui.tsx";
 import { FootButton, SidebarUpdate } from "../updates/Updates.tsx";
 
@@ -146,7 +147,7 @@ const SKEL_ROWS = ["72%", "56%", "80%", "64%", "48%", "70%"] as const;
 const notStarted = (s: ReturnType<typeof getState>): string => {
   const out: string[] = [];
   for (const t of Object.values(s.turns)) {
-    if (t.end !== undefined || t.image === true) continue;
+    if (t.end !== undefined || drawsPicture(t)) continue;
     if (t.text === "" && t.thinking === "" && t.tools.length === 0) out.push(`${t.threadId}@${t.startedAt}`);
   }
   // why: a new thread holding only a queued message counts from when the message was typed.

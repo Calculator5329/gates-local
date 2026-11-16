@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { type ThreadPage, pageBlocks, pageTitle } from "@gates-local/contracts";
 import { runningTurn, turnOf, useStore } from "../lib/store/store.ts";
+import { drawsPicture } from "../thread/turn.ts";
 
 /** What the session gives this module: the server's page list, and how many messages come before the loaded ones. */
 export interface PageReads {
@@ -69,7 +70,7 @@ export function usePages(threadId: string | null): { versions: PageVersion[]; wr
   const messages = useStore((s) => (threadId === null ? undefined : s.messages[threadId]));
   const live = useStore((s) => {
     const turn = turnOf(s, threadId);
-    return turn === undefined || turn.image === true ? "" : turn.text;
+    return turn === undefined || drawsPicture(turn) ? "" : turn.text;
   });
   const running = useStore((s) => runningTurn(s, threadId) !== undefined);
   const earlierNow = () => (threadId === null ? 0 : reads.earlierOf(threadId));

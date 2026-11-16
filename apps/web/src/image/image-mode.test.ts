@@ -73,7 +73,7 @@ it("Image on: one chat.send that carries the image choice and no chat-model chec
   expect(sends()[0]).toMatchObject({ content: "a lighthouse at dusk", draw: { preset: PIXEL.id, width: 768, height: 512 } });
   expect(sends()[0], "the old tool flag is gone").not.toHaveProperty("image");
   expect(b.server.calls("turns.blocking").length, "no chat model loads, so nothing is asked about stopping chats").toBe(blockingBefore);
-  expect(st().turns.A).toMatchObject({ image: true, model: PIXEL.id });
+  expect(st().turns.A).toMatchObject({ reply: { stage: "drawing" }, model: PIXEL.id });
 });
 
 it("Image off: the send is a chat send with no image choice", async () => {
@@ -203,5 +203,5 @@ it("another client's Image turn arrives marked as one", async () => {
   await until(() => st().messages.A !== undefined, 2000, "thread A");
   b.server.push("chat.event", { turnId: "turn-x", threadId: "A", event: { type: "start", model: PIXEL.id, userMessage: userMsg("u-x", "A", "from the phone"), image: true } });
   await until(() => st().turns.A !== undefined, 2000, "the turn");
-  expect(st().turns.A).toMatchObject({ image: true, model: PIXEL.id });
+  expect(st().turns.A).toMatchObject({ reply: { stage: "drawing" }, model: PIXEL.id });
 });

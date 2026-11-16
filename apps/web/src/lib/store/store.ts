@@ -65,7 +65,7 @@ export interface LiveTurn {
    * come from them and nothing else, a Stop included (stage "stopping", `stoppedAt`). They stay
    * with a reply that ended here, for its stopped line. Absent until the record's first change.
    */
-  readonly reply?: ReplyRecord;
+  readonly reply?: TurnClock;
   /** This client's time when `reply` arrived: its work grows from then while it thinks or runs a call. */
   readonly replyAt?: number;
   readonly thinking: string;
@@ -73,9 +73,10 @@ export interface LiveTurn {
   readonly tools: readonly ToolStep[];
   /** Set once the turn ended without a saved message, or the server's record says a Stop was taken (`secs` from that record). */
   readonly end?: { readonly kind: "stopped"; readonly secs: number } | { readonly kind: "error"; readonly code: string; readonly message: string };
-  /** An Image turn: the words went to the image model and the reply is its picture card; nothing of a chat reply shows. */
-  readonly image?: true;
 }
+
+/** The record's times as a turn keeps them; a picture's turn is "drawing" from its start to its end. */
+export type TurnClock = Omit<ReplyRecord, "stage"> & { readonly stage: ReplyRecord["stage"] | "drawing" };
 
 export type WaitingReply = Extract<Reply, { readonly stage: "queued" | "held" | "next" | "editing" }>;
 

@@ -169,11 +169,11 @@ it("a picture the server took a Stop for has nothing left to stop here, while it
   listed();
   const drawing = { id: "p1", threadId: "t1", rev: 3, stage: "drawing", questionId: "m-p1", preset: "preset", startedAt: 10_000, jobs: [] } as const;
   chat.recordChanged({ kind: "is", reply: drawing });
-  expect(runningTurn(getState(), "t1"), "the composer offers Stop").toMatchObject({ turnId: "p1", image: true });
+  expect(runningTurn(getState(), "t1"), "the composer offers Stop").toMatchObject({ turnId: "p1", reply: { stage: "drawing" } });
   chat.recordChanged({ kind: "is", reply: { ...drawing, rev: 4, stoppedAt: 14_000 } });
   expect(runningTurn(getState(), "t1"), "nothing more to press").toBeUndefined();
   // the turn stays until the server's record ends: a second reply cannot start in this chat yet
-  expect(getState().turns.t1).toMatchObject({ turnId: "p1", end: { kind: "stopped", secs: 4 }, reply: { stage: "stopping", stoppedAt: 14_000 } });
+  expect(getState().turns.t1).toMatchObject({ turnId: "p1", end: { kind: "stopped", secs: 4 }, reply: { stage: "drawing", stoppedAt: 14_000 } });
 });
 
 it("a message the server sent leaves what this window would ask again", async () => {

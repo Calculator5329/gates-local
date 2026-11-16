@@ -47,6 +47,7 @@ import {
   typedInComposer,
 } from "../lib/session/index.ts";
 import { NA, type State, type WaitingReply, behindSetup, getState, runningTurn, setState, streamingHere, useStore, waitingReplies } from "../lib/store/store.ts";
+import { drawsPicture } from "../thread/turn.ts";
 import { editDraft, getDraft, useDraft } from "../lib/store/drafts.ts";
 import { PHONE, SheetHead, Skel, closePop, closeTip, esc, isTouch, openTip, place, togglePop, useMedia } from "../lib/ui/ui.tsx";
 
@@ -560,7 +561,7 @@ export function queueWords(q: WaitingReply, editing: boolean, first: string | un
 export const replyElsewhere = (s: State): boolean => {
   // a turn here that only another window started counts too: the row then waits behind its own chat
   const here = s.threadId === null ? undefined : s.turns[s.threadId];
-  return (here === undefined || here.end !== undefined) && Object.entries(s.turns).some(([id, t]) => id !== s.threadId && t.end === undefined && t.image !== true);
+  return (here === undefined || here.end !== undefined) && Object.entries(s.turns).some(([id, t]) => id !== s.threadId && t.end === undefined && !drawsPicture(t));
 };
 
 export const EDITED_ELSEWHERE = "Being edited in another window";
@@ -614,7 +615,7 @@ function WaitNumbers({ value }: { value: string }) {
 /** What is running in the open chat, as a word, so a reader re-renders when that changes and not at every token. */
 const runningKind = (s: State): "image" | "reply" | null => {
   const turn = runningTurn(s, s.threadId);
-  return turn === undefined ? null : turn.image ? "image" : "reply";
+  return turn === undefined ? null : drawsPicture(turn) ? "image" : "reply";
 };
 
 const SEND_NOW = { image: "Send now. Cancels the image", reply: "Send now. Stops the reply" } as const;

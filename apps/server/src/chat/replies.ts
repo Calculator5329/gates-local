@@ -111,7 +111,7 @@ export interface Replies {
   /** Its model is loading before its start. True when the record changed. */
   loading(turnId: string): boolean;
   /** Its question was saved, in this same step. False when the record had moved on. Told to the windows at `notify`. */
-  started(turnId: string, attempt: number, question: Message, model: string, how: { readonly cold: boolean; readonly drawing: boolean }): boolean;
+  started(turnId: string, attempt: number, question: Message, model: string, how: { readonly cold: boolean; readonly drawing: boolean; readonly jobs?: readonly string[] }): boolean;
   /** Its start was refused, or cut before anything was saved. Told to the windows at `notify`. */
   refused(turnId: string, attempt: number, why: Refusal): void;
   /** The turn's stream sent this. The stage its record now shows; none when the record is not being written. */
@@ -371,7 +371,7 @@ export function createReplies({ file, log, changed, told, saved, deleting, closi
     if (c === undefined) return undefined;
     const common = { id, threadId: r.threadId, rev: r.rev };
     // an Image turn runs no chat model: its pictures are the image module's jobs, which it lists itself
-    if (r.stage === "drawing" || (r.stage === "stopping" && r.drawing)) return { ...common, stage: "drawing", questionId: r.question.id, preset: r.model, startedAt: c.startedAt, jobs: [], ...(r.stage === "stopping" ? { stoppedAt: r.stoppedAt } : {}) };
+    if (r.stage === "drawing" || (r.stage === "stopping" && r.drawing)) return { ...common, stage: "drawing", questionId: r.question.id, preset: r.model, startedAt: c.startedAt, jobs: r.jobs ?? [], ...(r.stage === "stopping" ? { stoppedAt: r.stoppedAt } : {}) };
     const times = {
       questionId: r.question.id, model: r.model, startedAt: c.startedAt, workMs: c.workMs, toolMs: c.toolMs, try: r.try, spans: c.spans, callsAt: c.callsAt,
       ...(c.readyAt === undefined ? {} : { readyAt: c.readyAt }),
@@ -614,9 +614,9 @@ export function createReplies({ file, log, changed, told, saved, deleting, closi
       const rec = ofTurn(turnId);
       return apply(rec, { event: "load", turnId }).next !== rec;
     },
-    started(turnId, attempt, question, model, { cold, drawing }) {
+    started(turnId, attempt, question, model, { cold, drawing, jobs }) {
       const rec = ofTurn(turnId);
-      const next = apply(rec, { event: "start", turnId, attempt, question, model, cold, drawing }).next;
+      const next = apply(rec, { event: "start", turnId, attempt, question, model, cold, drawing, ...(jobs === undefined ? {} : { jobs }) }).next;
       const ok = next !== rec && isAsked(next);
       if (ok) {
         savedWith(next.id, [question]);

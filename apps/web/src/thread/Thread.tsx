@@ -18,7 +18,7 @@ import { focusComposer } from "../composer/focus.ts";
 import { cancelImage, earlierOf, fileUrl, loadEarlier, onEarlier, reloadThread, retry, retryImage } from "../lib/session/index.ts";
 import { AttachedFiles, AttachmentImages } from "../composer/attachment-images.tsx";
 import { type LiveTurn, NA, type State, type StopNote, getState, turnOf, unsavedQuestion, useStore } from "../lib/store/store.ts";
-import { stopping, workMsAt } from "./turn.ts";
+import { drawsPicture, stopping, workMsAt } from "./turn.ts";
 import { type Drawn, type Rounds, drawTimes } from "./times.ts";
 import { currentDraftKey, replaceDraft } from "../lib/store/drafts.ts";
 import { TurnSkel, closeTip, esc } from "../lib/ui/ui.tsx";
@@ -577,7 +577,7 @@ function ImageJob({ msg, thread, origin, token, tile = false }: { msg: Message; 
   // An Image turn's own card is cancelled by the composer's Stop, so the card offers no second way;
   // a card the chat model's tool or a retry started has no Stop and keeps its Cancel.
   const turn = useStore((s) => turnOf(s, msg.threadId));
-  const head = turn?.image === true && turn.end === undefined && turn.userMessageId !== undefined ? turnCard(thread, turn.userMessageId) : undefined;
+  const head = turn !== undefined && drawsPicture(turn) && turn.end === undefined && turn.userMessageId !== undefined ? turnCard(thread, turn.userMessageId) : undefined;
   // every tile of the turn's card: Stop cancels those not done
   const stopCovers = pending && head !== undefined && (head === msg.id || (msg.imageJob!.group !== undefined && thread.find((m) => m.id === head)?.imageJob?.group?.id === msg.imageJob!.group.id));
   const since = thread.find((m) => m.id === job.jobId)?.createdAt ?? msg.createdAt;
@@ -756,7 +756,7 @@ const LiveReply = memo(function LiveReply({ threadId, msg, last, origin, token }
   if (msg === undefined && live === null) return null;
   // An Image turn's reply is its picture card, a row of its own with its progress and Cancel:
   // the turn shows its question until that is saved, and nothing of a chat reply.
-  if (msg === undefined && live?.image === true) return asked !== undefined ? <UserBubble text={asked.text} images={asked.images ?? []} files={asked.files} time={turnTime(live.startedAt)} /> : null;
+  if (msg === undefined && live !== null && drawsPicture(live)) return asked !== undefined ? <UserBubble text={asked.text} images={asked.images ?? []} files={asked.files} time={turnTime(live.startedAt)} /> : null;
   if (msg !== undefined) countRender(msg.id);
   return (
     <>
@@ -884,7 +884,7 @@ export function Timeline({ threadId }: { threadId: string }) {
   // What the live turn was sent to, as one string so the selector's answer compares by value.
   const liveBy = useStore((s) => {
     const turn = turnOf(s, threadId);
-    return turn === undefined ? null : `${turn.image === true ? "image" : "chat"}\n${turn.model}\n${turn.userMessageId ?? ""}`;
+    return turn === undefined ? null : `${drawsPicture(turn) ? "image" : "chat"}\n${turn.model}\n${turn.userMessageId ?? ""}`;
   });
   // A line above each turn answered by another thing than the one before, from the turn's first frame.
   // One pass over the messages; the timeline renders when they or the live turn's owner change, not per token.

@@ -133,7 +133,7 @@ export function createDrawTurn({ deps, store, log, push, reserve, replies, queue
           jobIds.push((await queueImage(image, { prompt: content, threadId, choice, ...tile })).jobId);
         }
         // The start is kept from here: its record becomes a reply, or (it moved on meanwhile) the start is undone.
-        if (!replies.started(turn.turnId, turn.attempt, userMessage, choice.preset, { cold: false, drawing: true })) throw stoppedEarly();
+        if (!replies.started(turn.turnId, turn.attempt, userMessage, choice.preset, { cold: false, drawing: true, jobs: jobIds })) throw stoppedEarly();
       } catch (e) {
         // Nothing was made: the question goes too, with any of its pictures already queued, so the words return to the composer as unsent.
         for (const id of jobIds) image.cancel(id);

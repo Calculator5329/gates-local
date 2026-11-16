@@ -7,20 +7,23 @@
 // What the reply is doing and its seconds are the server's reply record:
 // this client keeps no clock of its own and guesses no stage.
 // A press of Stop changes nothing here: the record says when the server took it.
-import type { Payload, ReplyRecord, ToolStep, TurnEnded } from "@gates-local/contracts";
-import type { LiveTurn, State } from "../lib/store/store.ts";
+import type { Payload, ToolStep, TurnEnded } from "@gates-local/contracts";
+import type { LiveTurn, State, TurnClock } from "../lib/store/store.ts";
 
 /** Every event a turn takes is the server's: this window has none of its own. */
 export type ChatEvent = Payload<"chat.event">["event"];
 /** What changes a turn the window shows: words, a tool step, its record, its end. */
-export type TurnEvent = Exclude<ChatEvent, { type: "start" }>;
+export type TurnEvent = Exclude<ChatEvent, { type: "start" | "reply" }> | { readonly type: "reply"; readonly reply: TurnClock };
 
 /** A stopped reply's seconds: both ends are the server's times, so every window and the saved row agree. */
-const stoppedSecs = (reply: ReplyRecord | undefined, at: number | undefined): number =>
+const stoppedSecs = (reply: TurnClock | undefined, at: number | undefined): number =>
   reply === undefined ? 0 : Math.max(0, Math.round(((reply.stoppedAt ?? at ?? reply.startedAt) - reply.startedAt) / 1000));
 
 /** The server took a Stop for this reply and has not ended it yet: no Retry, and nothing new starts in its chat. */
-export const stopping = (turn: Pick<LiveTurn, "reply"> | undefined): boolean => turn?.reply?.stage === "stopping";
+export const stopping = (turn: Pick<LiveTurn, "reply"> | undefined): boolean =>
+  turn?.reply?.stage === "stopping" || (drawsPicture(turn) && turn?.reply?.stoppedAt !== undefined);
+
+export const drawsPicture = (turn: Pick<LiveTurn, "reply"> | undefined): boolean => turn?.reply?.stage === "drawing";
 
 /**
  * The reply's work at `now`, in milliseconds: thinking plus tool time, never the
@@ -72,8 +75,8 @@ export function reduceTurn(turn: LiveTurn, event: TurnEvent, now: number): LiveT
     case "error": {
       if (event.partial !== undefined) return null;
       // the record ends with the turn: its work is what the server stamped on the question
-      const reply: ReplyRecord | undefined = turn.reply === undefined ? undefined
-        : { ...turn.reply, stage: "ended", workMs: event.question?.times?.workMs ?? turn.reply.workMs, ...(event.ended === undefined ? {} : { ended: event.ended }) };
+      const reply: TurnClock | undefined = turn.reply === undefined ? undefined
+        : { ...turn.reply, stage: drawsPicture(turn) ? "drawing" : "ended", workMs: event.question?.times?.workMs ?? turn.reply.workMs, ...(event.ended === undefined ? {} : { ended: event.ended }) };
       const ended = { ...turn, ...(reply === undefined ? {} : { reply, replyAt: now }) };
       // the server says why it ended: a halt or a failure is said, also when a Stop was on its way
       if (endReason(event) !== "stopped") return { ...ended, end: { kind: "error", code: event.code, message: event.message } };

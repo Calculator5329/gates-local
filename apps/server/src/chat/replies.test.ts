@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Message } from "@gates-local/contracts";
+import type { Message, ReplyChange } from "@gates-local/contracts";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { type Entry, type Ready, type RepliesDeps, createReplies } from "./replies.ts";
 
@@ -264,5 +264,21 @@ describe("the server's record of every message", () => {
     q.add(entry("b", "t2"));
     q.dropThread("t1");
     expect(q.list().map((e) => e.id)).toEqual(["b"]);
+  });
+});
+
+describe("a picture's record", () => {
+  it("lists the picture's jobs to every window while it is drawn, and while its Stop is taken", () => {
+    const told: ReplyChange[] = [];
+    const clock = { stage: "waiting", startedAt: 5, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {} } as const;
+    const { q } = store(undefined, { told: (c) => told.push(c), clock: () => clock });
+    q.direct("p1", "t1", { messageId: "m-p1", text: "a lighthouse", at: 1 }, false, 1);
+    q.begun("p1");
+    expect(q.started("p1", 1, question("m-p1"), "preset", { cold: false, drawing: true, jobs: ["job-1", "job-2"] })).toBe(true);
+    q.notify();
+    const last = () => told.flatMap((c) => (c.kind === "is" ? [c.reply] : [])).at(-1);
+    expect(last()).toMatchObject({ stage: "drawing", preset: "preset", jobs: ["job-1", "job-2"] });
+    q.stop({ id: "p1" }, 9);
+    expect(last()).toMatchObject({ stage: "drawing", jobs: ["job-1", "job-2"], stoppedAt: 9 });
   });
 });

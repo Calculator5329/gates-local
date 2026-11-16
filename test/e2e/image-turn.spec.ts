@@ -3,6 +3,7 @@ import { createClient } from "@gates-local/contracts";
 import { fakeComfy } from "./fake-comfy.ts";
 import { FAKE_URL } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { holds } from "./waits.ts";
 
 test.use({ video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off", allowedErrors: [/WebSocket connection to .* failed/] });
 let comfy: Awaited<ReturnType<typeof fakeComfy>>;
@@ -267,4 +268,34 @@ test("a waiting card survives a reload and cancellation leaves a reason", async 
     if (turnId) await client.call("chat.cancel", { turnId });
     client.close();
   }
+});
+
+/** From the page's first frame: each time a reply's running line is drawn, its words ("" while it waits its first second). */
+const liveLines = () => {
+  const seen: string[] = [];
+  (window as unknown as { liveLines: string[] }).liveLines = seen;
+  const look = () => { for (const line of document.querySelectorAll(".turn.a .run-dot")) seen.push(line.parentElement?.textContent ?? ""); };
+  new MutationObserver(look).observe(document, { childList: true, subtree: true, characterData: true });
+};
+const making = (p: Page) => p.locator("[data-image-job]").getByRole("status", { name: "Making image" });
+const linesIn = (page: Page) => page.evaluate(() => (window as unknown as { liveLines: string[] }).liveLines);
+
+// BUILD.md step 9: a picture's record has its own stage, so no window reads it as a reply that waits.
+test("a picture asked in one window reads as a picture being made from its first moment, in both windows and after a reload", async ({ page, open, context }) => {
+  await page.addInitScript(liveLines);
+  await setup(page, open);
+  await expect(making(page)).toBeVisible();
+  await expect.poll(() => comfy.state().length, { message: "the engine took the prompt" }).toBe(1);
+  const other = await context.newPage();
+  await other.addInitScript(liveLines);
+  await other.goto(page.url()); await waitReady(other);
+  await expect(making(other)).toBeVisible();
+  // past the second after which a reply that waits says "Waiting"
+  await holds(other, 1500, async () => making(other).count(), 1, { every: 250, message: "the picture is still being made" });
+  await other.reload(); await waitReady(other);
+  await expect(making(other)).toBeVisible();
+  await holds(other, 1500, async () => making(other).count(), 1, { every: 250, message: "the picture is still being made" });
+  expect(await linesIn(page), "the asking window drew no reply's running line").toEqual([]);
+  expect(await linesIn(other), "the other window drew none, before or after its reload").toEqual([]);
+  await other.close();
 });
