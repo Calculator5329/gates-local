@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-16: the GPU folder's comments hold to the six kinds
+
+- The gpu folder passes the comment rule with no offenders: 275
+  comment lines became 20. Five rules no test held now have one: the
+  load gate lets the next run in after one throws, the loaded record
+  gives back what a refused switch cleared, a model nobody asked for
+  counts as what is in memory, a busy picture engine is never said to
+  be freeing memory, and a picture that failed while loading makes the
+  engine's setup unknown again.
+
 ## 2026-11-16: Measure's comments hold to the six kinds
 
 - The measure folder passes the comment rule with no offenders: 231

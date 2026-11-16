@@ -114,6 +114,55 @@ describe("one thing in memory: the handoff", () => {
     expect(m.status()).toMatchObject({ resident: { kind: "chat", model: "b:2b", numCtx: 16384 } });
     expect(m.status().handoff).toBeUndefined();
   });
+
+  it("the record: a reading that drops the app's model returns it with its num_ctx, and a refused switch gets back what clear took", () => {
+    const m = owner(ollama([]));
+    m.loaded.loaded("a:1b", 8192);
+    m.loaded.loaded("b:2b", 16384);
+    expect(m.loaded.observe([{ name: "b:2b" }, { name: "other:1b" }])).toEqual([["a:1b", 8192]]);
+    expect(m.loaded.ours()).toEqual(["b:2b"]);
+    expect(m.loaded.oursAt("a:1b")).toBeUndefined();
+    const kept = m.loaded.clear();
+    expect(m.loaded.listed()).toEqual([]);
+    expect(m.loaded.ours()).toEqual([]);
+    m.loaded.restore(kept);
+    expect(m.loaded.listed().toSorted()).toEqual(["b:2b", "other:1b"]);
+    expect(m.loaded.oursAt("b:2b")).toBe(16384);
+    expect(m.loaded.left("b:2b")).toBe(16384);
+    expect(m.loaded.left("other:1b")).toBeUndefined();
+  });
+
+  it("a model the app did not ask for is what is in memory all the same, until a reading no longer lists it", () => {
+    const m = owner(ollama([]));
+    m.observe([row("x:3b")]);
+    expect(m.status().resident).toMatchObject({ kind: "chat", model: "x:3b", numCtx: 16384 });
+    m.observe([]);
+    expect(m.status().resident).toBeUndefined();
+  });
+
+  it("tells on when it asks something to leave and off once the wait ended; a busy engine was asked nothing and tells nothing", async () => {
+    const told: boolean[] = [];
+    const image = { kind: "image" as const, setup: "p 512x512" };
+    const busy = owner(ollama([]), { engine: () => ({ leave: async () => "busy" as const }) });
+    await busy.handoff(image, signal, { onLeave: (on) => told.push(on) });
+    expect(told).toEqual([]);
+    const freed = owner(ollama([]), { engine: () => ({ leave: async () => "freed" as const }) });
+    await freed.handoff(image, signal, { onLeave: (on) => told.push(on) });
+    expect(told).toEqual([true, false]);
+  });
+
+  it("an image that failed while loading leaves the engine's setup unknown: the next image asks it to free again", async () => {
+    let asks = 0;
+    const m = owner(ollama([]), { engine: () => ({ leave: async () => { asks += 1; return "freed" as const; } }) });
+    const image = { kind: "image" as const, setup: "p 512x512" };
+    await m.handoff(image, signal);
+    m.settled(image);
+    expect((await m.handoff(image, signal)).engine).toBe("kept");
+    m.stage(image, "loading");
+    m.ended();
+    expect((await m.handoff(image, signal)).engine).toBe("freed");
+    expect(asks).toBe(2);
+  });
 });
 
 /**

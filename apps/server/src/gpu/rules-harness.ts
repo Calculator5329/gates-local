@@ -1,25 +1,3 @@
-// The app's GPU rules, run on the real modules (rules.test.ts).
-//
-// One world per test: the real lease, load gate, memory owner, loaded record, loader, runtime
-// switch (with the wait a switch gives running turns) and picture job, wired to each other the
-// way runtime/services.ts and main.ts wire them. Only the edges are fakes: a card with a size and
-// what is on it (whisper included), one Ollama per runtime, a ComfyUI with the service that
-// starts and stops it, and the test's clock. A chat turn takes the steps app/admit.ts takes on
-// the GPU, in its order: reserve, the plan before the claim when it asks first, the claim, the
-// admission inside the gate, the chat request, the first token, the end.
-//
-// Each function is one step that a person, Ollama or ComfyUI takes. A test is a list of steps
-// and what must be true after them. The world writes down every request that reaches an edge, so
-// a test can say what was never asked: nothing ever asked of whisper, no stop of a process the
-// app did not start, never two things loading at once (checked at every change of the card, not
-// only between steps).
-//
-// Nothing here reaches a real card, Ollama or ComfyUI. Every request goes to a fake by its
-// address; one to any other address is refused. While a world is open the global fetch is that
-// router too, since the fit and the loader call it directly.
-//
-// `faultForTest` turns one guard of one module off (each module's own option of that name), so
-// the test that guards it can be seen failing. Nothing but this file and tests may set it (lint `gates/test-switch-stays-in-tests`).
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -41,53 +19,47 @@ import { openThreadStore } from "../threads/store.ts";
 import { createGpuLease, type GpuLeaseOptions } from "./lease.ts";
 import { createMemoryOwner, type MemoryOwnerDeps } from "./memory.ts";
 
-// Taken before a test installs its fake clock: file and database work needs real turns of the loop.
+// why: file and database work needs real turns of the loop once a test fakes the clock
 const realImmediate = setImmediate;
 const realTimeout = setTimeout;
 const realNow = performance.now.bind(performance);
 
-/** The card every world has, in MiB. */
 export const CARD_MIB = 16_384;
 export const WHISPER_MIB = 2_000;
-/** What ComfyUI holds once a setup is loaded, and what a picture needs free unless a world says otherwise. */
 export const PICTURE_MIB = 8_192;
-/** Installed chat models and their files' sizes in MiB. Two 7b models do not fit beside each other; small:1b fits beside one; big:30b never fits. */
+// why: two 7b models never fit together, small:1b fits beside one, big:30b fits nowhere
 export const MODELS = { "m1:7b": 6_144, "m2:7b": 6_144, "small:1b": 1_024, "big:30b": 14_336 } as const;
 export type Model = keyof typeof MODELS;
 export const NUM_CTX = 16_384;
-/** What a loaded model holds beyond its files: the runner's overhead and the context's cache, as the fit estimates them. */
-const RUNNER_MIB = 1_088;
-const heldMib = (model: string) => (MODELS[model as Model] ?? 1_024) + RUNNER_MIB;
+const RUNNER_AND_CACHE_MIB = 1_088;
+const heldMib = (model: string) => (MODELS[model as Model] ?? 1_024) + RUNNER_AND_CACHE_MIB;
 const same = (a: string, b: string) => canonicalTag(a) === canonicalTag(b);
-/** The owner's pause, on the test's clock (its default is a timer no fake clock moves). */
+// why: the owner's own pause is a timer no fake clock moves
 const sleep = (ms: number, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
   const done = () => { signal.removeEventListener("abort", stop); resolve(); };
   const stop = () => { clearTimeout(timer); reject(signal.reason); };
   const timer = setTimeout(done, ms);
   signal.addEventListener("abort", stop, { once: true });
 });
-/** The two setups a picture can ask for: ComfyUI lists the files of both. */
 const SETUPS: Record<"one" | "other", ImageChoice> = {
   one: { preset: "z-image-int8", width: 1024, height: 1024 },
   other: { preset: "moss-image", width: 1024, height: 1024 },
 };
 
 const OLLAMA_URL: Record<RuntimeMode, string> = { system: "http://ollama-system.test", app: "http://ollama-app.test" };
-/** The address the app manages its ComfyUI at; here it only ever names the fake. */
 const COMFY_URL = "http://127.0.0.1:8188";
 const COMFY_PID = 4242;
 const PNG = Buffer.from("iVBORw0KGgo=", "base64");
-/** This computer has almost no system memory: a model that does not fit the card is refused, never run partly from system memory. */
+// why: almost no system memory, so a model too big for the card is refused, never split
 const MEMINFO = `MemTotal: ${2 * 1024 * 1024} kB\nMemAvailable: ${1024 * 1024} kB\n`;
 
-/** Every guard a test can turn off, by the module that holds it. */
 export type Break =
   | NonNullable<GpuLeaseOptions["faultForTest"]>
   | NonNullable<MemoryOwnerDeps["faultForTest"]>
   | NonNullable<ModelLoaderDeps["faultForTest"]>
   | NonNullable<RuntimeSwitchOptions["faultForTest"]>
   | NonNullable<ImageDeps["faultForTest"]>
-  /** No module has this guard as a line: the owner asks only models Ollama lists. Here the list is made to name everything on the card. */
+  // why: no module has this guard; the fake /api/ps names everything on the card instead
   | "ask-everything-on-the-card";
 
 const LEASE_BREAKS: readonly Break[] = ["shared-claims-jump-the-queue"];
@@ -95,43 +67,25 @@ const OWNER_BREAKS: readonly Break[] = ["ask-replying-models"];
 const LOADER_BREAKS: readonly Break[] = ["gate-before-lease", "gate-let-go-at-send", "record-without-generation-check", "fit-from-the-first-reading", "refusal-names-nothing", "forget-on-refused-switch"];
 const SWITCH_BREAKS: readonly Break[] = ["stop-any-runtime"];
 const PICTURE_BREAKS: readonly Break[] = ["stuck-picture-gives-the-card-back", "stop-an-engine-the-app-did-not-start", "picture-without-lease"];
-/** `name` as module `T`'s own option, when it is one of that module's. */
 const pick = <T extends Break>(mine: readonly Break[], name: Break | undefined): { faultForTest?: T } =>
   name !== undefined && mine.includes(name) ? { faultForTest: name as T } : {};
 
 export interface WorldOptions {
-  /** Moves the test's fake clock (vi.advanceTimersByTimeAsync). */
   readonly advance: (ms: number) => Promise<void>;
   readonly faultForTest?: Break;
-  /** The runtime the app starts on; "system" unless said. */
   readonly mode?: RuntimeMode;
-  /** Whisper is on the card unless a world says not. */
   readonly whisper?: boolean;
-  /** Another program on the card and what it holds, in MiB. */
   readonly otherProgramMib?: number;
-  /** Chat models in the first runtime's Ollama that another program loaded. */
   readonly loadedByOthers?: readonly Model[];
-  /**
-   * ComfyUI at the start. "stopped": the app starts it for a picture. The rest run already, so
-   * somebody else started them: "idle" holds nothing, "holding" holds a setup's models, "busy"
-   * holds them and runs somebody else's job.
-   */
   readonly comfy?: "stopped" | "idle" | "holding" | "busy";
-  /** ComfyUI ignores a request to stop a picture until comfyLetsGo(). */
   readonly comfySticks?: boolean;
-  /** An Ollama keeps loading a model after the request that asked for it was dropped. */
   readonly ollamaKeepsLoading?: boolean;
-  /** Models an Ollama goes on listing after it was asked to unload them. */
   readonly slowToLeave?: readonly Model[];
-  /** The app's own Ollama runs already, left by an earlier run of the app, and holds these. */
   readonly appOllamaRuns?: readonly Model[];
-  /** What a picture needs free, in MiB. */
   readonly pictureNeedMib?: number;
 }
 
-/** One thing on the card, as a test reads it. */
 export interface Holder {
-  /** "whisper", "another program", "ComfyUI" or a chat model's tag. */
   readonly name: string;
   readonly mib: number;
   readonly state: "in" | "loading";
@@ -139,24 +93,18 @@ export interface Holder {
 
 export interface ChatView {
   readonly state: "waiting" | "loading" | "replying" | "ended" | "stopped" | "refused" | "failed";
-  /** A refusal's words. */
   readonly refusal?: string;
-  /** Refused because it would stop these replies' models, and the person was not asked yet. */
   readonly wouldStop?: readonly string[];
   readonly error?: string;
-  /** The fit the admission decided from. */
   readonly report?: FitReport;
 }
 
 interface Chat {
   model: Model;
   view: ChatView;
-  /** Admitted: the next plan counts its model as busy. */
-  started: boolean;
+  admitted: boolean;
   over: boolean;
-  /** The turn's own signal: the person's Stop, or its runtime going when it listens for that. */
   readonly turn: AbortController;
-  /** The chat request in Ollama: open from the send to the turn's end. */
   readonly request: AbortController;
   readonly replyEnds: () => void;
   done: Promise<void>;
@@ -175,9 +123,7 @@ interface CardEntry { who: "whisper" | "other" | "ollama" | "comfy"; name: strin
 interface OllamaModel {
   readonly tag: string;
   numCtx: number;
-  /** Requests using it: a chat from its send to its end, a preload until it is answered. */
   requests: number;
-  /** Asked to unload while in use or loading: it goes once nothing uses it. */
   leaving: boolean;
   readonly entry: CardEntry;
   readonly ready: Promise<void>;
@@ -190,36 +136,25 @@ export type World = Awaited<ReturnType<typeof createWorld>>;
 export async function createWorld(options: WorldOptions) {
   const broken = options.faultForTest;
   let seq = 0;
-  /** One counter orders the readings of the card and the requests to leave. */
   const tick = () => ++seq;
   const rec = {
-    /** Every unload request an Ollama got. */
     asked: [] as { model: string; runtime: RuntimeMode; at: number }[],
-    /** Every request to ComfyUI to free its models. */
     freed: [] as number[],
-    /** Every process stopped and started: "ollama system", "ollama app", "comfyui". */
     stops: [] as string[],
     starts: [] as string[],
-    /** Every time two things were loading on the card at once. */
     overlaps: [] as string[][],
-    /** Every time more was put on the card than it has. */
     overfull: [] as string[],
-    /** Anything that named whisper in a request, or changed what it holds. */
     whisper: [] as string[],
-    /** When each reading of the card was taken. */
     readings: [] as number[],
     loads: [] as ModelLoad[],
     pictures: [] as ImageEvent[],
-    /** Every request that reached a fake: its method and address. */
     requests: [] as string[],
   };
 
-  // ---- the card -------------------------------------------------------------------------------
   const card: CardEntry[] = [];
   let nextPid = 100;
   const usedMib = () => card.reduce((sum, e) => sum + e.mib, 0);
   const freeMib = () => Math.max(0, CARD_MIB - usedMib());
-  /** After every change: who is loading now, and whether the card is over its size. */
   const cardChanged = (what: string) => {
     const loading = card.filter((e) => e.state === "loading").map((e) => e.name);
     if (loading.length > 1) rec.overlaps.push(loading);
@@ -250,8 +185,6 @@ export async function createWorld(options: WorldOptions) {
     return card.map((e) => `${e.pid}, ${e.process}, ${e.mib}\n`).join("");
   };
 
-  // ---- an Ollama per runtime ------------------------------------------------------------------
-  /** Called on a request to unload, before it is answered: a test's chance to change the card meanwhile. */
   let whenAsked: (() => void) | undefined;
   const makeOllama = (mode: RuntimeMode) => {
     const models = new Map<string, OllamaModel>();
@@ -271,11 +204,11 @@ export async function createWorld(options: WorldOptions) {
       put(entry);
       return model;
     };
-    /** Ollama's own scheduler: a load starts once there is room, after idle models were put out for it; it waits for busy ones. */
+    // external: Ollama starts a load once idle models were put out for room, and waits for busy ones.
     const pump = () => {
       while (queue.length > 0) {
         const next = queue[0]!;
-        // the same model at another context is reloaded: its old copy goes first, once nothing uses it
+        // external: Ollama reloads a model asked at another context once its old copy is idle.
         const stale = models.get(next.tag);
         if (stale !== undefined && !idle(stale)) return;
         const others = [...models.values()].filter((m) => m !== stale);
@@ -287,14 +220,12 @@ export async function createWorld(options: WorldOptions) {
           out.push(more);
         }
         const room = freeMib() + out.reduce((sum, m) => sum + m.entry.mib, 0) >= heldMib(next.tag);
-        // no room and something of its own still in use: the load waits for it
         if (!room && others.some((m) => !idle(m))) return;
         queue.shift();
         for (const m of out) forget(m);
         next.start();
       }
     };
-    /** A request that needs `tag` at `numCtx` in memory: resolves once it is, and counts as using it until `signal` ends. */
     const use = (tag: string, numCtx: number, signal: AbortSignal): Promise<void> => new Promise<void>((resolve, reject) => {
       if (signal.aborted) { reject(signal.reason); return; }
       let model: OllamaModel | undefined;
@@ -310,7 +241,7 @@ export async function createWorld(options: WorldOptions) {
         model.requests -= 1;
         reject(signal.reason);
         if (model.requests > 0) return;
-        // dropped while it loads: Ollama gives the load up, unless this world's Ollama keeps going
+        // external: Ollama gives up a load whose request was dropped.
         if (model.entry.state === "loading" && !options.ollamaKeepsLoading) { model.failed(signal.reason); forget(model); return; }
         if (model.entry.state === "in" && model.leaving) forget(model);
         pumpAll();
@@ -350,7 +281,6 @@ export async function createWorld(options: WorldOptions) {
         return Response.json({});
       }
       if (url.pathname === "/api/generate") {
-        // a preload: answered once the model is in memory, and no longer using it then
         const over = new AbortController();
         const givenUp = () => over.abort(signal.reason);
         signal.addEventListener("abort", givenUp, { once: true });
@@ -363,7 +293,6 @@ export async function createWorld(options: WorldOptions) {
         }
       }
       if (url.pathname === "/api/chat") {
-        // answered at the first token; the reply uses the model until the request's signal ends
         await use(tag, body.options?.num_ctx ?? NUM_CTX, signal);
         return Response.json({ model: body.model, message: { role: "assistant", content: "" } });
       }
@@ -376,13 +305,10 @@ export async function createWorld(options: WorldOptions) {
       stop() {
         up = false;
         rec.stops.push(`ollama ${mode}`);
-        // a Map may lose the entry it is on while it is walked
         for (const m of models.values()) { m.failed(new Error("Ollama stopped")); forget(m); }
         queue.length = 0;
       },
-      /** A model another program loaded here, idle. */
-      has(tag: string, numCtx = NUM_CTX) { begin(canonicalTag(tag), numCtx).entry.state = "in"; models.get(canonicalTag(tag))!.loaded(); },
-      /** The load of `tag` finishes: whatever waited on it is answered. False when it is not loading here. */
+      holdsIdle(tag: string, numCtx = NUM_CTX) { begin(canonicalTag(tag), numCtx).entry.state = "in"; models.get(canonicalTag(tag))!.loaded(); },
       finish(tag: string) {
         const model = models.get(canonicalTag(tag));
         if (model === undefined || model.entry.state !== "loading") return false;
@@ -392,7 +318,6 @@ export async function createWorld(options: WorldOptions) {
         if (model.requests === 0 && model.leaving) forget(model);
         return true;
       },
-      /** A model this Ollama went on listing after an unload request goes now, if nothing uses it. */
       letGo(tag: string) {
         slow.delete(canonicalTag(tag));
         const model = models.get(canonicalTag(tag));
@@ -406,16 +331,12 @@ export async function createWorld(options: WorldOptions) {
   const ollamas: Record<RuntimeMode, ReturnType<typeof makeOllama>> = { system: makeOllama("system"), app: makeOllama("app") };
   function pumpAll() { ollamas.system.pump(); ollamas.app.pump(); }
 
-  // ---- ComfyUI and its service ----------------------------------------------------------------
   const startedByOthers = options.comfy !== undefined && options.comfy !== "stopped";
   const comfy = {
     up: startedByOthers,
-    /** What it holds on the card. */
     entry: undefined as CardEntry | undefined,
-    /** The prompt in its queue: the app's own, or somebody else's. */
     running: options.comfy === "busy" ? "foreign" : undefined as string | undefined,
     sticks: options.comfySticks === true,
-    /** While set, /system_stats is not answered: a picture waits before its gate. */
     held: undefined as Promise<void> | undefined,
     release: undefined as (() => void) | undefined,
     socket: undefined as EventTarget | undefined,
@@ -446,7 +367,6 @@ export async function createWorld(options: WorldOptions) {
     if (route === "/prompt") {
       const id = `p${++comfy.prompts}`;
       comfy.running = id;
-      // a setup it does not hold yet is loaded for the prompt
       if (comfy.entry === undefined) comfyHolds("loading");
       queueMicrotask(() => frame("progress", { prompt_id: id, value: 1, max: 4 }));
       return Response.json({ prompt_id: id });
@@ -464,7 +384,6 @@ export async function createWorld(options: WorldOptions) {
     throw new Error(`the fake ComfyUI has no ${route}`);
   };
 
-  // ---- one router for every request -----------------------------------------------------------
   const router: typeof fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     rec.requests.push(`${init?.method ?? "GET"} ${url.origin}${url.pathname}`);
@@ -477,7 +396,6 @@ export async function createWorld(options: WorldOptions) {
   const fetchBefore = globalThis.fetch;
   globalThis.fetch = router;
 
-  // ---- the real modules, wired as services.ts and main.ts wire them --------------------------
   const lease = createGpuLease(pick<NonNullable<GpuLeaseOptions["faultForTest"]>>(LEASE_BREAKS, broken));
   const makeRuntime = (mode: RuntimeMode): OllamaRuntime => {
     const ollama = ollamas[mode];
@@ -506,11 +424,7 @@ export async function createWorld(options: WorldOptions) {
     ...pick<NonNullable<RuntimeSwitchOptions["faultForTest"]>>(SWITCH_BREAKS, broken),
   });
   const holdsOne = () => runtime.baseUrl() !== undefined && runtime.status().holdsOne === true;
-  /**
-   * /api/ps as the app reads it. The app reads it over node:http, which no test can route, so
-   * this is the one reader replaced: the same answer, from the fake. The one variant no module
-   * holds a line for makes it name everything on the card.
-   */
+  // external: the app reads /api/ps with Node's http client, which a fetch router cannot reach.
   const listed = async (url: string, signal?: AbortSignal): Promise<LoadedModel[]> => {
     const ps = await (await router(new URL("/api/ps", url), signal === undefined ? {} : { signal })).json() as { models: { name: string; size: number; size_vram: number; context_length: number }[] };
     const real = ps.models.map((m): LoadedModel => ({ name: m.name, sizeBytes: m.size, sizeVramBytes: m.size_vram, contextLength: m.context_length }));
@@ -535,7 +449,6 @@ export async function createWorld(options: WorldOptions) {
     sleep,
     ...pick<NonNullable<MemoryOwnerDeps["faultForTest"]>>(OWNER_BREAKS, broken),
   });
-  /** What every fit reads: the fake card, this computer's small memory, and the counter as its clock. */
   const fitDeps = (baseUrl: string) => ({ runNvidiaSmi: smi, readMeminfo: async () => MEMINFO, now: tick, holdsOne: baseUrl === OLLAMA_URL.app });
   const loader = createModelLoader({
     baseUrl: () => runtime.baseUrl(),
@@ -549,7 +462,7 @@ export async function createWorld(options: WorldOptions) {
   const image = createImageModule({
     dataDir, lease, store, memory: owner,
     requiredBytes: (options.pictureNeedMib ?? PICTURE_MIB) * MIB,
-    // the idle stop is not one of these rules: it never runs inside a test
+    // why: the idle stop is not one of these rules
     idleMs: 24 * 3_600_000,
     log: () => undefined,
     settings: () => ({ imageGen: true, imageChoice: SETUPS.one }),
@@ -559,7 +472,6 @@ export async function createWorld(options: WorldOptions) {
     service: {
       inspect: async () => ({ present: true, active: comfy.up, activeState: comfy.up ? "active" : "inactive", pid: COMFY_PID }),
       start: async () => { rec.starts.push("comfyui"); comfy.up = true; },
-      // a stopped engine's queue and memory go with its process
       stop: async () => { rec.stops.push("comfyui"); comfy.up = false; comfy.running = undefined; comfyDrops(); },
     },
     socket: () => {
@@ -574,21 +486,16 @@ export async function createWorld(options: WorldOptions) {
     ...pick<NonNullable<ImageDeps["faultForTest"]>>(PICTURE_BREAKS, broken),
   });
   await runtime.ensure();
-  for (const model of options.loadedByOthers ?? []) ollamas[runtime.mode()].has(model);
-  for (const model of options.appOllamaRuns ?? []) ollamas.app.has(model);
+  for (const model of options.loadedByOthers ?? []) ollamas[runtime.mode()].holdsIdle(model);
+  for (const model of options.appOllamaRuns ?? []) ollamas.app.holdsIdle(model);
 
-  // ---- the clock ------------------------------------------------------------------------------
-  /** `ms` of the test's clock, a quarter second at a time, with real turns of the loop between for file and database work. */
   const pass = async (ms = 1_000) => {
     for (let left = ms; left > 0; left -= 250) {
       await options.advance(Math.min(250, left));
       await new Promise<void>((resolve) => realImmediate(resolve));
     }
   };
-  /**
-   * Steps the clock until `met`; a world that never gets there fails by name. The only wait on
-   * real time: a finished picture's file is really written, and that takes as long as the disk takes.
-   */
+  // why: a finished picture's file is really written, which takes as long as the disk takes
   const until = async (met: () => boolean, what: string) => {
     for (const start = realNow(); !met() && realNow() - start < 10_000;) {
       await options.advance(25);
@@ -597,7 +504,6 @@ export async function createWorld(options: WorldOptions) {
     if (!met()) throw new Error(`the world never got to: ${what}`);
   };
 
-  // ---- steps ----------------------------------------------------------------------------------
   const chats = new Map<string, Chat>();
   const chat = (id: string): Chat => {
     const found = chats.get(id);
@@ -614,21 +520,16 @@ export async function createWorld(options: WorldOptions) {
 
   const world = {
     lease, owner, loader, runtime, image, rec,
-    /** The memory owner's record of what is loaded and which of it is the app's. */
     record: owner.loaded,
 
-    /**
-     * A person sends a chat. `askFirst`: the client's first try, refused with the replies it would
-     * stop. `endsWhenTold: false`: a turn that goes on after its runtime told it to end (a tool
-     * round that does not return), until chatEnds.
-     */
+    // why: the steps, in their order, are the ones app/admit.ts takes on the GPU
     async chatSends(id: string, sent: { model?: Model; numCtx?: number; askFirst?: boolean; endsWhenTold?: boolean } = {}) {
       const { model = "m1:7b", numCtx = NUM_CTX, askFirst = false, endsWhenTold = true } = sent;
       const turn = new AbortController();
       const request = new AbortController();
       let replyEnds!: () => void;
       const replied = new Promise<void>((resolve) => { replyEnds = resolve; });
-      const me: Chat = { model, view: { state: "waiting" }, started: false, over: false, turn, request, replyEnds, done: Promise.resolve() };
+      const me: Chat = { model, view: { state: "waiting" }, admitted: false, over: false, turn, request, replyEnds, done: Promise.resolve() };
       chats.set(id, me);
       me.done = (async () => {
         let reservation: TurnReservation | undefined;
@@ -637,17 +538,16 @@ export async function createWorld(options: WorldOptions) {
           reservation = loader.reserve(model);
           const baseUrl = reservation.baseUrl;
           if (baseUrl === undefined) throw new Error("no runtime is ready");
-          // reply.send ties its runtime's end to the turn
           const gone = reservation.signal;
           gone.addEventListener("abort", () => { if (endsWhenTold) turn.abort(gone.reason); }, { once: true });
           const plan = async (signal: AbortSignal, context?: AdmitContext): Promise<FitReport> => {
-            const running = [...chats.values()].filter((c) => c !== me && c.started && !c.over && !same(c.model, model));
+            const running = [...chats.values()].filter((c) => c !== me && c.admitted && !c.over && !same(c.model, model));
             const planned = await planLoad({ ...fitDeps(baseUrl), baseUrl, model, numCtx, busy: running.map((c) => c.model), signal, ...context?.handoff !== undefined ? { measured: true } : {} });
             const stop = running.filter((c) => planned.stop.some((name) => same(name, c.model)));
             if (askFirst && stop.length > 0) throw new WouldStop(stop.map((c) => c.model));
             return planned.report;
           };
-          if (askFirst && [...chats.values()].some((c) => c.started && !c.over)) {
+          if (askFirst && [...chats.values()].some((c) => c.admitted && !c.over)) {
             const ahead = await plan(turn.signal);
             if (ahead.verdict === "refuse" && image.current().state === "off") { me.view = { state: "refused", refusal: ahead.message ?? "", report: ahead }; return; }
           }
@@ -655,13 +555,13 @@ export async function createWorld(options: WorldOptions) {
           const report = await reservation.admit(numCtx, {
             fit: async (signal, context) => {
               const r = await plan(signal, context);
-              if (r.verdict !== "refuse") me.started = true;
+              if (r.verdict !== "refuse") me.admitted = true;
               return r;
             },
             signal: turn.signal,
           });
           if (report.verdict === "refuse") { me.view = { state: "refused", refusal: report.message ?? "", report }; return; }
-          me.started = true;
+          me.admitted = true;
           me.view = { state: "loading", report };
           turn.signal.addEventListener("abort", () => request.abort(turn.signal.reason), { once: true });
           if (turn.signal.aborted) throw turn.signal.reason;
@@ -689,12 +589,10 @@ export async function createWorld(options: WorldOptions) {
       await pass();
     },
     chat: (id: string): ChatView => chat(id).view,
-    /** The Ollama that is loading `model` finishes: a chat waiting on it gets its first token, a preload its answer. */
     async ollamaFinishesLoading(model: Model = "m1:7b") {
       if (!ollamas.system.finish(model) && !ollamas.app.finish(model)) throw new Error(`no Ollama is loading ${model}`);
       await pass();
     },
-    /** A reply runs to its end; a turn that is not replying yet ends where it is. */
     async chatEnds(id: string) {
       const c = chat(id);
       if (c.view.state === "replying") c.replyEnds();
@@ -705,14 +603,12 @@ export async function createWorld(options: WorldOptions) {
       chat(id).turn.abort(new Error("stopped"));
       await pass();
     },
-    /** The first key typed in a chat: a hint to load its model (models.load). Its answer, or its refusal, is in preloaded(). */
     async preloads(model: Model = "m1:7b", numCtx = NUM_CTX) {
       preloads.push(loader.load(model, numCtx).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e)))));
       await pass();
     },
     preloaded: async () => Promise.all(preloads),
 
-    /** A person sends a picture. `setup: "other"`: not the setup the last picture ran. */
     async pictureSends(sent: { setup?: "one" | "other" } = {}) {
       const { jobId } = await image.generate({ prompt: "a tree", choice: SETUPS[sent.setup ?? "one"] });
       picture = jobId;
@@ -720,10 +616,8 @@ export async function createWorld(options: WorldOptions) {
       await pass();
       return jobId;
     },
-    /** The last picture's last event (or that of `jobId`). */
     picture: (jobId?: string) => lastOf(jobId ?? picture),
     pictureJobs: () => [...pictureJobs],
-    /** ComfyUI stops answering its status, so the next picture waits before its gate with its claim held; comfyAnswers() lets it on. */
     comfyHoldsItsAnswer() {
       comfy.held = new Promise<void>((resolve) => { comfy.release = resolve; });
     },
@@ -732,13 +626,11 @@ export async function createWorld(options: WorldOptions) {
       comfy.held = undefined;
       await pass();
     },
-    /** ComfyUI finishes loading the setup; the picture is still being made. */
     async comfyFinishesLoading() {
       if (comfy.entry?.state !== "loading") throw new Error("ComfyUI is not loading");
       comfyHolds("in");
       await pass();
     },
-    /** The picture is made: ComfyUI holds its setup, and the job saves the file and ends. */
     async pictureFinishes(jobId = picture) {
       const id = comfy.running;
       if (id === undefined || id === "foreign") throw new Error("ComfyUI is not making a picture of the app's");
@@ -752,40 +644,33 @@ export async function createWorld(options: WorldOptions) {
       if (jobId !== undefined) image.cancel(jobId);
       await pass();
     },
-    /** The wait a Stop gives ComfyUI to let go of the picture runs out. */
     async pictureStopTimesOut() {
       await pass(CANCEL_WAIT_MS + 1_000);
     },
-    /** The longest a stuck picture keeps the card runs out. */
     async stuckHoldRunsOut() {
       await pass(STUCK_HOLD_MS + 2_000);
     },
-    /** ComfyUI lets go of the picture it would not stop: the prompt leaves its queue, and a load it was in the middle of is over. */
     async comfyLetsGo() {
       comfy.sticks = false;
       comfy.running = undefined;
       if (comfy.entry?.state === "loading") comfyHolds("in");
       await pass();
     },
-    /** Somebody else's job in ComfyUI ends. */
     async othersJobEnds() {
       if (comfy.running === "foreign") comfy.running = undefined;
       await pass();
     },
-    /** Somebody else starts a job in the ComfyUI that is running. */
     async othersJobStarts() {
       if (!comfy.up || comfy.running !== undefined) throw new Error("ComfyUI is not free for somebody else's job");
       comfy.running = "foreign";
       if (comfy.entry === undefined) comfyHolds("in");
       await pass();
     },
-    /** An Ollama that went on listing `model` after it was asked to unload it lets it go. */
     async slowModelLeaves(model: Model, mode: RuntimeMode = runtime.mode()) {
       ollamas[mode].letGo(model);
       await pass();
     },
 
-    /** A person picks the other runtime in Settings. Whether it went ahead is in switchIsRefused() / switchGoesAhead(). */
     async switchBegins(to: RuntimeMode = runtime.mode() === "system" ? "app" : "system") {
       switchError = undefined;
       switchOver = false;
@@ -793,47 +678,38 @@ export async function createWorld(options: WorldOptions) {
       switching.then(() => { switchOver = true; }, (e: unknown) => { switchError = e instanceof Error ? e : new Error(String(e)); switchOver = true; });
       await pass();
     },
-    /** The wait for the old runtime's turns runs out: the switch is refused. Resolves with why. */
     async switchIsRefused(): Promise<Error> {
       await pass(TURN_DRAIN_MS + 1_000);
       if (switchError === undefined) throw new Error("the switch was not refused");
       return switchError;
     },
-    /** The switch is over, on the new runtime. */
     async switchGoesAhead(): Promise<RuntimeStatus> {
       if (switching === undefined) throw new Error("no switch began");
       await until(() => switchOver, "the switch's end");
       if (switchError !== undefined) throw switchError;
       return switching;
     },
-    /** The GPU status poll: /api/ps of the current runtime, through the loader. */
     async statusPolls() {
       await loader.residentModels();
       await pass(250);
     },
 
-    /** Another program takes `mib` of the card (or changes what it holds). */
     otherProgramTakes,
-    /** Run once, when an Ollama is next asked to unload a model, before it answers. */
     whenNextAskedToLeave(then: () => void) {
       whenAsked = () => { whenAsked = undefined; then(); };
     },
     pass,
 
-    /** The card now: who is on it, what is loading, what is free. */
     card: () => ({
       holders: card.map((e): Holder => ({ name: e.name, mib: e.mib, state: e.state })),
       names: card.map((e) => e.name),
       loading: card.filter((e) => e.state === "loading").map((e) => e.name),
       freeMib: freeMib(),
     }),
-    /** The chat models the current runtime's Ollama lists. */
     ollamaLists: (mode: RuntimeMode = runtime.mode()) => ollamas[mode].lists(),
-    /** The models any Ollama was asked to unload. */
     askedToLeave: () => rec.asked.map((a) => a.model),
     comfyUp: () => comfy.up,
 
-    /** Ends everything the world started and puts the global fetch back. */
     async close() {
       try {
         for (const c of chats.values()) c.turn.abort(new Error("the test ended"));
