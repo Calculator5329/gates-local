@@ -20,7 +20,7 @@ export function Grp({ title, action, busy = false, children }: { title?: string;
     <div className="grp" aria-busy={busy || undefined}>
       {title ? (
         <div className="grp-h">
-          <div className="grp-l">
+          <div>
             <div className="grp-t">{title}</div>
           </div>
           {action === undefined ? null : <div className="grp-a">{action}</div>}

@@ -184,7 +184,7 @@ function Check({ c, quiet = false }: { c: MeasureCheck; quiet?: boolean }) {
       <button type="button" className="md-cl" aria-expanded={evidence ? open : undefined} disabled={!evidence} onClick={() => setOpen((o) => !o)}>
         <span className="md-mk" role="img" aria-label={word}><Icon id={mark} cls="s14" /></span>
         <span className="md-needs">{c.needs ?? c.id}</span>
-        {c.tokens === undefined ? null : <span className="md-n md-tok">{c.tokens}{c.cut ? " cut" : ""}</span>}
+        {c.tokens === undefined ? null : <span className="md-n">{c.tokens}{c.cut ? " cut" : ""}</span>}
       </button>
       {c.why && !c.ok && !quiet ? <div className="md-why">{c.why}</div> : null}
       {open ? (
@@ -192,7 +192,7 @@ function Check({ c, quiet = false }: { c: MeasureCheck; quiet?: boolean }) {
           {c.calls?.map((call, i) => <pre key={i} className="md-call">{call}</pre>)}
           {c.reply ? <pre className="md-reply">{c.reply}</pre> : null}
           {c.result ? <pre className="md-call">{c.result}</pre> : null}
-          {c.ms === undefined ? null : <div className="md-n md-ms">{seconds(c.ms)}</div>}
+          {c.ms === undefined ? null : <div className="md-n">{seconds(c.ms)}</div>}
         </div>
       ) : null}
     </div>

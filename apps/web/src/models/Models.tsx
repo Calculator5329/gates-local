@@ -460,7 +460,7 @@ function Fallback({ rows }: { rows: readonly InstalledRow[] }) {
   if (saved === undefined || picked === undefined || picked.name === saved) return null;
   const name = (tag: string) => rows.find((r) => r.name === tag)?.label.text ?? tag;
   return (
-    <p className="mp-note mp-fb" data-testid="models.default.fallback">
+    <p className="mp-note" data-testid="models.default.fallback">
       {name(saved)} won't run here, so new chats start on <b>{name(picked.name)}</b>.
     </p>
   );
@@ -517,7 +517,7 @@ function NoModels() {
 function Field({ value, onChange, placeholder, label, cls }: { value: string; onChange: (v: string) => void; placeholder: string; label: string; cls?: string }) {
   const ref = useRef<HTMLInputElement>(null);
   return (
-    <div className={`mp-field${value ? " typed" : ""}${cls ? ` ${cls}` : ""}`}>
+    <div className={`mp-field${cls ? ` ${cls}` : ""}`}>
       <Icon id="search" cls="s14" />
       <input
         ref={ref}

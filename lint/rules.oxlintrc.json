@@ -27,6 +27,7 @@
       "files": ["**/apps/web/src/**"],
       "excludeFiles": ["**/*.test.ts", "**/*.test.tsx"],
       "rules": {
+        "gates/class-in-css": "error",
         "gates/effect-needs-reason": "error",
         "gates/timer-needs-reason": "error"
       }

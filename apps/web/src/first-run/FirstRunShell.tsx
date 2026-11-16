@@ -22,7 +22,7 @@ export function FirstRunLoading() {
         <svg className="mark" aria-hidden="true"><use href="#i-mark" /></svg>
         Gates Local
       </div>
-      <div className="fr-skel" data-skel="" aria-hidden="true">
+      <div data-skel="" aria-hidden="true">
         <div className="fr-st"><span className="skel" style={{ width: "11em" }} /></div>
         <div className="fr-h"><span className="skel" style={{ width: "7em" }} /></div>
         <div className="fr-card">

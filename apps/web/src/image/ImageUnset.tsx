@@ -39,7 +39,7 @@ function Running({ p }: { p: ImageSetupProgress }) {
           <div className="prog-l"><span>{gb(p.completedBytes)} of {gb(p.totalBytes)}</span></div>
         </>
       )}
-      {p.message === undefined ? null : <p className="unset-d unset-note" role="status">{p.message}</p>}
+      {p.message === undefined ? null : <p className="unset-d" role="status">{p.message}</p>}
     </div>
   );
 }
@@ -90,7 +90,7 @@ export function ImageUnset() {
         <SheetHead title="Image" />
         <p className="unset-t" id="imageUnsetT">ComfyUI is not running</p>
         <p className="unset-d" id="imageUnsetAddress"><code>{address}</code></p>
-        {note === null ? null : <p className="unset-d unset-note" role="status">{note}</p>}
+        {note === null ? null : <p className="unset-d" role="status">{note}</p>}
         <div className="unset-acts">
           <button type="button" className="btn" data-testid="image.unset.check-again" disabled={checking} onClick={() => void check()}>{checking ? "Checking…" : "Check again"}</button>
           {canSetUp && canSave ? <button type="button" className="btn outline" data-testid="image.unset.use-own" onClick={() => void useOwn()}>Set up here instead</button> : null}
@@ -106,7 +106,7 @@ export function ImageUnset() {
         ? <p className="unset-d" id="imageSetupWhy">{setup.why}</p>
         : offer ? null : <p className="unset-d">Image mode needs ComfyUI, and none answered{address === undefined ? "" : <> at <code>{address}</code></>}.</p>}
       {offer && progress !== undefined && progress.step !== "done" ? <Running p={progress} /> : offer ? <Plan s={setup} /> : null}
-      {note === null ? null : <p className="unset-d unset-note" role="status">{note}</p>}
+      {note === null ? null : <p className="unset-d" role="status">{note}</p>}
       <div className="unset-acts">
         {offer ? <button type="button" className="btn" data-testid="image.unset.set-up" disabled={running} onClick={() => void go()}>{running ? "Setting up…" : progress?.step === "error" ? "Try again" : "Set up images"}</button> : null}
         <button type="button" className={offer ? "btn outline" : "btn"} data-testid="image.unset.settings" onClick={() => { closePop(); openSettings("images"); }}>{offer ? "Settings" : "Open Settings"}</button>

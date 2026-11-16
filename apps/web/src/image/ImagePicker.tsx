@@ -299,7 +299,7 @@ export function ImagePicker() {
     const state = status === undefined || status === NA ? undefined : status.state;
     const as = state === "stopped" ? "start" : "check";
     const label = starting === "start" || state === "starting" ? "Starting ComfyUI…" : starting === "check" ? "Checking…" : as === "start" ? "Start ComfyUI" : "Check again";
-    return <div ref={ref} id="imagePicker" className="model-picker image-picker open blank" role="dialog" data-testid="image.picker.blank" aria-label="Choose an image model" aria-modal={phone} onKeyDown={keys}>
+    return <div ref={ref} id="imagePicker" className="model-picker image-picker open" role="dialog" data-testid="image.picker.blank" aria-label="Choose an image model" aria-modal={phone} onKeyDown={keys}>
       <div className="pk-blank">
         <p>{empty}{startError === null ? null : <span className="pk-blank-error" role="status">{startError}</span>}</p>
         {known === undefined || !canStart ? null : <button type="button" className="btn outline" data-testid="image.picker.start-comfy" disabled={starting !== null || state === "starting"} onClick={() => void start(as)}>{label}</button>}

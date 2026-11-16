@@ -16,5 +16,5 @@ export function LoadRing({ since, ms, ask = false }: Load & { readonly ask?: boo
 }
 
 export function DownloadBar({ pct }: { pct: number }) {
-  return <span className="ldbar dl" aria-hidden="true" style={{ transform: `scaleX(${Math.min(100, Math.max(0, pct)) / 100})` }} />;
+  return <span className="ldbar" aria-hidden="true" style={{ transform: `scaleX(${Math.min(100, Math.max(0, pct)) / 100})` }} />;
 }

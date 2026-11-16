@@ -1,3 +1,4 @@
+import classInCss from "./rules/class-in-css.ts";
 import closedPackage from "./rules/closed-package.ts";
 import commentIsAKind from "./rules/comment-is-a-kind.ts";
 import disableNeedsReason from "./rules/disable-needs-reason.ts";
@@ -10,6 +11,7 @@ import timerNeedsReason from "./rules/timer-needs-reason.ts";
 export default {
   meta: { name: "gates" },
   rules: {
+    "class-in-css": classInCss,
     "closed-package": closedPackage,
     "comment-is-a-kind": commentIsAKind,
     "disable-needs-reason": disableNeedsReason,

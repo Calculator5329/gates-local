@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-16: a class a component names must style something
+
+- A new lint rule, gates/class-in-css, refuses a className in the web
+  app's components that no CSS file in the package names and no test
+  looks up. It reads string literals, both arms of a condition,
+  template text, joined lists and class helper arguments, and skips a
+  word an expression cuts.
+- Twelve classes that styled nothing are gone from their components.
+- Three stay recorded because their CSS went in an earlier change
+  while the component kept the class, so they may be lost styles:
+  fp-gpu (the sheet header's second line), mp-tag (a download row's
+  model name) and pk-choice (the image picker's error).
+
 ## 2026-11-16: the server's image folder holds to the six comment kinds
 
 - apps/server/src/image passes the comment rule: all 515 offenders

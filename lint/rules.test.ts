@@ -22,6 +22,17 @@ const DOOR = [
 
 const CASES: Case[] = [
   {
+    rule: "gates/class-in-css",
+    planted: {
+      "apps/web/src/banner.css": text(".ba{display:flex}", ".ba .ok{color:green}"),
+      "apps/web/src/Banner.tsx": text('export const Banner = () => <div className="bx"><span className="ok" /></div>;'),
+    },
+    fixed: {
+      "apps/web/src/banner.css": text(".ba{display:flex}", ".ba .ok{color:green}"),
+      "apps/web/src/Banner.tsx": text('export const Banner = () => <div className="ba"><span className="ok" /></div>;'),
+    },
+  },
+  {
     rule: "gates/no-relative-import-across-packages",
     planted: { ...PORT, "apps/web/src/cross.ts": text('import { port } from "../../server/src/port.ts";', "export const where = port;") },
     fixed: { ...PORT, "apps/web/src/cross.ts": text('import { port } from "@gates-local/contracts";', "export const where = port;") },
@@ -234,6 +245,8 @@ const UNTOUCHED: Files = {
     "}",
   ),
   "apps/server/src/retry.ts": text("export const retry = (run: () => void) => setTimeout(run, 1000);"),
+  // A class in a test's own markup styles nothing by design.
+  "apps/web/src/Row.test.tsx": text('export const Row = () => <div className="probe-only" />;'),
   // A relative import inside one package, and one from the repo's own scripts into an app.
   "apps/web/src/near.ts": text('import { where } from "./cross.ts";', "export const near = where;"),
   "scripts/report.ts": text('import { port } from "../apps/server/src/port.ts";', "export const reported = port;"),
@@ -655,5 +668,101 @@ describe(COMMENT_RULE, () => {
 
   it("asks a bare directive for its reason", () => {
     expect(messageAt("apps/server/src/bare-directives.ts", 2)).toContain("-- <reason>");
+  });
+});
+
+const CLASS_RULE = "gates/class-in-css";
+
+/** The CSS and the browser test the class rule's cases are judged against. */
+const CLASS_WORLD: Files = {
+  "apps/web/src/app/styles.css": text(
+    "/* .commented{color:red} names nothing */",
+    ".row{display:flex}.row.on{font-weight:600}",
+    "@media (width < 600px){.row .tag-small{display:none}}",
+    ".btn-primary,.btn-ghost{padding:4px}",
+  ),
+  "test/e2e/rows.spec.ts": text(
+    'import { expect, test } from "@playwright/test";',
+    'test("rows", async ({ page }) => {',
+    '  await expect(page.locator(".row.hooked")).toHaveCount(1);',
+    '  await expect(page.locator("#one")).toHaveClass(/\\bpicked\\b/);',
+    "});",
+  ),
+  "apps/web/src/Tested.test.tsx": text(
+    'import { expect, it } from "vitest";',
+    'it("marks the row", () => { expect(String(1)).toBe("1"); const node = { props: { className: "" } };',
+    '  expect(node.props.className).toBe("row tested"); });',
+  ),
+};
+
+/** One component, and the class names the rule must refuse in it, in the order it reports them. */
+type ClassCase = { name: string; file: string; body: string; refused: string[] };
+
+const CLASS_CASES: ClassCase[] = [
+  {
+    name: "a class in a compound selector, under a media query, or in a selector list",
+    file: "apps/web/src/Styled.tsx",
+    body: text('export const Styled = () => <div className="row on"><b className="tag-small btn-ghost" /></div>;'),
+    refused: [],
+  },
+  {
+    name: "a class only a comment in the CSS names",
+    file: "apps/web/src/Commented.tsx",
+    body: text('export const Commented = () => <div className="row commented" />;'),
+    refused: ["commented"],
+  },
+  {
+    name: "a class a browser test looks up, by selector or by toHaveClass",
+    file: "apps/web/src/Hooked.tsx",
+    body: text('export const Hooked = ({ on }: { on: boolean }) => <div className={on ? "row hooked picked" : "row"} />;'),
+    refused: [],
+  },
+  {
+    name: "a class a unit test reads off a className",
+    file: "apps/web/src/Tested.tsx",
+    body: text('export const Tested = ({ on }: { on: boolean }) => <div className={on ? "row tested" : "row tsted"} />;'),
+    refused: ["tsted"],
+  },
+  {
+    name: "both arms of a condition, but never a string it compares",
+    file: "apps/web/src/Arms.tsx",
+    body: text('export const Arms = ({ kind }: { kind: string }) => <div className={kind === "ghost-kind" ? "row" : "rwo"} />;'),
+    refused: ["rwo"],
+  },
+  {
+    name: "template text and the strings beside it, but not a name cut by an expression",
+    file: "apps/web/src/Built.tsx",
+    body: text(
+      'export const Built = ({ on, kind }: { on: boolean; kind: string }) =>',
+      '  <div className={`row${on ? " on" : " of"} btn-${kind} ${on ? "btn-ghost" : "btn-gost"}`} />;',
+    ),
+    refused: ["of", "btn-gost"],
+  },
+  {
+    name: "the items of a joined list and the arguments of a class helper",
+    file: "apps/web/src/Joined.tsx",
+    body: text(
+      "const cx = (...names: string[]) => names.join(\" \");",
+      'export const Joined = ({ on }: { on: boolean }) => <div className={[on && "on", "row", "rows"].join(" ")}><b className={cx("row", "btn-primry")} /></div>;',
+    ),
+    refused: ["rows", "btn-primry"],
+  },
+];
+
+describe(CLASS_RULE, () => {
+  let found: Finding[] = [];
+  beforeAll(() => {
+    found = lint({ ...CLASS_WORLD, ...Object.fromEntries(CLASS_CASES.map(each => [each.file, each.body])) })
+      .filter(finding => finding.rule === CLASS_RULE);
+  });
+
+  it.each(CLASS_CASES)("$name", ({ file, refused }) => {
+    expect(found.filter(finding => finding.file === file).map(finding => /`([^`]+)`/.exec(finding.message)?.[1])).toEqual(refused);
+  });
+
+  it("says the class styles nothing and what to do about it", () => {
+    const message = found.find(finding => finding.file === "apps/web/src/Arms.tsx")?.message ?? "";
+    expect(message).toContain("`rwo`");
+    expect(message).toContain("fix the name, add its rule to the package's CSS, or drop it");
   });
 });

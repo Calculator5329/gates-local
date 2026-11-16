@@ -291,7 +291,7 @@ function GroupsPlaceholder({ rows, first }: { rows: number; first: number }) {
       <div data-skel="" aria-hidden="true">
         {sizes.map((n, g) => (
           <div className="grp" key={g}>
-            <div className="grp-h"><div className="grp-l"><div className="grp-t"><Skel w={g === 0 ? "7em" : "8em"} /></div></div></div>
+            <div className="grp-h"><div><div className="grp-t"><Skel w={g === 0 ? "7em" : "8em"} /></div></div></div>
             <div className="box">
               {Array.from({ length: n }, (_, i) => (
                 <div className="dlrow" key={i}>
@@ -405,7 +405,7 @@ export function DownloadTab() {
       ) : null}
       {holding ? <GroupsPlaceholder rows={list.length} first={list.filter(c => c.recommended).length} /> : null}
       {keep ? (
-        <div className="grp grp-keep" aria-hidden="true"><div className="grp-h"><div className="grp-l"><div className="grp-t">{" "}</div></div></div></div>
+        <div className="grp grp-keep" aria-hidden="true"><div className="grp-h"><div><div className="grp-t">{" "}</div></div></div></div>
       ) : null}
       {!holding && rec.length > 0 ? (
         <Grp title="Recommended">
@@ -426,7 +426,7 @@ export function DownloadTab() {
       {big.length > 0 ? (
         <details className="grp dl-bigs">
           <summary className="grp-h" data-testid="models.download.too-big">
-            <div className="grp-l"><div className="grp-t">Too big for this computer<span className="grp-n">{big.length}</span><Icon id="down" cls="dl-chev" /></div></div>
+            <div><div className="grp-t">Too big for this computer<span className="grp-n">{big.length}</span><Icon id="down" cls="dl-chev" /></div></div>
           </summary>
           <div className="box">
             {big.map((c) => {

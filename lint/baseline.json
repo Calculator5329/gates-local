@@ -4,6 +4,11 @@
     "eslint/id-length": {},
     "eslint/no-restricted-imports": {},
     "eslint/no-warning-comments": {},
+    "gates/class-in-css": {
+      "apps/web/src/image/ImagePicker.tsx": 1,
+      "apps/web/src/lib/ui/ui.tsx": 1,
+      "apps/web/src/models/ModelDownloads.tsx": 1
+    },
     "gates/closed-package": {},
     "gates/comment-is-a-kind": {
       "apps/server/src/app.ts": 25,

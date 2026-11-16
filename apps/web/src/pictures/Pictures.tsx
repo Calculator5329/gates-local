@@ -162,7 +162,7 @@ function PhoneOne({ p }: { p: Picture }) {
         <button type="button" className="pics-th" data-testid="pictures.thumb.show-large" aria-label="Show large" onClick={() => pictures.setLarge(true)}>
           <img src={file(thumbPath(p))} alt="" draggable={false} />
         </button>
-        <div className="pics-what">
+        <div>
           <p className="pics-prompt">{p.prompt}</p>
           <div className="pics-line">{line}</div>
         </div>
