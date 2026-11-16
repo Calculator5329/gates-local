@@ -164,7 +164,7 @@ it("thread changes invalidate completed and in-flight speculative history", asyn
 
 it("a new message invalidates a prefetched snapshot, and a confirmed delete cannot be resurrected by a pending load", async () => {
   session.preloadThread("a"); await dwell();
-  browser.server.push("chat.event", { threadId: "a", turnId: "other", event: { type: "start", model: "gemma3:4b", userMessage: message("a", "new question") } });
+  browser.server.push("turn", { threadId: "a", turnId: "other", event: { type: "start", model: "gemma3:4b", userMessage: message("a", "new question") } });
   await vi.advanceTimersByTimeAsync(0);
   browser.server.answer("threads.get", ({ threadId }) => snapshot(threadId, "new question"));
   session.openThread("a"); await vi.advanceTimersByTimeAsync(0);

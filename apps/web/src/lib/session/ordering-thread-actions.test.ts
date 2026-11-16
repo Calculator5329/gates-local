@@ -24,7 +24,7 @@ async function create() {
   session.openThread(original.id);
   await drain();
   const load = await loading;
-  browser.server.push("chat.event", { threadId: "t1", turnId: "turn-1", event: { type: "start", model: "gemma3:4b", userMessage: user } });
+  browser.server.push("turn", { threadId: "t1", turnId: "turn-1", event: { type: "start", model: "gemma3:4b", userMessage: user } });
   await drain();
   const renaming = browser.server.hold("threads.rename");
   void session.renameThread(original.id, "Rejected title");
@@ -51,7 +51,7 @@ it("failed thread actions preserve an open streaming/loading conversation across
         await drain();
       } },
       { name: "reply.done", run: async w => {
-        w.browser.server.push("chat.event", { threadId: "t1", turnId: "turn-1", event: { type: "done", message: reply, stopReason: "stop" } });
+        w.browser.server.push("turn", { threadId: "t1", turnId: "turn-1", event: { type: "done", message: reply, stopReason: "stop" } });
         await drain();
       } },
     ],

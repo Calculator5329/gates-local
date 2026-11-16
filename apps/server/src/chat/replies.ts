@@ -8,12 +8,13 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import * as Result from "effect/Result";
 import * as S from "effect/Schema";
-import type { Message, Params, Reply, ReplyAnswer, ReplyChange, ReplyListed, ReplyRecord, ReplyStage, StopConsent, WaitFor } from "@gates-local/contracts";
+import type { Message, Params, Reply, ReplyAnswer, ReplyChange, ReplyListed, StopConsent, WaitFor } from "@gates-local/contracts";
 import {
   SOUND, fromQueued, heardAs, isAsked, isEnded, isInFlight, isLive, isWaiting, move, shownStage, stillStarting, toQueued,
   type Ahead, type Back, type Behind, type Drawing, type End, type Ended, type Heard, type Held, type InFlight, type Input, type Live, type Moved, type Next, type Queued, type Rec, type Refusal, type Rules, type Stopping, type Waiting, type Words,
 } from "./reply.ts";
 import { SavedEntry } from "./queue-file.ts";
+import type { ReplyRecord, ReplyStage } from "./times.ts";
 
 export type Entry = SavedEntry;
 

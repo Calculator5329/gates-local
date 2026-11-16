@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-16: the chat.event push is gone
+
+- The window reads a reply only from `reply.changed` and
+  `reply.words`, so the server no longer sends the older `chat.event`
+  push, and `ChatEvent`, `ReplyRecord` and `ReplyStage` leave the
+  contract. A v0.2.4 page left open across the update no longer sees
+  other windows' replies stream until it reloads.
+- The server keeps a turn's events to itself. Tests read them through
+  a `turnSaid` hook on the app; no window hears them.
+- The perf observer times the first words from `reply.words`, and the
+  real-model smoke check reads Stop and done from the reply's record.
+
 ## 2026-11-16: chat.send and chat.cancel are gone
 
 - The window already sent with `reply.send` and stopped with

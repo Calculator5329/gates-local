@@ -24,22 +24,24 @@ export function observeServerStages(socket: SocketPrototype, save: (record: Serv
   const emit = socket.emit, send = socket.send, fetch = globalThis.fetch;
   socket.emit = function(event, ...args) {
     const message = event === "message" ? frame(args[0]) : undefined;
-    if (message?.["method"] === "reply.send" && typeof message["id"] === "string" && object(message["params"]) && typeof message["params"]["threadId"] === "string") {
-      const record = { requestId: message["id"], threadId: message["params"]["threadId"], receive: clock() };
-      sends.set(record.threadId, record);
+    const params = message?.["params"];
+    if (message?.["method"] === "reply.send" && typeof message["id"] === "string" && object(params) && typeof params["threadId"] === "string" && typeof params["id"] === "string") {
+      const record = { requestId: message["id"], threadId: params["threadId"], receive: clock() };
+      sends.set(params["id"], record);
       return context.run(record, () => emit.call(this, event, ...args));
     }
     return emit.call(this, event, ...args);
   };
   socket.send = function(data, ...args) {
     const message = frame(data), payload = message?.["payload"];
-    if (message?.["channel"] === "chat.event" && object(payload) && typeof payload["threadId"] === "string" && object(payload["event"]) && payload["event"]["type"] === "delta") {
-      const record = sends.get(payload["threadId"]);
+    // the first words of the reply a send made: reply.words names the reply by the send's id
+    if (message?.["channel"] === "reply.words" && object(payload) && typeof payload["id"] === "string" && object(payload["part"]) && payload["part"]["type"] === "text") {
+      const record = sends.get(payload["id"]);
       if (record && record.firstSocketDelta === undefined) {
         record.firstSocketDelta = clock();
         // Persist before delegating the send. Teardown can follow immediately.
         save({ ...record });
-        sends.delete(record.threadId);
+        sends.delete(payload["id"]);
       }
     }
     return send.call(this, data, ...args);

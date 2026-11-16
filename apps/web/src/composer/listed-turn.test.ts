@@ -8,12 +8,14 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import type { Message, Payload, ReplyListed, ReplyRecord } from "@gates-local/contracts";
+import type { Message, Payload, ReplyListed } from "@gates-local/contracts";
 import { createApp } from "@gates-local/server/app.ts";
 import { sendStarted } from "@gates-local/server/chat/send-started.ts";
 import { openThreadStore } from "@gates-local/server/threads/store.ts";
 import { installBrowser, tick, until } from "../../test/harness.ts";
 import { queuedOf } from "../../test/queue.ts";
+import type { TurnSaid } from "@gates-local/server/app/turn.ts";
+import type { ReplyRecord } from "@gates-local/server/chat/times.ts";
 
 const cleanups: (() => void)[] = [];
 /** The server's reply record of a turn still waiting (decision 33). */
@@ -63,6 +65,7 @@ it("a listed turn that fails before its start puts the sidebar's dot out, waits 
     runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
     catalog: { current: () => [qwen], refresh: async () => ({ models: [qwen], changed: false }), onChange: () => () => {}, stop: () => {} },
     push: (channel, payload) => { pushes.push({ channel, payload }); },
+    turnSaid: (said) => { pushes.push({ channel: "turn", payload: said }); },
     fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
     models: { handlers: {}, loader: { reserve: () => ({
       baseUrl: "http://fake", signal, cold: false, firstToken: () => {}, end: () => {},
@@ -106,13 +109,13 @@ it("a listed turn that fails before its start puts the sidebar's dot out, waits 
     expect(await sending).toBe(rejected);
     expect(app.activeTurns()).toBe(0);
     const since = pushes.slice(told);
-    const said = since.filter((p): p is { channel: "chat.event"; payload: Payload<"chat.event"> } => (p as { channel: string }).channel === "chat.event");
+    const said = since.filter((p): p is { channel: "turn"; payload: TurnSaid } => (p as { channel: string }).channel === "turn");
     expect(said.map((p) => p.payload.event)).toEqual([expect.objectContaining({ type: "error", code: "internal", ended: { reason: "failed", at: expect.any(Number) } })]);
     // its message waits on hold in every window with the reason, its question never saved
     const ended = since.filter((p): p is { channel: "reply.changed"; payload: Payload<"reply.changed"> } => (p as { channel: string }).channel === "reply.changed");
     expect(ended.map((p) => p.payload)).toEqual([expect.objectContaining({ kind: "is", reply: expect.objectContaining({ id: theirs, stage: "held", held: expect.objectContaining({ why: "refused", code: "internal" }) }) })]);
     expect(ended[0]!.payload).not.toHaveProperty("reply.questionId");
-    b.server.push("chat.event", said[0]!.payload);
+    b.server.push("turn", said[0]!.payload);
     b.server.push("reply.changed", ended[0]!.payload);
     await tick();
     expect(store.runningThreads(store.getState()).has(a.id), "the sidebar's working dot goes out").toBe(false);
@@ -120,7 +123,7 @@ it("a listed turn that fails before its start puts the sidebar's dot out, waits 
     session.newThread();
     await session.send("B");
     await session.send("after B");
-    b.server.push("chat.event", { threadId: "B", turnId: "turn-B", event: { type: "done", message: { id: "aB", threadId: "B", role: "assistant", content: "B finished", createdAt: 2 }, stopReason: "stop" } });
+    b.server.push("turn", { threadId: "B", turnId: "turn-B", event: { type: "done", message: { id: "aB", threadId: "B", role: "assistant", content: "B finished", createdAt: 2 }, stopReason: "stop" } });
     await tick(); b.frame();
     expect.soft(b.server.calls("turn.start").map(call => call.params), "the queue goes on once B finishes").toHaveLength(2);
     expect.soft(queuedOf(store.getState()), "only A's message waits, on hold").toEqual([expect.objectContaining({ threadId: a.id, held: true, why: expect.objectContaining({ code: "internal" }) })]);
@@ -147,7 +150,7 @@ it("a listed reply draws the server's record: the one reply.list gave, then each
   vi.spyOn(Date, "now").mockImplementation(() => realNow() + skew);
   const question: Message = { id: "their-question", threadId: "A", role: "user", content: "theirs", createdAt: 1 };
   const answer: Message = { id: "their-answer", threadId: "A", role: "assistant", content: "First words", createdAt: 2 };
-  const chat = (event: Payload<"chat.event">["event"]) => b.server.push("chat.event", { threadId: "A", turnId: "other", event });
+  const chat = (event: TurnSaid["event"]) => b.server.push("turn", { threadId: "A", turnId: "other", event });
   // another window's send, taken before this one connected: its model is loading, its question not saved yet
   b.server.answer("reply.list", () => [{ reply: { id: "other", threadId: "A", rev: 1, messageId: question.id, text: question.content, at: 1, stage: "starting", attempt: 1, startedAt: 0, loading: true } }]);
   b.server.answer("threads.get", ({ threadId }) => ({ thread: { id: threadId, title: threadId, createdAt: 1, updatedAt: 1 }, messages: [] }));

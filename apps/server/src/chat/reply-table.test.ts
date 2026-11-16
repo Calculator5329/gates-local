@@ -4,7 +4,8 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Message, Params, Payload, Reply, ReplyAnswer, ReplyChange, ReplyRecord, ReplyStage } from "@gates-local/contracts";
+import type { Message, Params, Payload, Reply, ReplyAnswer, ReplyChange } from "@gates-local/contracts";
+import type { ReplyRecord, ReplyStage } from "./times.ts";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { MODEL, type Rig, type RigHooks, WAITING, rig, settle, until } from "../../test/send-rig.ts";
 import { AppError } from "../app.ts";
@@ -178,7 +179,7 @@ const calls: Record<Call, (r: Rig) => ReplyAnswer | Promise<ReplyAnswer>> = {
 };
 /** The record of the reply last heard of, as every window was told it. */
 const heard = (r: Rig): ReplyRecord | undefined =>
-  r.pushes.flatMap((p) => { const e = p.channel === "chat.event" ? (p.payload as Payload<"chat.event">).event : undefined; return e?.type === "reply" ? [e.reply] : []; }).at(-1);
+  r.said.flatMap(({ event: e }) => e.type === "reply" ? [e.reply] : []).at(-1);
 
 describe("a call on a waiting message at each stage", () => {
   const every: readonly Call[] = ["change", "open edit", "close edit", "remove", "send now", "hold"];
@@ -964,8 +965,6 @@ describe("table 3: what every window is sent as a record changes", () => {
     expect(told.flatMap((c) => (c.kind === "is" ? c.saved ?? [] : []))).toEqual(saved);
     expect(await at.r.h["reply.list"]({}, { clientId: 2 })).toEqual([]);
     // the words of the reply name their record, so a window puts them on the reply it has by that id
-    const words = at.r.pushes.flatMap((p) => p.channel === "chat.event" && (p.payload as Payload<"chat.event">).event.type === "delta" ? [(p.payload as Payload<"chat.event">).replyId] : []);
-    expect(words).toEqual([at.id]);
     const parts = at.r.pushes.flatMap((p) => (p.channel === "reply.words" ? [(p.payload as Payload<"reply.words">).id] : []));
     expect(parts.length).toBeGreaterThan(0);
     expect(new Set(parts)).toEqual(new Set([at.id]));

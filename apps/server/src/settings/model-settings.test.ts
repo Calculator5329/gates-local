@@ -163,6 +163,7 @@ async function rig(native = true) {
     runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: fake.baseUrl }), baseUrl: () => fake.baseUrl, onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: fake.baseUrl }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: fake.baseUrl }) },
     catalog: chatCatalog(MODEL),
     push: (_channel, payload) => events.push(payload),
+    turnSaid: (said) => events.push(said),
     fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
   });
   cleanups.push(() => app.shutdown());

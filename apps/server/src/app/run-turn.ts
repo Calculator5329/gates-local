@@ -14,7 +14,7 @@ import type { TurnSettings } from "../settings/turn.ts";
 import { threadChanged } from "../threads/sync.ts";
 import type { NewMessage } from "../threads/types.ts";
 import type { ThreadImages } from "./drawing.ts";
-import { ENDED_EARLY, HALTED, endOf, endedOf, haltedEnd, runsAgain, type AppContext, type StreamDone, type Turn, type TurnEnd, type TurnFailure, type WireEvent } from "./turn.ts";
+import { ENDED_EARLY, HALTED, endOf, endedOf, haltedEnd, runsAgain, type AppContext, type StreamDone, type Turn, type TurnEnd, type TurnEvent, type TurnFailure } from "./turn.ts";
 
 /**
  * The think flag a turn sends: none when /api/show lists the model's
@@ -37,17 +37,17 @@ async function thinkFlag(baseUrl: string, model: string, requested: boolean | un
 export type TurnOptions = { tools?: boolean; think?: boolean; settings?: TurnSettings; files?: readonly LibraryEntry[] };
 export type RunTurn = (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad, options?: TurnOptions) => Promise<void>;
 
-export interface TurnRunnerDeps extends Pick<AppContext, "deps" | "store" | "log" | "push" | "pushReply" | "draftEveryMs" | "replies" | "pushSpeeds"> {
+export interface TurnRunnerDeps extends Pick<AppContext, "deps" | "store" | "log" | "push" | "said" | "pushReply" | "draftEveryMs" | "replies" | "pushSpeeds"> {
   readonly queueImageFor: ThreadImages["queueImageFor"];
 }
 
-export function createTurnRunner({ deps, store, log, push, pushReply, draftEveryMs, replies, pushSpeeds, queueImageFor }: TurnRunnerDeps): RunTurn {
+export function createTurnRunner({ deps, store, log, push, said, pushReply, draftEveryMs, replies, pushSpeeds, queueImageFor }: TurnRunnerDeps): RunTurn {
   const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad, options: TurnOptions = {}) => {
     const { turnId, threadId, controller } = turn;
     let counted = false;
     /** The saved question this work answers, while its record says the reply has not ended. */
     const question = () => replies.question(turnId);
-    const emit = (event: Exclude<WireEvent, TurnEnd | { type: "reply" | "start" }>) => {
+    const emit = (event: Exclude<TurnEvent, TurnEnd | { type: "reply" | "start" }>) => {
       if (question() === undefined) return;
       // Only text means the model answered; an error, cancel or end goes through end() below.
       if (event.type === "delta" || event.type === "thinking") {
@@ -64,7 +64,7 @@ export function createTurnRunner({ deps, store, log, push, pushReply, draftEvery
       if (event.type === "thinking") turn.thinking += event.text;
       if (event.type === "tool") turn.steps.set(event.step.callId, event.step);
       const replyId = replies.of(turnId)?.id;
-      push("chat.event", { turnId, threadId, ...(replyId === undefined ? {} : { replyId }), event });
+      said({ turnId, threadId, ...(replyId === undefined ? {} : { replyId }), event });
       if (replyId !== undefined && (part.type === "tool" || part.text !== "")) push("reply.words", { id: replyId, part });
       // the record after the event that changed it: a window has the words before the stage that names them
       if (changed) pushReply(turn);
@@ -153,7 +153,7 @@ export function createTurnRunner({ deps, store, log, push, pushReply, draftEvery
       // The record ends with its last event: a window that reads now is told of no reply on its way.
       const rows = event.type === "done" ? [event.message] : event.partial !== undefined ? [event.partial] : event.question !== undefined ? [event.question] : [];
       replies.ended(turnId, endOf(turn, event, ended), now, rows);
-      push("chat.event", { turnId, threadId, event });
+      said({ turnId, threadId, event });
       if (event.type === "done" || event.partial !== undefined) push(...threadChanged(store, threadId));
       if (event.type === "done") pushSpeeds();
       // after its last event: the windows hear what became of the messages that waited behind it

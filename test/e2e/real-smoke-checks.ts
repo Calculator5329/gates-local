@@ -1,5 +1,5 @@
 // Shared by the real journey and local, network-free failure probes.
-import { doesNotMatch, match } from "node:assert/strict";
+import { match } from "node:assert/strict";
 import { randomInt } from "node:crypto";
 
 export const REAL_SMOKE_URL = "http://127.0.0.1:16195";
@@ -15,10 +15,6 @@ export function randomContextWord(): string {
   const consonants = "bdfghjklmnprstvz";
   const vowels = "aeiou";
   return Array.from({ length: 6 }, () => consonants[randomInt(consonants.length)]! + vowels[randomInt(vowels.length)]!).join("");
-}
-
-export function assertInterruptedCancellation(message: string): void {
-  doesNotMatch(message, /as the reply finished/, "Stop must interrupt generation, not wait for its natural end");
 }
 
 /** An echo of the earlier prompt counts: it still proves history reached the model. */

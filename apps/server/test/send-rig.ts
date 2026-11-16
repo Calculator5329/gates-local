@@ -3,9 +3,11 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Channel, Params, Payload, Reply, ReplyChange, ReplyRecord } from "@gates-local/contracts";
+import type { Channel, Params, Reply, ReplyChange } from "@gates-local/contracts";
 import { afterEach, vi } from "vitest";
 import { createApp } from "../src/app.ts";
+import type { TurnSaid } from "../src/app/turn.ts";
+import type { ReplyRecord } from "../src/chat/times.ts";
 import type { Rules } from "../src/chat/reply.ts";
 import { openThreadStore } from "../src/threads/store.ts";
 
@@ -100,6 +102,7 @@ export function rig(hooks: RigHooks = {}) {
   const openOne = () => { allowed++; pass(); };
   const signal = new AbortController().signal;
   const pushes: Array<{ channel: Channel; payload: unknown }> = [];
+  const said: TurnSaid[] = [];
   const model = { name: MODEL, digest: "d", sizeBytes: 6_600_000_000, modifiedAt: "2026-11-01T00:00:00Z", capabilities: ["completion" as const] };
   // a test can act at the moment the server reads who owns the attached files (inside the save)
   const store = new Proxy(db, { get: (target, key) => key === "fileOwnersRead" ? undefined : key === "fileOwners" ? () => { hooks.fileOwnersRead?.(); return target.fileOwners(); } : Reflect.get(target, key, target) });
@@ -109,6 +112,7 @@ export function rig(hooks: RigHooks = {}) {
     runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
     catalog: { current: () => [model], refresh: async () => ({ models: [model], changed: false }), onChange: () => () => {}, stop: () => {} },
     push: (channel, payload) => { pushes.push({ channel, payload }); },
+    turnSaid: (s) => { said.push(s); },
     fit: { runNvidiaSmi: async (args) => (args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : ""), readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
     models: { handlers: {}, loader: { reserve: () => ({
       baseUrl: "http://fake", signal, cold: false, firstToken: () => {}, end: () => {},
@@ -122,14 +126,11 @@ export function rig(hooks: RigHooks = {}) {
     }) } },
   }, hooks.rules);
   cleanups.push(async () => { open(); finish(); await app.shutdown(); db.close(); });
-  /** Every chat event pushed for this turn, in order. */
-  const events = (turnId: string) => pushes.flatMap((p) => p.channel === "chat.event" && (p.payload as Payload<"chat.event">).turnId === turnId ? [(p.payload as Payload<"chat.event">).event] : []);
+  /** Every event the turn said, in order. */
+  const events = (turnId: string) => said.flatMap((s) => s.turnId === turnId ? [s.event] : []);
   /** The turn's record as last pushed. */
   const record = (turnId: string): ReplyRecord | undefined => events(turnId).findLast((e) => e.type === "reply")?.reply;
-  const starts = () => pushes.flatMap((p) => {
-    const e = (p.payload as Payload<"chat.event">).event;
-    return p.channel === "chat.event" && e.type === "start" ? [e.userMessage.content] : [];
-  });
+  const starts = () => said.flatMap(({ event: e }) => e.type === "start" ? [e.userMessage.content] : []);
   /** Every change of a record the windows were sent, in order. */
   const told = (): readonly ReplyChange[] => pushes.flatMap((p) => p.channel === "reply.changed" ? [p.payload as ReplyChange] : []);
   /** A record as the windows were last told, or undefined once it left. */
@@ -148,7 +149,7 @@ export function rig(hooks: RigHooks = {}) {
     } catch { return undefined; }
   };
   const entry = (id: string, text: string): Params<"reply.send"> => ({ id, threadId: thread.id, messageId: `m-${id}`, text, model: MODEL, numCtx: 16384 });
-  return { app, db, thread, open, openOne, finish, refusals, asked, pushes, events, record, starts, told, latest, queued, takenAs, entry, h: app.handlers as Required<typeof app.handlers> };
+  return { app, db, thread, open, openOne, finish, refusals, asked, pushes, said, events, record, starts, told, latest, queued, takenAs, entry, h: app.handlers as Required<typeof app.handlers> };
 }
 
 export type Rig = ReturnType<typeof rig>;

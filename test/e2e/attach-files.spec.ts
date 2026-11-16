@@ -60,10 +60,10 @@ test("a dropped text file is read by the model by its name, survives a reload, a
     // the server's copy is gone: a message naming it is refused, not sent; Send answers at once, and the refusal is the turn's end (chat row 32)
     const other = await rpc.call("threads.create", {});
     const model = (await rpc.call("models.list", {})).models.find(m => m.capabilities?.includes("completion"))!.name;
-    const ends: string[] = [];
-    rpc.subscribe("chat.event", p => { if (p.threadId === other.id && p.event.type === "error") ends.push(p.event.message); });
+    const ends = new Map<string, string>();
+    rpc.subscribe("reply.changed", c => { if (c.kind === "is" && c.reply.threadId === other.id && c.reply.stage === "held" && c.reply.held.why === "refused") ends.set(c.reply.id, c.reply.held.message); });
     await rpc.call("reply.send", { id: "again", threadId: other.id, messageId: "again", text: "again", model, numCtx: 4096, files: [file] });
-    await expect.poll(() => ends).toEqual([expect.stringContaining("notes.txt is no longer attached")]);
+    await expect.poll(() => [...ends.values()]).toEqual([expect.stringContaining("notes.txt is no longer attached")]);
     expect((await rpc.call("threads.get", { threadId: other.id })).messages).toEqual([]);
   } finally { rpc.close(); }
 });

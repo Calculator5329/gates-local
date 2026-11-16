@@ -34,7 +34,7 @@ it.each([
     const late = store.getState().turns["A"]?.turnId;
     expect(late).toBe("q");
     // and its reply ends
-    browser.server.push("chat.event", { turnId: "sent-1", threadId: "A", event: { type: "done", message: { id: "late-reply", threadId: "A", role: "assistant", content: "ok", createdAt: 2 }, stopReason: "stop" } });
+    browser.server.push("turn", { turnId: "sent-1", threadId: "A", event: { type: "done", message: { id: "late-reply", threadId: "A", role: "assistant", content: "ok", createdAt: 2 }, stopReason: "stop" } });
     await until(() => store.getState().turns["A"] === undefined, 2000, "the late reply ended");
   } else {
     // Remove, pressed there: the next Send here finds it gone
@@ -56,7 +56,7 @@ it("X18: confirmation clears its ordinary source while another chat has an edit 
   await heldOnServer(browser.server, store.getState, { id: "edit-B", threadId: "B", text: "queued B" });
   drafts.editDraft("unfinished B"); session.editQueued("edit-B");
   drafts.replaceDraft("A", { text: "confirmed A", sendId: "M" });
-  browser.server.push("chat.event", { turnId: "late-A", threadId: "A", event: { type: "start", model: "qwen3:14b", userMessage: { id: "M", threadId: "A", role: "user", content: "confirmed A", createdAt: 1 } } });
+  browser.server.push("turn", { turnId: "late-A", threadId: "A", event: { type: "start", model: "qwen3:14b", userMessage: { id: "M", threadId: "A", role: "user", content: "confirmed A", createdAt: 1 } } });
   await until(() => store.getState().turns["A"]?.userMessageId === "M", 2000, "A confirmed");
   expect(drafts.getDraft("A").text).toBe("");
   expect(store.getState().editingQueued).toBe("edit-B");

@@ -68,7 +68,7 @@ export function createThreadImages({ deps, deleting }: Pick<AppContext, "deps" |
   return { queueImage, queueImageFor, cancelThreadImages };
 }
 
-export interface DrawTurnDeps extends Pick<AppContext, "deps" | "store" | "log" | "push" | "reserve" | "replies"> {
+export interface DrawTurnDeps extends Pick<AppContext, "deps" | "store" | "log" | "push" | "said" | "reserve" | "replies"> {
   readonly queueImage: ThreadImages["queueImage"];
   /** Keeps the admission on the turn (admit.ts). */
   readonly admitting: (turn: Turn, admission: Promise<Message>, replacedFiles?: readonly string[]) => void;
@@ -79,7 +79,7 @@ export interface DrawTurnDeps extends Pick<AppContext, "deps" | "store" | "log" 
 /** `taken`: the start the picker took for a waiting message. */
 export type DrawTurn = (threadId: string, content: string, choice: ImageChoice, count: { now: number; saved: number }, messageId: string | undefined, replaced: readonly string[], attached: boolean, replacedFiles: readonly string[], taken: Taken) => { turnId: string };
 
-export function createDrawTurn({ deps, store, log, push, reserve, replies, queueImage, admitting, refused }: DrawTurnDeps): DrawTurn {
+export function createDrawTurn({ deps, store, log, push, said, reserve, replies, queueImage, admitting, refused }: DrawTurnDeps): DrawTurn {
   /**
    * Image mode (a send's draw): the words go to the image module as its prompt and no chat model
    * runs, so there is no fit, no load and no chat claim; the job claims the GPU alone. The turn
@@ -155,7 +155,7 @@ export function createDrawTurn({ deps, store, log, push, reserve, replies, queue
       try { store.setImageCount(threadId, count.now); } catch (e) { log(`turn ${turn.turnId}: image count not kept: ${(e as Error).message}`); }
     }
     push(...threadChanged(store, threadId));
-    push("chat.event", { turnId: turn.turnId, threadId, event: { type: "start", model: choice.preset, userMessage, image: true } });
+    said({ turnId: turn.turnId, threadId, event: { type: "start", model: choice.preset, userMessage, image: true } });
     // after the start: the list every window shows no longer has this message
     replies.notify();
     const stop = () => { for (const id of jobIds) image.cancel(id); };
@@ -180,7 +180,7 @@ export function createDrawTurn({ deps, store, log, push, reserve, replies, queue
       const event: TurnEnd = { ...last, ended: last.type === "done" ? { reason: "done", at: now } : { reason: "stopped", at: replies.stoppedAt(turn.turnId) ?? now } };
       // The record ends with its last event; the windows hear what became of the messages behind it after that event.
       replies.ended(turn.turnId, last.type === "done" ? { how: "done", replyId: last.message.id } : { how: "stopped", by: { who: "person" } }, now, last.type === "done" ? [last.message] : []);
-      push("chat.event", { turnId: turn.turnId, threadId, event });
+      said({ turnId: turn.turnId, threadId, event });
       push(...threadChanged(store, threadId));
       replies.notify();
     }).finally(end);

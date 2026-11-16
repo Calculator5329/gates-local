@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
 import type { State } from "../lib/store/store.ts";
 import { installBrowser, tick, until } from "../../test/harness.ts";
+import type { TurnSaid } from "@gates-local/server/app/turn.ts";
 
 vi.mock("../lib/store/store.ts", async (original) => {
   const actual = await original<typeof import("../lib/store/store.ts")>();
@@ -22,7 +23,7 @@ it("keeps rendered link permissions after Stop followed by Send", async () => {
     // the turn's start, which the server sends after the answer and before any step
     await tick();
     const live = Object.values(store.getState().turns)[0]!;
-    const event = (value: import("@gates-local/contracts").Payload<"chat.event">["event"]) => browser.server.push("chat.event", { turnId: live.turnId!, threadId: live.threadId, event: value });
+    const event = (value: TurnSaid["event"]) => browser.server.push("turn", { turnId: live.turnId!, threadId: live.threadId, event: value });
     event({ type: "tool", step: { callId: "image", name: "image", state: "done", summary: "Image queued", links: [] } });
     event({ type: "tool", step: { callId: "read", name: "read", state: "done", summary: "Read report", links: ["https://tool.example/report"] } });
     event({ type: "delta", text: "[Download](https://invented.example/ship.png) and [Report](https://tool.example/report)" });

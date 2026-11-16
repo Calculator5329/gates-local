@@ -4,9 +4,9 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Channel, Payload } from "@gates-local/contracts";
 import { afterEach, expect, it, vi } from "vitest";
 import { AppError, createApp } from "../app.ts";
+import type { TurnSaid } from "../app/turn.ts";
 import { openThreadStore } from "../threads/store.ts";
 import { sendTaken } from "./send-started.ts";
 import { chatCatalog } from "../../test/send-rig.ts";
@@ -48,12 +48,13 @@ function rig(admit: () => Promise<void> = async () => {}) {
   });
   const gate = deferred();
   const signal = new AbortController().signal;
-  const pushes: Array<{ channel: Channel; payload: unknown }> = [];
+  const said: TurnSaid[] = [];
   const app = createApp({
     store: db,
     runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
     catalog: chatCatalog(),
-    push: (channel, payload) => { pushes.push({ channel, payload }); },
+    push: () => undefined,
+    turnSaid: (s) => { said.push(s); },
     fit: { runNvidiaSmi: async (args) => (args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : ""), readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
     models: { handlers: {}, loader: { reserve: () => ({
       baseUrl: "http://fake", signal, cold: false, firstToken: () => {}, end: () => {},
@@ -67,10 +68,7 @@ function rig(admit: () => Promise<void> = async () => {}) {
   });
   cleanups.push(async () => { gate.resolve(); await app.shutdown(); db.close(); });
   // the turn's events but its reply records (decision 33), a stream of their own
-  const events = (turnId: string) => pushes
-    .filter((p) => p.channel === "chat.event" && (p.payload as Payload<"chat.event">).turnId === turnId)
-    .map((p) => (p.payload as Payload<"chat.event">).event)
-    .filter((e) => e.type !== "reply");
+  const events = (turnId: string) => said.filter((s) => s.turnId === turnId).map((s) => s.event).filter((e) => e.type !== "reply");
   return { app, db, thread, gate, events };
 }
 

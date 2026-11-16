@@ -189,7 +189,6 @@ export class OrderingServer extends FakeServer {
     ];
   }
 
-  /** The record's change follows the chat event on the same socket, as the server sends the two. */
   private record(target: FakeSocket, reply: Reply, saved: readonly Message[]): void {
     target.frame({ type: "push", channel: "reply.changed", payload: { kind: "is", reply, saved } });
   }
@@ -198,10 +197,6 @@ export class OrderingServer extends FakeServer {
     const userMessage = this.turns.get(turnId);
     if (!userMessage) throw new Error(`No admitted turn: ${turnId}`);
     const message: Message = { ...userMessage, id: `reply-${turnId}`, role: "assistant", content: "reply" };
-    const event: Payload<"chat.event">["event"] = done
-      ? { type: "done", message, stopReason: "stop" }
-      : { type: "start", model: "gemma3:4b", userMessage };
-    target.frame({ type: "push", channel: "chat.event", payload: { turnId, replyId: this.rid(turnId), threadId: userMessage.threadId, event } });
     if (done) this.record(target, { id: this.rid(turnId), threadId: userMessage.threadId, rev: 4, stage: "done", at: Date.now(), questionId: userMessage.id, replyId: message.id }, [message]);
     else this.record(target, this.live(turnId, userMessage), [userMessage]);
   }
@@ -212,19 +207,17 @@ export class OrderingServer extends FakeServer {
   chatWords(turnId: string, target: FakeSocket, text: string, ended = false): void {
     const userMessage = this.turns.get(turnId);
     if (!userMessage) throw new Error(`No admitted turn: ${turnId}`);
-    const event: Payload<"chat.event">["event"] = ended
-      ? { type: "error", code: "cancelled", message: "stopped", partial: { id: `reply-${turnId}`, threadId: userMessage.threadId, role: "assistant", content: text, interrupted: true, createdAt: 1_000 }, ended: { reason: "stopped", at: Date.now() } }
-      : { type: "delta", text };
-    target.frame({ type: "push", channel: "chat.event", payload: { turnId, replyId: this.rid(turnId), threadId: userMessage.threadId, event } });
-    if (event.type === "delta") {
+    if (!ended) {
       const from = this.written.get(turnId) ?? 0;
       this.written.set(turnId, from + text.length);
       target.frame({ type: "push", channel: "reply.words", payload: { id: this.rid(turnId), part: { type: "text", from, text } } });
+      return;
     }
-    if (event.type === "error" && event.partial !== undefined) this.record(target, { id: this.rid(turnId), threadId: userMessage.threadId, rev: 4, stage: "stopped", at: event.ended?.at ?? Date.now(), questionId: userMessage.id, replyId: event.partial.id, by: { who: "person" } }, [event.partial]);
+    const partial: Message = { id: `reply-${turnId}`, threadId: userMessage.threadId, role: "assistant", content: text, interrupted: true, createdAt: 1_000 };
+    this.record(target, { id: this.rid(turnId), threadId: userMessage.threadId, rev: 4, stage: "stopped", at: Date.now(), questionId: userMessage.id, replyId: partial.id, by: { who: "person" } }, [partial]);
   }
 
-  /** A runtime error after some words: the terminal event carries the saved row and the server's reason. */
+  /** A runtime error after some words: the record's end carries the saved row and the server's reason. */
   chatFailed(turnId: string, target: FakeSocket, text: string, message: string): void {
     const userMessage = this.turns.get(turnId);
     if (!userMessage) throw new Error(`No admitted turn: ${turnId}`);
@@ -232,7 +225,6 @@ export class OrderingServer extends FakeServer {
     // the row carries how its turn ended, as the server stamps it (chat row 32)
     const partial: Message = { id: `reply-${turnId}`, threadId: userMessage.threadId, role: "assistant", content: text, interrupted: true, createdAt: 1_000,
       times: { startedAt: 1_000, spans: [], callsAt: {}, ended, why: { code: "runtime-error", message } } };
-    target.frame({ type: "push", channel: "chat.event", payload: { turnId, replyId: this.rid(turnId), threadId: userMessage.threadId, event: { type: "error", code: "runtime-error", message, partial, ended } } });
     this.record(target, { id: this.rid(turnId), threadId: userMessage.threadId, rev: 4, stage: "failed", at: ended.at, questionId: userMessage.id, code: "runtime-error", message }, [partial]);
   }
 

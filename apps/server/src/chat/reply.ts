@@ -5,8 +5,9 @@
 // the answer and the record as it now is. It reads no clock, no file and no other record; what
 // it needs to know of the rest of the app comes in with the call. The store (replies.ts) keeps
 // the records and applies what `move` says, also to the other messages of the same chat.
-import type { HeldWhy, Message, ReplyStage, StopConsent } from "@gates-local/contracts";
+import type { HeldWhy, Message, StopConsent } from "@gates-local/contracts";
 import type { SavedEntry } from "./queue-file.ts";
+import type { ReplyStage } from "./times.ts";
 
 /** What a message was typed behind, as the window that typed it said. */
 export type Behind = SavedEntry["waitFor"];

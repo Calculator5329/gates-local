@@ -151,7 +151,7 @@ export const FEATURES: readonly Feature[] = [
     server: ["app/run-turn.ts", "app/turn.ts", "app/push.ts", "chat/stream.ts", "chat/replies.ts", "chat/times.ts"],
     packages: ["harness"],
     calls: ["reply.list"],
-    pushes: ["chat.event"],
+    pushes: ["reply.changed", "reply.words"],
     specs: ["streaming.spec.ts", "writing-label.spec.ts", "streaming-integrity.spec.ts", "threads-resume.spec.ts", "two-clients.spec.ts", "text-mode-stream.spec.ts"],
     testIds: ["chat.reply.turn", "chat.markdown.copy-code"],
   },
@@ -273,7 +273,7 @@ export const FEATURES: readonly Feature[] = [
     window: ["thread/Thread.tsx", "composer/chat.ts"],
     server: ["app/run-turn.ts", "gpu"],
     calls: ["reply.list"],
-    pushes: ["chat.event", "reply.changed", "reply.words"],
+    pushes: ["reply.changed", "reply.words"],
     specs: ["threads-concurrent.spec.ts", "sidebar-running.spec.ts"],
   },
 

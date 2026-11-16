@@ -2,8 +2,9 @@
 // the same reducer, as the one on screen, and it costs the open chat nothing
 // per word.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { Message, Payload } from "@gates-local/contracts";
+import type { Message } from "@gates-local/contracts";
 import { type Browser, installBrowser, tick, until } from "../../../test/harness.ts";
+import type { TurnSaid } from "@gates-local/server/app/turn.ts";
 
 let b: Browser;
 let session: typeof import("./index.ts");
@@ -14,7 +15,7 @@ let skew = 0;
 
 const st = () => store.getState();
 const userMsg = (id: string, threadId: string, content: string): Message => ({ id, threadId, role: "user", content, createdAt: 1 });
-const chat = (turnId: string, threadId: string, event: Payload<"chat.event">["event"]) => b.server.push("chat.event", { turnId, threadId, event });
+const chat = (turnId: string, threadId: string, event: TurnSaid["event"]) => b.server.push("turn", { turnId, threadId, event });
 
 beforeEach(async () => {
   b = installBrowser();

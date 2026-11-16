@@ -1,11 +1,11 @@
 // The work of one start as the app holds it from reserve to its end, how it ended, and the
 // state the app's jobs share (app.ts builds it once and hands it to each).
-import type { AttachedFile, ImageChoice, ImageCount, Message, Payload, ToolStep, TurnEnded } from "@gates-local/contracts";
+import type { AttachedFile, BlockingTurn, FitOffer, FitReport, ImageChoice, ImageCount, Message, ToolStep, TurnEnded } from "@gates-local/contracts";
 import type { fileLifecycle } from "../chat/files.ts";
 import type { imageLifecycle } from "../chat/image-lifecycle.ts";
 import type { Replies } from "../chat/replies.ts";
 import type { End } from "../chat/reply.ts";
-import type { TurnClock } from "../chat/times.ts";
+import type { ReplyRecord, TurnClock } from "../chat/times.ts";
 import type { ChatEvent } from "../chat/types.ts";
 import type { FitTableSource } from "../fit/table.ts";
 import type { ModelCatalog } from "../runtime/models.ts";
@@ -16,9 +16,31 @@ import type { AppDeps } from "./types.ts";
 
 export const HALTED = Symbol("halted");
 
-export type WireEvent = Payload<"chat.event">["event"];
-export type TurnEnd = Extract<WireEvent, { type: "done" | "error" }>;
-export type TurnFailure = Extract<WireEvent, { type: "error" }>;
+export interface TurnFailure {
+  readonly type: "error";
+  readonly code: string;
+  readonly message: string;
+  readonly ended?: TurnEnded;
+  readonly partial?: Message;
+  readonly question?: Message;
+  readonly neededBy?: string;
+  readonly blocking?: readonly BlockingTurn[];
+  readonly fit?: FitReport;
+  readonly offer?: FitOffer;
+}
+export type TurnEnd = { readonly type: "done"; readonly message: Message; readonly stopReason: string; readonly ended?: TurnEnded } | TurnFailure;
+export type TurnEvent =
+  | { readonly type: "start"; readonly model: string; readonly userMessage: Message; readonly image?: true }
+  | { readonly type: "delta" | "thinking"; readonly text: string }
+  | { readonly type: "tool"; readonly step: ToolStep }
+  | { readonly type: "reply"; readonly reply: ReplyRecord }
+  | TurnEnd;
+export interface TurnSaid {
+  readonly turnId: string;
+  readonly threadId: string;
+  readonly replyId?: string;
+  readonly event: TurnEvent;
+}
 export type StreamDone = Extract<ChatEvent, { type: "done" }>;
 /** A halt's one terminal event: its error's code, message and, for preempted, the model that needed the GPU. */
 export const haltedEnd = (reason: AppError): TurnFailure => ({ type: "error", code: reason.code, message: reason.message, ...(reason.neededBy === undefined ? {} : { neededBy: reason.neededBy }) });
@@ -137,8 +159,9 @@ export interface AppContext {
   readonly runtime: AppDeps["runtime"];
   readonly catalog: ModelCatalog;
   readonly log: (line: string) => void;
-  /** deps.push, logging a failure; a chat.event also moves the queue. */
+  /** deps.push, logging a failure. */
   readonly push: Push;
+  readonly said: (said: TurnSaid) => void;
   /** Turns from their reserve to their end, by turn id. */
   readonly turns: Map<string, Turn>;
   /** The same turns by thread: one at a time in each. */

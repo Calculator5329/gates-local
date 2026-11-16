@@ -319,7 +319,7 @@ require("./out/main.cjs");
       const model = (await control.call("models.list", {})).models.find((entry) => entry.capabilities.includes("completion"));
       assert.ok(model);
       let sawText = false;
-      const off = control.subscribe("chat.event", (event) => { if (event.threadId === thread.id && event.event.type === "delta") sawText = true; });
+      const off = control.subscribe("reply.words", (words) => { if (words.id === "partial-answer" && words.part.type === "text") sawText = true; });
       await control.call("reply.send", { id: "partial-answer", threadId: thread.id, messageId: "partial-answer", text: "Keep a partial answer", model: model.name, numCtx: 16384 });
       await expect.poll(() => sawText, { timeout: 60_000 }).toBe(true);
       off();

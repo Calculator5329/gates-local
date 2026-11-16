@@ -58,7 +58,7 @@ describe("measured speed in the store", () => {
     b.server.answer("models.speed", () => [fast]);
     await boot();
     const turnId = "turn-1";
-    for (const text of ["one ", "two ", "three "]) b.server.broadcast("chat.event", { turnId, threadId: "t1", event: { type: "delta", text } });
+    for (const text of ["one ", "two ", "three "]) b.server.broadcast("turn", { turnId, threadId: "t1", event: { type: "delta", text } });
     await tick();
     expect(b.server.calls("models.speed")).toHaveLength(1);
     expect(speeds()).toEqual({ "qwen3.5:9b": fast });

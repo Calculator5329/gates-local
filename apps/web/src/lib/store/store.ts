@@ -5,7 +5,6 @@ import { useSyncExternalStore } from "react";
 import { readLoadTimes } from "./load-times.ts";
 import type {
   Reply,
-  ReplyRecord,
   BlockingTurn,
   CatalogEntry,
   ContextSize,
@@ -33,6 +32,7 @@ import type {
   SuggestedList,
   Thread,
   ToolStep,
+  TurnEnded,
   UpdateStatus,
   AttachedFile,
 } from "@gates-local/contracts";
@@ -75,8 +75,24 @@ export interface LiveTurn {
   readonly end?: { readonly kind: "stopped"; readonly secs: number } | { readonly kind: "error"; readonly code: string; readonly message: string };
 }
 
-/** The record's times as a turn keeps them; a picture's turn is "drawing" from its start to its end. */
-export type TurnClock = Omit<ReplyRecord, "stage"> & { readonly stage: ReplyRecord["stage"] | "drawing" };
+/**
+ * A running reply's stage and times, from its reply.changed record. A picture's turn is "drawing"
+ * from its start to its end. `workMs` is as of the record and grows here only while the stage is
+ * thinking or tool.
+ */
+export interface TurnClock {
+  readonly stage: "waiting" | "loading" | "thinking" | "tool" | "writing" | "stopping" | "ended" | "drawing";
+  readonly startedAt: number;
+  readonly readyAt?: number;
+  readonly firstTokenAt?: number;
+  readonly workMs: number;
+  readonly toolMs: number;
+  readonly attempt: number;
+  readonly spans: readonly { readonly from: number; readonly ms: number }[];
+  readonly callsAt: Readonly<Record<string, number>>;
+  readonly stoppedAt?: number;
+  readonly ended?: TurnEnded;
+}
 
 export type WaitingReply = Extract<Reply, { readonly stage: "queued" | "held" | "next" | "editing" }>;
 

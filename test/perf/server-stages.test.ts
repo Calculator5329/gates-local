@@ -21,7 +21,7 @@ test("server stages persist at the first delta with only times and ids, across c
         await Promise.resolve(); // The request's async context must survive admission.
         const response = await fetch(new URL("https://model.invalid/api/chat"), { method: "POST", body: JSON.stringify({ stream: true, messages: [{ role: "user", content: "words that must never be saved" }] }) });
         await response.body!.getReader().read();
-        const frame = JSON.stringify({ channel: "chat.event", payload: { threadId: params.threadId, event: { type: "delta", text: "private output" } } });
+        const frame = JSON.stringify({ channel: "reply.words", payload: { id: params.id, part: { type: "text", from: 0, text: "private output" } } });
         socket.send(frame); socket.send(frame);
       })());
     });

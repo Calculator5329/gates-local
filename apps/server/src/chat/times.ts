@@ -3,7 +3,23 @@
 // row when it ends. Every window and every reload shows the same stage and seconds;
 // no window keeps a clock of its own. The clock only times: which stage a reply is in is its
 // record's to say (chat/reply.ts), and each call here is told the stage the record shows.
-import type { ReplyRecord, ReplyStage, ReplyTimes, TurnEnded } from "@gates-local/contracts";
+import type { ReplyTimes, TurnEnded } from "@gates-local/contracts";
+
+export type ReplyStage = "waiting" | "loading" | "thinking" | "tool" | "writing" | "stopping" | "ended";
+
+export interface ReplyRecord {
+  readonly stage: ReplyStage;
+  readonly startedAt: number;
+  readonly readyAt?: number;
+  readonly firstTokenAt?: number;
+  readonly workMs: number;
+  readonly toolMs: number;
+  readonly attempt: number;
+  readonly spans: readonly { readonly from: number; readonly ms: number }[];
+  readonly callsAt: Readonly<Record<string, number>>;
+  readonly stoppedAt?: number;
+  readonly ended?: TurnEnded;
+}
 
 /** An event the turn sends before its end. */
 export type TurnStep =

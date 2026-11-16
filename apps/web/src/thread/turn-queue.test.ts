@@ -3,13 +3,14 @@
 // keeps, a turn left running behind another chat, and the queue of messages
 // typed while a reply is being written.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { BlockingTurn, Message, Payload, ReplyTimes } from "@gates-local/contracts";
+import type { BlockingTurn, Message, ReplyTimes } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { type Browser, type HeldStart, installBrowser, tick, until } from "../../test/harness.ts";
 import { replay } from "../../test/ordering-replay.ts";
 import { gpuReadFailure } from "@gates-local/server/fit/gpu.ts";
 import { draftView } from "../../test/draft-view.ts";
 import { drawTimes } from "./times.ts";
+import type { TurnSaid } from "@gates-local/server/app/turn.ts";
 
 type Session = typeof import("../lib/session/index.ts");
 type Store = typeof import("../lib/store/store.ts");
@@ -26,7 +27,7 @@ const type = (text: string) => draftSource.replaceDraft(store.getState().threadI
 const live = () => { const s = st(); return s.threadId === null ? null : s.turns[s.threadId] ?? null; };
 const userMsg = (id: string, threadId: string, content = "hello"): Message => ({ id, threadId, role: "user", content, createdAt: 1 });
 const asstMsg = (id: string, threadId: string, content = "hi there"): Message => ({ id, threadId, role: "assistant", content, model: "qwen3:14b", createdAt: 2 });
-const chat = (turnId: string, threadId: string, event: Payload<"chat.event">["event"]) => b.server.push("chat.event", { turnId, threadId, event });
+const chat = (turnId: string, threadId: string, event: TurnSaid["event"]) => b.server.push("turn", { turnId, threadId, event });
 const BLOCKING: BlockingTurn[] = [{ threadId: "A", title: "First chat", model: "qwen3:14b", turnId: "turn-A-1" }];
 // the model the sample list makes the pick
 const MODEL = "gemma3:4b";
@@ -364,7 +365,7 @@ const preemptWhy = {
   message: "qwen3:14b at num_ctx 16384 needed the GPU memory other was using, so this reply stopped. Send the message again.",
   neededBy: "qwen3:14b",
 };
-const preempted = (partial?: Message, question?: Message): Payload<"chat.event">["event"] => ({
+const preempted = (partial?: Message, question?: Message): TurnSaid["event"] => ({
   type: "error",
   ...preemptWhy,
   ended: { reason: "preempted", at: 4_000 },
@@ -498,7 +499,7 @@ describe("a send that would stop another chat", () => {
   });
 });
 
-const ask = async (reply: Payload<"chat.event">["event"]) => {
+const ask = async (reply: TurnSaid["event"]) => {
   const turn = await answering("A");
   chat(turn, "A", { type: "delta", text: "so far" });
   b.frame();
@@ -508,7 +509,7 @@ const ask = async (reply: Payload<"chat.event">["event"]) => {
   return st().messages["A"]?.find((m) => m.role === "user")?.id ?? "";
 };
 const saved = (id: string, content = "so far") => ({ ...asstMsg(id, "A", content), interrupted: true as const });
-const cancelledWith = (partial: Message): Payload<"chat.event">["event"] => ({ type: "error", code: "cancelled", message: "stopped", partial: stampedRow(partial, "stopped"), ended: { reason: "stopped", at: 4_000 } });
+const cancelledWith = (partial: Message): TurnSaid["event"] => ({ type: "error", code: "cancelled", message: "stopped", partial: stampedRow(partial, "stopped"), ended: { reason: "stopped", at: 4_000 } });
 const replies = () => (st().messages["A"] ?? []).filter((m) => m.role === "assistant").map((m) => m.content);
 
 describe("the chat that got stopped", () => {
@@ -537,7 +538,7 @@ describe("the chat that got stopped", () => {
   });
 
   describe("Retry", () => {
-    const unfinished: Payload<"chat.event">["event"] = { type: "error", code: "cancelled", message: "stopped", partial: { ...asstMsg("p8", "A", "so far"), interrupted: true }, ended: { reason: "stopped", at: Date.now() } };
+    const unfinished: TurnSaid["event"] = { type: "error", code: "cancelled", message: "stopped", partial: { ...asstMsg("p8", "A", "so far"), interrupted: true }, ended: { reason: "stopped", at: Date.now() } };
 
     it("of an unfinished reply names the question, and the old rows go once the server has saved the new one", async () => {
       const question = await ask(unfinished);
@@ -1059,8 +1060,8 @@ async function reworded(): Promise<string> {
   return id;
 }
 
-const CANCELLED: Payload<"chat.event">["event"] = { type: "error", code: "cancelled", message: "stopped", ended: { reason: "stopped", at: Date.now() } };
-const done = (id: string, threadId: string): Payload<"chat.event">["event"] => ({ type: "done", message: asstMsg(id, threadId), stopReason: "stop" });
+const CANCELLED: TurnSaid["event"] = { type: "error", code: "cancelled", message: "stopped", ended: { reason: "stopped", at: Date.now() } };
+const done = (id: string, threadId: string): TurnSaid["event"] => ({ type: "done", message: asstMsg(id, threadId), stopReason: "stop" });
 const texts = () => st().queued.map((q) => q.text);
 
 /** Chat A's reply was stopped with these messages waiting, all on hold; their ids in order. */

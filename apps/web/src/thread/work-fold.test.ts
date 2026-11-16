@@ -4,8 +4,8 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Message, ReplyRecord, ReplyTimes, ToolStep } from "@gates-local/contracts";
-import { type LiveTurn, setState, type State } from "../lib/store/store.ts";
+import type { Message, ReplyTimes, ToolStep } from "@gates-local/contracts";
+import { type LiveTurn, setState, type State, type TurnClock } from "../lib/store/store.ts";
 import { reduceTurn, type TurnEvent } from "./turn.ts";
 
 vi.mock("../lib/store/store.ts", async (original) => {
@@ -20,7 +20,7 @@ const T = "t";
 const user: Message = { id: "u", threadId: T, role: "user", createdAt: 1, content: "Check my notes" };
 const step = (callId: string, state: ToolStep["state"], durationMs?: number): ToolStep =>
   ({ callId, name: "shell", state, summary: "Searching your library", ...(durationMs === undefined ? {} : { durationMs }) });
-const record = (patch: Partial<ReplyRecord>): ReplyRecord => ({ stage: "waiting", startedAt: 0, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {}, ...patch });
+const record = (patch: Partial<TurnClock>): TurnClock => ({ stage: "waiting", startedAt: 0, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {}, ...patch });
 /** A turn this client sent at 0. */
 const sent = (): LiveTurn => ({ threadId: T, turnId: "turn", model: "m", startedAt: 0, thinking: "", text: "", tools: [] });
 /** The server's saved times for a reply that ended at `secs` with `workMs` of work. */
@@ -32,7 +32,7 @@ function play(turn: LiveTurn, events: readonly (readonly [number, TurnEvent])[])
   return events.reduce<LiveTurn>((t, [at, e]) => reduceTurn(t, e, at) ?? t, turn);
 }
 /** A record pushed at `at`. */
-const push = (at: number, patch: Partial<ReplyRecord>) => [at, { type: "reply", reply: record(patch) }] as const;
+const push = (at: number, patch: Partial<TurnClock>) => [at, { type: "reply", reply: record(patch) }] as const;
 
 async function render(now: number, state: Partial<State>): Promise<string> {
   vi.setSystemTime(now);

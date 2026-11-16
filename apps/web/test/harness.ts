@@ -4,11 +4,16 @@
 // the few browser globals session.ts touches (location, history, document,
 // localStorage, requestAnimationFrame). Each test imports session.ts fresh.
 import { vi } from "vitest";
-import type { Channel, Message, MethodName, Params, Payload, ReplyAnswer, ReplyListed, ReplyRecord, ResultOf, SyncMetadata, ToolStep } from "@gates-local/contracts";
+import type { Channel, Message, MethodName, Params, Payload, ReplyAnswer, ReplyListed, ResultOf, SyncMetadata, ToolStep } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { createReplies } from "@gates-local/server/chat/replies.ts";
 import { isLive, type End } from "@gates-local/server/chat/reply.ts";
-import type { StartAnswer, StartParams } from "@gates-local/server/app/turn.ts";
+import type { StartAnswer, StartParams, TurnSaid } from "@gates-local/server/app/turn.ts";
+import type { ReplyRecord } from "@gates-local/server/chat/times.ts";
+
+/** A push channel, or "turn": what a turn says as it runs, which the fake server takes as the real one does. */
+type Pushed = Channel | "turn";
+type PayloadOf<C extends Pushed> = C extends "turn" ? TurnSaid : C extends Channel ? Payload<C> : never;
 
 /** The call a pushed record stands for when it says "tool" and the test pushed no step of its own. */
 const SHOWN_CALL = "shown-call";
@@ -96,12 +101,12 @@ type Answer = (params: never) => unknown;
  * A turn's start as the server pushes it: the test's answer names the turn and the saved question.
  * A replayed answer, or one without the question (the test pushes the start itself), pushes nothing.
  */
-function sendAnswer(start: (payload: Payload<"chat.event">) => void, params: StartParams, result: unknown, answer: (result: unknown) => void): void {
+function sendAnswer(start: (payload: TurnSaid) => void, params: StartParams, result: unknown, answer: (result: unknown) => void): void {
   const r = result as { turnId?: string; userMessage?: Message; replayed?: boolean } | null;
   if (r === null || typeof r !== "object" || r.userMessage === undefined || r.replayed === true || r.turnId === undefined) return answer(result);
   const { turnId, userMessage } = r;
   answer({ turnId });
-  const event: Payload<"chat.event">["event"] = params.draw !== undefined
+  const event: TurnSaid["event"] = params.draw !== undefined
     ? { type: "start", model: params.draw.preset, userMessage, image: true }
     : { type: "start", model: params.model, userMessage };
   // its own task, as a browser delivers each frame: the answer's continuation runs first
@@ -215,7 +220,7 @@ export class FakeServer {
       this.made.add(p.id);
       this.store.begun(p.id);
       answer(sent.answer());
-      sendAnswer((payload) => this.broadcast("chat.event", payload), params, { ...r, turnId: p.id }, () => undefined);
+      sendAnswer((payload) => this.broadcast("turn", payload), params, { ...r, turnId: p.id }, () => undefined);
       this.pump();
     };
     const err = (code: string, message = code, blocking?: unknown) => {
@@ -237,9 +242,9 @@ export class FakeServer {
    * A chat event a test pushed under the turn id it named, under the record's id. A start that
    * saved the question of a send still waiting for its answer is that send's: it began.
    */
-  private aliased<C extends Channel>(channel: C, payload: Payload<C>): Payload<C> {
-    if (channel !== "chat.event") return payload;
-    const p = payload as Payload<"chat.event">;
+  private aliased<C extends Pushed>(channel: C, payload: PayloadOf<C>): PayloadOf<C> {
+    if (channel !== "turn") return payload;
+    const p = payload as TurnSaid;
     if (!this.alias.has(p.turnId) && p.event.type === "start" && !this.made.has(p.turnId) && this.store.of(p.turnId) === undefined) {
       const question = p.event.userMessage.id;
       const mine = [...this.starting].find(([, s]) => s.threadId === p.threadId && s.messageId === question)?.[0];
@@ -251,7 +256,7 @@ export class FakeServer {
       }
     }
     const to = this.alias.get(p.turnId);
-    return (to === undefined ? payload : { ...p, turnId: to }) as Payload<C>;
+    return (to === undefined ? payload : { ...p, turnId: to }) as PayloadOf<C>;
   }
 
   /** A test's hold or answer for the method, else the queue's own answer, else the contract sample. */
@@ -271,24 +276,24 @@ export class FakeServer {
     }
   }
 
-  /** `sync`: the number an ordered push carries (numbered-server.ts gives it). */
-  push<C extends Channel>(channel: C, given: Payload<C>, sync?: SyncMetadata): void {
-    const payload = this.aliased(channel, given);
-    const words = this.words(channel, payload);
-    if (!this.muted) {
-      this.socket.frame({ type: "push", channel, payload: this.named(channel, payload), ...(sync === undefined ? {} : { sync }) });
-      if (words !== undefined) this.socket.frame({ type: "push", channel: "reply.words", payload: words });
-    }
-    this.pushed(channel, payload);
+  /**
+   * `sync`: the number an ordered push carries (numbered-server.ts gives it). A "turn" is what the
+   * server's turn says as it runs (app/turn.ts): no window hears it, only its words and record.
+   */
+  push<C extends Pushed>(channel: C, given: PayloadOf<C>, sync?: SyncMetadata): void {
+    this.sent(() => [this.socket], channel, given, sync);
   }
 
   /** A push to every open socket, as the real server sends it to each connected client. */
-  broadcast<C extends Channel>(channel: C, given: Payload<C>): void {
+  broadcast<C extends Pushed>(channel: C, given: PayloadOf<C>): void {
+    this.sent(() => this.sockets, channel, given);
+  }
+
+  private sent<C extends Pushed>(to: () => readonly FakeSocket[], channel: C, given: PayloadOf<C>, sync?: SyncMetadata): void {
     const payload = this.aliased(channel, given);
-    const named = this.named(channel, payload);
     const words = this.words(channel, payload);
-    if (!this.muted) for (const s of this.sockets) {
-      s.frame({ type: "push", channel, payload: named });
+    if (!this.muted) for (const s of to()) {
+      if (channel !== "turn") s.frame({ type: "push", channel, payload, ...(sync === undefined ? {} : { sync }) });
       if (words !== undefined) s.frame({ type: "push", channel: "reply.words", payload: words });
     }
     this.pushed(channel, payload);
@@ -313,10 +318,10 @@ export class FakeServer {
   private readonly said = new Map<string, { text: string; thinking: string; steps: Map<string, ToolStep> }>();
 
   /** The reply.words push that goes with a chat event's words, each part saying where it starts. */
-  private words<C extends Channel>(channel: C, payload: Payload<C>): Payload<"reply.words"> | undefined {
-    if (channel !== "chat.event") return undefined;
-    const { turnId, event } = payload as Payload<"chat.event">;
-    const id = this.named("chat.event", payload as Payload<"chat.event">).replyId;
+  private words<C extends Pushed>(channel: C, payload: PayloadOf<C>): Payload<"reply.words"> | undefined {
+    if (channel !== "turn") return undefined;
+    const { turnId, event } = payload as TurnSaid;
+    const id = (payload as TurnSaid).replyId ?? this.store.of(turnId)?.id;
     if (id === undefined) return undefined;
     if (event.type === "done" || event.type === "error") return void this.said.delete(id);
     if (event.type === "reply") {
@@ -337,13 +342,6 @@ export class FakeServer {
     return event.text === "" ? undefined : { id, part: { type: kind, from, text: event.text } };
   }
 
-  /** A chat event names the record its turn works for, as the server's does (app/run-turn.ts). */
-  private named<C extends Channel>(channel: C, payload: Payload<C>): Payload<C> {
-    if (channel !== "chat.event") return payload;
-    const p = payload as Payload<"chat.event">;
-    const replyId = p.replyId ?? this.store.of(p.turnId)?.id;
-    return (replyId === undefined ? p : { ...p, replyId }) as Payload<C>;
-  }
 
   // The server's record of every message: its real rules (server chat/replies.ts) and, in small,
   // the server's pump (app/queue-pump.ts) and what a turn's work says to its record. A waiting
@@ -430,7 +428,7 @@ export class FakeServer {
     const threadId = this.replies.get(turnId);
     // a record the test pushed as stopping has been sent already
     if (threadId === undefined || this.records.get(turnId)?.stoppedAt !== undefined) return;
-    this.broadcast("chat.event", { turnId, threadId, event: { type: "reply", reply: { ...this.clock(turnId, at), stage: "stopping", stoppedAt: at } } });
+    this.broadcast("turn", { turnId, threadId, event: { type: "reply", reply: { ...this.clock(turnId, at), stage: "stopping", stoppedAt: at } } });
   }
 
   /** Every record the server keeps, as reply.list answers a window that connects. */
@@ -485,13 +483,13 @@ export class FakeServer {
     this.pump();
   }
 
-  private pushed(channel: Channel, payload: unknown): void {
-    if (channel === "chat.event") this.heard(payload as Payload<"chat.event">);
+  private pushed(channel: Pushed, payload: unknown): void {
+    if (channel === "turn") this.heard(payload as TurnSaid);
     if (channel === "runtime.changed") { this.runtimeReady = (payload as Payload<"runtime.changed">).state === "ready"; this.pump(); }
     if (channel === "models.changed") { this.hasModels = (payload as Payload<"models.changed">).length > 0; this.pump(); }
   }
 
-  private heard({ turnId, threadId, event }: Payload<"chat.event">): void {
+  private heard({ turnId, threadId, event }: TurnSaid): void {
     if (event.type === "reply") {
       const before = this.attempts.get(turnId) ?? 1;
       this.attempts.set(turnId, event.reply.attempt);
@@ -601,7 +599,7 @@ export class FakeServer {
           this.store.begun(turnId);
         }
       }
-      sendAnswer((payload) => this.broadcast("chat.event", payload), params, result, () => undefined);
+      sendAnswer((payload) => this.broadcast("turn", payload), params, result, () => undefined);
       done();
     };
     const err = (code: string, message = code, blocking?: unknown) => {

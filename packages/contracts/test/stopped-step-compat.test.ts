@@ -18,13 +18,12 @@ const OldToolStep = S.Struct({
   links: S.optional(S.Array(S.String)),
 });
 const OldThreadsGet = S.Struct({ thread: Thread, messages: S.Array(S.Struct({ ...Message.fields, tools: S.optional(S.Array(OldToolStep)) })) });
-const OldToolEvent = S.Struct({ turnId: S.String, threadId: S.String, event: S.Struct({ type: S.Literal("tool"), step: OldToolStep }) });
 
 const ok = (r: Result.Result<unknown, unknown>) => Result.isSuccess(r);
 const thread = { id: "t1", title: "Images", createdAt: 1, updatedAt: 1 };
 const cut: ToolStep = { callId: "c1", name: "image", state: "error", stopped: true, summary: "Making an image" };
 const saved = { thread, messages: [{ id: "m1", threadId: "t1", role: "assistant" as const, content: "", createdAt: 2, interrupted: true as const, tools: [cut] }] };
-const push = { turnId: "turn", threadId: "t1", event: { type: "tool" as const, step: cut } };
+const words = { id: "q-1", part: { type: "tool" as const, step: cut } };
 
 describe("a stopped step and a build that predates it", () => {
   it("threads.get: this server sends the mark, an old client reads the result, an old server encodes the saved row", () => {
@@ -39,22 +38,14 @@ describe("a stopped step and a build that predates it", () => {
     expect(JSON.stringify(Result.getOrThrow(oldServer))).not.toContain("stopped");
   });
 
-  it("chat.event: an old client decodes the pushed step and keeps its socket", () => {
-    const frame = encodePush("chat.event", push);
-    if (!frame.ok) throw frame.error;
-    const payload = (JSON.parse(frame.value) as { payload: unknown }).payload;
-    expect(payload).toMatchObject({ event: { step: { state: "error", stopped: true } } });
-    expect(decodePayload("chat.event", payload)).toMatchObject({ ok: true });
-    expect(ok(S.decodeUnknownResult(OldToolEvent)(payload)), "an old client decodes it").toBe(true);
-  });
-
   it("the old shape refuses a fourth state, which is why the mark is a field", () => {
-    expect(ok(S.decodeUnknownResult(OldToolEvent)({ ...push, event: { type: "tool", step: { ...cut, stopped: undefined, state: "stopped" } } }))).toBe(false);
+    expect(ok(S.decodeUnknownResult(OldToolStep)({ ...cut, stopped: undefined, state: "stopped" }))).toBe(false);
   });
 
   it("this build refuses a fourth state too: nothing here may start sending one", () => {
-    const fourth = { ...push, event: { type: "tool", step: { callId: "c1", name: "image", state: "stopped", summary: "Making an image" } } };
-    expect(decodePayload("chat.event", fourth)).toMatchObject({ ok: false });
-    expect(encodePush("chat.event", fourth as never)).toMatchObject({ ok: false });
+    const fourth = { ...words, part: { type: "tool", step: { callId: "c1", name: "image", state: "stopped", summary: "Making an image" } } };
+    expect(decodePayload("reply.words", words)).toMatchObject({ ok: true });
+    expect(decodePayload("reply.words", fourth)).toMatchObject({ ok: false });
+    expect(encodePush("reply.words", fourth as never)).toMatchObject({ ok: false });
   });
 });

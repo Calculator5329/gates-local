@@ -72,10 +72,10 @@ test("an address set in Settings that does not answer: Image opens a pop-up sayi
     await expect(page.locator("body")).not.toContainText(/service/i);
     // the server refuses an image send: no card, no question kept; Send answers at once, and the refusal is the turn's end (chat row 32)
     const before = (await client.call("threads.get", { threadId })).messages.length;
-    const ends: string[] = [];
-    client.subscribe("chat.event", p => { if (p.threadId === threadId && p.event.type === "error") ends.push(p.event.message); });
+    const ends = new Map<string, string>();
+    client.subscribe("reply.changed", c => { if (c.kind === "is" && c.reply.threadId === threadId && c.reply.stage === "held" && c.reply.held.why === "refused") ends.set(c.reply.id, c.reply.held.message); });
     await client.call("reply.send", { id: "a-ship", threadId, messageId: "a-ship", text: "a ship", model: "qwen3.5:9b", numCtx: 16384, draw: { preset: "flux2-klein-4b", width: 1024, height: 1024 } });
-    await expect.poll(() => ends).toEqual([expect.stringContaining(`ComfyUI at ${comfy.url} is not running.`)]);
+    await expect.poll(() => [...ends.values()]).toEqual([expect.stringContaining(`ComfyUI at ${comfy.url} is not running.`)]);
     expect((await client.call("threads.get", { threadId })).messages).toHaveLength(before);
     // Settings says the same: Not running, the address with Test connection as the one retry, and no install guide
     await pop.press("Escape");

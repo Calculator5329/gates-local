@@ -102,8 +102,8 @@ test("a reply that fails before it starts puts out the sidebar's working dot in 
     const first = await rpc.call("threads.create", { title: "Loads the model" });
     const second = await rpc.call("threads.create", { title: "Asks a missing model" });
     await rpc.call("reply.send", { id: "loads", threadId: first.id, messageId: "loads", text: "hello", model: MODEL, numCtx: 4096 });
-    const ends: string[] = [];
-    rpc.subscribe("chat.event", (p) => { if (p.threadId === second.id && p.event.type === "error") ends.push(p.event.code); });
+    const ends = new Map<string, string>();
+    rpc.subscribe("reply.changed", (c) => { if (c.kind === "is" && c.reply.threadId === second.id && c.reply.stage === "held" && c.reply.held.why === "refused") ends.set(c.reply.id, c.reply.held.code); });
     // answered at once, while it waits for the load gate
     await rpc.call("reply.send", { id: "missing", threadId: second.id, messageId: "missing", text: "hello", model: "not-installed:1b", numCtx: 4096 });
     // this window hears of both only from reply.list, at its reload
@@ -111,7 +111,7 @@ test("a reply that fails before it starts puts out the sidebar's working dot in 
     const dot = page.locator(".sb-row").filter({ hasText: "Asks a missing model" }).getByLabel("Reply in progress", { exact: true });
     await shot(page, info, "dot-listed", { dot });
     await expect(dot).toBeVisible();
-    await expect.poll(() => ends, { timeout: 20_000 }).toHaveLength(1);
+    await expect.poll(() => ends.size, { timeout: 20_000 }).toBe(1);
     await shot(page, info, "dot-out", { row: page.locator(".sb-row").filter({ hasText: "Asks a missing model" }) });
     await expect(dot).toHaveCount(0);
     expect((await rpc.call("threads.get", { threadId: second.id })).messages, "nothing was saved").toEqual([]);

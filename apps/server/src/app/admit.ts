@@ -45,11 +45,11 @@ export interface Admission {
   notReady(): AppError;
 }
 
-export interface AdmissionDeps extends Pick<AppContext, "deps" | "store" | "runtime" | "catalog" | "log" | "push" | "turns" | "imageReady" | "imageFiles" | "attachedFiles" | "pushReply" | "answered" | "replies" | "fitTable"> {
+export interface AdmissionDeps extends Pick<AppContext, "deps" | "store" | "runtime" | "catalog" | "log" | "push" | "said" | "turns" | "imageReady" | "imageFiles" | "attachedFiles" | "pushReply" | "answered" | "replies" | "fitTable"> {
   readonly runTurn: RunTurn;
 }
 
-export function createAdmission({ deps, store, runtime, catalog, log, push, turns, imageReady, imageFiles, attachedFiles, pushReply, answered, replies, fitTable, runTurn }: AdmissionDeps): Admission {
+export function createAdmission({ deps, store, runtime, catalog, log, push, said, turns, imageReady, imageFiles, attachedFiles, pushReply, answered, replies, fitTable, runTurn }: AdmissionDeps): Admission {
   /**
    * A load of `model` at `numCtx` as the fit plans it (fit/planLoad) beside the admitted turns on
    * other models (a halted one too, until it ends), and the turns it would push out of the GPU.
@@ -284,7 +284,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
         if (load?.cold === true) turn.clock.loading();
         else turn.clock.ready(Date.now());
         // Every client (also one that did not send this) learns of the question here.
-        push("chat.event", { turnId: turn.turnId, threadId, event: { type: "start", model, userMessage } });
+        said({ turnId: turn.turnId, threadId, event: { type: "start", model, userMessage } });
         pushReply(turn);
         // after the start: the list every window shows no longer has this message
         replies.notify();
@@ -330,7 +330,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, turn
       ...(offer === undefined ? {} : { offer }),
     };
     if (failure.code === "internal") log(`turn ${turn.turnId} refused: ${failure.message}`);
-    push("chat.event", { turnId: turn.turnId, threadId: turn.threadId, event: { ...failure, ended: endedOf(turn, failure, Date.now(), stoppedAt) } });
+    said({ turnId: turn.turnId, threadId: turn.threadId, event: { ...failure, ended: endedOf(turn, failure, Date.now(), stoppedAt) } });
     // after the error: the list every window shows has the message back, on hold
     replies.notify();
   }

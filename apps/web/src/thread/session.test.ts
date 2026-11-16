@@ -3,12 +3,13 @@
 // reconciliation, the buffered words Stop keeps, runtime Retry and the
 // failures actions hand back to the UI.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Message, Payload, RuntimeStatus } from "@gates-local/contracts";
+import type { Message, RuntimeStatus } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { type Browser, type Held, installBrowser, tick, until } from "../../test/harness.ts";
 import { numberServer } from "../../test/numbered-server.ts";
 import { queuedOf } from "../../test/queue.ts";
 import { drawTimes } from "./times.ts";
+import type { TurnSaid } from "@gates-local/server/app/turn.ts";
 
 type Session = typeof import("../lib/session/index.ts");
 type Store = typeof import("../lib/store/store.ts");
@@ -70,8 +71,8 @@ async function bootSettingsReady(): Promise<void> {
   await settingsScreen.load();
 }
 
-const chat = (turnId: string, event: Payload<"chat.event">["event"], threadId = "t1") =>
-  b.server.push("chat.event", { turnId, threadId, event });
+const chat = (turnId: string, event: TurnSaid["event"], threadId = "t1") =>
+  b.server.push("turn", { turnId, threadId, event });
 
 it("TT-01: retrying an already-deleted thread removes its stale row without a notice", async () => {
   await boot();
@@ -405,7 +406,7 @@ describe("the catalog follows the model list", () => {
 });
 
 /** A reply's work gone with nothing saved for it. */
-const GONE: Payload<"chat.event">["event"] = { type: "error", code: "internal", message: "the reply ended without finishing", ended: { reason: "failed", at: 5 } };
+const GONE: TurnSaid["event"] = { type: "error", code: "internal", message: "the reply ended without finishing", ended: { reason: "failed", at: 5 } };
 
 describe("reconnect reconciles cached threads (W-04)", () => {
   it("drops the retained partial reply once the server has its saved message", async () => {
@@ -952,10 +953,10 @@ describe("the same thread open in two clients (PH-02)", () => {
     const asked = pending.params.messageId!;
     const userMessage = { ...userMsg(asked, "t1", "hello"), createdAt: 5 };
     // the real server pushes start before reply.send answers (apps/server/src/app.ts runTurn), naming the model sent: the server's pick
-    b.server.broadcast("chat.event", { turnId: "turn-7", threadId: "t1", event: { type: "start", model: "qwen3:14b", userMessage } });
+    b.server.broadcast("turn", { turnId: "turn-7", threadId: "t1", event: { type: "start", model: "qwen3:14b", userMessage } });
     pending.respond({ turnId: "turn-7", userMessage });
     await tick();
-    b.server.broadcast("chat.event", { turnId: "turn-7", threadId: "t1", event: { type: "delta", text: "Half a" } });
+    b.server.broadcast("turn", { turnId: "turn-7", threadId: "t1", event: { type: "delta", text: "Half a" } });
     await tick();
     b.frame();
     for (const st of [store, other.store]) {
@@ -963,7 +964,7 @@ describe("the same thread open in two clients (PH-02)", () => {
       expect(openTurn(st.getState())?.end).toBeUndefined();
       expect(st.getState().messages["t1"]?.filter((m) => m.id === asked)).toHaveLength(1);
     }
-    b.server.broadcast("chat.event", { turnId: "turn-7", threadId: "t1", event: { type: "done", message: asstMsg("m6", "t1", "Half a reply"), stopReason: "stop" } });
+    b.server.broadcast("turn", { turnId: "turn-7", threadId: "t1", event: { type: "done", message: asstMsg("m6", "t1", "Half a reply"), stopReason: "stop" } });
     await tick();
     for (const st of [store, other.store]) {
       expect(openTurn(st.getState())).toBeNull();
@@ -996,8 +997,8 @@ describe("the same thread open in two clients (PH-02)", () => {
     await boot();
     session.openThread("t1");
     await until(() => store.getState().messages["t1"] !== undefined);
-    b.server.push("chat.event", { turnId: "turn-8", threadId: "t2", event: { type: "start", model: "gemma3:4b", userMessage: userMsg("x1", "t2") } });
-    b.server.push("chat.event", { turnId: "turn-8", threadId: "t2", event: { type: "delta", text: "elsewhere" } });
+    b.server.push("turn", { turnId: "turn-8", threadId: "t2", event: { type: "start", model: "gemma3:4b", userMessage: userMsg("x1", "t2") } });
+    b.server.push("turn", { turnId: "turn-8", threadId: "t2", event: { type: "delta", text: "elsewhere" } });
     await tick();
     b.frame();
     expect(openTurn(store.getState())).toBeNull();

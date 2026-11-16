@@ -85,8 +85,9 @@ export function numberServer(server: FakeServer, options: { serves: readonly Syn
   return {
     push(channel, payload) {
       const stamped = stamp(channel);
-      if (stamped === undefined) server.push(channel, payload);
-      else server.push(channel, payload, stamped);
+      // why: a contract channel is a channel the fake server takes
+      if (stamped === undefined) server.push(channel, payload as never);
+      else server.push(channel, payload as never, stamped);
     },
     stamp,
     ordered: () => ordered,

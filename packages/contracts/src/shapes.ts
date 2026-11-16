@@ -161,44 +161,6 @@ export const ReplyTimes = S.Struct({
 export type ReplyTimes = typeof ReplyTimes.Type;
 
 /**
- * What a running reply is doing: waiting for the GPU or the load gate, loading its model,
- * thinking (from the model being ready, also while it reads a call's result), running a call,
- * writing its answer, stopping (the server took a Stop and is saving the words so far), or ended.
- */
-export const ReplyStage = S.Literals(["waiting", "loading", "thinking", "tool", "writing", "stopping", "ended"]);
-export type ReplyStage = typeof ReplyStage.Type;
-
-/**
- * A running reply as the server keeps it: one record per turn, pushed to every
- * window at each change, and the only thing a window draws the live line from. Its times are
- * the server's; `workMs` is as of the push, and grows on the window's own clock only while the
- * stage is thinking or tool. The saved row's ReplyTimes are this record at the end.
- */
-export const ReplyRecord = S.Struct({
-  stage: ReplyStage,
-  startedAt: Millis,
-  /** The model is ready for this reply: at the start of a warm turn, at the first token or call of a cold one. */
-  readyAt: S.optional(Millis),
-  firstTokenAt: S.optional(Millis),
-  /** Thinking plus tool time so far, as of the push. */
-  workMs: Count,
-  /** Tool time so far, as of the push. */
-  toolMs: Count,
-  /** 1, then 2 while the server runs a failed reply again (it does so once). */
-  attempt: PositiveInt,
-  /** The closed thinking spans and where each call came, for the fold's rounds; as on ReplyTimes. */
-  spans: S.Array(S.Struct({ from: Count, ms: Count })),
-  callsAt: S.Record(S.String, Count),
-  /**
-   * When the server took a Stop for this reply. A stopped reply's seconds are this less startedAt,
-   * in every window: the saved row ends at the same moment.
-   */
-  stoppedAt: S.optional(Millis),
-  ended: S.optional(TurnEnded),
-});
-export type ReplyRecord = typeof ReplyRecord.Type;
-
-/**
  * A non-image file attached to a message: the server's own copy in its data folder. The model
  * never gets its contents in the prompt, only a line naming it; with tools on it reads the copy
  * through the read tool, by its label, in this thread's turns only.
@@ -620,45 +582,6 @@ export const BlockingTurn = S.Struct({
 });
 export type BlockingTurn = typeof BlockingTurn.Type;
 
-export const ChatEvent = S.Union([
-  // The turn began: its model and saved user message, so a client that did not send it
-  // (the same thread open elsewhere) can stream the reply too.
-  // `image`: a direct Image turn; `model` is then the image preset id and no chat model runs.
-  // `replayed`: sent again to a client that connected mid-reply, which did not see the turn begin.
-  S.Struct({ type: S.Literal("start"), model: S.String, userMessage: Message, image: S.optional(S.Literal(true)), replayed: S.optional(S.Literal(true)) }),
-  S.Struct({ type: S.Literal("delta"), text: S.String }),
-  S.Struct({ type: S.Literal("thinking"), text: S.String }),
-  // stopReason is Ollama's done_reason: "stop", or "length" when num_ctx or num_predict cut the reply.
-  // `ended`: absent only from a server before 2026-11-13.
-  S.Struct({ type: S.Literal("done"), message: Message, stopReason: S.String, ended: S.optional(TurnEnded) }),
-  S.Struct({
-    type: S.Literal("error"),
-    code: S.String,
-    message: S.String,
-    ended: S.optional(TurnEnded),
-    /**
-     * code "runtime-changed" or "preempted": the reply streamed so far (exactly the delta and
-     * thinking text sent), saved to the thread as a stopped reply. Absent when nothing was sent.
-     */
-    partial: S.optional(Message),
-    /** No reply was saved: the question, which now keeps how its turn ended (Message.times). */
-    question: S.optional(Message),
-    /** code "preempted": the model whose load needed the GPU this turn's model held. */
-    neededBy: S.optional(S.String),
-    /** Refused before its start, code "would-stop" (askFirst, or consent for other replies): the running turns in the way. */
-    blocking: S.optional(S.Array(BlockingTurn)),
-    /** code "wont-fit": the fit that refused, with the GPU and system memory of the reading it was decided from. */
-    fit: S.optional(FitReport),
-    /** code "wont-fit": what does run, from the same reading. Absent when that could not be worked out. */
-    offer: S.optional(FitOffer),
-  }),
-  // A tool call started, finished or failed; the same callId updates one step row.
-  S.Struct({ type: S.Literal("tool"), step: ToolStep }),
-  // The turn's reply record changed: its stage, its times, or a second attempt.
-  S.Struct({ type: S.Literal("reply"), reply: ReplyRecord }),
-]);
-export type ChatEvent = typeof ChatEvent.Type;
-
 export const NumCtx = PositiveInt;
 
 // ---------------------------------------------------------------- one record per message
@@ -1008,7 +931,7 @@ export const ModelLoad = S.Struct({
   numCtx: NumCtx,
   state: S.Literals(["loading", "ready", "error", "unloaded"]),
   message: S.optional(S.String),
-  /** An "error" refused for memory: what does run, from the same reading (as on chat.event's wont-fit). */
+  /** An "error" refused for memory: what does run, from the same reading (as on a held send's wont-fit). */
   offer: S.optional(FitOffer),
 });
 export type ModelLoad = typeof ModelLoad.Type;

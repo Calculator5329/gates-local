@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { Message, Payload } from "@gates-local/contracts";
+import type { Message } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { type Browser, installBrowser, tick, until } from "../../../test/harness.ts";
+import type { TurnSaid } from "@gates-local/server/app/turn.ts";
 
 let browser: Browser;
 let session: typeof import("./index.ts");
@@ -9,7 +10,7 @@ let store: typeof import("../store/store.ts");
 let disconnect: (() => void) | undefined;
 const question: Message = { id: "question", threadId: "t1", role: "user", content: "Explain this long-running question", createdAt: 1 };
 const history = (messages: Message[]) => ({ thread: methodSamples["threads.create"].result, messages });
-const chat = (event: Payload<"chat.event">["event"]) => browser.server.push("chat.event", { threadId: "t1", turnId: "turn-live", event });
+const chat = (event: TurnSaid["event"]) => browser.server.push("turn", { threadId: "t1", turnId: "turn-live", event });
 
 beforeEach(async () => {
   browser = installBrowser();

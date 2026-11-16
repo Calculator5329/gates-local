@@ -7,13 +7,25 @@
 // What the reply is doing and its seconds are the server's reply record:
 // this client keeps no clock of its own and guesses no stage.
 // A press of Stop changes nothing here: the record says when the server took it.
-import type { Payload, ToolStep, TurnEnded } from "@gates-local/contracts";
+import type { Message, ToolStep, TurnEnded } from "@gates-local/contracts";
 import type { LiveTurn, State, TurnClock } from "../lib/store/store.ts";
 
-/** Every event a turn takes is the server's: this window has none of its own. */
-export type ChatEvent = Payload<"chat.event">["event"];
-/** What changes a turn the window shows: words, a tool step, its record, its end. */
-export type TurnEvent = Exclude<ChatEvent, { type: "start" | "reply" }> | { readonly type: "reply"; readonly reply: TurnClock };
+/** A reply that ended without finishing, from its record: why, how it ended, and the row it saved. */
+export interface TurnFailure {
+  readonly type: "error";
+  readonly code: string;
+  readonly message: string;
+  readonly ended?: TurnEnded;
+  readonly partial?: Message;
+  readonly question?: Message;
+  readonly neededBy?: string;
+}
+/** What changes a turn the window shows, each from the server's reply.changed and reply.words: words, a tool step, its record, its end. */
+export type TurnEvent =
+  | { readonly type: "delta" | "thinking"; readonly text: string }
+  | { readonly type: "tool"; readonly step: ToolStep }
+  | { readonly type: "reply"; readonly reply: TurnClock }
+  | TurnFailure;
 
 /** A stopped reply's seconds: both ends are the server's times, so every window and the saved row agree. */
 const stoppedSecs = (reply: TurnClock | undefined, at: number | undefined): number =>
@@ -38,10 +50,8 @@ export function workMsAt(turn: Pick<LiveTurn, "reply" | "replyAt" | "end">, now:
   return r.workMs + (growing ? Math.max(0, now - (turn.replyAt ?? now)) : 0);
 }
 
-type TurnEnd = Extract<ChatEvent, { type: "done" | "error" }>;
-
-/** How the server says the turn ended; an end without the word, from an older server, counts as a failure, which is said. */
-export const endReason = (event: TurnEnd): TurnEnded["reason"] => event.ended?.reason ?? (event.type === "done" ? "done" : "failed");
+/** How the server says the turn ended; an end without the word counts as a failure, which is said. */
+export const endReason = (event: TurnFailure): TurnEnded["reason"] => event.ended?.reason ?? "failed";
 
 function upsertStep(steps: readonly ToolStep[], step: ToolStep): ToolStep[] {
   const i = steps.findIndex((x) => x.callId === step.callId);
@@ -70,8 +80,6 @@ export function reduceTurn(turn: LiveTurn, event: TurnEvent, now: number): LiveT
       return turn.end !== undefined || event.text === "" ? turn : { ...turn, text: turn.text + event.text };
     case "tool":
       return { ...turn, tools: upsertStep(turn.tools, event.step) };
-    case "done":
-      return null;
     case "error": {
       if (event.partial !== undefined) return null;
       // the record ends with the turn: its work is what the server stamped on the question

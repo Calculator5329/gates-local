@@ -4,7 +4,7 @@
 //
 // A chat turn: one active turn per thread, a ready runtime, a fit verdict
 // other than refuse; then the user message persists and the reply streams on
-// chat.event. A finished reply is saved complete; any other end keeps the words
+// reply.words. A finished reply is saved complete; any other end keeps the words
 // sent so far, marked interrupted (app/run-turn.ts finish).
 //
 // This file builds the state the app's jobs share and wires them together; each job is a
@@ -31,7 +31,7 @@ import { createHandlers } from "./app/handlers.ts";
 import type { Push } from "./app/push.ts";
 import { createQueuePump } from "./app/queue-pump.ts";
 import { createTurnRunner } from "./app/run-turn.ts";
-import { HALTED, type AppContext, type Taken, type Turn } from "./app/turn.ts";
+import { HALTED, type AppContext, type Taken, type Turn, type TurnSaid } from "./app/turn.ts";
 import type { App, AppDeps } from "./app/types.ts";
 
 export { AppError, RUNTIME_CHANGED_TURN_MESSAGE, type AppErrorCode } from "./app/errors.ts";
@@ -63,6 +63,13 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
       deps.push(channel, payload, changes);
     } catch (e) {
       log(`push ${channel} failed: ${(e as Error).message}`);
+    }
+  };
+  const said = (told: TurnSaid) => {
+    try {
+      deps.turnSaid?.(told);
+    } catch (e) {
+      log(`turn ${told.turnId}: its event was not taken: ${(e as Error).message}`);
     }
   };
 
@@ -98,9 +105,9 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
   });
   const { pump } = queue;
 
-  /** The turn's times changed: its record as it is now, to every window (and, for the older pages, the older record). */
+  /** The turn's times changed: its record as it is now, to every window. */
   const pushReply = (turn: Turn) => {
-    push("chat.event", { turnId: turn.turnId, threadId: turn.threadId, event: { type: "reply", reply: turn.clock.record(Date.now()) } });
+    said({ turnId: turn.turnId, threadId: turn.threadId, event: { type: "reply", reply: turn.clock.record(Date.now()) } });
     replies.clocked(turn.turnId);
   };
 
@@ -234,7 +241,7 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
   };
 
   const context: AppContext = {
-    deps, store, runtime, catalog, log, push, turns, byThread, closing: () => closing, deleting,
+    deps, store, runtime, catalog, log, push, said, turns, byThread, closing: () => closing, deleting,
     imageFiles, imageReady, attachedFiles, draftEveryMs, replies, fitTable, pushReply, answered, pushSpeeds, reserve, pump,
   };
   const threadImages = createThreadImages(context);

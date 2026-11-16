@@ -350,26 +350,8 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   },
 };
 
-/** One sample per channel; chat.event gets one per ChatEvent variant. */
+/** One sample per channel. */
 export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
-  "chat.event": [
-    { turnId: "turn-1", threadId: "t1", event: { type: "start", model: "qwen3:14b", userMessage } },
-    { turnId: "turn-1", threadId: "t1", event: { type: "thinking", text: "greet" } },
-    { turnId: "turn-1", threadId: "t1", event: { type: "delta", text: "hi " } },
-    { turnId: "turn-1", threadId: "t1", event: { type: "done", message: assistantMessage, stopReason: "stop" } },
-    { turnId: "turn-1", threadId: "t1", event: { type: "error", code: "runtime-gone", message: "Ollama stopped" } },
-    {
-      turnId: "turn-1",
-      threadId: "t1",
-      event: { type: "error", code: "preempted", message: "qwen3:14b needed the GPU this reply was using, so it stopped.", partial: assistantMessage, neededBy: "qwen3:14b" },
-    },
-    { turnId: "turn-1", threadId: "t1", event: { type: "tool", step: { ...toolStep, state: "running" } } },
-    {
-      turnId: "turn-1",
-      threadId: "t1",
-      event: { type: "done", message: { ...assistantMessage, tools: [toolStep], images: ["images/j1.png"] }, stopReason: "stop" },
-    },
-  ],
   "reply.changed": [
     { kind: "is", reply: { id: "q-1", threadId: "t1", rev: 3, messageId: "m-q1", text: "and then?", at: 1_700_000_000_000, stage: "starting", attempt: 1, startedAt: 1_700_000_000_500, loading: true } },
     { kind: "is", reply: { id: "q-1", threadId: "t1", rev: 4, questionId: "m1", model: "qwen3:14b", startedAt: 1_700_000_000_500, workMs: 0, toolMs: 0, try: 1, spans: [], callsAt: {}, stage: "thinking" }, saved: [userMessage] },

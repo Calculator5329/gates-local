@@ -353,7 +353,7 @@ interface RigOptions {
   /** The fit readings the app's turns use (default: plenty of free VRAM). */
   readonly fit?: AppDeps["fit"];
   readonly turnDrainMs?: number;
-  /** Runs inside the app's push of each chat event, before the turn takes its next step. */
+  /** Runs inside each of the turn's events, before the turn takes its next step. */
   readonly onEvent?: (event: { type: string }) => void;
 }
 
@@ -389,13 +389,11 @@ async function rig(routes: Record<string, Route>, options: RigOptions = {}) {
     store,
     runtime: s.runtime,
     catalog: s.catalog,
-    push: (channel, payload) => {
-      if (channel === "chat.event") {
-        const { turnId, event } = payload as { turnId: string; event: { type: string } };
-        // the reply records (decision 33) are their own stream; these cases read the turn's events
-        if (event.type !== "reply") events.push({ ...event, turnId });
-        options.onEvent?.(event);
-      }
+    push: () => undefined,
+    turnSaid: ({ turnId, event }) => {
+      // the reply records (decision 33) are their own stream; these cases read the turn's events
+      if (event.type !== "reply") events.push({ ...event, turnId } as (typeof events)[number]);
+      options.onEvent?.(event);
     },
     models: { handlers: s.handlers, loader: s.loader },
     fit: options.fit ?? fit,

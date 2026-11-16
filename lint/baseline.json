@@ -254,7 +254,7 @@
       "packages/contracts/src/index.ts": 1,
       "packages/contracts/src/pages.ts": 4,
       "packages/contracts/src/protocol.ts": 79,
-      "packages/contracts/src/shapes.ts": 214,
+      "packages/contracts/src/shapes.ts": 198,
       "packages/contracts/src/sync.ts": 5,
       "packages/contracts/src/testing.ts": 3
     },

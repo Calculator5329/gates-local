@@ -3,9 +3,10 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Message, Payload } from "@gates-local/contracts";
+import type { Message } from "@gates-local/contracts";
 import type { State } from "../lib/store/store.ts";
 import { type Browser, installBrowser, tick, until } from "../../test/harness.ts";
+import type { TurnSaid } from "@gates-local/server/app/turn.ts";
 
 type Session = typeof import("../lib/session/index.ts");
 type Store = typeof import("../lib/store/store.ts");
@@ -24,7 +25,7 @@ let disconnect: (() => void) | undefined;
 let capture = false;
 let selectors: Selector[];
 
-const chat = (turnId: string, threadId: string, event: Payload<"chat.event">["event"]) => b.server.push("chat.event", { turnId, threadId, event });
+const chat = (turnId: string, threadId: string, event: TurnSaid["event"]) => b.server.push("turn", { turnId, threadId, event });
 /** The open chat's turn (what the old single live slot showed), or null. */
 const openTurn = () => { const s = store.getState(); return s.threadId === null ? null : s.turns[s.threadId] ?? null; };
 

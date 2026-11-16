@@ -8,10 +8,12 @@ import { createInterface } from "node:readline";
 import { expect, test } from "@playwright/test";
 import { createClient, decodePayload, decodeServerMessage, type Client, type Payload } from "@gates-local/contracts";
 import { DATA_ROOT, ROOT, WEB_ORIGIN } from "./env.ts";
-import { assertContextCopied, assertInterruptedCancellation, randomContextWord, requireRealSmokeUrl } from "./real-smoke-checks.ts";
+import { assertContextCopied, randomContextWord, requireRealSmokeUrl } from "./real-smoke-checks.ts";
 import { holds } from "./waits.ts";
 
-type Arrival = { at: number; payload: Payload<"chat.event"> };
+type Arrival = { at: number } & ({ channel: "reply.words"; payload: Payload<"reply.words"> } | { channel: "reply.changed"; payload: Payload<"reply.changed"> });
+/** A reply's record as it arrived at a stage. */
+const records = (arrivals: readonly Arrival[]) => arrivals.flatMap((a) => (a.channel === "reply.changed" && a.payload.kind === "is" ? [a.payload.reply] : []));
 
 async function productionServer(dataDir: string, ollamaUrl: string): Promise<{ child: ChildProcess; client: Client; socketUrl: string }> {
   const token = randomUUID();
@@ -66,11 +68,12 @@ test("real model streams, stops, recalls the thread and survives a server restar
   const arrivals: Arrival[] = [];
   page.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => {
     const decoded = decodeServerMessage(payload.toString());
-    if (decoded.ok && decoded.value.type === "push" && decoded.value.channel === "chat.event") {
-      const checked = decodePayload("chat.event", decoded.value.payload);
-      // decodePayload checks the channel's Schema; its generic return type is unknown.
-      if (checked.ok) arrivals.push({ at: Date.now(), payload: checked.value.payload as Payload<"chat.event"> });
-    }
+    if (!decoded.ok || decoded.value.type !== "push") return;
+    const { channel } = decoded.value;
+    if (channel !== "reply.words" && channel !== "reply.changed") return;
+    const checked = decodePayload(channel, decoded.value.payload);
+    // decodePayload checks the channel's Schema; its generic return type is unknown.
+    if (checked.ok) arrivals.push({ at: Date.now(), channel, payload: checked.value.payload } as Arrival);
   }));
   try {
     const runtime = await server.client.call("runtime.retry", {});
@@ -104,11 +107,12 @@ test("real model streams, stops, recalls the thread and survives a server restar
     const firstStart = Date.now();
     await page.locator("#ta").fill(firstPrompt);
     await page.locator("#ta").press("Enter");
-    await expect.poll(() => arrivals.filter((a) => a.payload.event.type === "delta").length, { timeout: 60_000 }).toBeGreaterThanOrEqual(12);
-    const beforeStop = arrivals.filter((a) => a.payload.event.type === "delta");
+    const words = () => arrivals.filter((a) => a.channel === "reply.words" && a.payload.part.type === "text");
+    await expect.poll(() => words().length, { timeout: 60_000 }).toBeGreaterThanOrEqual(12);
+    const beforeStop = words();
     expect(beforeStop.at(-1)!.at - beforeStop[0]!.at, "tokens must arrive progressively over time, not as one buffered reply").toBeGreaterThan(20);
-    expect(arrivals.some((a) => a.payload.event.type === "done"), "Stop must interrupt an unfinished reply").toBe(false);
-    const threadId = beforeStop[0]!.payload.threadId;
+    expect(records(arrivals).some((r) => r.stage === "done"), "Stop must interrupt an unfinished reply").toBe(false);
+    const threadId = records(arrivals)[0]!.threadId;
     evidence["stream"] = { firstDeltaMs: beforeStop[0]!.at - firstStart, deltas: beforeStop.length, spanMs: beforeStop.at(-1)!.at - beforeStop[0]!.at };
     console.log(`[real-smoke] progressive stream ${JSON.stringify(evidence["stream"])}`);
     const stopAt = Date.now();
@@ -116,17 +120,16 @@ test("real model streams, stops, recalls the thread and survives a server restar
     const firstReply = page.locator(".turn.a").first();
     await expect(page.locator(".stop-note")).toBeVisible();
     await expect(page.locator(".think.run")).toHaveCount(0);
-    await expect.poll(() => arrivals.some((a) => a.payload.event.type === "error" && a.payload.event.code === "cancelled")).toBe(true);
-    const cancellation = arrivals.map((a) => a.payload.event).find((event) => event.type === "error" && event.code === "cancelled");
-    if (cancellation?.type !== "error") throw new Error("Stop produced no cancelled event");
-    assertInterruptedCancellation(cancellation.message);
+    // a reply that finished as the Stop landed ends done, never stopped
+    await expect.poll(() => records(arrivals).some((r) => r.stage === "stopped" && r.by.who === "person")).toBe(true);
+    expect(records(arrivals).some((r) => r.stage === "done"), "Stop must interrupt generation, not wait for its natural end").toBe(false);
     const partial = await firstReply.locator(".md").innerText();
     expect(partial.trim().length).toBeGreaterThan(0);
     const cancelMs = Date.now() - stopAt;
-    const stoppedCount = arrivals.length;
+    const stoppedCount = words().length;
     // A bounded observation window is intentional: cancellation must prevent later deltas.
-    await holds(page, 500, async () => [arrivals.length, await firstReply.locator(".md").innerText()], [stoppedCount, partial], { message: "messages that arrived and the reply's words after Stop" });
-    evidence["stop"] = { ms: Date.now() - stopAt, cancelMs, quietWindowMs: 500, message: cancellation.message, partial };
+    await holds(page, 500, async () => [words().length, await firstReply.locator(".md").innerText()], [stoppedCount, partial], { message: "words that arrived and the reply's words after Stop" });
+    evidence["stop"] = { ms: Date.now() - stopAt, cancelMs, quietWindowMs: 500, partial };
     console.log(`[real-smoke] Stop ${Date.now() - stopAt} ms; partial retained ${JSON.stringify(partial)}`);
 
     // The made-up word is absent from this question and the system prompt.
@@ -138,7 +141,7 @@ test("real model streams, stops, recalls the thread and survives a server restar
     const answer = await secondReply.locator(".md").innerText();
     assertContextCopied(answer, word);
     expect(await firstReply.locator(".md").innerText(), "partial survives the following turn").toBe(partial);
-    const completed = arrivals.findLast((a) => a.payload.event.type === "done");
+    const completed = records(arrivals).findLast((r) => r.stage === "done");
     expect(completed).toBeDefined();
     const saved = await server.client.call("threads.get", { threadId });
     expect(saved.messages.some((m) => m.role === "assistant" && m.content.toLowerCase().includes(word))).toBe(true);

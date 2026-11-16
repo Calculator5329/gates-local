@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Message, ReplyRecord } from "@gates-local/contracts";
-import type { LiveTurn } from "../lib/store/store.ts";
+import type { Message } from "@gates-local/contracts";
+import type { LiveTurn, TurnClock } from "../lib/store/store.ts";
 import { reduceTurn, stopping, unfinished, withTurn, workMsAt } from "./turn.ts";
 
 const T0 = 1_000_000;
@@ -8,7 +8,7 @@ const turn = (patch: Partial<LiveTurn> = {}): LiveTurn => ({ threadId: "A", turn
 const question: Message = { id: "u1", threadId: "A", role: "user", content: "hi", createdAt: 1 };
 const answer: Message = { id: "a1", threadId: "A", role: "assistant", content: "done", createdAt: 2 };
 const at = (secs: number) => T0 + secs * 1000;
-const record = (patch: Partial<ReplyRecord> = {}): ReplyRecord => ({ stage: "waiting", startedAt: T0, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {}, ...patch });
+const record = (patch: Partial<TurnClock> = {}): TurnClock => ({ stage: "waiting", startedAt: T0, workMs: 0, toolMs: 0, attempt: 1, spans: [], callsAt: {}, ...patch });
 
 describe("reduceTurn", () => {
   // decision 33: the stage and the seconds are the server's record; this client only grows the work between pushes
@@ -56,8 +56,7 @@ describe("reduceTurn", () => {
     expect(t?.tools).toEqual([done]);
   });
 
-  it("ends with done, or an error that saved a partial: the saved row takes its place", () => {
-    expect(reduceTurn(turn(), { type: "done", message: answer, stopReason: "stop" }, T0)).toBeNull();
+  it("ends with an error that saved a partial: the saved row takes its place", () => {
     expect(reduceTurn(turn(), { type: "error", code: "internal", message: "x", partial: { ...answer, interrupted: true } }, T0)).toBeNull();
   });
 

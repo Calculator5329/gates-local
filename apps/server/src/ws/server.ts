@@ -377,7 +377,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
       if (missing !== undefined) throw new Error(`${channel} did not capture ${missing} metadata`);
       let versioned: string | undefined;
       for (const ws of clients) {
-        if ((channel === "chat.event" || channel === "reply.words") && !chatClients.has(ws)) continue;
+        if (channel === "reply.words" && !chatClients.has(ws)) continue;
         if (row !== undefined && changes !== undefined && ordered.get(ws)?.includes(row.domain)) {
           if (versioned === undefined) {
             const encoded = encodePush(channel, payload, { epoch, changes });

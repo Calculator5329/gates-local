@@ -1,6 +1,6 @@
-// Plain shapes for the streamed turn. Message and ChatEvent mirror the
-// shared shapes packages/contracts carries as Schemas; the done event adds
-// `stopReason` so a length stop is reported, not hidden.
+// Plain shapes for the streamed turn. Message mirrors the shared shape
+// packages/contracts carries as a Schema; the done event adds `stopReason` so a
+// length stop is reported, not hidden.
 
 export type Role = "user" | "assistant" | "system";
 

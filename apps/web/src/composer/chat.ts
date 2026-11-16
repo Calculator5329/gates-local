@@ -8,7 +8,7 @@ import { drawChoice, imageMode } from "../image/image-choice.ts";
 import { releaseFiles } from "./file-holds.ts";
 import { type Draft, type DraftKey, beginQueuedDraft, cancelQueuedDraft, clearDraft, currentDraftKey, getDraft, moveDraft, renewDraft, replaceDraft } from "../lib/store/drafts.ts";
 import type { ServerEvent } from "../lib/session/server-state.ts";
-import { type ChatEvent, type TurnEvent, reduceTurn, stopping, unfinished, withTurn } from "../thread/turn.ts";
+import { type TurnEvent, type TurnFailure, reduceTurn, stopping, unfinished, withTurn } from "../thread/turn.ts";
 import { stopReason as stopWords } from "../thread/times.ts";
 import { type WindowRules, createRecords } from "./records.ts";
 
@@ -397,7 +397,7 @@ function without(s: State, id: string): State["replies"] {
   return replies;
 }
 
-function endOf(r: Extract<Reply, { readonly stage: "stopped" | "failed" }>, at: number): Extract<ChatEvent, { type: "error" }> {
+function endOf(r: Extract<Reply, { readonly stage: "stopped" | "failed" }>, at: number): TurnFailure {
   if (r.stage === "failed") return { type: "error", code: r.code, message: r.message, ended: { reason: "failed", at } };
   switch (r.by.who) {
     case "person": return { type: "error", code: "cancelled", message: "", ended: { reason: "stopped", at } };
@@ -620,7 +620,7 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     const partial = saved.find((m) => m.role === "assistant");
     // a failure that landed after a Stop: the record ends as stopped, the rows it saved are stamped with the failure, and the failure is what is said
     const stamp = r.stage === "stopped" && r.by.who === "person" ? (partial ?? question)?.times : undefined;
-    const event: Extract<ChatEvent, { type: "error" }> = stamp?.ended.reason === "failed" && stamp.why !== undefined
+    const event: TurnFailure = stamp?.ended.reason === "failed" && stamp.why !== undefined
       ? { type: "error", code: stamp.why.code, message: stamp.why.message, ended: stamp.ended }
       : endOf(r, r.at);
     const said = { ...event, message: stopReason(event) ?? event.message, ...(partial === undefined ? {} : { partial }), ...(question === undefined ? {} : { question }) };
@@ -1163,14 +1163,14 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
    * The question of a turn that saved no reply, stamped by the server with how the turn ended, in
    * place of its copy here. Only in place: a Retry may have taken the row out on the server already.
    */
-  function keepQuestion(threadId: string, event: Extract<ChatEvent, { type: "error" }>): void {
+  function keepQuestion(threadId: string, event: TurnFailure): void {
     const { question } = event;
     if (question === undefined) return;
     applyServerEvent((s) => s.messages[threadId]?.some((m) => m.id === question.id) === true ? { messages: withMessage(s, threadId, question) } : {});
   }
 
   /** A turn that ended without being on screen: what it saved goes into its thread, with how it ended on the row. */
-  function keepStopped(threadId: string, event: Extract<ChatEvent, { type: "error" }>): void {
+  function keepStopped(threadId: string, event: TurnFailure): void {
     const { partial } = event;
     if (partial === undefined) return keepQuestion(threadId, event);
     noteMessage(threadId, partial);

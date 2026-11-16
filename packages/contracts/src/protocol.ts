@@ -10,7 +10,6 @@ import {
   BlockingTurn,
   CatalogEntry,
   ModelEstimate,
-  ChatEvent,
   ReplyAnswer,
   ReplyChange,
   ReplyId,
@@ -419,7 +418,6 @@ export const methods = {
 /** Server-to-client channels and their payload Schemas. */
 export const pushes = {
   "update.changed": { payload: UpdateStatus, sync: UPDATE },
-  "chat.event": { payload: S.Struct({ turnId: S.String, threadId: S.String, replyId: S.optional(ReplyId), event: ChatEvent }) },
   "reply.changed": { payload: ReplyChange },
   "reply.words": { payload: StreamedWords },
   "runtime.changed": { payload: RuntimeStatus, sync: RUNTIME },

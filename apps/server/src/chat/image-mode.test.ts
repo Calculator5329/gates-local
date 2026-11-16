@@ -75,10 +75,10 @@ async function rig(options: { imageTool?: ImageChoice; hold?: boolean; firstDone
     runtime: { status: () => ready, baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ready, lookIfDown: async () => ready },
     catalog: chatCatalog(),
     push: (channel, payload) => {
-      // the turn's events; its reply records (decision 33) are not what these cases read
-      if (channel === "chat.event" && (payload as { event: { type: string } }).event.type !== "reply") events.push((payload as { event: { type: string } }).event);
       if (channel === "threads.changed") changed.push((payload as { threadId: string }).threadId);
     },
+    // the turn's events; its reply records (decision 33) are not what these cases read
+    turnSaid: ({ event }) => { if (event.type !== "reply") events.push(event); },
     fit: { runNvidiaSmi: async (args) => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
   });
   const thread = store.createThread();

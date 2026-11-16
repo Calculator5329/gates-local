@@ -17,6 +17,7 @@ import type { UpdateModule } from "../update/module.ts";
 import type { Usage } from "../usage/index.ts";
 import type { Handlers } from "../ws/server.ts";
 import type { Push } from "./push.ts";
+import type { TurnSaid } from "./turn.ts";
 
 /** The methods every build answers. The others join with their modules; until then the socket answers "not-implemented". */
 type CoreMethod =
@@ -47,6 +48,8 @@ export interface AppDeps {
   readonly catalog: ModelCatalog;
   /** Bound late: main creates the ws server after the handlers. */
   readonly push: Push;
+  // why: tests read each turn's events here; no window hears them
+  readonly turnSaid?: (said: TurnSaid) => void;
   /** nvidia-smi, meminfo, clock and margins for the fit check; defaults read the real machine. */
   readonly fit?: Omit<FitDeps, "baseUrl">;
   /** Ollama's think flag for every turn; omitted from the request when undefined. */

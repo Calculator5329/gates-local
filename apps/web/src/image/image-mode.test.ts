@@ -109,7 +109,7 @@ it("the saved choice is what the button names and the send carries, in every thr
   type("first");
   await session.send("first");
   await until(() => sends().length === 1, 2000, "first send");
-  b.server.push("chat.event", { turnId: "turn-A-1", threadId: "A", event: { type: "done", message: { id: "job-1", threadId: "A", role: "assistant", content: "", createdAt: 2 }, stopReason: "stop" } });
+  b.server.push("turn", { turnId: "turn-A-1", threadId: "A", event: { type: "done", message: { id: "job-1", threadId: "A", role: "assistant", content: "", createdAt: 2 }, stopReason: "stop" } });
   await until(() => st().turns.A === undefined, 2000, "first turn over");
   session.newThread();
   expect(choice.chosenImage(st())).toMatchObject({ preset: { id: FLUX.id }, width: 1024, height: 768 });
@@ -185,7 +185,7 @@ it("a message typed with Image on while a reply runs waits, then goes to the ima
   type("question");
   await session.send("question");
   await until(() => sends().length === 1, 2000, "chat send");
-  b.server.push("chat.event", { turnId: "turn-A-1", threadId: "A", event: { type: "start", model: "gemma3:4b", userMessage: userMsg("u-A-1", "A", "question") } });
+  b.server.push("turn", { turnId: "turn-A-1", threadId: "A", event: { type: "start", model: "gemma3:4b", userMessage: userMsg("u-A-1", "A", "question") } });
   store.setState({ image: true });
   type("now a picture");
   await session.send("now a picture");
@@ -193,7 +193,7 @@ it("a message typed with Image on while a reply runs waits, then goes to the ima
   expect(queuedOf(st())).toMatchObject([{ text: "now a picture", draw: { preset: PIXEL.id } }]);
   // Image turned off before it goes: it still goes as it was typed
   store.setState({ image: false });
-  b.server.push("chat.event", { turnId: "turn-A-1", threadId: "A", event: { type: "done", message: { id: "a-A-1", threadId: "A", role: "assistant", content: "answer", createdAt: 2 }, stopReason: "stop" } });
+  b.server.push("turn", { turnId: "turn-A-1", threadId: "A", event: { type: "done", message: { id: "a-A-1", threadId: "A", role: "assistant", content: "answer", createdAt: 2 }, stopReason: "stop" } });
   await until(() => sends().length === 2, 2000, "queued send");
   expect(sends()[1]).toMatchObject({ content: "now a picture", draw: { preset: PIXEL.id, width: 768, height: 512 } });
 });
@@ -201,7 +201,7 @@ it("a message typed with Image on while a reply runs waits, then goes to the ima
 it("another client's Image turn arrives marked as one", async () => {
   session.openThread("A");
   await until(() => st().messages.A !== undefined, 2000, "thread A");
-  b.server.push("chat.event", { turnId: "turn-x", threadId: "A", event: { type: "start", model: PIXEL.id, userMessage: userMsg("u-x", "A", "from the phone"), image: true } });
+  b.server.push("turn", { turnId: "turn-x", threadId: "A", event: { type: "start", model: PIXEL.id, userMessage: userMsg("u-x", "A", "from the phone"), image: true } });
   await until(() => st().turns.A !== undefined, 2000, "the turn");
   expect(st().turns.A).toMatchObject({ reply: { stage: "drawing" }, model: PIXEL.id });
 });

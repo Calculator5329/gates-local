@@ -82,7 +82,7 @@ const imageApp = async (second: (signal: AbortSignal | undefined) => Response | 
   const app = createApp({ store, sources, toolsEnabled: () => true, image: fake.image, imageTool: () => (imageTool ? TOOL_CHOICE : undefined), lease,
     runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
     catalog: chatCatalog(),
-    push: (channel, payload) => pushed.push({ channel, payload }), fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
+    push: (channel, payload) => pushed.push({ channel, payload }), turnSaid: (said) => pushed.push({ channel: "turn", payload: said }), fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
   });
   return { app, store, lease, fake, chatBodies, pushed, atSecond: () => atSecond, close: async () => { await app.shutdown(); store.close(); vi.unstubAllGlobals(); } };
 };
@@ -274,6 +274,7 @@ describe("tool chat transport", () => {
       runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
       catalog: chatCatalog(),
       push: (channel, payload) => pushed.push({ channel, payload }),
+      turnSaid: (said) => pushed.push({ channel: "turn", payload: said }),
       fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
     });
     try {
@@ -430,7 +431,8 @@ describe("tool chat transport", () => {
     const app = createApp({ store, sources, think: true, toolsEnabled: () => true, shellStatus: async () => ({ state: "ready" }),
       runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
       catalog: chatCatalog(),
-      push: (method, payload) => { const event = (payload as { event?: { type?: string; text?: string } }).event; if (method === "chat.event" && event?.type === "delta") deltas.push(event.text ?? ""); },
+      push: () => undefined,
+      turnSaid: ({ event }) => { if (event.type === "delta") deltas.push(event.text); },
       fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
     });
     try {

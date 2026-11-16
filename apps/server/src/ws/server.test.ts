@@ -104,28 +104,23 @@ function rawFrames(ws: WebSocket) {
 
 describe("round trip over a real socket", () => {
   it("TE-02: a quiet client gets no backlog of streamed words; from its first request it gets the new ones", async () => {
-    const payload = { threadId: "thread", turnId: "turn", event: { type: "delta" as const, text: "current" } };
     const words = { id: "turn", part: { type: "text" as const, from: 0, text: "old" } };
     const server = await start({ "threads.list": () => [] });
     const quiet = await client(server);
-    const chat: unknown[] = [], said: unknown[] = [], changed: unknown[] = [];
-    quiet.client.subscribe("chat.event", (event) => chat.push(event));
+    const said: unknown[] = [], changed: unknown[] = [];
     quiet.client.subscribe("reply.words", (event) => said.push(event));
     quiet.client.subscribe("threads.changed", (event) => changed.push(event));
     for (let i = 0; i < 10_000; i++) {
-      server.push("chat.event", { ...payload, event: { type: "delta", text: "old" } });
       server.push("reply.words", words);
     }
     server.push("threads.changed", { threadId: "thread", thread: null });
     // Ping is not a request: the quiet client remains before the boundary.
     await new Promise<void>((resolve) => { quiet.ws.once("pong", () => resolve()); quiet.ws.ping(); });
-    expect.soft([chat.length, said.length]).toEqual([0, 0]);
+    expect.soft(said.length).toBe(0);
     expect(changed).toEqual([{ threadId: "thread", thread: null }]);
     await quiet.client.call("threads.list", {});
-    server.push("chat.event", payload);
     server.push("reply.words", { id: "turn", part: { type: "text", from: 3, text: "new" } });
     await quiet.client.call("threads.list", {});
-    expect(chat).toEqual([payload]);
     expect(said).toEqual([{ id: "turn", part: { type: "text", from: 3, text: "new" } }]);
   });
 

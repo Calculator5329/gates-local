@@ -3,9 +3,10 @@
 // Stop is said, on screen or off it, and the rows it saved say it once the
 // turn leaves the screen, in place of the copies here.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { Message, Payload, ReplyTimes } from "@gates-local/contracts";
+import type { Message, ReplyTimes } from "@gates-local/contracts";
 import { drawTimes } from "./times.ts";
 import { type Browser, installBrowser, tick, until } from "../../test/harness.ts";
+import type { TurnSaid } from "@gates-local/server/app/turn.ts";
 
 let b: Browser;
 let session: typeof import("../lib/session/index.ts");
@@ -15,7 +16,7 @@ let created: string[] = [];
 
 const st = () => store.getState();
 const userMsg = (id: string, threadId: string, content: string): Message => ({ id, threadId, role: "user", content, createdAt: 1 });
-const chat = (turnId: string, threadId: string, event: Payload<"chat.event">["event"]) => b.server.push("chat.event", { turnId, threadId, event });
+const chat = (turnId: string, threadId: string, event: TurnSaid["event"]) => b.server.push("turn", { turnId, threadId, event });
 /** The times the server stamps on a row as its turn ends. */
 const stamped = (reason: ReplyTimes["ended"]["reason"], why?: ReplyTimes["why"]): ReplyTimes => ({ startedAt: 1_000, spans: [], callsAt: {}, ended: { reason, at: 4_000 }, ...(why === undefined ? {} : { why }) });
 const notFoundWhy = { code: "model-not-found", message: "HTTP 404: model 'x' not found" };
