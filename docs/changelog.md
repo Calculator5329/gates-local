@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-11-16: the server's app folder holds to the six comment kinds
+
+- apps/server/src/app passes the comment rule: all 202 offenders went,
+  and the folder's comment lines fell from 331 to 24. What stays is
+  four one-line `external:` facts about Ollama and eleven `why:` lines.
+- Nine comments were stale. Among them: a note that a refused send's
+  words go back in the composer, where they stay on hold as a queue
+  row; a note that only a Stop before the reply started ends the turn
+  that way, where a Stop mid-reply does too; and a note that halt ends
+  a turn only for a runtime switch, where a preempting load and the
+  app closing do as well.
+- 73 rules gained 92 unit tests, each watched fail with its rule
+  broken. Three rules the old cites did not hold (a delete waiting for
+  the start-up image sweep, a dropped step's stream cleanup, a model's
+  loading stage) now have their own tests.
+- Follow-ups found on the way: a send waits for the image sweep by two
+  separate paths, where one would do; admit tells the replies list
+  again after a refusal, which the queue pump already does; `attempt`
+  would read better as `start`; and main.ts's wiring of gpu.changed
+  and models.load is held only by spawning the whole server.
+
 ## 2026-11-16: the web app's thread folder holds to the six comment kinds
 
 - apps/web/src/thread passes the comment rule: all 252 offenders went,

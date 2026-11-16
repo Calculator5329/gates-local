@@ -1,6 +1,3 @@
-// The request handlers: every contracts method the app answers, on the thread store, the
-// runtime, the catalog, the fit table and the queue. A picked message's start is taken here and handed
-// to admit.ts (a chat model) or drawing.ts (Image mode).
 import type { Params, ReplyAnswer, SoFar } from "@gates-local/contracts";
 import { checkAttachments } from "../chat/attachments.ts";
 import { saveFile } from "../chat/files.ts";
@@ -21,10 +18,8 @@ import type { QueuePump } from "./queue-pump.ts";
 import type { AppContext, StartAnswer, StartParams, Taken } from "./turn.ts";
 import type { AppHandlers } from "./types.ts";
 
-/** What a Retry of `questionId` replaces: that question and the unfinished rows after it. None once something else was asked or a finished reply followed: then it is a new question. */
 function retriedRows(messages: readonly { readonly id: string; readonly role: string; readonly interrupted?: true; readonly imageJob?: { readonly state: string } }[], questionId: string): string[] {
   const rows = messages.slice(messages.findLastIndex((m) => m.role === "user"));
-  // A picture that failed or was cancelled is unfinished the way a stopped reply is.
   const unfinished = (m: (typeof rows)[number]) => m.interrupted === true || m.imageJob?.state === "error" || m.imageJob?.state === "cancelled";
   return rows[0]?.id === questionId && rows.slice(1).every(unfinished) ? rows.map((m) => m.id) : [];
 }
@@ -48,7 +43,6 @@ export function createHandlers({
 }: HandlersDeps) {
   const { queueImage, cancelThreadImages } = threadImages;
   const { admitTurn, admitting, blockingTurns, planBeside, notReady } = admission;
-  /** A call on a waiting message may have freed the next one to go. */
   const moved = (answer: ReplyAnswer): ReplyAnswer => {
     pump();
     return answer;
@@ -62,18 +56,12 @@ export function createHandlers({
     await turn.ended;
   };
 
-  /**
-   * The start of a waiting message the picker took (`taken`: its record is starting already, for
-   * that turn). Everything checked here is checked
-   * before any work is reserved; the work itself runs after the answer (admit.ts, drawing.ts).
-   */
   const begin = (params: StartParams, taken: Taken): Promise<StartAnswer> => withSendTimes(async () => {
     const { threadId, content, model, numCtx, messageId, retryOf, images = [], files: attaching = [], tools, think, draw, drawCount, stopOthers, stopTurns, askFirst } = params;
     if (closing()) throw new AppError("shutting-down", "the server is stopping; no new turns");
     deps.admit?.();
-    // The thread is going: its delete has already listed what it takes back.
+    // why: the delete has already listed what it takes back, so new work would outlive it
     if (deleting.has(threadId)) throw threadGoing(threadId);
-    // Keep unfinished text for the person, but never present it to a model as a completed answer.
     const loaded = store.getThread(threadId);
     const stored = loaded.messages;
     const replaced = retryOf === undefined ? [] : retriedRows(stored, retryOf);
@@ -97,10 +85,8 @@ export function createHandlers({
     const { turn, end } = reserve(threadId, model, taken);
     let load: TurnReservation | undefined;
     try {
-      // Before the answer, so models.remove sees this turn at once (throws while a removal runs).
       load = deps.models?.loader?.reserve(model);
     } catch (e) {
-      // its record hears why before the work leaves
       replies.refused(turn.turnId, turn.attempt, refusalOf(e));
       end();
       throw e;
@@ -112,13 +98,11 @@ export function createHandlers({
   const handlers = {
     ...deps.models?.handlers,
     ...(deps.image ? createImageHandlers({ image: deps.image, ...deps.imageSetup ? { setup: deps.imageSetup } : {} }) : {}),
-    // Kept per thread like the tool's jobs, so threads.delete takes them back too.
     ...(deps.image ? { "image.generate": (params: Params<"image.generate">) => queueImage(deps.image!, params) } : {}),
     ...(deps.sources ? createSourcesHandlers({ sources: deps.sources }) : {}),
     ...deps.libraryImports?.handlers,
     ...(deps.update ? createUpdateHandlers(deps.update) : {}),
     ...measure?.handlers,
-    // Settings › Tools says Ready for Run commands only after this probe ran a command in the sandbox.
     "tools.shell": async () => deps.shellStatus ? await deps.shellStatus() : { state: "off" as const, word: "Not checked" },
     "threads.list": (_params, ctx) => listRead(store, ctx),
     "threads.create": ({ title }, ctx) => {
@@ -133,7 +117,6 @@ export function createHandlers({
         const saved = store.getThread(threadId);
         return draft === undefined ? saved : { ...saved, messages: saved.messages.filter((m) => m.id !== draft) };
       }
-      // a page starts at a question, so a reply never shows without the question it answers
       const page = store.getThreadPage(threadId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }), ...(draft === undefined ? {} : { skip: draft }) });
       if (page === undefined) throw new AppError("message-not-found", `message ${before ?? ""} is not in thread ${threadId}`);
       return page;
@@ -155,12 +138,10 @@ export function createHandlers({
       return thread;
     },
     "threads.delete": async ({ threadId }, ctx) => {
-      // Before the first await: no new turn or image job for this thread from here on.
       const marked = !deleting.has(threadId);
       deleting.add(threadId);
       try {
         await cancelThreadTurn(threadId, true);
-        // After the turn: its cancel takes back what it queued, and a finished turn's jobs are still here.
         await cancelThreadImages(threadId);
         await imageReady;
         const messages = store.getThread(threadId).messages;
@@ -181,7 +162,6 @@ export function createHandlers({
       const marked = !deleting.has(threadId);
       deleting.add(threadId);
       try {
-        // Deleting any other message stops the reply and keeps its words.
         const turn = byThread.get(threadId);
         await cancelThreadTurn(threadId, turn !== undefined && replies.question(turn.turnId)?.id === messageId);
         await imageReady;
@@ -208,7 +188,6 @@ export function createHandlers({
       return {};
     },
 
-    // the status is read after the list, so a reply never pairs a list with a runtime from before it
     "models.list": async () => {
       const models = catalog.current() ?? (await catalog.refresh()).models;
       return { runtime: runtime.status(), models };
@@ -223,7 +202,6 @@ export function createHandlers({
     "runtime.retry": () => runtime.ensure(),
     "runtime.discover": () => runtime.lookIfDown(),
 
-    // a send's plan for every model and context without stopping any turn, from one reading.
     "fit.table": () => fitTable.get(),
 
     "turns.blocking": async ({ model, numCtx }) => {
