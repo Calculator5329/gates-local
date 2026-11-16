@@ -155,6 +155,15 @@ describe("the kept list", () => {
     expect(names(again.held.inUse())).toContain(NEW_MODEL);
   });
 
+  it("a newer list that cannot be kept is still used until the next start, and the log says why", async () => {
+    const l = lists();
+    fs.writeFileSync(path.join(l.dir, MODELS_DIR), "a file where the folder goes");
+    serve(l.feed, signed(chatAt(2)));
+    expect(await refresh(l)).toEqual({ kind: "used", revision: 2 });
+    expect(names(l.held.inUse())).toContain(NEW_MODEL);
+    expect(l.log).toHaveBeenCalledWith(expect.stringMatching(/^chat model list not kept: /));
+  });
+
   it("a tampered kept file is refused on start, and the built-in list stays", async () => {
     const first = lists();
     serve(first.feed, signed(chatAt(2)));

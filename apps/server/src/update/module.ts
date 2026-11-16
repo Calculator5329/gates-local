@@ -1,10 +1,3 @@
-// Settings › General › Updates on the server: update.status, update.check
-// and update.dismissResult.
-//
-// Status reads local files only. The desktop server's one automatic timer
-// and manual update.check share a fetch and the checkout's install lock.
-// Background failures stay silent. Installing is never done from here: the
-// desktop app starts `pnpm run app-update` and quits (apps/desktop).
 import type { SyncChange, UpdateCheck, UpdateCommitRequest, UpdateCommitResult, UpdatePreparation, UpdateResult, UpdateStatus, UpdateVersion } from "@gates-local/contracts";
 import { publishStatus, type StatusListener } from "./published.ts";
 import { randomUUID } from "node:crypto";
@@ -20,29 +13,22 @@ import { acquireLock } from "@gates-local/update/lock";
 import { createUpdateAdmission, UPDATE_PAUSED, type UpdateAdmission } from "@gates-local/update/admission";
 
 export interface UpdateModuleDeps {
-  /** The clone the server runs from. */
   readonly root: string;
   readonly dataDir: string;
   readonly runner: Runner;
-  /** Settings' "Get every change, not only releases". */
   readonly everyChange: () => boolean;
-  /** Calls the listener when that switch flips; returns the unsubscribe. The last check answered for the other choice, so it is dropped. */
   readonly onEveryChange?: (listener: () => void) => () => void;
   readonly now?: () => number;
   readonly log?: (line: string) => void;
   readonly version?: (root: string) => VersionInfo;
   readonly activity?: () => readonly string[];
-  /** Work that must finish, rather than being interrupted by an install. */
   readonly uninterruptible?: () => readonly string[];
-  /** A new status, with the number it was committed with. */
   readonly changed?: StatusListener;
   readonly admission?: UpdateAdmission;
 }
 
 export interface UpdateModule {
-  /** The status now; a value that differs from the last one given out is committed and announced first. */
   status(): UpdateStatus;
-  /** The number a status from status() or changed was committed with. */
   stamp(value: UpdateStatus): SyncChange;
   check(background?: boolean): Promise<UpdateCheck>;
   close(): Promise<void>;
@@ -50,13 +36,11 @@ export interface UpdateModule {
   commit(request: UpdateCommitRequest, disconnected?: AbortSignal): UpdateCommitResult;
   cancel(reservation: string): { cancelled: boolean };
   dismissResult(): { dismissed: boolean };
-  /** An installed copy only (installed/module.ts): the Download click. */
   download?(): Promise<UpdateCheck>;
 }
 
 const changesWord = (n: number) => (n === 1 ? "1 change" : `${n} changes`);
 
-/** The one line the app shows for the last run, from the record the updater left. */
 export function resultLine(r: UpdateRecord): string {
   const to = r.to?.label ?? "the new version";
   const from = r.from?.label ?? "the version it was on";
@@ -74,7 +58,7 @@ export function resultLine(r: UpdateRecord): string {
     case "refused":
       return `The update stopped: ${r.reason ?? "no reason was given"}`;
     case "rolled-back":
-      // Written only by an installed copy's watcher, whose own words the installed module shows.
+      // why: only an installed copy's watcher writes it, and that module shows the watcher's words
       return `The update to ${to} did not start, so Gates Local went back to ${from}.`;
   }
 }
@@ -89,7 +73,6 @@ function toResult(r: UpdateRecord): UpdateResult {
   };
 }
 
-/** The words Settings shows when a check cannot answer; the remedies name the app's own controls. */
 export function blockedLines(b: Blocked): string[] {
   switch (b.reason) {
     case "diverged":
@@ -120,7 +103,6 @@ function toCheck(i: Inspection, checkedAt: number): UpdateCheck {
 export function createUpdateModule(deps: UpdateModuleDeps): UpdateModule {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? (() => undefined);
-  // Taken once: shown for this launch, gone from disk.
   let record: UpdateRecord | undefined;
   try {
     record = takeRecord(deps.dataDir);
@@ -136,8 +118,6 @@ export function createUpdateModule(deps: UpdateModuleDeps): UpdateModule {
   let offer: { token: string; fingerprint: string } | undefined;
   const version = (): UpdateVersion => (deps.version ?? readVersion)(deps.root);
   const work = (): UpdateStatus => {
-    // Main may acknowledge first startup after this server constructed its
-    // modules. Pick up that success note before serving the new client.
     try { const ready = takeRecord(deps.dataDir); if (ready !== undefined) result = toResult(ready); }
     catch (error) { log(`could not read the startup result: ${(error as Error).message}`); }
     const activity = deps.activity?.() ?? [];
@@ -151,8 +131,6 @@ export function createUpdateModule(deps: UpdateModuleDeps): UpdateModule {
   const published = publishStatus(work, deps.changed);
   const status = published.read;
   const offAdmission = admission.onChange(published.changed);
-  // A flip of the switch makes the last check about the other choice: drop it and say so, and a check
-  // already running for the old choice is run again for the new one (choice counts the flips).
   let choice = 0;
   const offEveryChange = deps.onEveryChange?.(() => {
     choice += 1;
@@ -182,12 +160,12 @@ export function createUpdateModule(deps: UpdateModuleDeps): UpdateModule {
   const waiting = () => ({ state: "blocked" as const, message: `Wait for ${busy().join(", ")} to finish before updating.` });
   const update: UpdateModule = {
     status,
-    // Two clicks (or two windows) share one fetch.
     check: async (background = false) => {
       if (closed || admission.installing()) return { state: "cannot-check", checkedAt: now(), reason: "error", lines: [UPDATE_PAUSED] };
       const asked = choice;
       running ??= runCheck().finally(() => { running = undefined; });
       const c = await running;
+      // why: a check still running answered for the old choice, so it runs again for the new one
       if (!closed && choice !== asked) return update.check(background);
       if (!closed && (!background || c.state !== "cannot-check")) {
         lastCheck = c;
@@ -200,8 +178,6 @@ export function createUpdateModule(deps: UpdateModuleDeps): UpdateModule {
       if (closed || admission.installing()) return { state: "blocked", message: UPDATE_PAUSED };
       if (busy().length > 0) return waiting();
       if (status().approval !== approval) return { state: "changed", status: status() };
-      // Re-fetch, then compare activity and reserve in this same synchronous
-      // continuation. Every producer calls admission before registering work.
       await update.check();
       const latest = status();
       if (busy().length > 0) return waiting();
@@ -226,14 +202,11 @@ export function createUpdateModule(deps: UpdateModuleDeps): UpdateModule {
   return update;
 }
 
-/** A check the module answered without keeping it (paused, closing, nothing to download here): its words are the action's refusal. */
 class UpdateRefusal extends Error {
   readonly code = "update-refused";
 }
 
 export function createUpdateHandlers(update: UpdateModule) {
-  // Every update method answers with the status as it is now, numbered: the window applies an
-  // action's answer like any read, and drops it when a newer push got there first.
   const answer = (context: HandlerContext | undefined): UpdateStatus => {
     const value = update.status();
     context?.capture?.([update.stamp(value)]);

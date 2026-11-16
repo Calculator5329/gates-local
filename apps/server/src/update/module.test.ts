@@ -76,6 +76,16 @@ describe("update.status", () => {
     expect(c.commands).toEqual([]);
   });
 
+  it("a result written after the server started is shown at the next status read, and taken from disk", () => {
+    const c = counting();
+    const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner: c.runner, everyChange: () => false });
+    expect(update.status().result).toBeNull();
+    writeRecord(r.data, { at: 5, outcome: "updated", to: { commit: "a".repeat(40), label: "v0.2.0" }, changes: 3 });
+    expect(update.status().result).toEqual({ at: 5, outcome: "updated", line: "Updated to v0.2.0, 3 changes." });
+    expect(existsSync(path.join(r.data, RECORD_FILE))).toBe(false);
+    expect(c.commands).toEqual([]);
+  });
+
   it("words a stopped update with its step and the log", () => {
     writeRecord(r.data, {
       at: 5,

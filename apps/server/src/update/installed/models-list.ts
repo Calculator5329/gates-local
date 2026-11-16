@@ -1,21 +1,3 @@
-// The chat model list an installed copy takes from its release page, so a new
-// model shows up without a release (owner, proposal 13 option A).
-//
-// models.json and models.json.sig sit beside release.json and are read by the
-// same bounded read (feed.ts, FEED_LIMITS.modelsBytes and signatureBytes),
-// from the same base, with no query string, and verified by the same key and
-// the same check (verifySigned) as release.json. The file is
-//   { "schema": 1, "chat": <a chat-models.json list> }
-// and its chat list goes through parseChatModels, the reader of the built-in
-// list. The list is used only when its schema is known and its revision is
-// higher than the list in use; the verified bytes and their signature are then
-// kept in <data dir>/models-list/ and checked again on the next start.
-//
-// A missing models.json (every release before this one) says nothing. A list
-// that fails its size, signature or shape is dropped and logged once, and the
-// copy keeps the list it has. Nothing here changes an update check's verdict.
-// A downloaded list names models and their numbers (sizes, memory tiers,
-// maker patterns): it never names a file to fetch or code to run.
 import { type ChatModels, parseChatModels } from "@gates-local/contracts";
 import fs from "node:fs";
 import path from "node:path";
@@ -28,50 +10,38 @@ export const MODELS_FILE = "models.json";
 export const MODELS_SIGNATURE_FILE = "models.json.sig";
 
 export type ListOutcome =
-  /** No models.json on the release page, or none kept: silent. */
   | { readonly kind: "missing" }
   | { readonly kind: "unreachable"; readonly detail: string }
-  /** Too large, unsigned, wrongly signed, an unknown schema or a list that does not hold together. */
   | { readonly kind: "refused"; readonly detail: string }
-  /** Verified, but its revision is not higher than the list in use. */
   | { readonly kind: "not-newer"; readonly revision: number; readonly inUse: number }
   | { readonly kind: "used"; readonly revision: number };
 
 export interface ModelListsDeps {
-  /** The server's --data-dir; the kept list goes in its models-list/ folder. */
   readonly dataDir: string;
-  /** The release page base B, as the update check reads it. */
   readonly base: URL;
-  /** The same release keys release.json is verified with. */
   readonly keys: readonly string[];
   readonly get: Get;
-  /** The list this server uses now (runtime/chat-list.ts). */
   readonly inUse: () => ChatModels;
   readonly use: (list: ChatModels) => void;
   readonly log?: (line: string) => void;
-  /** One time budget for the list and its signature together. Default FEED_LIMITS.totalMs; tests shorten it. */
   readonly totalMs?: number;
 }
 
 export interface ModelLists {
-  /** On start: the kept list, verified again, when it is newer than the list in use. */
   readonly loadStored: () => ListOutcome;
-  /** After a check whose release.json verified: read, verify and maybe use the release page's list. */
   readonly refresh: (signal: AbortSignal) => Promise<ListOutcome>;
 }
 
-/** The list and signature addresses under B, beside release.json. */
 export function modelsUrls(base: URL): { list: URL; signature: URL } {
   const root = base.href.replace(/\/+$/, "");
   return { list: new URL(`${root}/latest/download/${MODELS_FILE}`), signature: new URL(`${root}/latest/download/${MODELS_SIGNATURE_FILE}`) };
 }
 
-/** The bytes the release kit signs: two-space JSON and one trailing LF. */
 export function encodeModelsFile(chat: unknown, schema: number = MODELS_SCHEMA): Buffer {
   return Buffer.from(JSON.stringify({ schema, chat }, null, 2) + "\n", "utf8");
 }
 
-/** Decode only bytes verifySigned accepted. Throws with the reason. */
+// why: it checks shape, not trust: only bytes verifySigned accepted come here
 export function parseModelsFile(bytes: Uint8Array): ChatModels {
   let text: string;
   try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
@@ -92,7 +62,6 @@ export function createModelLists(deps: ModelListsDeps): ModelLists {
   const folder = path.join(deps.dataDir, MODELS_DIR);
   const listFile = path.join(folder, MODELS_FILE);
   const signatureFile = path.join(folder, MODELS_SIGNATURE_FILE);
-  // The hourly check would say the same thing every hour: each reason is logged once in a row.
   let lastLogged: string | undefined;
   const note = (line: string) => {
     if (line === lastLogged) return;
@@ -104,7 +73,6 @@ export function createModelLists(deps: ModelListsDeps): ModelLists {
     return { kind: "refused", detail };
   };
 
-  /** Verified bytes: their list, or the reason it is refused. */
   const read = (list: Buffer, signature: Buffer): ChatModels | Error => {
     try {
       verifySigned(list, signature, deps.keys);
@@ -114,7 +82,6 @@ export function createModelLists(deps: ModelListsDeps): ModelLists {
     }
   };
 
-  /** Use the list when it is newer than the one in use. */
   const consider = (list: ChatModels): ListOutcome => {
     const inUse = deps.inUse().revision;
     if (list.revision <= inUse) return { kind: "not-newer", revision: list.revision, inUse };
@@ -123,7 +90,6 @@ export function createModelLists(deps: ModelListsDeps): ModelLists {
     return { kind: "used", revision: list.revision };
   };
 
-  /** Each file written whole beside itself, then renamed into place. */
   const keep = (list: Buffer, signature: Buffer) => {
     fs.mkdirSync(folder, { recursive: true });
     for (const [file, bytes] of [[signatureFile, signature], [listFile, list]] as const) {
@@ -167,7 +133,6 @@ export function createModelLists(deps: ModelListsDeps): ModelLists {
       const parsed = read(list.bytes, signature.bytes);
       if (parsed instanceof Error) return refused("from the release page", parsed.message);
       if (parsed.revision <= deps.inUse().revision) return consider(parsed);
-      // Kept before it is used, so it survives a restart; one that cannot be written is still used until then.
       try { keep(list.bytes, signature.bytes); }
       catch (error) { note(`chat model list not kept: ${message(error)}`); }
       return consider(parsed);

@@ -5,7 +5,7 @@ export interface AutomaticCheckOptions {
   readonly onChange: (listener: () => void) => () => void;
 }
 
-/** One timer per desktop server, never one per connected client. It only checks. */
+// decision: docs/decisions.md "Visible desktop update control, existing transaction"
 export function automaticChecks(options: AutomaticCheckOptions): () => void {
   if (!options.desktop) return () => undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;

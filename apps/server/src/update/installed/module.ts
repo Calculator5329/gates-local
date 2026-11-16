@@ -1,34 +1,3 @@
-// Settings › General › Updates for an installed copy (AppImage or installer).
-//
-// The desktop app passes the packaged version in GATES_LOCAL_INSTALLED_VERSION;
-// with it set, main.ts composes this module in place of the clone updater, so
-// no git process ever starts for updates. Status is the version and the last
-// check. A check reads the signed release list (check.ts) and says in plain
-// words whether a newer version exists. When the list holds a file for this
-// copy, it is downloaded into <data dir>/updates/<version>/ and checked
-// (download.ts): by itself while the automatic switch is on (owner decision
-// D1), on the Download click (update.download) while it is off.
-//
-// A Linux AppImage that can replace its own file (the desktop app says so in
-// GATES_LOCAL_INSTALLED_RESTART) offers "Restart to update" once the download
-// is checked: the status carries an approval pinned to the version and the
-// SHA-512 of the signed list, and the click reserves and commits admission
-// with that identity as its target (docs/design/installed-updates.md, 1).
-// The desktop app does the rest (apps/desktop/src/installed-update/). A
-// Windows install offers the same button (section 3, W-A): the desktop runs
-// the checked installer silently, and the row says how to go back, naming
-// the running version's kept installer, which no cleanup deletes. Any other
-// copy keeps its checked download, and the desktop app opens its folder.
-// What this module and the desktop app share (the environment between them,
-// the feed, Restart and the download's words) is @gates-local/update/installed/copy.
-//
-// Results: the watcher leaves one in update-result.json. A token launch
-// (GATES_LOCAL_UPDATE_STARTUP_TOKEN) keeps admission closed until it reads a
-// result carrying its token and never removes the file; an ordinary start
-// takes the file, except a rollback-failed note, which stays until dismissed.
-// The automatic timer (automatic.ts) and the updateAutomatic switch are shared
-// with the clone updater unchanged; its hourly check is also the download's
-// retry. Settings reads the switch itself for the bracketed sentences.
 import type { UpdateCheck, UpdateCommitRequest, UpdatePreparation, UpdateResult, UpdateStatus } from "@gates-local/contracts";
 import { randomUUID } from "node:crypto";
 import { cannotReplace, earlierFailure, pinnedDataFolder } from "@gates-local/update/installed/words";
@@ -44,7 +13,6 @@ import { boundedGet, type Get, type Stream, streamGet } from "@gates-local/updat
 import { INSTALLED_APPROVAL_MS } from "@gates-local/update/installed/transaction";
 import type { ModelLists } from "./models-list.ts";
 
-/** The installed module when the desktop app said this is an installed copy, else the clone updater. */
 export function chooseUpdateModule(env: NodeJS.ProcessEnv, build: { readonly installed: (version: string) => UpdateModule; readonly clone: () => UpdateModule }): UpdateModule {
   const version = env[INSTALLED_VERSION_ENV] ?? "";
   return version === "" ? build.clone() : build.installed(version);
@@ -52,15 +20,12 @@ export function chooseUpdateModule(env: NodeJS.ProcessEnv, build: { readonly ins
 
 const blocked = (message: string) => ({ state: "blocked" as const, message });
 
-/** Why the click is refused, for a copy that cannot replace its file. */
 function refusal(restart: Exclude<Restart, "yes" | "windows">, target: string): string {
   if (restart === "none") return INSTALL_REFUSAL;
   return restart === "pinned" ? pinnedDataFolder(target).text : cannotReplace(restart, target).text;
 }
 
-/** The words Settings shows for each outcome; page is where they send the person.
- *  "Gates Local will try again in an hour." is not here: Settings adds it to
- *  unreachable and no-list from the live switch, so it stays true after a toggle. */
+// why: Settings adds the hourly retry line from the live switch, so it stays true after a toggle
 export function installedCheck(outcome: InstalledOutcome, o: { readonly version: string; readonly page: string; readonly checkedAt: number }): UpdateCheck {
   const { checkedAt, page } = o;
   switch (outcome.kind) {
@@ -78,7 +43,6 @@ export function installedCheck(outcome: InstalledOutcome, o: { readonly version:
       return { state: "up-to-date", checkedAt, channel: "release", current: o.version };
     case "newer": {
       const forThisCopy = "artifact" in outcome;
-      // For this copy, the download's own words replace this line (downloadLines).
       const line = forThisCopy
         ? `Version ${outcome.target} is available.`
         : `Version ${outcome.target} is available, but this copy cannot install it by itself. Download it from the release page.`;
@@ -97,57 +61,31 @@ function fetchOf(outcome: Exclude<DownloadOutcome, { readonly kind: "cancelled" 
 }
 
 export interface InstalledModuleDeps {
-  /** app.getVersion() of the packaged copy. */
   readonly version: string;
   readonly platform: string;
   readonly arch: string;
   readonly feed: InstalledFeed;
-  /** The server's --data-dir; downloads go in its updates/ folder. */
   readonly dataDir: string;
-  /** Settings' "Check for updates automatically": on, a newer version downloads by itself; turned off, a download in flight stops and is deleted, a finished one stays. */
   readonly automatic: { readonly enabled: () => boolean; readonly onChange: (listener: () => void) => () => void };
-  /**
-   * Versions whose folders cleanup and the switch never delete: main.ts
-   * returns the one an unfinished update names. The module adds the one an
-   * undismissed rollback-failed note names, and the one being installed.
-   */
   readonly keep: () => readonly string[];
-  /** Whether this copy can replace its own file; default none. */
   readonly restart?: Restart;
-  /** Linux: the running AppImage, which a copy that cannot replace itself names for the person to replace. Default: APPIMAGE, set by the AppImage runtime. */
   readonly program?: string | null;
-  /** Shared with every producer of work, as for the clone updater. */
   readonly admission?: UpdateAdmission;
   readonly activity?: () => readonly string[];
-  /** Work that must finish, rather than being interrupted by an install. */
   readonly uninterruptible?: () => readonly string[];
-  /** A token launch: the result carrying this token opens admission. */
   readonly startupToken?: string;
-  /** How often a token launch looks for its result; default 200 ms. */
   readonly resultPollMs?: number;
-  /** Tests pass a fake; the real one is boundedGet. */
   readonly get?: Get;
-  /**
-   * The chat model list from the release page (models-list.ts): the kept one
-   * is read when the module starts, a newer one after each check whose
-   * release.json verified. Absent, the copy uses its built-in list only.
-   */
   readonly models?: ModelLists;
-  /** The artifact's read; the real one is streamGet with the feed's rules. */
   readonly stream?: Stream;
-  /** Tests pretend a full disk. */
   readonly freeSpace?: (folder: string) => Promise<Space>;
-  /** Windows: the check of the running version's kept installer; tests hold it. Default verifyKept. */
   readonly keptInstaller?: (version: string) => Promise<Verified>;
-  /** Least time between two progress pushes; default a second. */
   readonly progressMs?: number;
   readonly now?: () => number;
   readonly log?: (line: string) => void;
-  /** A new status, with the number it was committed with. */
   readonly changed?: StatusListener;
 }
 
-/** A verified newer version with a file for this copy: what a download needs. */
 interface Found {
   readonly target: string;
   readonly artifact: ReleaseArtifact;
@@ -162,8 +100,6 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
   const stream = deps.stream ?? streamGet({ allowLoopbackHttp: deps.feed.allowLoopbackHttp });
   const progressMs = deps.progressMs ?? 1_000;
   const program = deps.program === undefined ? (deps.platform === "linux" ? runningAppImage(process.env) : null) : deps.program;
-  // No delete removes a folder holding the running program: the AppImage, or this process's executable.
-  // Every delete also asks, by itself, whether the folder could be in use by anyone else (update/installed/in-use).
   const programs = [...(program === null ? [] : [program]), process.execPath];
   const identity = { dataDir: deps.dataDir, running: deps.version, keys: deps.feed.keys, platform: deps.platform, arch: deps.arch, programs };
   const controller = new AbortController();
@@ -172,14 +108,9 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
   let closed = false;
   let found: Found | undefined;
   let fetch: { readonly target: string; readonly fetch: Fetch } | undefined;
-  // list: the SHA-512 of the signed list this download is for.
   let active: { readonly target: string; readonly list: string; readonly controller: AbortController; readonly done: Promise<void> } | undefined;
-  // SHA-512 of the signed list whose last finished download did not match. A
-  // background check does not fetch that list again; a click or a check that
-  // verifies any other list (or none) forgets it. Kept in memory only: a
-  // restart forgets it, which costs one more try.
   let refused: string | undefined;
-  // Checks, clicks and the switch change the folder one at a time.
+  // why: checks, clicks and the switch each change the updates folder, so one at a time
   let queue: Promise<unknown> = Promise.resolve();
   const serial = <T>(work: () => Promise<T>): Promise<T> => {
     const next = queue.then(work);
@@ -187,23 +118,17 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     return next;
   };
 
-  // The kept chat model list, checked again before use: it survives a restart with no network.
   try { deps.models?.loadStored(); }
   catch (error) { log(`chat model list: ${error instanceof Error ? error.message : String(error)}`); }
 
-  // A copy started from inside updates/ never replaces itself: that folder is this updater's to fill and clean.
   const restart = deps.restart === "yes" && program !== null && inUpdatesFolder(deps.dataDir, program) ? "download-folder" : deps.restart ?? "none";
-  // It is also a file the person starts the app from: the note it leaves keeps every later cleanup, by any copy, off its folder.
   if (program !== null) {
     try { noteStartedFrom(deps.dataDir, program); }
     catch (error) { log(`could not note that this copy was started from its download folder: ${error instanceof Error ? error.message : String(error)}`); }
   }
-  // Windows: set once the running version's kept installer has been looked for.
   let goBack: GoBack | undefined;
   const admission =deps.admission ?? createUpdateAdmission({ finishing: deps.startupToken !== undefined });
 
-  // The last run's note. failed: an undismissed rollback-failed note, which
-  // stays on disk, keeps the folders it names and refuses a new update.
   const toResult = (r: UpdateRecord): UpdateResult | null => {
     const own = r.installed;
     if (own === undefined) return null;
@@ -220,11 +145,10 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     looking = undefined;
     result = toResult(r);
     if (r.outcome === "rollback-failed") failed = r;
-    // This launch says it; the next ordinary start does not say it again.
     else if (r.installed.shown !== true) {
       try { writeRecord(deps.dataDir, { ...r, installed: { ...r.installed, shown: true } }); } catch (error) { log(`could not mark the update result shown: ${(error as Error).message}`); }
     }
-    // Opening notifies, which pushes the status with the result.
+    // why: opening notifies, and that pushes the status with the result
     admission.open();
   };
   try {
@@ -233,7 +157,6 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
       if (left?.outcome === "rollback-failed" && left.installed !== undefined) { failed = left; result = toResult(left); }
       else {
         const taken = takeRecord(deps.dataDir);
-        // "Updated to version N+1" taken by N: N+1 never reached its server and N was put back (Windows, IU-W2).
         const otherVersion = taken?.outcome === "updated" && taken.installed !== undefined && taken.installed.to !== deps.version;
         if (otherVersion) log(`dropped the result "updated to ${taken.installed?.to ?? ""}": version ${deps.version} runs`);
         else if (taken !== undefined && taken.installed?.shown !== true) result = toResult(taken);
@@ -243,20 +166,15 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     log(`could not read the last update result: ${(error as Error).message}`);
   }
 
-  /** The last check, with the download's words in place of "is available." for this copy. */
   const shown = (c: UpdateCheck | null): UpdateCheck | null => {
     if (c?.state !== "newer" || !c.forThisCopy || fetch?.target !== c.target) return c;
     const checked = fetch.fetch.state === "ready" && canRestart(restart);
-    // An undismissed rollback-failed note refuses the update: no button, and the row says why.
-    // Windows: the button turns on once the kept installer has been looked for (section 3, W-A step 2).
     const ready = checked && failed === undefined && (restart !== "windows" || goBack !== undefined);
-    // Until then restart is false: the button is coming, still being checked, so nothing offers the file as one this copy cannot install.
     const coming = checked && failed === undefined && !ready;
     const lines = checked && failed !== undefined ? [earlierFailure().text] : downloadLines(c.target, fetch.fetch, restart, goBack, deps.platform, program);
     return { ...c, lines, download: fetch.fetch.state, ...(ready ? { restart: true } : coming ? { restart: false } : {}) };
   };
   let offer: { readonly token: string; readonly fingerprint: string } | undefined;
-  /** The admission target of the found version, when it is the checked, ready one Restart would install. */
   const readyTarget = (c: UpdateCheck | null): string | undefined => {
     if (!canRestart(restart) || found === undefined || failed !== undefined || c?.state !== "newer" || c.target !== found.target || c.download !== "ready" || c.restart !== true) return undefined;
     return installedTarget(found.target, listHash(found.list));
@@ -278,7 +196,6 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
   const push = () => { if (!closed) published.changed(); };
   const offAdmission = admission.onChange(push);
   if (restart === "windows") {
-    // Looked for once: cleanup never deletes it while this version runs.
     const releasePage = `${deps.feed.base.href.replace(/\/+$/, "")}/tag/v${deps.version}`;
     void (deps.keptInstaller ?? ((version: string) => verifyKept({ ...identity, version })))(deps.version)
       .catch((error: unknown) => ({ ok: false as const, reason: error instanceof Error ? error.message : String(error) }))
@@ -288,7 +205,6 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
         push();
       });
   }
-  /** Folders no cleanup deletes: the caller's, an undismissed failure's, the one being installed, and on Windows the running version's installer. */
   const kept = (): string[] => [
     ...deps.keep(),
     ...(restart === "windows" ? [deps.version] : []),
@@ -329,10 +245,8 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
       .then((outcome) => {
         if (active?.controller === own) active = undefined;
         if ("detail" in outcome) log(`update download ${f.target}: ${outcome.kind}: ${outcome.detail}`);
-        // The last finished attempt decides: any other end (a network failure, a full disk) keeps its own retry.
         if (outcome.kind === "bad-download") refused = list;
         else if (outcome.kind !== "cancelled") refused = undefined;
-        // Cancelled: the switch or closing ended it; the version is offered again as not downloaded.
         fetch = outcome.kind === "cancelled" ? undefined : { target: f.target, fetch: fetchOf(outcome) };
         push();
       });
@@ -341,14 +255,13 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     push();
   };
 
-  /** After a verified list: drop other versions, then reuse, start or offer this one. */
   const settle = (outcome: InstalledOutcome) => serial(async () => {
     if (closed) return;
     if (outcome.kind !== "newer" && outcome.kind !== "none-found") return;
     if (outcome.kind === "none-found" || !("artifact" in outcome)) {
       found = undefined;
       await cancelActive("the release list no longer offers a version for this copy");
-      // After the cancel: a download ended by it can still finish as "did not match".
+      // why: a download the cancel ended can still finish as "did not match"
       refused = undefined;
       fetch = undefined;
       return;
@@ -361,24 +274,19 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     if (refused !== list) refused = undefined;
     await removeVersions(deps.dataDir, [f.target, ...kept()], programs).catch((error: unknown) => log(`update cleanup: ${error instanceof Error ? error.message : String(error)}`));
     if (active !== undefined) return;
-    // A folder left by an earlier start is ready only after it checks out again, holding this very list.
     const prepared = await preparedRelease({ ...identity, version: f.target, list: f.list }).catch(() => null);
     if (prepared?.ok === true) { fetch = { target: f.target, fetch: { state: "ready" } }; return; }
     if (prepared !== null) log(`update download ${f.target}: its folder did not check out: ${prepared.reason}`);
-    // Off: a failure is not retried by itself; "Check for updates" offers Download again.
     if (!deps.automatic.enabled()) { fetch = undefined; return; }
-    // A list whose file did not match stays "did not match" until a click or new list bytes.
     if (refused === list) { fetch = { target: f.target, fetch: { state: "bad" } }; return; }
     start(f);
   });
 
-  /** A click after a bad download: fetch the refused list again (settle left it alone). */
   const retryRefused = () => serial(async () => {
     if (closed || found === undefined || active !== undefined || !deps.automatic.enabled() || refused !== listHash(found.list)) return;
     start(found);
   });
 
-  // Off stops a download in flight, whose part file goes. A finished, checked download stays, so it is never fetched twice.
   const switchedOff = () => serial(async () => {
     await cancelActive("automatic checks were turned off");
     const ready = fetch?.fetch.state === "ready" ? [fetch.target] : [];
@@ -394,7 +302,6 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
       .catch((error: unknown): InstalledOutcome => ({ kind: "unreachable", detail: error instanceof Error ? error.message : String(error) }));
     if ("detail" in outcome) log(`update check: ${outcome.kind}: ${outcome.detail}`);
     await settle(outcome);
-    // The chat model list rides on a release.json that verified; whatever it does, the verdict below is the check's own.
     if (deps.models !== undefined && (outcome.kind === "none-found" || outcome.kind === "newer") && !closed) {
       await deps.models.refresh(controller.signal).catch((error: unknown) => log(`chat model list: ${error instanceof Error ? error.message : String(error)}`));
     }
@@ -402,13 +309,10 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
   };
 
   const check = async (background = false): Promise<UpdateCheck> => {
-    // "error", not "unreachable": Settings promises a retry for an unreachable page, and a closing app will not retry.
     if (closed) return closingCheck();
-    // Closing to update: nothing is read or deleted, as for clones.
     if (admission.installing()) return { state: "cannot-check", checkedAt: now(), reason: "error", lines: [UPDATE_PAUSED] };
     running ??= runCheck().finally(() => { running = undefined; });
     const c = await running;
-    // Also when this click joined a background check already in flight.
     if (!background) await retryRefused();
     if (!closed && (!background || c.state !== "cannot-check")) {
       lastCheck = c;
@@ -420,9 +324,7 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
   const update: UpdateModule = {
     status,
     stamp: published.stamp,
-    // Two clicks (or two windows) share one read; a background failure stays silent, as for clones.
     check,
-    // The Download click: with no verified list in hand, check first.
     download: async () => {
       if (closed) return closingCheck();
       if (found === undefined) await check();
@@ -444,14 +346,12 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     },
     prepare,
     commit: ({ reservation, target, release: requested }: UpdateCommitRequest, disconnected?: AbortSignal) => {
-      // The watcher gives the old app INSTALLED_APPROVAL_MS to close and goes ahead if it does, so no work is let in sooner.
       const release = admission.commit(reservation, target, requested, disconnected, INSTALLED_APPROVAL_MS);
       return release === null ? { accepted: false } : { accepted: true, release };
     },
     cancel: (reservation: string) => ({ cancelled: admission.cancel(reservation) }),
     dismissResult: () => {
       const dismissed = result !== null;
-      // The note on disk goes with it: a rollback-failed note stays only until now, and any other was already shown.
       if (dismissed) {
         try { removeRecord(deps.dataDir); } catch (error) { log(`could not remove the update result: ${(error as Error).message}`); }
       }
@@ -462,7 +362,6 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     },
   };
 
-  /** The click, after the person confirmed: re-check the prepared folder, then reserve admission for its identity. */
   async function prepare(approval: string): Promise<UpdatePreparation> {
     if (closed || admission.installing()) return blocked(UPDATE_PAUSED);
     if (admission.finishing()) return blocked(FINISHING);
@@ -473,14 +372,12 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     const changed = () => ({ state: "changed" as const, status: status() });
     const f = found;
     if (f === undefined || status().approval !== approval) return changed();
-    // The folder is checked again as it is now: its list, signature and file.
     const prepared = await serial(() => preparedRelease({ ...identity, version: f.target, list: f.list }).catch(() => null));
     if (prepared?.ok !== true) {
       if (fetch?.target === f.target) fetch = undefined;
       push();
       return changed();
     }
-    // Compare and reserve in this same synchronous continuation, as for clones.
     const still = deps.uninterruptible?.() ?? [];
     if (still.length > 0) return blocked(`Wait for ${still.join(", ")} to finish before updating.`);
     if (closed || found !== f || status().approval !== approval) return changed();

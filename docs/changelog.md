@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-16: the server's update folder holds to the six comment kinds
+
+- The update folder passes the comment rule: 121 offenders went, and
+  its comment lines fell from 202 to 11, one decision and ten reasons.
+  Rules a named test already held went with the comment; one in five
+  was broken in the source and watched fail.
+- Two rules no test held now have one: a newer chat model list that
+  cannot be written to disk is still used until the next start, and a
+  result the update watcher writes after the server started shows at
+  the next status read.
+- One comment was wrong: reading the status never announces it.
+
 ## 2026-11-16: the server's threads folder holds to the six comment kinds
 
 - The chat store's folder passes the comment rule: 90 offenders went,
