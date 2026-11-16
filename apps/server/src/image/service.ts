@@ -4,7 +4,6 @@ export interface ComfyService {
   inspect(): Promise<{ present: boolean; active: boolean; activeState: string; pid: number }>;
   start(): Promise<void>;
   stop(): Promise<void>;
-  /** Deadline only: verify this run's MainPID, then queue a stop without waiting. */
   killRuntimeNow?(ownedPid: number): void;
 }
 
@@ -27,7 +26,6 @@ const run: Systemctl = (args) => new Promise((resolve, reject) => {
   execFile("systemctl", [...args], { timeout: 15_000 }, (error, stdout) => error ? reject(error) : resolve(stdout));
 });
 
-/** Only the named user unit. Callers must prove ownership and matching MainPID before stop. */
 export function createComfyService(platform = process.platform, systemctl: Systemctl = run, deadline: DeadlineSystemctl = deadlineSystemctl): ComfyService {
   return {
     async inspect() {
@@ -54,7 +52,7 @@ export function createComfyService(platform = process.platform, systemctl: Syste
       try {
         const current = deadline.read(["--user", "show", "comfyui.service", "--property=MainPID", "--value"]);
         if (Number(current.trim()) === ownedPid) deadline.stop(["--user", "stop", "--no-block", "comfyui.service"]);
-      } catch { /* Missing, changed or unreadable units are left alone. */ }
+      } catch {}
     },
   };
 }

@@ -40,21 +40,18 @@ export type ObjectInfo = Readonly<Record<string, unknown>>;
 export type ApiNode = { class_type: string; inputs: Record<string, unknown> };
 export type ApiGraph = Record<string, ApiNode>;
 
-/** A workflow this app cannot run, with the reason in words for the picker. */
 export class WorkflowRefusal extends Error {
   override readonly name = "WorkflowRefusal";
 }
 
 const MUTED = 2;
 const BYPASSED = 4;
-/** An inner link from the subgraph's input node; one to its output node (-20) is found from `outputs[].linkIds`. */
+// external: inside a ComfyUI subgraph, node -10 is its input node and node -20 its output node
 const SUBGRAPH_IN = -10;
 const DROPPED = new Set(["Note", "MarkdownNote", "Reroute", "PrimitiveStringMultiline", "PrimitiveNode"]);
-/** Text boxes whose value goes into the input they feed. */
 const INLINED = new Set(["PrimitiveStringMultiline", "PrimitiveNode"]);
 const CONTROL_WORDS = new Set(["fixed", "increment", "decrement", "randomize"]);
 const WIDGET_TYPES = new Set(["INT", "FLOAT", "STRING", "BOOLEAN", "COMBO"]);
-/** Widget kinds that hold a saved value this file cannot turn into API inputs (a dynamic combo brings inputs of its own). */
 const UNREAD_WIDGETS = new Set(["COMFY_DYNAMICCOMBO_V3", "COLOR"]);
 
 interface Link { readonly origin: number; readonly originSlot: number }
@@ -76,7 +73,6 @@ interface Definition {
   readonly nodes: readonly UiNode[];
   readonly links: ReadonlyMap<number, Link>;
 }
-/** One graph level: the root, or one subgraph instance opened in place. */
 interface Scope {
   readonly path: string;
   readonly nodes: ReadonlyMap<number, UiNode>;
@@ -105,7 +101,7 @@ function readNode(raw: unknown): UiNode {
   };
 }
 
-/** Root links are arrays `[id, origin, originSlot, target, targetSlot, type]`; subgraph links are objects. Either is read in either place. */
+// external: ComfyUI saves root links as arrays and subgraph links as objects
 function readLinks(raw: unknown): Map<number, Link> {
   const out = new Map<number, Link>();
   for (const l of Array.isArray(raw) ? raw : []) {
@@ -134,7 +130,6 @@ function readDefinitions(workflow: Record<string, unknown>): Map<string, Definit
   return out;
 }
 
-/** True for a file already in API format: every entry names a class and has inputs. */
 function isApiGraph(raw: Record<string, unknown>): boolean {
   const entries = Object.values(raw);
   return entries.length > 0 && entries.every((e) => isObject(e) && typeof e["class_type"] === "string" && isObject(e["inputs"]));
@@ -142,10 +137,6 @@ function isApiGraph(raw: Record<string, unknown>): boolean {
 
 interface WidgetSpec { readonly name: string; readonly kind: string; readonly control: boolean; readonly upload: boolean; readonly fallback: unknown }
 
-/**
- * The inputs a node class shows as widgets, in /object_info's order: required, then optional.
- * Throws when one is of a kind whose saved value cannot be read (UNREAD_WIDGETS).
- */
 function widgetSpecs(node: UiNode, spec: Record<string, unknown>): WidgetSpec[] {
   const input = isObject(spec["input"]) ? spec["input"] : {};
   const order = isObject(spec["input_order"]) ? spec["input_order"] : {};
@@ -177,12 +168,6 @@ function widgetSpecs(node: UiNode, spec: Record<string, unknown>): WidgetSpec[] 
 const fitsKind = (kind: string, v: unknown) =>
   kind === "INT" || kind === "FLOAT" ? typeof v === "number" : kind === "BOOLEAN" ? typeof v === "boolean" : kind === "STRING" ? typeof v === "string" : typeof v === "string" || typeof v === "number";
 
-/**
- * A node's saved widget values by input name. Throws when they do not line up with the class's
- * inputs: a value of the wrong kind, or values left over once every input has one. A class with
- * no widgets at all keeps nothing it runs on in its values (a preview's shown text), so they are
- * not read.
- */
 function widgetValues(node: UiNode, spec: Record<string, unknown>): Record<string, unknown> {
   const specs = widgetSpecs(node, spec);
   const out: Record<string, unknown> = {};
@@ -204,7 +189,6 @@ function widgetValues(node: UiNode, spec: Record<string, unknown>): Record<strin
     const v = values[i++];
     if (!fitsKind(s.kind, v)) throw new WorkflowRefusal(`${node.type}'s saved values do not match the inputs ComfyUI lists for it (${s.name}).`);
     out[s.name] = v;
-    // the control word after a seed, and an upload combo's upload value, are editor state
     if (s.control && typeof values[i] === "string" && CONTROL_WORDS.has(values[i] as string)) i++;
     else if (s.upload && i < values.length) i++;
   }
@@ -214,15 +198,6 @@ function widgetValues(node: UiNode, spec: Record<string, unknown>): Record<strin
 
 interface Promoted { readonly byInput: ReadonlyMap<string, unknown>; readonly byWidget: ReadonlyMap<string, unknown> }
 
-/**
- * The values an instance gives its subgraph's widgets. Two formats:
- * - newer: `properties.proxyWidgets` lists `[inner node id, widget]` (`-1` for a subgraph input),
- *   and `widgets_values` holds each one's value at the same place;
- * - older (no `proxyWidgets`): `widgets_values` holds a value for each subgraph input the instance
- *   shows as a widget, in the subgraph's input order: every input it has no socket for, and every
- *   socket marked as a widget (its value is used when nothing is linked to it). A seed may be
- *   followed by its control word. Throws when the values do not line up with those inputs.
- */
 function promoted(instance: UiNode, definition: Definition): Promoted {
   const byInput = new Map<string, unknown>(), byWidget = new Map<string, unknown>();
   const proxies = instance.properties["proxyWidgets"];
@@ -255,20 +230,13 @@ function promoted(instance: UiNode, definition: Definition): Promoted {
   return { byInput, byWidget };
 }
 
-/** An API input that is a link: [node id, output slot]. */
 const isRef = (v: unknown): v is [string, number] => Array.isArray(v) && v.length === 2 && typeof v[0] === "string" && typeof v[1] === "number";
 
-/** Refuses, by name and once each, the classes `info` does not list. */
 function refuseUnknown(classes: readonly string[], info: ObjectInfo): void {
   const missing = [...new Set(classes.filter((c) => !isObject(info[c])))];
   if (missing.length > 0) throw new WorkflowRefusal(`Needs a node this ComfyUI does not have: ${missing.toSorted().join(", ")} (a custom node, or one from a newer ComfyUI).`);
 }
 
-/**
- * The API graph for a workflow file in either format. Throws WorkflowRefusal, in words for the
- * picker, when the file is neither format, saves nothing, needs a node class `info` does not list,
- * or has widget values that do not line up.
- */
 export function convertWorkflow(workflow: unknown, info: ObjectInfo): ApiGraph {
   if (!isObject(workflow)) throw notWorkflow();
   if (!Array.isArray(workflow["nodes"])) {
@@ -301,7 +269,6 @@ export function convertWorkflow(workflow: unknown, info: ObjectInfo): ApiGraph {
     return guard(() => link.origin === SUBGRAPH_IN ? fromSubgraphInput(scope, link.originSlot) : fromOutput(scope, link.origin, link.originSlot));
   };
 
-  /** What feeds the subgraph input at `slot` of the instance this scope opens: its link outside, else a promoted value. */
   const fromSubgraphInput = (scope: Scope, slot: number): Source | undefined => {
     if (scope.inside === undefined) return undefined;
     const { definition, instance, parent } = scope.inside;
@@ -315,7 +282,6 @@ export function convertWorkflow(workflow: unknown, info: ObjectInfo): ApiGraph {
 
   const fromInput = (scope: Scope, node: UiNode, index: number): Source | undefined => fromLink(scope, node.inputs[index]?.link);
 
-  /** A switch's setting when the file fixes it: what feeds it, a value set on its instance, else its own; undefined when a node computes it. */
   const switchOf = (scope: Scope, node: UiNode): boolean | undefined => {
     const fed = fromInput(scope, node, node.inputs.findIndex((i) => (i.widget?.name ?? i.name) === "switch"));
     if (fed !== undefined) return "value" in fed && typeof fed.value === "boolean" ? fed.value : undefined;
@@ -325,7 +291,6 @@ export function convertWorkflow(workflow: unknown, info: ObjectInfo): ApiGraph {
     return typeof value === "boolean" ? value : undefined;
   };
 
-  /** What output `slot` of node `id` gives once subgraphs, reroutes, text boxes and bypasses are seen through. */
   const fromOutput = (scope: Scope, id: number, slot: number): Source | undefined => {
     const node = scope.nodes.get(id);
     if (node === undefined || node.mode === MUTED) return undefined;
@@ -360,7 +325,7 @@ export function convertWorkflow(workflow: unknown, info: ObjectInfo): ApiGraph {
   };
 
   const graph: ApiGraph = {};
-  const unknown = new Map<string, string>(); // api id -> class ComfyUI does not list
+  const unknown = new Map<string, string>();
   const outputs: string[] = [];
   const emit = (scope: Scope, overrides: ReadonlyMap<string, unknown>) => {
     for (const node of scope.nodes.values()) {
@@ -391,9 +356,6 @@ export function convertWorkflow(workflow: unknown, info: ObjectInfo): ApiGraph {
   };
   emit(root, new Map());
 
-  // keep what an output reads from. A node of a class ComfyUI does not list, that reads from other
-  // nodes and that nothing reads from, may be where the workflow saves its picture: it is kept, so
-  // the refusal names it, rather than dropped.
   const read = new Set(Object.values(graph).flatMap((n) => Object.values(n.inputs).filter(isRef).map((v) => v[0])));
   const sinks = [...unknown.keys()].filter((id) => !read.has(id) && Object.values(graph[id]!.inputs).some(isRef));
   const kept = new Set<string>();

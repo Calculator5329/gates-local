@@ -142,3 +142,56 @@ describe("refusals, in words for the picker", () => {
     expect(refusal(graph)).toBe("It starts from a picture (Load Image); Image mode makes pictures from words only.");
   });
 });
+
+describe("found by the shape of the graph, whatever leads into it", () => {
+  it("a prompt that reaches only a BasicGuider's conditioning is the prompt box", () => {
+    const graph = sdxl();
+    graph["12"] = { class_type: "BasicGuider", inputs: { model: ["15", 0], conditioning: ["10", 0] } };
+    graph["16"] = { class_type: "RandomNoise", inputs: { noise_seed: 5 } };
+    graph["17"] = { class_type: "SamplerCustomAdvanced", inputs: { noise: ["16", 0], guider: ["12", 0], latent_image: ["13", 0] } };
+    graph["14"]!.inputs["samples"] = ["17", 0];
+    expect(findControls(graph)).toMatchObject({ prompt: { node: "10", input: "text" }, seed: { node: "16", input: "noise_seed" } });
+  });
+
+  it("a text box that feeds the prompt is filled in, in place of the prompt node", () => {
+    const graph = sdxl();
+    graph["20"] = { class_type: "PrimitiveStringMultiline", inputs: { value: "a statue" } };
+    graph["10"]!.inputs["text"] = ["20", 0];
+    const controls = findControls(graph);
+    expect(controls.prompt).toEqual({ node: "20", input: "value" });
+    const filled = applyControls(graph, controls, { prompt: "a lighthouse", width: 1024, height: 1024, seed: 1 });
+    expect([filled["20"]!.inputs["value"], filled["10"]!.inputs["text"]]).toEqual(["a lighthouse", ["20", 0]]);
+  });
+
+  it("a seed read from a number box is set in that box", () => {
+    const graph = sdxl();
+    graph["20"] = { class_type: "PrimitiveInt", inputs: { value: 42 } };
+    graph["12"]!.inputs["seed"] = ["20", 0];
+    const controls = findControls(graph);
+    expect(controls.seed).toEqual({ node: "20", input: "value" });
+    expect(applyControls(graph, controls, { prompt: "a", width: 1024, height: 1024, seed: 9 })["20"]!.inputs["value"]).toBe(9);
+  });
+});
+
+describe("refused in words, where Image mode cannot set it apart", () => {
+  it("a seed worked out by another node", () => {
+    const graph = sdxl();
+    graph["20"] = { class_type: "SeedFromDate", inputs: {} };
+    graph["12"]!.inputs["seed"] = ["20", 0];
+    expect(refusal(graph)).toBe("Its seed is made by another node (SeedFromDate), so Image mode cannot set it.");
+  });
+
+  it("a width and height that read the same number box", () => {
+    const graph = sdxl();
+    graph["20"] = { class_type: "PrimitiveInt", inputs: { value: 1024 } };
+    graph["13"]!.inputs["width"] = ["20", 0];
+    graph["13"]!.inputs["height"] = ["20", 0];
+    expect(refusal(graph)).toBe("Its width and height are one number, so Image mode cannot set them apart.");
+  });
+
+  it("a size that is not a number", () => {
+    const graph = sdxl();
+    graph["13"]!.inputs["width"] = "1024";
+    expect(refusal(graph)).toBe("Its size is not a number, so Image mode cannot set it.");
+  });
+});

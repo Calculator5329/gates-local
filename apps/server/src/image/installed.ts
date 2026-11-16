@@ -1,16 +1,3 @@
-// The model files already in ComfyUI's folders, read from their safetensors headers (never the
-// weights): which family each is for, so a checkpoint becomes a setup and a LoRA a style on its
-// family's setup. Only for a ComfyUI on this machine, in the folders its /internal/folder_paths
-// names. The family comes from the header's metadata (`modelspec.architecture`,
-// `ss_base_model_version`), else from its tensor names and shapes:
-// - SDXL: a checkpoint's `conditioner.embedders.1`; a LoRA's `lora_te2_` or `lora_unet_input_blocks`;
-// - SD 1.5: a checkpoint's `cond_stage_model.transformer`; a LoRA's `lora_unet_down_blocks` or `lora_te_text_model` alone;
-// - FLUX.2 Klein 4B: Flux blocks 3072 wide, no more than its 5 double and 20 single blocks; more is
-//   FLUX.1 (19 and 38). A Fill model's wider image input (more than 128 channels) is left out.
-// A file it cannot place is left out, as are inpainting (Fill) and audio models: an SD or SDXL
-// checkpoint whose first UNet layer takes other than 4 channels (an inpainting one takes 9) too.
-// Only a plain file is read (a pipe would hang the read), and only by a name inside its folder;
-// a linked file or folder in there is followed wherever it points, as ComfyUI does.
 import { open, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import type { ApiGraph } from "./convert.ts";
@@ -19,21 +6,17 @@ import klein from "./setups/flux2-klein-4b.json" with { type: "json" };
 import checkpoint from "./setups/sdxl-checkpoint.json" with { type: "json" };
 import fileSources from "./setups/files.json" with { type: "json" };
 
-/** What a header says: its metadata, and each tensor's name and shape. */
 export interface Header { readonly metadata: Readonly<Record<string, string>>; readonly shapes: Readonly<Record<string, readonly number[]>> }
 
-/** Families the app knows by name; a LoRA or checkpoint for one it has no setup for is listed with that reason. */
 export type Family = "sdxl" | "sd15" | "flux2-klein-4b" | "flux1" | "flux1-kontext" | "zimage" | "qwen-image";
 export const FAMILY_NAMES: Readonly<Record<Family, string>> = {
   sdxl: "SDXL", sd15: "Stable Diffusion 1.5", "flux2-klein-4b": "FLUX.2 Klein 4B", flux1: "FLUX.1", "flux1-kontext": "FLUX.1 Kontext", zimage: "Z-Image Turbo", "qwen-image": "Qwen-Image",
 };
 
-/** An installed file as kept: its kind (ComfyUI folder), name as ComfyUI lists it, size, family and whether it is a few-step model. */
 export interface InstalledFile { readonly kind: "checkpoints" | "loras"; readonly name: string; readonly bytes: number; readonly family: Family; readonly fewStep?: boolean }
 
 const MAX_HEADER = 8 * 1024 * 1024;
 
-/** The header of a safetensors file, or undefined when it is not one (or its header is implausibly large). */
 export async function readHeader(file: string): Promise<Header | undefined> {
   const handle = await open(file, "r");
   try {
@@ -71,7 +54,6 @@ const byArchitecture = (arch: string): Family | undefined => {
 
 const maxIndex = (keys: readonly string[], pattern: RegExp) => Math.max(-1, ...keys.map((k) => Number(pattern.exec(k)?.[1] ?? -1)));
 
-/** The family a header is for, or undefined when it cannot say. */
 export function familyOf(header: Header, kind: InstalledFile["kind"]): Family | undefined {
   const m = header.metadata;
   for (const v of [m["modelspec.architecture"], m["ss_base_model_version"]]) {
@@ -83,13 +65,15 @@ export function familyOf(header: Header, kind: InstalledFile["kind"]): Family | 
   const keys = Object.keys(header.shapes);
   const has = (re: RegExp) => keys.some((k) => re.test(k));
   const convIn = header.shapes["model.diffusion_model.input_blocks.0.0.weight"]?.[1];
-  if (kind === "checkpoints" && convIn !== undefined && convIn !== 4) return undefined; // inpainting: 9 channels in
-  if (has(/^conditioner\.(embedders|conditioners)\./) && !has(/conditioner\.embedders\.1\./)) return undefined; // audio and others
+  // external: Stable Diffusion and SDXL inpainting UNets take 9 input channels, plain ones take 4
+  if (kind === "checkpoints" && convIn !== undefined && convIn !== 4) return undefined;
+  if (has(/^conditioner\.(embedders|conditioners)\./) && !has(/conditioner\.embedders\.1\./)) return undefined;
   if (has(/conditioner\.embedders\.1\./) || has(/^lora_te2_/) || has(/^lora_unet_(input_blocks|output_blocks|middle_block)_/)) return "sdxl";
   if (has(/^cond_stage_model\.transformer\./) || has(/^lora_unet_down_blocks_/) || (has(/^lora_te_text_model/) && !has(/^lora_te2_/))) return "sd15";
   if (has(/double_blocks[._]\d/) || has(/single_blocks[._]\d/)) {
     const imgIn = Object.entries(header.shapes).find(([k]) => /(^|\.)img_in\.weight$/.test(k))?.[1];
-    if (kind === "checkpoints" && imgIn !== undefined && imgIn[1] !== undefined && imgIn[1] > 128) return undefined; // Fill: extra input channels
+    // external: a FLUX Fill model's img_in takes over 128 channels, for its mask and image inputs
+    if (kind === "checkpoints" && imgIn !== undefined && imgIn[1] !== undefined && imgIn[1] > 128) return undefined;
     const double = maxIndex(keys, /double_blocks[._](\d+)/), single = maxIndex(keys, /single_blocks[._](\d+)/);
     const wide = Object.entries(header.shapes).some(([k, s]) => /double_blocks[._]\d+[._]img_attn[._]qkv/.test(k) && s.includes(3072));
     if (!wide) return undefined;
@@ -98,13 +82,8 @@ export function familyOf(header: Header, kind: InstalledFile["kind"]): Family | 
   return undefined;
 }
 
-/** A few-step distillation of a person's own checkpoint, by the words its metadata or name uses for one. */
 export const fewStep = (name: string, header: Header) => /lightning|turbo|hyper|lcm/i.test([name, ...Object.values(header.metadata).filter((v) => v.length < 400)].join(" "));
 
-/**
- * The checkpoints and LoRAs ComfyUI lists, placed by their headers. `folders` is ComfyUI's own
- * /internal/folder_paths answer; a name is only read inside one of its kind's folders.
- */
 export async function readInstalled(folders: Readonly<Record<string, readonly string[]>>, lists: Readonly<Record<string, readonly string[]>>): Promise<InstalledFile[]> {
   const out: InstalledFile[] = [];
   for (const kind of ["checkpoints", "loras"] as const) {
@@ -116,10 +95,11 @@ export async function readInstalled(folders: Readonly<Record<string, readonly st
         if (!file.startsWith(path.resolve(folder) + path.sep)) continue;
         let bytes: number, real: string;
         try {
-          // a link out of the folder is read: ComfyUI lists and runs it, as people keep models on another disk
+          // external: ComfyUI lists and loads models through symlinks out of its model folders
           real = await realpath(file);
           const s = await stat(real);
-          if (!s.isFile()) continue; // a pipe or a folder: opening a pipe would wait for ever
+          // external: under POSIX, opening a FIFO for reading blocks until a writer opens it
+          if (!s.isFile()) continue;
           bytes = s.size;
         } catch { continue; }
         const header = await readHeader(real).catch(() => undefined);
@@ -132,17 +112,12 @@ export async function readInstalled(folders: Readonly<Record<string, readonly st
   return out;
 }
 
-/** Whether a ComfyUI address is this machine: only then are its folders this machine's folders. */
 export function isLocalComfy(baseUrl: string): boolean {
   try { return ["localhost", "127.0.0.1", "[::1]"].includes(new URL(baseUrl).hostname); }
   catch { return false; }
 }
 
-/**
- * The installed files as setups (installedWorkflows), for a ComfyUI on this machine: its folders from
- * GET /internal/folder_paths, each kind's first entry a list of paths. Undefined when the ComfyUI is
- * elsewhere or the route fails, so the caller keeps what it had.
- */
+// external: ComfyUI's /internal/folder_paths maps each model kind to its list of folder paths
 export async function readInstalledSetups(get: (route: string) => Promise<unknown>, baseUrl: string, files: Readonly<Record<string, readonly string[]>>): Promise<KnownWorkflow[] | undefined> {
   if (!isLocalComfy(baseUrl)) return undefined;
   let answer: unknown;
@@ -151,7 +126,7 @@ export async function readInstalledSetups(get: (route: string) => Promise<unknow
   return folders && installedWorkflows(await readInstalled(folders, files));
 }
 
-/** ComfyUI's /internal/folder_paths answer: each kind's absolute folders, first is where it saves. */
+// external: ComfyUI saves into the first folder listed for a kind
 export function comfyFolders(answer: unknown): Record<string, string[]> | undefined {
   if (typeof answer !== "object" || answer === null || Array.isArray(answer)) return undefined;
   const folders: Record<string, string[]> = {};
@@ -162,15 +137,9 @@ export function comfyFolders(answer: unknown): Record<string, string[]> | undefi
 const clone = (graph: unknown): ApiGraph => structuredClone(graph) as ApiGraph;
 const base = (name: string) => name.replaceAll("\\", "/").split("/").at(-1)!;
 const title = (name: string) => base(name).replace(/\.safetensors$/i, "");
-/** The picker's family mark for each family. */
 const MARK: Readonly<Record<Family, string>> = { sdxl: "sdxl", sd15: "sd15", "flux2-klein-4b": "flux", flux1: "flux", "flux1-kontext": "flux", zimage: "zimage", "qwen-image": "qwen" };
 const APP_SOURCES: Readonly<Record<string, ModelSource>> = fileSources;
 
-/**
- * A checkpoint's graph: setups/sdxl-checkpoint.json with its file, at the family's plain settings
- * (SDXL 28 steps, cfg 5, dpmpp_2m karras at 1024 x 1024; SD 1.5 the same at 512 x 512, cfg 7), or
- * the graph's own 4 steps at cfg 1, euler on sgm_uniform, when the file says it is a few-step model.
- */
 function checkpointGraph(file: InstalledFile): ApiGraph {
   const graph = clone(checkpoint);
   graph["1"]!.inputs["ckpt_name"] = file.name;
@@ -181,7 +150,6 @@ function checkpointGraph(file: InstalledFile): ApiGraph {
   return graph;
 }
 
-/** A LoRA on a graph whose model and clip come from node 1 (checkpoint), at 0.8. */
 function withLora(graph: ApiGraph, lora: string): ApiGraph {
   graph["2"] = { class_type: "LoraLoader", inputs: { lora_name: lora, strength_model: 0.8, strength_clip: 0.8, model: ["1", 0], clip: ["1", 1] } };
   graph["3"]!.inputs["clip"] = ["2", 1];
@@ -190,7 +158,6 @@ function withLora(graph: ApiGraph, lora: string): ApiGraph {
   return graph;
 }
 
-/** A LoRA on the app's Klein 4B setup: model only (its text encoder is not CLIP), at 0.8. */
 function kleinLora(lora: string): ApiGraph {
   const graph = clone(klein);
   graph["14"] = { class_type: "LoraLoaderModelOnly", inputs: { lora_name: lora, strength_model: 0.8, model: ["1", 0] } };
@@ -198,12 +165,6 @@ function kleinLora(lora: string): ApiGraph {
   return graph;
 }
 
-/**
- * The installed files as setups, in the group "Your models": a checkpoint of SDXL or SD 1.5 with its
- * family's plain settings; a LoRA as a style on its family's base (the app's Klein 4B setup, which
- * needs its files when they are missing, or the first installed SDXL or SD 1.5 checkpoint, a plain
- * one before a few-step one); a file of a family Image mode has no setup for, refused with that reason.
- */
 export function installedWorkflows(files: readonly InstalledFile[]): KnownWorkflow[] {
   const out: KnownWorkflow[] = [];
   const checkpoints = files.filter((f) => f.kind === "checkpoints").toSorted((a, b) => Number(a.fewStep ?? false) - Number(b.fewStep ?? false));

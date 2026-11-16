@@ -1,10 +1,4 @@
-// Explicit coordinator-only runtime check. Never imported or run by verify.
-// Run: node apps/server/src/image/real-check.ts --execute
-// The swap: node apps/server/src/image/real-check.ts --execute --swap-model <installed chat model tag> [--num-ctx 16384] [--ollama-url URL]
-//   first loads that chat model through the app's own loader and fit planner, so the image job
-//   has to unload it, wait for the memory and then render, as a chat's image does in the app.
-// The warm swap: add --warm with a --swap-model that is already in memory (as after an app restart):
-//   one chat turn runs on it, then the image has to unload it although this check never loaded it.
+// why: a manual check on a real GPU and ComfyUI; nothing imports it and verify never runs it
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
@@ -27,22 +21,16 @@ import { createImageHandlers } from "./handlers.ts";
 import { createImageModule } from "./module.ts";
 import { DEFAULT_CHOICE, resolveChoice } from "./presets.ts";
 
-/** The first default's estimate; the job settles to the first default ComfyUI has, which may be the next one. */
 const IMAGE_ESTIMATED_BYTES = resolveChoice(DEFAULT_CHOICE).size.bytes;
 
 export interface SwapOptions {
-  /**
-   * An installed chat model that is not resident yet: this check must be the one that loads it.
-   * With `warm`, one that is already resident (loaded before this check, as after an app restart).
-   */
   model: string;
   numCtx: number;
   ollamaUrl: string;
-  /** The warm swap: the model is already resident, one chat turn runs on it, then the image. */
   warm?: boolean;
 }
 
-/** Loads the chat model the way the app's models.load does (services.ts): its loader, its fit planner. */
+// why: the check loads the chat model the way the app does, or it would not test the real swap
 async function loadChatModel(swap: SwapOptions): Promise<ModelLoader> {
   const loader = createModelLoader({
     baseUrl: () => swap.ollamaUrl,
@@ -59,10 +47,6 @@ async function loadChatModel(swap: SwapOptions): Promise<ModelLoader> {
   return loader;
 }
 
-/**
- * The owner's restart: the chat model is resident and the loader did not load it. One chat turn
- * runs on it through the loader's reservation, as reply.send does, so the image may unload it.
- */
 async function warmTurn(swap: SwapOptions, loader: ModelLoader): Promise<ModelLoader> {
   const resident = (await listLoaded(swap.ollamaUrl)).map((m) => canonicalTag(m.name));
   assert(resident.includes(canonicalTag(swap.model)), `${swap.model} is not in memory; load it first (one message in any chat) so this check finds it warm`);
@@ -81,7 +65,6 @@ async function warmTurn(swap: SwapOptions, loader: ModelLoader): Promise<ModelLo
     turn.end();
   }
   assert.deepEqual(loader.appLoadedModels(), [], `${swap.model} was loaded by this check, so it was not warm`);
-  // A resident model no running reply uses is the next thing's to ask to leave, whoever loaded it.
   assert.deepEqual(loader.replying(), [], "the turn still counts as a running reply, so the image may not unload it");
   console.log(JSON.stringify({ warmChatTurn: swap.model, numCtx: swap.numCtx }));
   return loader;
@@ -101,10 +84,8 @@ export async function realCheck(dataDir: string, comfyUrl?: string, swap?: SwapO
   const before = await whisperSnapshot();
   const gpu = await readGpu();
   console.log(JSON.stringify({ whisperBefore: before, freeBytes: gpu.freeBytes, imageEstimateBytes: IMAGE_ESTIMATED_BYTES }));
-  // Without --swap-model this check loads no chat model, so it owns none to unload.
+  // why: without --swap-model the check loads no chat model, so there is none to unload
   const loader = swap ? await loadChatModel(swap) : undefined;
-  // The module checks the remaining estimate after crediting healthy ComfyUI's
-  // resident bytes. A full-free-memory precheck would reject every warm job.
   const store = openThreadStore(path.join(dataDir, "real-check.sqlite"));
   let terminal: ImageEvent | undefined;
   let progressFrames = 0;
@@ -113,7 +94,7 @@ export async function realCheck(dataDir: string, comfyUrl?: string, swap?: SwapO
   let engine: MemoryEngine | undefined;
   const image = createImageModule({ dataDir, store, lease: createGpuLease(),
     settings: () => ({ imageGen: true, ...(comfyUrl ? { comfyUrl } : {}) }),
-    // Wired as services.ts wires the app's memory owner.
+    // why: the check wires the memory owner as the app does, or it would not test the real handoff
     memory: createMemoryOwner({
       ollamaUrl: () => swap?.ollamaUrl,
       listLoaded: (url, signal) => listLoaded(url, undefined, signal),
@@ -136,7 +117,7 @@ export async function realCheck(dataDir: string, comfyUrl?: string, swap?: SwapO
   });
   engine = image;
   try {
-    const token = randomUUID(); // per-launch only, never logged or persisted
+    const token = randomUUID();
     const handlers = createImageHandlers({ image });
     server = await startWsServer({ port: 0, token, allowedOrigins: [], handlers, dataDir });
     const thread = store.createThread({ title: "Image real check" });

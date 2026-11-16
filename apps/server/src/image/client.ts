@@ -17,16 +17,11 @@ const Queue = S.Struct({ queue_running: S.Array(S.Array(S.Unknown)), queue_pendi
 const ObjectInfo = S.Record(S.String, S.Unknown);
 const failure = (code: string, message: string) => Object.assign(new Error(message), { code });
 
-/** What ComfyUI said it is doing for a prompt (contracts ImageEvent's stage and steps). */
 export interface RenderSaid {
   readonly stage: "queued" | "loading" | "encoding" | "sampling" | "decoding";
   readonly steps?: { readonly done: number; readonly total: number };
 }
-/**
- * The stage a node of this class is, when ComfyUI says it is executing it. A loader that executes
- * reads its model from disk (a loader whose output is cached is not executed, and says nothing);
- * any other class says nothing new.
- */
+// external: ComfyUI sends no executing frame for a node whose output it takes from its cache
 export function stageOfNode(classType: string): RenderSaid["stage"] | undefined {
   if (/Loader/.test(classType)) return "loading";
   if (/TextEncode/.test(classType)) return "encoding";
@@ -41,10 +36,9 @@ export interface ComfyClientDeps {
   requestTimeoutMs?: number;
 }
 
-/** How long a cancel waits on its interrupt before it asks again. */
 export const INTERRUPT_AGAIN_MS = 10_000;
 
-/** How long a cancel waits for ComfyUI to let go of the prompt, on a card: it checks the interrupt between steps of a second or so. */
+// external: ComfyUI checks for an interrupt between sampler steps, about a second each on a card
 export const CANCEL_WAIT_MS = 30_000;
 
 const waitWords = (ms: number) => ms < 120_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} minutes`;
@@ -53,10 +47,8 @@ export class ComfyCancelTimeoutError extends Error {
   constructor(waitMs: number = CANCEL_WAIT_MS) { super(`ComfyUI did not release the image job within ${waitWords(waitMs)}`); this.name = "ComfyCancelTimeoutError"; }
 }
 
-/** How a render's cancel behaves: how long it waits for ComfyUI to let go, and who is told when it starts waiting. */
 export interface RenderStop {
   readonly waitMs?: number;
-  /** The render was stopped (a cancel or its limit) and its cancel is waiting for ComfyUI to let go. */
   readonly stopping?: () => void;
 }
 
@@ -75,32 +67,21 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
       try { await this.stats(); return true; }
       catch { return false; }
     },
-    /** Nothing queued and nothing running, except possibly `except` (our own prompt stuck past its cancel deadline). */
     async idle(except?: string) { const q = await queue(); return q.queue_pending.length === 0 && q.queue_running.every((row) => except !== undefined && row[1] === except); },
     async running(signal?: AbortSignal) { return (await queue(signal)).queue_running.map((row) => String(row[1])); },
-    /**
-     * Asks ComfyUI to let go of its models and cached memory (POST /free), only when its queue is
-     * empty: nothing running and nothing pending. "busy": something was queued, nothing was sent.
-     * Never stops, restarts or reconfigures it.
-     */
     async free(signal?: AbortSignal): Promise<"freed" | "busy"> {
       const q = await queue(signal);
       if (q.queue_running.length > 0 || q.queue_pending.length > 0) return "busy";
       await post("/free", { unload_models: true, free_memory: true }, signal);
       return "freed";
     },
-    /** ComfyUI's /object_info answer: every node class with its inputs, including the file lists. */
+    // external: ComfyUI's /object_info lists every node class with its inputs, file lists included
     async info(signal?: AbortSignal): Promise<Info> {
       return S.decodeUnknownSync(ObjectInfo)(await (await request("/object_info", undefined, signal)).json());
     },
-    /** The file lists and node classes ComfyUI reports. */
     async files(signal?: AbortSignal): Promise<ComfyLists> {
       return comfyLists(await this.info(signal));
     },
-    /**
-     * The file lists and node classes, and the workflows ComfyUI has (sources.ts): its templates and
-     * the person's saved ones, each undefined when that list could not be read.
-     */
     async catalog(signal?: AbortSignal): Promise<{ lists: ComfyLists; templates?: KnownWorkflow[]; saved?: KnownWorkflow[]; installed?: KnownWorkflow[] }> {
       const info = await this.info(signal);
       const lists = comfyLists(info);
@@ -108,19 +89,14 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
       const [templates, saved, installed] = await Promise.all([readTemplates(get, info), readSaved(get, info), readInstalledSetups(get, baseUrl, lists.files)]);
       return { lists, ...templates === undefined ? {} : { templates }, ...saved === undefined ? {} : { saved }, ...installed === undefined ? {} : { installed } };
     },
-    /** ComfyUI's model folders by kind (installed.ts comfyFolders), or undefined when it does not say. */
     async folders(signal?: AbortSignal): Promise<Record<string, string[]> | undefined> {
       try { return comfyFolders(await (await request("/internal/folder_paths", undefined, signal)).json()); }
       catch { return undefined; }
     },
-    /** `extra`: the workflows ComfyUI had, as setups (presets.ts workflowPreset), for a choice that names one. `seed` omitted: a random one. */
-    /** `progress`: the sampler's fraction, and with it what ComfyUI said it is doing, whenever either changes. */
     async render(prompt: string, clientId: string, signal: AbortSignal, progress: (value: number, said?: RenderSaid) => void, fetched: () => void = () => {}, choice: ImageChoice = DEFAULT_CHOICE, extra: readonly Preset[] = [], seed: number = Math.floor(Math.random() * 2 ** 32), stop: RenderStop = {}): Promise<{ bytes: Buffer; seed: number; steps?: number }> {
       const { preset, size } = resolveChoice(choice, extra);
       const graph = jobGraph(preset, await this.info(signal), { prompt, seed, width: size.width, height: size.height });
-      // The steps the graph asks for, for the Pictures screen; a graph with none or several gives none.
       const { steps } = graphFacts(graph);
-      // Do not submit into another client's queue.
       if (!await this.idle()) throw failure("image-busy", "ComfyUI is busy with another job. Wait for it to finish, then retry.");
       signal.throwIfAborted();
       const url = new URL(`${baseUrl}/ws`); url.protocol = url.protocol === "https:" ? "wss:" : "ws:"; url.searchParams.set("clientId", clientId);
@@ -133,7 +109,7 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
       const pending: { type: string; data: Record<string, unknown> }[] = [];
       let done!: () => void, fail!: (error: Error) => void;
       const completed = new Promise<void>((resolve, reject) => { done = () => { settled = true; resolve(); }; fail = (error) => { settled = true; reject(error); }; });
-      // A socket can fail while POST /prompt is still in flight.
+      // why: a socket that fails before the await below would otherwise be an unhandled rejection
       void completed.catch(() => {});
       let fraction = 0, said: RenderSaid | undefined;
       const say = (next: RenderSaid | undefined, value = fraction) => {
@@ -151,7 +127,7 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
         if (frame.type === "progress") {
           const value = frame.data["value"], max = frame.data["max"];
           if (typeof value === "number" && typeof max === "number" && max > 0) {
-            // a tiled decode reports progress too; anything else that counts steps is the sampler
+            // external: ComfyUI's tiled VAE decode sends progress frames just as the sampler does
             const counted = { done: Math.round(value), total: Math.round(max) };
             say(said?.stage === "decoding" ? said : { stage: "sampling", steps: counted }, Math.max(0, Math.min(1, value / max)));
           }
@@ -160,8 +136,9 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
         if (frame.type === "execution_error" || frame.type === "execution_interrupted") fail(failure("image-workflow", `ComfyUI ${frame.type}: ${String(frame.data["exception_message"] ?? "image did not finish")}`));
       };
       const message = (event: MessageEvent) => {
-        if (typeof event.data !== "string") return; // binary preview frames
-        try { handle(S.decodeUnknownSync(Frame)(JSON.parse(event.data) as unknown)); } catch { /* unrelated or malformed progress frame */ }
+        // external: ComfyUI sends its preview images as binary WebSocket frames
+        if (typeof event.data !== "string") return;
+        try { handle(S.decodeUnknownSync(Frame)(JSON.parse(event.data) as unknown)); } catch {}
       };
       const closed = () => fail(failure("image-disconnected", "ComfyUI disconnected while making the image. Retry after it is ready."));
       const aborted = () => fail(new Error("Image cancelled."));
@@ -184,12 +161,13 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
           if (signal.aborted) cancel();
         });
         signal.throwIfAborted();
-        // Do not abort submission: retain prompt_id if cancellation races server acceptance.
+        // why: an aborted POST would lose the id of a prompt ComfyUI had already queued
         promptId = S.decodeUnknownSync(Prompt)(await (await post("/prompt", { prompt: graph, client_id: clientId })).json()).prompt_id;
-        say({ stage: "queued" }); // ComfyUI took it: in its queue until a node of it runs
+        // external: ComfyUI answers POST /prompt once the prompt is queued, before any node runs
+        say({ stage: "queued" });
         for (const frame of pending) handle(frame);
         if (signal.aborted) aborted();
-        // History also handles cache hits and keeps failure bounded if progress stops.
+        // external: ComfyUI may finish a fully cached prompt with no WebSocket end frames
         const pollAbort = new AbortController();
         const poll = async () => {
           while (!isSettled()) {
@@ -220,7 +198,6 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
           if (signal.aborted) stop.stopping?.();
           try { await this.cancelPrompt(promptId, stop.waitMs); }
           catch (error) {
-            // Cleanup must not replace the render failure (especially a dead ComfyUI).
             if (renderFailure) {
               const timedOut = error instanceof ComfyCancelTimeoutError;
               Object.assign(renderFailure, timedOut
@@ -231,19 +208,11 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
         }
       }
     },
-    /**
-     * `waitMs`: how long ComfyUI may take to let go (CANCEL_WAIT_MS on a card; a processor step's
-     * length on the processor). `signal`: ends the wait early with its reason (a job waiting on it).
-     */
     async cancelPrompt(promptId: string, waitMs: number = CANCEL_WAIT_MS, signal?: AbortSignal) {
-      // Bound cleanup even if Comfy ignores interruption. Chat remeasures real
-      // free VRAM before loading after the lease is released.
       const timedOut = new AbortController();
       const timeout = setTimeout(() => timedOut.abort(new ComfyCancelTimeoutError(waitMs)), waitMs);
       const deadline = { signal: signal === undefined ? timedOut.signal : AbortSignal.any([timedOut.signal, signal]) };
-      // One interrupt: ComfyUI keeps it until the prompt stops, which on a processor can take seconds
-      // into a long step. Asked again only after INTERRUPT_AGAIN_MS, for the one it drops: an interrupt
-      // that lands as the prompt starts is cleared by the start (execute_async).
+      // external: ComfyUI keeps an interrupt until the prompt stops, but a prompt's start clears it
       let interruptedAt: number | undefined;
       try {
         for (;;) {

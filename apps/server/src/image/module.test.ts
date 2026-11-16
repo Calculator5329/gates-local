@@ -1,7 +1,7 @@
 import { mkdtemp, open as openFile, readFile, readdir, rm, symlink, writeFile, mkdir } from "node:fs/promises";
 import * as files from "node:fs/promises";
 import { readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import os, { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,7 +16,7 @@ import { comfyInfo, KLEIN_COMPACT_FILES, KLEIN_FILES, MOSS_FILES, SDXL_FILES, ZI
 import { createGpuLease } from "../gpu/lease.ts";
 import { openThreadStore } from "../threads/store.ts";
 import { startWsServer } from "../ws/server.ts";
-import { createImageModule, fitSentence, IMAGES_UNSET, imageFitError, imageRoom, isLocalHost, ranLong, RUN_LIMIT_MS, STUCK_HOLD_MS, STUCK_HOLD_NOTE, waitedLong, type ImageDeps, type ImageModule } from "./module.ts";
+import { canonicalAddress, createImageModule, fitSentence, IMAGES_UNSET, imageFitError, imageRoom, isLocalHost, localAddresses, ranLong, RUN_LIMIT_MS, sharedFolder, STUCK_HOLD_MS, STUCK_HOLD_NOTE, waitedLong, type ImageDeps, type ImageModule } from "./module.ts";
 import { createMemoryOwner } from "../gpu/memory.ts";
 import { createImageHandlers } from "./handlers.ts";
 import { createComfyService } from "./service.ts";
@@ -1636,6 +1636,27 @@ describe("image presets (fake ComfyUI file lists)", () => {
       await rm(path.dirname(folder), { recursive: true, force: true });
     });
 
+    it("a list that cannot be read at a new address keeps nothing from the address read before", async () => {
+      const f = await fixture();
+      f.workflows(routes);
+      const first = await f.module.presets();
+      expect([...first.presets, ...first.others ?? []].map((p) => p.id)).toEqual(expect.arrayContaining(["saved:mine.json", "template:image_sdxl_simple"]));
+      f.workflows({});
+      f.configure({ comfyUrl: "http://localhost:8188" });
+      const there = await f.module.presets();
+      expect(there.readAt).toEqual(expect.any(Number));
+      expect([...there.presets, ...there.others ?? []].map((p) => p.id).filter((id) => id.includes(":"))).toEqual([]);
+    });
+
+    it("a saved workflow read at one address is no setup a send can name at another", async () => {
+      const f = await fixture();
+      f.workflows(routes);
+      expect((await f.module.presets()).presets.map((p) => p.id)).toContain("saved:mine.json");
+      f.configure({ comfyUrl: "http://127.0.0.1:9999", answering: false });
+      await expect(f.module.generate({ prompt: "a tree", choice: { preset: "saved:mine.json", width: 1024, height: 1024 } })).rejects.toThrow("There is no image preset saved:mine.json.");
+      expect(f.events).toEqual([]);
+    });
+
     describe("downloading the files a setup needs", () => {
       // a fake file server in this process: any address answers with a few bytes named after its file
       let version = 1;
@@ -2762,5 +2783,351 @@ describe("what a finished picture and the image status say", () => {
     expect((await small.module.presets()).unloadsChat).toBeUndefined();
     const unread = await fixture();
     expect((await unread.module.presets()).unloadsChat).toBeUndefined();
+  });
+});
+
+const iface = (address: string, family: "IPv4" | "IPv6"): os.NetworkInterfaceInfo => family === "IPv4"
+  ? { address, family, netmask: "255.255.255.0", mac: "00:00:00:00:00:00", internal: false, cidr: null }
+  : { address, family, netmask: "ffff:ffff:ffff:ffff::", mac: "00:00:00:00:00:00", internal: false, cidr: null, scopeid: 0 };
+
+const sixteenGib = async () => nvidia(16 * GIB);
+const twoCards = async (args: readonly string[]) => args[0]?.startsWith("--query-gpu") ? "16303, 4000, 12303\n8192, 0, 8192\n" : "2101, /usr/local/bin/whisper-server, 2150\n";
+
+describe("what the image module keeps, reads and says", () => {
+  it("the folder that holds every download place is the deepest one they share, the first itself when it holds the rest", () => {
+    expect(sharedFolder(["/models/vae"])).toBe(path.resolve("/models/vae"));
+    expect(sharedFolder(["/models", "/models/vae", "/models/loras/style"])).toBe(path.resolve("/models"));
+    expect(sharedFolder(["/models/vae", "/models/loras"])).toBe(path.resolve("/models"));
+    expect(sharedFolder(["/models", "/models-old/vae"])).toBe(path.resolve("/"));
+  });
+
+  it("a kept file list from before node classes were kept lists every setup its files allow, until ComfyUI is read again", async () => {
+    const f = await fixture();
+    const first = (await f.module.presets()).presets.map((p) => p.id);
+    expect(first.length).toBeGreaterThan(0);
+    const kept = JSON.parse(await readFile(path.join(f.dataDir, "image-files.json"), "utf8")) as { classes?: unknown };
+    expect(kept.classes).toEqual(expect.any(Array));
+    const old = { ...kept };
+    delete old.classes;
+    const dataDir = await mkdtemp(path.join(tmpdir(), "gates-image-old-")); dirs.push(dataDir);
+    await writeFile(path.join(dataDir, "image-files.json"), JSON.stringify(old));
+    const restarted = await fixture({ dataDir });
+    restarted.configure({ answering: false });
+    expect((await restarted.module.presets()).presets.map((p) => p.id)).toEqual(first);
+    restarted.configure({ answering: true });
+    await restarted.module.presets();
+    const read = JSON.parse(await readFile(path.join(dataDir, "image-files.json"), "utf8")) as { classes?: unknown };
+    expect(read.classes).toEqual(expect.any(Array));
+  });
+
+  it("a thumbnail that fails is written to the log, and the picture is kept", async () => {
+    const lines: string[] = [];
+    const f = await fixture({ log: (line) => { lines.push(line); }, thumbnail: async () => { throw new Error("encoder failed"); } });
+    const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+    expect(f.events.at(-1)).toMatchObject({ jobId, state: "done" });
+    expect(lines).toContain(`thumbnail for ${jobId} not made: encoder failed`);
+  });
+
+  it("with no memory owner a job measures the card as it is: no chat model is asked to leave and nothing is freed", async () => {
+    const f = await fixture({ memory: undefined });
+    f.ollamaLists(["app-chat"]); f.configure({ freeBytes: 5000 });
+    const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+    expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "wont-fit" });
+    expect(f.measurements()).toBeGreaterThan(0);
+    expect(f.ollamaPosts).toEqual([]);
+    expect(f.calls).not.toContain("/free");
+  });
+
+  it("under 30 GB of system memory the MOSS cells are listed without their style; memory that cannot be read counts as enough", async () => {
+    const portrait = "portraits--moss-official25";
+    const small = await fixture({ gpuStatus: sixteenGib, memTotal: async () => 16 * GIB });
+    expect((await small.module.presets()).presets.find((p) => p.id === portrait)).toBeDefined();
+    expect((await small.module.presets()).presets.find((p) => p.id === portrait)?.style).toBeUndefined();
+    const unread = await fixture({ gpuStatus: sixteenGib, memTotal: async () => { throw new Error("no meminfo"); } });
+    expect((await unread.module.presets()).presets.find((p) => p.id === portrait)?.style).toBeDefined();
+    const large = await fixture({ gpuStatus: sixteenGib, memTotal: async () => 64 * GIB });
+    expect((await large.module.presets()).presets.find((p) => p.id === portrait)?.style).toBeDefined();
+  });
+
+  it("the app's own engine, once installed, is read in place of a test's address when Settings names none", async () => {
+    const f = await fixture({ defaultUrl: "http://127.0.0.1:1", own: ownEngine(() => true) });
+    f.configure({ answering: false });
+    expect(await f.module.status()).toMatchObject({ state: "stopped", baseUrl: "http://127.0.0.1:41234", own: true });
+  });
+
+  it("a shorter hold set for a stuck picture is the one kept: the app stops its engine when that hold ends", async () => {
+    const f = await fixture({ stuckHoldMs: 10_000 }); f.configure({ answering: false, hold: true, stuck: true }); vi.useFakeTimers();
+    const { jobId } = await f.module.generate({ prompt: "a tree" });
+    await vi.waitFor(() => expect(f.events.some((e) => e.progress === 0.5)).toBe(true));
+    f.module.cancel(jobId);
+    await vi.advanceTimersByTimeAsync(30_000 + 9_000);
+    expect(f.lease.status().holder).toBe("image");
+    expect(f.calls).not.toContain("stop");
+    await vi.advanceTimersByTimeAsync(2_000); await f.module.wait(jobId);
+    expect(f.calls.filter((c) => c === "stop")).toHaveLength(1);
+    expect(f.lease.status().holder).toBeNull();
+  });
+
+  it("the card's room is unknown until it is read, and unknown again for a ComfyUI on another computer", async () => {
+    const f = await fixture({ gpuStatus: async () => nvidia(16 * GIB) });
+    expect(f.module.engine().room).toBeUndefined();
+    await f.module.status();
+    expect(f.module.engine().room).toBe(16 * GIB);
+    f.configure({ comfyUrl: "http://remote-comfy:8188" });
+    await f.module.status();
+    expect(f.module.engine().room).toBeUndefined();
+  });
+
+  it("images still waiting for their turn count as active jobs", async () => {
+    const f = await fixture();
+    const release = await f.lease.acquire("chat");
+    const first = await f.module.generate({ prompt: "a tree" });
+    const second = await f.module.generate({ prompt: "a tree" });
+    expect(f.module.activeJobs?.()).toBe(2);
+    release(); await f.module.wait(first.jobId); await f.module.wait(second.jobId);
+    expect(f.module.activeJobs?.()).toBe(0);
+  });
+
+  it("reading the held engine value asks neither ComfyUI nor the GPU anything", async () => {
+    let reads = 0;
+    const f = await fixture({ gpuStatus: async () => { reads++; return nvidia(16 * GIB); } });
+    await f.module.status();
+    await f.presetsSent(1);
+    const before = { calls: f.calls.length, reads, measured: f.measurements() };
+    for (let i = 0; i < 3; i++) expect(f.module.engine()).toMatchObject({ state: "ready", room: 16 * GIB });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect({ calls: f.calls.length, reads, measured: f.measurements() }).toEqual(before);
+  });
+
+  it("a file list read at one address is not used at another, also after a restart", async () => {
+    const f = await fixture();
+    expect((await f.module.presets()).presets.length).toBeGreaterThan(0);
+    f.configure({ comfyUrl: "http://127.0.0.1:9999", answering: false });
+    const elsewhere = await f.module.presets();
+    expect(elsewhere.presets).toEqual([]);
+    expect(elsewhere.readAt).toBeUndefined();
+    expect(f.module.engine().files).toBeUndefined();
+    const restarted = await fixture({ dataDir: f.dataDir });
+    restarted.configure({ comfyUrl: "http://127.0.0.1:9999", answering: false });
+    expect((await restarted.module.presets()).readAt).toBeUndefined();
+  });
+
+  it("a setup can run only once a file list is read and the card has room for a default", async () => {
+    const card = await fixture({ gpuStatus: async () => nvidia(16 * GIB) });
+    card.configure({ answering: false });
+    await card.module.status();
+    expect(card.module.runnable()).toBe(false);
+    card.configure({ answering: true });
+    await card.module.presets();
+    expect(card.module.runnable()).toBe(true);
+    const small = await fixture({ gpuStatus: async () => nvidia(2 * GIB) });
+    expect((await small.module.presets()).presets.length).toBeGreaterThan(0);
+    expect(small.module.runnable()).toBe(false);
+  });
+
+  it("what a setup's download has left is unknown with nowhere to put it, or while a missing file's size is unknown", async () => {
+    const f = await fixture(); f.configure({ answering: false });
+    expect(await f.module.setupLeft("flux2-klein-4b-compact")).toBeUndefined();
+    const picked = await mkdtemp(path.join(tmpdir(), "gates-image-picked-")); dirs.push(picked);
+    f.pickFolder(picked);
+    expect(await f.module.setupLeft("flux2-klein-4b-compact")).toBe(4_070_624_520 + 3_848_213_998 + 336_211_292);
+    expect(await f.module.setupLeft("no-such-setup")).toBeUndefined();
+    const unsized = await fixture({ download: { records: false } }); unsized.configure({ answering: false });
+    unsized.pickFolder(picked);
+    expect(await unsized.module.setupLeft("flux2-klein-4b-compact")).toBeUndefined();
+  });
+
+  it("a reclaim cancelled once the stop has begun lets that stop end: the engine is stopped and the claim given back", async () => {
+    let up = false;
+    let stopped: (() => void) | undefined;
+    const reclaim = new AbortController();
+    let f!: Awaited<ReturnType<typeof fixture>>;
+    f = await fixture({ idleMs: 60_000, service: {
+      inspect: async () => ({ present: true, active: up, activeState: up ? "active" : "inactive", pid: 42 }),
+      start: async () => { up = true; f.configure({ answering: true }); },
+      stop: () => new Promise<void>((resolve) => {
+        reclaim.abort(new Error("reclaim cancelled"));
+        stopped = () => { up = false; f.configure({ answering: false }); resolve(); };
+      }),
+    } });
+    f.configure({ answering: false });
+    const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+    expect(f.module.current().owner).toBe("app");
+    const idle = f.module.stopIdle(reclaim.signal);
+    await vi.waitFor(() => expect(stopped).toBeDefined());
+    stopped?.();
+    await expect(idle).resolves.toBeUndefined();
+    expect(f.module.current()).toMatchObject({ state: "stopped", owner: "none" });
+    expect(f.module.reclaimable()).toBeUndefined();
+    expect(f.lease.status().holder).toBeNull();
+  });
+
+  it("the engine the app started can be reclaimed only while no image job runs or waits, and never after close", async () => {
+    const external = await fixture();
+    const outside = await external.module.generate({ prompt: "a tree" }); await external.module.wait(outside.jobId);
+    expect(external.module.reclaimable()).toBeUndefined();
+    const f = await fixture({ idleMs: 60_000 }); f.configure({ answering: false });
+    expect(f.module.reclaimable()).toBeUndefined();
+    const first = await f.module.generate({ prompt: "a tree" }); await f.module.wait(first.jobId);
+    expect(f.module.reclaimable()).toBe(42);
+    const release = await f.lease.acquire("chat");
+    const waiting = await f.module.generate({ prompt: "a tree" });
+    expect(f.module.reclaimable()).toBeUndefined();
+    release(); await f.module.wait(waiting.jobId);
+    expect(f.module.reclaimable()).toBe(42);
+    await f.module.close();
+    expect(f.module.reclaimable()).toBeUndefined();
+  });
+
+  it("with no ComfyUI and none to start, the card, the status and Settings read the same words, which name no service or unit", async () => {
+    const f = await fixture(); f.configure({ answering: false, present: false });
+    expect(await f.module.status()).toMatchObject({ state: "missing", detail: IMAGES_UNSET });
+    const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+    expect(f.events.at(-1)).toMatchObject({ state: "error", message: IMAGES_UNSET });
+    expect(f.module.current()).toMatchObject({ state: "missing", detail: IMAGES_UNSET });
+    expect(IMAGES_UNSET).not.toMatch(/service|systemd|systemctl|\bunit\b/i);
+  });
+
+  it("an IP address has one spelling: lowercase, without brackets or zone, a mapped IPv4 as plain IPv4; a name comes back lowercased", () => {
+    expect(canonicalAddress("FE80::1%eth0")).toBe("fe80::1");
+    expect(canonicalAddress("[FE80:0:0:0::1%25eth0]")).toBe("fe80::1");
+    expect(canonicalAddress("2001:DB8:0:0:0:0:0:1")).toBe("2001:db8::1");
+    expect(canonicalAddress("[::FFFF:192.168.1.20]")).toBe("192.168.1.20");
+    expect(canonicalAddress("::ffff:c0a8:114")).toBe("192.168.1.20");
+    expect(canonicalAddress("MyBox.Home.ARPA")).toBe("mybox.home.arpa");
+  });
+
+  it("this machine's addresses are read from its interfaces in that one spelling", () => {
+    vi.spyOn(os, "networkInterfaces").mockReturnValue({
+      lo: [iface("127.0.0.1", "IPv4"), iface("::1", "IPv6")],
+      eth0: [iface("192.168.1.20", "IPv4"), iface("FE80::1", "IPv6"), iface("::FFFF:C0A8:0115", "IPv6")],
+    });
+    expect(localAddresses()).toEqual(["127.0.0.1", "::1", "192.168.1.20", "fe80::1", "192.168.1.21"]);
+  });
+
+  it("a window that cannot be told does not strand the picture: it is made and the card is given back", async () => {
+    const f = await fixture({ push: () => { throw new Error("the window closed"); } });
+    const thread = f.store.createThread();
+    const { jobId } = await f.module.generate({ prompt: "a tree", threadId: thread.id }); await f.module.wait(jobId);
+    expect(f.store.getThread(thread.id).messages[0]).toMatchObject({ id: jobId, imageJob: { state: "done" } });
+    expect(f.lease.status().holder).toBeNull();
+    expect(f.module.activeJobs?.()).toBe(0);
+  });
+
+  it("a picture's busy and ready again sends no window the presets read again", async () => {
+    const f = await fixture();
+    f.choose({ preset: "moss-image", width: 1024, height: 1024 });
+    await f.module.status();
+    await f.presetsSent(1);
+    const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+    expect(f.events.at(-1)).toMatchObject({ state: "done" });
+    expect(f.module.current().state).toBe("ready");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(f.presets).toHaveLength(1);
+  });
+
+  it("a kept file list that cannot be read or is not a list is no list: ComfyUI is read again", async () => {
+    const first = await fixture();
+    await first.module.presets();
+    const kept = JSON.parse(await readFile(path.join(first.dataDir, "image-files.json"), "utf8")) as Record<string, unknown>;
+    for (const text of ["{not json", JSON.stringify({ ...kept, readAt: "yesterday" })]) {
+      const dataDir = await mkdtemp(path.join(tmpdir(), "gates-image-kept-")); dirs.push(dataDir);
+      await writeFile(path.join(dataDir, "image-files.json"), text);
+      const f = await fixture({ dataDir }); f.configure({ answering: false });
+      const stopped = await f.module.presets();
+      expect(stopped.presets, text).toEqual([]);
+      expect(stopped.readAt, text).toBeUndefined();
+      f.configure({ answering: true });
+      expect((await f.module.presets()).readAt, text).toEqual(expect.any(Number));
+    }
+  });
+
+  it("with image generation off, an engine whose service cannot be read is never said to be nowhere", async () => {
+    const f = await fixture({ service: { inspect: async () => { throw new Error("systemctl timed out"); }, start: async () => {}, stop: async () => {} } });
+    f.configure({ enabled: false, answering: false });
+    expect(await f.module.status()).toMatchObject({ state: "off" });
+    expect((await f.module.status()).nowhere).toBeUndefined();
+  });
+
+  it("the fit reads the largest card's free memory, never every card's together", async () => {
+    const f = await fixture({ readGpu: undefined, runNvidiaSmi: twoCards, requiredBytes: 16 * GIB });
+    const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+    expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "wont-fit" });
+    expect(f.module.current().detail).toContain("needs 16.0 GiB, 12.0 GiB free");
+    expect(f.calls).not.toContain("/prompt");
+  });
+
+  it("the processor build frees nothing for a picture: no chat model is asked to leave and the engine is not asked to free", async () => {
+    const own = { active: false };
+    let f!: Awaited<ReturnType<typeof fixture>>;
+    f = await fixture({ idleMs: 60_000, own: {
+      installed: () => true, address: () => "http://127.0.0.1:41234",
+      build: () => ({ version: "1.0.0-cpu", cpu: true }),
+      inspect: async () => ({ present: true, active: own.active, activeState: own.active ? "active" : "inactive", pid: own.active ? 77 : 0 }),
+      start: async () => { own.active = true; f.configure({ answering: true, cpu: true }); },
+      stop: async () => { own.active = false; f.configure({ answering: false }); },
+      onExit: () => {},
+    } });
+    f.configure({ answering: false }); f.ollamaLists(["app-chat"]);
+    f.choose({ preset: "z-image-int8", width: 1024, height: 1024 });
+    const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+    expect(f.events.at(-1)).toMatchObject({ state: "done" });
+    expect(f.ollamaPosts).toEqual([]);
+    expect(f.calls).not.toContain("/free");
+    expect(f.measurements()).toBe(0);
+  });
+
+  it("a refusal never names the app's own running engine as the one to close, though it holds the most", async () => {
+    const f = await fixture({ idleMs: 60_000 }); f.configure({ answering: false });
+    f.choose({ preset: "z-image-int8", width: 1024, height: 1024 });
+    const first = await f.module.generate({ prompt: "a tree" }); await f.module.wait(first.jobId);
+    expect(f.module.engine()).toMatchObject({ owner: "app", pid: 42 });
+    f.configure({ freeBytes: 100, resident: 50_000 });
+    f.choose({ preset: "moss-image", width: 1024, height: 1024 });
+    const second = await f.module.generate({ prompt: "a tree" }); await f.module.wait(second.jobId);
+    const said = f.events.at(-1);
+    expect(said).toMatchObject({ jobId: second.jobId, state: "error", errorKind: "wont-fit" });
+    expect(said?.message).not.toContain("42");
+    expect(said?.message).not.toContain("close it");
+  });
+
+  it("the app's own engine that ends while it starts fails the start at once, in those words, not at the timeout", async () => {
+    const own = { up: false, failed: 0 };
+    const f = await fixture({ startupTimeoutMs: 2_000, own: {
+      installed: () => true, address: () => "http://127.0.0.1:41234",
+      inspect: async () => {
+        if (!own.up) return { present: true, active: false, activeState: "inactive", pid: 0 };
+        own.up = false;
+        return { present: true, active: true, activeState: "active", pid: 77 };
+      },
+      start: async () => { own.up = true; },
+      stop: async () => {}, onExit: () => {},
+      failed: () => { own.failed++; return undefined; },
+    } });
+    f.configure({ answering: false });
+    const at = Date.now();
+    await expect(f.module.start()).rejects.toThrow("ComfyUI stopped while it was starting. Check its log, then try again.");
+    expect(Date.now() - at).toBeLessThan(1_000);
+    expect(f.module.engine().pid).toBeUndefined();
+  });
+
+  it("a picture stopped while the app's own engine starts is nobody's failure: no build is passed over", async () => {
+    let finish: (() => void) | undefined;
+    const own = { failed: 0 };
+    const f = await fixture({ own: {
+      installed: () => true, address: () => "http://127.0.0.1:41234",
+      inspect: async () => ({ present: true, active: false, activeState: "inactive", pid: 0 }),
+      start: () => new Promise<void>((resolve) => { finish = resolve; }),
+      stop: async () => {}, onExit: () => {},
+      failed: () => { own.failed++; return undefined; },
+    } });
+    f.configure({ answering: false });
+    const { jobId } = await f.module.generate({ prompt: "a tree" });
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    f.module.cancel(jobId);
+    finish?.();
+    await f.module.wait(jobId);
+    expect(f.events.at(-1)).toMatchObject({ jobId, state: "cancelled" });
+    expect(own.failed).toBe(0);
   });
 });

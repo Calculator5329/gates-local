@@ -11,7 +11,7 @@ import { InstallError } from "../runtime/install.ts";
 import type { InstallManifest } from "../runtime/schemas.ts";
 import { removeDir, startReleaseServer, tmpDir, type ReleaseServer } from "../runtime/test-fakes.ts";
 import type { InstallProgress } from "../runtime/types.ts";
-import { ENGINE_OFFERED, engineDir, engineOffered, engineRoot, installEngine } from "./engine.ts";
+import { ENGINE_OFFERED, engineDir, engineFiles, engineKnob, engineOffered, engineRoot, engineTarget, installEngine } from "./engine.ts";
 
 describe("engineOffered, the release switch and the owner's try-it switch", () => {
   it("follows ENGINE_OFFERED unless GATES_LOCAL_OFFER_ENGINE is 1, and refuses any other value", () => {
@@ -78,5 +78,32 @@ describe("installEngine", () => {
     expect((e as InstallError).code).toBe("extract-failed");
     expect((e as InstallError).message).toContain("Unpacking the image engine failed");
     expect(existsSync(engineDir(appDataDir, "0.0.1-test"))).toBe(false);
+  });
+});
+
+const within = (dir: string, file: string) => !path.relative(dir, file).startsWith("..") && !path.isAbsolute(path.relative(dir, file));
+
+describe("the engine is the app's own: nothing system-wide", () => {
+  it("installs, stages and runs only inside the app's data folder, with the Python of its own tree", () => {
+    for (const layout of ["windows-portable", "uv-venv"] as const) {
+      const target = engineTarget(appDataDir, layout);
+      expect([target.root, target.stagingRoot].every((dir) => within(appDataDir, dir)), layout).toBe(true);
+      const tree = engineDir(appDataDir, "0.0.1-test");
+      const files = engineFiles(tree, layout);
+      for (const file of [files.python, files.main, files.cwd]) expect(within(tree, file), file).toBe(true);
+    }
+  });
+});
+
+describe("engineKnob, the tests' own engine", () => {
+  const knob = { manifest: { version: "0.0.1-test", url: "http://fake/engine.7z", sha256: "0".repeat(64), sizeBytes: 1, format: "7z", verified: true, source: "test" }, layout: "uv-venv", address: "http://fake:1" };
+
+  it("unset or empty is no knob; a malformed one is an error, never the real download", () => {
+    expect(engineKnob(undefined)).toBeUndefined();
+    expect(engineKnob("")).toBeUndefined();
+    expect(engineKnob(JSON.stringify(knob))).toEqual(knob);
+    expect(() => engineKnob("{not json")).toThrow("GATES_LOCAL_IMAGE_ENGINE is not JSON");
+    expect(() => engineKnob(JSON.stringify({ ...knob, layout: "docker" }))).toThrow(/^GATES_LOCAL_IMAGE_ENGINE: /);
+    expect(() => engineKnob(JSON.stringify({ layout: "uv-venv" }))).toThrow(/^GATES_LOCAL_IMAGE_ENGINE: /);
   });
 });

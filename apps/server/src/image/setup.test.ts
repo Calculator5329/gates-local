@@ -1,11 +1,12 @@
 // Which Linux build Set up images fetches: a computer whose card runs pictures gets the card build as
 // before, one with none the processor build. Fake plans and a fake image module; nothing is downloaded.
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { statfs } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { removeDir, tmpDir } from "../runtime/test-fakes.ts";
 import type { InstallProgress } from "../runtime/types.ts";
-import { engineDir, engineFiles } from "./engine.ts";
+import { engineDir, engineFiles, engineFor, PINNED_ENGINE_WINDOWS, PINNED_ENGINE_WINDOWS_CU126 } from "./engine.ts";
 import { LINUX_ENGINE, linuxBuild } from "./linux-build.ts";
 import { createOwnComfy, writeDevice } from "./own.ts";
 import { createImageHandlers } from "./handlers.ts";
@@ -448,5 +449,153 @@ describe("what the setup read says before anything is fetched", () => {
     expect(await setup.info()).toMatchObject({ freeBytes: 7 * GIB, engine: { version: "1.0.0-cpu" }, cpu: CPU_SECONDS });
     room = 2 * GIB;
     expect((await setup.info()).why).toBe(smallCard(2 * GIB));
+  });
+});
+
+/** The Windows engine for a card of this name, as main.ts hands it to the setup. */
+const windowsArchive = (gpuName: string | undefined): EnginePlan | undefined => {
+  const pick = engineFor("win32", "x64", gpuName);
+  return pick === undefined ? undefined : { kind: "archive", ...pick };
+};
+
+/** An image module whose model download is under way until the setup is told it ended. */
+const downloading = (): ImageSetupDeps["image"] => ({ ...imageAt(16 * GIB), download: async () => ({ files: ["a", "b", "c"] }), setupLeft: async () => 900 });
+
+type Pushed = { step: string; completedBytes: number; totalBytes: number; message?: string };
+
+describe("which engine and which model", () => {
+  it("on Windows x64 the engine is one pinned archive, unpacked as ComfyUI's portable build; other systems get none from it", () => {
+    expect(engineFor("win32", "x64", "NVIDIA GeForce RTX 4060")).toEqual({ manifest: PINNED_ENGINE_WINDOWS, layout: "windows-portable" });
+    expect(engineFor("win32", "x64")).toEqual({ manifest: PINNED_ENGINE_WINDOWS, layout: "windows-portable" });
+    for (const [platform, arch] of [["win32", "arm64"], ["linux", "x64"], ["darwin", "arm64"]] as const) expect(engineFor(platform, arch), `${platform} ${arch}`).toBeUndefined();
+  });
+
+  it("the setup asks for the engine by the card's name: an older card gets the cu126 build, a newer one the current", async () => {
+    const asked: (string | undefined)[] = [];
+    const at = (name: string) => fixture(8 * GIB, fakeBuild("1.0.0", 3000, []), {
+      engine: (gpuName) => { asked.push(gpuName); return windowsArchive(gpuName); },
+      gpuStatus: async () => ({ vendor: "nvidia", name, totalBytes: 8 * GIB, occupants: [], systemMemoryAvailableBytes: 0, measuredAt: 0 }) as never,
+    }).setup;
+    expect((await at("NVIDIA GeForce GTX 1080").info()).engine).toMatchObject({ version: PINNED_ENGINE_WINDOWS_CU126.version, bytes: PINNED_ENGINE_WINDOWS_CU126.sizeBytes });
+    expect((await at("NVIDIA GeForce RTX 4060").info()).engine).toMatchObject({ version: PINNED_ENGINE_WINDOWS.version, bytes: PINNED_ENGINE_WINDOWS.sizeBytes });
+    expect(asked).toEqual(["NVIDIA GeForce GTX 1080", "NVIDIA GeForce RTX 4060"]);
+  });
+
+  it("the setup's one download is compact Klein on every tier: no card, a small card and a large one", async () => {
+    const plan: EnginePlan = { ...fakeBuild("1.0.0", 3000, []), cpu: fakeBuild("1.0.0-cpu", 1000, []) };
+    for (const room of [0, 4 * GIB, 6 * GIB, 8 * GIB, 12 * GIB, 16 * GIB, 24 * GIB, 32 * GIB]) {
+      const fetched: string[] = [];
+      const { setup } = fixture(room, plan, { image: imageAt(room, fetched) });
+      expect((await setup.info()).model, String(room)).toMatchObject({ preset: "flux2-klein-4b-compact" });
+      await setup.run();
+      expect(await settled(setup)).toMatchObject({ progress: { step: "done" } });
+      expect(fetched, String(room)).toEqual(["flux2-klein-4b-compact"]);
+    }
+  });
+});
+
+describe("the disk the setup reads", () => {
+  it("with a folder picked for image downloads, the disk the setup says it needs is the engine's alone: the model goes to that folder", async () => {
+    const plan = fakeBuild("1.0.0", 3000, []);
+    const app = await fixture(16 * GIB, plan).setup.info();
+    expect(app.needBytes).toBe(3000 * 4 + app.model!.bytes);
+    const picked = await fixture(16 * GIB, plan, { pickedFolder: () => "/mnt/models" }).setup.info();
+    expect(picked.needBytes).toBe(3000 * 4);
+    expect(picked.model).toEqual(app.model);
+    const tight = fixture(16 * GIB, plan, { pickedFolder: () => "/mnt/models", freeBytes: async () => 3000 * 4 }).setup;
+    await expect(tight.run()).resolves.toEqual({ started: true });
+    expect(await settled(tight)).toMatchObject({ progress: { step: "done" } });
+  });
+
+  it("with no free-space reader given, the setup reads the drive of the app's folder, made or not", async () => {
+    const appDataDir = tmpDir("setup-disk");
+    try {
+      const s = await statfs(appDataDir);
+      const info = await fixture(16 * GIB, fakeBuild("1.0.0", 3000, []), { appDataDir: path.join(appDataDir, "not", "made"), freeBytes: undefined }).setup.info();
+      expect(info.freeBytes).toBeDefined();
+      expect(Math.abs(info.freeBytes! - s.bavail * s.bsize)).toBeLessThan(GIB);
+    } finally { removeDir(appDataDir); }
+  });
+});
+
+describe("the device follows the card", () => {
+  it("a card that reads just under 4 GiB is a 4 GB card and runs pictures; one nearer 3 GB does not", async () => {
+    const plan = fakeBuild("1.0.0", 3000, []);
+    for (const [gib, devices] of [[3.6, ["gpu"]], [3.4, []]] as const) {
+      const at = fixture(16 * GIB, plan, { own: { installed: () => true }, gpuStatus: card(gib) });
+      await at.setup.info();
+      expect([...new Set(at.devices)], String(gib)).toEqual(devices);
+    }
+  });
+
+  it("a card too small for pictures, or one nvidia-smi cannot read, leaves the device the engine was set to", async () => {
+    const plan = fakeBuild("1.0.0", 3000, []);
+    const unread: ImageSetupDeps["gpuStatus"][] = [card(2), async () => ({}) as never, async () => { throw new Error("nvidia-smi failed"); }];
+    for (const [i, gpuStatus] of unread.entries()) {
+      const at = fixture(16 * GIB, plan, { own: { installed: () => true }, gpuStatus });
+      await at.setup.info();
+      expect(at.devices, String(i)).toEqual([]);
+    }
+    const none = fixture(0, plan, { own: { installed: () => true }, gpuStatus: card("none") });
+    await none.setup.info();
+    expect(none.devices).toContain("cpu");
+  });
+
+  it("a processor engine busy with a picture is left to finish: the setup ends, and the start after its idle stop is the card build's", async () => {
+    const appDataDir = tmpDir("setup-card-busy");
+    try {
+      writeTree(appDataDir, "1.0.0-cpu");
+      writeDevice(appDataDir, "cpu");
+      const own = createOwnComfy({ appDataDir, port: 1, platform: "linux" });
+      const calls: string[] = [];
+      const plan: EnginePlan = { ...fakeBuild("1.0.0", 3000, []), run: async () => { writeTree(appDataDir, "1.0.0"); }, cpu: fakeBuild("1.0.0-cpu", 1000, []) };
+      const image = {
+        status: async () => ({ state: "busy", owner: "app" }) as never, engine: () => ({ owner: "app", state: "busy", room: 0 }) as never,
+        start: async () => { calls.push("start"); return {} as never; },
+        download: async () => ({ files: [] }),
+        stopIdle: async () => { calls.push("stopIdle"); },
+      };
+      const setup = createImageSetup({ appDataDir, own, image, setDevice: (d) => writeDevice(appDataDir, d), engine: () => plan, gpuStatus: card(16), settingsAddress: () => undefined, push: () => {}, freeBytes: async () => 500 * GIB });
+      await setup.run();
+      expect(await settled(setup)).toMatchObject({ progress: { step: "done", toCard: true } });
+      expect(calls).toEqual(["stopIdle", "start"]);
+      expect(own.build?.()).toEqual({ version: "1.0.0", cpu: false });
+    } finally { removeDir(appDataDir); }
+  });
+});
+
+describe("the model step", () => {
+  it("the model step counts the engine's bytes first, then the model's share of what the download says, against the whole run", async () => {
+    const pushed: Pushed[] = [];
+    const { setup } = fixture(16 * GIB, fakeBuild("1.0.0", 3000, []), { image: downloading(), push: (_c, p) => { pushed.push(p); } });
+    await setup.run();
+    await vi.waitFor(() => expect(pushed.at(-1)).toEqual({ step: "model", completedBytes: 3000, totalBytes: 3900 }));
+    const from = pushed.length, preset = "flux2-klein-4b-compact";
+    setup.saw("image.download", { preset, file: 1, files: 3, state: "downloading", completedBytes: 10, totalBytes: 100, setupCompletedBytes: 300, setupTotalBytes: 900 });
+    setup.saw("image.download", { preset, file: 2, files: 3, state: "downloading", completedBytes: 50, totalBytes: 100 });
+    setup.saw("image.download", { preset: "flux2-klein-4b", file: 3, files: 3, state: "downloading", completedBytes: 100, totalBytes: 100 });
+    setup.saw("image.pull", { preset, file: 3, files: 3, state: "downloading", completedBytes: 100, totalBytes: 100 });
+    expect(pushed.slice(from)).toEqual([{ step: "model", completedBytes: 3300, totalBytes: 3900 }, { step: "model", completedBytes: 3450, totalBytes: 3900 }]);
+    setup.saw("image.download", { preset, file: 3, files: 3, state: "done", completedBytes: 100, totalBytes: 100, ended: true });
+    expect(await settled(setup)).toMatchObject({ progress: { step: "done", completedBytes: 3900, totalBytes: 3900 } });
+  });
+
+  it("after the model download ends the run says the engine's start, and a download that ends in error ends the setup with its words", async () => {
+    const preset = "flux2-klein-4b-compact";
+    const pushed: Pushed[] = [];
+    const { setup } = fixture(16 * GIB, fakeBuild("1.0.0", 3000, []), { image: downloading(), push: (_c, p) => { pushed.push(p); } });
+    await setup.run();
+    await vi.waitFor(() => expect(pushed.at(-1)?.step).toBe("model"));
+    const from = pushed.length;
+    setup.saw("image.download", { preset, file: 3, files: 3, state: "done", completedBytes: 100, totalBytes: 100, ended: true });
+    await vi.waitFor(() => expect(pushed.at(-1)?.step).toBe("done"));
+    expect(pushed.slice(from).map((p) => p.step)).toEqual(["starting", "done"]);
+    const failed: Pushed[] = [];
+    const again = fixture(16 * GIB, fakeBuild("1.0.0", 3000, []), { image: downloading(), push: (_c, p) => { failed.push(p); } }).setup;
+    await again.run();
+    await vi.waitFor(() => expect(failed.at(-1)?.step).toBe("model"));
+    again.saw("image.download", { preset, file: 2, files: 3, state: "error", completedBytes: 50, totalBytes: 100, ended: true, message: "Hugging Face answered 503." });
+    await vi.waitFor(() => expect(failed.at(-1)).toMatchObject({ step: "error", message: "Hugging Face answered 503." }));
+    expect(failed.map((p) => p.step)).not.toContain("starting");
   });
 });

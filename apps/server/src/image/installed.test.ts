@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { comfyInfo, KLEIN_FILES, SDXL_FILES } from "../../test/comfy/info.ts";
-import { familyOf, installedWorkflows, readHeader, readInstalled, readInstalledSetups, type Header } from "./installed.ts";
+import { comfyFolders, familyOf, fewStep, installedWorkflows, readHeader, readInstalled, readInstalledSetups, type Header } from "./installed.ts";
 import { comfyLists, jobGraph, listPresets, resolveChoice, workflowPreset } from "./presets.ts";
 
 /** A safetensors file's header and nothing after it: the 8-byte length, then the JSON. */
@@ -15,6 +15,13 @@ const safetensors = (tensors: Record<string, readonly number[]>, metadata: Recor
   const length = Buffer.alloc(8);
   length.writeBigUInt64LE(BigInt(json.length));
   return Buffer.concat([length, json]);
+};
+/** A file of an 8-byte length and then this text, as a safetensors header is laid out. */
+const rawHeader = (text: string) => {
+  const json = Buffer.from(text);
+  const head = Buffer.alloc(8);
+  head.writeBigUInt64LE(BigInt(json.length));
+  return Buffer.concat([head, json]);
 };
 const header = (shapes: Record<string, readonly number[]>, metadata: Record<string, string> = {}): Header => ({ shapes, metadata });
 const range = (n: number) => Array.from({ length: n }, (_, i) => i);
@@ -198,5 +205,57 @@ describe("the files in ComfyUI's folders", () => {
     expect(asked).toEqual([]);
     expect((await readInstalledSetups(get, "http://127.0.0.1:9", lists().files))?.map((w) => w.id)).toContain("file:checkpoints/xl/juggernaut.safetensors");
     expect(await readInstalledSetups(async () => { throw new Error("404"); }, "http://localhost:9", lists().files)).toBeUndefined();
+  });
+});
+
+describe("what an installed file is", () => {
+  it("an SDXL LoRA is known by its UNet's input blocks alone", () => {
+    expect(familyOf(header({ "lora_unet_input_blocks_4_1_proj_in.lora_down.weight": [16, 640] }), "loras")).toBe("sdxl");
+  });
+
+  it("an SD 1.5 LoRA is known by its UNet's down blocks alone, or by its one text encoder alone", () => {
+    expect(familyOf(header({ "lora_unet_down_blocks_0_attentions_0_proj_in.lora_down.weight": [16, 320] }), "loras")).toBe("sd15");
+    expect(familyOf(header({ "lora_te_text_model_encoder_layers_0_mlp_fc1.lora_down.weight": [16, 768] }), "loras")).toBe("sd15");
+  });
+
+  it("a few-step model is known by lightning, turbo, hyper or lcm, in its name or in its metadata alone", () => {
+    for (const word of ["Lightning", "Turbo", "Hyper", "LCM"]) {
+      expect(fewStep(`juggernaut-${word}.safetensors`, header({})), word).toBe(true);
+      expect(fewStep("juggernaut.safetensors", header({}, { "modelspec.title": `Juggernaut XL ${word}` })), word).toBe(true);
+    }
+    expect(fewStep("juggernaut.safetensors", header({}, { "modelspec.title": "Juggernaut XL" }))).toBe(false);
+  });
+
+  it("a checkpoint of a family Image mode has no setup for is listed, refused with that reason", () => {
+    expect(installedWorkflows([{ kind: "checkpoints", name: "flux1-dev.safetensors", bytes: 1000, family: "flux1" }]).map(workflowPreset)).toEqual([
+      expect.objectContaining({ id: "file:checkpoints/flux1-dev.safetensors", name: "flux1-dev", refused: "A FLUX.1 checkpoint; Image mode has no FLUX.1 setup to run it in." }),
+    ]);
+  });
+
+  it("ComfyUI's folder answer keeps each kind's absolute folders in order, and nothing else", () => {
+    expect(comfyFolders({ checkpoints: ["/models/checkpoints", "relative/checkpoints", 3, null, "/more/checkpoints"], loras: "/not/a/list" })).toEqual({ checkpoints: ["/models/checkpoints", "/more/checkpoints"] });
+    for (const answer of [null, [], "folders", 3, undefined]) expect(comfyFolders(answer), String(answer)).toBeUndefined();
+  });
+});
+
+describe("files that are not read as models", () => {
+  let root: string;
+  beforeAll(async () => { root = await mkdtemp(path.join(tmpdir(), "gates-installed-not-")); });
+  afterAll(async () => { await rm(root, { recursive: true, force: true }); });
+
+  it("a file shorter than its length, a header that is not JSON, or JSON that is not an object reads as nothing", async () => {
+    const cases: Record<string, Buffer> = { "short.safetensors": Buffer.from([1, 0, 0, 0, 0]), "text.safetensors": rawHeader("{not json}"), "array.safetensors": rawHeader('[{"shape":[1]}]'), "object.safetensors": rawHeader('{"__metadata__":{"a":"b"}}') };
+    for (const [name, bytes] of Object.entries(cases)) await writeFile(path.join(root, name), bytes);
+    for (const name of ["short.safetensors", "text.safetensors", "array.safetensors"]) expect(await readHeader(path.join(root, name)), name).toBeUndefined();
+    expect(await readHeader(path.join(root, "object.safetensors"))).toEqual({ metadata: { a: "b" }, shapes: {} });
+  });
+
+  it("a folder under a model's name is passed over for the file of that name in ComfyUI's next folder", async () => {
+    const file = safetensors(SDXL);
+    await mkdir(path.join(root, "first", "xl", "juggernaut.safetensors"), { recursive: true });
+    await mkdir(path.join(root, "second", "xl"), { recursive: true });
+    await writeFile(path.join(root, "second", "xl", "juggernaut.safetensors"), file);
+    const read = await readInstalled({ checkpoints: [path.join(root, "first"), path.join(root, "second")] }, { "CheckpointLoaderSimple.ckpt_name": ["xl/juggernaut.safetensors"] });
+    expect(read).toEqual([{ kind: "checkpoints", name: "xl/juggernaut.safetensors", bytes: file.length, family: "sdxl" }]);
   });
 });

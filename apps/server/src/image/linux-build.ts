@@ -1,16 +1,4 @@
-// The image engine on Linux x64. No portable exists, so the tree is built from pinned parts, with
-// the same installer as Ollama and the Windows engine (installPinned: pinned URL, sha256 checked
-// while streaming, staged and renamed) for the two archives, and uv for the rest:
-//
-//   runtime/uv/<uv version>/            uv, one static binary (pinned archive)
-//   runtime/comfyui-src/<version>/      ComfyUI's source (pinned archive)
-//   runtime/uv-python/                  uv's standalone Python (uv checks it against the
-//                                       digests built into the pinned uv)
-//   runtime/comfyui/<version>/          the engine: ComfyUI/ and venv/, built in a staging
-//                                       folder beside it and renamed into place whole
-//
-// The wheels (torch and ComfyUI's requirements) come from `uv pip sync --require-hashes` against
-// the lock below: a wheel whose hash is not in the lock is refused. No root, no system Python.
+// external: uv checks the Python it downloads against digests built into the uv binary
 import { type ChildProcess, spawn } from "node:child_process";
 import { constants, readFileSync } from "node:fs";
 import { access, cp, mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises";
@@ -25,35 +13,19 @@ import { LINUX_CPU_WHEEL_BYTES, LINUX_LOCK_CPU } from "./linux-lock-cpu.ts";
 import type { BuildPlan, EnginePlan } from "./setup.ts";
 
 export type LinuxPins = {
-  /** The engine's version: its folder under runtime/comfyui/. */
   version: string;
-  /** The Python uv builds the venv with (one of its standalone builds). */
   python: string;
   uv: InstallManifest;
-  /** The folder the uv archive unpacks to. */
   uvDir: string;
   source: InstallManifest;
-  /** The folder the source archive unpacks to. */
   sourceDir: string;
-  /** `uv pip compile --generate-hashes --emit-index-url` output: every wheel, its index and its sha256. */
   lock: string;
-  /** What the wheels download, for the progress and the free-space check. */
   wheelBytes: number;
-  /** What the built engine takes on disk (its tree, uv, uv's Python, the source), measured once; absent, the setup guesses. */
   diskBytes?: number;
-  /**
-   * The same engine for a computer whose card cannot run pictures: the lock with torch's CPU build
-   * and no CUDA libraries, built into `<version>-cpu`. Absent: that computer builds from `lock`.
-   */
   cpu?: { lock: string; wheelBytes: number; diskBytes?: number };
 };
 
-/**
- * Pinned 2026-11-13: uv's release archive and the v0.44.0 tag archive were each fetched once on a
- * test machine, their sha256 and size read and checked against uv's published digest; the lock
- * (linux-lock.ts) was compiled from the source's requirements.txt. Offered only once the release
- * switch (ENGINE_OFFERED in engine.ts) is on.
- */
+// external: uv's GitHub releases publish a sha256 digest and size for each asset
 export const LINUX_ENGINE: LinuxPins = {
   version: ENGINE_VERSION,
   python: "3.13",
@@ -75,13 +47,11 @@ export const LINUX_ENGINE: LinuxPins = {
   sourceDir: `ComfyUI-${ENGINE_VERSION}`,
   lock: LINUX_LOCK,
   wheelBytes: LINUX_WHEEL_BYTES,
-  // du of runtime/comfyui, uv, uv-python and comfyui-src after one real build each, 2026-11-14
+  // why: measured by du over the four runtime folders after one real build on 2026-11-14
   diskBytes: 7_325_333_460,
-  // compiled 2026-11-14 against the CPU index, the rest held to the cu130 lock's versions
   cpu: { lock: LINUX_LOCK_CPU, wheelBytes: LINUX_CPU_WHEEL_BYTES, diskBytes: 2_444_080_259 },
 };
 
-/** Every part has its digest and the lock is filled in: the build may be offered. */
 export const linuxPinned = (pins: LinuxPins): boolean => pins.uv.verified && pins.source.verified && pins.lock !== "";
 
 const BUILD_PREFIX = ".build-";
@@ -94,17 +64,10 @@ const target = (appDataDir: string, label: string, folder: string, inside: strin
 });
 
 const UNITS: Record<string, number> = { B: 1, KiB: 1024, MiB: 1024 ** 2, GiB: 1024 ** 3, TiB: 1024 ** 4 };
-/** A terminal colour code, should uv print one (FORCE_COLOR in the app's environment). */
+// external: uv prints ANSI colour codes even into a pipe when FORCE_COLOR is set
 const COLOUR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 
-/**
- * The bytes uv's sync has finished downloading, from its own lines. With its output not a terminal
- * uv prints no bars; for each file over 1 MiB it prints "Downloading torch (846.4MiB)" when the
- * download starts and " Downloaded torch" when it ends (uv-command-support progress.rs, 0.13.7):
- * the size, but nothing in between. A wheel counts once it has ended, at the size uv gave it;
- * smaller wheels say nothing and are counted when the sync ends. Never more than `cap`.
- * `inFlight` is what the files uv has started and not ended will add.
- */
+// external: off a terminal, uv 0.13.7 logs files over 1 MiB only at start (with size) and end
 export function uvDownloads(cap: number): { line(line: string): number; inFlight(): number } {
   const sizes = new Map<string, number>();
   let done = 0;
@@ -121,10 +84,7 @@ export function uvDownloads(cap: number): { line(line: string): number; inFlight
   };
 }
 
-/**
- * The bytes this computer's network interfaces have received (/proc/net/dev, loopback left out);
- * undefined where it cannot be read.
- */
+// external: /proc/net/dev has two header lines, then one "name: rx_bytes ..." row per interface
 export function netReceived(): number | undefined {
   try {
     let sum = 0;
@@ -137,10 +97,8 @@ export function netReceived(): number | undefined {
   } catch { return undefined; }
 }
 
-/** How often the sync's count is read again while no line comes (a large wheel downloading). */
 const COUNT_MS = 500;
 
-/** Run uv to the end; a failure carries the end of what it printed. `onLine` hears each line it prints. */
 function runUv(uv: string, args: string[], env: NodeJS.ProcessEnv, signal: AbortSignal, onLine?: (line: string) => void): Promise<void> {
   return new Promise((resolve, reject) => {
     let run: ChildProcess;
@@ -163,11 +121,6 @@ function runUv(uv: string, args: string[], env: NodeJS.ProcessEnv, signal: Abort
   });
 }
 
-/**
- * The build with a card's lock, and beside it (`cpu`) the processor one when the pins carry it: the
- * setup takes `cpu` on a computer whose card cannot run pictures (setup.ts), so no CUDA library is
- * fetched there.
- */
 export function linuxBuild(opts: { appDataDir: string; pins: LinuxPins; received?: () => number | undefined }): Extract<EnginePlan, { kind: "build" }> {
   const { appDataDir, pins } = opts;
   const received = opts.received ?? netReceived;
@@ -193,12 +146,9 @@ function buildWith(appDataDir: string, pins: LinuxPins, received: () => number |
 
       const root = engineRoot(appDataDir);
       await mkdir(root, { recursive: true });
-      // a build a killed app left behind (own.ts skips dot folders, so it was never started)
       for (const entry of await readdir(root)) if (entry.startsWith(BUILD_PREFIX)) await rm(path.join(root, entry), { recursive: true, force: true });
       const staging = await mkdtemp(path.join(root, BUILD_PREFIX));
-      // uv's cache is the build's own folder beside the staging one, never kept: kept, it counts as
-      // a second engine (6.7 GB by du after one card build) and is one wherever uv can neither
-      // clone nor hardlink its files into the venv; a killed build's is swept with its staging above
+      // why: a kept uv cache is a second engine on disk, 6.7 GB after one card build
       const cache = await mkdtemp(path.join(root, `${BUILD_PREFIX}cache-`));
       try {
         await cp(path.join(source.dir, pins.sourceDir), path.join(staging, "ComfyUI"), { recursive: true });
@@ -207,23 +157,16 @@ function buildWith(appDataDir: string, pins: LinuxPins, received: () => number |
         const env: NodeJS.ProcessEnv = {
           ...process.env,
           UV_CACHE_DIR: cache,
-          // uv locks a credentials file before it fetches, by default under the person's home
-          // (~/.local/share/uv/credentials); kept in the cache folder, it goes when the build does
+          // external: by default uv locks a credentials file in the person's home before fetching
           UV_CREDENTIALS_DIR: path.join(cache, "credentials"),
           UV_PYTHON_INSTALL_DIR: path.join(runtimeDir(appDataDir), "uv-python"),
           UV_PYTHON_PREFERENCE: "only-managed",
           UV_NO_CONFIG: "1",
         };
         const venv = path.join(staging, "venv");
-        // --relocatable: the venv still runs once the staging folder is renamed into place
+        // external: uv venv --relocatable makes a venv that still runs after its folder is moved
         await runUv(path.join(uv.dir, uvBin), ["venv", "--relocatable", "--python", pins.python, venv], env, signal);
-        // best-match, as the lock was compiled: first-index would take certifi and the like from
-        // the torch index, which lacks the pinned versions
-        // The wheels are most of the download. Each one uv says it finished counts; while some are
-        // still coming, the bytes the network has received since the sync began count, never past
-        // what the wheels uv has started will add, so other downloads on the computer cannot run
-        // the count ahead (one real processor build: the finished wheels alone trailed the network
-        // by about 0.45 GB of 1.05 for most of the sync, then caught up in its last seconds).
+        // external: uv's default takes certifi from the torch index, which lacks the pinned version
         const wheels = uvDownloads(wheelBytes);
         const rx0 = received();
         let finished = 0, counted = 0;

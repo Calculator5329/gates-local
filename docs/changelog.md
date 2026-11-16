@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-11-16: the server's image folder holds to the six comment kinds
+
+- apps/server/src/image passes the comment rule: all 515 offenders
+  went, and the folder's comment lines fell from 1127 to 129. What
+  stays is 49 `external:` lines, each one fact that ComfyUI, CUDA,
+  Hugging Face, HTTP or another outside thing forces on the code, and
+  43 `why:` lines for what the code cannot say. CUDA, DNS, FLUX, HTTP,
+  Hugging Face and Stable Diffusion join the rule's list of outside
+  things.
+- Nine comments were wrong. The setup read's "off" names the version,
+  not the computer; Linux's engine comes from linuxBuild, not
+  engineFor; a ComfyUI on another machine skips the fit check rather
+  than running it; the job credits no bytes to a warm engine; the
+  processor's cancel deadline is 30 minutes, and a changed process
+  does not clear a stuck record; the default pick falls back to the
+  General cell, not to a listed preset; a thread's own kept choice
+  comes before Settings'; the picker marks sizes by the card's total,
+  not by the job's fit check; and the list read also returns the
+  installed setups.
+- 181 rules gained 185 unit tests, each watched fail with its rule
+  broken. Most hold how a picture job runs and claims the card, the
+  engine the app starts and stops itself, and the presets read from
+  ComfyUI; the rest hold the ComfyUI client, the setup and its Linux
+  build, downloads and model files.
+
 ## 2026-11-16: the web app's image folder holds to the six comment kinds
 
 - apps/web/src/image passes the comment rule: all 60 offenders went,

@@ -6,11 +6,11 @@ import { gb, type PullProgress } from "@gates-local/contracts";
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readdir, readFile, readlink, rm, stat, statfs, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { downloadFile, fetchFrom, huggingFace, type DownloadOptions } from "./download.ts";
+import { downloadFile, fetchFrom, huggingFace, nearestFolder, partBytes, volumeFree, volumeOf, type DownloadOptions } from "./download.ts";
 
 const BODY = Buffer.from(Array.from({ length: 300_000 }, (_, i) => (i * 7) % 251));
 const SHA = createHash("sha256").update(BODY).digest("hex");
@@ -22,7 +22,7 @@ let server: Server, port = 0, dir = "";
 const seen: { url: string; method: string; range?: string; ifRange?: string }[] = [];
 let cutAt: number | undefined, ignoreRange = false, short = false;
 /** What the fake serves now, and its ETags: the upload's (on the redirect) and the CDN's. */
-let body = BODY, upload = '"upload-1"', cdnTag = '"cdn-1"';
+let body = BODY, upload: string | undefined = '"upload-1"', cdnTag = '"cdn-1"';
 let noLength = false, rangeOff = 0, extra = 0;
 /** Set: the size a ranged answer's Content-Range gives for the file, instead of the file's. */
 let rangeTotal: number | undefined;
@@ -33,7 +33,7 @@ beforeAll(async () => {
     const ifRange = req.headers["if-range"];
     seen.push({ url: `${req.headers.host}${url.pathname}`, method: req.method ?? "", ...req.headers.range ? { range: req.headers.range } : {}, ...typeof ifRange === "string" ? { ifRange } : {} });
     if (url.pathname === "/hf/model.safetensors") {
-      res.writeHead(302, { location: `http://localhost:${port}/cdn/model.safetensors?sig=${seen.length}`, "x-linked-etag": upload, "x-linked-size": String(body.length) }).end();
+      res.writeHead(302, { location: `http://localhost:${port}/cdn/model.safetensors?sig=${seen.length}`, ...upload === undefined ? {} : { "x-linked-etag": upload }, "x-linked-size": String(body.length) }).end();
       return;
     }
     if (url.pathname === "/hf/twice") { res.writeHead(302, { location: `http://localhost:${port}/cdn/again` }).end(); return; }
@@ -286,5 +286,100 @@ describe("downloadFile", () => {
     rangeTotal = BODY.length + 5;
     expect((await downloadFile(options())).sha256).toBe(SHA);
     expect(gets().map((s) => s.range)).toEqual([`bytes=${have}-`, undefined]);
+  });
+});
+
+describe("downloadFile, more", () => {
+  it("with no upload ETag on the redirect, the note keeps the file host's own ETag and a cut-off download still resumes", async () => {
+    upload = undefined;
+    const have = await cutOff();
+    expect(JSON.parse(await readFile(`${partFile()}.json`, "utf8"))).toEqual({ url: options().url, etag: '"cdn-1"', size: BODY.length });
+    expect((await downloadFile(options())).sha256).toBe(SHA);
+    expect(gets().map((s) => s.range)).toEqual([`bytes=${have}-`]);
+  });
+
+  it("a part of an upload that cannot be told apart, its ETag empty, starts again", async () => {
+    upload = "";
+    await cutOff();
+    expect(JSON.parse(await readFile(`${partFile()}.json`, "utf8"))).toMatchObject({ etag: "" });
+    expect((await downloadFile(options())).sha256).toBe(SHA);
+    expect(gets().map((s) => s.range)).toEqual([undefined]);
+  });
+
+  it("through the tests' download origin, an address that is not Hugging Face's own is refused before anything is fetched", async () => {
+    const get = fetchFrom(`http://127.0.0.1:${port}`);
+    for (const url of ["https://example.com/hf/model.safetensors", "https://cdn-lfs.huggingface.co/hf/model.safetensors"]) {
+      await expect(downloadFile(options({ url, fetch: get, allow: undefined })), url).rejects.toThrow(`Downloads come from Hugging Face only, not ${new URL(url).host}.`);
+    }
+    expect(seen).toEqual([]);
+    await expect(downloadFile(options({ url: "https://huggingface.co/hf/model.safetensors", fetch: get, allow: undefined }))).rejects.toThrow("which is not Hugging Face");
+    expect(seen.map((s) => s.url.replace(String(port), "P"))).toEqual(["127.0.0.1:P/hf/model.safetensors"]);
+  });
+
+  it("a part already whole and vouched for by its note is only checked: nothing more is fetched", async () => {
+    const folder = options().dir;
+    await mkdir(folder, { recursive: true });
+    await writeFile(partFile(), BODY);
+    await writeFile(`${partFile()}.json`, JSON.stringify({ url: options().url, etag: '"upload-1"', size: BODY.length }));
+    const done = await downloadFile(options({ sha256: SHA }));
+    expect(done).toEqual({ file: path.join(folder, "model.safetensors"), bytes: BODY.length, sha256: SHA });
+    expect(seen.filter((s) => s.method === "GET")).toEqual([]);
+    expect(await readdir(folder)).toEqual(["model.safetensors"]);
+  });
+
+  it("a link or a folder already under the file's name is moved aside as it is, the link never followed", async () => {
+    const folder = options().dir, at = path.join(folder, "model.safetensors"), target = path.join(dir, "elsewhere.safetensors");
+    await mkdir(folder, { recursive: true });
+    await symlink(target, at);
+    const first = await downloadFile(options({ now: () => Date.UTC(2026, 0, 2, 3, 4, 5, 678) }));
+    const linkAside = `${at}.replaced-2026-01-02T03-04-05-678Z`;
+    expect(first.replaced).toBe(linkAside);
+    expect((await lstat(linkAside)).isSymbolicLink()).toBe(true);
+    expect(await readlink(linkAside)).toBe(target);
+    expect(await readFile(at)).toEqual(BODY);
+    await rm(at);
+    await mkdir(path.join(at, "inside"), { recursive: true });
+    const second = await downloadFile(options({ now: () => Date.UTC(2026, 0, 2, 3, 4, 6, 0) }));
+    const folderAside = `${at}.replaced-2026-01-02T03-04-06-000Z`;
+    expect(second.replaced).toBe(folderAside);
+    expect(await readdir(folderAside)).toEqual(["inside"]);
+    expect(await readFile(at)).toEqual(BODY);
+    expect((await readdir(folder)).filter((n) => n.endsWith(".safetensors"))).toEqual(["model.safetensors"]);
+  });
+});
+
+describe("the disk a download goes to", () => {
+  it("the nearest folder that exists is the folder itself, else its nearest parent, up to the top of the disk", async () => {
+    const file = path.join(dir, "a.bin");
+    await writeFile(file, "x");
+    expect(await nearestFolder(dir)).toBe(dir);
+    expect(await nearestFolder(path.join(dir, "not", "made", "yet"))).toBe(dir);
+    expect(await nearestFolder(file)).toBe(dir);
+    const top = path.parse(dir).root;
+    expect(await nearestFolder(path.join(top, `gates-no-such-${process.pid}`, "a"))).toBe(top);
+  });
+
+  it("the free space of a folder not made yet is that of the disk it will be made on", async () => {
+    const s = await statfs(dir);
+    const free = await volumeFree(path.join(dir, "not", "made"));
+    expect(Math.abs(free - s.bavail * s.bsize)).toBeLessThan(1024 ** 3);
+  });
+
+  it("folders not made yet count on the disk of their nearest folder, and a folder on another disk counts on its own", async () => {
+    const here = (await stat(dir)).dev;
+    expect(await volumeOf(path.join(dir, "loras", "gates-local"))).toBe(here);
+    expect(await volumeOf(path.join(dir, "checkpoints", "gates-local"))).toBe(here);
+    const other = await volumeOf("/proc/gates-no-such/a");
+    expect(other).toBe((await stat("/proc")).dev);
+    expect(other).not.toBe(here);
+  });
+
+  it("the bytes of a part its note vouches for count as fetched; a part with no note, or one of another address, counts nothing", async () => {
+    const have = await cutOff();
+    const { dir: folder, name, url } = options();
+    expect(await partBytes(folder, name, url)).toBe(have);
+    expect(await partBytes(folder, name, "https://huggingface.co/other/model.safetensors")).toBe(0);
+    await rm(`${partFile()}.json`);
+    expect(await partBytes(folder, name, url)).toBe(0);
   });
 });

@@ -1,10 +1,4 @@
-// The app's own ComfyUI (engine.ts) run as a child process on a free local
-// port, never 8188, so it neither collides with nor adopts a ComfyUI the
-// person runs. Its models, inputs, outputs and user files live under
-// <appData>/image (--base-directory), and its log in
-// <appData>/runtime/comfyui.log. It implements the same seam as the
-// systemd unit (service.ts), so the module's start, idle stop and shutdown
-// deadline are unchanged: only what starts and stops it differs.
+// why: a free port other than 8188, so it never collides with or adopts the person's own ComfyUI
 import { type ChildProcess, spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { type AddressInfo, createServer } from "node:net";
@@ -14,84 +8,44 @@ import { engineDir, engineFiles, engineRoot, isProcessorBuild, type EngineLayout
 import type { ComfyService } from "./service.ts";
 
 export interface OwnComfy extends ComfyService {
-  /** An engine tree is whole in the app's folder. */
   installed(): boolean;
-  /** Where it answers once started: http://127.0.0.1:<port>. */
   address(): string;
-  /** Told the pid of a run that ends without the app asking (a crash, a kill from outside); stop and killRuntimeNow are not told. */
   onExit(listener: (pid: number) => void): void;
-  /** Its models folder (kind folders inside), known without starting it: where image downloads go unless the person picked a folder. */
   modelsDir?(): string;
-  /**
-   * The build start() runs (the newest whole one), and whether it runs on the processor: always for
-   * the processor build, which has no CUDA; for a card build, where the setup found no card to run
-   * it on. Undefined while none is whole.
-   */
   build?(): { version: string; cpu: boolean } | undefined;
-  /**
-   * A card build that has not shown it starts is held: with the processor's build whole beside it,
-   * start() runs the processor's, which is known to work. The setup holds the card's build before
-   * it makes one beside the processor's.
-   */
   holdCard?(version: string): void;
-  /** The held card build that is whole on disk beside the processor's, waiting to be tried. */
   heldCard?(): string | undefined;
-  /** The held card build that was passed over because it was not there after its start; kept across the app's starts. */
   failedCard?(): string | undefined;
-  /** The next start is the held card build's, to see it start. */
   tryCard?(): void;
-  /** The engine start() ran answered: a card build is held no longer. */
   answered?(): void;
-  /**
-   * The engine start() ran is not there (it ended while starting, or could not be run). A card
-   * build with the processor's whole beside it is held and its version returned: the next start is
-   * the processor's. Undefined where there is nothing else to start, or the engine is still running.
-   */
   failed?(): string | undefined;
-  /** Told the version of a card build failed() held. */
   onHeld?(listener: (version: string) => void): void;
 }
 
 export type OwnComfyOptions = {
   appDataDir: string;
-  /** The free port main.ts picked at startup. */
   port: number;
-  /** Tests only (the e2e stack's fake engine): read this address instead of 127.0.0.1:<port>. */
+  // why: only for tests, so the e2e stack's fake engine can stand in at its own address
   address?: string;
   platform?: NodeJS.Platform;
-  /** How long a stop waits for the engine to exit before it kills it. */
   stopTimeoutMs?: number;
-  /** The folder the person picked for image downloads (Settings' imageFolder), read at each start: the engine looks there too. */
   extraModels?: () => string | undefined;
 };
 
-/** The kinds of model folder the app downloads into, each a folder of that name inside the download folder. */
 export const MODEL_KINDS = ["checkpoints", "loras", "diffusion_models", "text_encoders", "vae"] as const;
 
-/**
- * ComfyUI's extra_model_paths config naming a picked folder: its kind folders are searched as well
- * as the engine's own. Single-quoted YAML, so a Windows path's backslashes are taken as they are.
- */
+// external: YAML single-quoted strings keep backslashes as they are, so Windows paths survive
 export function extraModelPaths(folder: string): string {
   const quoted = `'${folder.replaceAll("'", "''")}'`;
   return ["gates_local:", `  base_path: ${quoted}`, ...MODEL_KINDS.map((k) => `  ${k}: ${k}`), ""].join("\n");
 }
 
-/**
- * The same entry as one line of YAML (a flow mapping), for a person's own ComfyUI: they add it to
- * its extra_model_paths.yaml themselves. The app never writes their file.
- */
 export function extraModelPathsLine(folder: string): string {
   const quoted = `'${folder.replaceAll("'", "''")}'`;
   return `gates_local: { base_path: ${quoted}, ${MODEL_KINDS.map((k) => `${k}: ${k}`).join(", ")} }`;
 }
 
-/**
- * The environment of the engine the app starts, so what it compiles stays in the app's data and
- * leaves with it: the CUDA kernel cache (the same folder the app's chat engine uses; the driver
- * shares one too) and Triton's, which would be ~/.nv/ComputeCache and ~/.triton/cache. Its home
- * is left as it is: Python reads much from it. A ComfyUI the person runs never gets this.
- */
+// external: CUDA and Triton cache to ~/.nv/ComputeCache and ~/.triton/cache unless told otherwise
 export function engineChildEnv(env: NodeJS.ProcessEnv, appDataDir: string): NodeJS.ProcessEnv {
   return {
     ...env,
@@ -100,7 +54,6 @@ export function engineChildEnv(env: NodeJS.ProcessEnv, appDataDir: string): Node
   };
 }
 
-/** A local TCP port free now, for the engine to listen on (picked once at startup). */
 export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const probe = createServer();
@@ -112,7 +65,7 @@ export function freePort(): Promise<number> {
   });
 }
 
-/** The folder ComfyUI keeps models, inputs, outputs and user files in. */
+// external: ComfyUI keeps models, inputs, outputs and user files under its --base-directory
 export function engineDataDir(appDataDir: string): string {
   return path.join(appDataDir, "image");
 }
@@ -122,13 +75,7 @@ export function engineLogFile(appDataDir: string): string {
 }
 
 const pidFile = (appDataDir: string) => path.join(runtimeDir(appDataDir), "comfyui.pid");
-/**
- * What the computer has for pictures, as the setup last saw it (setup.ts, at its run, at the app's
- * start and each time it is read): "cpu" where no card runs them. A card build runs on it, and with
- * both builds whole it picks which one starts (find), a held card build aside. Outside the pinned
- * tree, so its checksum stays whole. The processor build always runs with --cpu, whatever it says
- * (own.build).
- */
+// why: kept outside the pinned engine tree so the tree's checksum stays whole
 const deviceFile = (appDataDir: string) => path.join(runtimeDir(appDataDir), "comfyui-device");
 
 export function writeDevice(appDataDir: string, device: "gpu" | "cpu"): void {
@@ -140,18 +87,7 @@ const onCpu = (appDataDir: string) => {
   try { return readFileSync(deviceFile(appDataDir), "utf8").trim() === "cpu"; } catch { return false; }
 };
 
-/**
- * The card builds that have not shown they start, a version a line: one being made beside the
- * processor's, and one that was not there after its start. A line goes the first time its build
- * answers. Kept on disk so the app's next start still runs the build that works; outside the
- * pinned tree. Unreadable, nothing is held.
- */
 const heldFile = (appDataDir: string) => path.join(runtimeDir(appDataDir), "comfyui-card-held");
-/**
- * Of the held builds, those held because they were not there after their start (failed()), not
- * because they are being made: the setup's row says why after the app starts again. A line goes
- * when its build answers. Unreadable, none is.
- */
 const failedFile = (appDataDir: string) => path.join(runtimeDir(appDataDir), "comfyui-card-failed");
 
 const readLines = (file: string): string[] => {
@@ -169,27 +105,16 @@ export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
   const platform = opts.platform ?? process.platform;
   const layout: EngineLayout = platform === "win32" ? "windows-portable" : "uv-venv";
   const whole = (dir: string) => { const f = engineFiles(dir, layout); return existsSync(f.python) && existsSync(f.main); };
-  /** The whole versions under runtime/comfyui/, newest first. */
   const builds = (): string[] => {
     let entries: string[];
     try { entries = readdirSync(engineRoot(opts.appDataDir)); } catch { return []; }
     return entries.filter((e) => !e.startsWith(".")).toSorted((a, b) => b.localeCompare(a, undefined, { numeric: true }))
       .filter((v) => whole(engineDir(opts.appDataDir, v)));
   };
-  /** Held in this run of the app: what the file says, and what could not be written to it. */
   const heldHere = new Set<string>();
   const heldNow = () => [...readHeld(opts.appDataDir), ...heldHere];
-  /** tryCard was asked: the next start is a held card build's, until it answers or is not there. */
   let trying = false;
-  /** The version start() last ran. */
   let ran: string | undefined;
-  /**
-   * The newest whole version for what the computer has (the device file): the card's build where it
-   * has a card for pictures, the processor's where it has none; the other where only that one is
-   * whole. A build made for one stays when the other is made beside it. With the processor's build
-   * whole, a held card build is passed over until it is tried: the build that works is never left
-   * for one that has not started.
-   */
   const find = (): string | undefined => {
     const versions = builds();
     const processor = versions.find(isProcessorBuild);
@@ -202,48 +127,45 @@ export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
     heldHere.add(version);
     const onDisk = readHeld(opts.appDataDir);
     if (onDisk.includes(version)) return;
-    try { writeHeld(opts.appDataDir, [...onDisk, version]); } catch { /* held for this run of the app */ }
+    try { writeHeld(opts.appDataDir, [...onDisk, version]); } catch {}
   };
-  /** Failed in this run of the app: what the file says, and what could not be written to it. */
   const failedHere = new Set<string>();
   const failedNow = () => [...readLines(failedFile(opts.appDataDir)), ...failedHere];
   const markFailed = (version: string) => {
     failedHere.add(version);
     const onDisk = readLines(failedFile(opts.appDataDir));
     if (onDisk.includes(version)) return;
-    try { writeLines(opts.appDataDir, failedFile(opts.appDataDir), [...onDisk, version]); } catch { /* said for this run of the app */ }
+    try { writeLines(opts.appDataDir, failedFile(opts.appDataDir), [...onDisk, version]); } catch {}
   };
   const release = (version: string) => {
     heldHere.delete(version);
     failedHere.delete(version);
     const failed = readLines(failedFile(opts.appDataDir));
     if (failed.includes(version)) {
-      try { writeLines(opts.appDataDir, failedFile(opts.appDataDir), failed.filter((v) => v !== version)); } catch { /* the build answers again at the app's next start */ }
+      try { writeLines(opts.appDataDir, failedFile(opts.appDataDir), failed.filter((v) => v !== version)); } catch {}
     }
     const onDisk = readHeld(opts.appDataDir);
     if (!onDisk.includes(version)) return;
-    try { writeHeld(opts.appDataDir, onDisk.filter((v) => v !== version)); } catch { /* offered again at the app's next start */ }
+    try { writeHeld(opts.appDataDir, onDisk.filter((v) => v !== version)); } catch {}
   };
   const heldListeners: ((version: string) => void)[] = [];
   let child: ChildProcess | undefined;
   let exited: Promise<void> = Promise.resolve();
-  /** The run the app asked to end (stop, killRuntimeNow): its exit is not news. */
   let ending: ChildProcess | undefined;
   const listeners: ((pid: number) => void)[] = [];
-  /** Its process group on Linux (it runs detached), so the stop reaches whatever it started. */
   const signalRun = (run: ChildProcess, sig: NodeJS.Signals) => {
     try {
       if (platform === "win32" || run.pid === undefined) run.kill(sig);
       else process.kill(-run.pid, sig);
-    } catch { /* already gone */ }
+    // external: Node's process.kill throws ESRCH when the process is already gone
+    } catch {}
   };
-  /** A run the app left behind when it was killed: ended before a new one starts, if it is still ours. */
   const endLeftover = () => {
     if (platform !== "linux") return;
     try {
       const { pid, main } = JSON.parse(readFileSync(pidFile(opts.appDataDir), "utf8")) as { pid: number; main: string };
       if (readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").includes(main)) process.kill(-pid, "SIGKILL");
-    } catch { /* none, gone, or not ours */ }
+    } catch {}
   };
   const buildOf = (dir: string) => ({ version: path.basename(dir), cpu: isProcessorBuild(path.basename(dir)) || onCpu(opts.appDataDir) });
   const own: OwnComfy = {
@@ -286,11 +208,10 @@ export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
       if (child !== undefined) return;
       const dir = find();
       if (dir === undefined) throw new Error("The image engine is not installed.");
-      // before anything that can fail, so failed() knows which build could not be run
       ran = path.basename(dir);
       const files = engineFiles(dir, layout);
       endLeftover();
-      // ComfyUI lists <base>/custom_nodes before it serves and exits when the folder is missing.
+      // external: ComfyUI 0.44 exits at start when <base>/custom_nodes is missing
       mkdirSync(path.join(engineDataDir(opts.appDataDir), "custom_nodes"), { recursive: true });
       mkdirSync(runtimeDir(opts.appDataDir), { recursive: true });
       const picked = opts.extraModels?.();
@@ -304,7 +225,6 @@ export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
         "--disable-auto-launch",
         "--base-directory", engineDataDir(opts.appDataDir),
         ...picked === undefined ? [] : ["--extra-model-paths-config", extra],
-        // follows the build being started, so a processor build always has it
         ...buildOf(dir).cpu ? ["--cpu"] : [],
         ...layout === "windows-portable" ? ["--windows-standalone-build"] : [],
       ];
@@ -324,7 +244,8 @@ export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
         resolve();
       }));
       if (run.pid !== undefined) {
-        try { writeFileSync(pidFile(opts.appDataDir), JSON.stringify({ pid: run.pid, main: files.main })); } catch { /* the leftover check is best effort */ }
+        // why: the pid file only feeds the best-effort leftover kill, so a failed write is ignored
+        try { writeFileSync(pidFile(opts.appDataDir), JSON.stringify({ pid: run.pid, main: files.main })); } catch {}
       }
     },
     async stop() {

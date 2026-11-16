@@ -1,15 +1,9 @@
-// The Linux engine's lock for a computer with no graphics card that runs pictures: the cu130 lock
-// (linux-lock.ts) with torch and torchvision from PyTorch's CPU index and the CUDA-only packages
-// left out. Compiled 2026-11-14 the same way (uv 0.13.7, `uv pip compile --generate-hashes
-// --emit-index-url`, index metadata only) with every other package held to the cu130 lock's
-// version, so the two differ only here. The text below builds that compile's output byte for byte,
-// without uv's `# via` comments. 84 packages; linux-build.ts syncs it with --require-hashes.
+// why: every package but torch is held to the cu130 lock's version, so the locks differ only there
 import { LINUX_LOCK } from "./linux-lock.ts";
 
-/** What the 84 wheels download for x86_64 Linux, CPython 3.13 (sizes from the index, the rest by HEAD). */
 export const LINUX_CPU_WHEEL_BYTES = 1_022_455_100;
 
-/** In the cu130 lock only: CUDA's libraries and triton, which only a card runs. */
+// external: CPU torch needs neither CUDA's libraries nor triton
 export const CUDA_ONLY = [
   "cuda-bindings", "cuda-pathfinder", "cuda-toolkit",
   "nvidia-cublas", "nvidia-cuda-cupti", "nvidia-cuda-nvrtc", "nvidia-cuda-runtime", "nvidia-cudnn-cu13",
@@ -20,7 +14,7 @@ export const CUDA_ONLY = [
 
 const CPU_INDEX = "--extra-index-url https://download.pytorch.org/whl/cpu";
 
-/** torch and torchvision from the CPU index, every wheel of each version the index lists. */
+// external: PyPI's Linux torch wheels are CUDA builds, so CPU ones come from PyTorch's own index
 const CPU_TORCH: Record<string, string> = {
   torch: String.raw`torch==2.14.1+cpu \
     --hash=sha256:100df7e44af5c973606cfef571a14b36b0acfd165d6bbc7aabe3edac95c9ccbd \
@@ -85,11 +79,6 @@ const CPU_TORCH: Record<string, string> = {
 
 const nameOf = (entry: string) => /^([A-Za-z0-9_.-]+)==/.exec(entry)?.[1];
 
-/**
- * The processor lock from the cu130 one: the CPU index in place of cu130's, the CUDA-only entries
- * left out, torch and torchvision swapped for their CPU builds. Refuses a cu130 lock whose torch is
- * not the version the CPU builds were compiled for, so a torch bump there cannot ship a stale one here.
- */
 export function cpuLock(cu130: string): string {
   const entries = cu130.split(/\n(?=\S)/);
   const torch = entries.find((e) => nameOf(e) === "torch");

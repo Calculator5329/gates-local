@@ -18,6 +18,19 @@ function comfy(routes: Record<string, unknown>) {
   return { get, asked };
 }
 
+const inFlight = { now: 0, max: 0 };
+
+function slowComfy(index: unknown, template: unknown) {
+  inFlight.now = 0; inFlight.max = 0;
+  return async (route: string): Promise<unknown> => {
+    if (route === "/templates/index.json") return index;
+    inFlight.now++; inFlight.max = Math.max(inFlight.max, inFlight.now);
+    await new Promise((done) => setTimeout(done, Number(/\d+/.exec(route)?.[0] ?? 0) % 5));
+    inFlight.now--;
+    return template;
+  };
+}
+
 describe("ComfyUI's templates", () => {
   const templates = {
     "/templates/index.json": fixture("template-index.json"),
@@ -49,6 +62,14 @@ describe("ComfyUI's templates", () => {
     const { get, asked } = comfy({ ...templates, "/templates/index.json": index });
     expect((await readTemplates(get, info))?.map((w) => w.id)).toEqual(["template:image_sdxl_simple"]);
     expect(asked.toSorted()).toEqual(["/templates/image_sdxl_simple.json", "/templates/index.json"]);
+  });
+
+  it("reads at most six templates at once and keeps them in the index's order", async () => {
+    const names = Array.from({ length: 14 }, (_, n) => `image_t${String(n).padStart(2, "0")}`);
+    const index = [{ templates: names.map((name) => ({ name, title: name, mediaType: "image" })) }];
+    const read = await readTemplates(slowComfy(index, fixture("templates/image_sdxl_simple.json")), info);
+    expect(read?.map((w) => w.id)).toEqual(names.map((n) => `template:${n}`));
+    expect(inFlight.max).toBe(6);
   });
 
   it("no template list (no templates package, or an older ComfyUI) is not an empty one", async () => {

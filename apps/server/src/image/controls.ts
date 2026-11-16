@@ -1,30 +1,13 @@
-// Image mode fills in four things in any workflow: the prompt, the picture's size, the seed, and
-// which node's picture comes back. They are found by the shape of the API graph (convert.ts),
-// never by node ids or names:
-// - output: the one Save Image or Preview Image node;
-// - prompt: the text on the way into a sampler's `positive` input (or a BasicGuider's
-//   `conditioning`), followed back through conditioning nodes; a text box that feeds it
-//   (a Primitive node's `value`) is filled in instead;
-// - size: the one empty-latent node's width and height, or the Primitive numbers they read. Any
-//   other node that repeats the same width and height as plain numbers (Flux2Scheduler) is kept
-//   in step;
-// - seed: the one `seed` or `noise_seed` value, or the Primitive number it reads.
-// Anything missing, doubled, or worked out by another node is refused in words (WorkflowRefusal),
-// and the picker lists the workflow greyed out with that reason.
 import { WorkflowRefusal, type ApiGraph, type ApiNode } from "./convert.ts";
 
 export interface Target { readonly node: string; readonly input: string }
 export interface Controls {
   readonly prompt: Target;
-  /** First the latent's (or its Primitive's) input, then any node that repeats it. */
   readonly width: readonly Target[];
   readonly height: readonly Target[];
   readonly seed: Target;
-  /** The empty-latent node; its batch size is set to one. */
   readonly latent: string;
-  /** The node whose picture is fetched. */
   readonly output: string;
-  /** The size the file itself was saved with. */
   readonly size: { readonly width: number; readonly height: number };
 }
 export interface ControlValues { readonly prompt: string; readonly width: number; readonly height: number; readonly seed: number }
@@ -38,7 +21,6 @@ const nodes = (ids: readonly string[]) => ids.length === 2 ? `${ids[0]} and ${id
 const keyOf = (t: Target) => `${t.node}\u0000${t.input}`;
 const refuse = (message: string): never => { throw new WorkflowRefusal(message); };
 
-/** A plain value, or the `value` of a Primitive node it reads; `made` names the class when another kind of node makes it. */
 function resolve(graph: ApiGraph, node: string, input: string, kind: "string" | "number"): { target: Target; value: unknown } | { made: string } {
   const v = graph[node]!.inputs[input];
   if (!isRef(v)) return { target: { node, input }, value: v };
@@ -114,7 +96,6 @@ function findSeed(graph: ApiGraph): Target {
   return targets[0]!;
 }
 
-/** Where Image mode writes its prompt, size and seed in this graph, and which node it reads the picture from. Throws WorkflowRefusal. */
 export function findControls(graph: ApiGraph): Controls {
   const output = findOutput(graph);
   if (Object.values(graph).some((n) => n.class_type.startsWith("LoadImage"))) refuse("It starts from a picture (Load Image); Image mode makes pictures from words only.");
@@ -124,7 +105,6 @@ export function findControls(graph: ApiGraph): Controls {
   return { prompt, ...size, seed, output };
 }
 
-/** A copy of `graph` with the prompt, size and seed written in and a batch of one. The graph passed in is left as it was. */
 export function applyControls(graph: ApiGraph, controls: Controls, values: ControlValues): ApiGraph {
   const out = structuredClone(graph);
   const set = (t: Target, value: unknown) => { out[t.node]!.inputs[t.input] = value; };

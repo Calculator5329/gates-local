@@ -5,10 +5,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { APP_FILES, comfyInfo, KLEIN_COMPACT_FILES, KLEIN_FILES, MOSS_FILES, SDXL_FILES, ZIMAGE_FILES, type FakeFiles } from "../../test/comfy/info.ts";
 import { readFileSync } from "node:fs";
-import { imageFitVerdict } from "@gates-local/contracts";
-import { cardBytes, comfyLists, defaultChoice, imageOffLine, jobGraph, listPresets, presetFiles, PRESETS, resolveChoice, RETIRED, tiersFor, workflowPreset, type Preset } from "./presets.ts";
+import { imageFitVerdict, type GpuStatus, type ImageChoice, type ImageEvent } from "@gates-local/contracts";
+import { cardBytes, comfyLists, DEFAULT_CHOICE, DEFAULT_ORDER, defaultChoice, imageOffLine, imageToolChoice, isDefaultChoice, jobGraph, listPresets, presetFiles, PRESETS, resolveChoice, RETIRED, tiersFor, workflowPreset, type Preset } from "./presets.ts";
 import { createGpuLease } from "../gpu/lease.ts";
-import type { ThreadStore } from "../threads/store.ts";
+import { openThreadStore, type ThreadStore } from "../threads/store.ts";
 import { createImageModule } from "./module.ts";
 import { keepWorkflow } from "./sources.ts";
 import { cellsFor, STYLE_CELLS } from "./styles.ts";
@@ -235,6 +235,16 @@ describe("themes", () => {
     expect(graph["13"]!.inputs["images"]).toEqual(["15", 0]);
   });
 
+  it("a sprite is asked for on a flat magenta field and saved as drawn, with no cut-out step", () => {
+    const sprite = jobGraph(resolveChoice({ preset: "flux2-klein-4b-sprites", width: 768, height: 768 }).preset, info, values);
+    const pixel = jobGraph(resolveChoice({ preset: "flux2-klein-4b-pixel", width: 768, height: 768 }).preset, info, values);
+    expect(sprite["4"]!.inputs["text"]).toContain("isolated on a uniform solid pure magenta background (#FF00FF), no magenta on the subject");
+    const classes = (graph: typeof sprite) => Object.values(graph).map((n) => n.class_type).toSorted();
+    expect(classes(sprite)).toEqual(classes(pixel));
+    expect(classes(sprite).filter((c) => /alpha|mask|background|rembg|composite/i.test(c))).toEqual([]);
+    expect(sprite["13"]!.inputs["images"]).toEqual(["15", 0]);
+  });
+
   it("the composer's short names start with letters no other setup of the app's uses", () => {
     const firsts = APP_ROWS.map((p) => p.short[0]!.toLowerCase());
     expect(new Set(firsts).size).toBe(firsts.length);
@@ -321,6 +331,7 @@ describe("the picker's groups", () => {
 
 const sdxlGraph = (): Record<string, { class_type: string; inputs: Record<string, unknown> }> => JSON.parse(readFileSync(new URL("../../test/comfy/api/image_sdxl_simple.json", import.meta.url), "utf8"));
 const broken = (change: (graph: ReturnType<typeof sdxlGraph>) => void) => { const graph = sdxlGraph(); change(graph); return graph; };
+const named = (ckpt: string) => workflowPreset({ id: "saved:mine", name: "mine", group: "Your workflows", graph: broken((g) => { g["15"]!.inputs["ckpt_name"] = ckpt; }) }).family;
 
 describe("a workflow Image mode cannot fill in", () => {
   it("is listed refused when it has no single prompt, size, seed or output, each with its own reason", () => {
@@ -390,5 +401,232 @@ describe("what a setup has left to fetch", () => {
     const unknown = await row(false);
     expect(unknown).toMatchObject({ download: true });
     expect(unknown).not.toHaveProperty("leftBytes");
+  });
+});
+
+const PNG = Buffer.from("iVBORw0KGgo=", "base64");
+const nvidia = (bytes: number): GpuStatus => ({ vendor: "nvidia", totalBytes: bytes, freeBytes: bytes, occupants: [], systemMemoryAvailableBytes: 0, measuredAt: 0 });
+const isRoute = (routes: Record<string, unknown>, route: string): boolean => Object.hasOwn(routes, route);
+
+async function engineOver(start: { files?: readonly FakeFiles[]; routes?: Record<string, unknown>; choice?: ImageChoice; card?: number }) {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "gates-presets-engine-"));
+  made.push(dataDir);
+  const store = openThreadStore(path.join(dataDir, "threads.sqlite"));
+  const events: ImageEvent[] = [];
+  const graphs: Record<string, { class_type: string; inputs: Record<string, unknown> }>[] = [];
+  const routes = start.routes ?? {};
+  const card = start.card;
+  let served = start.files ?? [];
+  let socket: EventTarget | undefined;
+  const module = createImageModule({
+    dataDir, lease: createGpuLease(), store, log: () => {},
+    push: (channel, payload) => { if (channel === "image.event") events.push(payload as ImageEvent); },
+    settings: () => ({ imageGen: true, ...start.choice === undefined ? {} : { imageChoice: start.choice } }),
+    defaultUrl: "http://127.0.0.1:18999",
+    localAddresses: () => ["127.0.0.1"], lookupHost: async () => ["127.0.0.1"],
+    readGpu: async () => ({ freeBytes: 64 * GIB, holders: "" }),
+    ...card === undefined ? {} : { gpuStatus: async () => nvidia(card) },
+    socket: () => {
+      socket = new EventTarget();
+      Object.defineProperty(socket, "readyState", { value: 1 });
+      Object.assign(socket, { close() {} });
+      return socket as WebSocket;
+    },
+    fetch: async (input, init) => {
+      const url = new URL(String(input));
+      const route = `${url.pathname}${url.search}`;
+      if (route === "/system_stats") return Response.json({ system: { comfyui_version: "fake" }, devices: [{ type: "cuda" }] });
+      if (route === "/object_info") return Response.json(comfyInfo(...served));
+      if (route === "/queue") return Response.json({ queue_running: [], queue_pending: [] });
+      if (route === "/prompt") {
+        graphs.push((JSON.parse(String(init?.body)) as { prompt: (typeof graphs)[number] }).prompt);
+        queueMicrotask(() => socket?.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "executing", data: { prompt_id: "p1", node: null } }) })));
+        return Response.json({ prompt_id: "p1" });
+      }
+      if (route === "/history/p1") return Response.json({ p1: { outputs: { "13": { images: [{ filename: "out.png", subfolder: "", type: "output" }] } } } });
+      if (url.pathname === "/view") return new Response(PNG);
+      return isRoute(routes, route) ? Response.json(routes[route]) : new Response("not found", { status: 404 });
+    },
+  });
+  opened.push(module, { close: async () => store.close() });
+  return { module, store, events, graphs, list: (next: readonly FakeFiles[]) => { served = next; } };
+}
+
+async function sdxlLoraFolder(): Promise<string> {
+  const root = await mkdtemp(path.join(tmpdir(), "gates-presets-loras-"));
+  made.push(root);
+  const folder = path.join(root, "loras");
+  await mkdir(folder);
+  const json = Buffer.from(JSON.stringify({ "lora_te2_text_model_encoder_layers_0_mlp_fc1.lora_down.weight": { dtype: "F16", shape: [16, 1280], data_offsets: [0, 0] } }));
+  const length = Buffer.alloc(8);
+  length.writeBigUInt64LE(BigInt(json.length));
+  await writeFile(path.join(folder, "ink.safetensors"), Buffer.concat([length, json]));
+  return folder;
+}
+
+describe("rules of the app's own setups", () => {
+  it("a style cell's row names its model alone; a model's own row has no separate model name", () => {
+    const { ready } = listPresets(lists(...APP_FILES), [], 16 * GIB);
+    expect(ready.find((p) => p.id === "general--r2-2a-klein-compact8")).toMatchObject({ name: "FLUX.2 Klein 4B general", model: "FLUX.2 Klein 4B" });
+    expect(ready.find((p) => p.id === "portraits--moss-official25")).toMatchObject({ name: "MOSS-Image portraits", model: "MOSS-Image" });
+    for (const id of ["flux2-klein-4b", "z-image-int8", "moss-image"]) expect(ready.find((p) => p.id === id), id).not.toHaveProperty("model");
+  });
+
+  it("a setup offered at several sizes is a default at its first size", () => {
+    for (const d of DEFAULT_ORDER) {
+      const sizes = PRESETS.find((p) => p.id === d.preset)!.sizes;
+      expect(sizes.length, d.preset).toBeGreaterThan(1);
+      expect([d.width, d.height], d.preset).toEqual([sizes[0]!.width, sizes[0]!.height]);
+    }
+    expect(defaultChoice(lists(ZIMAGE_FILES), [], 7 * GIB)).toEqual({ preset: "z-image-int8", width: 1024, height: 1024 });
+  });
+
+  it("every size the app's own setups are offered at is at most 1024 x 1024 pixels, the wide ones too", () => {
+    const all = [...PRESETS, ...STYLE_CELLS, ...RETIRED].flatMap((p) => p.sizes.map((s) => ({ id: p.id, ...s })));
+    expect(all.some((s) => s.width > 1024)).toBe(true);
+    for (const s of all) expect(s.width * s.height, `${s.id} ${s.width}x${s.height}`).toBeLessThanOrEqual(1024 * 1024);
+  });
+
+  it("compact Klein runs 12 steps on the FP4 text encoder", () => {
+    const compact = PRESETS.find((p) => p.id === "flux2-klein-4b-compact")!;
+    const graph = jobGraph(compact, comfyInfo(KLEIN_COMPACT_FILES), { prompt: "a fox", seed: 1, width: 1024, height: 1024 });
+    const inputs = (cls: string) => Object.values(graph).filter((n) => n.class_type === cls).map((n) => n.inputs);
+    expect(inputs("Flux2Scheduler")).toMatchObject([{ steps: 12 }]);
+    expect(inputs("CLIPLoader")).toMatchObject([{ clip_name: "qwen_3_4b_fp4_flux2.safetensors" }]);
+  });
+
+  it("below 8 GiB, with the General cell refused, compact Klein is the default ahead of MOSS-Image", () => {
+    const info = comfyInfo(KLEIN_COMPACT_FILES, MOSS_FILES);
+    delete info["ConditioningZeroOut"];
+    const listed = comfyLists(info);
+    expect(listPresets(listed, [], 6 * GIB).others.find((p) => p.id === "general--fit-8b-klein-compact8")?.why).toMatch(/ConditioningZeroOut/);
+    expect(defaultChoice(listed, [], 6 * GIB)).toEqual({ preset: "flux2-klein-4b-compact", width: 1024, height: 1024 });
+    expect(defaultChoice(listed, [], 4 * GIB)).toEqual({ preset: "flux2-klein-4b-compact", width: 1024, height: 1024 });
+  });
+
+  it("a send of a default the composer may show counts as unset: any model of the default order, or the General cell of any card level", () => {
+    expect(isDefaultChoice(undefined)).toBe(true);
+    for (const d of DEFAULT_ORDER) expect(isDefaultChoice(d), d.preset).toBe(true);
+    const general = STYLE_CELLS.filter((c) => c.style === "general");
+    expect(general.length).toBeGreaterThan(1);
+    for (const c of general) expect(isDefaultChoice({ preset: c.id, width: c.sizes[0]!.width, height: c.sizes[0]!.height }), c.id).toBe(true);
+    expect(isDefaultChoice({ preset: "z-image-int8", width: 1024, height: 768 })).toBe(false);
+    expect(isDefaultChoice({ preset: "pixel-art--r2-1a-klein-compact8", width: 640, height: 640 })).toBe(false);
+  });
+
+  it("a workflow refused as a job fails as an image-model error that names the setup and the reason", () => {
+    const values = { prompt: "a fox", seed: 1, width: 1024, height: 1024 };
+    const edit = workflowPreset({ id: "saved:edit", name: "edit", group: "Your workflows", why: "It starts from a picture (Load Image); Image mode makes pictures from words only." });
+    expect(() => jobGraph(edit, comfyInfo(SDXL_FILES), values)).toThrow(expect.objectContaining({ code: "image-model", message: "edit: It starts from a picture (Load Image); Image mode makes pictures from words only." }));
+    const info = comfyInfo(KLEIN_FILES);
+    delete info["Flux2Scheduler"];
+    expect(() => jobGraph(PRESETS[0]!, info, values)).toThrow(expect.objectContaining({ code: "image-model", message: "FLUX.2 Klein 4B: Needs a node this ComfyUI does not have: Flux2Scheduler (a custom node, or one from a newer ComfyUI)." }));
+  });
+
+  it("with nothing saved the image tool runs the default ComfyUI has every file for, judged at the top card level", () => {
+    expect(imageToolChoice({ imageGen: true }, true)).toEqual(DEFAULT_CHOICE);
+    expect(imageToolChoice({ imageGen: true }, true, lists(ZIMAGE_FILES))).toEqual({ preset: "z-image-int8", width: 1024, height: 1024 });
+    expect(imageToolChoice({ imageGen: true }, true, lists(KLEIN_COMPACT_FILES))).toEqual({ preset: "general--r2-2a-klein-compact8", width: 896, height: 896 });
+  });
+});
+
+describe("rules of a workflow ComfyUI has", () => {
+  it("a /object_info file list in the COMBO spelling counts like the bare list", () => {
+    const info = comfyInfo(ZIMAGE_FILES) as Record<string, { input: { required: Record<string, unknown> } }>;
+    info["UNETLoader"]!.input.required["unet_name"] = ["COMBO", { options: ["z_image_turbo_int8_convrot.safetensors"] }];
+    const listed = comfyLists(info);
+    expect(listed.files["UNETLoader.unet_name"]).toEqual(["z_image_turbo_int8_convrot.safetensors"]);
+    expect(ids(listPresets(listed).ready)).toContain("z-image-int8");
+  });
+
+  it("sampler and scheduler names are never taken for files, and an empty file list is the same as none", () => {
+    const { files: listed } = lists(KLEIN_FILES);
+    expect(Object.keys(listed).filter((key) => /sampler|scheduler/i.test(key))).toEqual([]);
+    expect(listed).not.toHaveProperty(["CheckpointLoaderSimple.ckpt_name"]);
+    expect(listed).toHaveProperty(["UNETLoader.unet_name"], ["flux-2-klein-4b-fp8.safetensors"]);
+  });
+
+  it("one whose files name no model family the app knows gets ComfyUI's own mark", () => {
+    expect(named("sd_xl_base_1.0.safetensors")).toBe("sdxl");
+    expect(named("juggernaut.safetensors")).toBe("comfy");
+  });
+
+  it("one whose files' sizes are all unknown is estimated at 10 GiB", () => {
+    expect(workflowPreset({ id: "saved:mine", name: "mine", group: "Your workflows", graph: sdxlGraph() }).sizes).toEqual([{ width: 1024, height: 1024, bytes: 10 * GIB }]);
+  });
+
+  it("is never marked measured, whether it runs or is refused", () => {
+    const runs = workflowPreset({ id: "saved:mine", name: "mine", group: "Your workflows", graph: sdxlGraph() });
+    const refused = workflowPreset({ id: "saved:edit", name: "edit", group: "Your workflows", why: "It starts from a picture (Load Image); Image mode makes pictures from words only." });
+    expect([runs.measured, refused.measured]).toEqual([false, false]);
+    expect(listPresets(comfyLists(comfyInfo({ checkpoints: ["sd_xl_base_1.0.safetensors"] })), [runs]).ready.find((p) => p.id === "saved:mine")).toMatchObject({ measured: false });
+  });
+});
+
+describe("the picker and a send, through the image module", () => {
+  it("lists ComfyUI's templates, then the person's saved workflows, then the model files in its folders, after the app's own", async () => {
+    const folder = await sdxlLoraFolder();
+    const f = await engineOver({
+      files: [{ loras: ["ink.safetensors"] }],
+      routes: {
+        "/templates/index.json": [{ templates: [{ name: "image_sdxl_simple", title: "SDXL Simple", mediaType: "image" }] }],
+        "/templates/image_sdxl_simple.json": template("image_sdxl_simple"),
+        "/userdata?dir=workflows&recurse=true&split=false&full_info=false": ["broken.json"],
+        "/userdata/workflows%2Fbroken.json": { nodes: "not a list" },
+        "/internal/folder_paths": { loras: [folder], checkpoints: [] },
+      },
+    });
+    const listed = await f.module.presets();
+    const all = ids([...listed.presets, ...listed.others ?? []]);
+    const theirs = all.filter((id) => id.includes(":"));
+    expect(theirs).toEqual(["template:image_sdxl_simple", "saved:broken.json", "file:loras/ink.safetensors"]);
+    expect(all.slice(-theirs.length)).toEqual(theirs);
+  });
+
+  it("a pick of either Klein setup is the one Klein row the card lists, with that row's tier", async () => {
+    const f = await engineOver({ files: [KLEIN_COMPACT_FILES], card: 16 * GIB, choice: { preset: "flux2-klein-4b", width: 1024, height: 1024 } });
+    const listed = await f.module.presets();
+    const rows = [...listed.presets, ...listed.others ?? []];
+    expect(rows.filter((p) => p.id.startsWith("flux2-klein-4b")).map((p) => [p.id, p.tier])).toEqual([["flux2-klein-4b-compact", "Fast"]]);
+    expect(listed.current).toMatchObject({ preset: { id: "flux2-klein-4b-compact" }, width: 1024, height: 1024 });
+  });
+
+  it("a saved ComfyUI template stays the pick, and its card names the file it is missing", async () => {
+    const f = await engineOver({
+      files: [SDXL_FILES],
+      routes: { "/templates/index.json": [{ templates: [{ name: "image_sdxl_simple", title: "SDXL Simple", mediaType: "image" }] }], "/templates/image_sdxl_simple.json": template("image_sdxl_simple") },
+      choice: { preset: "template:image_sdxl_simple", width: 1024, height: 1024 },
+    });
+    await f.module.presets();
+    const job = await f.module.generate({ prompt: "a fox" }); await f.module.wait(job.jobId);
+    expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "image-model", choice: { preset: "template:image_sdxl_simple" }, message: "Install sd_xl_base_1.0.safetensors in ComfyUI, then try again." });
+  });
+
+  it("a Retry of a card made with a retired theme runs that theme again, its words around the first prompt", async () => {
+    const f = await engineOver({ files: [ZIMAGE_FILES] });
+    const thread = f.store.createThread();
+    const portraits = { preset: "flux2-klein-4b-portraits", width: 832, height: 1216 };
+    const failed = await f.module.generate({ prompt: "a fox", threadId: thread.id, choice: portraits }); await f.module.wait(failed.jobId);
+    expect(f.events.at(-1)).toMatchObject({ jobId: failed.jobId, state: "error", errorKind: "image-model", choice: portraits });
+    f.list([KLEIN_FILES]);
+    const retry = await f.module.generate({ prompt: "ignored", threadId: thread.id, retryOf: failed.jobId }); await f.module.wait(retry.jobId);
+    expect(f.events.at(-1)).toMatchObject({ jobId: retry.jobId, state: "done", choice: portraits });
+    expect(f.graphs.at(-1)!["4"]!.inputs["text"]).toBe("Natural editorial portrait photograph. a fox Soft window light, realistic skin texture, clear eyes, both hands visible with relaxed separated fingers, simple uncluttered background.");
+  });
+});
+
+describe("imageOffLine, every way the image tool is off", () => {
+  it("says what turns it on here, and never sends the person to another app or website", () => {
+    const cases: [Parameters<typeof imageOffLine>[0], boolean, boolean, string][] = [
+      [{ imageGen: false }, true, true, "Turn on Generate images in Settings > Image generation."],
+      [{ imageGen: true }, false, true, "Set up an image model in Settings > Image generation."],
+      [{ imageGen: true }, true, false, "Turn on Let the model use tools and Make images in Settings > Tools, or switch the message box to Image."],
+      [{ imageGen: true, imageTool: false }, true, true, "Turn on Make images in Settings > Tools, or switch the message box to Image."],
+    ];
+    for (const [settings, runnable, toolsOn, say] of cases) {
+      const line = imageOffLine(settings, runnable, toolsOn);
+      expect(line, say).toContain(`If asked for an image, say: "${say}"`);
+      expect(line, say).toMatch(/ Never send the person to another app or website for it\.$/);
+    }
   });
 });

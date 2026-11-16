@@ -3,7 +3,6 @@ import { open, realpath } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 
-/** Exact filenames only, with a realpath check and O_NOFOLLOW for symlink escapes. */
 export async function serveImage(req: IncomingMessage, res: ServerResponse, dataDir: string): Promise<void> {
   const url = new URL(req.url ?? "/", "http://loopback");
   const match = /^\/files\/images\/([a-zA-Z0-9_-]+\.(png|jpeg|webp|gif))$/.exec(url.pathname);

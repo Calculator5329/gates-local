@@ -199,3 +199,99 @@ describe("values set on a subgraph instance win over the inner node's own", () =
     expect([graph["57:28"]!.inputs["unet_name"], graph["57:30"]!.inputs["clip_name"], graph["57:29"]!.inputs["vae_name"]]).toEqual(["z.safetensors", "q.safetensors", "v.safetensors"]);
   });
 });
+
+type UiNode = { id: number; type: string; mode: number; inputs: { name: string; type: string; link: number | null; widget?: { name: string } }[]; outputs: { name?: string; type: string; links: number[] }[]; properties: object; widgets_values?: unknown[] };
+type UiWorkflow = { nodes: UiNode[]; links: unknown[]; definitions?: { subgraphs: unknown[] } };
+const sdxlUi = () => sdxl() as unknown as UiWorkflow;
+const sdxlApi = () => fixture("api/image_sdxl_simple.json") as Record<string, { class_type: string; inputs: Record<string, unknown> }>;
+
+describe("editor parts the API never sees", () => {
+  it("the editor's old text box (PrimitiveNode) is dropped and its text written into the prompt it feeds", () => {
+    const workflow = sdxlUi();
+    const prompt = workflow.nodes.find((n) => n.id === 10)!;
+    prompt.inputs.push({ name: "text", type: "STRING", widget: { name: "text" }, link: 95 });
+    workflow.nodes.push({ id: 90, type: "PrimitiveNode", mode: 0, inputs: [], outputs: [{ type: "STRING", links: [95] }], properties: {}, widgets_values: ["a fox in snow"] });
+    workflow.links.push([95, 90, 0, 10, 1, "STRING"]);
+    const expected = sdxlApi();
+    expected["10"]!.inputs["text"] = "a fox in snow";
+    expect(convertWorkflow(workflow, info)).toEqual(expected);
+  });
+
+  it("a colour setting this app cannot read is refused by name, not read shifted", () => {
+    const colored = structuredClone(info) as Record<string, { input: Record<string, unknown>; input_order: Record<string, string[]> }>;
+    colored["SaveImage"]!.input["optional"] = { tint: ["COLOR", { default: "#ffffff" }] };
+    colored["SaveImage"]!.input_order["optional"] = ["tint"];
+    expect(refusal(() => convertWorkflow(sdxl(), colored))).toBe("SaveImage has a setting this app cannot read yet: tint (COLOR).");
+  });
+
+  it("values saved on a node with no settings at all (a preview's shown text) are not read, and not refused", () => {
+    const workflow = sdxlUi();
+    workflow.nodes.find((n) => n.type === "VAEDecode")!.widgets_values = ["a preview's shown text", 3];
+    expect(convertWorkflow(workflow, info)).toEqual(sdxlApi());
+  });
+
+  it("an upload combo's upload value is editor state: the file name is read, the next value is not taken for another input", () => {
+    const workflow = sdxlUi();
+    workflow.nodes.push(
+      { id: 90, type: "LoadImage", mode: 0, inputs: [], outputs: [{ type: "IMAGE", links: [96] }, { type: "MASK", links: [] }], properties: {}, widgets_values: ["example.png", "image"] },
+      { id: 91, type: "PreviewImage", mode: 0, inputs: [{ name: "images", type: "IMAGE", link: 96 }], outputs: [], properties: {} },
+    );
+    workflow.links.push([96, 90, 0, 91, 0, "IMAGE"]);
+    expect(convertWorkflow(workflow, info)).toEqual({
+      ...sdxlApi(),
+      "90": { class_type: "LoadImage", inputs: { image: "example.png" } },
+      "91": { class_type: "PreviewImage", inputs: { images: ["90", 0] } },
+    });
+  });
+});
+
+const asObject = (l: unknown[]) => ({ id: l[0], origin_id: l[1], origin_slot: l[2], target_id: l[3], target_slot: l[4], type: l[5] });
+const asArray = (l: Record<string, unknown>) => [l["id"], l["origin_id"], l["origin_slot"], l["target_id"], l["target_slot"], l["type"]];
+
+it("links are read as arrays or as objects, at the root and inside a subgraph alike", () => {
+  const workflow = fixture("templates/subgraph-case.json") as { links: unknown[][]; definitions: { subgraphs: { links: Record<string, unknown>[] }[] } };
+  const swapped = { ...workflow, links: workflow.links.map(asObject), definitions: { subgraphs: workflow.definitions.subgraphs.map((s) => ({ ...s, links: s.links.map(asArray) })) } };
+  expect(convertWorkflow(swapped, info)).toEqual(fixture("api/subgraph-case.json"));
+});
+
+describe("a switch whose setting is not fixed by its own value", () => {
+  it("a switch set by another node's output stays a node, with both branches it may take", () => {
+    const workflow = sdxlUi();
+    workflow.links = workflow.links.map((l) => (l as unknown[])[0] === 38 ? [38, 91, 0, 12, 0, "MODEL"] : l);
+    workflow.links.push([92, 15, 0, 91, 1, "MODEL"], [93, 15, 0, 91, 2, "MODEL"], [96, 95, 0, 91, 0, "INT"]);
+    workflow.nodes.push(
+      { id: 95, type: "PrimitiveInt", mode: 0, inputs: [], outputs: [{ type: "INT", links: [96] }], properties: {}, widgets_values: [1] },
+      { id: 91, type: "ComfySwitchNode", mode: 0, inputs: [{ name: "switch", type: "BOOLEAN", widget: { name: "switch" }, link: 96 }, { name: "on_false", type: "*", link: 92 }, { name: "on_true", type: "*", link: 93 }], outputs: [{ type: "*", links: [38] }], properties: {}, widgets_values: [false] },
+    );
+    const expected = sdxlApi();
+    expected["12"]!.inputs["model"] = ["91", 0];
+    expect(convertWorkflow(workflow, info)).toEqual({
+      ...expected,
+      "91": { class_type: "ComfySwitchNode", inputs: { switch: ["95", 0], on_false: ["15", 0], on_true: ["15", 0] } },
+      "95": { class_type: "PrimitiveInt", inputs: { value: 1 } },
+    });
+  });
+
+  it("a switch inside a subgraph set on its instance (proxyWidgets) takes the instance's setting over its own", () => {
+    const workflow = sdxlUi();
+    workflow.links = workflow.links.map((l) => (l as unknown[])[0] === 38 ? [38, 91, 0, 12, 0, "MODEL"] : l);
+    workflow.links.push([92, 15, 0, 91, 0, "MODEL"]);
+    workflow.nodes.push({ id: 91, type: "model-switch", mode: 0, inputs: [{ name: "model", type: "MODEL", link: 92 }], outputs: [{ type: "MODEL", links: [38] }], properties: { proxyWidgets: [["5", "switch"]] }, widgets_values: [false] });
+    workflow.definitions = { subgraphs: [{
+      id: "model-switch", name: "Model switch",
+      inputs: [{ name: "model", type: "MODEL" }],
+      outputs: [{ linkIds: [3] }],
+      nodes: [
+        { id: 5, type: "ComfySwitchNode", mode: 0, inputs: [{ name: "switch", type: "BOOLEAN", widget: { name: "switch" }, link: null }, { name: "on_false", type: "*", link: 1 }, { name: "on_true", type: "*", link: 2 }], outputs: [{ type: "*", links: [3] }], properties: {}, widgets_values: [true] },
+        { id: 6, type: "SomePatch", mode: 0, inputs: [{ name: "model", type: "MODEL", link: 4 }], outputs: [{ type: "MODEL", links: [2] }], properties: {} },
+      ],
+      links: [
+        { id: 1, origin_id: -10, origin_slot: 0, target_id: 5, target_slot: 1, type: "MODEL" },
+        { id: 2, origin_id: 6, origin_slot: 0, target_id: 5, target_slot: 2, type: "MODEL" },
+        { id: 3, origin_id: 5, origin_slot: 0, target_id: -20, target_slot: 0, type: "MODEL" },
+        { id: 4, origin_id: -10, origin_slot: 0, target_id: 6, target_slot: 0, type: "MODEL" },
+      ],
+    }] };
+    expect(convertWorkflow(workflow, info)).toEqual(sdxlApi());
+  });
+});

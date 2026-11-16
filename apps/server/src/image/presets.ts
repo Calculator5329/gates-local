@@ -1,15 +1,3 @@
-// The image setups: each one a ComfyUI workflow file, plus the name the picker shows, the sizes it
-// is offered at and the GPU memory a job needs at each. What Image mode fills in (prompt, size,
-// seed, output) is found in the graph by its shape (controls.ts), and the files it loads are read
-// from the graph too: every input whose value is a model file name. A setup is ready when
-// ComfyUI's /object_info lists every node class it uses and names every file it loads; one that
-// is not is still listed, with the reason.
-//
-// The app's own setups are the API-format files in setups/ (origin in setups/README.md): the four
-// models of Other models (PRESETS), and the Defaults menu's style cells (styles.ts), the style
-// bench's winner for each style at this machine's level, whose words go before the person's. The
-// setups ComfyUI has (its templates and the person's saved workflows, sources.ts) come after them,
-// and then the model files already in its folders (installed.ts).
 import { cardBytes, MIN_ROOM, type ImageChoice, type ImagePreset, type Settings } from "@gates-local/contracts";
 import * as Option from "effect/Option";
 import * as S from "effect/Schema";
@@ -27,82 +15,51 @@ import { cellsFor, compactStandIn, levelOf, STYLE_CELLS, type StyleCell } from "
 export interface Preset {
   readonly id: string;
   readonly name: string;
-  /**
-   * The composer button's name, beside the family's mark (which says FX or ZI already): its first
-   * letter is no other preset's, so however narrow the button, two presets never cut to the same text.
-   */
+  // why: each name starts with its own letter, so a narrow button never shows two setups alike
   readonly short: string;
   readonly family: string;
-  /** The workflow, in either of ComfyUI's formats. */
   readonly workflow: unknown;
-  /** Every size it is offered at, first is the default, and the memory a job at it needs. */
   readonly sizes: readonly { readonly width: number; readonly height: number; readonly bytes: number }[];
-  /** False while every byte count is an estimate. */
   readonly measured: boolean;
-  /** The picker's group: a theme for the app's own setups, where it came from for the rest. */
   readonly group: string;
-  /** The model alone, where `name` adds a style (a style cell); absent when `name` is the model. */
   readonly model?: string;
-  /** Words written around the person's prompt (a theme's wrapping). */
   readonly wrap?: { readonly prefix: string; readonly suffix: string };
-  /** Where a file it loads can be downloaded from, by the name the workflow gives. */
   readonly sources?: Readonly<Record<string, ModelSource>>;
-  /** Set when the workflow could not be read at all: why, in words. */
   readonly refused?: string;
 }
 
-/** Where a model file comes from: its ComfyUI folder kind and download address, and its size and hash once known. */
 export interface ModelSource { readonly directory?: string; readonly url?: string; readonly bytes?: number; readonly sha256?: string }
 
-/** The picker's groups, theme defaults first. */
 export const GROUPS = { general: "General", portraits: "Portraits and people", characters: "Characters", pixel: "Pixel art", sprites: "Game sprites", backgrounds: "Backgrounds", icons: "Icons", text: "Text and logos", painterly: "Painterly and concept art", templates: "ComfyUI templates", saved: "Your workflows", installed: "Your models" } as const;
 
-/** The files the app's own setups load: where each is downloaded from, its size and sha256 (setups/files.json). */
 const APP_FILES: Readonly<Record<string, ModelSource>> = fileSources;
 
 const GIB = 1024 ** 3;
 
-// The memory each of the app's setups needs is the smallest cap the GPU matrix of 2026-11-12 ran
-// it under (ComfyUI 0.45.0, every size at most 1024x1024 pixels, warm): a cap it ran under, not a
-// measured peak, so `measured` stays false. Klein with the full text encoder ran under 8 GiB and
-// ran out of memory under 6; with the compact FP4 encoder it ran under 4. Z-Image Turbo int8 ran
-// under 6, MOSS-Image under 4. The backgrounds' wide sizes have the same pixel count or fewer.
+// why: each figure is the smallest memory cap the setup ran under in the GPU matrix, not a peak
 const sized = (gib: number) => (sizes: readonly (readonly [number, number])[]) => sizes.map(([width, height]) => ({ width, height, bytes: gib * GIB }));
 const kleinSizes = sized(8);
 const square = [[1024, 1024], [1024, 768], [768, 1024]] as const;
 const klein4b = { family: "flux", sources: APP_FILES, measured: false } as const;
 
-/**
- * Other models' rows from the app: the General group's tier setups (TIERS). Klein is one row
- * under one name: the full setup on a card of 8 GB or more, the compact one below (kleinFor).
- */
 export const PRESETS: readonly Preset[] = [
   { ...klein4b, id: "flux2-klein-4b", name: "FLUX.2 Klein 4B", short: "Klein 4B", group: GROUPS.general, workflow: klein, sizes: kleinSizes(square) },
-  // The same model with the FP4 text encoder and 12 steps (the matrix's compact-12): for a card under 8 GB.
   { ...klein4b, id: "flux2-klein-4b-compact", name: "FLUX.2 Klein 4B", short: "Klein 4B", group: GROUPS.general, workflow: kleinCompact, sizes: sized(4)(square) },
   { id: "z-image-int8", name: "Z-Image Turbo int8", short: "Z-Image", family: "zimage", group: GROUPS.general, workflow: zImage, sizes: sized(6)(square), sources: APP_FILES, measured: false },
   { id: "moss-image", name: "MOSS-Image", short: "MOSS", family: "moss", group: GROUPS.general, workflow: moss, sizes: sized(4)(square), sources: APP_FILES, measured: false },
 ];
 
-/**
- * The themes before the style bench (the image-themes research, 2026-11-12), on Klein with its
- * prompt wrapping and sizes. No longer listed: the Defaults menu's style cells took their place
- * (owner ruling 2026-11-13). They still resolve, so a saved pick and a card's Retry still run.
- */
 export const RETIRED: readonly Preset[] = [
   {
     ...klein4b, id: "flux2-klein-4b-portraits", name: "FLUX.2 Klein 4B portraits", short: "Faces", group: GROUPS.portraits, workflow: klein,
     wrap: { prefix: "Natural editorial portrait photograph. ", suffix: " Soft window light, realistic skin texture, clear eyes, both hands visible with relaxed separated fingers, simple uncluttered background." },
     sizes: kleinSizes([[832, 1216], [896, 1152], [1024, 1024]]),
   },
-  // Pixel art and sprites are drawn square, then shrunk to 128 px and cut to 32 colours by
-  // ComfyUI's own ImageScale and ImageQuantize: the picture that comes back is 128 x 128.
   {
     ...klein4b, id: "flux2-klein-4b-pixel", name: "FLUX.2 Klein 4B pixel art", short: "Retro pixel", group: GROUPS.pixel, workflow: kleinPixel,
     wrap: { prefix: "Pixel art, ", suffix: ". Crisp square pixel clusters, limited 32-color palette, simple readable shapes, deliberate hard edges, no lettering." },
     sizes: kleinSizes([[768, 768], [512, 512], [1024, 1024]]),
   },
-  // A sprite comes back on a flat magenta field; cutting it out is not done here.
   {
     ...klein4b, id: "flux2-klein-4b-sprites", name: "FLUX.2 Klein 4B game sprites", short: "Sprites", group: GROUPS.sprites, workflow: kleinPixel,
     wrap: { prefix: "A single game character sprite, ", suffix: ". Full body entirely inside the frame with generous empty padding, three-quarter view facing right, readable silhouette, simple flat shading, isolated on a uniform solid pure magenta background (#FF00FF), no magenta on the subject, no ground, no cast shadow, no text, one subject only." },
@@ -115,13 +72,7 @@ export const RETIRED: readonly Preset[] = [
   },
 ];
 
-/**
- * What an unset Settings choice runs when the General style's cell for the card is not ready
- * (defaultChoice): the first of these that fits the GPU room and is ready. Klein first, its compact
- * setup standing in below 8 GiB (the Fast tier's own swap), then Z-Image Turbo int8, then
- * MOSS-Image. A saved choice is never replaced by one of these. Its own rule, not "the first
- * row", so a row added to PRESETS never becomes the default by its place.
- */
+// why: an explicit list, so a row added to PRESETS never becomes the default by its place
 export const DEFAULT_ORDER: readonly ImageChoice[] = [
   { preset: "flux2-klein-4b", width: 1024, height: 1024 },
   { preset: "flux2-klein-4b-compact", width: 1024, height: 1024 },
@@ -130,60 +81,34 @@ export const DEFAULT_ORDER: readonly ImageChoice[] = [
 ];
 
 export const NO_GPU = "Image mode needs a GPU with 4 GB.";
-/** The picker's line when ComfyUI runs on the processor: the basic-PC bench's times were 100 to 235 seconds a picture. */
+// why: the basic-PC bench took 100 to 235 seconds a picture on the processor
 export const SLOW = "No GPU: a picture takes 2 to 4 minutes.";
 
-/**
- * A card's size from nvidia-smi's total, to the nearest GB as cards are sold (contracts'
- * image-fit.ts, which the picker judges sizes by). The tiers and the default go by it, never by
- * what is free now (owner ruling 2026-11-13); the job's own fit check judges what is free when it runs.
- */
 export { cardBytes, MIN_ROOM };
 
-/**
- * The quality tiers of the owner's picks (2026-11-13): each takes the first of its setups whose
- * first size fits the card (cardBytes). Fast: Klein on an 8 GB card, compact below. Balanced:
- * Z-Image Turbo int8 on 6 GB, Klein compact on 4. Best: MOSS-Image on 4.
- */
 export const TIERS: readonly { readonly name: string; readonly presets: readonly string[] }[] = [
   { name: "Fast", presets: ["flux2-klein-4b", "flux2-klein-4b-compact"] },
   { name: "Balanced", presets: ["z-image-int8", "flux2-klein-4b-compact"] },
   { name: "Best", presets: ["moss-image"] },
 ];
 
-/**
- * MOSS-Image is a default only on a computer with 32 GB of system memory (bench rule A,
- * 2026-11-13): it took 13 to 15 GiB of it in the bench, beside the desktop and the chat model.
- * A 32 GB computer reports a little under 32 GiB, so the line is 30. Memory not known: it counts.
- */
+// why: MOSS took 13 to 15 GiB of RAM in the bench, and a 32 GB computer reports under 32 GiB
 export const MOSS_RAM = 30 * GIB;
 const mossFits = (ram: number | undefined): boolean => ram === undefined || ram >= MOSS_RAM;
 
 const presetById = (id: string): Preset => PRESETS.find((p) => p.id === id)!;
 const firstBytes = (id: string): number => presetById(id).sizes[0]!.bytes;
-/** Room unknown (no reading, or a ComfyUI on another machine) fits everything; the job's own check still runs. */
 const fits = (bytes: number, room: number | undefined): boolean => room === undefined || bytes <= room;
 
 const KLEIN = ["flux2-klein-4b", "flux2-klein-4b-compact"] as const;
-/** Klein's one row for a card of `room` bytes (cardBytes): the full setup where it fits the card, else the compact one. */
 export const kleinFor = (room: number | undefined): (typeof KLEIN)[number] => fits(firstBytes(KLEIN[0]), room) ? KLEIN[0] : KLEIN[1];
 const isKlein = (id: string): boolean => (KLEIN as readonly string[]).includes(id);
-/** Two ids that are one row of the picker: the same setup, or the two Klein setups. */
 export const sameRow = (a: string, b: string): boolean => a === b || isKlein(a) && isKlein(b);
-/**
- * Klein's one row: the card's (kleinFor), unless only the other one runs now and it fits the card
- * too (a 16 GB card that has the compact setup's files only runs that, not a download). With no
- * card (room 0, the CPU) there is nothing to judge by, so whichever one runs is the row.
- */
 function kleinRow(room: number | undefined, runs: (p: Preset) => boolean): string {
   const card = kleinFor(room), other = card === KLEIN[0] ? KLEIN[1] : KLEIN[0];
   return !runs(presetById(card)) && runs(presetById(other)) && (room === 0 || fits(firstBytes(other), room)) ? other : card;
 }
 
-/**
- * Each tier's setup for a card of `room` bytes (cardBytes), in tier order, with its label ("Fast",
- * or "Fast and balanced" when one setup is two tiers' pick). Empty below MIN_ROOM.
- */
 export function tiersFor(room: number | undefined): { preset: string; tier: string }[] {
   if (room !== undefined && room < MIN_ROOM) return [];
   const out: { preset: string; names: string[] }[] = [];
@@ -197,37 +122,20 @@ export function tiersFor(room: number | undefined): { preset: string; tier: stri
   return out.map((o) => ({ preset: o.preset, tier: o.names.join(" and ") }));
 }
 
-/** A cell's one size as a choice. */
 const cellChoice = (c: StyleCell): ImageChoice => ({ preset: c.id, width: c.sizes[0]!.width, height: c.sizes[0]!.height });
-/** The General style's cell at a level: what an unset choice runs there when it is ready. */
 const generalCell = (level: NonNullable<ReturnType<typeof levelOf>>): StyleCell => cellsFor(level).find((c) => c.style === "general")!;
 
-/** Absent, one of DEFAULT_ORDER, or a General cell of any level. */
 export const isDefaultChoice = (c: ImageChoice | undefined): boolean =>
   c === undefined || [...DEFAULT_ORDER, ...STYLE_CELLS.filter((s) => s.style === "general").map(cellChoice)].some((d) => d.preset === c.preset && d.width === c.width && d.height === c.height);
 
-/** An unset choice before ComfyUI's lists or the card have been read: the General cell of the top level. */
 export const DEFAULT_CHOICE: ImageChoice = cellChoice(generalCell("16"));
 
-/** Every setup of the app's that a choice can name: listed or not. */
 const APP_PRESETS: readonly Preset[] = [...PRESETS, ...STYLE_CELLS, ...RETIRED];
-/** One of the app's own setups by id, listed at this level or not. */
 export const appPreset = (id: string): Preset | undefined => APP_PRESETS.find((p) => p.id === id);
 
-/**
- * A saved choice (Settings' or a thread's) as a send reads it: undefined when it names one of the
- * app's own setups this build no longer has (an older build's pick, such as SDXL Lightning), so the
- * send runs what nothing picked runs, as the composer already shows. A ComfyUI workflow or a
- * person's own file (an id with a `kind:` prefix) is kept: its list may not be read yet, and its
- * job says what is missing.
- */
 export const liveChoice = (choice: ImageChoice | undefined): ImageChoice | undefined =>
   choice === undefined || choice.preset.includes(":") || appPreset(choice.preset) !== undefined ? choice : undefined;
 
-/**
- * The preset and size a choice names, from the app's own and `extra` (the workflows ComfyUI had,
- * workflowPresets). An unknown preset or a size it does not run at is refused, never swapped.
- */
 export function resolveChoice(choice: ImageChoice, extra: readonly Preset[] = []): { preset: Preset; size: Preset["sizes"][number] } {
   const preset = appPreset(choice.preset) ?? extra.find((p) => p.id === choice.preset);
   if (preset === undefined) throw Object.assign(new Error(`There is no image preset ${choice.preset}. Pick an image model in the composer.`), { code: "image-model" });
@@ -236,17 +144,14 @@ export function resolveChoice(choice: ImageChoice, extra: readonly Preset[] = []
   return { preset, size };
 }
 
-/** For each `Class.input` that takes a model file, the file names ComfyUI lists there. */
 export type LoaderFiles = Readonly<Record<string, readonly string[]>>;
-/** What the app keeps of /object_info: the file lists and, once read, every node class it lists. */
 export interface ComfyLists { readonly files: LoaderFiles; readonly classes?: readonly string[] }
 
-/** An /object_info stand-in that lists every node class (with no inputs): for judging files alone. */
 const EVERY_CLASS: ObjectInfo = new Proxy({}, { get: () => ({}) });
 const MODEL_FILE = /\.(safetensors|sft|ckpt|pt|pth|bin|gguf|onnx)$/i;
 const Spec = S.Struct({ input: S.optional(S.Struct({ required: S.optional(S.Record(S.String, S.Unknown)), optional: S.optional(S.Record(S.String, S.Unknown)) })) });
 
-/** A combo input's options in either of /object_info's spellings, else undefined. */
+// external: ComfyUI's /object_info spells a combo as [options] or as ["COMBO", { options }]
 function comboOptions(def: unknown): readonly unknown[] | undefined {
   if (!Array.isArray(def)) return undefined;
   if (Array.isArray(def[0])) return def[0] as unknown[];
@@ -254,7 +159,6 @@ function comboOptions(def: unknown): readonly unknown[] | undefined {
   return undefined;
 }
 
-/** The file lists and node classes in a /object_info answer. */
 export function comfyLists(info: ObjectInfo): ComfyLists & { classes: readonly string[] } {
   const files: Record<string, string[]> = {};
   for (const [name, raw] of Object.entries(info)) {
@@ -264,17 +168,15 @@ export function comfyLists(info: ObjectInfo): ComfyLists & { classes: readonly s
       const options = comboOptions(def);
       if (options === undefined) continue;
       const names = options.filter((v): v is string => typeof v === "string");
-      // a file list, never a list of sampler or scheduler names; an empty list and no list both mean no files
+      // why: ComfyUI combos also list samplers and schedulers, so only lists of model files count
       if (names.some((v) => MODEL_FILE.test(v))) files[`${name}.${field}`] = names;
     }
   }
   return { files, classes: Object.keys(info) };
 }
 
-/** A file a graph loads: the node, its input, and the name the workflow gives. */
 export interface GraphFile { readonly node: string; readonly key: string; readonly input: string; readonly name: string }
 
-/** Every model file a graph loads: the inputs whose value is a model file name. */
 export function graphFiles(graph: ApiGraph): GraphFile[] {
   const out: GraphFile[] = [];
   for (const [node, { class_type, inputs }] of Object.entries(graph)) {
@@ -283,21 +185,17 @@ export function graphFiles(graph: ApiGraph): GraphFile[] {
   return out;
 }
 
-/** The model files a setup's workflow loads, as it names them (its file lists not consulted). */
 export function presetFiles(preset: Preset): string[] {
   return graphFiles(convertWorkflow(preset.workflow, EVERY_CLASS)).map((f) => f.name);
 }
 
-/** The name ComfyUI lists for this file (it may sit in a subfolder), or undefined when it lists none. */
 export function findFile(files: LoaderFiles, file: Pick<GraphFile, "key" | "name">): string | undefined {
   const base = file.name.replaceAll("\\", "/").split("/").at(-1)!;
   return files[file.key]?.find((v) => v === file.name || v.replaceAll("\\", "/").endsWith(`/${base}`) || v === base);
 }
 
-/** The setup's graph as Image mode would run it, or why it cannot: refused (WorkflowRefusal) or missing files. */
 function judge(preset: Preset, lists: ComfyLists): { graph: ApiGraph; missing: GraphFile[] } {
   if (preset.refused !== undefined) throw new WorkflowRefusal(preset.refused);
-  // Before ComfyUI's class list was kept, every class counts as listed.
   const info: ObjectInfo = lists.classes === undefined ? EVERY_CLASS : Object.fromEntries(lists.classes.map((c) => [c, {}]));
   const graph = convertWorkflow(preset.workflow, info);
   findControls(graph);
@@ -310,13 +208,11 @@ const row = (p: Preset): ImagePreset => ({
   ...(p as Partial<StyleCell>).style === undefined ? {} : { style: (p as StyleCell).style },
 });
 
-/** A Hugging Face address and a folder kind: what image.download needs to fetch a file. */
 const fetchable = (source: ModelSource | undefined): boolean => {
   if (source?.url === undefined || source.directory === undefined) return false;
   try { return huggingFace(new URL(source.url), false); } catch { return false; }
 };
 
-/** The files to fetch, their total size when every one's is known, and whether image.download can fetch them all. */
 function needs(preset: Preset, missing: readonly GraphFile[]): NonNullable<ImagePreset["needs"]> {
   const files = [...new Set(missing.map((f) => f.name))];
   const sizes = files.map((f) => preset.sources?.[f]?.bytes);
@@ -327,19 +223,11 @@ function needs(preset: Preset, missing: readonly GraphFile[]): NonNullable<Image
   };
 }
 
-/**
- * Every setup as the picker lists it: the ready ones, and the rest with what stops them. Klein is
- * one row, the card's (kleinRow). The style
- * cells are the ones of the level a card of `room` bytes runs at (levelOf; unknown: the top level).
- * With `ram` bytes of system memory under MOSS_RAM, a MOSS cell is listed without its style (the
- * picker shows it under Other models) and its style's compact Klein cell takes its place.
- */
 export function listPresets(lists: ComfyLists, extra: readonly Preset[] = [], room?: number, ram?: number): { ready: ImagePreset[]; others: ImagePreset[] } {
   const ready: ImagePreset[] = [], others: ImagePreset[] = [];
   const level = levelOf(room);
   const cells = new Set<Preset>(cellsFor(level));
   const runs = (p: Preset) => { try { return judge(p, lists).missing.length === 0; } catch { return false; } };
-  // too little memory for MOSS: its cell's style goes to the compact Klein cell, listed first
   const unstyled = new Set<Preset>(mossFits(ram) || level === undefined ? [] : cellsFor(level).filter((c) => c.family === "moss" && compactStandIn(c, level) !== undefined));
   const kleinId = kleinRow(room, runs);
   const list = [...PRESETS.filter((p) => !isKlein(p.id) || p.id === kleinId), ...cellsFor(level), ...extra].flatMap((p) => unstyled.has(p) ? [compactStandIn(p as StyleCell, level!)!, p] : [p]);
@@ -349,8 +237,6 @@ export function listPresets(lists: ComfyLists, extra: readonly Preset[] = [], ro
       const { missing } = judge(p, lists);
       if (missing.length === 0) ready.push(listed(p));
       else {
-        // A winner that needs the second download stays offered; its style's compact Klein cell
-        // stands in, so a style never shows a default this ComfyUI cannot run.
         const standIn = cells.has(p) && !unstyled.has(p) && level !== undefined ? compactStandIn(p as StyleCell, level) : undefined;
         if (standIn !== undefined && runs(standIn)) ready.push(row(standIn));
         others.push({ ...listed(p), needs: needs(p, missing) });
@@ -363,10 +249,6 @@ export function listPresets(lists: ComfyLists, extra: readonly Preset[] = [], ro
   return { ready, others };
 }
 
-/**
- * One setup judged as listPresets judges it, whether this card lists it or not: the setup's one
- * download fetches the compact Klein on any card, where the picker's one Klein row is the full one.
- */
 export function judgeRow(lists: ComfyLists, p: Preset): ImagePreset {
   try {
     const { missing } = judge(p, lists);
@@ -377,14 +259,8 @@ export function judgeRow(lists: ComfyLists, p: Preset): ImagePreset {
   }
 }
 
-/** The presets ComfyUI has every class and file for, as the picker shows them. */
 export const availablePresets = (lists: ComfyLists, extra: readonly Preset[] = [], room?: number, ram?: number): ImagePreset[] => listPresets(lists, extra, room, ram).ready;
 
-/**
- * The graph a job sends: the setup's workflow with the prompt, size and seed written in and each
- * file named as ComfyUI lists it. Throws `image-model` (with `file`) when a file is not listed,
- * and `image-model` with the reason when the workflow is refused.
- */
 export function jobGraph(preset: Preset, info: ObjectInfo, values: { prompt: string; seed: number; width: number; height: number }): ApiGraph {
   const lists = comfyLists(info);
   let graph: ApiGraph;
@@ -403,11 +279,6 @@ export function jobGraph(preset: Preset, info: ObjectInfo, values: { prompt: str
   catch (error) { throw error instanceof WorkflowRefusal ? Object.assign(new Error(`${preset.name}: ${error.message}`), { code: "image-model" }) : error; }
 }
 
-/**
- * A refusal's way out: the first setup and size in the picker's list (availablePresets) that needs
- * less than `needBytes` and fits in `roomBytes`, named as the picker names it. Undefined when none
- * would (each of the app's setups needs the same at every size; 4 GiB is the smallest need there is).
- */
 export function smallerFit(lists: ComfyLists | undefined, needBytes: number, roomBytes: number, extra: readonly Preset[] = []): string | undefined {
   for (const p of lists === undefined ? [] : availablePresets(lists, extra)) {
     const size = p.sizes.find((s) => s.bytes < needBytes && s.bytes <= roomBytes);
@@ -416,55 +287,33 @@ export function smallerFit(lists: ComfyLists | undefined, needBytes: number, roo
   return undefined;
 }
 
-/** A choice as the composer names it. One this build no longer runs (an older preset id) names the default. */
 export function describeChoice(choice: ImageChoice, fallback: ImageChoice, extra: readonly Preset[] = []): { preset: ImagePreset; width: number; height: number } {
   for (const c of [choice, fallback, DEFAULT_CHOICE]) {
     try { const { preset } = resolveChoice(c, extra); return { preset: row(preset), width: c.width, height: c.height }; }
-    catch { /* try the next */ }
+    catch {}
   }
   return { preset: row(PRESETS[0]!), width: DEFAULT_CHOICE.width, height: DEFAULT_CHOICE.height };
 }
 
-/** Tools › Make images as the person left it: on or off when they flipped it, else on exactly while a setup can run. */
 export function imageToolOn(settings: Pick<Settings, "imageGen" | "imageTool">, runnable: boolean): boolean {
   return settings.imageGen === true && (settings.imageTool ?? runnable);
 }
 
-/**
- * The system prompt's one line for a chat turn without the image tool, so a model asked for a
- * picture says what turns it on here instead of naming another app. `toolsOn`: the turn runs tools
- * (Let the model use tools). Undefined when the tool is offered.
- */
 export function imageOffLine(settings: Pick<Settings, "imageGen" | "imageTool">, runnable: boolean, toolsOn: boolean): string | undefined {
   if (toolsOn && imageToolOn(settings, runnable)) return undefined;
   const say = !settings.imageGen ? "Turn on Generate images in Settings > Image generation."
     : !runnable && settings.imageTool !== false ? "Set up an image model in Settings > Image generation."
     : !toolsOn ? "Turn on Let the model use tools and Make images in Settings > Tools, or switch the message box to Image."
     : "Turn on Make images in Settings > Tools, or switch the message box to Image.";
-  // about images only: beside a tool list, "you cannot" read as every tool being off (a model quoted it so)
+  // why: beside a tool list, a model read "you cannot" as every tool being off and said so
   const off = toolsOn ? "Making images is off in this chat; every other tool you have still works." : "Making images is off in this chat.";
   return `${off} If asked for an image, say: "${say}" Never send the person to another app or website for it.`;
 }
 
-/**
- * Tools › Make images: the choice a chat model's image tool runs, or undefined when the tool is
- * off. It needs image generation on too. Unset is on once a setup can run (`runnable`); an
- * explicit off stays off.
- */
 export function imageToolChoice(settings: Pick<Settings, "imageGen" | "imageTool" | "imageChoice">, runnable: boolean, lists?: ComfyLists, extra: readonly Preset[] = []): ImageChoice | undefined {
-  // with no default (no GPU room), DEFAULT_CHOICE: the job's own check then refuses it in words
   return imageToolOn(settings, runnable) ? (liveChoice(settings.imageChoice) ?? defaultChoice(lists, extra) ?? DEFAULT_CHOICE) : undefined;
 }
 
-/**
- * The default for an unset choice, for a card of `room` bytes (cardBytes; undefined: unknown, so
- * the top level; 0: the CPU): undefined on a GPU under MIN_ROOM (NO_GPU says why). Else the General
- * style's cell for the card's level when it is ready, else the first of DEFAULT_ORDER that fits
- * and is ready, else the General cell even when not ready, so the send says which files are
- * missing (and the picker offers the download) rather than running some other row. On the CPU
- * only the General cell is a default. Never a template or a person's own, and never MOSS-Image
- * with `ram` bytes of system memory under MOSS_RAM.
- */
 export function defaultChoice(lists: ComfyLists | undefined, extra: readonly Preset[] = [], room?: number, ram?: number): ImageChoice | undefined {
   const level = levelOf(room);
   if (level === undefined) return undefined;
@@ -475,10 +324,6 @@ export function defaultChoice(lists: ComfyLists | undefined, extra: readonly Pre
   return fitting.find((c) => available.some((p) => p.id === c.preset)) ?? fitting[0];
 }
 
-/**
- * A workflow read from ComfyUI (sources.ts), as the app keeps it: its API graph once converted, or
- * why it could not be, and where the files it names come from (the file's `properties.models`).
- */
 export interface KnownWorkflow {
   readonly id: string;
   readonly name: string;
@@ -486,14 +331,12 @@ export interface KnownWorkflow {
   readonly graph?: unknown;
   readonly why?: string;
   readonly sources?: Readonly<Record<string, ModelSource>>;
-  /** The family mark, when it is known from the files' headers (installed.ts) rather than guessed. */
   readonly family?: string;
 }
 
-/** Guessed from the files it loads, for the mark beside its name; "comfy" when none is known. */
 function familyOf(graph: ApiGraph): string {
   const names = graphFiles(graph).map((f) => f.name.toLowerCase()).join(" ");
-  // MOSS-Image loads FLUX.2's VAE: a model's own name goes before the VAE it borrows
+  // external: MOSS-Image workflows load FLUX.2's VAE, so a flux file name appears in them too
   if (/moss[_-]?image/.test(names)) return "moss";
   if (/z[_-]?image/.test(names)) return "zimage";
   if (/flux/.test(names)) return "flux";
@@ -502,16 +345,11 @@ function familyOf(graph: ApiGraph): string {
   return "comfy";
 }
 
-/**
- * The research's memory rule for a workflow with no measured figure: the largest file it loads
- * plus 1.5 GiB, not a measured peak. With no file's size known, 10 GiB, the app's own largest estimate.
- */
 function estimateBytes(graph: ApiGraph, sources: Readonly<Record<string, ModelSource>>): number {
   const known = graphFiles(graph).map((f) => sources[f.name]?.bytes ?? APP_FILES[f.name]?.bytes).filter((b): b is number => b !== undefined);
   return known.length === 0 ? 10 * GIB : Math.max(...known) + 1.5 * GIB;
 }
 
-/** A kept workflow as a setup: its own size only, the memory estimated, never measured. */
 export function workflowPreset(w: KnownWorkflow): Preset {
   const base = { id: w.id, name: w.name, short: w.name, group: w.group, workflow: w.graph, measured: false, sources: w.sources ?? {} };
   if (w.why !== undefined) return { ...base, family: w.family ?? "comfy", sizes: [], refused: w.why };

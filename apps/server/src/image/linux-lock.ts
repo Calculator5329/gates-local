@@ -1,10 +1,5 @@
-// Generated from `uv pip compile --generate-hashes --emit-index-url` (uv 0.13.7) on ComfyUI
-// v0.44.0's requirements.txt, for CPython 3.13 on x86_64 Linux: torch and torchvision held to the
-// cu130 index's 2.14.1 / 0.29.1, every other package at its newest on PyPI (unsafe-best-match),
-// read 2026-11-13. uv's `# via` comments are dropped. 103 packages; linux-build.ts syncs it
-// with --require-hashes, so a wheel whose hash is not here is refused.
+// external: uv pip sync --require-hashes refuses any wheel whose hash is not in the lock
 
-/** What the 103 wheels download for x86_64 Linux, CPython 3.13 (sizes from the index, the rest by HEAD). */
 export const LINUX_WHEEL_BYTES = 3_836_323_793;
 
 export const LINUX_LOCK = String.raw`--index-url https://pypi.org/simple

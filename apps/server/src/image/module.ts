@@ -25,7 +25,6 @@ import { createComfyService, type ComfyService } from "./service.ts";
 import { engineStatus, mayWrite, type Seen, type StatusWriter } from "./engine-status.ts";
 import { extraModelPathsLine, MODEL_KINDS, type OwnComfy } from "./own.ts";
 
-/** The deepest folder every one of `dirs` is in (the first itself, when there is one). */
 export function sharedFolder(dirs: readonly string[]): string {
   let at = path.resolve(dirs[0] ?? ".");
   const inside = (dir: string) => { const rel = path.relative(at, path.resolve(dir)); return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel)); };
@@ -33,16 +32,10 @@ export function sharedFolder(dirs: readonly string[]): string {
   return at;
 }
 
-/**
- * ComfyUI's last file lists and node classes, and the workflows it had (its templates and the
- * person's saved ones, as API graphs: sources.ts), kept in the data dir so the picker lists setups
- * while ComfyUI is stopped. A record from before the classes were kept has none: every class then
- * counts as listed until ComfyUI is read again.
- */
 const FILES_NAME = "image-files.json";
 const Source = S.Struct({ directory: S.optional(S.String), url: S.optional(S.String), bytes: S.optional(S.Finite), sha256: S.optional(S.String) });
 const Workflow = S.Struct({ id: S.String, name: S.String, group: S.String, graph: S.optional(S.Unknown), why: S.optional(S.String), sources: S.optional(S.Record(S.String, Source)), family: S.optional(S.String) });
-// folders: its model folders by kind (/internal/folder_paths), so a download needs no running ComfyUI
+// external: ComfyUI reports its model folders only while running, through /internal/folder_paths
 const KnownFiles = S.Struct({ baseUrl: S.String, readAt: S.Finite, files: S.Record(S.String, S.Array(S.String)), classes: S.optional(S.Array(S.String)), workflows: S.optional(S.Array(Workflow)), folders: S.optional(S.Record(S.String, S.Array(S.String))) });
 type KnownFiles = typeof KnownFiles.Type;
 type ImageSettings = { imageGen: boolean; comfyUrl?: string; imageChoice?: ImageChoice; imageFolder?: string };
@@ -53,151 +46,67 @@ export interface ImageDeps extends ComfyClientDeps {
   lease: GpuLease;
   store: ThreadStore;
   push: Push;
-  /** The finished picture's thumbnail (pictures/thumbs.ts), made before done; a failure is logged and the picture kept. */
   thumbnail?(jobId: string, png: Buffer): Promise<void>;
   settings(): ImageSettings;
-  /** Every saved settings change, from any window: the image ones change the status or the presets every window shows. */
   onSettings?(listener: (next: ImageSettings, previous: ImageSettings) => void): void;
-  /**
-   * The one owner of memory (gpu/memory.ts): a job's fit runs its handoff in its gate, so every chat
-   * model leaves and the engine frees a setup it holds before the job measures. Absent (tests, the
-   * real check): the job measures what is there.
-   */
   memory?: MemoryOwner;
   readGpu?(): Promise<{ freeBytes: number; holders: string; tenants?: readonly GpuHolder[] }>;
-  /**
-   * The GPU as the picker sees it (the app's GPU watcher): what decides the default and the tiers
-   * (imageRoom). Absent (tests, the real check): the room is unknown and every setup counts as fitting.
-   */
   gpuStatus?(): Promise<GpuStatus>;
-  /**
-   * This computer's memory in bytes (MemTotal; the e2e stack's fake GATES_LOCAL_MEMINFO): under
-   * MOSS_RAM no MOSS setup is a default (presets.ts). Absent or undefined: not known, and MOSS counts.
-   */
   memTotal?(): Promise<number | undefined>;
-  /** The nvidia-smi the default readGpu runs; the e2e stack's fake (GATES_LOCAL_NVIDIA_SMI), as every chat fit uses. */
   runNvidiaSmi?: NvidiaSmiRunner;
   service?: ComfyService;
-  /**
-   * The app's own ComfyUI (own.ts): once installed, and while Settings names no address, it is
-   * the ComfyUI the app reads, starts and stops, at its own address, in place of the unit.
-   */
   own?: OwnComfy;
-  /**
-   * Tests (GATES_LOCAL_COMFY_URL, GATES_LOCAL_IMAGE_ENGINE): the ComfyUI address when Settings has
-   * none and the own engine is not installed, in place of the local 8188. Set, that address is not
-   * managed: comfyui.service is never inspected, started or stopped.
-   */
   defaultUrl?: string;
   requiredBytes?: number;
   idleMs?: number;
   startupTimeoutMs?: number;
   jobTimeoutMs?: number;
   queueTimeoutMs?: number;
-  /** How long a picture the engine will not let go of keeps its claim (STUCK_HOLD_MS); tests shorten it. */
   stuckHoldMs?: number;
-  /** Tests only (gpu/rules.test.ts): turns one guard off, so the test that needs it is seen failing. */
   faultForTest?: "stuck-picture-gives-the-card-back" | "stop-an-engine-the-app-did-not-start" | "picture-without-lease";
-  /** This machine's own interface addresses; tests inject them. */
   localAddresses?(): readonly string[];
-  /** Every address a host name resolves to; tests inject it. */
   lookupHost?(name: string): Promise<readonly string[]>;
-  /**
-   * Model downloads' fetch, allowed hosts and free-space reading; tests point them at a fake file
-   * server. `records: false` (tests only, with that fake) uses neither the app's records' sha256
-   * nor their sizes, as the fake's bytes are not the files they name: files are checked against
-   * their pins alone, and each counts at the size its download says.
-   */
   download?: Pick<DownloadOptions, "fetch" | "allow" | "freeBytes" | "intervalMs"> & { readonly records?: false };
   log?(line: string): void;
 }
 
-/**
- * What the app holds about its ComfyUI, read in one place: the address it reads, whose process
- * that is, its state, the process the app started (while it runs), the card's room and the file
- * list last read there. The setup and the GPU status read this rather than asking again. The
- * app's own engine writes its end directly (own.ts onExit); an outside ComfyUI is read by status.
- */
+// why: setup and GPU status read this one held value rather than asking ComfyUI again
 export interface ImageEngine {
   address?: string;
   owner: "app" | "outside" | "none";
   state: ImageStatus["state"];
-  /** The ComfyUI process this app started, while it runs. */
   pid?: number;
-  /** imageRoom: undefined until read, and for a ComfyUI on another computer. */
   room?: number;
   files?: KnownFiles;
 }
 
 export interface ImageModule extends MemoryEngine {
-  /** Queued and running jobs, including jobs waiting for GPU memory. */
   activeJobs?(): number;
   current(): ImageStatus;
-  /** The held engine value (ImageEngine); reads nothing. */
   engine(): ImageEngine;
   status(): Promise<ImageStatus>;
-  /**
-   * The presets ComfyUI has every file for. Reads ComfyUI's file list when it answers (never
-   * starts it), else returns the last list read at this address, kept across restarts.
-   */
   presets(): Promise<ImagePresets>;
-  /** The choice an unset Settings choice means now: the first preset ComfyUI last listed every file for. */
   defaultChoice(): ImageChoice;
-  /**
-   * Whether a setup can run here: ComfyUI last listed every file for one, and the card has room for
-   * a default. Tools › Make images left unset is on exactly while this holds.
-   */
   runnable(): boolean;
-  /** A job runs `choice`, else Settings' imageChoice, else defaultChoice(); a retry runs its failed job's. */
   generate(params: Params<"image.generate">): Promise<{ jobId: string }>;
   cancel(jobId: string): { cancelled: boolean };
-  /**
-   * Fetch the files a setup needs, one after another, into a `gates-local/` folder inside each of
-   * the local ComfyUI's own model folders (download.ts); progress goes out on image.download. Answers
-   * with the files it will fetch once each has an address and a folder; refuses while another runs.
-   */
   download(preset: string): Promise<{ files: string[] }>;
-  /**
-   * What Set up images' download of `preset` fetches: the size of each of its files not already
-   * whole where that download puts them (a picked folder, else the app's own engine's models,
-   * built or not), by the check download() skips them with (haveFile). Undefined where that place
-   * or a missing file's size is not known.
-   */
   setupLeft(preset: string): Promise<number | undefined>;
-  /** Stop `preset`'s download if it is the one running; its part file stays for the next download to resume. */
   stopDownload(preset: string): { stopped: boolean };
-  /** Start ComfyUI with no job (the picker's Start ComfyUI) and answer presets(); no job runs, so the idle stop applies. */
   start(): Promise<ImagePresets>;
-  /** Test/CLI completion seam; errors are reported on image.event. */
+  // why: tests and the CLI await a job's end here, as its errors go out on image.event, not thrown
   wait(jobId: string): Promise<void>;
-  /**
-   * `signal` (a turn's reclaim) ends the wait for the GPU claim and every read under it, so the
-   * claim goes back at once; a cancelled call never starts a stop. A stop already begun runs to its end.
-   */
   stopIdle(signal?: AbortSignal): Promise<void>;
-  /** The MainPID of the ComfyUI this app started while no image job runs (what stopIdle would stop), else undefined. */
   reclaimable(): number | undefined;
   close(): Promise<void>;
-  /** Hard shutdown deadline: running jobs cannot delay this run's owned unit stop. */
   killRuntimeNow(): void;
 }
 
 const DEFAULT_URL = "http://127.0.0.1:8188";
 
-/**
- * No ComfyUI answered and the app has none to start: what a person reads, on the card, the send's
- * refusal and Settings. It names no service (Windows has none) and no unit.
- */
 export const IMAGES_UNSET = "Images are not set up on this computer. No ComfyUI answered; start one, or set its address in Settings › Image generation.";
-/** An address the person set that does not answer (WIN-MEM-04): it is not running there, not missing from this computer. */
 export const notRunning = (baseUrl: string) => `ComfyUI at ${baseUrl} is not running. Start it there, then try again.`;
 
-/**
- * One spelling per IP address: lowercase, no brackets or zone, IPv6 written
- * the way the URL parser writes it, and an IPv4-mapped IPv6 address
- * (::ffff:a.b.c.d, which the parser writes as ::ffff:XXXX:YYYY) as plain
- * dotted IPv4. Anything that is not an IP literal comes back lowercased.
- */
 export function canonicalAddress(address: string): string {
   let a = address.toLowerCase().replace(/^\[(.*)\]$/, "$1").split("%")[0]!;
   if (net.isIPv6(a)) {
@@ -211,7 +120,6 @@ export function canonicalAddress(address: string): string {
   return a;
 }
 
-/** This machine's interface addresses, in canonicalAddress form. */
 export function localAddresses(): string[] {
   const out: string[] = [];
   for (const list of Object.values(os.networkInterfaces())) for (const a of list ?? []) out.push(canonicalAddress(a.address));
@@ -221,24 +129,12 @@ export function localAddresses(): string[] {
 const lookupHost = async (name: string): Promise<readonly string[]> =>
   (await dns.lookup(name, { all: true, verbatim: true })).map((entry) => entry.address);
 
-/** Loopback (all of 127.0.0.0/8 and ::1), the wildcard addresses, or one of this machine's interfaces. */
 const isLocalAddress = (address: string, own: readonly string[]) => {
   const a = canonicalAddress(address);
   return /^127(\.\d{1,3}){3}$/.test(a) || a === "::1" || a === "0.0.0.0" || a === "::" || own.map(canonicalAddress).includes(a);
 };
 
-/**
- * True when a ComfyUI at this host runs on this machine's GPU; only then do
- * the VRAM fit and the chat unload apply. An IP literal is local when it is
- * loopback, the wildcard address ComfyUI prints when started with --listen,
- * or one of this machine's interface addresses. A name is local when any
- * address it resolves to is local; `localhost` and `*.localhost` always are.
- * One trailing dot is ignored for those checks, but DNS gets the name as
- * the HTTP request will send it: with search suffixes, `comfy.lan.` and
- * `comfy.lan` can resolve to different hosts. When the name cannot be
- * resolved the answer is true: an unknown host gets the fit, never a
- * skipped one. An aborted signal ends a pending lookup with its reason.
- */
+// external: with DNS search suffixes, comfy.lan. and comfy.lan can resolve to different hosts
 export async function isLocalHost(hostname: string, own: readonly string[] = localAddresses(),
   lookup: (name: string) => Promise<readonly string[]> = lookupHost, signal?: AbortSignal): Promise<boolean> {
   const name = hostname.toLowerCase();
@@ -261,52 +157,22 @@ const imageError = (code: string, message: string) => Object.assign(new Error(me
 const gib = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
 const same = (a: ImageChoice, b: ImageChoice) => a.preset === b.preset && a.width === b.width && a.height === b.height;
 
-/**
- * How long a picture may run before it is stopped. On a card a picture takes seconds; on the processor
- * Settings promises 2 to 4 minutes (presets.ts SLOW), and a busy computer took 9 minutes a step, so its
- * limit is five times the slowest promised picture and more.
- */
+// why: a busy processor took 9 minutes a step, so its limit is over five times the 4-minute promise
 export const RUN_LIMIT_MS = { card: 600_000, cpu: 1_800_000 } as const;
 const QUEUE_LIMIT_MS = 1_800_000;
 const minutes = (ms: number) => Math.round(ms / 60_000);
-/**
- * A picture stopped at its limit: the cause, with the engine named as Settings names it. `stopped`:
- * the engine let go of it; else it is still stopping (a step it has not ended), and a new picture
- * on the processor waits for it.
- */
 export const ranLong = (min: number, stopped = true) => stopped
   ? `The picture took longer than the ${min}-minute limit on this computer, so the image engine stopped it. Try again when you are ready.`
   : `The picture took longer than the ${min}-minute limit on this computer, and the image engine is still stopping it.`;
-/**
- * How long a cancel waits for the engine to let go. On a card it checks the interrupt between
- * steps of a second or so (client.ts CANCEL_WAIT_MS). On the processor a step can run for minutes
- * (9 on a busy computer): the wait is as long as the processor's picture limit, which no one
- * step outlasts.
- */
+// external: ComfyUI checks for an interrupt only between steps, and a processor step takes minutes
 export const CANCEL_WAIT = { card: CANCEL_WAIT_MS, cpu: RUN_LIMIT_MS.cpu } as const;
-/**
- * How long a stopped picture the engine has not let go of keeps the card after the cancel wait.
- * The engine reads a stop between steps, and loading a setup's files is one step: the largest
- * setup read from a slow disk loads in under this.
- */
+// why: a load is one uninterruptible step, and the largest setup loads from a slow disk in less
 export const STUCK_HOLD_MS = 300_000;
-/** The status while that picture keeps the card. */
 export const STUCK_HOLD_NOTE = "ComfyUI has not stopped the picture yet. Chat and new pictures wait until it has.";
-/** A picture that never got its turn (chat held the memory): nothing ran, nothing is wrong with the engine. */
 export const waitedLong = (min: number) => `The picture waited ${min} minutes for its turn and did not start. Try again when you are ready.`;
 
-/** One process on the GPU as nvidia-smi lists it (fit/gpu.ts GpuTenant). */
 export interface GpuHolder { pid: number; usedBytes?: number; label?: string; role?: string; system?: true; unnamed?: true }
 
-/**
- * The refusal the card shows, in one sentence: what the image needs, what is free, who holds the
- * most of the rest, and a setup that would fit when one does (`smaller`, from smallerFit). `ours`
- * are the chat models the app's Ollama still lists after the handoff and its wait (a running reply's,
- * or slow to leave): an Ollama runner is then the app's, and the sentence never says to close
- * another app. Undefined when Ollama's list could not be read; the sentence then names Ollama and
- * claims nothing about whose model it is. Whisper is never the one named: nothing the app says
- * asks for it to be closed.
- */
 export function fitSentence(needBytes: number, freeBytes: number, holders: readonly GpuHolder[], ours: readonly string[] | undefined, smaller?: string): string {
   const base = `The image needs ${gib(needBytes)} and ${gib(freeBytes)} is free`;
   const out = smaller === undefined ? "" : `; ${smaller} would fit`;
@@ -321,23 +187,12 @@ export function fitSentence(needBytes: number, freeBytes: number, holders: reado
   return `${base}; ${top.label ?? `process ${top.pid}`} holds ${held}, close it${out}.`;
 }
 
-/**
- * The long form (status detail and log) keeps every number; `said` is the card's one sentence. The
- * free memory is a reading taken after the handoff: nothing else is counted as free.
- */
 export function imageFitError(needBytes: number, freeBytes: number, holders: string, said?: string) {
   const shortfallBytes = Math.max(0, needBytes - freeBytes);
   return Object.assign(imageError("wont-fit", `Image generation needs ${gib(needBytes)}, ${gib(freeBytes)} free, ${gib(shortfallBytes)} short. GPU memory by process: ${holders}. Protected occupants are left running.`),
     { needBytes, freeBytes, shortfallBytes, holders, said: said ?? fitSentence(needBytes, freeBytes, [], []) });
 }
 
-/**
- * The card Image mode is judged by, for the default and the tiers: its memory to the nearest GB
- * (cardBytes), never what is free now (owner ruling 2026-11-13). What other programs hold is the
- * picker's information, and the job's own fit check judges it when the job runs.
- * 0 when ComfyUI runs on the CPU (`cpuOnly`), or when there is no NVIDIA GPU and ComfyUI does not
- * say it has another. Undefined (unknown) when nvidia-smi fails or ComfyUI reports a GPU nvidia-smi cannot read.
- */
 export function imageRoom(gpu: GpuStatus | undefined, cpuOnly: boolean | undefined): number | undefined {
   if (cpuOnly === true) return 0;
   if (gpu === undefined || gpu.vendor === "unreadable") return undefined;
@@ -346,10 +201,6 @@ export function imageRoom(gpu: GpuStatus | undefined, cpuOnly: boolean | undefin
   return cardBytes(gpu.totalBytes);
 }
 
-/**
- * The picker's words: on a GPU too small for any default why, and on the CPU how slow. A card that
- * renders (a room read only for a ComfyUI on this computer) is where the fit hands memory off.
- */
 const roomWords = (room: number | undefined): { noGpu?: string; slow?: string; unloadsChat?: boolean } =>
   room === 0 ? { slow: SLOW } : room === undefined ? {} : room < MIN_ROOM ? { noGpu: NO_GPU } : { unloadsChat: true };
 
@@ -365,15 +216,9 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   let closed = false;
   let activeJob: string | undefined;
-  /**
-   * Our own prompts that ignored the 30 s cancel deadline, one per ComfyUI
-   * address; ComfyUI may still be running them. `pid` is the MainPID of the
-   * app-started ComfyUI that ran it, when the address was ours. A record
-   * goes when its prompt is no longer running or its process changed.
-   */
   const stuck = new Map<string, { promptId: string; pid?: number }>();
-  const emit: Push = (channel, payload, changes) => { try { deps.push(channel, payload, changes); } catch { /* a disconnected client cannot strand a GPU job */ } };
-  /** The engine state the presets were last read again for: ComfyUI coming up or turning off changes the list, a job's busy and ready again does not. */
+  // why: a window that vanished mid-job must not leave the job holding the GPU
+  const emit: Push = (channel, payload, changes) => { try { deps.push(channel, payload, changes); } catch {} };
   let presetsFor: ImageStatus["state"] | undefined;
   const move = (writer: StatusWriter, seen: Seen, baseUrl?: string): ImageStatus => {
     if (!mayWrite(writer, jobs.size, activeJob)) return status;
@@ -382,7 +227,6 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     if ((status.state === "ready" || status.state === "off") && status.state !== presetsFor) { presetsFor = status.state; republish(); }
     return status;
   };
-  /** Read the presets again for every window: presets() pushes what it read. */
   const republish = () => { void module.presets().catch((error: unknown) => log(`presets not read again: ${detail(error)}`)); };
   const config = () => {
     const settings = deps.settings();
@@ -392,32 +236,24 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     const baseUrl = url.href.replace(/\/$/, "");
     return { enabled: settings.imageGen, baseUrl, managed: settings.comfyUrl === undefined && (own !== undefined || (deps.defaultUrl === undefined && baseUrl === DEFAULT_URL)), hostname: url.hostname, addressSet: settings.comfyUrl !== undefined };
   };
-  /** Nothing answers and there is nothing to start: an address the person set is not running there; with none, images are not set up. */
   const missingWords = (baseUrl: string, asStatus = false) => {
     let set = false;
-    try { set = config().addressSet; } catch { /* a bad address says so on its own */ }
+    // why: a bad address already reports its own config error, so this check stays quiet
+    try { set = config().addressSet; } catch {}
     return !set ? IMAGES_UNSET : asStatus ? `No ComfyUI answers at ${baseUrl}.` : notRunning(baseUrl);
   };
   const marked = (baseUrl: string): { addressSet?: true } => {
     try { return config().addressSet && config().baseUrl === baseUrl ? { addressSet: true } : {}; } catch { return {}; }
   };
-  /** What starts and stops the ComfyUI at `baseUrl`: the app's own engine at its address, else the unit. */
   const serviceAt = (baseUrl: string): ComfyService =>
     deps.own !== undefined && deps.own.installed() && deps.own.address().replace(/\/$/, "") === baseUrl ? deps.own : systemUnit;
-  /** The app's own engine is at `baseUrl`: Settings says Ready for it stopped, never Found. */
   const ownMark = (baseUrl: string): { own?: true } => deps.own !== undefined && serviceAt(baseUrl) === deps.own ? { own: true } : {};
-  /**
-   * The app's own engine is at `baseUrl` and its build runs on the processor (own.ts build): the
-   * processor build on disk, whatever card shows up later. Known while it is stopped, so the room,
-   * the limits and the settings are the processor's before it answers.
-   */
   const onProcessor = (baseUrl: string) => ownMark(baseUrl).own === true && deps.own?.build?.()?.cpu === true;
   const client = (baseUrl: string) => createComfyClient(baseUrl, deps);
   const filesPath = path.join(deps.dataDir, FILES_NAME);
   let known: KnownFiles | undefined;
   try { known = S.decodeUnknownSync(KnownFiles)(JSON.parse(readFileSync(filesPath, "utf8"))); }
-  catch { known = undefined; /* absent or unreadable: read again from ComfyUI */ }
-  /** Workflows from a source that was not read this time are kept from the last read at this address. */
+  catch { known = undefined; }
   const remember = (baseUrl: string, lists: ComfyLists, read: { templates?: readonly KnownWorkflow[]; saved?: readonly KnownWorkflow[]; installed?: readonly KnownWorkflow[]; folders?: Record<string, string[]> } = {}) => {
     const before = known?.baseUrl === baseUrl ? known.workflows ?? [] : [];
     const kept = (prefix: string, fresh: readonly KnownWorkflow[] | undefined) => fresh ?? before.filter((w) => w.id.startsWith(prefix));
@@ -430,13 +266,12 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       renameSync(tmp, filesPath);
     } catch (error) { log(`ComfyUI file list not kept: ${detail(error)}`); }
   };
-  /** The last file list read at the configured address, or undefined. */
   const knownFiles = (): KnownFiles | undefined => {
     try { return known?.baseUrl === config().baseUrl ? known : undefined; }
     catch { return undefined; }
   };
   let extraFor: { record: KnownFiles; presets: readonly Preset[] } | undefined;
-  /** The kept workflows as setups (empty before ComfyUI was read at this address), worked out once per read. */
+  // why: worked out once per read record, so each presets call does not convert them again
   const extras = (): readonly Preset[] => {
     const record = knownFiles();
     if (record === undefined) return [];
@@ -453,10 +288,6 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     }); }, deps.idleMs ?? 300_000);
     idleTimer.unref();
   };
-  /**
-   * With image generation off: is there no engine anywhere? None of the app's, no address set, no
-   * service to start, and nothing answering at the default address. Unsure is never "nowhere".
-   */
   const nowhere = async (cfg: ReturnType<typeof config>): Promise<boolean> => {
     if (cfg.addressSet || deps.own?.installed() === true) return false;
     try {
@@ -482,23 +313,12 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   };
   const measure = deps.readGpu ?? (async () => {
     const gpu = await readGpu(deps.runNvidiaSmi);
-    // ComfyUI runs on one card: the largest one's free memory, never every card's together
+    // external: ComfyUI runs a job on one card, so free memory on several cards does not add up
     return { freeBytes: gpu.cards?.[0]?.freeBytes ?? gpu.freeBytes, tenants: gpu.tenants, holders: holdersSummary(gpu.tenants, gib) };
   });
-  /**
-   * The one answer to "may this image load" (owner ruling 2026-11-13: one thing in memory). Inside
-   * the memory owner's gate: the handoff asks every chat model to leave and the engine to free a
-   * setup other than `want` (only while its queue is empty), then one new reading decides, crediting
-   * nothing. The engine already holding `want` (a warm image of the same setup) leaves nothing to
-   * measure: the job runs. `needBytes`: the preset's need at the job's size (presets.ts).
-   * `freeing` is told when something is asked to leave (true), and once the reading after it says
-   * the image fits (false): a refusal or an error ends the freeing step itself. Resolves with `want` staged "loading" (the caller settles or ends it), or undefined when no fit
-   * applies (a ComfyUI on another computer, or on the CPU).
-   */
   const fit = async (cfg: ReturnType<typeof config>, needBytes: number, want: Want, signal: AbortSignal, freeing: (on: boolean) => void): Promise<Want | undefined> => {
     if (!await isLocalHost(cfg.hostname, deps.localAddresses?.() ?? localAddresses(), deps.lookupHost ?? lookupHost, signal)) return undefined;
     signal.throwIfAborted();
-    // the processor build holds nothing on the card: nothing to free or measure there
     if (onProcessor(cfg.baseUrl)) return undefined;
     const stats = await client(cfg.baseUrl).stats(signal).catch(() => undefined);
     signal.throwIfAborted();
@@ -512,12 +332,9 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       const gpu = await measure();
       signal.throwIfAborted();
       if (!Number.isFinite(gpu.freeBytes) || gpu.freeBytes < 0) throw new Error(asked ? "GPU free memory could not be measured after unloading what held it. Retry when the GPU status is available." : "GPU free memory could not be measured. Retry when the GPU status is available.");
-      // The picker's mark comes from the same function (contracts/image-fit.ts).
       if (imageFitVerdict({ estimateBytes: estimate, freeBytes: gpu.freeBytes, creditedBytes: 0 }).verdict === "fits") return fits();
-      // The app's own ComfyUI is the engine this job runs on: the sentence never says to close it.
       const others = (gpu.tenants ?? []).filter((tenant) => !(owned !== undefined && tenant.pid === owned.pid));
       const smaller = smallerFit(knownFiles(), estimate, gpu.freeBytes, extras());
-      // What stayed in the app's Ollama is this app's to wait for; an unreadable /api/ps claims nothing.
       const said = fitSentence(estimate, gpu.freeBytes, others, handoff === undefined ? [] : handoff.stayed, smaller);
       throw imageFitError(estimate, gpu.freeBytes, gpu.holders, handoff?.engine === "busy" ? `${said} ${ENGINE_BUSY_NOTE}` : said);
     };
@@ -549,7 +366,6 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     const canStart = ["inactive", "failed"].includes(before.activeState);
     move(writer, { state: "starting", answering: !canStart }, baseUrl);
     signal.throwIfAborted();
-    // Active and transitional units belong to their existing owner. Wait, never adopt.
     const up = async () => {
       if (canStart) {
         await service.start();
@@ -561,7 +377,6 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       while (!await comfy.healthy()) {
         signal.throwIfAborted();
         if (Date.now() >= deadline) throw new Error("ComfyUI did not become ready within the startup timeout. Check its log, then try again.");
-        // The app's own engine is a child: one that exited will not answer, so say so now, not at the timeout.
         if (service === deps.own && !(await service.inspect()).active) { owned = undefined; throw new Error("ComfyUI stopped while it was starting. Check its log, then try again."); }
         await delay(250, undefined, { signal });
       }
@@ -569,23 +384,18 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     const mine = canStart && service === deps.own ? deps.own : undefined;
     try { await up(); }
     catch (error) {
-      // The app's own engine is not there after its start: where that was the card's build and the
-      // processor's is whole beside it, own.ts passes the card's over and the processor's starts
-      // now. One still running (slow to answer) is left to finish, and a stop is nobody's failure.
       if (mine === undefined || signal.aborted || (await mine.inspect().catch(() => undefined))?.active !== false) throw error;
       const passed = mine.failed?.();
       if (passed === undefined) throw error;
       owned = undefined;
       log(`the image engine's card build ${passed} was not there after its start (${detail(error)}); the processor's build runs in its place`);
       await up();
-      // the room and the limits are the processor's from here on
       await readRoom(signal).catch(() => undefined);
     }
     mine?.answered?.();
     signal.throwIfAborted();
     return comfy;
   };
-  /** A file's sha256 from its first download, by its address: a later download that differs is not put in place. */
   const pinsPath = path.join(deps.dataDir, "image-pins.json");
   const readPins = (): Record<string, string> => {
     try { return S.decodeUnknownSync(S.Record(S.String, S.String))(JSON.parse(readFileSync(pinsPath, "utf8"))); }
@@ -596,18 +406,10 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     catch (error) { log(`image download pins not kept: ${detail(error)}`); }
   };
   let downloading: Promise<void> | undefined, downloads: AbortController | undefined;
-  /** The running download: its setup, and its last push until that push ends it. */
   let downloadOf: string | undefined, lastDownload: ImageDownload | undefined;
   const say = (p: ImageDownload) => { lastDownload = p; emit("image.download", p); };
-  /** Sizes a download learned from where a file is served (a HEAD, or its own progress), by address. */
   const learned = new Map<string, number>();
   type Cfg = ReturnType<typeof config>;
-  /**
-   * Where image downloads go, never by guessing: Settings' picked folder; else the app's own
-   * engine's models folder (known while it is stopped); else the folders a ComfyUI on this
-   * computer last reported. `dirOf` is undefined when none of these is known, or ComfyUI is on
-   * another computer (its folders are not this one's). Each kind goes in a gates-local folder.
-   */
   const downloadPlace = (cfg: Cfg): { root?: string; picked: boolean; dirOf?: (kind: string) => string | undefined } | undefined => {
     if (!isLocalComfy(cfg.baseUrl)) return undefined;
     const picked = deps.settings().imageFolder;
@@ -620,27 +422,21 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     return { root: sharedFolder(firsts), picked: false, dirOf: (kind) => { const first = folders[kind]?.[0]; return first === undefined ? undefined : path.join(first, "gates-local"); } };
   };
   const freeAt = (dir: string) => (deps.download?.freeBytes ?? volumeFree)(dir).then((b) => Math.floor(b));
-  /** The picker's disk row: where the files go and the room on that volume. */
   const diskRow = async (cfg: Cfg): Promise<NonNullable<ImagePresets["disk"]> | undefined> => {
     const place = downloadPlace(cfg);
     if (place === undefined) return undefined;
     if (place.root === undefined) return { picked: place.picked };
     const free = await freeAt(place.root).catch(() => undefined);
-    // the app's own engine is started reading a picked folder; the person's own ComfyUI is told by them
     const line = place.picked && serviceAt(cfg.baseUrl) !== deps.own ? { line: extraModelPathsLine(place.root) } : {};
     return { folder: place.root, ...free === undefined ? {} : { freeBytes: free }, picked: place.picked, ...line };
   };
-  /** One file of a download's plan: its address, and its folder here. */
   interface Planned { readonly name: string; readonly url: string; readonly dir: string; readonly sha256?: string; readonly bytes?: number }
-  /** What is left to fetch of each file: its size less a part already there (0 for a file whole there); undefined while a size is unknown. */
   const leftOf = (files: readonly Planned[], sizes: readonly (number | undefined)[]) => Promise.all(files.map(async (f, i) => {
     const size = sizes[i];
     if (await haveFile(f.dir, f.name, size)) return 0;
     return size === undefined ? undefined : Math.max(0, size - await partBytes(f.dir, f.name, f.url));
   }));
-  /** A file's size as far as it is known without a request: the app's record (unless records are off), else one learned. */
   const knownSize = (f: Planned) => (deps.download?.records === false ? undefined : f.bytes) ?? learned.get(f.url);
-  /** The setup's files with an address and a folder here; a file without either is left out (the download itself says why). */
   const plannedFiles = (id: string, names: readonly string[], cfg: Cfg): Planned[] => {
     const preset = appPreset(id) ?? extras().find((p) => p.id === id);
     const place = downloadPlace(cfg);
@@ -650,14 +446,12 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       return source?.url === undefined || dir === undefined ? [] : [{ name: path.basename(name), url: source.url, dir, ...source.sha256 === undefined ? {} : { sha256: source.sha256 }, ...source.bytes === undefined ? {} : { bytes: source.bytes } }];
     });
   };
-  /** The picker's "left to fetch" for a setup's missing files, when every one's size is known. */
   const leftToFetch = async (id: string, names: readonly string[], cfg: Cfg): Promise<number | undefined> => {
     const files = plannedFiles(id, names, cfg);
     if (files.length !== names.length) return undefined;
     const left = await leftOf(files, files.map(knownSize));
     return left.every((b) => b !== undefined) ? left.reduce((a, b) => a + b, 0) : undefined;
   };
-  /** ImageModule.setupLeft: the files not whole in the picked folder, else the app's own engine's models folder (built or not). */
   const setupLeft = async (id: string): Promise<number | undefined> => {
     const preset = appPreset(id);
     const root = deps.settings().imageFolder ?? deps.own?.modelsDir?.();
@@ -671,11 +465,6 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     }));
     return left.every((b) => b !== undefined) ? left.reduce((a, b) => a + b, 0) : undefined;
   };
-  /**
-   * The room check before any byte and again before each file: on each volume the files go to, what
-   * is left to fetch of them against what is free there. Files of unknown size are checked by
-   * their own download (download.ts), once their size is said.
-   */
   const roomFor = async (files: readonly Planned[], sizes: readonly (number | undefined)[]) => {
     const left = await leftOf(files, sizes);
     const volumes = new Map<number, { dirs: string[]; need: number }>();
@@ -693,11 +482,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       if (free < need) throw imageError("image-disk", `Not enough disk space in ${folder}: ${gib(need)} is left to fetch and ${gib(free)} is free.`);
     }
   };
-  /** The last room read (imageRoom), for the default between reads; undefined until one is. */
   let lastRoom: number | undefined;
-  /** This computer's memory, read with the room for a ComfyUI on this computer; undefined otherwise. */
   let lastRam: number | undefined;
-  /** The room now, for a ComfyUI on this machine; unknown for one elsewhere (its GPU is not this one). */
   const readRoom = async (signal?: AbortSignal): Promise<number | undefined> => {
     const unknown = () => { lastRam = undefined; return lastRoom = undefined; };
     if (deps.gpuStatus === undefined) return unknown();
@@ -713,20 +499,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     const cpuOnly = onProcessor(cfg.baseUrl) || (stats === undefined || stats.devices.length === 0 ? undefined : stats.devices.every((d) => d.type === "cpu"));
     return lastRoom = imageRoom(gpu, cpuOnly);
   };
-  /** How long a stop waits for the engine to let go, on the room last read. */
   const cancelWaitMs = () => lastRoom === 0 ? CANCEL_WAIT.cpu : CANCEL_WAIT.card;
-  /** Ends the wait below when the app closes. */
   const closing = new AbortController();
-  /**
-   * A picture's claim on the card: its job, and after it the wait for a picture the engine will
-   * not let go of. A prompt that outlived the cancel wait on an engine on this card (`onCard`)
-   * keeps the claim: the engine may still be loading, and whoever claimed next would measure and
-   * load beside it. The claim is given back when the prompt has left the engine's queue (the
-   * picture then ends like any stopped one), when the engine no longer answers, when the app
-   * closes, or after STUCK_HOLD_MS. At that limit an engine the app started is stopped, so its
-   * memory is free. One the app did not start is never stopped: the card is given back with the
-   * warning, and the next load is decided by a reading of the card.
-   */
   const heldWhileStuck = async (writer: StatusWriter, onCard: () => boolean, at: () => string, job: () => Promise<void>): Promise<void> => {
     try { await job(); }
     catch (error) {
@@ -738,12 +512,10 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       let ended: "left" | "gone" | "limit" | "closing" | undefined;
       let unanswered = 0;
       while (ended === undefined) {
-        // keeps asking it to stop, as the cancel did
         try { await comfy.cancelPrompt(promptId, Math.max(0, until - Date.now()), closing.signal); ended = "left"; }
         catch {
           if (closing.signal.aborted) ended = "closing";
           else if (Date.now() >= until) ended = "limit";
-          // one missed answer is not an engine that is gone
           else if (await comfy.healthy()) unanswered = 0;
           else if (++unanswered >= 2) ended = "gone";
           if (ended === undefined) await new Promise<void>((resolve) => {
@@ -756,7 +528,6 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       if (ended === "limit") {
         const service = serviceAt(baseUrl);
         const unit = await service.inspect().catch(() => undefined);
-        // only the engine this app started, still the same process
         if (unit?.active === true && ((owned?.baseUrl === baseUrl && unit.pid === owned.pid) || deps.faultForTest === "stop-an-engine-the-app-did-not-start")) {
           await service.stop();
           forgetGpuReadings();
@@ -766,22 +537,16 @@ export function createImageModule(deps: ImageDeps): ImageModule {
           ended = "gone";
         }
       }
-      // still there: the record and the warning, as for an engine that holds nothing on this card
       if (ended === "limit" || ended === "closing") throw error;
       const stopped = error as { stuckPromptId?: string; cancelDetail?: string };
       delete stopped.stuckPromptId; delete stopped.cancelDetail;
       throw error;
     }
   };
-  /** A picture runs alone on the card: its whole job, the wait above included, is inside one claim. */
   const claimed = (signal: AbortSignal, job: () => Promise<void>): Promise<void> =>
     deps.faultForTest === "picture-without-lease" ? job() : deps.lease.run("image", signal, job);
-  /** The default for the files and room last read; DEFAULT_CHOICE stands in where there is none, and the job refuses it (settle). */
   const chooseDefault = () => defaultChoice(knownFiles(), extras(), lastRoom, lastRam) ?? DEFAULT_CHOICE;
-  /** What a send runs now: the saved choice, or the default for the files last read. */
   const currentChoice = () => describeChoice(deps.settings().imageChoice ?? chooseDefault(), chooseDefault(), extras());
-  // The app's own engine says when its process ends without the app asking: the held value
-  // changes now, not at the next status read.
   deps.own?.onExit((pid) => {
     if (owned?.pid !== pid) return;
     const baseUrl = owned.baseUrl;
@@ -790,7 +555,6 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     deps.memory?.engineGone();
     move(READ, { state: "stopped", detail: "ComfyUI stopped on its own. It starts again when you make an image; its log says why." }, baseUrl);
   });
-  /** presets() reads begun, and the last one whose list went out. */
   let presetsBegun = 0, presetsSent = 0;
   const readPresets = async (): Promise<ImagePresets> => {
     const cfg = config();
@@ -815,9 +579,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       const left = await leftToFetch(p.id, p.needs.files, cfg);
       return left === undefined ? p : { ...p, needs: { ...p.needs, leftBytes: left } };
     }));
-    // read after the last wait, so the list carries the download as its last push said
+    // why: it is read after the last await, so a push made during the reads above is not missed
     const download = lastDownload?.ended === true ? undefined : lastDownload;
-    // a pick of the Klein setup this card does not list runs as the one it lists: Klein is one row
     const chosen = currentChoice();
     const row = ready.find((p) => p.id !== chosen.preset.id && sameRow(p.id, chosen.preset.id) && p.sizes.some((z) => z.width === chosen.width && z.height === chosen.height));
     const current = row === undefined ? chosen : { ...chosen, preset: row };
@@ -837,7 +600,6 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       };
     },
     activeJobs: () => jobs.size,
-    // The room is read with the status, so runnable() does not wait for a client to ask for presets.
     status: async () => {
       const read = await discover();
       await readRoom().catch(() => undefined);
@@ -848,8 +610,6 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       const files = knownFiles();
       return files !== undefined && roomWords(lastRoom).noGpu === undefined && listPresets(files, extras(), lastRoom, lastRam).ready.length > 0;
     },
-    // Every read goes to every window too, so no window reads again to learn what another window's
-    // action changed; a read begun earlier that ends later answers its asker but is not pushed.
     async presets() {
       const begun = ++presetsBegun;
       const value = await readPresets();
@@ -860,7 +620,6 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       if (closed) throw imageError("shutting-down", "Image generation is shutting down.");
       const cfg = config();
       if (!cfg.enabled) throw imageError("image-off", "Image generation is off. Turn it on in Settings first.");
-      // A job starts it anyway, and owns the status while it runs.
       if (jobs.size === 0) {
         await ensure(READ, cfg.baseUrl, cfg.managed, AbortSignal.timeout((deps.startupTimeoutMs ?? 60_000) + 5_000));
         move(READ, { state: "ready" }, cfg.baseUrl);
@@ -872,16 +631,10 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       if (closed) throw imageError("shutting-down", "Image generation is shutting down.");
       deps.admit?.();
       let cfg = { enabled: false, baseUrl: "", managed: false, hostname: "", addressSet: false };
-      // The thread's own choice (its last pick or send), else Settings' (the last pick anywhere).
-      // A saved one this build no longer has (an older build's pick) counts as none (liveChoice).
       const kept = liveChoice(params.threadId ? deps.store.imageChoiceOf(params.threadId) : undefined);
       const jobId = randomUUID();
       const writer: StatusWriter = { kind: "job", jobId };
       let prompt = params.prompt;
-      // Unset: nothing saved in the thread or Settings, and the choice sent (or a retry's stored one)
-      // is absent or one of the defaults. The picker saves every pick, so with nothing saved a default
-      // is all a send can carry (the composer and the image tool send the one they show). The job
-      // settles it again from ComfyUI's own list, so a default whose files went missing is passed over.
       const saved = kept ?? liveChoice(deps.settings().imageChoice);
       let choice = params.choice ?? saved ?? chooseDefault();
       let unset = saved === undefined && isDefaultChoice(params.choice);
@@ -892,21 +645,16 @@ export function createImageModule(deps: ImageDeps): ImageModule {
         prompt = retry.prompt;
         choice = retry.choice;
         unset = saved === undefined && isDefaultChoice(retry.choice);
-      } else resolveChoice(choice, extras()); // an unknown preset or size is refused before any card
+      } else resolveChoice(choice, extras());
       if (!prompt.trim()) throw imageError("bad-params", "Describe the image you want to make.");
-      const sent = choice; // the card's box keeps this shape whatever the job settles to
-      // A retry is its own card that takes over the failed one's place (and tile), so it is in no group.
+      const sent = choice;
       const group = params.retryOf === undefined ? params.group : undefined;
-      // The thread sends with this from now on, whatever another thread picks. A choice someone made is
-      // kept at send. An unset default is kept only once it has made a picture, as settled from ComfyUI's
-      // files, and only while the thread still has none: a pick or a send since then stays. A failed
-      // default keeps nothing, so the next send settles again. A retry leaves the thread's alone.
       const pinIn = params.retryOf === undefined ? params.threadId : undefined;
       if (pinIn !== undefined && !unset && (kept === undefined || !same(choice, kept))) {
         try {
           deps.store.setImageChoice(pinIn, choice);
           emit(...threadChanged(deps.store, pinIn));
-        } catch { /* a thread deleted meanwhile */ }
+        } catch {}
       }
       clearIdle();
       const controller = new AbortController();
@@ -914,10 +662,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       const signal = AbortSignal.any([controller.signal, deadline.signal]);
       let timeout: ReturnType<typeof setTimeout> | undefined;
       let timedOut: "queue" | "run" | undefined;
-      /** The run's start and the limit its timer is set to: a computer found to have no card gets its own. */
       let runFrom = 0, runLimit = 0;
       const runLimitMs = () => deps.jobTimeoutMs ?? (lastRoom === 0 ? RUN_LIMIT_MS.cpu : RUN_LIMIT_MS.card);
-      /** The last progress the card was told, so a stop keeps the card's bar where it was. */
       let shown = 0;
       const armRun = (ms: number) => {
         clearTimeout(timeout);
@@ -926,9 +672,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
         timeout.unref();
       };
       let stage = "image-config";
-      /** The setup this job handed memory to, while it loads: settled at done, ended on a failure. */
       let staged: Want | undefined;
-      // reached sampling once: every window, and one opened later, can tell a later "loading" is not the cold first load
       let sampled = false;
       const event = (state: ImageEvent["state"], rest: Partial<ImageEvent> = {}, picture?: PictureFacts) => {
         if (rest.stage === "sampling" || rest.stage === "decoding") sampled = true;
@@ -937,10 +681,9 @@ export function createImageModule(deps: ImageDeps): ImageModule {
         emit("image.event", payload);
       };
       event("queued");
-      // Waiting has its own limit; it never spends the render's full run budget.
       timeout = setTimeout(() => { timedOut = "queue"; deadline.abort(new Error("Image queue timed out.")); }, deps.queueTimeoutMs ?? QUEUE_LIMIT_MS);
       timeout.unref();
-      // Begin after registering the promise; generate returns before any running event.
+      // why: the work waits a tick, so the job is in jobs before it runs and generate returns first
       const ended = Promise.resolve().then(async () => {
         try {
           await claimed(signal, () => heldWhileStuck(writer, () => staged !== undefined, () => cfg.baseUrl, async () => {
@@ -952,55 +695,43 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             activeJob = jobId;
             event("running", { progress: 0 });
             move(writer, { state: "busy", answering: false }, cfg.baseUrl);
-            // Inside the job: a retry's stored choice a newer table no longer has fails its card in words.
             let { size } = resolveChoice(choice, extras());
             const freeing = (on: boolean) => event("running", on ? { progress: 0, phase: "freeing" } : { progress: 0 });
-            // An unset default settles to the files ComfyUI lists, so the fit and any unload judge the
-            // setup that will really run. A default whose files ComfyUI does not list is passed over without a word.
             const read = async (from: Awaited<ReturnType<typeof ensure>>) => {
               try { remember(cfg.baseUrl, await from.files(signal)); }
               catch (error) { signal.throwIfAborted(); log(`ComfyUI file list not read: ${detail(error)}`); }
             };
-            // With too little GPU room there is no default: the card says why, and no other setup runs.
             const settle = async () => {
               const settled = defaultChoice(knownFiles(), extras(), await readRoom(signal), lastRam);
               if (settled === undefined) throw Object.assign(imageError("wont-fit", NO_GPU), { said: NO_GPU });
               if (same(settled, choice)) return;
               choice = settled;
-              // the job read ComfyUI's files and settled to others than the button names: every window's list
               republish();
               ({ size } = resolveChoice(choice, extras()));
               event("running", { progress: 0 });
             };
-            // Never read: ComfyUI is started (or found) and its list read before the first fit.
             stage = "image-missing";
             const early = unset && knownFiles() === undefined ? await ensure(writer, cfg.baseUrl, cfg.managed, signal) : undefined;
             if (early) await read(early);
             if (unset) await settle();
-            // One answer, before ComfyUI starts: everything else leaves, then the reading decides.
             stage = "image-fit";
             staged = await fit(cfg, size.bytes, { kind: "image", setup: imageSetup(choice) }, signal, freeing);
             stage = "image-missing";
             const comfy = early ?? await ensure(writer, cfg.baseUrl, cfg.managed, signal);
-            // read before: the read now ComfyUI is up catches files gone since
             if (unset && !early) {
               await read(comfy);
               const was = choice;
               await settle();
-              // the default settled to another setup: that one is what loads, so it is the one handed off to
               if (!same(was, choice)) {
                 stage = "image-fit";
                 staged = await fit(cfg, size.bytes, { kind: "image", setup: imageSetup(choice) }, signal, freeing);
               }
             }
             stage = "image-render";
-            // The limit follows the computer: a first picture sent before any status read learns here that there is no card.
             if (lastRoom === undefined && deps.jobTimeoutMs === undefined) await readRoom(signal).catch(() => signal.throwIfAborted());
             const earlier = stuck.get(cfg.baseUrl);
             if (earlier && (await comfy.running(signal)).includes(earlier.promptId)) {
               const busy = imageError("image-busy", "ComfyUI is still running an earlier image from this app that did not stop when cancelled. Wait for it to finish, then retry.");
-              // On the processor the engine is still ending a step of it: this picture waits its turn
-              // (the wait is not its run time), asking it to stop as a cancel does.
               if (lastRoom !== 0) throw busy;
               clearTimeout(timeout);
               await comfy.cancelPrompt(earlier.promptId, cancelWaitMs(), signal).catch((error: unknown) => { signal.throwIfAborted(); throw Object.assign(busy, { cause: error }); });
@@ -1010,7 +741,6 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             if (earlier) stuck.delete(cfg.baseUrl);
             if (runLimitMs() !== runLimit) armRun(runLimitMs());
             move(writer, { state: "busy", answering: true }, cfg.baseUrl);
-            // The run time is ComfyUI's time making the picture, not the wait before it.
             const started = performance.now();
             const { bytes, seed, steps } = await comfy.render(prompt, jobId, signal, (progress, said) => { shown = progress; event("running", { progress, ...said }); }, () => {
               const job = jobs.get(jobId);
@@ -1018,7 +748,6 @@ export function createImageModule(deps: ImageDeps): ImageModule {
               clearTimeout(timeout);
             }, choice, extras(), params.seed, {
               waitMs: cancelWaitMs(),
-              // stopped and waiting for the engine to let go: the card says so until it has
               stopping: () => event("running", { progress: shown, phase: "stopping" }),
             });
             const runMs = Math.round(performance.now() - started);
@@ -1029,10 +758,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             await writeFile(pendingPath, bytes, { flag: "wx" });
             await rename(pendingPath, path.join(deps.dataDir, imagePath));
             await deps.thumbnail?.(jobId, bytes).catch((error: unknown) => log(`thumbnail for ${jobId} not made: ${detail(error)}`));
-            // a default is kept as settled once it has made a picture; the threads.changed below says so
             if (unset && pinIn !== undefined) deps.store.fillImageChoice(pinIn, choice);
             const made = await pngFacts(bytes) ?? size;
-            // the engine holds this setup now: the one thing in memory
             if (staged !== undefined) deps.memory?.settled(staged);
             staged = undefined;
             event("done", { progress: 1, imagePath, runMs }, { width: made.width, height: made.height, seed, ...steps === undefined ? {} : { steps }, runMs, bytes: bytes.length });
@@ -1040,25 +767,22 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             move(writer, { state: "ready" }, cfg.baseUrl);
           }));
         } catch (error) {
-          // a load that did not finish: what the engine holds is unknown, and the next handoff asks it to free
           if (staged !== undefined) deps.memory?.ended();
           staged = undefined;
           const cancelDetail = error instanceof Error && "cancelDetail" in error && typeof error.cancelDetail === "string" ? error.cancelDetail : undefined;
           const stuckPromptId = error instanceof Error && "stuckPromptId" in error && typeof error.stuckPromptId === "string" ? error.stuckPromptId : undefined;
-          // the words follow what the cancel did: the engine let go, or it is still stopping
           const late = controller.signal.aborted ? undefined
             : timedOut === "run" ? ranLong(minutes(runLimit), stuckPromptId === undefined) : timedOut === "queue" ? waitedLong(minutes(deps.queueTimeoutMs ?? QUEUE_LIMIT_MS)) : undefined;
           const message = late ?? detail(error);
           if (stuckPromptId) stuck.set(cfg.baseUrl, { promptId: stuckPromptId, ...owned?.baseUrl === cfg.baseUrl ? { pid: owned.pid } : {} });
           const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : stage;
           const missingFile = error instanceof Error && "file" in error && typeof error.file === "string" ? error.file : undefined;
-          // no ComfyUI and none to start (ensure's own refusal), apart from a start that failed in the same stage
           const noComfy = error instanceof Error && "code" in error && error.code === "image-missing";
           const reasons: Record<string, string> = {
             "image-config": "Check the ComfyUI address in Settings, then try again.",
             "image-off": "Turn on image generation in Settings, then try again.",
             "image-fit": "GPU memory could not be checked; check the GPU status and try again.",
-            "wont-fit": "There is not enough GPU memory for this image.", // the fit's own sentence wins below
+            "wont-fit": "There is not enough GPU memory for this image.",
             "image-missing": noComfy ? missingWords(cfg.baseUrl) : "ComfyUI did not start. Check its log, then try again.",
             "image-model": missingFile === undefined ? "Pick an image model ComfyUI has, then try again." : `Install ${missingFile} in ComfyUI, then try again.`,
             "image-busy": "ComfyUI is busy; wait for its other job to finish and try again.",
@@ -1075,14 +799,11 @@ export function createImageModule(deps: ImageDeps): ImageModule {
           event(controller.signal.aborted ? "cancelled" : "error", { message: reason, errorKind });
           const ran = activeJob === jobId;
           if (cancelDetail && ran) {
-            // Only a prompt that outlived the deadline means ComfyUI is still up; a failed cleanup alone does not.
             move(writer, { state: "error", answering: stuckPromptId !== undefined, detail: `${message} ${cancelDetail}` }, cfg.baseUrl);
           } else if ((controller.signal.aborted || timedOut === "run") && ran) {
-            // a picture stopped at its limit, like one cancelled: the engine that stopped it is ready for the next
             const healthy = await client(cfg.baseUrl).healthy();
             move(writer, healthy ? { state: "ready" } : { state: "stopped" }, cfg.baseUrl);
           } else if (!controller.signal.aborted && noComfy) {
-            // nothing to draw with is the state, not a fault: the Image button reads it and stays out of Image mode
             move(writer, { state: "missing", detail: missingWords(cfg.baseUrl, true) }, cfg.baseUrl);
           } else if (!controller.signal.aborted) {
             move(writer, { state: "error", answering: false, detail: message }, cfg.baseUrl);
@@ -1100,7 +821,6 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     cancel(jobId) {
       const job = jobs.get(jobId);
       if (!job || job.committing) return { cancelled: false };
-      // a second Stop while the engine lets go of it is answered the same: it is stopping
       if (!job.controller.signal.aborted) job.controller.abort(new Error("Image cancelled."));
       return { cancelled: true };
     },
@@ -1111,14 +831,10 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       await deps.lease.run("image", signal, async () => {
         if (!owned || jobs.size > 0) return;
         const service = serviceAt(owned.baseUrl);
-        // The reads end at the signal, so a cancel gives the claim back at once; the stop does not.
         const unit = await untilAborted(service.inspect(), signal);
-        // A record from an earlier process at this address names no prompt this ComfyUI runs for us;
-        // the next job at this address or a stop clears it.
         const mine = stuck.get(owned.baseUrl);
         if (!unit.active || unit.pid !== owned.pid) { owned = undefined; return; }
-        // Another Comfy client may have submitted work since ours ended.
-        // Our own prompt stuck past its cancel deadline does not keep an app-started ComfyUI up.
+        // external: other clients can queue prompts on the same ComfyUI at any time
         signal?.throwIfAborted();
         if (!await untilAborted(client(owned.baseUrl).idle(mine?.pid === owned.pid ? mine.promptId : undefined), signal)) { armIdle(); return; }
         signal?.throwIfAborted();
@@ -1127,25 +843,18 @@ export function createImageModule(deps: ImageDeps): ImageModule {
         if (jobs.size > 0) return;
         signal?.throwIfAborted();
         await service.stop();
-        // ComfyUI's memory is free: the turn that asked for this stop plans on a reading from after it
         forgetGpuReadings();
         const baseUrl = owned.baseUrl; owned = undefined;
         stuck.delete(baseUrl);
         deps.memory?.engineGone();
         move({ kind: "fact" }, { state: "stopped" }, baseUrl);
       }).catch((error: unknown) => {
-        // A cancelled reclaim leaves ComfyUI to its idle timer.
         if (signal?.aborted) armIdle();
         throw error;
       });
     },
     reclaimable: () => (owned && jobs.size === 0 && !closed ? owned.pid : undefined),
-    /**
-     * The handoff's ask (gpu/memory.ts), inside its gate: a ComfyUI on this computer that answers
-     * frees every model (POST /free) while its queue is empty, whoever started it. It is never
-     * stopped, restarted or reconfigured here. A ComfyUI on another computer holds none of this
-     * GPU's memory: absent, like none at all.
-     */
+    // external: ComfyUI's POST /free with unload_models and free_memory unloads every model
     async leave(signal) {
       let cfg: ReturnType<typeof config>;
       try { cfg = config(); }
@@ -1169,7 +878,6 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       if (!cfg.enabled) throw imageError("image-off", "Image generation is off. Turn it on in Settings first.");
       if (downloads !== undefined) throw imageError("image-download", "A model download is already running; it finishes first.");
       const controller = new AbortController();
-      // set before the plan is made, so a Stop pressed while it is made stops it
       downloads = controller; downloadOf = id; lastDownload = undefined;
       try { return await startDownload(id, cfg, controller); }
       catch (error) { if (downloading === undefined) { downloads = undefined; downloadOf = undefined; } throw error; }
@@ -1190,28 +898,21 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       await module.stopIdle();
     },
   };
-  // A settings change from any window: generation or its address asks ComfyUI again (the status
-  // push), and the presets go to every window; the folder (its free space) and the pick change only the presets.
   deps.onSettings?.((next, previous) => {
     if (closed) return;
     if (next.imageGen !== previous.imageGen || next.comfyUrl !== previous.comfyUrl) {
       void module.status().catch((error: unknown) => log(`ComfyUI not asked again: ${detail(error)}`)).then(republish);
     } else if (next.imageFolder !== previous.imageFolder || JSON.stringify(next.imageChoice) !== JSON.stringify(previous.imageChoice)) republish();
   });
-  /** Plans the files to fetch, then fetches them in the background (module.download). */
   async function startDownload(id: string, cfg: Cfg, controller: AbortController): Promise<{ files: string[] }> {
-    // Never needs ComfyUI running, and never starts it: its list and folders are read only when it
-    // answers (presets), and the last ones read are used when it does not.
     if (!isLocalComfy(cfg.baseUrl)) throw imageError("image-download", "Start ComfyUI on this computer first: downloads go into its model folders.");
     await module.presets();
     const last = knownFiles();
     const preset = appPreset(id) ?? extras().find((p) => p.id === id);
     if (preset === undefined) throw imageError("image-model", `There is no image setup ${id}.`);
-    // a setup this card does not list (the other Klein: the setup's download) is judged on its own
     const listed = last && listPresets(last, extras(), lastRoom, lastRam);
     const row = last && listed && ([...listed.ready, ...listed.others].find((p) => p.id === id) ?? (appPreset(id) === undefined ? undefined : judgeRow(last, preset)));
     if (row?.why !== undefined) throw imageError("image-model", `${preset.name}: ${row.why}`);
-    // never read from this ComfyUI: every file the setup loads (those already in the folder are passed over below)
     const names = last === undefined ? [...new Set(presetFiles(preset))] : row?.needs?.files ?? [];
     for (const name of names) {
       if (preset.sources?.[name]?.url === undefined) throw imageError("image-download", `${preset.name}: ${name} has no download address. Install it in ComfyUI's model folders yourself.`);
@@ -1220,11 +921,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     const planned = plannedFiles(id, names, cfg);
     const lost = names.find((name) => !planned.some((f) => f.name === path.basename(name)));
     if (lost !== undefined) throw imageError("image-download", `${preset.name}: ComfyUI did not say which folder ${lost} goes in.`);
-    // a file already whole in its folder is not fetched again
     const plan = (await Promise.all(planned.map(async (f) => await haveFile(f.dir, f.name, knownSize(f)) ? undefined : f))).filter((f): f is Planned => f !== undefined);
     if (plan.length === 0) { downloads = undefined; downloadOf = undefined; return { files: [] }; }
-    // each file's size: the record's, else where it is served says (a HEAD); the room is checked
-    // for all of them before a byte, and the setup's bar counts them all from the start
     const { records, ...fetching } = deps.download ?? {};
     const sizes: (number | undefined)[] = await Promise.all(plan.map(async (f) => knownSize(f) ?? (controller.signal.aborted ? undefined
       : await sizeOf({ ...fetching, url: f.url, name: f.name, signal: controller.signal }).then((b) => { learned.set(f.url, b); return b; }, () => undefined))));
@@ -1235,38 +933,32 @@ export function createImageModule(deps: ImageDeps): ImageModule {
         const place = { preset: id, file: i + 1, files: plan.length };
         try {
           const pinned = (records === false ? undefined : file.sha256) ?? pins[file.url];
-          // again before each file: the disk may have filled since
           if (i > 0) await roomFor(plan.slice(i), sizes.slice(i));
-          // The last file's done is the download's last word; the list is read again after it.
           const progress = (p: PullProgress) => {
             if (p.totalBytes !== undefined) { sizes[i] = p.totalBytes; learned.set(file.url, p.totalBytes); }
             const all = sizes.every((b) => b !== undefined) ? sizes as number[] : undefined;
             const setup = all === undefined ? {} : { setupCompletedBytes: all.slice(0, i).reduce((a, b) => a + b, 0) + p.completedBytes, setupTotalBytes: all.reduce((a, b) => a + b, 0) };
             say({ ...p, ...place, ...setup, ...p.state === "done" && i === plan.length - 1 ? { ended: true } : {} });
           };
-          controller.signal.throwIfAborted(); // stopped while the plan was made
+          controller.signal.throwIfAborted();
           const got = await downloadFile({ ...fetching, name: file.name, url: file.url, dir: file.dir, ...pinned === undefined ? {} : { sha256: pinned }, signal: controller.signal, progress });
           if (pinned === undefined) { pins[file.url] = got.sha256; writePins(pins); }
           if (got.replaced !== undefined) log(`image download ${file.name}: a file of that name was already there; kept as ${got.replaced}`);
         } catch (error) {
           const cancelled = controller.signal.aborted;
-          // say() set it since; TypeScript still sees the undefined from before the loop
+          // why: TypeScript keeps the pre-loop undefined though say() has set it since
           const said = lastDownload as ImageDownload | undefined;
           const completedBytes = said?.file === place.file ? said.completedBytes : 0;
           const totalBytes = said?.file === place.file ? said.totalBytes : undefined;
-          // the whole setup's bytes in, so a stop's bar stays at the part kept; the control, not a sentence, says it resumes
           const setup = said?.file === place.file && said.setupTotalBytes !== undefined && said.setupCompletedBytes !== undefined ? { setupCompletedBytes: said.setupCompletedBytes, setupTotalBytes: said.setupTotalBytes } : {};
           say({ name: file.name, ...place, state: cancelled ? "cancelled" : "error", completedBytes, ...totalBytes === undefined ? {} : { totalBytes }, ...setup, ...cancelled ? {} : { message: detail(error) }, ended: true });
           log(`image download ${file.name}: ${detail(error)}`);
           break;
         }
       }
-      // The row offers Download as soon as the last file ends, so the lock goes then, not after
-      // the list is read again (that read waits on the GPU's).
       unlock();
       await module.presets().catch(() => undefined);
     })().finally(() => { unlock(); if (downloading === run) downloading = undefined; });
-    /** Frees the lock this download holds, and never one a later download took. */
     function unlock() { if (downloads === controller) { downloads = undefined; downloadOf = undefined; } }
     downloading = run;
     return { files: plan.map((f) => f.name) };

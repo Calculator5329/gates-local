@@ -4,16 +4,25 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { runtimeDir } from "@gates-local/runtime-files/paths";
+import { InstallError } from "../runtime/install.ts";
 import { type ReleaseServer, removeDir, startReleaseServer, tmpDir } from "../runtime/test-fakes.ts";
 import type { InstallProgress } from "../runtime/types.ts";
-import { engineDir, engineRoot } from "./engine.ts";
-import { LINUX_ENGINE, linuxBuild, linuxPinned, type LinuxPins, uvDownloads } from "./linux-build.ts";
+import { engineDir, engineFiles, engineRoot } from "./engine.ts";
+import { LINUX_ENGINE, linuxBuild, linuxPinned, type LinuxPins, netReceived, uvDownloads } from "./linux-build.ts";
 import { CUDA_ONLY, cpuLock, LINUX_LOCK_CPU } from "./linux-lock-cpu.ts";
 import { createOwnComfy } from "./own.ts";
+import { createImageSetup, type EnginePlan, type ImageSetupDeps } from "./setup.ts";
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, readFileSync: vi.fn(actual.readFileSync) };
+});
 
 const FAKE_UV = `#!/bin/sh
 echo "$*" >> "$FAKE_UV_LOG"
+echo "$UV_PYTHON_INSTALL_DIR|$UV_PYTHON_PREFERENCE" >> "$FAKE_UV_LOG.python"
 # as uv does: what it fetched stays in its cache
 mkdir -p "$UV_CACHE_DIR" && echo wheel > "$UV_CACHE_DIR/$1.whl" && echo "$UV_CACHE_DIR" >> "$FAKE_UV_LOG.cache"
 # as uv does: it locks its credentials file before it fetches, in this folder or the person's home
@@ -230,5 +239,119 @@ describe("LINUX_ENGINE, the shipped pins", () => {
     expect(LINUX_ENGINE.cpu!.wheelBytes).toBeLessThan(LINUX_ENGINE.wheelBytes / 3);
     // a torch bump in the cu130 lock must not ship with the old CPU torch beside it
     expect(() => cpuLock(LINUX_ENGINE.lock.replace("torch==2.14.1+cu130", "torch==2.15.0+cu130"))).toThrow(/compile the CPU lock again/);
+  });
+});
+
+function writeTree(dir: string) {
+  const files = engineFiles(dir, "uv-venv");
+  for (const file of [files.python, files.main]) { mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, "", { mode: 0o755 }); }
+}
+
+describe.skipIf(process.platform === "win32")("linuxBuild, what it leaves where", () => {
+  it("uv builds the venv with its own standalone Python in runtime/uv-python, never a Python on the system", async () => {
+    await linuxBuild({ appDataDir, pins }).run(() => {}, new AbortController().signal);
+    const runs = readFileSync(`${uvLog}.python`, "utf8").trim().split("\n");
+    expect(runs).toHaveLength(2);
+    for (const run of runs) expect(run).toBe(`${path.join(runtimeDir(appDataDir), "uv-python")}|only-managed`);
+  });
+
+  it("uv and ComfyUI's source each stay in their own pinned folder: runtime/uv/<uv version> and runtime/comfyui-src/<version>", async () => {
+    await linuxBuild({ appDataDir, pins }).run(() => {}, new AbortController().signal);
+    expect(existsSync(path.join(runtimeDir(appDataDir), "uv", "0.0.1", "uv-x86_64-unknown-linux-gnu", "uv"))).toBe(true);
+    expect(existsSync(path.join(runtimeDir(appDataDir), "comfyui-src", "0.0.0", "ComfyUI-0.0.0", "main.py"))).toBe(true);
+    expect(readdirSync(runtimeDir(appDataDir)).toSorted()).toEqual(["comfyui", "comfyui-src", "uv"]);
+  });
+
+  it("a uv or source archive whose checksum is wrong builds nothing and runs no uv", async () => {
+    for (const part of ["uv", "source"] as const) {
+      const data = path.join(work, `bad-${part}`);
+      const bad = { ...pins, [part]: { ...pins[part], sha256: "0".repeat(64) } };
+      const error = await linuxBuild({ appDataDir: data, pins: bad }).run(() => {}, new AbortController().signal).catch((e: unknown) => e);
+      expect(error, part).toBeInstanceOf(InstallError);
+      expect((error as InstallError).code, part).toBe("hash-mismatch");
+      expect(existsSync(engineDir(data, "0.0.0")), part).toBe(false);
+    }
+    expect(existsSync(uvLog)).toBe(false);
+    expect(existsSync(path.join(runtimeDir(path.join(work, "bad-uv")), "comfyui-src"))).toBe(false);
+  });
+
+  it("a whole tree in a dot folder (a build a killed app left half done) is never taken for the engine", () => {
+    writeTree(path.join(engineRoot(appDataDir), ".build-killed"));
+    expect(own().installed()).toBe(false);
+  });
+
+  it("the next build sweeps away the staging folder a killed build left behind", async () => {
+    const left = path.join(engineRoot(appDataDir), ".build-killed");
+    writeTree(left);
+    await linuxBuild({ appDataDir, pins }).run(() => {}, new AbortController().signal);
+    expect(existsSync(left)).toBe(false);
+    expect(leftovers()).toEqual([]);
+  });
+
+  it("uv's cache a killed build left behind is swept by the next build, as its staging folder is", async () => {
+    const plan = linuxBuild({ appDataDir, pins });
+    await plan.run(() => {}, new AbortController().signal);
+    const cache = readFileSync(`${uvLog}.cache`, "utf8").trim().split("\n")[0]!;
+    mkdirSync(cache, { recursive: true });
+    writeFileSync(path.join(cache, "torch.whl"), "wheel");
+    await plan.cpu!.run(() => {}, new AbortController().signal);
+    expect(existsSync(cache)).toBe(false);
+  });
+});
+
+const GIB = 1024 ** 3;
+
+function setupDeps(plan: EnginePlan): ImageSetupDeps {
+  return {
+    appDataDir: "/nowhere",
+    own: { installed: () => false },
+    image: {
+      status: async () => ({ state: "stopped", owner: "none" }) as never,
+      engine: () => ({ owner: "none", state: "stopped", room: 16 * GIB }) as never,
+      start: async () => ({}) as never,
+      download: async () => ({ files: [] }),
+    },
+    setDevice: () => {},
+    engine: () => plan,
+    gpuStatus: async () => ({}) as never,
+    settingsAddress: () => undefined,
+    push: () => {},
+    freeBytes: async () => 500 * GIB,
+  };
+}
+
+describe("LINUX_ENGINE's sizes, as the setup reads them", () => {
+  it("with no measured disk use, the free space it asks for is four times the download (uv, the source and the wheels) and the model", async () => {
+    const { version, python, uv, uvDir, source, sourceDir, lock, wheelBytes } = LINUX_ENGINE;
+    const plan = linuxBuild({ appDataDir: "/nowhere", pins: { version, python, uv, uvDir, source, sourceDir, lock, wheelBytes } });
+    expect(plan.diskBytes).toBeUndefined();
+    const info = await createImageSetup(setupDeps(plan)).info();
+    expect(info.engine?.bytes).toBe(uv.sizeBytes + source.sizeBytes + wheelBytes);
+    expect(info.needBytes).toBe((uv.sizeBytes + source.sizeBytes + wheelBytes) * 4 + info.model!.bytes);
+  });
+});
+
+describe("linuxPinned, whether the build may be offered", () => {
+  it("is not, while either archive has no confirmed digest or the lock is empty", () => {
+    expect(linuxPinned({ ...LINUX_ENGINE, uv: { ...LINUX_ENGINE.uv, verified: false } })).toBe(false);
+    expect(linuxPinned({ ...LINUX_ENGINE, source: { ...LINUX_ENGINE.source, verified: false } })).toBe(false);
+    expect(linuxPinned({ ...LINUX_ENGINE, lock: "" })).toBe(false);
+  });
+});
+
+const NET_DEV = `Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 5000      10    0    0    0     0          0         0     5000      10    0    0    0     0       0          0
+  eth0: 1200       9    0    0    0     0          0         0      800       7    0    0    0     0       0          0
+ wlan0:  300       2    0    0    0     0          0         0      100       1    0    0    0     0       0          0
+`;
+
+describe("netReceived, this computer's network counter", () => {
+  it("adds up what every interface but loopback has received, and gives nothing where that cannot be read", () => {
+    vi.mocked(readFileSync).mockImplementationOnce(() => NET_DEV);
+    expect(netReceived()).toBe(1500);
+    expect(vi.mocked(readFileSync)).toHaveBeenLastCalledWith("/proc/net/dev", "utf8");
+    vi.mocked(readFileSync).mockImplementationOnce(() => { throw new Error("ENOENT: no such file or directory, open '/proc/net/dev'"); });
+    expect(netReceived()).toBeUndefined();
   });
 });
