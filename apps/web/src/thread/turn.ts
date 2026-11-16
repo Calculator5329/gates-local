@@ -12,6 +12,8 @@ import type { LiveTurn, State } from "../lib/store/store.ts";
 
 /** Every event a turn takes is the server's: this window has none of its own. */
 export type ChatEvent = Payload<"chat.event">["event"];
+/** What changes a turn the window shows: words, a tool step, its record, its end. */
+export type TurnEvent = Exclude<ChatEvent, { type: "start" }>;
 
 /** A stopped reply's seconds: both ends are the server's times, so every window and the saved row agree. */
 const stoppedSecs = (reply: ReplyRecord | undefined, at: number | undefined): number =>
@@ -48,12 +50,8 @@ function upsertStep(steps: readonly ToolStep[], step: ToolStep): ToolStep[] {
  * saved row takes its place. Words that come after the turn ended here are
  * dropped (W-05); a tool step still lands.
  */
-export function reduceTurn(turn: LiveTurn, event: ChatEvent, now: number): LiveTurn | null {
+export function reduceTurn(turn: LiveTurn, event: TurnEvent, now: number): LiveTurn | null {
   switch (event.type) {
-    case "start":
-      // the mark that the reply's words so far follow, after a reconnect: the server's snapshot of
-      // them takes the place of what was heard before. Its question and model are its record's to say.
-      return turn.end === undefined ? { ...turn, text: "", thinking: "", tools: [] } : turn;
     case "reply": {
       // a reply that failed here keeps how it ended; a stopped one takes the server's record
       if (turn.end?.kind === "error") return turn;

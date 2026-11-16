@@ -273,7 +273,7 @@ export const FEATURES: readonly Feature[] = [
     window: ["thread/Thread.tsx", "composer/chat.ts"],
     server: ["app/run-turn.ts", "gpu"],
     calls: ["turns.active", "reply.list"],
-    pushes: ["chat.event", "reply.changed"],
+    pushes: ["chat.event", "reply.changed", "reply.words"],
     specs: ["threads-concurrent.spec.ts", "sidebar-running.spec.ts"],
   },
 

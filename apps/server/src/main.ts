@@ -474,7 +474,6 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
       handlers: { ...app.handlers, ...usage.handlers, ...createVoiceModule({ settings: () => services.settings.get() }).handlers, ...pictures.handlers },
       thumbnails: (jobId) => app.thumbnail(jobId),
       onClientCount: (n) => services.gpu.clientsChanged(n),
-      onClientReady: (push) => app.replayTurns(push),
       dataDir,
       log: (line) => log(`ws ${line}`),
       ...(phone === null ? {} : { phone }),

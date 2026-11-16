@@ -2,7 +2,9 @@
 import { build } from "esbuild";
 import path from "node:path";
 import type { State } from "../../apps/web/src/lib/store/store.ts";
-import { expect, test } from "./fixtures.ts";
+import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { pick } from "./threads-support.ts";
+import { STREAM_REPLY } from "../fake-ollama/stream-reply.ts";
 
 declare global {
   interface Window {
@@ -105,4 +107,24 @@ for (const [label, reply, witness] of [
   }
   if (label !== "prose") expect(frames.at(-1)!.tables).toBe(1);
   await page.screenshot({ path: info.outputPath(`${label.replaceAll(" ", "-")}.png`), animations: "disabled" });
+});
+
+// BUILD.md step 7: words carry their position, so a window that reloads mid-reply has each word once.
+test("a reply reloaded three times while it is written shows each word written, once", async ({ page, open }) => {
+  test.setTimeout(60_000);
+  await open(); await waitReady(page);
+  await pick(page, "qwen3.5:9b");
+  // the long reply, about 7 s, held a little before its end so the words stop moving
+  await stack.scenario("slow-drip", { longDrip: 1, tokenDelayMs: 8, holdAfterTokens: 820 });
+  await sendMessage(page, "Write the long one");
+  const reply = page.locator(".turn.a").last();
+  const received = async () => Number(await reply.getAttribute("data-received"));
+  // the fake sends exactly its first 820 words and waits there
+  const written = (STREAM_REPLY.match(/\s*\S+/g) ?? []).slice(0, 820).join("");
+  // reloads at a quarter, a half and three quarters of the way
+  for (let i = 1; i <= 3; i++) {
+    await expect.poll(received, { timeout: 20_000 }).toBeGreaterThan((written.length * i) / 4);
+    await page.reload(); await waitReady(page);
+  }
+  await expect.poll(received, { timeout: 20_000, message: "the window has the words written, nothing twice and nothing missing" }).toBe(written.length);
 });

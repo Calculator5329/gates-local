@@ -11,7 +11,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { type Channel, type Client, type ImageEvent, type Message, type Params, type Payload, type SocketLike, ORDERED_DOMAINS, WireError, createClient } from "@gates-local/contracts";
+import { type Channel, type Client, type ImageEvent, type Message, type Params, type Payload, type ReplyListed, type SocketLike, ORDERED_DOMAINS, WireError, createClient } from "@gates-local/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { type App, type AppDeps, createApp } from "../src/app.ts";
@@ -118,7 +118,7 @@ interface Rig {
   pushes: Array<{ channel: Channel; payload: unknown }>;
   /** Stored message count of the thread at the moment each done event left app.ts (in process, before the socket). */
   storedAtDonePush: number[];
-  replayedAtDone: Payload<"chat.event">[];
+  listedAtDone: ReplyListed[];
   /** The model catalog the app reads; a finished download forces its refresh. */
   catalog: ReturnType<typeof createModelCatalog>;
   /** Replaces the /api/tags answer: what Ollama has installed. */
@@ -201,7 +201,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
   cleanups.push(() => catalog.stop()); // no discovery retry outlives the test (MP2-04)
   const gpu: Gpu = { freeMib: 15000, memAvailableKb: 30_000_000, ...opts.gpu };
   const storedAtDonePush: number[] = [];
-  const replayedAtDone: Payload<"chat.event">[] = [];
+  const listedAtDone: ReplyListed[] = [];
   const fitReads = {
     runNvidiaSmi: async (args: readonly string[]) => {
       if (!args[0]?.startsWith("--query-gpu")) return gpu.apps ?? "";
@@ -260,7 +260,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
         if (event.type === "delta") opts.onDelta?.(turnId);
         if (event.type === "done") {
           storedAtDonePush.push(store.getThread(threadId).messages.length);
-          app.replayTurns((channel, payload) => { if (channel === "chat.event") replayedAtDone.push(payload as Payload<"chat.event">); });
+          listedAtDone.push(...((app.handlers["reply.list"]?.({}, { clientId: 1 }) ?? []) as readonly ReplyListed[]).filter((l) => l.soFar !== undefined));
         }
         if (event.type === "done" || event.type === "error") opts.onTerminal?.();
       }
@@ -271,7 +271,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
   });
   cleanups.push(() => app.shutdown());
   // Every kind ordered, as the app runs: a writer that pushes without its number fails here.
-  server = await startWsServer({ port: 0, token: TOKEN, allowedOrigins: [], ordered: ORDERED_DOMAINS, handlers: app.handlers, onClientReady: (push) => app.replayTurns(push), log: () => undefined });
+  server = await startWsServer({ port: 0, token: TOKEN, allowedOrigins: [], ordered: ORDERED_DOMAINS, handlers: app.handlers, log: () => undefined });
   const ws = server;
   cleanups.push(() => ws.close());
 
@@ -287,7 +287,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
 
   const pushes: Rig["pushes"] = [];
   const waiters = new Set<() => void>();
-  for (const channel of ["chat.event", "runtime.changed", "models.changed", "threads.changed", "models.speed", "fit.changed"] as const) {
+  for (const channel of ["chat.event", "reply.words", "runtime.changed", "models.changed", "threads.changed", "models.speed", "fit.changed"] as const) {
     client.subscribe(channel, (payload) => {
       pushes.push({ channel, payload });
       for (const w of waiters) w(); // a waiter deleting itself mid-iteration is safe on a Set
@@ -313,7 +313,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
   // The pushes below come from this discover(): runtime.changed, then the
   // catalog refresh it triggers, then models.changed.
   await runtime.discover();
-  return { app, server, client, store, runtime, ollama, gpu, lease, setChat: (r) => (chat = r), setShow: (r) => (show = r), pushes, storedAtDonePush, replayedAtDone, catalog, setTags: (t) => (tags = t), waitFor, ps, memory, loader };
+  return { app, server, client, store, runtime, ollama, gpu, lease, setChat: (r) => (chat = r), setShow: (r) => (show = r), pushes, storedAtDonePush, listedAtDone, catalog, setTags: (t) => (tags = t), waitFor, ps, memory, loader };
 }
 
 const turnEvents = (r: Rig, turnId: string) =>
@@ -396,12 +396,11 @@ it("tells the model, and only the model, when a text-only follow-up omits earlie
   r.setChat(slowReply);
   const next = await sendStarted(r, { threadId: thread.id, content: "read chart", model: MODEL, numCtx: 16384 });
   await r.waitFor("chat.event", p => p.turnId === next.turnId && p.event.type === "delta" && p.event.text !== "");
-  const replayed: Payload<"chat.event">[] = [];
-  r.app.replayTurns((channel, payload) => { if (channel === "chat.event") replayed.push(payload as Payload<"chat.event">); });
+  const listed = await r.client.call("reply.list", {});
   await r.waitFor("chat.event", p => p.turnId === next.turnId && p.event.type === "done");
   expect(JSON.stringify(r.ollama.requests.filter(q => q.path === "/api/chat").at(-1)?.body)).toContain("image was here and is unavailable");
-  // the person sees nothing of it (owner, chat row 17): not live, not replayed, not saved
-  expect(JSON.stringify([replayed, events(r, next.turnId)])).not.toContain("contextNotice");
+  // the person sees nothing of it (owner, chat row 17): not live, not listed, not saved
+  expect(JSON.stringify([listed, events(r, next.turnId)])).not.toContain("contextNotice");
   expect(r.store.getThread(thread.id).messages.at(-1)).not.toHaveProperty("contextNotice");
   expect(r.store.getThread(thread.id).messages[0]?.content).toBe("chart");
 });
@@ -575,7 +574,7 @@ describe("chat.send", () => {
     expect(firstEvent).toEqual([{ type: "start", answered: true }]);
   });
 
-  it.each([false, true])("TE-02: a reply starting before the first request crosses the snapshot boundary once (already finished: %s)", async (finishedFirst) => {
+  it.each([false, true])("TE-02: a reply starting before a window's first request reaches it once, as list words and the parts after (already finished: %s)", async (finishedFirst) => {
     const r = await rig();
     let response: ServerResponse | undefined;
     r.setChat((res) => {
@@ -587,14 +586,14 @@ describe("chat.send", () => {
     const socket = new WebSocket(`ws://127.0.0.1:${r.server.port}/?token=${TOKEN}`);
     cleanups.push(() => socket.terminate());
     const newcomer = createClient(socket as unknown as SocketLike);
-    const joined: Payload<"chat.event">[] = [];
-    newcomer.subscribe("chat.event", (event) => joined.push(event));
+    const parts: Payload<"reply.words">[] = [];
+    newcomer.subscribe("reply.words", (p) => parts.push(p));
     await new Promise<void>((resolve) => socket.once("open", resolve));
     const receivedEarlierFrames = () => new Promise<void>((resolve) => { socket.once("pong", () => resolve()); socket.ping(); });
     const sent = await sendStarted(r, { threadId: thread.id, content: "hello", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (event) => event.turnId === sent.turnId && event.event.type === "delta");
     await receivedEarlierFrames();
-    expect.soft(joined.length).toBe(0);
+    expect.soft(parts.length).toBe(0);
     const reply = response;
     if (reply === undefined) throw new Error("No held model response");
     const finish = () => { reply.write(piece("two ")); reply.end(doneLine); };
@@ -603,47 +602,38 @@ describe("chat.send", () => {
       await r.waitFor("chat.event", (event) => event.turnId === sent.turnId && event.event.type === "done");
       await receivedEarlierFrames();
     }
-    // This is the newcomer's first request; its chat subscriptions are already installed.
-    await newcomer.call("threads.get", { threadId: thread.id });
+    // the newcomer's first request, as a window's hydrate makes it
+    const listed = await newcomer.call("reply.list", {});
     if (!finishedFirst) {
       finish();
       await r.waitFor("chat.event", (event) => event.turnId === sent.turnId && event.event.type === "done");
+      await receivedEarlierFrames();
     }
     const history = await newcomer.call("threads.get", { threadId: thread.id });
     expect(history.messages.map((message) => [message.role, message.content])).toEqual([["user", "hello"], ["assistant", "one two "]]);
-    if (finishedFirst) {
-      // A completed reply comes from durable history, with no stale live replay.
-      expect(joined.length).toBe(0);
-    } else {
-      expect.soft(joined.filter((event) => event.event.type === "start")).toHaveLength(1);
-      expect(joined.flatMap((event) => event.event.type === "delta" ? [event.event.text] : []).join("")).toBe("one two ");
-      expect(joined.filter((event) => event.event.type === "done")).toHaveLength(1);
-    }
+    // a reply already finished is in the chat's rows, with no words listed or pushed
+    if (finishedFirst) expect([listed.flatMap((l) => l.soFar ?? []), parts]).toEqual([[], []]);
+    else expect(heard(listed, parts)).toBe("one two ");
   });
 
-  it("a late client receives an in-flight snapshot once, without replaying words to existing clients", async () => {
+  it("a late window gets the words so far once from the list, and the windows already there get each word once", async () => {
     const r = await rig();
     r.setChat(slowReply);
     const thread = await r.client.call("threads.create", { title: "late join" });
-    await sendStarted(r, { threadId: thread.id, content: "hello", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId: thread.id, content: "hello", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.event.type === "delta");
     const socket = new WebSocket(`ws://127.0.0.1:${r.server.port}/?token=${TOKEN}`);
     cleanups.push(() => socket.terminate());
     const client = createClient(socket as unknown as SocketLike);
-    const joined: Payload<"chat.event">[] = [];
-    client.subscribe("chat.event", (event) => joined.push(event));
+    const parts: Payload<"reply.words">[] = [];
+    client.subscribe("reply.words", (p) => parts.push(p));
     await new Promise<void>((resolve) => socket.once("open", resolve));
+    const listed = await client.call("reply.list", {});
+    await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
     await client.call("threads.list", {});
-    await vi.waitFor(() => expect(joined.filter((p) => p.event.type === "start")).toHaveLength(1), { timeout: 1000 });
-    await vi.waitFor(() => expect(joined.some((p) => p.event.type === "done")).toBe(true), { timeout: 2000 });
-    const words = joined.flatMap((p) => p.event.type === "delta" ? [p.event.text] : []).join("");
-    expect(words).toBe("one two three four ");
-    const originalWords = r.pushes.flatMap((p) => {
-      if (p.channel !== "chat.event") return [];
-      const event = (p.payload as Payload<"chat.event">).event;
-      return event.type === "delta" ? [event.text] : [];
-    }).join("");
-    expect(originalWords).toBe(words);
+    expect(heard(listed, parts)).toBe("one two three four ");
+    const first = r.pushes.filter((p) => p.channel === "reply.words").map((p) => p.payload as Payload<"reply.words">);
+    expect(heard([], first)).toBe("one two three four ");
   });
 
   it("streams every event, persists the done message before pushing done, and returns at once", async () => {
@@ -675,7 +665,7 @@ describe("chat.send", () => {
     expect(await terminalSnapshot).toEqual([]);
     // The assistant message was in the store when the done event was pushed.
     expect(r.storedAtDonePush).toEqual([2]);
-    expect(r.replayedAtDone).toEqual([]);
+    expect(r.listedAtDone).toEqual([]);
 
     expect(events(r, sent.turnId).map((e) => e.type)).toEqual(["start", "delta", "delta", "done"]);
     // every window drew the stage from the server: after the start, and once at the first word, not at every word
@@ -1578,6 +1568,16 @@ describe("threads.delete and the image jobs its turns queued", () => {
   });
 });
 
+/** A window's text from the list's words so far and the parts after it: a part that starts past the end is a gap, words already held are not added twice. */
+function heard(listed: readonly ReplyListed[], parts: readonly Payload<"reply.words">[]): string {
+  let text = listed.find((l) => l.soFar !== undefined)?.soFar?.text ?? "";
+  for (const { part } of parts) {
+    if (part.type !== "text") continue;
+    if (part.from > text.length) throw new Error(`a gap: words from ${part.from}, the window has ${text.length}`);
+    text += part.text.slice(text.length - part.from);
+  }
+  return text;
+}
 const untilWords = async (r: Rig, turnId: string, count = 1) => r.waitFor("chat.event", (p) => p.turnId === turnId && p.event.type === "delta" && r.pushes.filter((q) => q.channel === "chat.event" && (q.payload as Payload<"chat.event">).turnId === turnId && (q.payload as Payload<"chat.event">).event.type === "delta").length >= count);
 /**
  * slowReply's words, held after the first `shown` until `go()`: a test acts mid-reply without racing
@@ -1649,17 +1649,20 @@ describe("chat.cancel and threads.delete during a turn", () => {
     await r.waitFor("chat.event", (p) => p.turnId === again.turnId && p.event.type === "done");
   });
 
-  it("a start sent again to a client that joins mid-reply says it is a replay; the first one does not", async () => {
+  it("a window that joins mid-reply reads the words so far from reply.list, and each pushed part says where it starts", async () => {
     const r = await rig();
-    const held = heldReply();
+    const held = heldReply(2);
     const { sent } = await startReply(r, held.route);
-    await untilWords(r, sent.turnId);
-    const replayed: Payload<"chat.event">[] = [];
-    r.app.replayTurns((channel, payload) => { if (channel === "chat.event") replayed.push(payload as Payload<"chat.event">); });
-    expect(replayed.find((p) => p.turnId === sent.turnId)?.event).toMatchObject({ type: "start", replayed: true });
-    expect(events(r, sent.turnId).find((e) => e.type === "start")).not.toHaveProperty("replayed");
+    await untilWords(r, sent.turnId, 2);
+    const id = r.pushes.map((p) => p.payload as Partial<Payload<"chat.event">>).find((p) => p.turnId === sent.turnId && p.replyId !== undefined)?.replyId;
+    expect((await r.client.call("reply.list", {})).find((l) => l.reply.id === id)?.soFar).toEqual({ text: "one two ", thinking: "", steps: [] });
     held.go();
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+    const parts = r.pushes.filter((p) => p.channel === "reply.words" && (p.payload as Payload<"reply.words">).id === id).map((p) => (p.payload as Payload<"reply.words">).part);
+    expect(parts).toEqual([
+      { type: "text", from: 0, text: "one " }, { type: "text", from: 4, text: "two " },
+      { type: "text", from: 8, text: "three " }, { type: "text", from: 14, text: "four " },
+    ]);
   });
 
   describe("a reply on its way to disk", () => {

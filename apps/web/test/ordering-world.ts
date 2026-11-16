@@ -206,6 +206,8 @@ export class OrderingServer extends FakeServer {
     else this.record(target, this.live(turnId, userMessage), [userMessage]);
   }
 
+  /** How much of each turn's reply the server has written, for where its next words start. */
+  private readonly written = new Map<string, number>();
   /** Words of a running reply; after Stop, its end with the saved row (runTurn in app.ts). */
   chatWords(turnId: string, target: FakeSocket, text: string, ended = false): void {
     const userMessage = this.turns.get(turnId);
@@ -214,6 +216,11 @@ export class OrderingServer extends FakeServer {
       ? { type: "error", code: "cancelled", message: "stopped", partial: { id: `reply-${turnId}`, threadId: userMessage.threadId, role: "assistant", content: text, interrupted: true, createdAt: 1_000 }, ended: { reason: "stopped", at: Date.now() } }
       : { type: "delta", text };
     target.frame({ type: "push", channel: "chat.event", payload: { turnId, replyId: this.rid(turnId), threadId: userMessage.threadId, event } });
+    if (event.type === "delta") {
+      const from = this.written.get(turnId) ?? 0;
+      this.written.set(turnId, from + text.length);
+      target.frame({ type: "push", channel: "reply.words", payload: { id: this.rid(turnId), part: { type: "text", from, text } } });
+    }
     if (event.type === "error" && event.partial !== undefined) this.record(target, { id: this.rid(turnId), threadId: userMessage.threadId, rev: 4, stage: "stopped", at: event.ended?.at ?? Date.now(), questionId: userMessage.id, replyId: event.partial.id, by: { who: "person" } }, [event.partial]);
   }
 

@@ -955,7 +955,9 @@ describe("table 3: what every window is sent as a record changes", () => {
   it("the app sends a reply's whole life in order, and reply.list reads the same record", async () => {
     const at = await reach.writing();
     const live = at.r.told().at(-1);
-    expect(await at.r.h["reply.list"]({}, { clientId: 2 })).toEqual(live?.kind === "is" ? [{ reply: live.reply }] : []);
+    const listed = await at.r.h["reply.list"]({}, { clientId: 2 });
+    expect(listed.map((l) => l.reply)).toEqual(live?.kind === "is" ? [live.reply] : []);
+    expect(listed[0]?.soFar, "a reply being written lists its words so far").toBeDefined();
     at.r.finish();
     await until(() => over(at), "the reply's end");
     await until(() => at.r.told().some((c) => c.kind === "is" && c.reply.stage === "done"), "the end, sent to the windows");
@@ -968,6 +970,9 @@ describe("table 3: what every window is sent as a record changes", () => {
     // the words of the reply name their record, so a window puts them on the reply it has by that id
     const words = at.r.pushes.flatMap((p) => p.channel === "chat.event" && (p.payload as Payload<"chat.event">).event.type === "delta" ? [(p.payload as Payload<"chat.event">).replyId] : []);
     expect(words).toEqual([at.turnId]);
+    const parts = at.r.pushes.flatMap((p) => (p.channel === "reply.words" ? [(p.payload as Payload<"reply.words">).id] : []));
+    expect(parts.length).toBeGreaterThan(0);
+    expect(new Set(parts)).toEqual(new Set([at.turnId]));
   });
 
   it("a restart sends nothing: each window reads the records", () => {

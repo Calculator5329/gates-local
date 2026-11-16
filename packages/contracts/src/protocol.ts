@@ -17,6 +17,7 @@ import {
   ReplyId,
   ReplyListed,
   ReplySaid,
+  StreamedWords,
   StopConsent,
   type FitOffer,
   FitTable,
@@ -529,6 +530,7 @@ export const pushes = {
   "update.changed": { payload: UpdateStatus, sync: UPDATE },
   "chat.event": { payload: S.Struct({ turnId: S.String, threadId: S.String, replyId: S.optional(ReplyId), event: ChatEvent }) },
   "reply.changed": { payload: ReplyChange },
+  "reply.words": { payload: StreamedWords },
   "runtime.changed": { payload: RuntimeStatus, sync: RUNTIME },
   "models.changed": { payload: S.Array(ModelInfo), sync: MODELS },
   /** The chat list in use changed: a newer signed list arrived with the update check. The catalog changes with it. */

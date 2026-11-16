@@ -4,7 +4,7 @@
 // the few browser globals session.ts touches (location, history, document,
 // localStorage, requestAnimationFrame). Each test imports session.ts fresh.
 import { vi } from "vitest";
-import type { Channel, Message, MethodName, Params, Payload, QueuedMessage, ReplyAnswer, ReplyListed, ReplyRecord, ResultOf, SyncMetadata } from "@gates-local/contracts";
+import type { Channel, Message, MethodName, Params, Payload, QueuedMessage, ReplyAnswer, ReplyListed, ReplyRecord, ResultOf, SyncMetadata, ToolStep } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { createReplies, type QueuePatch } from "@gates-local/server/chat/replies.ts";
 import { isLive, type End } from "@gates-local/server/chat/reply.ts";
@@ -277,7 +277,11 @@ export class FakeServer {
   /** `sync`: the number an ordered push carries (numbered-server.ts gives it). */
   push<C extends Channel>(channel: C, given: Payload<C>, sync?: SyncMetadata): void {
     const payload = this.aliased(channel, given);
-    if (!this.muted) this.socket.frame({ type: "push", channel, payload: this.named(channel, payload), ...(sync === undefined ? {} : { sync }) });
+    const words = this.words(channel, payload);
+    if (!this.muted) {
+      this.socket.frame({ type: "push", channel, payload: this.named(channel, payload), ...(sync === undefined ? {} : { sync }) });
+      if (words !== undefined) this.socket.frame({ type: "push", channel: "reply.words", payload: words });
+    }
     this.pushed(channel, payload);
   }
 
@@ -285,7 +289,11 @@ export class FakeServer {
   broadcast<C extends Channel>(channel: C, given: Payload<C>): void {
     const payload = this.aliased(channel, given);
     const named = this.named(channel, payload);
-    if (!this.muted) for (const s of this.sockets) s.frame({ type: "push", channel, payload: named });
+    const words = this.words(channel, payload);
+    if (!this.muted) for (const s of this.sockets) {
+      s.frame({ type: "push", channel, payload: named });
+      if (words !== undefined) s.frame({ type: "push", channel: "reply.words", payload: words });
+    }
     this.pushed(channel, payload);
   }
 
@@ -302,6 +310,34 @@ export class FakeServer {
     } finally {
       this.muted = false;
     }
+  }
+
+  /** Each running reply's words so far, by record id, as the server's turn keeps them (app/run-turn.ts). */
+  private readonly said = new Map<string, { text: string; thinking: string; steps: Map<string, ToolStep> }>();
+
+  /** The reply.words push that goes with a chat event's words, each part saying where it starts. */
+  private words<C extends Channel>(channel: C, payload: Payload<C>): Payload<"reply.words"> | undefined {
+    if (channel !== "chat.event") return undefined;
+    const { turnId, event } = payload as Payload<"chat.event">;
+    const id = this.named("chat.event", payload as Payload<"chat.event">).replyId;
+    if (id === undefined) return undefined;
+    if (event.type === "done" || event.type === "error") return void this.said.delete(id);
+    if (event.type === "reply") {
+      if (event.reply.attempt <= (this.attempts.get(turnId) ?? 1)) return undefined;
+      this.said.delete(id);
+      return { id, part: { type: "again" } };
+    }
+    if (event.type !== "delta" && event.type !== "thinking" && event.type !== "tool") return undefined;
+    const so = this.said.get(id) ?? { text: "", thinking: "", steps: new Map<string, ToolStep>() };
+    this.said.set(id, so);
+    if (event.type === "tool") {
+      so.steps.set(event.step.callId, event.step);
+      return { id, part: event };
+    }
+    const kind = event.type === "delta" ? "text" : "thinking";
+    const from = so[kind].length;
+    so[kind] += event.text;
+    return event.text === "" ? undefined : { id, part: { type: kind, from, text: event.text } };
   }
 
   /** A chat event names the record its turn works for, as the server's does (app/run-turn.ts). */
@@ -393,7 +429,11 @@ export class FakeServer {
 
   /** Every record the server keeps, as reply.list answers a window that connects. */
   protected listing(): readonly ReplyListed[] {
-    return this.store.records();
+    return this.store.records().map((l) => {
+      const so = this.said.get(l.reply.id);
+      // why: words come only after the question is saved; a reply still starting has none to list
+      return so === undefined || l.reply.stage === "starting" ? l : { ...l, soFar: { text: so.text, thinking: so.thinking, steps: [...so.steps.values()] } };
+    });
   }
 
   private queueCall(req: Request): readonly QueuedMessage[] | readonly ReplyListed[] | ReplyAnswer {

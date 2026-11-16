@@ -1,7 +1,7 @@
 // Running a reply: an admitted turn's stream from its first word to its one terminal event,
 // the reply kept on disk while it streams, one more attempt after a failure of its own, and
 // what is saved however it ends.
-import type { Message, TurnEnded } from "@gates-local/contracts";
+import type { Message, TurnEnded, WordsPart } from "@gates-local/contracts";
 import type { LibraryEntry } from "@gates-local/harness";
 import { PAGE_RULE } from "../chat/pages.ts";
 import { sendTimesLine } from "../chat/send-times.ts";
@@ -58,11 +58,14 @@ export function createTurnRunner({ deps, store, log, push, pushReply, draftEvery
       // the record takes the event first; the clock is told the stage the record now shows
       const stage = replies.heard(turnId, event);
       const changed = stage !== undefined && turn.clock.see(event, Date.now(), turn.thinking, stage);
+      const part: Exclude<WordsPart, { type: "again" }> = event.type === "tool" ? event
+        : event.type === "delta" ? { type: "text", from: turn.text.length, text: event.text } : { type: "thinking", from: turn.thinking.length, text: event.text };
       if (event.type === "delta") turn.text += event.text;
       if (event.type === "thinking") turn.thinking += event.text;
       if (event.type === "tool") turn.steps.set(event.step.callId, event.step);
       const replyId = replies.of(turnId)?.id;
       push("chat.event", { turnId, threadId, ...(replyId === undefined ? {} : { replyId }), event });
+      if (replyId !== undefined && (part.type === "tool" || part.text !== "")) push("reply.words", { id: replyId, part });
       // the record after the event that changed it: a window has the words before the stage that names them
       if (changed) pushReply(turn);
       keepDraft();
@@ -265,6 +268,7 @@ export function createTurnRunner({ deps, store, log, push, pushReply, draftEvery
         }
         turn.text = "";
         turn.thinking = "";
+        turn.steps.clear();
         // the record runs it again, and what waits behind it holds until the second attempt ends
         const stage = replies.retrying(turnId);
         if (stage === undefined) {
@@ -272,6 +276,8 @@ export function createTurnRunner({ deps, store, log, push, pushReply, draftEvery
           return;
         }
         turn.clock.retry(Date.now(), stage);
+        const again = replies.of(turnId)?.id;
+        if (again !== undefined) push("reply.words", { id: again, part: { type: "again" } });
         pushReply(turn);
       }
     } catch (e) {

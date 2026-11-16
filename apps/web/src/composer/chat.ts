@@ -1,5 +1,5 @@
 // Chat admissions, concurrent replies, streaming buffers, and the server's record of every message as this window keeps it.
-import { type AttachedFile, type BlockingTurn, type ImageChoice, type Message, type MethodName, type Params, type Payload, type Reply, type ReplyCall, type ReplyChange, type ReplyListed, type ReplyOutcome, type ReplyRecord, type ReplyTimes, type ResultOf, type StopConsent, WireError } from "@gates-local/contracts";
+import { type AttachedFile, type BlockingTurn, type ImageChoice, type Message, type MethodName, type Params, type Payload, type Reply, type ReplyCall, type ReplyChange, type ReplyListed, type ReplyOutcome, type ReplyRecord, type ReplyTimes, type ResultOf, type SoFar, type StopConsent, WireError } from "@gates-local/contracts";
 import { ctxFor, describeModel, k } from "../lib/words/format.ts";
 import { firstChatPull, sendableModel } from "../models/pick.ts";
 import { type LiveTurn, NA, type State, type StopAsk, type WaitingReply, behindSetup, chatReady, getState, isWaiting, runningTurn, setState, streamingHere, turnOf, waitingReplies } from "../lib/store/store.ts";
@@ -8,7 +8,7 @@ import { drawChoice, imageMode } from "../image/image-choice.ts";
 import { releaseFiles } from "./file-holds.ts";
 import { type Draft, type DraftKey, beginQueuedDraft, cancelQueuedDraft, clearDraft, currentDraftKey, getDraft, moveDraft, renewDraft, replaceDraft } from "../lib/store/drafts.ts";
 import type { ServerEvent } from "../lib/session/server-state.ts";
-import { type ChatEvent, reduceTurn, stopping, unfinished, withTurn } from "../thread/turn.ts";
+import { type ChatEvent, type TurnEvent, reduceTurn, stopping, unfinished, withTurn } from "../thread/turn.ts";
 import { stopReason as stopWords } from "../thread/times.ts";
 import { type WindowRules, createRecords } from "./records.ts";
 
@@ -415,6 +415,8 @@ function handedOver(id: string, restored: boolean): void {
   oldQueueChanged?.();
 }
 
+const shownTurn = (id: string) => Object.values(getState().turns).find((t) => t.turnId === id);
+
 /** History, navigation, fit and RPC operations are wired by session.ts. `rules` is given only by the test that turns one off (records.test.ts). */
 export function createChat({ applyServerEvent, call, reply: askOne, codeOf, createThread, creatingDraft, loadThread, loading, noteMessage, withMessage, untrackedDone, openThread, blockingFor }: ChatEffects, rules?: WindowRules) {
   askServer = askOne;
@@ -734,6 +736,7 @@ export function createChat({ applyServerEvent, call, reply: askOne, codeOf, crea
    */
   function replyListed(list: readonly ReplyListed[]): void {
     for (const { reply } of list) recordChanged({ kind: "is", reply }, true);
+    for (const { reply, soFar } of list) if (soFar !== undefined) caughtUp(reply.id, soFar);
     const unlisted = new Set(records.unlisted());
     for (const id of unlisted) editsHere.delete(id);
     if (unlisted.size > 0) {
@@ -806,7 +809,7 @@ export function createChat({ applyServerEvent, call, reply: askOne, codeOf, crea
   window.glPerf = perf;
 
   /** Apply one of the server's events to a thread's turn, if that turn is still the one of the record `id`. */
-  function update(threadId: string, id: string, event: ChatEvent): void {
+  function update(threadId: string, id: string, event: TurnEvent): void {
     applyServerEvent((s) => {
       const turn = s.turns[threadId];
       if (turn === undefined || turn.turnId !== id) return;
@@ -1107,25 +1110,43 @@ export function createChat({ applyServerEvent, call, reply: askOne, codeOf, crea
     if (turnOf(getState(), threadId) !== undefined) settleEnded(threadId);
   }
 
-  // why: where a reply stands is its record's to say (recordChanged); these events carry only words
-  function onChatEvent(p: Payload<"chat.event">): void {
-    const { threadId, event } = p;
-    if (event.type === "error" || event.type === "done" || event.type === "reply") return;
-    const turn = getState().turns[threadId];
-    if (turn === undefined || turn.turnId !== (p.replyId ?? p.turnId)) return;
-    switch (event.type) {
-      case "thinking":
-        return queueWords(turn, "thinking", event.text);
-      case "delta":
-        return event.text === "" ? undefined : queueWords(turn, "text", event.text);
-      case "tool":
-        flushWords(threadId);
-        return update(threadId, turn.turnId, event);
-      case "start":
-        // why: the snapshot that follows has every word: words still waiting would come twice
-        if (turn.end === undefined || turn.end.kind === "error") waiting.delete(threadId);
-        return update(threadId, turn.turnId, event);
+
+  // why: a part says where it starts, so words this window has are not added twice
+  function onWords({ id, part }: Payload<"reply.words">): void {
+    const turn = shownTurn(id);
+    if (turn === undefined) return;
+    const { threadId } = turn;
+    if (part.type === "again") {
+      waiting.delete(threadId);
+      return applyServerEvent((s) => {
+        const at = s.turns[threadId];
+        return at?.turnId === id ? { turns: withTurn(s.turns, threadId, { ...at, text: "", thinking: "", tools: [] }) } : undefined;
+      });
     }
+    if (part.type === "tool") {
+      flushWords(threadId);
+      return update(threadId, id, part);
+    }
+    const w = waiting.get(threadId);
+    const have = turn[part.type].length + (w?.id === id ? w[part.type].length : 0);
+    // why: a part past this window's words follows ones it missed; the next connect's list has them
+    if (part.from > have) return;
+    const fresh = part.text.slice(have - part.from);
+    if (fresh !== "") queueWords(turn, part.type, fresh);
+  }
+
+  function caughtUp(id: string, soFar: SoFar): void {
+    const turn = shownTurn(id);
+    if (turn === undefined) return;
+    const { threadId } = turn;
+    flushWords(threadId);
+    applyServerEvent((s) => {
+      const at = s.turns[threadId];
+      if (at?.turnId !== id || at.end !== undefined) return;
+      const words = { ...at, text: soFar.text.length > at.text.length ? soFar.text : at.text, thinking: soFar.thinking.length > at.thinking.length ? soFar.thinking : at.thinking };
+      const now = Date.now();
+      return { turns: withTurn(s.turns, threadId, soFar.steps.reduce((t, step) => reduceTurn(t, { type: "tool", step }, now) ?? t, words)) };
+    });
   }
 
   /** A reply that ended without a saved row while its chat was not open: its words become a row; its question already says how it ended. */
@@ -1176,6 +1197,6 @@ export function createChat({ applyServerEvent, call, reply: askOne, codeOf, crea
 
   return {
     send, confirmStopAsk, stop, retry, sendQueuedNow, cancelQueuedEdit,
-    onChatEvent, lostTurn, catchUp, connected, recordChanged, replyListed, editEnded,
+    onWords, lostTurn, catchUp, connected, recordChanged, replyListed, editEnded,
   };
 }

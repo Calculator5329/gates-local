@@ -78,8 +78,6 @@ export interface WsServerOptions {
   readonly maxPayloadBytes?: number;
   /** Called with the number of open clients after each connect and close (the GPU poll runs only while it is above 0). */
   readonly onClientCount?: (count: number) => void;
-  /** Synchronous snapshot at the first request, before this client receives chat broadcasts. */
-  readonly onClientReady?: (push: <C extends Channel>(channel: C, payload: Payload<C>) => void) => void;
   readonly dataDir?: string;
   /** A picture's thumbnail by job id (pictures/thumbs.ts), served at /files/thumbs/<jobId>.webp; 404 when absent. */
   readonly thumbnails?: (jobId: string) => Promise<Buffer | undefined>;
@@ -192,8 +190,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     return { scope, kind: "snapshot", rev };
   };
   const phoneClients = new WeakSet<WebSocket>();
-  // Before the snapshot, active replies are recovered from that snapshot and
-  // completed ones from RPC history. Keeping no chat backlog bounds idle clients.
+  // why: streamed words start at a socket's first request (reply.list has them before); idle sockets keep no backlog
   const chatClients = new WeakSet<WebSocket>();
   let nextClientId = 1;
 
@@ -300,25 +297,11 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
 
   wss.on("connection", (ws: WebSocket) => {
     clients.add(ws);
-    if (options.onClientReady === undefined) chatClients.add(ws);
     options.onClientCount?.(clients.size);
     const controller = new AbortController();
     const ctx: HandlerContext = { clientId: nextClientId++, listener: phoneClients.has(ws) ? "phone" : "desktop", signal: controller.signal };
     ws.on("message", (data, isBinary) => {
-      if (!chatClients.has(ws)) {
-        try {
-          options.onClientReady?.((channel, payload) => {
-            const frame = encodePush(channel, payload);
-            if (!frame.ok) throw frame.error;
-            send(ws, frame.value);
-          });
-          chatClients.add(ws);
-        } catch (e) {
-          log(`client snapshot failed: ${String(e)}`);
-          ws.close(1011, "Chat snapshot failed");
-          return;
-        }
-      }
+      chatClients.add(ws);
       // Binary frames fail the text check in decodeRequest and are dropped with a log.
       const raw = isBinary ? data : Buffer.isBuffer(data) ? data.toString("utf8") : Buffer.concat(data as Buffer[]).toString("utf8");
       dispatch(ws, ctx, raw).catch((e: unknown) => log(`dispatch failed: ${String(e)}`));
@@ -356,7 +339,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
       if (missing !== undefined) throw new Error(`${channel} did not capture ${missing} metadata`);
       let versioned: string | undefined;
       for (const ws of clients) {
-        if (channel === "chat.event" && !chatClients.has(ws)) continue;
+        if ((channel === "chat.event" || channel === "reply.words") && !chatClients.has(ws)) continue;
         if (row !== undefined && changes !== undefined && ordered.get(ws)?.includes(row.domain)) {
           if (versioned === undefined) {
             const encoded = encodePush(channel, payload, { epoch, changes });

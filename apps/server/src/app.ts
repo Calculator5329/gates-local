@@ -16,7 +16,7 @@ import { suggestedList, type Payload } from "@gates-local/contracts";
 import { fileLifecycle } from "./chat/files.ts";
 import { imageLifecycle } from "./chat/image-lifecycle.ts";
 import { createReplies, type Replies } from "./chat/replies.ts";
-import { isAsked, type Rules } from "./chat/reply.ts";
+import type { Rules } from "./chat/reply.ts";
 import { turnClock } from "./chat/times.ts";
 import { sameModel } from "./fit/ollama.ts";
 import { createFitTable } from "./fit/table.ts";
@@ -31,7 +31,7 @@ import { createHandlers } from "./app/handlers.ts";
 import type { Push } from "./app/push.ts";
 import { createQueuePump } from "./app/queue-pump.ts";
 import { createTurnRunner } from "./app/run-turn.ts";
-import { HALTED, type AppContext, type Taken, type Turn, type WireEvent } from "./app/turn.ts";
+import { HALTED, type AppContext, type Taken, type Turn } from "./app/turn.ts";
 import type { App, AppDeps } from "./app/types.ts";
 
 export { AppError, RUNTIME_CHANGED_TURN_MESSAGE, type AppErrorCode } from "./app/errors.ts";
@@ -256,21 +256,6 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
     thumbnail: async (jobId) => (deps.dataDir && imageFiles ? readThumbnail(deps.dataDir, jobId, imageFiles.queue) : undefined),
     activeTurns: () => turns.size,
     admission: (turnId) => turns.get(turnId)?.admission,
-    replayTurns(target) {
-      for (const turn of turns.values()) {
-        // only a reply whose question is saved and that has not ended, as its record says
-        const rec = replies.of(turn.turnId);
-        if (!isAsked(rec)) continue;
-        const send = (event: WireEvent) => target("chat.event", { turnId: turn.turnId, threadId: turn.threadId, replyId: rec.id, event });
-        const image = rec.stage === "drawing" || (rec.stage === "stopping" && rec.drawing);
-        send({ type: "start", model: rec.model, userMessage: rec.question, ...(image ? { image: true as const } : {}), replayed: true });
-        // the record as it is now: a window that joins mid-reply draws the same stage and seconds
-        send({ type: "reply", reply: turn.clock.record(Date.now()) });
-        if (turn.thinking !== "") send({ type: "thinking", text: turn.thinking });
-        for (const step of turn.steps.values()) send({ type: "tool", step });
-        if (turn.text !== "") send({ type: "delta", text: turn.text });
-      }
-    },
     async shutdown() {
       closing = true;
       attachedFiles?.stop();

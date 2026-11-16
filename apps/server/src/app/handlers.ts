@@ -1,7 +1,7 @@
 // The request handlers: every contracts method the app answers, on the thread store, the
 // runtime, the catalog, the fit table and the queue. chat.send takes a turn here and hands it
 // to admit.ts (a chat model) or drawing.ts (Image mode).
-import type { Params, ReplyAnswer, ResultOf } from "@gates-local/contracts";
+import type { Params, ReplyAnswer, ResultOf, SoFar } from "@gates-local/contracts";
 import { checkAttachments } from "../chat/attachments.ts";
 import { saveFile } from "../chat/files.ts";
 import { withSendTimes } from "../chat/send-times.ts";
@@ -316,7 +316,15 @@ export function createHandlers({
     "reply.now": (params) => moved(replies.now(params)),
     "reply.hold": (params) => moved(replies.hold(params)),
     "reply.stop": (params) => moved(replies.stop(params)),
-    "reply.list": () => replies.records(),
+    "reply.list": () => {
+      const soFar = new Map<string, SoFar>();
+      for (const t of turns.values()) {
+        const id = replies.of(t.turnId)?.id;
+        // why: words come only after the question is saved; a reply still starting has none to list
+        if (id !== undefined && replies.question(t.turnId) !== undefined) soFar.set(id, { text: t.text, thinking: t.thinking, steps: [...t.steps.values()] });
+      }
+      return replies.records().map((l) => { const words = soFar.get(l.reply.id); return words === undefined ? l : { ...l, soFar: words }; });
+    },
 
     // the older Stop, for a page from before reply.stop: the same one step, answered yes or no
     "chat.cancel": ({ turnId }) => {

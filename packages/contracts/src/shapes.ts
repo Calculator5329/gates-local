@@ -873,9 +873,28 @@ export const ReplyChange = S.Union([
 ]);
 export type ReplyChange = typeof ReplyChange.Type;
 
-/** One record of reply.list: a message waiting or a reply on its way. */
-export const ReplyListed = S.Struct({ reply: Reply });
+/** The words a reply on its way has written so far. */
+export const SoFar = S.Struct({ text: S.String, thinking: S.String, steps: S.Array(ToolStep) });
+export type SoFar = typeof SoFar.Type;
+
+/** One record of reply.list: a message waiting or a reply on its way, with its words so far. */
+export const ReplyListed = S.Struct({ reply: Reply, soFar: S.optional(SoFar) });
 export type ReplyListed = typeof ReplyListed.Type;
+
+/**
+ * Streamed words of one reply (reply.words). Text and thinking say where they start, so a window
+ * that has them already, from the list or an earlier push, keeps only what is new.
+ */
+export const WordsPart = S.Union([
+  S.Struct({ type: S.Literal("text"), from: Count, text: S.String }),
+  S.Struct({ type: S.Literal("thinking"), from: Count, text: S.String }),
+  S.Struct({ type: S.Literal("tool"), step: ToolStep }),
+  // why: the server runs a failed reply once more; what the first try wrote is cleared
+  S.Struct({ type: S.Literal("again") }),
+]);
+export type WordsPart = typeof WordsPart.Type;
+export const StreamedWords = S.Struct({ id: ReplyId, part: WordsPart });
+export type StreamedWords = typeof StreamedWords.Type;
 
 /** The context sizes the product offers; a model runs at the most it takes when that is less. */
 export const ContextSize = S.Literals([8192, 16384, 32768, 65536]);

@@ -37,11 +37,13 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function dropConnection() {
+/** `whileDown`: what the server does after the socket closes and before the window connects again. */
+async function dropConnection(whileDown?: () => void) {
   const batch = browser.server.hold("models.list");
   const thread = browser.server.hold("threads.get");
   const before = browser.server.sockets.length;
   browser.server.socket.close();
+  whileDown?.();
   await until(() => browser.server.sockets.length > before);
   return { batch: await batch, thread };
 }
@@ -49,53 +51,55 @@ async function dropConnection() {
 /** The open chat's turn (what the old single live slot showed), or null. */
 const openTurn = () => { const s = store.getState(); return s.threadId === null ? null : s.turns[s.threadId] ?? null; };
 
-function replay() {
-  const live = openTurn();
-  if (live === null) throw new Error("No retained live turn");
-  chat({ type: "start", model: live.model, userMessage: question });
-  chat({ type: "thinking", text: "server thoughts" });
-  chat({ type: "tool", step: { callId: "server-read", name: "read", state: "done", summary: "Read on the server" } });
-  chat({ type: "delta", text: "one two " });
+/** The words the server's turn writes while this window's connection is down. */
+function writtenUnheard() {
+  browser.server.unheard(() => {
+    chat({ type: "thinking", text: " and server thoughts" });
+    chat({ type: "tool", step: { callId: "server-read", name: "read", state: "done", summary: "Read on the server" } });
+    chat({ type: "delta", text: "two " });
+  });
 }
 
-it("TE-03: replay continues a reply through a dropped connection, replaces its snapshot once and survives the hydration history load", async () => {
-  const held = await dropConnection();
+it("TE-03: a reply goes on through a dropped connection: the list's words so far replace the window's once, and survive the hydration history load", async () => {
+  const held = await dropConnection(writtenUnheard);
   // the window does not end a reply on its own: the server's record says whether it still runs
   expect(openTurn()).toMatchObject({ text: "one " });
   expect(openTurn()?.end).toBeUndefined();
-  replay(); // buffered behind the reconnect's first hydration batch
+  chat({ type: "delta", text: "three " }); // pushed behind the reconnect's first hydration batch
   held.batch.respond(methodSamples["models.list"].result);
   const reload = await held.thread;
   await tick(); browser.frame();
   expect.soft(store.streamingHere(store.getState())).toBe(true);
-  expect.soft(openTurn()).toMatchObject({ turnId: browser.server.replyOf("turn-live"), text: "one two ", thinking: "server thoughts", tools: [{ callId: "server-read" }] });
+  expect.soft(openTurn()).toMatchObject({ turnId: browser.server.replyOf("turn-live"), text: "one two three ", thinking: "local thoughts and server thoughts" });
+  expect.soft(openTurn()?.tools.map((t) => t.callId)).toEqual(["local-read", "server-read"]);
   expect.soft(openTurn()?.end).toBeUndefined();
   expect.soft(store.getState().turns["t1"]?.turnId).toBe(browser.server.replyOf("turn-live"));
   expect.soft(store.runningThreads(store.getState()).has("t1")).toBe(true);
   // An assistant card after the question must not make savedReplyFor clear a
-  // turn whose replay just proved it is still alive.
+  // turn the server's list just said is still running.
   reload.respond(history([question, { id: "image", threadId: "t1", role: "assistant", content: "", createdAt: 2,
     imageJob: { jobId: "image", threadId: "t1", state: "queued" } }]));
   await tick();
-  chat({ type: "delta", text: "three " });
+  chat({ type: "delta", text: "four " });
   await tick(); browser.frame();
-  expect.soft(openTurn()?.text).toBe("one two three ");
-  expect.soft(openTurn()?.tools).toHaveLength(1);
+  expect.soft(openTurn()?.text).toBe("one two three four ");
+  expect.soft(openTurn()?.tools).toHaveLength(2);
   session.stop();
   await tick();
   expect(browser.server.calls("reply.stop").map((call) => call.params)).toEqual([{ id: browser.server.replyOf("turn-live") }]);
 });
 
-it("TE-03: a reply the server lists as still running gets its words replaced by the snapshot, not doubled", async () => {
+it("TE-03: a reply the server lists as still running takes the list's words in place of its own, not doubled", async () => {
   // the server's list of records names the reply: nothing ended it
-  const held = await dropConnection();
+  const held = await dropConnection(writtenUnheard);
   held.batch.respond(methodSamples["models.list"].result);
   (await held.thread).respond(history([question]));
   await tick(); browser.frame();
   expect(store.runningThreads(store.getState()).has("t1")).toBe(true);
-  replay();
+  expect(openTurn()).toMatchObject({ turnId: browser.server.replyOf("turn-live"), text: "one two ", thinking: "local thoughts and server thoughts" });
+  chat({ type: "delta", text: "three " });
   await tick(); browser.frame();
-  expect(openTurn()).toMatchObject({ turnId: browser.server.replyOf("turn-live"), text: "one two ", thinking: "server thoughts", tools: [{ callId: "server-read" }] });
+  expect(openTurn()?.text).toBe("one two three ");
 });
 
 it("TE-03: a reply that ended unheard, with nothing saved, is running no more once the server's list leaves it out", async () => {
@@ -111,12 +115,12 @@ it("TE-03: a reply that ended unheard, with nothing saved, is running no more on
   expect(store.runningThreads(store.getState()).size).toBe(0);
 });
 
-it("TE-03: replay cannot revive a reply the server stopped", async () => {
+it("TE-03: words after a Stop cannot revive a reply the server stopped", async () => {
   session.stop();
   // the server's record of the Stop reaches this window before the connection drops
   await tick();
   const held = await dropConnection();
-  replay();
+  chat({ type: "delta", text: "two " });
   held.batch.respond(methodSamples["models.list"].result);
   (await held.thread).respond(history([question]));
   await tick(); browser.frame();

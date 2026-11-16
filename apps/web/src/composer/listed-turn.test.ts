@@ -83,14 +83,12 @@ it("a listed turn that fails before its start puts the sidebar's dot out, holds 
     if (listActive === undefined) throw new Error("the server has no turns.active");
     const snapshot = await listActive({}, { clientId: 2 });
     expect(snapshot).toHaveLength(1);
-    const replay: unknown[] = [];
-    app.replayTurns((channel, payload) => { replay.push({ channel, payload }); });
-    expect(replay).toEqual([]);
     // what a window is given at connect: the server's records, with this reply on its way
     const list = app.handlers["reply.list"];
     if (list === undefined) throw new Error("the server has no reply.list");
     let listed = await list({}, { clientId: 2 });
     expect(listed).toMatchObject([{ reply: { threadId: a.id, stage: "starting" } }]);
+    expect(listed[0], "no question saved, so no words to list").not.toHaveProperty("soFar");
     const theirs = listed[0]!.reply.id;
     b.server.answer("reply.list", () => listed);
     b.server.answer("threads.list", () => [a]);

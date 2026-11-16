@@ -98,8 +98,6 @@ export interface App {
    * just answered, once it starts, or its refusal. Undefined once the turn has ended.
    */
   admission(turnId: string): Promise<Message> | undefined;
-  /** Send only this client's current in-flight words before it starts receiving newer events. */
-  replayTurns(target: Push): void;
   /** The fit table: main feeds it the GPU watcher's gpu.changed and the loader's models.load. */
   readonly fitTable: Pick<FitTableSource, "changed" | "load">;
   /** Refuse new turns, cancel the active ones and wait for them to end. Idempotent. */

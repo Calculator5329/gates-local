@@ -96,25 +96,9 @@ describe("reduceTurn", () => {
     expect(reduceTurn(failed, { type: "reply", reply: record({ stage: "stopping", stoppedAt: at(2) }) }, at(5))).toBe(failed);
   });
 
-  it("the start mark replaces the words heard so far; the saved question is its record's to bring", () => {
-    const marked = reduceTurn(turn({ text: "one ", thinking: "t" }), { type: "start", model: "other", userMessage: question }, T0)!;
-    expect(marked).toMatchObject({ turnId: "t1", model: "m", text: "", thinking: "", tools: [] });
-    expect(marked.userMessageId).toBeUndefined();
-  });
-
-  it("a turn made from another window's record takes its words like any other, and the start mark leaves whose question it shows", () => {
+  it("a turn made from another window's record takes its words like any other", () => {
     const theirs = turn({ userMessageId: "u0", model: "m0" });
     expect(reduceTurn(theirs, { type: "delta", text: "Hi" }, T0)).toMatchObject({ text: "Hi", userMessageId: "u0" });
-    expect(reduceTurn(theirs, { type: "start", model: "m", userMessage: question }, T0)).toMatchObject({ userMessageId: "u0", model: "m0" });
-  });
-
-  it("the start mark after a reconnect keeps the turn's own clock", () => {
-    expect(reduceTurn(turn(), { type: "start", model: "m", userMessage: question }, at(20))?.startedAt).toBe(T0);
-  });
-
-  it("the start mark does not revive a reply stopped here", () => {
-    const stopped = turn({ text: "one ", end: { kind: "stopped", secs: 1 } });
-    expect(reduceTurn(stopped, { type: "start", model: "m", userMessage: question }, T0)).toMatchObject({ end: { kind: "stopped" }, text: "one " });
   });
 });
 

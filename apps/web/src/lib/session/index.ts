@@ -138,7 +138,7 @@ const chat = createChat({ applyServerEvent,
   openThread: (threadId) => openThread(threadId), blockingFor,
 });
 export const { send, confirmStopAsk, stop, retry, sendQueuedNow, cancelQueuedEdit } = chat;
-const { onChatEvent, lostTurn, catchUp, connected, recordChanged, replyListed, editEnded } = chat;
+const { onWords, lostTurn, catchUp, connected, recordChanged, replyListed, editEnded } = chat;
 
 const modelsSession = createModels({ applyServerEvent,
   call, probe, act, isNA, restoreSaved,
@@ -258,7 +258,7 @@ async function hydrateWith(
 ): Promise<void> {
   // why: what this window holds of the records is from before this connection, until its list
   connected();
-  on("chat.event", onChatEvent);
+  on("reply.words", onWords);
   on("reply.changed", (change) => recordChanged(change));
   on("usage.changed", () => usageSession.usageChanged());
   // Install every receipt handler first. Ordered domains stay disabled until

@@ -224,6 +224,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
     result: [
       { reply: { id: "q-1", threadId: "t1", rev: 7, messageId: "m-q1", text: "and then?", at: 1_700_000_000_000, stage: "held", held: { why: "refused", code: "wont-fit", message: "It needs more memory than this GPU has." } } },
       { reply: { id: "turn-1", threadId: "t1", rev: 8, questionId: "m1", model: "qwen3:14b", startedAt: 1_700_000_000_000, workMs: 0, toolMs: 0, try: 1, spans: [], callsAt: {}, stage: "loading" } },
+      { reply: { id: "turn-2", threadId: "t2", rev: 9, questionId: "m3", model: "qwen3:14b", startedAt: 1_700_000_000_000, workMs: 0, toolMs: 0, try: 1, spans: [], callsAt: {}, stage: "writing" }, soFar: { text: "hi ", thinking: "greet", steps: [] } },
     ],
   },
 
@@ -388,6 +389,12 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
     { kind: "is", reply: { id: "q-1", threadId: "t1", rev: 9, stage: "done", at: 1_700_000_003_000, questionId: "m1", replyId: "m2" }, saved: [assistantMessage] },
     { kind: "is", reply: { id: "q-1", threadId: "t1", rev: 9, stage: "stopped", at: 1_700_000_003_000, questionId: "m1", by: { who: "preempted", neededBy: "qwen3:14b" } } },
     { kind: "left", id: "q-2", threadId: "t1", rev: 10, why: "removed" },
+  ],
+  "reply.words": [
+    { id: "q-1", part: { type: "thinking", from: 0, text: "greet" } },
+    { id: "q-1", part: { type: "text", from: 0, text: "hi " } },
+    { id: "q-1", part: { type: "tool", step: { ...toolStep, state: "running" } } },
+    { id: "q-1", part: { type: "again" } },
   ],
   "runtime.changed": [runtime, { state: "missing", owner: "none", baseUrl: "http://127.0.0.1:11434", detail: "no answer" }],
   "models.changed": [models, []],

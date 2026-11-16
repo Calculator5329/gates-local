@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, ReplyRecord, ReplyTimes, ToolStep } from "@gates-local/contracts";
 import { type LiveTurn, setState, type State } from "../lib/store/store.ts";
-import { reduceTurn, type ChatEvent } from "./turn.ts";
+import { reduceTurn, type TurnEvent } from "./turn.ts";
 
 vi.mock("../lib/store/store.ts", async (original) => {
   const actual = await original<typeof import("../lib/store/store.ts")>();
@@ -28,7 +28,7 @@ const stamped = (reason: ReplyTimes["ended"]["reason"], secs: number, workMs?: n
   ({ startedAt: 0, spans: [], callsAt: {}, ended: { reason, at: secs * 1000 }, ...(workMs === undefined ? {} : { workMs }), ...(why === undefined ? {} : { why }) });
 
 /** The turn after each event at its time, as chat.ts applies them. */
-function play(turn: LiveTurn, events: readonly (readonly [number, ChatEvent])[]): LiveTurn {
+function play(turn: LiveTurn, events: readonly (readonly [number, TurnEvent])[]): LiveTurn {
   return events.reduce<LiveTurn>((t, [at, e]) => reduceTurn(t, e, at) ?? t, turn);
 }
 /** A record pushed at `at`. */
@@ -122,7 +122,7 @@ describe("the live line says the server's record (decisions 1, 2, 33)", () => {
   it("a window that opened mid-reply has the same number as the one that sent it", async () => {
     // its turn is made from the reply's record, read at the window's own clock
     const listed: LiveTurn = { ...sent(), startedAt: 20_000 };
-    const opened = play(listed, [push(20_000, { stage: "tool", readyAt: 2000, workMs: 18_000 }), [20_010, { type: "start", model: "m", userMessage: user, replayed: true }], [20_010, { type: "thinking", text: "eighteen seconds of thought" }], [20_010, { type: "tool", step: step("a", "running") }]]);
+    const opened = play(listed, [push(20_000, { stage: "tool", readyAt: 2000, workMs: 18_000 }), [20_010, { type: "thinking", text: "eighteen seconds of thought" }], [20_010, { type: "tool", step: step("a", "running") }]]);
     expect(says(await live(25_000, opened))).toBe("23 s Searching your library");
   });
 
