@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-16: the web measure folder holds to the six comment kinds
+
+- Measure's row, detail, pages and page harness pass the comment rule:
+  62 offenders went, and the folder's comment lines fell from 117 to
+  none. The two lint directives in the page harness now give their
+  reason. Rules a named test already held went with the comment; one
+  in five was broken in the source and watched fail.
+- Six rules no test held now have one: a measure that went away closes
+  its detail; the Measure button says the pages wait and why it is off
+  for another model's run; a push that came first stands over the
+  click's answer; a measure of other weights is not this model's; a
+  page frame hands focus back and a second load fails; and an older
+  server shows no Speed or Score.
+
 ## 2026-11-16: the web runtime folder holds to the six comment kinds
 
 - The runtime banner and its words pass the comment rule: 34 offenders

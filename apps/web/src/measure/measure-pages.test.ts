@@ -109,6 +109,25 @@ describe("Measure's pages and where the window is", () => {
     expect(w.frames).toHaveLength(2);
     expect(result).toEqual({ id: "page-total", seen: ["1"] });
   });
+
+  it("a page frame that takes focus hands it back unscrolled, and a page that loads a second document fails", async () => {
+    vi.useFakeTimers();
+    const w = fakeWindow();
+    w.show("visible");
+    const before = { focus: vi.fn() };
+    let result: unknown;
+    void runPage("page-filter", page, script, 5000, { origin: SERVER, token: "t" }, before as never).then((r) => { result = r; });
+    await vi.advanceTimersByTimeAsync(0);
+    const frame = w.frames[0] as unknown as EventTarget;
+    frame.dispatchEvent(new Event("focus"));
+    expect(before.focus).toHaveBeenCalledWith({ preventScroll: true });
+    frame.dispatchEvent(new Event("load"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(result).toBeUndefined();
+    frame.dispatchEvent(new Event("load"));
+    await vi.advanceTimersByTimeAsync(200);
+    expect(result).toEqual({ id: "page-filter", seen: [], error: "The page left for another address." });
+  });
 });
 
 /**

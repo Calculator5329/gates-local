@@ -1,7 +1,3 @@
-// Settings › Models, Measure's detail: what a model's score is made of. Opened from the
-// score on its row (the phone's measure line on a phone). The run's window, thinking, speed and
-// first word; the five parts with their weights; and each check with what a pass needs, what
-// went wrong, and on a click what the model wrote and which tools it called.
 import { type KeyboardEvent, useRef, useState } from "react";
 import { focusOnDraw } from "../lib/ui/kit/focus.ts";
 import { createPortal } from "react-dom";
@@ -14,33 +10,19 @@ import { measureOf, measuringNow } from "./measures.ts";
 import { useStore } from "../lib/store/store.ts";
 
 const PART: Readonly<Record<MeasurePart, string>> = { tools: "Tools", files: "Files", database: "Database", instructions: "Follows instructions", pages: "Pages" };
-/** The parts in the order the detail lists them; older checks (kind "sql") are the database's. */
 const ORDER: readonly MeasurePart[] = ["tools", "files", "database", "instructions", "pages"];
 const partOf = (c: MeasureCheck): MeasurePart => (c.kind === "sql" ? "database" : c.kind);
 
-/** Below this the model writes slower than a person reads; past that first word a person stops waiting (server suite.ts). */
 export const SLOW_WORDS: Readonly<Record<NonNullable<ModelMeasure["slow"]>, string>> = {
   decode: "Slower than you read: under 10 tok/s",
   "first-token": "Slow to start: over 10 s to the first word",
 };
 
 const seconds = (ms: number) => `${ms < 10_000 ? (ms / 1000).toFixed(1) : Math.round(ms / 1000)} s`;
-/** How the run sampled, in one line: Measure's own settings, or an earlier build's, which used the chat's. */
 export const samplingText = (m: ModelMeasure) => m.sampling ? `Temperature ${m.sampling.temperature}, seed ${m.sampling.seed}, model defaults` : "Your chat's sampling settings";
-/** A measure from before the five parts: eight checks, kept as they were. */
 export const isOlder = (m: ModelMeasure) => m.version === undefined;
-/**
- * A five-part measure made with earlier checks and grades than this build's: a score out of 100
- * still, but not made as a new one is, so it is marked wherever it shows.
- */
 export const isEarlier = (m: ModelMeasure) => m.version !== undefined && m.version !== MEASURE_VERSION;
-/** What an earlier measure's mark says, in a few words. */
 export const EARLIER_WORDS = "Earlier checks";
-/**
- * The detail's line on an earlier measure: what its checks did that this build's do not. Version 3
- * ran this build's checks but skipped one the model cut short itself (refused calls, the turn
- * limit, a filled window), which fails now; version 2 had fewer tasks and other grades.
- */
 export const earlierWords = (m: ModelMeasure): string => {
   if (!isEarlier(m)) return "";
   const what = m.version === 3 ? "a check the model cut short was skipped; it fails now" : "fewer tasks, and some replies graded differently";
@@ -51,7 +33,6 @@ export function MeasureDetail({ name, label, onClose }: { name: string; label: s
   const m = useStore((s) => measureOf(s, name));
   const busy = useStore((s) => measuringNow(s) !== undefined);
   const box = useRef<HTMLDivElement>(null);
-  // The measure went away (the model's weights changed): nothing is left to show, and the parent closes it (ModelMeasure.tsx).
   if (m === undefined) return null;
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") {
@@ -59,7 +40,6 @@ export function MeasureDetail({ name, label, onClose }: { name: string; label: s
       e.stopPropagation();
       onClose();
     } else if (e.key === "Tab") {
-      // keep focus inside the dialog
       const els = [...(box.current?.querySelectorAll<HTMLElement>("button:not(:disabled)") ?? [])];
       const at = els.indexOf(document.activeElement as HTMLElement);
       e.preventDefault();
@@ -101,10 +81,8 @@ export function MeasureDetail({ name, label, onClose }: { name: string; label: s
   );
 }
 
-/** A part the score is short of: `counted` of its `total` checks went into it (none: left out whole). */
 export interface ShortPart { part: MeasurePart; counted: number; total: number; waiting: boolean }
 
-/** Each part the score counts fewer checks of than the part has: skipped, or a page still waiting. */
 export function shortParts(m: ModelMeasure): ShortPart[] {
   if (isOlder(m)) return [];
   return ORDER.flatMap((part) => {
@@ -116,7 +94,6 @@ export function shortParts(m: ModelMeasure): ShortPart[] {
 
 const and = (words: readonly string[]) => words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`;
 
-/** The row's few words on what its score left out, for the mark's tooltip: "Without Database · Tools 3 of 4". */
 export function shortWords(m: ModelMeasure): string | undefined {
   const short = shortParts(m);
   if (short.length === 0) return undefined;
@@ -124,10 +101,8 @@ export function shortWords(m: ModelMeasure): string | undefined {
   return [...(whole.length ? [`Without ${and(whole)}`] : []), ...short.filter((p) => p.counted > 0).map((p) => `${PART[p.part]} ${p.counted} of ${p.total}`)].join(" · ");
 }
 
-/** What the score leaves out: pages still waiting for a window, parts left out, and parts it counts short. */
 export function MeasureNotes({ m }: { m: ModelMeasure }) {
   const pending = m.checks.filter((c) => c.state === "pending").length;
-  // The waiting pages say so in their own line; every other part the score is short of is named.
   const short = shortParts(m).filter((p) => !(p.waiting && p.counted === 0));
   const left = short.filter((p) => p.counted === 0).map((p) => PART[p.part]);
   const fewer = short.filter((p) => p.counted > 0).map((p) => `${PART[p.part]} over ${p.counted} of its ${p.total} checks`);
@@ -145,12 +120,6 @@ export function MeasureNotes({ m }: { m: ModelMeasure }) {
   );
 }
 
-/**
- * Where each reason checks were skipped for is said, once: a reason checks of more than one part
- * share (the window left the turn without tools) above the parts; one that several checks of a
- * part share (Run commands off, the window in the background) under that part's name; a reason
- * one check has, on the check.
- */
 export function skipsSaid(checks: readonly MeasureCheck[]) {
   const by = new Map<string, MeasureCheck[]>();
   for (const c of checks) if (c.state === "skipped" && c.why) by.set(c.why, [...by.get(c.why) ?? [], c]);
@@ -164,7 +133,6 @@ export function skipsSaid(checks: readonly MeasureCheck[]) {
   return { across, under, said: (c: MeasureCheck) => c.state === "skipped" && c.why !== undefined && by.get(c.why)!.length > 1 };
 }
 
-/** Each part's checks under its name; a reason said for many checks is not said again on each. */
 export function MeasureChecks({ m }: { m: ModelMeasure }) {
   const { under, said } = skipsSaid(m.checks);
   return (
@@ -206,11 +174,9 @@ function Parts({ m }: { m: ModelMeasure }) {
   );
 }
 
-/** `quiet`: why it was skipped is already said, for it and the others skipped for the same. */
 function Check({ c, quiet = false }: { c: MeasureCheck; quiet?: boolean }) {
   const [open, setOpen] = useState(false);
   const evidence = c.reply !== undefined || c.calls !== undefined || c.result !== undefined || c.tokens !== undefined;
-  // Cut while still thinking is its own mark, apart from a wrong answer.
   const mark = c.state === "pending" ? "clock" : c.state === "skipped" ? "lock" : c.ok ? "check" : c.cutThinking ? "bulb" : "x";
   const word = c.state === "pending" ? "Waiting" : c.state === "skipped" ? "Skipped" : c.ok ? "Passed" : c.cutThinking ? "Cut while thinking" : "Failed";
   return (
