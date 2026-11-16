@@ -80,10 +80,10 @@ test("sending on a model that needs the memory warns, then stops the other chat,
 
 // Guards the owner's ruling (R18): "Don't show this again" sticks.
 test("'Don't show this again' survives a reload and later sends stop the other chat with no prompt", async ({ page, open }) => {
-  const sends: Params<"chat.send">[] = [];
+  const sends: Params<"reply.send">[] = [];
   page.on("websocket", (socket) => socket.on("framesent", (frame) => {
     const request = decodeRequest(frame.payload);
-    if (request.ok && request.value.method === "chat.send") sends.push(request.value.params);
+    if (request.ok && request.value.method === "reply.send") sends.push(request.value.params);
   }));
   await open();
   await waitReady(page);
@@ -124,7 +124,8 @@ test("'Don't show this again' survives a reload and later sends stop the other c
   await expect(page.locator(".stop-note")).toHaveText("Stopped so Qwen 3.5 9B could load.");
   await expect(page.locator(".turn.a.interrupted .md ul li")).toHaveCount(3);
   await expect(page.locator(".think.run")).toHaveCount(0);
-  await expect.poll(() => sends.findLast((send) => send.threadId === target)?.stopOthers).toBe(true);
+  // the standing yes goes with the send, so the server stops the other chat without asking
+  await expect.poll(() => sends.findLast((send) => send.threadId === target)?.consent?.kind).toBe("standing");
   await expect.poll(async () => (await runtimeState()).turns.find((turn) => turn.id === running?.id)?.outcome).toBe("cancelled");
   await shot(page, "05-optout-stopped-chat");
 });

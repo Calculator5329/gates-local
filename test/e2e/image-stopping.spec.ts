@@ -2,8 +2,7 @@
 // so the card says "Stopping the picture" in the box it already had, then settles to the stopped
 // card in that same box. While it stops there is nothing more to press: the composer's Stop has
 // gone with the turn and the card offers no Cancel. The picture's turn has not ended on the server
-// yet, so a chat question sent in that chat is refused (chat.send "turn-active"): its words go back
-// in the box, and the notice says a reply is still being written.
+// yet, so a chat question sent in that chat waits behind it as a queued message, and the box empties.
 import type { Page } from "@playwright/test";
 import { createClient } from "@gates-local/contracts";
 import { fakeComfy } from "./fake-comfy.ts";
@@ -96,12 +95,15 @@ test("Stop on a processor picture: the card says it is stopping in its own box, 
     expect(comfy.state(), "no new picture was asked for").toHaveLength(1);
 
     // a chat question in this chat meanwhile: the picture's turn is still open on the server, so the
-    // send is refused and the words come back to the box
+    // question waits behind it, and the box is empty
     await page.getByTestId("chat.composer.image").click();
     await sendMessage(page, QUESTION);
-    await expect(page.getByText("A reply is still being written in this thread. Stop it or wait.")).toBeVisible();
-    await expect(page.locator("#ta")).toHaveValue(QUESTION);
+    await expect(page.getByRole("listitem", { name: "Queued message 1 of 1" })).toBeVisible();
+    await expect(page.locator("#ta")).toHaveValue("");
     await expect(card.getByRole("status", { name: STOPPING })).toBeVisible();
+    // taken back, so nothing is sent below the card when the picture's turn ends
+    await page.getByRole("listitem", { name: "Queued message 1 of 1" }).locator("[data-unqueue]").click();
+    await expect(page.getByRole("listitem", { name: "Queued message 1 of 1" })).toHaveCount(0);
 
     // the engine lets go: the stopped card, in the same box, with Try again
     comfy.slowStop(0);
