@@ -737,6 +737,13 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
 - [ ] <!-- workspace:id=work:63010974-f6f0-5a94-8bd5-c84eed47a226 --> A saved stopped step keeps its summary in the "-ing" form ("Searching your library · stopped").
       *Accept:* the owner picks the words for a call that was cut.
 
+*2026-11-16, from the 0.2.5 release review (both present in 0.2.4 already):*
+
+- [ ] A send the fit check refuses carries an offer (a smaller context or model that would fit), but the wire's error drops it: `errorCode` keeps only the code, message and blocking flag, and the error body has no field for it, so the window never shows the offer.
+      *Accept:* a refused send in the window shows the offer the server made, with a test across the real socket.
+- [ ] Pictures scrolls back to the picked picture whenever its list changes, so a new picture arriving pulls a person who scrolled away back to their pick.
+      *Accept:* a new picture leaves the scroll where the person put it; opening Pictures still shows the pick.
+
 ## Next: slices 2 to 4
 
 - [ ] <!-- workspace:id=work:f1f9169a-4f22-5deb-93c4-018289b0be13 --> GPU lease: one app-owned heavy job at a time; chat, image, bench and

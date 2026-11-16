@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-16: two roadmap items from the 0.2.5 release review
+
+- The fit check's offer that never reaches the window, and Pictures scrolling back to the pick when a new picture arrives, are on the roadmap. Both were already in 0.2.4.
+
 ## 2026-11-16: a reply retried while a window was away shows the new try, and a send on a dead connection ends
 
 - After a reconnect, words that arrive before the list of replies is read wait for it, so a reply the server retried in the meantime shows the new try's words and keeps growing, instead of stopping on the old try's.
