@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-11-16: voice and updates follow the store instead of their effects
+
+- Two new kit pieces. `useLoad(key, load)` reads once per key and keeps
+  only the current key's result; a read left behind, even for a key that
+  came back, is dropped. `useAfter(ms, key)` turns true once `ms` has
+  passed since `key` last arrived or changed, on `useFlash`'s timer,
+  which now takes a value at mount. Neither reads a value left from the
+  old key on the render where the key changes.
+- Update's ask reads its status through `useLoad`, holds Go through
+  `useAfter` in the same render the list changes, and Cancel takes the
+  focus as it is drawn.
+- Read aloud starts from the entry and follows talk mode and the speaker
+  directly. The speaker button follows the browser's voice list through
+  `useSyncExternalStore`.
+- Dictate's clock reads the shared clock, and the 60 second cap is the
+  capture's own. The microphone is released in one place on a new draft,
+  connection, cover or Stop. Hold-to-talk's window keys go through
+  `useDocumentEvent`, and a talk send runs after the commit that draws the
+  words.
+
 ## 2026-11-16: the composer follows the store instead of its effects
 
 - The entry starts `watchComposer()` beside the shell's watches: the

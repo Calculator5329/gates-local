@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import { getState, runningTurn, subscribe, turnOf } from "../lib/store/store.ts";
 
 export type TalkPrefs = { readonly on: boolean; readonly speak: boolean };
@@ -88,16 +88,15 @@ export function localVoice(): SpeechSynthesisVoice | null {
   return mine.find((v) => v.default) ?? mine[0] ?? voices.find((v) => v.default) ?? voices[0] ?? null;
 }
 
-export function useLocalVoice(): SpeechSynthesisVoice | null {
-  const [voice, setVoice] = useState(localVoice);
-  // oxlint-disable-next-line gates/effect-needs-reason -- the browser's voices change event, followed while mounted
-  useEffect(() => {
-    if (typeof speechSynthesis === "undefined") return;
-    const changed = () => setVoice(localVoice());
-    speechSynthesis.addEventListener("voiceschanged", changed);
-    return () => speechSynthesis.removeEventListener("voiceschanged", changed);
-  }, []);
-  return voice;
+const onVoices = (changed: () => void): (() => void) => {
+  if (typeof speechSynthesis === "undefined") return () => undefined;
+  speechSynthesis.addEventListener("voiceschanged", changed);
+  return () => speechSynthesis.removeEventListener("voiceschanged", changed);
+};
+const hasVoice = (): boolean => localVoice() !== null;
+
+export function useHasLocalVoice(): boolean {
+  return useSyncExternalStore(onVoices, hasVoice, hasVoice);
 }
 
 export type Speaker = { say(words: string): void; cancel(): void };
@@ -174,8 +173,25 @@ function deviceVoice(synth: SpeechSynthesis): Speaker {
   };
 }
 
-export function useReadAloud(): void {
-  const { on, speak } = useTalk();
-  // oxlint-disable-next-line gates/effect-needs-reason -- the reader subscribes to replies and the device's speech for as long as talk mode and the speaker are on
-  useEffect(() => (on && speak && typeof speechSynthesis !== "undefined" ? startReading(deviceVoice(speechSynthesis)) : undefined), [on, speak]);
+let reading: (() => void) | undefined;
+
+function keepReader(): void {
+  const { on, speak } = talkPrefs();
+  const wanted = on && speak && typeof speechSynthesis !== "undefined";
+  if (wanted && reading === undefined) reading = startReading(deviceVoice(speechSynthesis));
+  else if (!wanted && reading !== undefined) {
+    reading();
+    reading = undefined;
+  }
+}
+
+// why: started once by the entry; the reader runs while talk mode and the speaker are both on
+export function readAloud(): () => void {
+  keepReader();
+  const off = onTalk(keepReader);
+  return () => {
+    off();
+    reading?.();
+    reading = undefined;
+  };
 }

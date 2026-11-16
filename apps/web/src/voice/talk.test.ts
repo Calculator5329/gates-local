@@ -4,7 +4,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import type { LiveTurn } from "../lib/store/store.ts";
 import { setState } from "../lib/store/store.ts";
-import { hush, localVoice, sentencesFrom, setTalk, speakable, startReading, talkPrefs } from "./talk.ts";
+import { hush, localVoice, readAloud, sentencesFrom, setTalk, speakable, startReading, talkPrefs } from "./talk.ts";
 
 afterEach(() => { vi.unstubAllGlobals(); setState({ turns: {}, messages: {}, threadId: null }); });
 
@@ -126,4 +126,35 @@ it("reads only with a voice the device speaks itself, never one that goes throug
   expect(localVoice()?.name, "another language before any online voice").toBe("Local French");
   voices(voice("Online English", "en-US", false, true));
   expect(localVoice(), "no voice at all when every voice is online").toBeNull();
+});
+
+it("the entry's reader reads while talk mode and the speaker are both on, and stops when either goes off or it is stopped", () => {
+  const spoken: string[] = [];
+  const synth = { getVoices: () => [voice("Local English", "en-US", true, true)], speak: (u: { text: string }) => { spoken.push(u.text); }, cancel: vi.fn() };
+  vi.stubGlobal("speechSynthesis", synth);
+  vi.stubGlobal("SpeechSynthesisUtterance", class { voice: unknown; lang = ""; text: string; constructor(text: string) { this.text = text; } });
+  vi.stubGlobal("navigator", { language: "en-US" });
+  vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => undefined });
+  setState({ threadId: "t", turns: {}, messages: {} });
+  setTalk({ on: false, speak: true });
+  const stop = readAloud();
+  setState({ turns: { t: live("t", 1, "Off. ") } });
+  expect(spoken, "talk mode off reads nothing").toEqual([]);
+  setTalk({ on: true });
+  setState({ turns: { t: live("t", 1, "Off. Now on. ") } });
+  expect(spoken).toEqual(["Now on."]);
+  setTalk({ speak: false });
+  expect(synth.cancel, "the speaker going off stops the voice").toHaveBeenCalledTimes(1);
+  setState({ turns: { t: live("t", 1, "Off. Now on. Quiet. ") } });
+  expect(spoken).toEqual(["Now on."]);
+  setTalk({ speak: true });
+  setState({ turns: { t: live("t", 2, "Back. ") } });
+  expect(spoken).toEqual(["Now on.", "Back."]);
+  stop();
+  expect(synth.cancel).toHaveBeenCalledTimes(2);
+  setTalk({ on: false });
+  setTalk({ on: true });
+  setState({ turns: { t: live("t", 3, "After stop. ") } });
+  expect(spoken, "nothing after the stop").toEqual(["Now on.", "Back."]);
+  setTalk({ on: false });
 });

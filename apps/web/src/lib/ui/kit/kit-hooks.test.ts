@@ -18,6 +18,7 @@ let kit: {
   popover: typeof import("./popover.ts");
   focus: typeof import("./focus.ts");
   watch: typeof import("./watch.ts");
+  async: typeof import("./async.ts");
 };
 let store: typeof import("../../store/store.ts");
 let frames: FrameRequestCallback[] = [];
@@ -44,6 +45,7 @@ beforeAll(async () => {
     popover: await import("./popover.ts"),
     focus: await import("./focus.ts"),
     watch: await import("./watch.ts"),
+    async: await import("./async.ts"),
   };
   store = await import("../../store/store.ts");
   root = createRoot(doc.body.appendChild(doc.createElement("div")) as unknown as Element);
@@ -317,4 +319,86 @@ it("every puts a plain function on the shared clock, and its stop takes it off",
   expect(kit.now.clockCount()).toBe(0);
   vi.advanceTimersByTime(12_000);
   expect(ticks).toHaveBeenCalledTimes(2);
+});
+
+it("after a key arrives or changes, the wait is on for ms, then off; no key is never past, and a key at mount waits too", () => {
+  const seen: boolean[] = [];
+  const After = ({ k }: { k: number | null }) => { seen.push(kit.flash.useAfter(1000, k)); return null; };
+  act(() => root.render(createElement(After, { k: 1 })));
+  expect(seen.at(-1), "a key at mount waits").toBe(false);
+  act(() => vi.advanceTimersByTime(999));
+  expect(seen.at(-1)).toBe(false);
+  act(() => vi.advanceTimersByTime(1));
+  expect(seen.at(-1)).toBe(true);
+  act(() => root.render(createElement(After, { k: 2 })));
+  expect(seen.at(-1), "a change starts the wait again").toBe(false);
+  act(() => vi.advanceTimersByTime(600));
+  act(() => root.render(createElement(After, { k: 3 })));
+  act(() => vi.advanceTimersByTime(600));
+  expect(seen.at(-1), "the newest change sets when it ends").toBe(false);
+  act(() => vi.advanceTimersByTime(400));
+  expect(seen.at(-1)).toBe(true);
+  act(() => root.render(createElement(After, { k: null })));
+  expect(seen.at(-1)).toBe(false);
+  act(() => vi.advanceTimersByTime(5000));
+  expect(seen.at(-1), "no key is never past").toBe(false);
+  act(() => root.render(createElement(After, { k: 4 })));
+  act(() => root.render(null));
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("no render reads a wait as past before its time, not even the one where the key arrives or changes", () => {
+  const seen: boolean[] = [];
+  const After = ({ k }: { k: number | null }) => { seen.push(kit.flash.useAfter(1000, k)); return null; };
+  act(() => root.render(createElement(After, { k: null })));
+  act(() => root.render(createElement(After, { k: 1 })));
+  expect(seen, "the key's arrival").not.toContain(true);
+  act(() => vi.advanceTimersByTime(1000));
+  expect(seen.at(-1)).toBe(true);
+  const past = seen.length;
+  act(() => root.render(createElement(After, { k: 2 })));
+  expect(seen.slice(past), "a change while past").not.toContain(true);
+  act(() => root.render(null));
+});
+
+it("no render shows a load's result under another key, not even the one where the key changes", async () => {
+  const seen: (string | undefined)[] = [];
+  const Load = ({ k }: { k: string | null }) => { seen.push(kit.async.useLoad(k, async (key) => `for ${key}`)); return null; };
+  await act(async () => root.render(createElement(Load, { k: "a" })));
+  expect(seen.at(-1)).toBe("for a");
+  const before = seen.length;
+  await act(async () => root.render(createElement(Load, { k: null })));
+  expect(seen.slice(before), "no key reads nothing").toEqual(seen.slice(before).map(() => undefined));
+  await act(async () => root.render(createElement(Load, { k: "b" })));
+  expect(seen.slice(before)).not.toContain("for a");
+  expect(seen.at(-1)).toBe("for b");
+  act(() => root.render(null));
+});
+
+it("a load keeps only the current key's result, reads nothing while a new key loads, and drops one that lands after unmount", async () => {
+  const pending: { key: string; resolve: (v: string) => void }[] = [];
+  const load = (key: string) => new Promise<string>((resolve) => { pending.push({ key, resolve }); });
+  const seen: (string | undefined)[] = [];
+  const Load = ({ k }: { k: string | null }) => { seen.push(kit.async.useLoad(k, load)); return null; };
+  const land = async (n: number, value: string) => { await act(async () => { pending[n]?.resolve(value); await Promise.resolve(); }); };
+  act(() => root.render(createElement(Load, { k: "a" })));
+  expect(seen.at(-1)).toBeUndefined();
+  await land(0, "A");
+  expect(seen.at(-1)).toBe("A");
+  act(() => root.render(createElement(Load, { k: "b" })));
+  expect(seen.at(-1), "nothing while a new key loads").toBeUndefined();
+  act(() => root.render(createElement(Load, { k: "a" })));
+  expect(pending.map((p) => p.key)).toEqual(["a", "b", "a"]);
+  await land(1, "B");
+  await land(0, "old A");
+  expect(seen.at(-1), "a read that was left behind is dropped, even for the same key").toBeUndefined();
+  await land(2, "new A");
+  expect(seen.at(-1)).toBe("new A");
+  act(() => root.render(createElement(Load, { k: null })));
+  expect(seen.at(-1), "no key reads nothing").toBeUndefined();
+  act(() => root.render(createElement(Load, { k: "c" })));
+  act(() => root.render(null));
+  const after = seen.length;
+  await land(3, "C");
+  expect(seen.length, "a result after unmount draws nothing").toBe(after);
 });

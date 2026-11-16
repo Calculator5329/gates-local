@@ -1,11 +1,13 @@
 import type { UpdateCheck, UpdateStatus } from "@gates-local/contracts";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon, type IconId } from "../lib/ui/icons.tsx";
 import { canUpdateHere, checkForUpdates, dismissUpdateResult, downloadUpdate, openSettings, readUpdateStatus, updateAndRestart } from "../lib/session/index.ts";
 import { NA, getState, useStore } from "../lib/store/store.ts";
 import { closeTip, esc } from "../lib/ui/ui.tsx";
 import { useDocumentEvent } from "../lib/ui/kit/events.ts";
 import { useChange } from "../lib/ui/kit/popover.ts";
+import { useLoad } from "../lib/ui/kit/async.ts";
+import { useAfter } from "../lib/ui/kit/flash.ts";
 import { RESTART, restartable, type UpdateClick, type UpdateIcon, type UpdateInput, outdated, updateIcon, ver } from "./update-state.ts";
 import { updateWork, workLines } from "./update-work.ts";
 
@@ -76,11 +78,15 @@ function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStat
   const cancel = useRef<HTMLButtonElement>(null);
   const goButton = useRef<HTMLButtonElement>(null);
   const lines = () => workLines(updateWork(status.activity));
-  const [read, setRead] = useState<string | null | undefined>(undefined);
   const [work, setWork] = useState(lines);
   const [prev, setPrev] = useState(before);
   const [settle, setSettle] = useState(before === null ? 0 : 1);
-  const [wait, setWait] = useState(before !== null);
+  const read = useLoad("status", readUpdateStatus);
+  // why: a changed list is read before Go works again
+  const settled = useAfter(SETTLE_MS, settle === 0 ? null : settle);
+  const wait = settle !== 0 && !settled;
+  // why: the ask opens from several places; Cancel takes the focus as it is drawn
+  const cancelRef = useMemo(() => (el: HTMLButtonElement | null) => { cancel.current = el; el?.focus(); }, []);
   const seen = useRef(status.approval);
   const changed = (next: string[]) => {
     if (document.activeElement === goButton.current) cancel.current?.focus();
@@ -88,25 +94,12 @@ function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStat
     setWork(next);
     setSettle((n) => n + 1);
   };
-  // oxlint-disable-next-line gates/effect-needs-reason -- the ask opens from several places; on its mount Cancel takes focus and the status is read once
-  useEffect(() => {
-    cancel.current?.focus();
-    void readUpdateStatus().then(setRead);
-  }, []);
   // oxlint-disable-next-line gates/effect-needs-reason -- a new approval arrives pushed from the server while the ask is open; changed() also moves focus off Go, which a render cannot do
   useEffect(() => {
     if (status.approval === seen.current) return;
     seen.current = status.approval;
     changed(lines());
   }, [status.approval]);
-  // oxlint-disable-next-line gates/effect-needs-reason -- holds Go off for a moment after the list changed, and drops the timer on the next change or unmount
-  useEffect(() => {
-    if (settle === 0) return;
-    setWait(true);
-    // oxlint-disable-next-line gates/timer-needs-reason -- the pause that lets a changed list be read before Go works again
-    const t = window.setTimeout(() => setWait(false), SETTLE_MS);
-    return () => window.clearTimeout(t);
-  }, [settle]);
   const press = () => {
     const now = lines();
     if (status.approval !== seen.current) {
@@ -138,7 +131,7 @@ function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStat
         </p>
       ) : null}
       <div className="ca">
-        <button ref={cancel} type="button" className="btn ghost" data-testid="sidebar.update.cancel" onClick={onCancel}>
+        <button ref={cancelRef} type="button" className="btn ghost" data-testid="sidebar.update.cancel" onClick={onCancel}>
           Cancel
         </button>
         <button ref={goButton} type="button" className="btn primary" data-testid="sidebar.update.go" disabled={read !== null || wait} onClick={press}>

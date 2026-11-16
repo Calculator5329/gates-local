@@ -25,7 +25,6 @@ import { NA, type Section, type State, getState, overChat, setState, useStore } 
 import { useDraft } from "../lib/store/drafts.ts";
 import { syncWindowTitle } from "./titlebar.ts";
 import { keepSheetFocus } from "./sheet-focus.ts";
-import { useReadAloud } from "../voice/talk.ts";
 import { useCovering } from "../pages/cover.ts";
 import { PHONE, POP_EL, SheetHead, Tip, TurnSkel, anchorOf, closePop, isPhone, isTouch, menuKeys, place, tabStops, useMedia } from "../lib/ui/ui.tsx";
 import { downloadBlob, withTimeout } from "../lib/ui/kit/async.ts";
@@ -469,7 +468,6 @@ export function App() {
   const drawer = useStore((s) => s.drawer);
   const pageCover = useCovering();
   const setList = useStore((s) => s.setList);
-  useReadAloud();
   const popId = useStore((s) => s.pop?.id ?? null);
   const settings = useScreen(settingsScreen, view === "settings");
   const firstRun = useScreen(firstRunScreen, !noServer && view === "firstrun");

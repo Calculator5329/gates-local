@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => {
   const settings = { whisperUrl: "http://127.0.0.1:18078" as string | undefined };
   return {
-    cursor: 0, slots: [] as unknown[], refs: new Map<number, { current: unknown }>(),
+    cursor: 0, rendering: false, again: false, slots: [] as unknown[], refs: new Map<number, { current: unknown }>(),
     effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void }>(),
     pending: [] as (() => void)[],
     state: { settings, unavailable: {}, conn: { kind: "open" }, editingQueued: null as string | null, draft: "original draft", draftVersion: 0, voiceConnectionVersion: 0, notice: null as string | null, view: "thread", panel: null as string | null },
@@ -18,7 +18,7 @@ vi.mock("react", async (original) => ({
   useState(initial: unknown) {
     const at = h.cursor++;
     if (!(at in h.slots)) h.slots[at] = initial;
-    return [h.slots[at], (next: unknown) => { h.slots[at] = next; }];
+    return [h.slots[at], (next: unknown) => { h.slots[at] = next; if (h.rendering) h.again = true; }];
   },
   useRef(initial: unknown) {
     const at = h.cursor++;
@@ -26,6 +26,14 @@ vi.mock("react", async (original) => ({
     return h.refs.get(at);
   },
   useSyncExternalStore(_subscribe: unknown, snapshot: () => unknown) { return snapshot(); },
+  // React's own: one function for the component's life that calls the newest handler
+  useEffectEvent(handler: (...args: unknown[]) => unknown) {
+    const at = h.cursor++;
+    const box = h.refs.get(at) ?? { current: handler };
+    box.current = handler;
+    h.refs.set(at, box);
+    return (...args: unknown[]) => (box.current as typeof handler)(...args);
+  },
   useEffect(effect: () => void | (() => void), deps?: readonly unknown[]) {
     const at = h.cursor++, previous = h.effects.get(at);
     if (deps && previous?.deps && deps.length === previous.deps.length && deps.every((d, i) => Object.is(d, previous.deps?.[i]))) return;
@@ -58,9 +66,15 @@ vi.mock("./voice-audio.ts", () => {
 import { Voice } from "./Voice.tsx";
 import { VoiceSettings } from "./VoiceSettings.tsx";
 
+// As React does, a state update made while rendering draws again at once, and the pass it cut short commits nothing.
 function render(component: () => ReactNode) {
-  h.cursor = 0;
-  const tree = component();
+  let tree: ReactNode;
+  h.rendering = true;
+  do {
+    h.again = false; h.cursor = 0; h.pending.length = 0;
+    tree = component();
+  } while (h.again);
+  h.rendering = false;
   h.pending.splice(0).forEach((effect) => effect());
   return tree;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { call, updateSettings } from "../lib/session/index.ts";
 import { getState, NA, setState, useStore } from "../lib/store/store.ts";
 import { COMPUTER_ONLY, Grp, Row, Skel } from "../lib/ui/settings-ui.tsx";
@@ -20,8 +20,8 @@ export function VoiceSettings() {
   const attempt = useRef(0);
   const locked = useStore((s) => s.unavailable["settings.update"] === true);
   const talk = useTalk().on;
-  // oxlint-disable-next-line gates/effect-needs-reason -- on unmount a connect still on its way must not write into a card that is gone
-  useEffect(() => () => { attempt.current++; }, []);
+  // why: a connect still on its way when the field goes must not save or write into a gone card
+  const [endsAttempt] = useState(() => (el: HTMLInputElement | null) => (el === null ? undefined : () => { attempt.current++; setBusy(null); }));
   if (settings === NA) return null;
   // why: settings normally arrive before Settings can open; if not, the card keeps its shape.
   if (settings === undefined) return <Grp title="Voice to text" busy>
@@ -51,7 +51,7 @@ export function VoiceSettings() {
   return <Grp title="Voice to text">
     <Row label="Speech server" desc={settings.whisperUrl ? "Connected" : locked ? `Off. ${COMPUTER_ONLY}` : undefined} err={err}>
       {locked ? null : <>
-        <input className="inp" data-testid="settings.voice.address" aria-label="whisper.cpp address" value={url ?? settings.whisperUrl ?? "http://127.0.0.1:8178"} onChange={(e) => setUrl(e.target.value)} spellCheck={false} />
+        <input ref={endsAttempt} className="inp" data-testid="settings.voice.address" aria-label="whisper.cpp address" value={url ?? settings.whisperUrl ?? "http://127.0.0.1:8178"} onChange={(e) => setUrl(e.target.value)} spellCheck={false} />
         <button type="button" className="btn outline" data-testid="settings.voice.connect" disabled={busy} onClick={() => void connect()}>{busy ? "Connecting…" : "Connect"}</button>
         {settings.whisperUrl ? <button type="button" className="btn ghost" data-testid="settings.voice.disconnect" onClick={() => void disconnect()}>Disconnect</button> : null}
       </>}
