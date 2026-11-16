@@ -480,6 +480,28 @@ describe("tool steps and images (schema step 2)", () => {
     expect(s.getThread(t.id).messages[0]?.imageJob).toEqual({ jobId: "j1", threadId: t.id, state: "error", errorKind: "restarted",
       message: "The app restarted before this image finished; try again.", choice: settled, sent });
   });
+  it("a thread deleted while its image job settles stays deleted, and the job's next state is dropped", () => {
+    const s = store();
+    const t = s.createThread();
+    const choice = { preset: "z-image-int8", width: 1024, height: 768 };
+    s.saveImageJob({ jobId: "j1", threadId: t.id, state: "running", progress: 0, choice }, "a tree");
+    s.deleteThread(t.id);
+    expect(() => s.saveImageJob({ jobId: "j1", threadId: t.id, state: "running", progress: 0.5, choice }, "a tree")).not.toThrow();
+    expect(s.listThreads()).toEqual([]);
+    expect(() => s.getThread(t.id)).toThrow(ThreadNotFoundError);
+  });
+  it("a saved image choice or count this build cannot read is dropped: the thread follows the app's last pick and makes one", () => {
+    const path = join(dir, "threads.db");
+    const s = store(path);
+    const t = s.createThread({ title: "a" });
+    s.close();
+    const db = raw(path);
+    db.prepare("UPDATE threads SET image_choice_json = ?, image_count = ? WHERE id = ?").run('{"preset":7}', 99, t.id);
+    db.close();
+    const again = store(path);
+    expect(again.getThread(t.id).thread).toEqual(t);
+    expect(again.listThreads()).toEqual([t]);
+  });
   it("round-trips tool steps and image paths, and refuses malformed ones", () => {
     const s = store();
     const t = s.createThread();

@@ -1,6 +1,3 @@
-// Versioned schema steps, tracked in PRAGMA user_version. Step N moves the
-// database from version N-1 to N. Never edit a shipped step; append a new one.
-
 import type { DatabaseSync } from "node:sqlite";
 
 import { copyBeforeMigration } from "./copies.ts";
@@ -11,8 +8,6 @@ export interface Migration {
   up: (db: DatabaseSync) => void;
 }
 
-// Nullable additions from parallel builds must not depend on which version-4
-// shape arrived first. Repair them under the same write lock on every open.
 function addMessageColumns(db: DatabaseSync): void {
   const columns = new Set(db.prepare("PRAGMA table_info(messages)").all().map(row => row["name"]));
   for (const name of ["image_job_json", "context_notice", "files_json"]) {
@@ -20,6 +15,7 @@ function addMessageColumns(db: DatabaseSync): void {
   }
 }
 
+// why: a shipped step may have run on someone's database already, so a change is a new step
 export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
@@ -56,8 +52,6 @@ export const MIGRATIONS: readonly Migration[] = [
     },
   },
   {
-    // Tool steps and generated image paths ride on the message as JSON
-    // arrays (contracts v2, 2026-11-07). NULL means none.
     version: 2,
     up: (db) => {
       db.exec(`
@@ -67,9 +61,6 @@ export const MIGRATIONS: readonly Migration[] = [
     },
   },
   {
-    // Decode and prompt times from Ollama's eval_duration and
-    // prompt_eval_duration (2026-11-07), so speed is tokens over decode time
-    // and not over the wall time that includes the model load. NULL on older rows.
     version: 3,
     up: (db) => {
       db.exec(`
@@ -84,29 +75,22 @@ export const MIGRATIONS: readonly Migration[] = [
   },
   {
     version: 5,
-    // Compatibility with databases already stamped by the earlier paste build.
     up: addMessageColumns,
   },
 ];
 
 export const LATEST_VERSION: number = MIGRATIONS.length;
 
-/** Nullable extensions keep the previous build's version guard and named projections usable. */
 export function ensureMessageColumns(db: DatabaseSync): void {
   db.exec("BEGIN IMMEDIATE");
   try {
     addMessageColumns(db);
     const columns = new Set(db.prepare("PRAGMA table_info(messages)").all().map(row => row["name"]));
     if (!columns.has("interrupted")) db.exec("ALTER TABLE messages ADD COLUMN interrupted INTEGER CHECK (interrupted IS NULL OR interrupted = 1)");
-    // A reply's times (a ReplyTimes as JSON), or on a question whose turn saved no reply, how it ended.
     if (!columns.has("times_json")) db.exec("ALTER TABLE messages ADD COLUMN times_json TEXT");
-    // Each thread's image model and size (an ImageChoice as JSON); NULL follows the app's last pick.
     const threadColumns = new Set(db.prepare("PRAGMA table_info(threads)").all().map(row => row["name"]));
     if (!threadColumns.has("image_choice_json")) db.exec("ALTER TABLE threads ADD COLUMN image_choice_json TEXT");
-    // How many pictures an Image-mode send in this thread makes; NULL is one.
     if (!threadColumns.has("image_count")) db.exec("ALTER TABLE threads ADD COLUMN image_count INTEGER");
-    // Each model's measured speed (store.ts SPEED_SQL) reads only this: finished replies with a decode time.
-    // An index is not a schema version; a previous build opens the file and ignores it.
     db.exec(`CREATE INDEX IF NOT EXISTS messages_speed ON messages (created_at, model, completion_tokens, eval_duration_ms, role)
              WHERE role = 'assistant' AND eval_duration_ms > 0 AND completion_tokens IS NOT NULL`);
     db.exec("COMMIT");
@@ -119,13 +103,6 @@ function readUserVersion(db: DatabaseSync): number {
   return typeof v === "number" ? v : Number(v ?? 0);
 }
 
-/**
- * Brings the database up to LATEST_VERSION. Each step runs in its own
- * IMMEDIATE transaction together with its user_version bump, so a kill
- * between steps leaves a database at a clean, known version. The version is
- * re-read inside the write lock, so two processes opening at once do not run
- * a step twice.
- */
 export function migrate(db: DatabaseSync, dbPath: string, migrations: readonly Migration[] = MIGRATIONS): number {
   const latest = migrations.length;
   migrations.forEach((m, i) => {
@@ -134,7 +111,6 @@ export function migrate(db: DatabaseSync, dbPath: string, migrations: readonly M
 
   const initial = readUserVersion(db);
   if (initial > latest) throw new StoreVersionTooNewError(dbPath, initial, latest);
-  // A pre-versioning store can have tables while still reporting version 0.
   if (initial < latest && (initial > 0 || db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' LIMIT 1").get() !== undefined)) {
     copyBeforeMigration(db, dbPath, latest);
   }
@@ -152,7 +128,7 @@ export function migrate(db: DatabaseSync, dbPath: string, migrations: readonly M
       const step = migrations[current];
       if (!step) throw new Error(`no migration for version ${current + 1}`);
       step.up(db);
-      // PRAGMA takes no bound parameters; the value is an integer we own.
+      // external: SQLite's PRAGMA takes no bound parameters; the version is an integer we own
       db.exec(`PRAGMA user_version = ${step.version}`);
       db.exec("COMMIT");
     } catch (err) {

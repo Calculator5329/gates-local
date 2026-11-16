@@ -1,6 +1,3 @@
-// Named errors raised at the thread store boundary. Callers switch on `code`
-// (or instanceof); no SQLite error text leaks out for the expected cases.
-
 export class ThreadNotFoundError extends Error {
   override readonly name = "ThreadNotFoundError";
   readonly code = "thread-not-found";
@@ -56,7 +53,7 @@ export class StoreCopyError extends Error {
     const code = cause instanceof Error && "code" in cause ? cause.code : undefined;
     const sqliteCode = cause instanceof Error && "errcode" in cause && typeof cause.errcode === "number" ? cause.errcode & 0xff : undefined;
     const full = code === "ENOSPC" || code === "EDQUOT" || sqliteCode === 13;
-    // SQLITE_BUSY: another process held the store past the busy timeout.
+    // external: SQLite's result code 5 is SQLITE_BUSY, a lock held past the busy timeout
     const busy = sqliteCode === 5;
     const reason = full ? "the disk is full"
       : busy ? "another program, most likely another copy of Gates Local, is using your chats"
@@ -69,8 +66,6 @@ export class StoreCopyError extends Error {
       (full ? "Free some space and start it again. Nothing was changed."
         : busy ? "Close it and start Gates Local again. Nothing was changed."
         : "Check that the chat folder is writable and the disk is working, then start it again. Nothing was changed."),
-      // The sentence above is for the person. The raw failure stays attached
-      // and the server logs it at startup, naming the call and file that failed.
       { cause },
     );
     this.dbPath = dbPath;

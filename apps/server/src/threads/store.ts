@@ -1,6 +1,4 @@
-// SQLite thread store (node:sqlite, so no native dependency; it runs under
-// Electron 45's Node as well). Completed messages persist, and a reply that
-// has not finished persists marked interrupted, rewritten as it streams.
+// external: node:sqlite needs no native build, so the store runs under Electron's Node too
 
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -20,85 +18,49 @@ import { createPictureIndex, ensurePicturesTable, type PictureFacts, type Pictur
 import { ROLES, TOOL_STATES, type Message, type MessageStats, type NewMessage, type Role, type Thread, type ThreadWithMessages, type ToolStepRecord } from "./types.ts";
 
 export interface ThreadStoreOptions {
-  /** Clock for createdAt/updatedAt; tests pin it. Defaults to Date.now. */
   now?: () => number;
-  /** How long a write waits on another connection's lock before failing. */
   busyTimeoutMs?: number;
 }
 
 export interface ThreadStore {
   getMessage(messageId: string): Message | undefined;
-  /**
-   * A thread's saved replies that hold a code fence (where a page can be), oldest first: only their
-   * ids and text. With `before`, only the replies before that message; none when it is not saved.
-   */
   fencedReplies(threadId: string, before?: string): Array<{ id: string; content: string }>;
   deleteMessage(threadId: string, messageId: string): void;
   imageReferences(): Map<string, number>;
-  /** How many messages hold each attached file's copy (AttachedFile.path). */
   fileReferences(): Map<string, number>;
-  /** The thread each kept file belongs to: the thread of a saved message that holds it. */
   fileOwners(): Map<string, string>;
-  /** Every stored reply's model, time and reported tokens, for usage's one-time fill; `lacking` counts replies with no figures. */
   replyUsage(): {
     replies: Array<{ model: string; at: number; promptTokens: number | undefined; completionTokens: number | undefined; evalDurationMs: number | undefined; promptEvalDurationMs: number | undefined; durationMs: number | undefined }>;
     lacking: number;
   };
   readonly dbPath: string;
-  /**
-   * The numbers ordered windows compare (threads/sync.ts frames them). `list()`: every write to a
-   * chat takes the next one. `chat(id)`: the list's number at the last write to that chat's
-   * messages, 0 when there was none since the store opened. Both only go up.
-   */
   readonly numbers: { list(): number; chat(threadId: string): number };
-  /** The chat's row as listThreads gives it, or undefined when there is no such chat. */
   threadRow(threadId: string): Thread | undefined;
   listThreads(): Thread[];
   createThread(input?: { title?: string }): Thread;
   getThread(threadId: string): ThreadWithMessages;
-  /**
-   * One page of a thread, read from disk alone: up to `limit` messages before `before` (else the
-   * newest), widened back to a question so no reply shows without the one it answers, and how
-   * many come before the page. `skip`: a message no page shows (a reply still streaming).
-   * Undefined when `before` is not one of the thread's shown messages.
-   */
   getThreadPage(threadId: string, page: { before?: string; limit?: number; skip?: string }): (ThreadWithMessages & { earlier: number }) | undefined;
   renameThread(threadId: string, title: string): Thread;
-  /** Keep the image model and size this thread sends with; the list order stays (it is not an edit). */
   setImageChoice(threadId: string, choice: ImageChoice): Thread;
-  /**
-   * Keep `choice` only while the thread has no saved choice of its own (the last-image fallback does not
-   * count), in one write. False when it had one (a pick or a send since) or there is no such thread.
-   */
   fillImageChoice(threadId: string, choice: ImageChoice): boolean;
-  /** The thread's own image choice, or undefined while it has none. Throws for an unknown thread. */
   imageChoiceOf(threadId: string): ImageChoice | undefined;
-  /** Keep how many pictures this thread's Image-mode sends make; the list order stays (it is not an edit). */
   setImageCount(threadId: string, count: ImageCount): Thread;
   deleteThread(threadId: string): void;
-  /** `replacing`: rows of this thread that go in the same transaction, so a reader never sees both or neither. */
+  // why: a reader sees the old rows or the new one, never both and never neither
   appendMessage(input: NewMessage, replacing?: readonly string[]): Message;
-  /** Keep how the turn that answers this question ended, when it saved no reply; a question already gone is left alone. */
   stampTimes(threadId: string, messageId: string, times: ReplyTimes): void;
-  /** `picture`: at done, what the job knew; the card's row in the pictures index is written in the same transaction. */
   saveImageJob(event: ImageEvent, prompt: string, picture?: PictureFacts): void;
-  /** The finished pictures, for the Pictures screen (pictures/table.ts). */
   readonly pictures: PictureIndex;
-  /** Links the failed attempt and creates its retry card in one write transaction. */
-  /** `choice` is the retry's when the failed card has none (cards saved before presets). */
-  claimImageRetry(threadId: string, previousJobId: string, jobId: string, choice: ImageChoice): { jobId: string; prompt: string; choice: ImageChoice; created: boolean };
-  /** Called once by the image module at startup; an old process cannot finish these jobs. */
+  claimImageRetry(threadId: string, previousJobId: string, jobId: string, fallback: ImageChoice): { jobId: string; prompt: string; choice: ImageChoice; created: boolean };
   interruptImageJobs(): ImageEvent[];
-  /** Each model's measured decode speed over the last SPEED_WINDOW_MS, by model name without ":latest"; models under the floor are left out. */
   modelSpeeds(): ModelSpeed[];
   close(): void;
 }
 
-/** Measured speeds cover the last 14 days of replies; older ones say nothing about this computer now. */
+// why: replies older than 14 days say nothing about this computer now
 export const SPEED_WINDOW_MS = 14 * 86_400_000;
-/** Fewer completion tokens than this in the window shows no number: a reply or two of a few words is noise. */
+// why: a reply or two of a few words is noise
 export const SPEED_MIN_TOKENS = 50;
-/** Finished replies with a decode time, grouped by model; the partial index messages_speed covers it. */
 export const SPEED_SQL = `SELECT model, SUM(completion_tokens) AS tokens, SUM(eval_duration_ms) AS ms, COUNT(*) AS replies
   FROM messages INDEXED BY messages_speed
   WHERE role = 'assistant' AND eval_duration_ms > 0 AND completion_tokens IS NOT NULL AND created_at >= ? AND model IS NOT NULL
@@ -129,17 +91,11 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
   const db = new DatabaseSync(dbPath, { enableForeignKeyConstraints: true, timeout: busyTimeoutMs });
 
   try {
-    // busy_timeout first so the journal_mode switch and migrations wait on a
-    // second process instead of failing with SQLITE_BUSY.
+    // why: set first, so the WAL switch and the migrations wait on a second process, not fail
     db.exec(`PRAGMA busy_timeout = ${Math.max(0, Math.trunc(busyTimeoutMs))}`);
     const mode = db.prepare("PRAGMA journal_mode = WAL").get()?.["journal_mode"];
     if (mode !== "wal") throw new Error(`could not enable WAL on ${dbPath} (journal_mode=${String(mode)})`);
-    // synchronous=FULL: in WAL mode NORMAL already survives a process kill
-    // (a committed transaction is in the -wal file via write(); the OS keeps
-    // it after the process dies), but NORMAL can lose the last commits on a
-    // power cut or kernel crash. FULL fsyncs the WAL on every commit, which
-    // makes a committed message survive those too. Writes here are a few per
-    // turn, so the fsync cost is not measurable against model latency.
+    // external: in WAL mode SQLite's synchronous=NORMAL can lose the last commits on a power cut
     db.exec("PRAGMA synchronous = FULL");
     db.exec("PRAGMA foreign_keys = ON");
     migrate(db, dbPath);
@@ -150,15 +106,12 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
     throw err;
   }
 
-  // A thread's image choice: its own, else (a thread from before threads kept one) what its last
-  // finished image ran. A failed card is passed over: its default may never have been settled.
   const choiceColumn = `COALESCE(image_choice_json, (SELECT json_extract(m.image_job_json, '$.choice') FROM messages m
     WHERE m.thread_id = threads.id AND json_extract(m.image_job_json, '$.state') = 'done'
     ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1)) AS image_choice_json`;
   const messageColumns = `id, thread_id, role, content, thinking, model, created_at,
               prompt_tokens, completion_tokens, duration_ms, num_ctx,
               tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms, interrupted, image_job_json, context_notice, times_json, files_json`;
-  // A page's rows in thread order are those under a (created_at, seq) key, on messages_by_thread_time.
   const shown = "thread_id = ? AND id IS NOT ?";
   const stmt = {
     listThreads: db.prepare(`SELECT id, title, created_at, updated_at, image_count, ${choiceColumn} FROM threads ORDER BY updated_at DESC, id`),
@@ -217,8 +170,7 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
     return threadFromRow(row);
   };
 
-  // Every write below ends by taking the next number, after it committed: a reader that sees the
-  // number sees the write. `messages`: it changed the chat's messages, not only its row.
+  // why: a reader that sees a number must see its write, so each number is taken after commit
   let listNumber = 0;
   const chatNumbers = new Map<string, number>();
   const wrote = (threadId: string, messages: boolean): void => {
@@ -319,8 +271,7 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
     getThread(threadId) {
       guard();
       checkId("threadId", threadId);
-      // One read transaction so the thread row and its messages come from
-      // the same snapshot even while another connection writes.
+      // why: one read transaction, so the row and its messages come from one snapshot
       db.exec("BEGIN");
       try {
         const thread = loadThread(threadId);
@@ -346,12 +297,10 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
           if (!key) { db.exec("COMMIT"); return undefined; }
           end = [num(key, "created_at"), num(key, "seq")];
         }
-        // the page, newest first; a full one widens back to its question when it starts on a reply
         const rows = stmt.pageNewest.all(threadId, hide, ...end, limit ?? -1).toReversed();
         const oldest = rows[0];
         let page = rows;
         let earlier = 0;
-        // a page shorter than asked reaches the thread's first message
         if (limit !== undefined && oldest !== undefined && rows.length === limit) {
           let start: [number, number] = [num(oldest, "created_at"), num(oldest, "seq")];
           if (oldest["role"] !== "user") {
@@ -478,7 +427,6 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
       const threadId = clean.threadId;
       if (!threadId) return;
       const saved = transaction(() => {
-        // A thread deleted while its job settles must stay deleted.
         if (!stmt.getThread.get(threadId)) return false;
         stmt.insertImageCard.run(clean.jobId, threadId, prompt, now(), JSON.stringify(clean));
         stmt.updateImageCard.run(JSON.stringify(clean), clean.imagePath ? JSON.stringify([clean.imagePath]) : null, clean.jobId, threadId);
@@ -498,8 +446,6 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
         const previous = S.decodeUnknownSync(ImageEvent)(JSON.parse(str(row, "image_job_json")));
         const prompt = str(row, "content");
         const choice = previous.choice ?? fallback;
-        // Keep the link even after completion: a late duplicate is still the same request.
-        // A failed retry can be retried from its own card, with its own id.
         if (previous.retryJobId) return { jobId: previous.retryJobId, prompt, choice, created: false };
         if (previous.state !== "error" && previous.state !== "cancelled") throw new InvalidInputError("retryOf", "only a failed or cancelled image can be retried");
         const next: ImageEvent = { jobId, threadId, state: "queued", choice };
@@ -527,7 +473,6 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
 
     modelSpeeds() {
       guard();
-      // "llama3" and "llama3:latest" are one model; the sums merge before the floor.
       const sums = new Map<string, { tokens: number; ms: number; replies: number }>();
       for (const row of stmt.speeds.all(now() - SPEED_WINDOW_MS)) {
         const model = str(row, "model").replace(/:latest$/, "");
@@ -671,7 +616,6 @@ function checkTools(value: unknown): ToolStepRecord[] | undefined {
   });
 }
 
-/** The contract's own check: a stored path is only ever a generated `files/att-<uuid>`. */
 const decodeFiles = (value: unknown): AttachedFile[] => [...S.decodeUnknownSync(S.Array(AttachedFile))(value)];
 
 function checkImages(value: unknown): string[] | undefined {
@@ -710,10 +654,8 @@ function threadFromRow(row: Row): Thread {
   const thread: Thread = { id: str(row, "id"), title: str(row, "title"), createdAt: num(row, "created_at"), updatedAt: num(row, "updated_at") };
   const choice = optStr(row, "image_choice_json");
   if (choice !== undefined) {
-    // A choice this build cannot read is dropped: the thread then follows the app's last pick.
-    try { thread.imageChoice = S.decodeUnknownSync(ImageChoice)(JSON.parse(choice)); } catch { /* left out */ }
+    try { thread.imageChoice = S.decodeUnknownSync(ImageChoice)(JSON.parse(choice)); } catch {}
   }
-  // One is the default and is left out; a count this build cannot read is dropped the same way.
   const count = opt(row["image_count"]);
   if (count !== undefined && count !== 1 && S.is(ImageCount)(count)) thread.imageCount = count;
   return thread;

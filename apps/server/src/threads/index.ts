@@ -1,4 +1,3 @@
-// Thread store: messages in SQLite (WAL), a streaming reply as one row marked interrupted.
 export {
   DuplicateMessageError,
   InvalidInputError,
