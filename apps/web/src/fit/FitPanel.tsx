@@ -1,6 +1,3 @@
-// GPU memory in Settings › Advanced (shell.md F16, F17b, F36, F48, F63): the
-// verdict for a model at the context it runs at, and where the memory goes,
-// from the server's fit table plus gpu.status when the server has it.
 import type { ReactNode } from "react";
 import type { FitReport, GpuOccupant, GpuStatus } from "@gates-local/contracts";
 import { NO_GPU_TEXT, type SlowReason, type Verdict, cardGb, decodeSpeed, describeModel, gb, holderName, k, noGpu, slowReason, verdictOf } from "../lib/words/format.ts";
@@ -23,12 +20,10 @@ const GPU_UNREADABLE_TEXT = "GPU memory could not be read. Try again before load
 
 const r1 = (bytes: number) => Math.round((bytes / 1024 ** 3) * 10) / 10;
 
-/** "NVIDIA GeForce RTX 5070 Ti" → "RTX 5070 Ti". */
 export function shortGpu(name: string | undefined): string {
   return (name ?? "GPU").replace(/^NVIDIA\s+/i, "").replace(/^GeForce\s+/i, "");
 }
 
-/** A legend row's name and its small grey kind; the row has no tooltip (docs/design.md). */
 function occName(o: GpuOccupant): { nm: string; small: string } {
   const nm = holderName(o);
   switch (o.kind) {
@@ -45,7 +40,7 @@ function occName(o: GpuOccupant): { nm: string; small: string } {
   }
 }
 
-/** A bar segment and its legend swatch: Whisper's gray, and two more so neighbours differ. */
+// why: two swatches alternate so neighbouring segments differ
 const swOf = (o: GpuOccupant, i: number) => (o.kind === "whisper" ? "sw-whisper" : i % 2 === 0 ? "sw-occ" : "sw-other");
 const occupantKey = (o: GpuOccupant) => JSON.stringify([o.kind, o.label, o.protected]);
 
@@ -60,7 +55,6 @@ function MemoryBar({ gpu, name, v, loaded }: { gpu: GpuStatus; name: string; v: 
     return { o, gb: r1(o.bytes), key: `${identity}:${n}` };
   });
   const used = parts.reduce((a, p) => a + p.gb, 0);
-  // Right now only: the model is drawn while it is loaded, never an estimate cut to what is free.
   const ch = !loaded || v.k === "no" ? 0 : Math.min(r1(v.need), Math.max(0, Math.round((tot - used) * 10) / 10));
   const un = Math.max(0, Math.round((tot - used - ch) * 10) / 10);
   const w = (x: number) => `${((x / tot) * 100).toFixed(2)}%`;
@@ -113,7 +107,6 @@ function MemoryBar({ gpu, name, v, loaded }: { gpu: GpuStatus; name: string; v: 
   );
 }
 
-/** First-token time and speed of the latest reply by this model in the chats loaded here, if any: the server's times on the row. */
 function speedOf(s: State, model: string): { ttft: number; tps: number | null } | null {
   for (const msgs of Object.values(s.messages)) {
     for (let i = msgs.length - 1; i >= 0; i--) {
@@ -122,7 +115,6 @@ function speedOf(s: State, model: string): { ttft: number; tps: number | null } 
       const first = m.times?.firstTokenAt;
       if (first === undefined || m.times === undefined) continue;
       const ft = first - m.times.startedAt;
-      // Decode time only: the total includes loading the model and reading the prompt.
       return { ttft: ft, tps: decodeSpeed(m.stats) ?? null };
     }
   }
@@ -160,8 +152,7 @@ function Speed({ model, name, numCtx, loaded }: { model: string; name: string; n
   );
 }
 
-// The verdict is against the card's own memory (fit-table cardFit); what other programs hold right
-// now is the bar below, never a reason the model won't fit.
+// why: on a card reading freeVramBytes is the whole card, so it is named as every line names it
 function Numbers({ r, v, name, gpu, loaded, slow }: { r: FitReport; v: Verdict; name: string; gpu: GpuStatus | undefined; loaded: boolean; slow?: SlowReason | undefined }) {
   const ctx = k(r.numCtx);
   if (v.k === "no") {
@@ -174,7 +165,6 @@ function Numbers({ r, v, name, gpu, loaded, slow }: { r: FitReport; v: Verdict; 
   }
   return (
     <div className="fp-n fp-numbers">
-      {/* the fit judges a model against the whole card (freeVramBytes is its size), so the card is named as it is everywhere: 16 GB */}
       Estimated {gb(r.needVramBytes)}{noGpu(gpu) ? `; ${gpu?.detail ? gpuHead(gpu) : "no supported GPU"}` : ` of a ${cardGb(r.freeVramBytes)} GPU`}.
       <br />
       {v.k === "spill" ? `${gb(v.amt)} in system memory; slower replies.` : slow !== undefined ? <span data-testid="models.fit-panel.slow-now">{slow.sentence}</span> : noGpu(gpu) && r.words?.word !== "Runs on GPU" ? "Runs in system memory." : "Runs entirely on the GPU."}
@@ -184,7 +174,6 @@ function Numbers({ r, v, name, gpu, loaded, slow }: { r: FitReport; v: Verdict; 
   );
 }
 
-/** What holds the GPU right now, folded under Details in Settings: information, not the verdict. */
 function Breakdown({ model, name, numCtx, gpuRaw, report, loaded }: { model: string; name: string; numCtx: number; gpuRaw: GpuStatus | "na" | undefined; report: FitReport; loaded: boolean }) {
   const gpu = gpuRaw === NA ? undefined : gpuRaw;
   const v = verdictOf(report);
@@ -204,7 +193,6 @@ function Breakdown({ model, name, numCtx, gpuRaw, report, loaded }: { model: str
   );
 }
 
-/** The model's status, in the same words and the same dot as its row in Models, at the size it runs at. */
 function FitLine({ r, size }: { r: FitReport; size: number }) {
   const v = verdictOf(r);
   const at = `at ${k(size)}`;
@@ -222,7 +210,6 @@ function FitLine({ r, size }: { r: FitReport; size: number }) {
   );
 }
 
-/** What the body reads about a model: the size it runs at (the chat's, capped by the model) and the GPU. */
 function useFitModel(model: string) {
   const numCtx = useStore((s) => s.numCtx);
   const gpuRaw = useStore((s) => s.gpu);
@@ -234,22 +221,13 @@ function useFitModel(model: string) {
   return { ctx, gpuRaw, gpu, name: describeModel(model, catalog).name, loaded: load?.state === "ready" && load.numCtx === ctx };
 }
 
-/**
- * The model's status in one row, the one place the fit is said here, and the GB numbers one step
- * away under Details. Context is set in the model picker only, so the row names the
- * size the chat runs at.
- */
 function SettingsBody({ model, title, head, action }: { model: string; title: string; head: string; action: ReactNode }) {
   const { ctx, gpuRaw, gpu, name, loaded } = useFitModel(model);
   const table = useStore((s) => s.fitTable);
   const cpu = noGpu(gpu);
   const gpuNotice = gpu?.vendor === "unreadable" ? gpu.detail ?? GPU_UNREADABLE_TEXT : gpu?.vendor === "none" ? gpu.detail ?? NO_GPU_TEXT : undefined;
   const memory = cpu ? "memory" : "GPU memory";
-  // the table's row at the size this model runs at; it says estimate until the model has really run there.
-  // Details needs the GPU reading too, so the row waits for it rather than growing when it lands.
-  // Judged against the card's own memory (cardFit), whatever other programs hold right now.
   const fit = gpuRaw === undefined ? undefined : cardFit(fitFor(table, model, ctx));
-  // after a Measure, the measured speed rides beside the word slower
   const tps = useStore((s) => tpsText(measureOf(s, model)?.tokensPerSecond));
   const slow = slowReason(fit?.slowNow, tps);
   return (
@@ -259,7 +237,6 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
         {fit === undefined ? gpu?.vendor === "unreadable" ? null : table && gpuRaw !== undefined ? <span className="fp-n">{`No ${memory} reading for ${name}.`}</span> : <span className="fp-n" aria-busy="true"><FitSkel w="120px" /></span> : <FitLine r={fit} size={ctx} />}
         {action}
       </Row>
-      {/* the card holds it, right now it is slower: the short form under the status, the sentence under Details */}
       {cpu ? null : <SlowLine fit={fit} tps={tps} tip={false} testId="models.fit-panel.slow-line" />}
       {fit === undefined ? null : (
         <details className="upd-more fp-more">
@@ -275,7 +252,6 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
   );
 }
 
-/** GPU memory, the first group of Settings › Advanced, live from the store. */
 export function GpuMemory() {
   const ready = useStore(chatReady);
   const chat = useStore((s) => s.model);

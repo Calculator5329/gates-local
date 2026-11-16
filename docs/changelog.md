@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-16: the web fit folder holds to the six comment kinds
+
+- The memory panel and fit table pass the comment rule: 32 offenders
+  went, and the folder's comment lines fell from 60 to 4, all reasons.
+  Rules a named test already held went with the comment; one in five
+  was broken in the source and watched fail.
+- Two rules no test held now have one: Settings' memory bar draws the
+  chat model only while it is loaded, and a fit table with no rows or
+  an unread GPU still reads as checking.
+
 ## 2026-11-16: the server's update folder holds to the six comment kinds
 
 - The update folder passes the comment rule: 121 offenders went, and

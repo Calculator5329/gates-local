@@ -26,6 +26,13 @@ it("a row is fresh in the table, checking before the first table, and none when 
   expect(phaseOf(undefined, rowOf({ ...s, fitTable: undefined }, "a:1"))).toBe("checking");
 });
 
+it("a table built before the runtime gave rows, or on a GPU reading that failed, is not an answer: rows stay checking", () => {
+  const empty = table();
+  const unread = { ...table(row("a:1", 16384, "fits")), memory: { kind: "unreadable" } } as unknown as FitTable;
+  expect(phaseOf(empty, rowOf({ fitTable: empty, models: [], numCtx: 16384 }, "a:1"))).toBe("checking");
+  expect(phaseOf(unread, undefined)).toBe("checking");
+});
+
 it("the picker's card line names every card together, and one card as before", () => {
   const GIB = 1024 ** 3;
   const NBSP = String.fromCharCode(160);

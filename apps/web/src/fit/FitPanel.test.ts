@@ -64,6 +64,23 @@ it("waits for the GPU reading before showing a row, so Details never grows when 
   expect(html).not.toContain("couldn't read the GPU");
 });
 
+/** The memory bar and its legend for "chat" on a 16 GB card beside Whisper, `loaded` or not. */
+const bar = (loaded: boolean): string => {
+  store.state = {
+    model: "chat", numCtx: 16384, fitPanel: { model: null }, settings: { defaultNumCtx: 16384 },
+    gpu: { vendor: "nvidia", name: "RTX", totalBytes: 16e9, freeBytes: 12e9, occupants: [{ kind: "whisper", label: "whisper", bytes: 2e9, protected: false }], systemMemoryAvailableBytes: 16e9, measuredAt: 1 },
+    models: [], catalog: [], loads: loaded ? { chat: { state: "ready", numCtx: 16384 } } : {}, messages: {}, firstToken: {}, unavailable: {},
+    fitTable: { reading: { boot: "b", seq: 1, measuredAt: 1 }, memory: { kind: "gpu", freeBytes: 12e9, usableBytes: 11e9 }, rows: [{ model: "chat", numCtx: 16384, freeVramBytes: 16e9, needVramBytes: 5e9, spillRamBytes: 0, verdict: "fits", source: "estimate", stops: [] }] },
+  };
+  return renderToStaticMarkup(createElement(GpuMemory)).split('class="bar"')[1] ?? "";
+};
+
+it("the bar draws the model only while it is loaded, never an estimate of where it would go", () => {
+  expect(bar(true)).toContain("sw-chat");
+  expect(bar(false)).not.toContain("sw-chat");
+  expect(bar(false)).not.toContain("<small>loaded</small>");
+});
+
 it("keeps the existing no-GPU wording when nvidia-smi is absent", async () => {
   const gpu = await readGpuStatus({ platform: "win32", freemem: () => 16e9, runNvidiaSmi: async () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); } });
   expect(panel(gpu, true).split("<details")[0]).toContain(NO_GPU_TEXT);

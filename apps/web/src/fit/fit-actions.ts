@@ -2,7 +2,7 @@ import { openSettings } from "../lib/session/index.ts";
 import { getState, setState } from "../lib/store/store.ts";
 import { closeTip } from "../lib/ui/ui.tsx";
 
-/** The composer can open memory controls without loading the panel's UI. */
+// why: its own file, so the composer opens Settings without loading the panel
 export function openFit(model?: string): void {
   const s = getState();
   closeTip();
