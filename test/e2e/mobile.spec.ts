@@ -149,6 +149,40 @@ test("a message sends from the phone composer and its reply streams", async ({ p
   expect((form?.y ?? 0) + (form?.height ?? 0)).toBeGreaterThan(915 - 40);
 });
 
+const secs = (p: Page) => p.locator(".turn.a").last().locator(".stop-mark .s");
+
+// Guards one record per reply: Stop on the phone is what the computer shows, to the second.
+test("Stop on the phone with a message queued: the computer shows the reply stopped at the same seconds and the message on hold", async ({ page, open, browser }) => {
+  test.setTimeout(60_000);
+  await open();
+  await waitReady(page);
+  await stack.scenario("slow-drip", { holdAfterTokens: 46 });
+  const send = page.getByTestId("chat.composer.send");
+  await page.locator("#ta").fill("How do I check disk space before a download?");
+  await send.tap();
+  await expect(page.locator(".turn.a .md ul li")).toHaveCount(3, { timeout: 15_000 });
+  await page.locator("#ta").fill("Queued on the phone");
+  await send.tap();
+  await expect(page.locator(".qt-r")).toHaveCount(1);
+
+  const computer = await browser.newContext({ viewport: { width: 1280, height: 800 }, timezoneId: "America/Chicago", locale: "en-US" });
+  const desk = await computer.newPage();
+  await desk.goto(page.url());
+  await waitReady(desk);
+  await expect(desk.locator(".qt-r")).toHaveText("Queued on the phone");
+  await expect(desk.locator(".turn.a").last().locator(".md")).not.toBeEmpty();
+
+  await page.getByRole("button", { name: "Stop", exact: true }).tap();
+  await expect(secs(page)).toHaveText(/^\d+ s$/, { timeout: 10_000 });
+  await expect(desk.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0, { timeout: 10_000 });
+  await expect.poll(async () => (await secs(desk).textContent())?.trim()).toBe((await secs(page).textContent())?.trim());
+  await expect(desk.locator(".qt-r")).toContainText("On hold");
+  await expect(page.locator(".qt-r")).toContainText("On hold");
+  await desk.screenshot({ path: test.info().outputPath("computer-after-phone-stop.png") });
+  await page.screenshot({ path: test.info().outputPath("phone-after-stop.png") });
+  await computer.close();
+});
+
 // Guards the owner's ruling that the phone is for chat: a model is picked from the phone.
 test("the picker opens as a bottom sheet and picks a model", async ({ page, open }) => {
   await open();

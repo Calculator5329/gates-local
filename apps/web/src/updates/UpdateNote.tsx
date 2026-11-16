@@ -37,6 +37,22 @@ export function UpdateNoteView({ result, onDismiss }: { result: UpdateResult; on
 
 export function UpdateNote() {
   const status = useStore((s) => s.update);
+  const outdated = useStore((s) => s.outdated === true);
+  if (outdated) {
+    return (
+      <div className="banner" role="alert">
+        <Icon id="refresh" />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="bt">Gates Local changed since this page opened</div>
+          <div className="ba">
+            <button type="button" className="btn primary" data-testid="ui.update-note.reload" onClick={() => location.reload()}>
+              Reload
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (status !== undefined && status !== NA && status.installing === true) return <div className="banner" role="status">Gates Local is preparing an update. New replies, image jobs, model downloads and imports are paused until it opens again.</div>;
   const result = status === undefined || status === NA ? null : status.result;
   return result === null ? null : <UpdateNoteView result={result} onDismiss={() => void dismissUpdateResult()} />;

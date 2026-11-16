@@ -7,6 +7,7 @@ import {
   channelNames,
   createClient,
   methodNames,
+  PROTOCOL_VERSION,
 } from "@gates-local/contracts";
 import { methodSamples, pushSamples } from "@gates-local/contracts/testing";
 import { afterEach, describe, expect, it } from "vitest";
@@ -140,10 +141,11 @@ describe("round trip over a real socket", () => {
     const result = await desktop.client.call("sync.negotiate", { ordered: ["settings", "threads"] });
     expect(result.ordered).toEqual([]);
     expect(result.epoch).toMatch(/^[\da-f-]{36}$/);
-    await expect(other.client.negotiate()).resolves.toEqual({ mode: "legacy", epoch: result.epoch });
+    expect(result.protocol).toBe(PROTOCOL_VERSION);
+    await expect(other.client.negotiate()).resolves.toEqual({ mode: "legacy", epoch: result.epoch, protocol: PROTOCOL_VERSION });
     const nextListener = await start({});
     const next = await client(nextListener);
-    await expect(next.client.negotiate()).resolves.toEqual({ mode: "legacy", epoch: result.epoch });
+    await expect(next.client.negotiate()).resolves.toEqual({ mode: "legacy", epoch: result.epoch, protocol: PROTOCOL_VERSION });
   });
 
   it.each(channelNames)("push %s reaches every client", async (channel: Channel) => {

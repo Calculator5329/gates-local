@@ -62,7 +62,7 @@ import {
   UpdateCommitRequest,
 } from "./shapes.ts";
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /** Codes the protocol itself produces. Handlers may add their own codes. */
 export type WireErrorCode =

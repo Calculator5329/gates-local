@@ -31,7 +31,8 @@ export const SyncMetadata = S.Struct({
 export type SyncMetadata = typeof SyncMetadata.Type;
 export type SyncChange = SyncMetadata["changes"][number];
 
-export const SyncNegotiation = S.Struct({ epoch: Epoch, ordered: S.Array(SyncDomain) });
+// why: a page that opened against another PROTOCOL_VERSION asks for a reload
+export const SyncNegotiation = S.Struct({ epoch: Epoch, ordered: S.Array(SyncDomain), protocol: S.optional(S.Int) });
 export type SyncNegotiation = typeof SyncNegotiation.Type;
 
 /**

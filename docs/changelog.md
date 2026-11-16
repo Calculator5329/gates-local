@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-16: a page from another version asks for a reload
+
+- The contract goes to version 2. The server says its version when a
+  window connects, and a page that opened against another version
+  shows "Gates Local changed since this page opened" with a Reload
+  button. Pages from before this change cannot read the number, so a
+  v0.2.4 page left open still learns only from its refused sends.
+
 ## 2026-11-16: the chat.event push is gone
 
 - The window reads a reply only from `reply.changed` and

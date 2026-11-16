@@ -49,8 +49,8 @@ export interface CallOptions<M extends MethodName = MethodName> {
 }
 
 export type ClientSync =
-  | { readonly mode: "legacy"; readonly epoch?: string }
-  | { readonly mode: "ordered"; readonly epoch: string; readonly domains: readonly SyncDomain[] };
+  | { readonly mode: "legacy"; readonly epoch?: string; readonly protocol?: number }
+  | { readonly mode: "ordered"; readonly epoch: string; readonly domains: readonly SyncDomain[]; readonly protocol?: number };
 
 export interface Client {
   call<M extends MethodName>(method: M, params: Params<M>, options?: CallOptions<M>): Promise<ResultOf<M>>;
@@ -161,7 +161,8 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
         call.reject(new WireError("bad-result", "server enabled an unrequested ordered domain"));
         client.close(); return;
       }
-      sync = negotiated.ordered.length === 0 ? { mode: "legacy", epoch: negotiated.epoch } : { mode: "ordered", epoch: negotiated.epoch, domains: negotiated.ordered };
+      const { epoch, protocol } = negotiated;
+      sync = { ...(negotiated.ordered.length === 0 ? { mode: "legacy", epoch } : { mode: "ordered", epoch, domains: negotiated.ordered }), ...(protocol === undefined ? {} : { protocol }) };
     }
     try {
       call.onResult?.(r.value as never, msg.sync);

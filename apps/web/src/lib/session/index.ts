@@ -12,6 +12,7 @@ import {
   type Payload,
   type SyncMetadata,
   type SyncRow,
+  PROTOCOL_VERSION,
   methodSync,
   pushSync,
 } from "@gates-local/contracts";
@@ -264,6 +265,7 @@ async function hydrateWith(
   // Install every receipt handler first. Ordered domains stay disabled until
   // their full migration lands; unsupported servers continue in legacy mode.
   const negotiated = await negotiate();
+  if (negotiated.protocol !== undefined && negotiated.protocol !== PROTOCOL_VERSION) setState({ outdated: true });
   settingsSession.ready();
   threadSession.connected(negotiated.mode === "ordered" && negotiated.domains.includes("threads") ? negotiated.epoch : undefined);
   const orderedSettings = negotiated.mode === "ordered" && negotiated.domains.includes("settings");

@@ -255,6 +255,8 @@ export interface State {
   readonly imageRuns: Readonly<Record<string, number>>;
   /** Settings › Updates: the version, the last check and the last update's result. Read at hydrate; no git runs for it. */
   readonly update: Maybe<UpdateStatus>;
+  // why: the server speaks another contract version than this page; only a reload mends it
+  readonly outdated?: true;
   /** A "Check for updates" click waiting for its answer. */
   readonly updateChecking: boolean;
   readonly updateInstalling: boolean;

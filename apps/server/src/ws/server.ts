@@ -24,6 +24,7 @@ import {
   type SyncMetadata,
   WireError,
   ORDERED_DOMAINS,
+  PROTOCOL_VERSION,
   SENT_IN_ORDER,
   scopesOf,
   phoneMay,
@@ -282,7 +283,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     }
     if (method === "sync.negotiate") {
       const domains = (options.ordered ?? []).filter(domain => ORDERED_DOMAINS.includes(domain) && decodedParams.ordered.includes(domain));
-      const frame = encodeResult(id, method, { epoch, ordered: domains });
+      const frame = encodeResult(id, method, { epoch, ordered: domains, protocol: PROTOCOL_VERSION });
       if (!frame.ok) throw frame.error;
       send(ws, frame.value);
       ordered.set(ws, domains); // Success is enqueued before any ordered push.
