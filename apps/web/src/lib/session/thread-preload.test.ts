@@ -43,10 +43,11 @@ it("TC-01: a completed hover read installs fresh history over a stale visited th
   expect(store.getState().messages["a"]?.[0]?.content).toBe("old truth");
 
   browser.server.answer("threads.get", ({ threadId }) => snapshot(threadId, threadId === "a" ? "new truth" : "b"));
+  browser.server.chatWritten("a");
   vi.useRealTimers();
-  const sockets = browser.server.sockets.length;
+  const lists = browser.server.calls("threads.list").length;
   browser.server.socket.close();
-  await until(() => browser.server.sockets.length > sockets && gets().filter(params => params.threadId === "b").length === 2);
+  await until(() => browser.server.calls("threads.list").length > lists && store.getState().conn.kind === "open");
   await tick();
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 
@@ -149,6 +150,7 @@ it("retains at most two speculative histories and rejects an oversized history",
 
 it("thread changes invalidate completed and in-flight speculative history", async () => {
   session.preloadThread("a"); await dwell();
+  browser.server.chatWritten("a");
   browser.server.push("threads.changed", { threadId: "a", thread: snapshot("a").thread }); await vi.advanceTimersByTimeAsync(0);
   browser.server.answer("threads.get", ({ threadId }) => snapshot(threadId, "new truth"));
   session.openThread("a"); await vi.advanceTimersByTimeAsync(0);
@@ -157,6 +159,7 @@ it("thread changes invalidate completed and in-flight speculative history", asyn
   session.preloadThread("b"); await dwell();
   const held = await holding;
   session.openThread("b");
+  browser.server.chatWritten("b");
   browser.server.push("threads.changed", { threadId: "b", thread: snapshot("b").thread }); await vi.advanceTimersByTimeAsync(0);
   held.respond(snapshot("b", "old truth")); await vi.advanceTimersByTimeAsync(0);
   expect(store.getState().messages["b"]?.[0]?.content).toBe("new truth");

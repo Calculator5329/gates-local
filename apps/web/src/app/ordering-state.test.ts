@@ -43,7 +43,7 @@ class World {
     this.replies.delete(name); reply(); await drain();
   }
   async push<C extends Channel>(socket: FakeSocket, channel: C, payload: Payload<C>): Promise<void> {
-    const numbered = this.wire.numbering?.stamp(channel);
+    const numbered = this.wire.numbering?.stamp(channel, payload);
     socket.frame({ type: "push", channel, payload, ...(numbered ? { sync: numbered } : channel === "settings.changed" && this.wire.server.orderedSettings ? { sync: this.wire.server.settingsSync() } : {}) }); await drain();
   }
 }

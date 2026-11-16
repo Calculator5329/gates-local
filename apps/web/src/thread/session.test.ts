@@ -155,9 +155,11 @@ it.each([
   const pending = b.server.hold("settings.update");
   const saving = session.updateSettings({ whisperUrl: null });
   const save = await pending;
+  // why: the save's own push carries the save's number, so one sent after another window's change is older
+  const saved = b.server.at("settings");
   let latest = -1;
   for (const step of steps) {
-    if (step === "push") b.server.push("settings.changed", { ...disconnected, voiceChange: save.params.voiceChange });
+    if (step === "push") b.server.push("settings.changed", { ...disconnected, voiceChange: save.params.voiceChange }, saved);
     if (step === "response") { save.respond(disconnected); await saving; }
     if (step === "connect") {
       store.setState((s) => ({ voiceConnectionVersion: s.voiceConnectionVersion + 1 }));
@@ -458,12 +460,14 @@ describe("reconnect reconciles cached threads (W-04)", () => {
   it("reloads a background thread visited before the drop on its next visit", async () => {
     const saved: Record<string, Message[]> = { a: [userMsg("a1", "a")], b: [userMsg("b1", "b")] };
     b.server.answer("threads.get", ({ threadId }) => ({ thread: { ...methodSamples["threads.create"].result, id: threadId }, messages: saved[threadId] ?? [] }));
+    b.server.answer("threads.list", () => ["a", "b"].map((id) => ({ ...methodSamples["threads.create"].result, id })));
     await boot();
     session.openThread("a");
     await until(() => store.getState().messages["a"] !== undefined);
     session.openThread("b");
     await until(() => store.getState().messages["b"] !== undefined);
     saved["a"] = [userMsg("a1", "a"), asstMsg("a2", "a")];
+    b.server.chatWritten("a");
     await reconnect();
     session.openThread("a");
     await until(() => store.getState().messages["a"]?.length === 2, 1000, "thread a reloaded");
@@ -476,6 +480,9 @@ const snapshot = (messages: Message[]) => ({ thread: methodSamples["threads.crea
 async function reconnectHeld() {
   const held = b.server.hold("threads.get");
   const before = b.server.sockets.length;
+  // why: the reply went on while the window was away, so the open chat's number moved
+  const open = store.getState().threadId;
+  if (open !== null) b.server.chatWritten(open);
   store.setState({ imageStatus: undefined });
   b.server.socket.close();
   await until(() => b.server.sockets.length > before, 3000, "a new socket");

@@ -1,5 +1,5 @@
 // Runtime/model reads, local model choice, catalog and download actions.
-import { type BlockingTurn, type CallOptions, type MemoryState, type MethodName, type Params, type Payload, type ResultOf, type RuntimeStatus, type SyncMetadata, type SyncRow, methodSync, pushSync } from "@gates-local/contracts";
+import { type BlockingTurn, type CallOptions, type MemoryState, type MethodName, type ModelInfo, type Params, type Payload, type ResultOf, type RuntimeStatus, type SyncMetadata, type SyncRow, methodSync, pushSync } from "@gates-local/contracts";
 import { draftHolds } from "../lib/store/drafts.ts";
 import { type ModelDecision, choosable, modelChoice as pickChoice, modelNameKey } from "./pick.ts";
 import { describeModel, k } from "../lib/words/format.ts";
@@ -126,6 +126,10 @@ export function memoryChanged(memory: MemoryState): void {
 
 export const decided = (d: ModelDecision): Partial<State> => (d.kind === "keep" ? {} : { model: d.kind === "set" ? d.model : undefined });
 
+// why: the list and its choice in one update, so no render shows models with none chosen
+const withModels = (models: readonly ModelInfo[]) => (s: State): Partial<State> =>
+  ({ models, pulls: settlePulls(s.pulls, models), ...decided(modelChoice({ ...s, models })) });
+
 export function createModels({ applyServerEvent, call, probe, act, isNA, restoreSaved, blockingFor, newer }: ModelEffects) {
   /** A catalog read applies when its number is newer: one asked before a later one, or before a models.changed, describes the list before it. */
   async function refreshCatalog(): Promise<void> {
@@ -140,7 +144,7 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
     if (patch.runtime !== undefined) applyServerEvent({ runtime: patch.runtime });
     const { models } = patch;
     if (models === undefined) return;
-    applyServerEvent((s) => ({ models, pulls: settlePulls(s.pulls, models) }));
+    applyServerEvent(withModels(models));
     restoreSaved();
     chooseModel();
     if (getState().catalog === undefined) void refreshCatalog();
@@ -269,7 +273,7 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
       // Ollama answered), and the store keeps its list. A list with models in it came from Ollama,
       // even when it lands before this window has heard the runtime's status.
       if (models.length === 0 && !answered(getState().runtime)) return;
-      applyServerEvent((s) => ({ models, pulls: settlePulls(s.pulls, models) }));
+      applyServerEvent(withModels(models));
       restoreSaved();
       chooseModel();
       // The catalog's Installed marks follow the list: a removal or a runtime

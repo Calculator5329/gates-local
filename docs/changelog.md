@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-16: window tests run against a numbering server, and two fixes it found
+
+- The window's test server now numbers every answer and push the way
+  the real server does, so the window's tests run ordered. Before,
+  nearly all of them ran in the old unnumbered mode the product no
+  longer uses.
+- A "ready" push that came while the model list was still being read
+  could show the models with none chosen for a moment. A new list and
+  the model it picks now land in one update.
+- When the open chat's read came back older than a change already
+  heard about, the window dropped it and never read the chat again,
+  so the chat could stay empty or behind. It now reads again.
+
 ## 2026-11-16: a reply's own rows no longer read the chat again
 
 - The saved question and reply come with the reply's record, and now

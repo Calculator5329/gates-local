@@ -13,7 +13,7 @@ export interface Numbering {
   /** Push `payload` on `channel` as a new value of its thing: the next number, when ordered. */
   push<C extends Channel>(channel: C, payload: Payload<C>): void;
   /** The next number a push on `channel` carries, taken now, for a test that frames the push to one socket itself; undefined when not ordered. */
-  stamp<C extends Channel>(channel: C): SyncMetadata | undefined;
+  stamp<C extends Channel>(channel: C, payload?: Payload<C>): SyncMetadata | undefined;
   /** The domains the last negotiation ordered. */
   ordered(): readonly SyncDomain[];
 }
@@ -27,10 +27,9 @@ export function numberServer(server: FakeServer, options: { serves: readonly Syn
   let ordered: readonly SyncDomain[] = [];
   let epoch = "";
   const revs = new Map<string, number>();
-  const sync = (row: SyncRow, rev: number): SyncMetadata => ({ epoch, changes: [{ scope: row.scope, kind: "snapshot", rev }] });
-  /** A kind the real socket numbers itself (SENT_IN_ORDER): every read takes the next numbers as it is handled. */
-  const take = (row: SyncRow): SyncMetadata => ({ epoch, changes: scopesOf(row).map(scope => {
-    const rev = (revs.get(scope) ?? 0) + 1;
+  /** Every scope a frame of `row` carries: the next number of each when `next`, else the one it has; a chat's own number stays. */
+  const numbers = (row: SyncRow, about: unknown, next: boolean): SyncMetadata => ({ epoch, changes: scopesOf(row, about).map(scope => {
+    const rev = (revs.get(scope) ?? 0) + (next && !scope.startsWith("thread:") ? 1 : 0);
     revs.set(scope, rev);
     return { scope, kind: "snapshot" as const, rev };
   }) });
@@ -53,7 +52,7 @@ export function numberServer(server: FakeServer, options: { serves: readonly Syn
     const row = methodSync(request.method);
     if (!numbered(row)) return base(socket, request);
     if (SENT_IN_ORDER.includes(row.domain)) {
-      const taken = take(row);
+      const taken = numbers(row, request.params, true);
       const stamped = Object.create(socket) as FakeSocket;
       stamped.frame = (value: unknown) => {
         const frame = value as { type?: string; ok?: boolean };
@@ -63,28 +62,24 @@ export function numberServer(server: FakeServer, options: { serves: readonly Syn
       return;
     }
     const commits = options.commits?.includes(request.method) === true;
-    const read = revs.get(row.scope) ?? 0;
+    const read = commits ? undefined : numbers(row, request.params, false);
     // The answer goes out whenever the test lets it (a hold), with the number fixed now for a read.
     const stamping = Object.create(socket) as FakeSocket;
     stamping.frame = (value: unknown) => {
       const frame = value as { type?: string; ok?: boolean };
       if (frame.type !== "response" || frame.ok !== true) return socket.frame(value);
-      const rev = commits ? (revs.get(row.scope) ?? 0) + 1 : read;
-      if (commits) revs.set(row.scope, rev);
-      socket.frame({ ...frame, sync: sync(row, rev) });
+      socket.frame({ ...frame, sync: read ?? numbers(row, request.params, true) });
     };
     base(stamping, request);
   };
-  const stamp = (channel: Channel): SyncMetadata | undefined => {
+  const stamp = (channel: Channel, payload?: unknown): SyncMetadata | undefined => {
     const row = pushSync(channel);
     if (!numbered(row)) return undefined;
-    const rev = (revs.get(row.scope) ?? 0) + 1;
-    revs.set(row.scope, rev);
-    return sync(row, rev);
+    return numbers(row, payload, true);
   };
   return {
     push(channel, payload) {
-      const stamped = stamp(channel);
+      const stamped = stamp(channel, payload);
       // why: a contract channel is a channel the fake server takes
       if (stamped === undefined) server.push(channel, payload as never);
       else server.push(channel, payload as never, stamped);

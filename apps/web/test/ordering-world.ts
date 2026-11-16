@@ -152,7 +152,7 @@ export class OrderingServer extends FakeServer {
     const delivery = this.deliveries.get(key);
     if (!delivery) { if (optional) return; throw new Error(`No pending response: ${key}`); }
     this.deliveries.delete(key);
-    delivery.socket.frame({ type: "response", id: delivery.request.id, ok: true, result: delivery.result, ...(delivery.sync ? { sync: delivery.sync } : {}) });
+    delivery.socket.frame({ type: "response", id: delivery.request.id, ok: true, result: delivery.result, sync: delivery.sync });
   }
 
   settingsPush(key: string, target: FakeSocket, tagged = true, optional = false): void {

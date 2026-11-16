@@ -4,7 +4,7 @@
 // the few browser globals session.ts touches (location, history, document,
 // localStorage, requestAnimationFrame). Each test imports session.ts fresh.
 import { vi } from "vitest";
-import type { Channel, Message, MethodName, Params, Payload, ReplyAnswer, ReplyListed, ResultOf, SyncMetadata, ToolStep } from "@gates-local/contracts";
+import { type Channel, type Message, type MethodName, type Params, type Payload, type ReplyAnswer, type ReplyListed, type ResultOf, type ScopeName, type SyncDomain, type SyncMetadata, type SyncRow, type ToolStep, ORDERED_DOMAINS, PROTOCOL_VERSION, chatScope, methodSync, pushSync, scopesOf } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { createReplies } from "@gates-local/server/chat/replies.ts";
 import { isLive, type End } from "@gates-local/server/chat/reply.ts";
@@ -91,11 +91,15 @@ export class FakeSocket {
     this.server.left(this);
   }
   frame(value: unknown): void {
-    if (this.readyState === 1) this.emit("message", { data: JSON.stringify(value) });
+    if (this.readyState === 1) this.emit("message", { data: JSON.stringify(this.server.stamped(this, value)) });
   }
 }
 
 type Answer = (params: never) => unknown;
+
+/** The chats a threads.list answer names: it carries each one's own number beside the list's. */
+const listedIn = (method: MethodName, result: unknown): readonly string[] =>
+  method === "threads.list" && Array.isArray(result) ? result.map((t: { id: string }) => t.id) : [];
 
 /**
  * A turn's start as the server pushes it: the test's answer names the turn and the saved question.
@@ -118,7 +122,8 @@ export class FakeServer {
   /** False refuses new connections (they close at once). */
   accepting = true;
   // no turn is in the way of a send unless a test says so
-  private readonly answers = new Map<FakeMethod, Answer>([["turns.blocking", () => []], ["turn.start", () => STARTED]]);
+  private readonly answers = new Map<FakeMethod, Answer>([["turns.blocking", () => []], ["turn.start", () => STARTED],
+    ["sync.negotiate", (p: Params<"sync.negotiate">) => ({ epoch: this.epoch, ordered: ORDERED_DOMAINS.filter((d) => p.ordered.includes(d)), protocol: PROTOCOL_VERSION })]]);
   private readonly holds = new Map<FakeMethod, Array<(h: Held<never>) => void>>();
   readonly log: Logged[] = [];
 
@@ -156,10 +161,70 @@ export class FakeServer {
     return this.log.filter((r) => r.method === method);
   }
 
+  /** The epoch every negotiation answers; a test sets a new one to stand for a restarted server. */
+  epoch = "sample-process";
+  private readonly revs = new Map<string, number>();
+  /** What each socket's negotiation answered, whoever answered it. */
+  private readonly agreed = new WeakMap<FakeSocket, { readonly epoch: string; readonly ordered: readonly SyncDomain[] }>();
+
+  /**
+   * The numbers a frame of `row` carries, taken now: the next for each whole thing, so an answer
+   * read before a later push is older than it, as on the real server. A chat's own number (its
+   * messages) moves only when a test says so (`chatWritten`), never with its row. The chat list
+   * also carries the number of each chat it lists (`listed`).
+   */
+  private numbers(socket: FakeSocket, row: SyncRow | undefined, about: unknown, listed: readonly string[] = []): SyncMetadata | undefined {
+    const agreed = this.agreed.get(socket);
+    if (row === undefined || agreed === undefined || !agreed.ordered.includes(row.domain)) return undefined;
+    return { epoch: agreed.epoch, changes: [...scopesOf(row, about).map((scope) => {
+      const rev = (this.revs.get(scope) ?? 0) + (scope.startsWith("thread:") ? 0 : 1);
+      this.revs.set(scope, rev);
+      return { scope, kind: "snapshot" as const, rev };
+    }), ...this.chats(listed)] };
+  }
+
+  private chats(ids: readonly string[]): SyncMetadata["changes"] {
+    return ids.map((id) => ({ scope: chatScope(id), kind: "snapshot" as const, rev: this.revs.get(chatScope(id)) ?? 0 }));
+  }
+
+  // why: a test that frames an answer or a push itself gets the number the server would give it as it goes
+  stamped(socket: FakeSocket, value: unknown): unknown {
+    const frame = value as { type?: string; ok?: boolean; id?: string; channel?: Channel; payload?: unknown; sync?: SyncMetadata };
+    if ("sync" in frame) return value;
+    if (frame.type === "push" && frame.channel !== undefined) {
+      const sync = this.numbers(socket, pushSync(frame.channel), frame.payload);
+      return sync === undefined ? value : { ...frame, sync };
+    }
+    if (frame.type !== "response" || frame.ok !== true) return value;
+    const request = socket.sent.find((r) => r.id === frame.id);
+    if (request?.method === "sync.negotiate") {
+      const result = (frame as { result: { epoch: string; ordered: readonly SyncDomain[] } }).result;
+      this.agreed.set(socket, { epoch: result.epoch, ordered: result.ordered });
+      return value;
+    }
+    const sync = request === undefined ? undefined : this.numbers(socket, methodSync(request.method), request.params, listedIn(request.method, (frame as { result?: unknown }).result));
+    return sync === undefined ? value : { ...frame, sync };
+  }
+
+  /** The number a push of `scope` carries when it goes out with the write that has the number now. */
+  at(scope: ScopeName): SyncMetadata {
+    return { epoch: this.epoch, changes: [{ scope, kind: "snapshot", rev: this.revs.get(scope) ?? 0 }] };
+  }
+
+  /** Another window wrote to a chat's messages: its number moves, and the next row pushed for it says so. */
+  chatWritten(threadId: string): void {
+    const scope = chatScope(threadId);
+    this.revs.set(scope, (this.revs.get(scope) ?? 0) + 1);
+  }
+
   handle(socket: FakeSocket, req: Request): void {
     this.log.push(req);
     this.caller = this.sockets.indexOf(socket) + 1;
-    const answer = (result: unknown) => socket.frame({ type: "response", id: req.id, ok: true, result });
+    const sync = this.numbers(socket, methodSync(req.method), req.params);
+    const answer = (result: unknown) => {
+      const chats = this.chats(listedIn(req.method, result));
+      socket.frame({ type: "response", id: req.id, ok: true, result, ...(sync === undefined ? {} : { sync: { ...sync, changes: [...sync.changes, ...chats] } }) });
+    };
     const err = (code: string, message = code, blocking?: unknown) => {
       socket.frame({ type: "response", id: req.id, ok: false, error: { code, message, ...(blocking === undefined ? {} : { blocking }) } });
     };

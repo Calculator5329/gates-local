@@ -306,23 +306,19 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
       const limit = Math.max(PAGE_MESSAGES, getState().messages[threadId]?.length ?? 0);
       const { messages: snapshot, earlier = 0 } = await call("threads.get", { threadId, limit }, { onResult: (_, sync) => { at = numbers.of(sync, chatScope(threadId)) ?? at; } });
       if (older()) return;
+      const front = getState().messages[threadId]?.[0];
       // a change was named for the chat while this read was out: its answer is older than that, and
       // is read again instead of shown (a read ahead nobody opened yet is only dropped)
-      if (at < numbers.known(threadId)) {
-        outdated = preload === undefined || preload.used;
-        return;
-      }
+      if (at < numbers.known(threadId)) outdated = preload === undefined || preload.used;
       // an earlier page came in while this was asked: the reader holds messages in front of this
       // answer, so it is asked again for all of them (once: a front deleted meanwhile is not looped on)
-      const front = getState().messages[threadId]?.[0];
-      if (!again && (preload === undefined || preload.used) && earlier > 0 && front !== undefined && !snapshot.some((m) => m.id === front.id)) {
-        wider = true;
-        return;
+      else if (!again && (preload === undefined || preload.used) && earlier > 0 && front !== undefined && !snapshot.some((m) => m.id === front.id)) wider = true;
+      else {
+        landed.set(threadId, req.seq);
+        const messages = req.since.reduce(upsertMessage, snapshot);
+        if (preload !== undefined && !preload.used) keepPreview(threadId, messages, earlier, at);
+        else installHistory(threadId, messages, earlier, at);
       }
-      landed.set(threadId, req.seq);
-      const messages = req.since.reduce(upsertMessage, snapshot);
-      if (preload !== undefined && !preload.used) keepPreview(threadId, messages, earlier, at);
-      else installHistory(threadId, messages, earlier, at);
     } catch (e) {
       if (older()) return;
       if (preload !== undefined && !preload.used) return;

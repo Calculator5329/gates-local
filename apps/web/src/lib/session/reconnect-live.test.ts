@@ -62,7 +62,8 @@ function writtenUnheard() {
 }
 
 it("TE-03: a reply goes on through a dropped connection: the list's words so far replace the window's once, and survive the hydration history load", async () => {
-  const held = await dropConnection(writtenUnheard);
+  // why: a picture card was saved in the chat while the window was away, so the chat is read again
+  const held = await dropConnection(() => { writtenUnheard(); browser.server.chatWritten("t1"); });
   // the window does not end a reply on its own: the server's record says whether it still runs
   expect(openTurn()).toMatchObject({ text: "one " });
   expect(openTurn()?.end).toBeUndefined();
@@ -94,7 +95,6 @@ it("TE-03: a reply the server lists as still running takes the list's words in p
   // the server's list of records names the reply: nothing ended it
   const held = await dropConnection(writtenUnheard);
   held.batch.respond(methodSamples["models.list"].result);
-  (await held.thread).respond(history([question]));
   await tick(); browser.frame();
   expect(store.runningThreads(store.getState()).has("t1")).toBe(true);
   expect(openTurn()).toMatchObject({ turnId: browser.server.replyOf("turn-live"), text: "one two ", thinking: "local thoughts and server thoughts" });
@@ -123,7 +123,6 @@ it("TE-03: words after a Stop cannot revive a reply the server stopped", async (
   const held = await dropConnection();
   chat({ type: "delta", text: "two " });
   held.batch.respond(methodSamples["models.list"].result);
-  (await held.thread).respond(history([question]));
   await tick(); browser.frame();
   expect(openTurn()).toMatchObject({ turnId: browser.server.replyOf("turn-live"), text: "one ", end: { kind: "stopped" } });
   expect(store.streamingHere(store.getState())).toBe(false);
