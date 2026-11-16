@@ -1,7 +1,3 @@
-// First run (shell.md F32, F43, F44b, F54, F62): one screen before the first
-// chat. Found: a recommended installed model and Start chatting. No Ollama: a
-// calm status with Retry. No models: download the recommended one, with
-// progress and Cancel; the chat can open to draft while it downloads.
 import { type ReactNode, useEffect, useState } from "react";
 import type { CatalogEntry } from "@gates-local/contracts";
 import { suggestedOf } from "../picker/picker-models.ts";
@@ -34,20 +30,13 @@ function Cta({ label, onGo, link, onLink }: { label: string; onGo: () => void; l
   );
 }
 
-/** Leave first run for a new thread with the cursor in the message box. */
 function startChat(): void {
   finishFirstRun("chat");
   focusComposer();
 }
 
-/** The card's verdict slot before the table has this model: the table is on its way, or it has no reading for it. */
 const pendingWord = (phase: RowPhase): string => (phase === "checking" ? "Checking…" : "Couldn't check");
 
-/**
- * The recommended model card: name and verdict, a download's size when it is
- * one, and a Details disclosure. The model's purpose phrase is not here: the
- * screen is about whether it runs, and the picker and Settings carry it.
- */
 function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; entry?: CatalogEntry | undefined; children?: ReactNode }) {
   const [open, setOpen] = useState(false);
   const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
@@ -125,20 +114,13 @@ function NoModels() {
   const p = useStore((s) => (active === undefined ? undefined : s.pulls[active]));
   const cpu = useStore((s) => noGpu(s.gpu));
   const fresh = useStore(s => entry === undefined ? undefined : rowOf(s, entry.name));
-  // Ollama is fine here, so the status line says nothing (it speaks only when Ollama is missing,
-  // stopped, failed or installing). The space keeps the line's height, so the title sits where it
-  // does on every other first-run screen.
   const st = "\u00A0";
-  // An Ollama that does not report capabilities: a download would not help, so say what would.
   const tooOld = useStore((s) => chatBlockedReason(s.models, undefined));
-  // a sentence only for what the title and the card's verdict do not say, in the server's words: the
-  // number a refusal turns on, or system memory where the card's word would name a GPU
   const sub = tooOld ?? (fresh === undefined ? undefined : foundWords(verdictOf(fresh), cpu).sub);
   if (active !== undefined && p !== undefined) {
     return (
       <Shell st={st} title="Downloading your first model" sub={sub}>
         <RecCard tag={active} have={false} entry={entry?.name === active ? entry : undefined}>
-          {/* the Download tab's own button: the percent fills it, the × beside it cancels */}
           <div className="fr-dl">
             <span className="fr-dl-l">{etaText(p, { speed: false })}</span>
             <DlButton
@@ -158,7 +140,6 @@ function NoModels() {
     );
   }
   if (tooOld !== undefined) {
-    // with or without a catalog entry: a downloaded model would be as undescribed as the installed ones
     return (
       <Shell st={st} title="Update Ollama to chat" sub={tooOld}>
         <Cta label="Retry" onGo={() => void recheckRuntime()} />
@@ -166,7 +147,6 @@ function NoModels() {
     );
   }
   if (entry === undefined || pullNA) {
-    // no catalog or no downloads in this build: say how to get a model without the app
     return (
       <Shell st={st} title={pullNA ? "No model installed yet" : "Download your first model"}>
         <p className="fr-note na">
@@ -204,16 +184,8 @@ function NoModels() {
   );
 }
 
-/** The server's words as one sentence: "needs 2.0 GB more" reads "Needs 2.0 GB more."; nothing when it sent none. */
 const sentence = (words: string): { sub?: string } => (words === "" ? {} : { sub: `${words.charAt(0).toUpperCase()}${words.slice(1)}.` });
 
-/**
- * The model's verdict in the server's words (FitReport.words, printed as sent, as the model row
- * prints them; the client makes no fit sentence of its own). A refusal says nothing about the other
- * installed models. The title and the card's verdict say whether it runs; a sentence is added only
- * for the number a refusal turns on, or, on a computer with no supported GPU where the card's word
- * would name one, the server's label.
- */
 export function foundWords(v: Pick<Verdict, "k" | "label" | "detail"> | undefined, cpu = false): { title: string; sub?: string } {
   if (v?.k === "no") return { title: "Choose another model", ...sentence(v.detail) };
   if (cpu && v?.k === "gpu") return { title: "Ready to chat", ...sentence(v.label) };
@@ -223,13 +195,10 @@ export function foundWords(v: Pick<Verdict, "k" | "label" | "detail"> | undefine
 function Found() {
   const count = useStore((s) => chatModels(s.models ?? []).length);
   const picked = useStore((s) => pickedModel(s.models));
-  // The composer starts on the same model (session.ts reads the same pick).
   const tag = useStore((s) => s.model ?? picked?.name);
   const cpu = useStore((s) => noGpu(s.gpu));
   const fresh = useStore(s => rowOf(s, tag));
   const phase = useStore(s => phaseOf(s.fitTable, rowOf(s, tag)));
-  // no row for it: the title says what the card's slot says (still checking, or the table has no
-  // reading for it); no sentence, never "Ready"
   const words = fresh !== undefined ? foundWords(verdictOf(fresh), cpu) : { title: phase === "checking" ? "Checking memory" : "Couldn't check memory" };
   const dot = fresh === undefined ? (phase === "checking" ? "run" : "warn") : fresh.verdict === "refuse" ? "err" : "ok";
   return (
@@ -264,8 +233,6 @@ function NoOllama() {
   const own = note !== "";
   const around = own ? `${note} ` : "";
   const port = portOf(baseUrl);
-  // the heading says what is wrong and the sentence the cause or the step; the status line is the
-  // dot and "Ollama", except a busy port's, which is its cause (so it has no sentence)
   const [title, st, sub]: [string, string, string | undefined] =
     rt === "wrong"
       ? ["Ollama isn't answering", `Something else holds port ${port}`, undefined]
@@ -291,20 +258,16 @@ function NoOllama() {
   );
 }
 
-/** Nothing to say yet but that the app is connecting; the dot holds the status line. */
 function Connecting() {
   return <Shell st={<span className="dot run" />} title={CONNECTING} />;
 }
 
-// the step words live with the banner, which says them too (runtime/words.tsx)
 export { installStep, installWords };
 
 function Waiting({ installing }: { installing: boolean }) {
-  // the runtime has not answered once: no Ollama words yet
   const none = useStore(unread);
   const install = useStore((s) => s.runtime?.install);
   const { stalled, words, retry } = useInstallStall(installing ? install : undefined);
-  // the app's own copy starting (after its download) is not a search
   const own = useStore((s) => s.runtime?.state === "starting" && s.runtime.owner === "app");
   if (none) return <Connecting />;
   return (
@@ -320,7 +283,6 @@ function Waiting({ installing }: { installing: boolean }) {
     >
       {installing ? (
         <>
-          {/* a stalled download's one act is Retry; chatting early stays beside it */}
           {stalled ? (
             <Cta label="Retry" onGo={retry} link="Start chatting" onLink={startChat} />
           ) : (
@@ -333,23 +295,18 @@ function Waiting({ installing }: { installing: boolean }) {
   );
 }
 
-/** How long first run waits for its card's words and memory check before it shows with the check still running; the same bound as Settings' reads. */
 const WHOLE_WAIT_MS = 1000;
 
-/** The model the screen will be about: the installed pick, else the one it offers to download. */
 function screenModel(s: State): string | undefined {
   if (s.models === undefined) return undefined;
   return s.models.some(canChat) ? (s.model ?? pickedModel(s.models)?.name) : recommendedEntry(s)?.name;
 }
 
-/** The catalog is read (the card's model name and download size) and the fit table has answered for the model. */
 function inHand(s: State): boolean {
-  // an Ollama to update, or no way to download here: the words need no catalog and no check
   if (chatBlockedReason(s.models, undefined) !== undefined || s.unavailable["models.pull"] === true) return true;
   if (s.catalog === undefined) return false;
   const tag = screenModel(s);
   if (tag === undefined) return true;
-  // the table has this model's row, or it is in and has no reading for it ("Couldn't check")
   return phaseOf(s.fitTable, rowOf(s, tag)) !== "checking";
 }
 
@@ -361,10 +318,7 @@ export function FirstRun() {
   const known = !boot && rt === "ready" && models !== undefined;
   const [waited, setWaited] = useState(false);
   const [shown, setShown] = useState(false);
-  // anything but the placeholders has shown (past the boot bound): they never come back,
-  // so until the screen's words are in hand "Connecting…" stays up instead
   const [left, setLeft] = useState(false);
-  // once the screen shows it stays: a later recheck changes a verdict, never back to placeholders
   if (known && (ready || waited) && !shown) setShown(true);
   const placeholders = !left && (boot || (known && !shown && !ready && !waited));
   if (!placeholders && !left) setLeft(true);
@@ -376,7 +330,6 @@ export function FirstRun() {
     return () => clearTimeout(t);
   }, [known, ready]);
   if (placeholders) return <FirstRunLoading />;
-  // the same render that sets `shown` already shows the screen
   if (known) return !shown && !ready && !waited ? <Connecting /> : models.some(canChat) ? <Found /> : <NoModels />;
   if (rt === "missing" || rt === "stopped" || rt === "wrong" || rt === "error") return <NoOllama />;
   return <Waiting installing={rt === "installing"} />;

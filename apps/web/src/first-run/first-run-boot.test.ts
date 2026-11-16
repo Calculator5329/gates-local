@@ -184,3 +184,11 @@ it("keeps the Ollama sentences for a runtime that has answered starting", () => 
   expect(s.words).toContain("Looking for Ollama");
   expect(s.words).not.toContain("Connecting…");
 });
+
+it("a build that cannot download says how to get a model at once, with no catalog read and no wait", () => {
+  show(boot);
+  show({ ...boot, bootWaited: true });
+  const s = show({ ...late, models: [], unavailable: { "models.pull": true } });
+  expect(s.words).toContain("No model installed yet");
+  expect(s.words).not.toContain("Connecting…");
+});

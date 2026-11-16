@@ -79,8 +79,6 @@
       "apps/web/src/composer/paste.ts": 10,
       "apps/web/src/composer/refused-files.ts": 5,
       "apps/web/src/composer/starter.ts": 2,
-      "apps/web/src/first-run/FirstRun.tsx": 28,
-      "apps/web/src/first-run/FirstRunShell.tsx": 3,
       "apps/web/src/image/ImageMark.tsx": 1,
       "apps/web/src/image/ImagePicker.tsx": 38,
       "apps/web/src/image/ImageUnset.tsx": 6,

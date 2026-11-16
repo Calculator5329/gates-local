@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-16: the first-run folder holds to the six comment kinds
+
+- First run's screens and their shared frame pass the comment rule: 31
+  offenders went, and the folder's comment lines fell from 61 to none.
+  Rules a named test already held went with the comment; one in five
+  was broken in the source and watched fail.
+- One rule no test held now has one: a build that cannot download shows
+  first run's words at once, without waiting on the catalog.
+
 ## 2026-11-16: the web updates folder holds to the six comment kinds
 
 - The update footer button, its ask, Settings › Updates and the install
