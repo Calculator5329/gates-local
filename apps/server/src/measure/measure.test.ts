@@ -385,6 +385,19 @@ describe("measureModel", () => {
     expect(m.think).toBe(true);
   });
 
+  it("counts thinking past a check's allowance as answer: the check's next request is that much shorter", async () => {
+    const over = 200;
+    const rt = pieces(fakeRuntime(["completion", "tools", "thinking"], (c, round) =>
+      c?.id === "tools-count" && round === 0
+        ? { ...reference(true)(c, round), thinking: "t ".repeat(THINK_BUDGET + over), evalCount: THINK_BUDGET + over + 10 }
+        : reference(true)(c, round)));
+    await run(rt, { think: true });
+    const prompt = CASES.find((c) => c.id === "tools-count")!.prompt;
+    const asked = rt.bodies.filter((b) => b.messages.some((m) => m.content === prompt)).map((b) => b.options.num_predict!);
+    expect(asked.length).toBeGreaterThan(1);
+    expect(asked[1]).toBe(asked[0]! - THINK_BUDGET - over - 10);
+  });
+
   it("shares the run's answer tokens: a long check may take what earlier ones left, up to its ceiling, and every later check keeps its own share", async () => {
     // every answer check past Tools uses all it is given
     const asked: Record<string, number> = {};
@@ -466,6 +479,17 @@ describe("measureModel", () => {
     const why = `This model's ${contextWords(NARROW)} context has no room left for the tool results, so the turn stopped here.`;
     expect(m.checks.filter((c) => c.state === "skipped").map((c) => [c.id, c.why])).toEqual(["tools-recover", "tools-chain", "files-nested"].map((id) => [id, why]));
     expect(m.checks.filter((c) => c.state === undefined && !c.ok).map((c) => [c.id, c.why])).toEqual([]);
+  });
+
+  it("skips a check whose question does not fit the window at all, in the app's words, and grades the ones that fit, a page's question too", async () => {
+    const rt = fakeRuntime(["completion"], reference(true, true));
+    const m = await run(rt, { numCtx: 64 });
+    expect(m.checks.map((c) => c.id)).toEqual(CASES.map((c) => c.id));
+    const skipped = m.checks.filter((c) => c.state === "skipped");
+    const pages = CASES.filter((c) => c.kind === "page").map((c) => c.id);
+    expect(skipped.filter((c) => pages.includes(c.id)).map((c) => c.why)).toEqual(pages.map(() => expect.stringMatching(/^This message is too long for this model/)));
+    expect(m.checks.filter((c) => c.state === undefined && !c.ok)).toEqual([]);
+    expect(check(m, "tools-none").ok).toBe(true);
   });
 
   it("fails a check whose model filled the window itself, where the right calls fit", async () => {

@@ -1,27 +1,3 @@
-// models.measures, models.measure and models.measurePages (row 29). A measure runs only on its
-// RPC: it takes the GPU lease alone ("bench"), so it waits for running replies and a send waits
-// for it. Then, in the lock order a send uses (lease, then the memory owner's load gate), the
-// owner's handoff asks everything else in memory to leave, and the fit at the chat's window for
-// this model is decided from a new reading. It runs the suite, saves the numbers and pushes the
-// new list. One model at a time.
-//
-// A run holds its model in the loader the way a chat turn does (a reservation, never admitted), so
-// a runtime switch stops it as it ends a turn and waits for its end, and the model cannot be
-// removed under it. A check whose turn failed (the runtime crashed, the model did not load) ends
-// the run as an error: nothing is saved and the model's earlier measure stays.
-//
-// The page checks end with a page each, saved as pending. One window runs them, in a sandboxed
-// frame, and sends back what it saw (models.measurePages) while the run waits, with the GPU lease
-// already given back: up to PAGE_WAIT_MS for a window to ask, then up to PAGE_HELD_MS on the window
-// that holds them, which runs them only while it is shown. Which window: the one that claims them first
-// (models.measurePagesClaim), the window that started the run coming first while it is connected.
-// The claim is the connection's: a window that reloads or closes lets it go, the list is pushed
-// again, and the next window to ask runs them. A second window is refused while one holds them,
-// and its pages are refused too. Pages still pending when the wait ends are skipped, saying why,
-// and the score is over the other parts.
-//
-// The server keeps its own record of the run, its last step: models.measures answers with it, so
-// a window that connects mid-run, or missed the run's last push, shows what is true.
 import type { FitReport, MeasureList, MeasureRun, ModelInfo, ModelMeasure, PageSeen, ShellStatus } from "@gates-local/contracts";
 import type { GpuLease } from "../gpu/lease.ts";
 import type { MemoryOwner, Want } from "../gpu/memory.ts";
@@ -34,19 +10,11 @@ import { STEPS, measureModel } from "./suite.ts";
 import { gradePages, pendingPages, skipPages } from "./score.ts";
 import { measureStore } from "./store.ts";
 
-/** The chat's default window when the settings have none (settings/store.ts). */
 const DEFAULT_CTX = 16384;
-/** How long a run waits for a window to ask for its pages. */
 export const PAGE_WAIT_MS = 30_000;
-/**
- * How long a run waits on the window holding its pages. A window runs them only while it is shown
- * (web measure-pages.ts), so a run that ended with the app in the background waits for the person
- * to come back; past this the pages are skipped and another model can be measured.
- */
+// why: a window runs pages only while it is shown, so the run waits for the person to come back.
 export const PAGE_HELD_MS = 10 * 60_000;
-/** Why a page check counts for nothing: no window ran it in time. */
 export const PAGES_UNRUN = "Pages were not run: no window ran them while Measure waited.";
-/** Why a page check counts for nothing: the window holding the pages stayed out of sight. */
 export const PAGES_HIDDEN = "Pages were not run: the app's window stayed in the background while Measure waited.";
 export const RUNTIME_CHANGED_MEASURE = "The Ollama runtime changed while Measure ran, so it stopped.";
 
@@ -63,17 +31,12 @@ export interface MeasureDeps {
   readonly dataDir: string;
   readonly baseUrl: () => string | undefined;
   readonly installed: () => Promise<readonly ModelInfo[]>;
-  /** `measured`: after the handoff, inside the load gate, the reading alone decides (app.ts planBeside). */
   readonly plan: (baseUrl: string, model: string, numCtx: number, signal: AbortSignal, measured?: boolean) => Promise<FitReport>;
   readonly push: Push;
   readonly lease?: Pick<GpuLease, "acquire">;
-  /** The one owner of what is in memory: Measure hands off through it as a send does. */
   readonly memory?: Pick<MemoryOwner, "gate" | "handoff" | "stage" | "settled" | "ended">;
-  /** The model loader: a run reserves its model as a chat turn does, so a runtime switch stops it and waits for it. */
   readonly loader?: Pick<ModelLoader, "reserve">;
-  /** The chat's window and thinking, and the model's sampling settings. */
   readonly settings?: Pick<SettingsReader, "get">;
-  /** The shell sandbox's probe: off on Linux skips the database checks, as a chat could not read them. */
   readonly shellStatus?: () => Promise<ShellStatus>;
   readonly platform?: NodeJS.Platform;
   readonly fetch?: typeof fetch;
@@ -81,7 +44,6 @@ export interface MeasureDeps {
   readonly pageHeldMs?: number;
 }
 
-/** The connection a call came on (ws HandlerContext): its id, and a signal that aborts when it closes. */
 export interface Caller {
   readonly clientId: number;
   readonly signal?: AbortSignal;
@@ -91,23 +53,17 @@ export function createMeasure(deps: MeasureDeps) {
   const store = measureStore(deps.dataDir);
   const stop = new AbortController();
   let running: string | undefined;
-  /** The server's record of the last run: its last step, kept until the next run starts. */
   let last: MeasureRun | undefined;
-  /** The run waiting for its pages, by model and measure time; `held` restarts its wait for a window that holds them, or for one to ask. */
   let waiting: { model: string; at: number; resolve: () => void; held: (on: boolean) => void } | undefined;
-  /** The connection that started the running measure. */
   let starter: Caller | undefined;
-  /** The connection running the waiting run's pages now. */
   let holder: { model: string; at: number; clientId: number } | undefined;
   const total = STEPS + 1;
   const step = (run: MeasureRun) => {
     last = run;
     deps.push("models.measuring", run);
   };
-  /** Pages no run waits for any more (a run from before a restart, or an earlier build's) are skipped. */
   const settled = (m: ModelMeasure) => (waiting?.model === m.model && waiting.at === m.at ? m : skipPages(m, PAGES_UNRUN));
 
-  /** Refuses at once when it cannot start; otherwise answers with the started run and goes on behind it. */
   const start = async (model: string, caller?: Caller): Promise<MeasureRun> => {
     if (stop.signal.aborted) throw new MeasureError("shutting-down", "The app is closing.");
     if (running !== undefined) throw new MeasureError("measure-busy", `${running} is being measured. Measure one model at a time.`);
@@ -119,7 +75,6 @@ export function createMeasure(deps: MeasureDeps) {
       if (info === undefined) throw new MeasureError("not-installed", `${model} is not installed.`);
       const baseUrl = deps.baseUrl();
       if (baseUrl === undefined) throw new MeasureError("runtime-not-ready", "Ollama is not running.");
-      // Throws while the runtime switches, the model is being removed or the app closes.
       const hold = deps.loader?.reserve(model);
       const first: MeasureRun = { model, state: "waiting", done: 0, total };
       step(first);
@@ -135,7 +90,7 @@ export function createMeasure(deps: MeasureDeps) {
     const { name: model, digest } = info;
     const signal = hold ? AbortSignal.any([stop.signal, hold.signal]) : stop.signal;
     const settings = deps.settings?.get();
-    // The window a chat with this model gets (web format.ts ctxFor).
+    // why: the window a chat with this model gets.
     const numCtx = Math.min(settings?.defaultNumCtx ?? DEFAULT_CTX, info.maxContext ?? Infinity);
     try {
       let saved: ModelMeasure;
@@ -165,8 +120,7 @@ export function createMeasure(deps: MeasureDeps) {
           let result: Awaited<ReturnType<typeof measureModel>>;
           try {
             const shell = await deps.shellStatus?.();
-            // The person's sampling settings stay out (Measure samples its own way, suite.ts); how
-            // long the model stays in memory is theirs, as for a chat.
+            // why: Measure samples its own way; only how long the model stays in memory is the person's.
             const { keep_alive: keepAlive } = turnSettings(settings, model);
             result = await measureModel({
               baseUrl, model, signal, numCtx, sources: ensureFixtures(deps.dataDir), ...(keepAlive === undefined ? {} : { keepAlive }),
@@ -180,20 +134,18 @@ export function createMeasure(deps: MeasureDeps) {
           }
           memory?.settled(want);
           saved = { model, digest, ...result };
-          // Waiting from here: the push that carries its pages to the window keeps them pending.
+          // why: set before the push below, or `settled` would send its pages out as skipped.
           if (pendingPages(saved) > 0) waiting = { model, at: saved.at, resolve: () => undefined, held: () => undefined };
           deps.push("models.measures", store.put(saved).map(settled));
         } finally {
           release?.();
         }
       } finally {
-        // The runtime is not used past here: a switch need not wait for the pages.
+        // why: the runtime is not used past here, so a switch need not wait for the pages.
         hold?.end();
       }
       if (pendingPages(saved) > 0) {
         const at = saved.at;
-        // No window asked in time: PAGES_UNRUN. A window held them and did not send them in
-        // its time (its pages wait while it is out of sight): PAGES_HIDDEN.
         let why = PAGES_UNRUN;
         await new Promise<void>((resolve) => {
           let timer = setTimeout(done, deps.pageWaitMs ?? PAGE_WAIT_MS);
@@ -230,11 +182,6 @@ export function createMeasure(deps: MeasureDeps) {
 
   const waitsFor = (model: string, at: number) => waiting?.model === model && waiting.at === at;
 
-  /**
-   * A window asks to run the waiting run's pages. The one that started the run is first while it is
-   * connected; else the first to ask. The hold ends with its connection, and the list goes out
-   * again so a window still open (or the one just reloaded) can ask.
-   */
   const claim = ({ model, at }: { model: string; at: number }, caller?: Caller): { claimed: boolean } => {
     if (!waitsFor(model, at)) return { claimed: false };
     const id = caller?.clientId ?? -1;
@@ -254,7 +201,6 @@ export function createMeasure(deps: MeasureDeps) {
     return { claimed: true };
   };
 
-  /** What the window holding the run's pages saw on them: graded, saved and pushed, while the run waits. */
   const pagesSeen = ({ model, at, pages }: { model: string; at: number; pages: readonly PageSeen[] }, caller?: Caller): ModelMeasure => {
     const measure = store.list().find((m) => m.model === model && m.at === at);
     if (measure === undefined) throw new MeasureError("not-measured", `${model} has no measure from that time; it was measured again since.`);
@@ -266,7 +212,6 @@ export function createMeasure(deps: MeasureDeps) {
     return graded;
   };
 
-  /** Every measure, and the run going now or the one that stopped on an error. */
   const list = (): MeasureList => ({ measures: store.list().map(settled), ...(last === undefined || last.state === "done" ? {} : { run: last }) });
 
   return {

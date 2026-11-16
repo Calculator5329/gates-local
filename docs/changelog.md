@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-16: Measure's comments hold to the six kinds
+
+- The measure folder passes the comment rule with no offenders: 231
+  comment lines became 19. Two rules no test held now have one: a
+  check whose question does not fit the window is skipped in the
+  app's words, and thinking past a check's allowance counts against
+  its answer.
+
 ## 2026-11-16: comments in five server folders hold to the six kinds
 
 - Pages, pictures, settings, voice and the phone listener now pass the

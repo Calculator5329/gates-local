@@ -1,19 +1,3 @@
-// Measure (Settings › Models), version MEASURE_VERSION: how well one model does the app's own work on
-// this computer, run only when the person clicks Measure. Each check (cases.ts) is one chat turn
-// through the chat's tool turn: the same loop, the same Library tools and sandbox, the window a
-// chat with this model gets, and thinking as the chat's setting has it. A tool's result goes back
-// to the model, so a check can take several steps. The person's own system prompt is left out, so
-// a score says the same thing on every computer; the model's built-in one stays, as in a chat.
-//
-// Every request is metered. The run has RUN_BUDGET answer tokens in all, what every check's own
-// share (BUDGET) adds up to: a check always has its share, and may take up to CEILING times it
-// from what the checks before it left. Thinking has its own THINK_BUDGET a check, apart from
-// the answer's: a thinking model thinks on every tool round, and that does not shorten its answer.
-// A check is cut where its tokens end, and one cut while it was still thinking says so. The
-// decode speed is over every check's requests together, and the time to the first word is the
-// middle check's. A page check ends here with the page it wrote;
-// the window runs it later (score.ts). Nothing here takes the GPU lease or checks the fit: the
-// caller does both before it calls measureModel.
 import { MEASURE_VERSION, type MeasureCheck, type ModelMeasure, type ShellStatus, type ToolStep } from "@gates-local/contracts";
 import { CALL_CLOSE, CALL_OPEN, createTools, type LibraryEntry, type ToolCall, type ToolResult } from "@gates-local/harness";
 import { streamToolTurn, windowFullWords, type ToolTurnInput } from "../chat/tools.ts";
@@ -21,25 +5,17 @@ import type { TurnMessage } from "../chat/types.ts";
 import { BUDGET, CASES, SHOP_ID, pageIn, toolCallOf, type AnswerCase, type MeasureCase, type Turn } from "./cases.ts";
 import { partsOf, scoreOf } from "./score.ts";
 
-/** A model this slow writes slower than a person reads: about 250 words a minute is 5.5 tokens a second; twice that. */
+// why: slower than a person reads; 250 words a minute is 5.5 tokens a second, and this is twice it.
 export const SLOW_TOKENS_PER_SECOND = 10;
-/** Past 10 seconds a person stops waiting on a reply and turns to something else (Nielsen's response-time limits). */
+// why: past 10 seconds a person stops waiting on a reply (Nielsen's response-time limits).
 export const SLOW_FIRST_WORD_MS = 10_000;
-/** The same seed every run, so a measure repeats. */
 export const SEED = 7;
-/**
- * How Measure samples, whatever the person saved for chats: the most likely word each time, the
- * same seed, and the model's own defaults for the rest. Two models are measured alike, and the
- * measure keeps these beside its score.
- */
 export const SAMPLING = { temperature: 0, seed: SEED } as const;
-/** How much of a reply a check keeps: its start and its end. */
 const KEPT = 400;
 const CALL_KEPT = 300;
 const PAGE_KEPT = 30_000;
 
 const clip = (text: string, max: number) => text.length > max ? `${text.slice(0, max)}…` : text;
-/** The start and the end of a reply, with what was between them counted. */
 export const headTail = (text: string) => text.length <= 2 * KEPT ? text
   : `${text.slice(0, KEPT)}\n… ${text.length - 2 * KEPT} characters …\n${text.slice(-KEPT)}`;
 const median = (xs: readonly number[]) => {
@@ -51,39 +27,26 @@ export interface MeasureInput {
   baseUrl: string;
   model: string;
   signal: AbortSignal;
-  /** Measure's own Library sources (ensureFixtures). */
   sources: readonly LibraryEntry[];
-  /** The window a chat with this model gets: the default context, capped at the model's own. */
   numCtx: number;
-  /** The chat's thinking setting; sent only to a model that can think. */
   think?: boolean;
-  /** How long the model stays in memory after a request, as the person set it for chats. */
   keepAlive?: number;
-  /** The shell sandbox's probe: off on Linux skips the database checks. */
   shell?: ShellStatus;
   platform?: NodeJS.Platform;
   fetch?: typeof fetch;
-  /** Steps finished so far, of total: loading the model, then each check. */
   onStep?: (done: number, total: number) => void;
   now?: () => number;
 }
 
-/** Loading the model, then one step per check. */
+// why: one step for loading the model, then one per check.
 export const STEPS = CASES.length + 1;
 
-/** Answer tokens for the whole run: every check's own share, added up. */
 export const RUN_BUDGET = CASES.reduce((sum, c) => sum + BUDGET[c.part], 0);
-/** A check may take up to this many times its own share, so one check cannot eat the run. */
+// why: a check may take this many times its own share, so one check cannot eat the run.
 export const CEILING = 2;
-/** Thinking tokens one check may use over all its requests, with Thinking on; not counted in its answer's. */
 export const THINK_BUDGET = 1500;
 
-/**
- * One check's tokens. `cap`: its answer's; `think`: its thinking's allowance (0 with Thinking
- * off). `used` is every token it wrote, `thought` the ones it thought.
- */
 interface Meter { cap: number; think: number; used: number; thought: number; start: number; firstMs?: number; cut: boolean; cutThinking: boolean }
-/** Answer tokens a check used: thinking past its allowance counts as answer. */
 const answered = (m: Meter) => m.used - Math.min(m.thought, m.think);
 
 export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasure, "model" | "digest">> {
@@ -97,7 +60,6 @@ export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasu
   if (!show.ok) throw new Error(`The model's details could not be read (HTTP ${show.status})`);
   const details = (await show.json()) as { capabilities?: unknown; system?: unknown };
   const capabilities = Array.isArray(details.capabilities) ? details.capabilities : undefined;
-  // As a chat: a model that cannot think gets no flag; a runtime that lists nothing gets it as asked.
   const think = input.think === undefined || (capabilities !== undefined && !capabilities.includes("thinking")) ? undefined : input.think;
   const system = typeof details.system === "string" && details.system.trim() ? details.system : undefined;
 
@@ -111,7 +73,6 @@ export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasu
   const firstWords: number[] = [];
   const checks: MeasureCheck[] = [];
   const runs = (c: MeasureCase) => !(c.db && noDatabase);
-  // What the checks still to come are owed: their own shares.
   let owed = CASES.filter(runs).reduce((sum, c) => sum + BUDGET[c.part], 0);
   let runLeft = owed;
   for (const c of CASES) {
@@ -145,14 +106,12 @@ export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasu
     };
     const end = await turnEnd(streamToolTurn({ ...turn, fetch: metered, execute }));
     input.signal.throwIfAborted();
-    // The question itself did not fit the window: the app's sentence, and the check is skipped.
     if (end.type === "error" && end.code === "context-too-small") {
       checks.push({ id: c.id, kind: c.part, ok: false, state: "skipped", needs: c.needs, why: end.message });
       step();
       continue;
     }
-    // A turn that failed (the runtime crashed or went away, the model did not load, the stream
-    // broke) says nothing about the model: the run stops, and nothing it measured is kept.
+    // why: a turn that failed on the runtime says nothing about the model, so the run stops.
     if (end.type === "error") throw new Error(`Measure stopped at check ${checks.length + 1} of ${CASES.length}: ${end.message}`);
     const { answer, steps } = end;
     if (meter.firstMs !== undefined) firstWords.push(meter.firstMs);
@@ -185,30 +144,13 @@ export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasu
 
 type Evidence = Pick<MeasureCheck, "reply" | "calls" | "tokens" | "thinkTokens" | "ms" | "cut" | "cutThinking">;
 
-/** A check a model that gets it right does with the Library's tools. */
 const needsTools = (c: MeasureCase): c is AnswerCase => c.kind === "answer" && c.reference.calls.length > 0;
 
-// A check is skipped, not failed, only where the window kept it from being asked: the window is a
-// setting, not what the model wrote. The chat's tool turn (chat/tools.ts) says so in two ways,
-// read by the two functions below. A turn the model itself brought to its end (calls the tools
-// refused, calls up to the turn limit, a window filled with reads the check has no use for) is
-// graded like any other, and fails.
-
-/**
- * The tools did not fit beside the question, so the turn answered without them and its only step
- * is a note saying why: that note. (Measure offers no database it cannot read, so the shell's
- * note never comes here.)
- */
 function toolsLeftOut(steps: readonly ToolStep[]): string | undefined {
   const note = steps.length > 0 && steps.every((s) => s.name === "note") ? steps.at(-1)?.summary : undefined;
   return note ? `${note}.` : undefined;
 }
 
-/**
- * The turn ended on the full window, and so does the check done right: its reference calls and
- * answer (cases.ts), played through the same tool turn with the same tools and no model asked.
- * Then the sentence the turn ended on. A full window the right calls fit in is the model's doing.
- */
 async function windowTooSmall(c: AnswerCase, answer: string, turn: ToolTurnInput, show: { capabilities?: unknown }, windows: boolean): Promise<string | undefined> {
   const full = windowFullWords(turn.numCtx);
   const endedFull = (said: string) => (said.trim().split(/\n\n/).at(-1) ?? "").startsWith(full);
@@ -223,11 +165,11 @@ async function windowTooSmall(c: AnswerCase, answer: string, turn: ToolTurnInput
       : native ? { content: "", tool_calls: [{ function: fn }] } : { content: `${CALL_OPEN}${JSON.stringify(fn)}${CALL_CLOSE}` };
     return new Response(`${JSON.stringify({ message: { role: "assistant", ...message }, done: false })}\n${JSON.stringify({ message: { role: "assistant", content: "" }, done: true, done_reason: "stop" })}\n`);
   }) as typeof fetch;
+  // why: if the right calls fit the window, a full one was the model's doing, not the setting's.
   const end = await turnEnd(streamToolTurn({ ...turn, fetch: right }));
   return end.type === "done" && endedFull(end.answer) ? full : undefined;
 }
 
-/** Why a cut check failed: still thinking when its tokens ran out, or out of answer tokens. */
 export const CUT_THINKING = "It was still thinking when its tokens ran out.";
 const CUT_ANSWER = "It used its whole token budget before it answered.";
 
@@ -244,7 +186,6 @@ function grade(c: MeasureCase, turn: Turn, evidence: Evidence): MeasureCheck {
   return { ...base, ok: false, state: "pending", page: clip(page, PAGE_KEPT), script: [...c.script] };
 }
 
-/** The turn's one ending: its answer and steps, or why it failed. */
 async function turnEnd(events: ReturnType<typeof streamToolTurn>) {
   for await (const event of events) {
     if (event.type === "done") return { type: "done" as const, answer: event.message.content, steps: event.message.tools ?? [] };
@@ -253,7 +194,7 @@ async function turnEnd(events: ReturnType<typeof streamToolTurn>) {
   return { type: "error" as const, code: undefined, message: "The turn ended without an answer." };
 }
 
-/** One token at the chat's window and Measure's sampling, so the model is in memory before the first check is timed. */
+// why: one token, so the model is in memory before the first check is timed.
 async function warmUp(input: MeasureInput, fetcher: typeof fetch, think: boolean | undefined) {
   const response = await fetcher(new URL("/api/chat", input.baseUrl), {
     method: "POST", headers: { "content-type": "application/json" }, signal: input.signal,
@@ -267,14 +208,6 @@ async function warmUp(input: MeasureInput, fetcher: typeof fetch, think: boolean
   await response.text();
 }
 
-/**
- * The chat requests of one check, each capped at what is left of its answer's tokens and its
- * thinking's, and seeded; the first word's time and each request's counts are read off the stream
- * as it passes. The runtime counts thinking and answer together, so the thinking is counted here:
- * a streamed piece is about a token, and so are four characters of it; the larger of the two,
- * never more than the request wrote. Past the answer's tokens a request is not sent: it ends at
- * once, cut.
- */
 function meterFetch(base: typeof fetch, meter: Meter, now: () => number, counted: (tokens: number, ns: number) => void): typeof fetch {
   return async (url, init) => {
     if (!String(url).endsWith("/api/chat") || typeof init?.body !== "string") return base(url, init);
@@ -305,8 +238,10 @@ function meterFetch(base: typeof fetch, meter: Meter, now: () => number, counted
       }
       if (v.message?.content || v.message?.tool_calls?.length) thinkingLast = false;
       if (!v.done) return;
+      // external: Ollama's eval_count is the thinking and the answer together.
       const count = v.eval_count ?? 0;
       meter.used += count;
+      // why: a streamed piece is about a token, and so are four characters of it; the larger of the two.
       meter.thought += Math.min(count, Math.max(pieces, Math.ceil(chars / 4)));
       counted(count, v.eval_duration ?? 0);
       if (v.done_reason === "length") {
