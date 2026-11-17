@@ -9,6 +9,7 @@ import {
   type Payload,
   type SyncMetadata,
   type SyncRow,
+  FREE_AT_ONCE,
   PROTOCOL_VERSION,
   methodSync,
   pushSync,
@@ -349,7 +350,8 @@ export async function retryImage(threadId: string, prompt: string, retryOf: stri
 }
 
 export async function freeMemory(free: readonly OtherHolder[]): Promise<ActionResult> {
-  const r = await act("memory.free", { free: [...free] }, "free the memory");
+  // why: a held row saved before the cap can carry more holders than memory.free takes
+  const r = await act("memory.free", { free: free.toSorted((a, b) => b.bytes - a.bytes).slice(0, FREE_AT_ONCE) }, "free the memory");
   return r.ok ? null : r.message;
 }
 

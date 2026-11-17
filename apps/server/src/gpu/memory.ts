@@ -121,7 +121,7 @@ export interface MemoryOwner {
   readonly loaded: LoadedRecord;
   handoff(want: Want, signal: AbortSignal, options?: { onLeave?: (on: boolean) => void }): Promise<Handoff>;
   free(holders: readonly OtherHolder[], signal: AbortSignal): Promise<Handoff>;
-  stays(model: string): boolean;
+  stays(model: string, listed?: { readonly contextLength?: number | undefined }): boolean;
   stage(want: Want, stage: "measuring" | "loading"): void;
   settled(want: Want): void;
   ended(): void;
@@ -160,7 +160,7 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
   // why: the app's own Ollama runs only what the app loaded, on this run or the one before it
   const ours = (tag: string) => deps.holdsOne?.() === true || record.oursAt(tag) !== undefined;
   // why: a model carried from the last run may since have been replaced by another client's copy
-  const oursLive = (m: LoadedModel) => {
+  const oursLive = (m: { readonly name: string; readonly contextLength?: number | undefined }) => {
     const tag = canonicalTag(m.name);
     return ours(tag) && (deps.holdsOne?.() === true || record.fromLastRun?.(tag) !== true || m.contextLength === record.oursAt(tag));
   };
@@ -365,7 +365,8 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
       changed();
       return { left: asked === "freed" ? [...chat.left, "ComfyUI"] : chat.left, stayed: chat.stayed, engine: asked, held: [] };
     },
-    stays: (model) => !ours(canonicalTag(model)) && !othersMayGo(),
+    // why: with its /api/ps row, a plan judges a model as the handoff will
+    stays: (model, listed) => !(listed === undefined ? ours(canonicalTag(model)) : oursLive({ name: model, contextLength: listed.contextLength })) && !othersMayGo(),
     stage(want, stage) {
       handoff = { to: thing(want), stage };
       changed();

@@ -126,14 +126,14 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
       ...(refusal !== null && st.notice === refusal && st.model !== model ? { notice: null } : {}),
     }));
     const s = getState();
-    if (!s.unavailable["models.load"] && chatReady(s)) void preload(model, s.numCtx);
+    if (!s.unavailable["models.load"] && chatReady(s)) void preload(model, s.numCtx, true);
   }
 
   // external: Ollama queues a load behind a running reply
-  async function preload(model: string, numCtx: number, typed = false): Promise<void> {
+  async function preload(model: string, numCtx: number, pick = false): Promise<void> {
     if (Object.values(getState().turns).some((turn) => turn.model === model && turn.end === undefined)) return;
     if ((await blockingFor(model, numCtx)).length !== 0 || getState().model !== model) return;
-    const r = await act("models.load", { model, numCtx, ...(typed ? { typed } : {}) }, `load ${model}`);
+    const r = await act("models.load", { model, numCtx, ...(pick ? { pick } : {}) }, `load ${model}`);
     if (r.ok && r.value.state === "error" && r.value.message !== undefined && getState().model === model) {
       const { offer } = r.value;
       refusal = offer === undefined ? r.value.message : memoryRefusal(model, r.value.numCtx);
@@ -150,7 +150,7 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
     const now = Date.now();
     if (now - (typedAt.get(model) ?? Number.NEGATIVE_INFINITY) < TYPED_LOAD_EVERY_MS) return;
     typedAt.set(model, now);
-    void preload(model, s.numCtx, true);
+    void preload(model, s.numCtx);
   }
 
   async function pull(name: string): Promise<string | null> {

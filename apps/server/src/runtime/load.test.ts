@@ -161,9 +161,16 @@ describe("models.load", () => {
     expect(await loader.load("m", 16384, { typed: true })).toEqual({ model: "m", numCtx: 16384, state: "ready" });
     expect(loader.appLoadedModels(), "typing issued no load, so the model stays theirs").toEqual([]);
     expect(generates(s)).toBe(0);
+  });
+
+  it("models.load from the wire claims a resident model only when it says pick, so a page from an older build claims nothing", async () => {
+    const s = await fakeOllama(["m:latest"]);
+    const loader = loaderFor(s, []);
     const handlers = createRuntimeHandlers({ loader } as unknown as Parameters<typeof createRuntimeHandlers>[0]);
-    await handlers["models.load"]({ model: "m", numCtx: 16384, typed: true });
-    expect(loader.appLoadedModels(), "the wire's typed flag reaches the loader").toEqual([]);
+    await handlers["models.load"]({ model: "m", numCtx: 16384 });
+    expect(loader.appLoadedModels(), "no pick flag: typing, or a page from before the flag").toEqual([]);
+    await handlers["models.load"]({ model: "m", numCtx: 16384, pick: true });
+    expect(loader.appLoadedModels(), "a pick from the picker or Models").toEqual(["m:latest"]);
   });
 
   it("reselecting an owned resident model at the same context never queues an empty generate behind its reply", async () => {

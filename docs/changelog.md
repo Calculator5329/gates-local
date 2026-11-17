@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-17: the app's model file is never lost; a page left open from before the update claims nothing
+
+- If any entry in `own-models.json` can't be read, the whole file is moved aside as before, instead of the app quietly writing an empty list over it.
+- A second unreadable file never replaces one moved aside earlier. It takes the next free name (`-2`, `-3` ...).
+- Only a pick in the picker or in Models makes a model another client loaded the app's. Typing, or a page left open from before this update, claims nothing.
+- Free it on a held message saved by an earlier version sends at most 16 programs, the largest first, so the request is never refused.
+- The memory check before a load counts a model kept from the last run as the app's only when Ollama shows it at the same context, the same rule the actual freeing uses. An offer no longer counts memory that will not be freed.
+
 ## 2026-11-17: Free it sends only the message it was pressed for; held rows offer it too; the app's models are checked before they are freed
 
 - Free it remembers the chat and the words it was pressed for. If you move to another chat or change the words while the memory is freed, nothing is sent, and the other chat's words are left alone. A held message is sent again by its own id, whichever chat you are in by then.

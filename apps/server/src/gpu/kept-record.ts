@@ -1,6 +1,5 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import * as Option from "effect/Option";
 import * as S from "effect/Schema";
 import { canonicalTag } from "../runtime/recommended.ts";
 import { createLoadedRecord, type LoadedRecord } from "./memory.ts";
@@ -15,8 +14,15 @@ const OwnModel = S.Struct({
   carried: S.optional(S.Boolean),
 });
 type OwnModel = typeof OwnModel.Type;
-const decodeFile = S.decodeUnknownSync(S.Struct({ models: S.Array(S.Unknown) }));
-const decodeModel = S.decodeUnknownOption(OwnModel);
+// why: one entry the app cannot decode makes the whole file unreadable, so it is moved aside
+const decodeFile = S.decodeUnknownSync(S.Struct({ models: S.Array(OwnModel) }));
+
+// why: renameSync replaces an existing file, so an earlier file kept aside takes a free name
+function freeName(base: string): string {
+  let name = base;
+  for (let n = 2; existsSync(name); n++) name = `${base}-${n}`;
+  return name;
+}
 
 export interface KeptRecordOptions {
   readonly dataDir: string;
@@ -28,13 +34,13 @@ export interface KeptRecordOptions {
 
 // why: undefined is a file there that could be neither read nor moved aside, so nothing is written
 function readKept(file: string, mode: string, at: number, log: (line: string) => void): OwnModel[] | undefined {
-  let raw: readonly unknown[];
+  let raw: readonly OwnModel[];
   try {
     raw = decodeFile(JSON.parse(readFileSync(file, "utf8"))).models;
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
     // why: a file the app cannot read may not be its own, so it is kept beside the new one
-    const aside = `${file}.unreadable-${at}`;
+    const aside = freeName(`${file}.unreadable-${at}`);
     try {
       renameSync(file, aside);
     } catch (moving) {
@@ -45,10 +51,9 @@ function readKept(file: string, mode: string, at: number, log: (line: string) =>
     return [];
   }
   const kept: OwnModel[] = [];
-  for (const entry of raw) {
-    const model = decodeModel(entry);
+  for (const model of raw) {
     // decision: docs/decisions.md "Other programs' memory is freed only with a click"
-    if (Option.isSome(model) && model.value.carried !== true && model.value.mode === mode) kept.push(model.value);
+    if (model.carried !== true && model.mode === mode) kept.push(model);
   }
   return kept;
 }

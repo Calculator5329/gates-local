@@ -73,6 +73,6 @@ export function createRuntimeHandlers(deps: RuntimeHandlerDeps) {
       await deps.catalog.refresh({ force: true });
       return { name };
     },
-    "models.load": ({ model, numCtx, typed }) => deps.loader.load(model, numCtx, typed === true ? { typed } : {}),
+    "models.load": ({ model, numCtx, pick }) => deps.loader.load(model, numCtx, pick === true ? {} : { typed: true }),
   } satisfies Partial<Handlers>;
 }

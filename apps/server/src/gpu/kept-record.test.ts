@@ -59,6 +59,7 @@ describe("the app's own chat models, kept across one restart", () => {
   it.each([
     ["not JSON", "{ not json"],
     ["JSON of another shape", `{"version":2,"entries":[]}\n`],
+    ["an entry of another shape", `{"models":[{"tag":"m","context":8192}]}\n`],
   ])("a file the app cannot decode (%s) is moved aside once, never written over", (_, text) => {
     const dir = folder();
     writeFileSync(path.join(dir, OWN_MODELS_FILE), text);
@@ -70,5 +71,16 @@ describe("the app's own chat models, kept across one restart", () => {
     expect(lines.join("\n")).toContain(`${OWN_MODELS_FILE}.unreadable-77`);
     keptRecord({ dataDir: dir, mode: () => "system", now: () => 78 });
     expect(readdirSync(dir).filter((f) => f.includes("unreadable")), "the app's own file is read, not moved again").toEqual([`${OWN_MODELS_FILE}.unreadable-77`]);
+  });
+
+  it("a second unreadable file at the same moment takes a free name, so the first one kept is never replaced", () => {
+    const dir = folder();
+    writeFileSync(path.join(dir, `${OWN_MODELS_FILE}.unreadable-77`), "first");
+    writeFileSync(path.join(dir, `${OWN_MODELS_FILE}.unreadable-77-2`), "second");
+    writeFileSync(path.join(dir, OWN_MODELS_FILE), "third");
+    keptRecord({ dataDir: dir, mode: () => "system", now: () => 77 });
+    const read = (name: string) => readFileSync(path.join(dir, name), "utf8");
+    expect([read(`${OWN_MODELS_FILE}.unreadable-77`), read(`${OWN_MODELS_FILE}.unreadable-77-2`)], "the ones kept before, as they were").toEqual(["first", "second"]);
+    expect(existsSync(path.join(dir, `${OWN_MODELS_FILE}.unreadable-77-3`)) ? read(`${OWN_MODELS_FILE}.unreadable-77-3`) : "missing").toBe("third");
   });
 });

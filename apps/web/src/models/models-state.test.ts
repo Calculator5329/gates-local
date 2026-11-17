@@ -197,7 +197,7 @@ describe("typing loads the model", () => {
     expect(loadsAsked(asked)).toEqual([QWEN, GEMMA]);
   });
 
-  it("a load asked by typing says so, and a pick from the picker does not, so only a pick takes over a model someone else loaded", async () => {
+  it("a pick from the picker says so, and a load asked by typing does not, so only a pick takes over a model someone else loaded", async () => {
     typingReady();
     const { effects, asked } = world(store, loadAnswer);
     const { typedInComposer, pickModel } = models.createModels(effects);
@@ -206,8 +206,8 @@ describe("typing loads the model", () => {
     pickModel(GEMMA);
     await settle();
     expect(asked.filter((a) => a.method === "models.load").map((a) => a.params)).toEqual([
-      { model: QWEN, numCtx: expect.any(Number), typed: true },
-      { model: GEMMA, numCtx: expect.any(Number) },
+      { model: QWEN, numCtx: expect.any(Number) },
+      { model: GEMMA, numCtx: expect.any(Number), pick: true },
     ]);
   });
 });

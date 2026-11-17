@@ -69,7 +69,7 @@ function preloadChoice(): ReplayScenario<World> {
     ],
     check(w, order) {
       const expected = order.filter((name) => name === "preflight.new.response" || (name === "preflight.old.response" && (!order.includes("pick.new") || before(order, name, "pick.new")))).map((name) => name === "preflight.old.response" ? OLD_MODEL : MODEL);
-      expect(w.wire.server.calls("models.load").map((call) => call.params), "only a still-current pick may start loading").toEqual(expected.map((model) => ({ model, numCtx: CTX })));
+      expect(w.wire.server.calls("models.load").map((call) => call.params), "only a still-current pick may start loading").toEqual(expected.map((model) => ({ model, numCtx: CTX, pick: true })));
     },
   };
 }

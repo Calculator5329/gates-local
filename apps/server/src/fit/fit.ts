@@ -196,7 +196,7 @@ export interface FitDeps {
   holdsOne?: boolean;
   baseline?: GpuBaseline;
   // why: another program's idle model is not asked to leave, so a plan counts it as taken
-  stays?: (model: string) => boolean;
+  stays?: (model: string, listed?: { readonly contextLength?: number | undefined }) => boolean;
 }
 
 export interface FitCheck {
@@ -364,7 +364,7 @@ export async function planWith(deps: FitDeps & { model: string; numCtx: number; 
   const holdsOneModel = deps.holdsOne ?? holdsOneAt(deps.baseUrl);
   const onCard = r.gpu.gpuCount > 0;
   // why: nothing leaves with no GPU, or once a handoff has already asked the idle ones to go.
-  const leaving = !onCard || (deps.measured === true && !holdsOneModel) ? [] : others.filter((m) => !isBusy(m.name) && deps.stays?.(m.name) !== true).map((m) => m.name);
+  const leaving = !onCard || (deps.measured === true && !holdsOneModel) ? [] : others.filter((m) => !isBusy(m.name) && deps.stays?.(m.name, { contextLength: m.context_length }) !== true).map((m) => m.name);
   const fit = (stop: readonly string[]) => fitWithReadings(onCard ? { ...deps, reclaim: [...leaving, ...stop] } : deps, deps.model, deps.numCtx, r);
   const first = await fit([]);
   if (first.resident === true || candidates.length === 0) return { report: first.report, stop: [] };

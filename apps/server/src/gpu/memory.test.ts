@@ -238,6 +238,7 @@ describe("one thing in memory: the handoff", () => {
       return contextLength === undefined ? rest : { ...rest, contextLength };
     });
     const m = owner(o, { listLoaded, record: keptRecord({ dataDir: dir, mode: () => "system" }) });
+    expect(m.stays("old:7b", contextLength === undefined ? {} : { contextLength }), "the fit sum counts it as the handoff will treat it").toBe(!asked);
     const h = await m.gate(() => m.handoff(chat("b:2b"), signal));
     expect(o.asked).toEqual(asked ? ["old:7b"] : []);
     expect(h.held).toEqual(asked ? [] : [{ kind: "model", name: "old:7b", bytes: 1e9 }]);

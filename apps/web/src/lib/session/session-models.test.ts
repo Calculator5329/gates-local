@@ -389,7 +389,7 @@ describe("the model starts loading on the first key typed", () => {
     expect(model).toBeDefined();
     session.typedInComposer();
     session.typedInComposer();
-    await vi.waitFor(() => expect(asked).toEqual([{ model, numCtx: store.getState().numCtx, typed: true }]));
+    await vi.waitFor(() => expect(asked).toEqual([{ model, numCtx: store.getState().numCtx }]));
     session.typedInComposer();
     await settle();
     expect(asked).toHaveLength(1);
@@ -885,4 +885,13 @@ it("what is in memory is unknown until something says, and a memory.changed push
   expect(store.getState().memory).toBeUndefined();
   push("memory.changed", inMemory(QWEN));
   expect(store.getState().memory).toEqual(inMemory(QWEN));
+});
+
+// A held row saved before the cap can carry more holders than memory.free takes.
+it("Free it sends at most FREE_AT_ONCE holders, the largest first", async () => {
+  const sent: unknown[] = [];
+  const { session } = await boot({ "memory.free": (p) => { sent.push(p); return Promise.resolve({ left: [] }); } });
+  const holders = Array.from({ length: 20 }, (_, i) => ({ kind: "model" as const, name: `m${i}`, bytes: i + 1 }));
+  expect(await session.freeMemory(holders)).toBeNull();
+  expect(sent).toEqual([{ free: holders.toReversed().slice(0, 16) }]);
 });

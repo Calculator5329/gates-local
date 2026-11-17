@@ -258,8 +258,8 @@ export const methods = {
   "models.pull": { params: ModelRef, result: PullProgress, phone: "deny" },
   "models.cancelPull": { params: ModelRef, result: S.Struct({ cancelled: S.Boolean }), phone: "deny" },
   "models.remove": { params: ModelRef, result: ModelRef, phone: "deny" },
-  // why: typed is a load asked by a key; it never makes another client's model the app's
-  "models.load": { params: S.Struct({ model: S.String, numCtx: NumCtx, typed: S.optional(S.Boolean) }), result: ModelLoad, phone: "allow" },
+  // why: only pick claims another client's model, so typing or an older page claims nothing
+  "models.load": { params: S.Struct({ model: S.String, numCtx: NumCtx, pick: S.optional(S.Boolean) }), result: ModelLoad, phone: "allow" },
   "models.speed": { params: NoParams, result: S.Array(ModelSpeed), phone: "allow", sync: SPEEDS },
   "models.measures": { params: NoParams, result: MeasureList, phone: "allow", sync: MEASURES },
   "models.measure": { params: ModelRef, result: MeasureRun, phone: "deny" },
