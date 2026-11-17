@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-17: a saved failure keeps its plain words
+
+- A failed reply read back from history, or after the window reloads, says what to do from its failure code (Ollama stopped answering, model not installed, and so on), the same words the live failure showed. Before, every saved failure fell back to "The reply didn't finish."
+
 ## 2026-11-17: the GPU memory bar is the card reading
 
 - The memory bar in a model's details draws every loaded chat model at what it holds, and "Currently free" is the card's own free reading. Before, other loaded chat models were left off, so free read too high, and this model was drawn at its estimate.

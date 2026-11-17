@@ -67,7 +67,7 @@ it("a failure that lands after Stop, on screen, is the failure and not the Stop"
   await tick();
   expect(st().turns["A"]?.end).toEqual({ kind: "error", code: "model-not-found", message: notFound.message });
   // the stamped question is in place, and its note waits while the turn shows its own error line
-  expect(noteOn("A", "u-A")).toEqual({ kind: "failed", why: notFoundWhy.message });
+  expect(noteOn("A", "u-A")).toEqual({ kind: "failed", why: notFoundWhy.message, code: notFoundWhy.code });
 });
 
 it("a failure that lands after Stop, off screen, leaves its note under the question", async () => {
@@ -79,7 +79,7 @@ it("a failure that lands after Stop, off screen, leaves its note under the quest
   await tick();
   expect(st().turns["A"]).toBeUndefined();
   // the note a failure off screen leaves without a Stop
-  expect(noteOn("A", "u-A")).toEqual({ kind: "failed", why: notFoundWhy.message });
+  expect(noteOn("A", "u-A")).toEqual({ kind: "failed", why: notFoundWhy.message, code: notFoundWhy.code });
 });
 
 const quietMedia = () => ({ matches: false, addEventListener: () => undefined, removeEventListener: () => undefined });
@@ -150,7 +150,7 @@ it("leaving without a send: a failure after Stop leaves its note under the quest
   chat(a, "A", notFound);
   await tick();
   expect(st().turns["A"]).toBeUndefined();
-  expect(noteOn("A", "u-A")).toEqual({ kind: "failed", why: notFoundWhy.message });
+  expect(noteOn("A", "u-A")).toEqual({ kind: "failed", why: notFoundWhy.message, code: notFoundWhy.code });
 });
 
 it("a failure with saved words after Stop keeps the failure's words, not Stop's seconds", async () => {
@@ -164,7 +164,7 @@ it("a failure with saved words after Stop keeps the failure's words, not Stop's 
   const partial: Message = { id: "p-A", threadId: "A", role: "assistant", content: "Partly", interrupted: true, createdAt: 2, times: stamped("failed", why) };
   chat(a, "A", { type: "error", ...why, partial, ended: { reason: "failed", at: 4_000 } });
   await tick();
-  expect(noteOn("A", "p-A")).toEqual({ kind: "failed", why: "stream broke" });
+  expect(noteOn("A", "p-A")).toEqual({ kind: "failed", why: "stream broke", code: "stream-error" });
 });
 
 it("a call cut by Stop, kept in this chat without a saved row, is kept as stopped, not failed", async () => {

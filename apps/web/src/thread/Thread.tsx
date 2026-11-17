@@ -539,6 +539,7 @@ interface ReplyView extends Files {
 }
 
 const SAYS_WHY = new Set(["context-too-small", "preempted", "runtime-changed"]);
+const failWords = (code: string | undefined): string => (code === undefined ? undefined : FAIL_WORDS[code]) ?? "The reply didn't finish.";
 
 // why: a failure the person can act on says what to do; the runtime's own text stays out of sight
 const FAIL_WORDS: Readonly<Record<string, string>> = {
@@ -586,9 +587,9 @@ function Reply({ msg, live, text, paced, thinking, tools, rounds, secs, allowedL
       {msg?.imageJob ? <ImageCard msg={msg} thread={thread} origin={origin} token={token} /> : shown !== "" ? <Markdown text={shown} live={streaming || pending} allowedLinks={allowedLinks} /> : null}
       {(msg?.imageJob ? [] : msg?.images ?? []).map((p) => <ImageOut key={p} path={p} origin={origin} token={token} />)}
       {end?.kind === "error" ? (
-        <FailLine words={SAYS_WHY.has(end.code) ? end.message : FAIL_WORDS[end.code] ?? "The reply didn't finish."}
+        <FailLine words={SAYS_WHY.has(end.code) ? end.message : failWords(end.code)}
           why={end.message} retryable />
-      ) : note?.kind === "failed" ? <FailLine words="The reply didn't finish." why={note.why} retryable={regen} /> : null}
+      ) : note?.kind === "failed" ? <FailLine words={failWords(note.code)} why={note.why} retryable={regen} /> : null}
       {!streaming && !pending && !msg?.imageJob && !(text === "" && msg?.tools?.every(t => t.name === "image")) ? (
         <ActRow text={text} meta={meta} wait={wait} regen={regen} regenOff={stopping(live ?? undefined)} stop={stop} empty={text === "" && !folded && notes.length === 0 && !msg?.images?.length} />
       ) : null}
@@ -893,7 +894,7 @@ export function Timeline({ threadId }: { threadId: string }) {
                   {why.words}
                 </div>
               ) : m?.role === "user" && why?.kind === "failed" ? (
-                <div className="stop-note under-u"><FailLine words="The reply didn't finish." why={why.why} retryable={last} /></div>
+                <div className="stop-note under-u"><FailLine words={failWords(why.code)} why={why.why} retryable={last} /></div>
               ) : null}
             </Fragment>
           );

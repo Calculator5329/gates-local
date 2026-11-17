@@ -630,7 +630,7 @@ describe("the chat that got stopped", () => {
       await tick();
       expect(live()).toBeNull();
       expect(replies()).toEqual(["so far"]);
-      expect(noteOf("p6")).toEqual({ kind: "failed", why: "the model crashed" });
+      expect(noteOf("p6")).toEqual({ kind: "failed", why: "the model crashed", code: "runtime-error" });
     });
 
     it("a reply this window left running, stopped from elsewhere, still says it was stopped", async () => {

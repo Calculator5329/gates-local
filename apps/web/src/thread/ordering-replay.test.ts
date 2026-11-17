@@ -438,7 +438,7 @@ export function errorSavedPartial(): ReplayScenario<World> {
       expect(state.turns["t1"]).toBeUndefined();
       expect(state.messages["t1"]?.filter((m) => m.role === "assistant")).toMatchObject([{ id: "reply-turn-1", content: "so far", interrupted: true }]);
       const reply = state.messages["t1"]?.find((m) => m.id === "reply-turn-1");
-      expect(reply === undefined ? undefined : drawTimes(reply, undefined).note).toEqual({ kind: "failed", why: "the model runner crashed" });
+      expect(reply === undefined ? undefined : drawTimes(reply, undefined).note).toEqual({ kind: "failed", why: "the model runner crashed", code: "runtime-error" });
     },
   };
 }

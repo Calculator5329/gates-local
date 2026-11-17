@@ -30,7 +30,7 @@ function noteOf(role: Message["role"], t: ReplyTimes, catalog: readonly CatalogE
   if (reason === "stopped") return role === "assistant" ? { kind: "stopped", secs: Math.round((at - t.startedAt) / 1000) } : undefined;
   const said = t.why === undefined ? undefined : stopReason(t.why, catalog);
   if (said !== undefined) return { kind: "said", words: said };
-  return { kind: "failed", why: t.why?.message ?? "" };
+  return { kind: "failed", why: t.why?.message ?? "", ...(t.why === undefined ? {} : { code: t.why.code }) };
 }
 
 function oldWorkMs(t: ReplyTimes): number | undefined {

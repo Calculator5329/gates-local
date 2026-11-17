@@ -44,7 +44,7 @@ beforeEach(() => {
 const ask = (id: string, content = `Question ${id}`, more: Partial<Message> = {}): Message => ({ id, threadId: "T", role: "user", content, createdAt: 1, ...more });
 const answer = (id: string, more: Partial<Message> = {}): Message => ({ id, threadId: "T", role: "assistant", content: `Answer ${id}`, model: "qwen3.5:9b", createdAt: 2, ...more });
 const pairs = (n: number) => Array.from({ length: n }, (_, i) => [ask(`u${i}`), answer(`a${i}`)]).flat();
-const failed = (message: string): ReplyTimes => ({ startedAt: 1_000, spans: [], callsAt: {}, ended: { reason: "failed", at: 3_000 }, why: { code: "model-error", message } });
+const failed = (message: string, code = "model-error"): ReplyTimes => ({ startedAt: 1_000, spans: [], callsAt: {}, ended: { reason: "failed", at: 3_000 }, why: { code, message } });
 const live = (more: Partial<LiveTurn>): LiveTurn => ({ threadId: "T", turnId: "running", userMessageId: "u0", model: "qwen3.5:9b", startedAt: 1, thinking: "", text: "", tools: [], ...more });
 
 async function mount(key: string) {
@@ -99,6 +99,17 @@ it("a live reply that ended because its model gave way or its runtime changed, o
     expect(line?.getAttribute("data-tip"), code).toBeNull();
     expect(line?.getAttribute("data-why"), code).toBe(message);
   }
+});
+
+it("a saved failure says what to do from its code, as the live one did, under the reply and under its question", async () => {
+  const question = ask("u0", "What guides ships?", { times: failed("connect ECONNREFUSED 127.0.0.1:5288", "connection-failed") });
+  act(() => store.setState({ messages: { T: [question] } }));
+  await mount("last");
+  expect(failWords(failLine(".stop-note.under-u"))).toBe("Ollama stopped answering. Retry once it's running.");
+  act(() => store.setState({ messages: { T: [ask("u0"), answer("a0", { content: "Half", times: failed("model 'gemma4:12b' not found", "model-not-found") })] } }));
+  const line = failLine(".turn.a");
+  expect(failWords(line)).toBe("This model isn't installed any more. Pick another in the model menu.");
+  expect(line?.getAttribute("data-why")).toBe("model 'gemma4:12b' not found");
 });
 
 it("a question whose reply failed before its first word carries the failed reply's line: its words, the runtime's text kept off the tip, and Retry only on the last turn", async () => {

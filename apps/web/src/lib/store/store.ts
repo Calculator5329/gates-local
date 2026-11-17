@@ -94,7 +94,7 @@ export interface StopAsk {
 export type StopNote =
   | { readonly kind: "stopped"; readonly secs: number }
   | { readonly kind: "said"; readonly words: string }
-  | { readonly kind: "failed"; readonly why: string };
+  | { readonly kind: "failed"; readonly why: string; readonly code?: string };
 
 export interface NoticeOffer {
   readonly notice: string;
