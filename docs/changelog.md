@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-16: a send waiting a long time for the graphics card is not called unsent, and a failed start shows the words
+
+- A send waits for the graphics card with no limit, behind pictures or a Measure run, and then
+  for its model to load. Once that passed 11 minutes the window called the message unsent and
+  put it back in the box while the server went on to answer it. A send the server has already
+  numbered is now left to its row, however long it waits.
+- When a read at the start of a connection failed, such as the settings, the list of replies was
+  never taken and every word of a running reply stayed hidden until it ended. The words now come
+  in as they arrive.
+- Two tests are new, both watched fail.
+
 ## 2026-11-16: tabs that ask for one copied window a moment apart end with one each
 
 - Without Web Locks, a tab that asked for its copied window before a second tab was listening

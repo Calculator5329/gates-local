@@ -246,6 +246,24 @@ it("a send refused says why in plain words, and says the words are back in the b
   expect(getState().notice, "a Retry's words were never in the box").toBe("Chat starts when Ollama is ready.");
 });
 
+it.each([
+  ["the server already said it has it is not", true, null, ""],
+  ["the server never said it has it is", false, "back", "hello"],
+] as const)("a send whose answer timed out when %s called unsent", async (_what, heard, said, box) => {
+  setState({ ...READY, view: "thread", threadId: "t1" });
+  answers.set("reply.send", (params) => {
+    // why: the server's record of the send, as it arrives while the send waits for the card
+    if (heard) chat.recordChanged(is(starting(params.id)));
+    return Promise.resolve({ answer: "not-reached", why: "timeout" });
+  });
+  await chat.send("hello");
+  await settle();
+  const id = sends()[0]?.id ?? "";
+  expect(getState().notice === null ? null : "back").toBe(said);
+  expect(getDraft("t1").text).toBe(box);
+  expect(getState().replies.has(id)).toBe(heard);
+});
+
 it("words kept from a reply whose record never said how it ended carry no times and are marked unfinished", () => {
   const failed = { kind: "error" as const, code: "internal", message: "boom" };
   setState({ ...READY, view: "thread", threadId: "t2", turns: {

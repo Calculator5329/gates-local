@@ -4,7 +4,7 @@ import { pinFramePolicy } from "../../pages/frame-policy.ts";
 import { withTimeout } from "../ui/kit/async.ts";
 import { claimWindow, windowTabs } from "./window-id.ts";
 
-// why: a send waits at most the server's 10 minute model load; a dead socket ends after
+// why: a dead socket ends a send; one the server already numbered stays, however long it waits
 const SEND_MS = 11 * 60_000;
 
 interface ConnectionEffects {

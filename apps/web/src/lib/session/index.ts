@@ -184,6 +184,10 @@ async function hydrate(c: Client): Promise<void> {
   void readFolder();
   try {
     await hydrateWith(on, c.negotiate);
+  } catch (e) {
+    // why: a start that failed takes no list on this socket, so its words come in as they arrive
+    listMissed();
+    throw e;
   } finally {
     settingsSession.releasePresentation();
     settingsReads.end();

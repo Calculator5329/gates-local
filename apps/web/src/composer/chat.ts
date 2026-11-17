@@ -799,6 +799,8 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
         setState({ notice: "Your message was already sent. It was not sent again." });
         return void loadThread(threadId, true);
       case "not-reached":
+        // why: a send waits for the card with no limit; once the server numbered its record, it has it
+        if ((getState().replies.get(params.id)?.rev ?? 0) > 0) return;
         firstDraws.delete(params.id);
         unpressed(params.id);
         if (retryOf !== undefined) return setState({ notice: refusal("closed", out.model, null) });

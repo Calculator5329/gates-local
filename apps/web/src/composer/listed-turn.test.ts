@@ -207,16 +207,16 @@ it("a list that no longer names a reply on its way drops it and its turn, with n
   expect(store.getState().replies.size).toBe(0);
 });
 
-it("a list of replies that fails to read leaves the words to come in as they arrive, not held for a list that will not come", async () => {
+it.each([["the list of replies", "reply.list"], ["the settings", "settings.get"]] as const)("when the start's read of %s fails, the words come in as they arrive, not held for a list that will not come", async (_what, failing) => {
   const b = installBrowser();
-  b.server.answer("reply.list", () => { throw { code: "internal", message: "the list failed" }; });
+  b.server.answer(failing, () => { throw { code: "internal", message: "the read failed" }; });
   b.server.answer("threads.get", ({ threadId }) => ({ thread: { id: threadId, title: threadId, createdAt: 1, updatedAt: 1 }, messages: [] }));
   vi.resetModules();
   const session = await import("../lib/session/index.ts");
   const store = await import("../lib/store/store.ts");
   const disconnect = session.connect();
   try {
-    await until(() => store.getState().imageStatus !== undefined);
+    await until(() => store.getState().hydrationSettled);
     session.openThread("A");
     await tick();
     b.server.push("reply.changed", { kind: "is", reply: { id: "other", threadId: "A", rev: 2, questionId: "q", model: "qwen3.5:9b", startedAt: 1, workMs: 0, toolMs: 0, try: 1, spans: [], callsAt: {}, stage: "writing" } });
