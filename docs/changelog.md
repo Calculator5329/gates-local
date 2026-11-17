@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-17: desktop specs share one release shard; the Settings frame-pace check is a timing test
+
+- The release check's browser shards all draw on one display, so they share its clipboard and focus. The paste test in one shard read the copy test's clipboard from another and went red. The shard planner now puts every desktop spec in the same shard, one after another.
+- The Settings switch frame-pace check is a timing test again: it runs in the timing half on a quiet machine with its first budget (three frames under 80 ms). Beside four browser shards a busy machine failed it twice, and comparing with idle frames could not tell a burst of load from the old backdrop blur. The blur itself stays a blocking check: the pop-up backdrop has no backdrop filter (popups.spec).
+
 ## 2026-11-17: two browser checks measure the app, not how busy the machine is
 
 - The Settings switch check compares the three frames after a switch with three idle frames just before it (plus 30 ms, the idle part capped at 90 ms), instead of a fixed 80 ms. With four browser shards on one machine every frame took about 30 ms, idle ones too. The 4 px backdrop blur this check guards still fails it (163 ms against 120).

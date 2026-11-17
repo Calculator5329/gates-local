@@ -42,18 +42,22 @@ export function listSpecs(playwright: string[], cwd: string, env: NodeJS.Process
 
 /**
  * Longest-first into the lightest shard. A file's weight is its measured seconds, or for a file
- * the table has not seen, its test count times the measured seconds per test.
+ * the table has not seen, its test count times the measured seconds per test. The desktop specs
+ * go in as one unit: every shard shares the one display, and so its clipboard and focus.
  */
 export function planShards(files: readonly SpecFile[], shards: number, seconds: Readonly<Record<string, number>> = {}): string[][] {
   const known = files.filter((f) => typeof seconds[f.file] === "number");
   const perTest = known.length ? known.reduce((s, f) => s + (seconds[f.file] ?? 0), 0) / Math.max(1, known.reduce((n, f) => n + f.tests, 0)) : 1;
   const weight = (f: SpecFile) => seconds[f.file] ?? f.tests * perTest;
-  const count = Math.max(1, Math.min(shards, files.length));
+  const desktop = files.filter((f) => f.file.endsWith("-desktop.spec.ts"));
+  const units = [...files.filter((f) => !desktop.includes(f)).map((f) => [f]), ...(desktop.length ? [desktop] : [])];
+  const unitWeight = (u: readonly SpecFile[]) => u.reduce((s, f) => s + weight(f), 0);
+  const count = Math.max(1, Math.min(shards, units.length));
   const plan = Array.from({ length: count }, () => ({ load: 0, files: [] as string[] }));
-  for (const f of files.toSorted((a, b) => weight(b) - weight(a) || a.file.localeCompare(b.file))) {
+  for (const u of units.toSorted((a, b) => unitWeight(b) - unitWeight(a) || a[0]!.file.localeCompare(b[0]!.file))) {
     const lightest = plan.reduce((min, s) => (s.load < min.load ? s : min));
-    lightest.load += weight(f);
-    lightest.files.push(f.file);
+    lightest.load += unitWeight(u);
+    lightest.files.push(...u.map((f) => f.file));
   }
   return plan.map((s) => s.files.toSorted());
 }

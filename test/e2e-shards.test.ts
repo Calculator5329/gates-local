@@ -23,6 +23,16 @@ test("shards balance measured seconds, longest first, and every file lands in ex
   expect(planShards([], 4)).toEqual([[]]);
 });
 
+test("every desktop spec lands in one shard, since the shards share one display and its clipboard", () => {
+  const files = [{ file: "paste-desktop.spec.ts", tests: 1 }, { file: "copy-desktop.spec.ts", tests: 1 }, { file: "pages-desktop.spec.ts", tests: 1 }, { file: "a.spec.ts", tests: 1 }, { file: "b.spec.ts", tests: 1 }, { file: "c.spec.ts", tests: 1 }];
+  const seconds = { "paste-desktop.spec.ts": 40, "copy-desktop.spec.ts": 40, "pages-desktop.spec.ts": 40, "a.spec.ts": 50, "b.spec.ts": 50, "c.spec.ts": 50 };
+  const plan = planShards(files, 4, seconds);
+  expect(plan.flat().toSorted()).toEqual(files.map((f) => f.file).toSorted());
+  const desktop = plan.filter((shard) => shard.some((f) => f.endsWith("-desktop.spec.ts")));
+  expect(desktop).toEqual([["copy-desktop.spec.ts", "pages-desktop.spec.ts", "paste-desktop.spec.ts"]]);
+  expect(plan.toSorted((x, y) => x.length - y.length)).toEqual([["a.spec.ts"], ["b.spec.ts"], ["c.spec.ts"], ["copy-desktop.spec.ts", "pages-desktop.spec.ts", "paste-desktop.spec.ts"]]);
+});
+
 test("a file filter matches its own spec file and no other", () => {
   const filter = fileFilter("/repo/test/e2e", "pages.spec.ts");
   const re = new RegExp(filter.slice(1, -1));
