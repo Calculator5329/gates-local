@@ -4,7 +4,7 @@
 // beside estimates of the whole model, each context from its own GPU reading.
 import { readFileSync } from "node:fs";
 import type { FitTable } from "@gates-local/contracts";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { MIB, VRAM_SAFETY_MARGIN_BYTES } from "./constants.ts";
 import { json, startFakeServer, type FakeServer } from "./fake-http.ts";
 import { createGpuBaseline } from "./baseline.ts";
@@ -73,6 +73,12 @@ function table(s: FakeServer, smi: NvidiaSmiRunner, deps: Partial<FitTableDeps> 
 
 const needs = (t: FitTable, model = GEMMA) => t.rows.filter((r) => r.model === model).map((r) => r.needVramBytes);
 const settled = () => new Promise((resolve) => setTimeout(resolve, 20));
+/** The table once a build newer than `seq` has finished: a busy machine can take longer than any fixed wait. */
+const newer = (t: ReturnType<typeof table>["t"], seq: number) => vi.waitFor(async () => {
+  const x = await t.get();
+  expect(x.reading.seq).toBeGreaterThan(seq);
+  return x;
+});
 
 it("every context of one model is stated on one basis: a larger context never needs less", async () => {
   const s = await ollama({ models: [SPILLED] });
@@ -197,11 +203,10 @@ it("a table equal to the last one pushed is not pushed again, but fit.table answ
   const s = await ollama({ models: [SPILLED] });
   const { t, pushed } = table(s, card());
   t.changed();
-  await settled();
+  await vi.waitFor(() => expect(pushed).toHaveLength(1));
   t.changed();
-  await settled();
+  expect((await newer(t, 1)).reading.seq).toBe(2);
   expect(pushed.map((x) => x.reading.seq)).toEqual([1]);
-  expect((await t.get()).reading.seq).toBe(2);
 });
 
 it("a table whose rows match the last but whose memory line moved is pushed", async () => {
@@ -342,8 +347,7 @@ it("a model is judged against the card's own memory; a send is judged right now"
 
   blender = true;
   t.changed();
-  await settled();
-  const busy = await t.get();
+  const busy = await newer(t, idle.reading.seq);
   const busySend = await send();
   // The card's own memory, whisper and the other always-on programs included: a download row and an
   // installed row's card verdict read it, loaded or not; the installed row itself is a send's plan.

@@ -57,6 +57,7 @@ let drafts: typeof import("../lib/store/drafts.ts");
 let session: typeof import("../lib/session/index.ts");
 let Composer: typeof import("./Composer.tsx")["Composer"];
 let initial: State;
+const frames = new Set<ReturnType<typeof setTimeout>>();
 
 beforeAll(async () => {
   doc.defaultView = win;
@@ -67,7 +68,12 @@ beforeAll(async () => {
   vi.stubGlobal("matchMedia", (q: string) => ({ matches: mediaMatches(q), addEventListener() {}, removeEventListener() {} }));
   vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (X11; Linux x86_64)" });
   vi.stubGlobal("localStorage", { getItem: () => null, setItem() {}, removeItem() {} });
-  vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) => setTimeout(() => cb(0), 0));
+  vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) => {
+    const id = setTimeout(() => { frames.delete(id); cb(0); }, 0);
+    frames.add(id);
+    return id;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (id: ReturnType<typeof setTimeout>) => { frames.delete(id); clearTimeout(id); });
   Object.assign(FakeElement.prototype, { value: "", selectionStart: 0, selectionEnd: 0, checked: false, setSelectionRange: selectRange });
   Object.defineProperty(FakeElement.prototype, "defaultValue", { configurable: true, set: followDefault });
   const { createRoot } = await import("react-dom/client");
@@ -80,7 +86,8 @@ beforeAll(async () => {
   initial = store.getState();
   root = createRoot(doc.body.appendChild(doc.createElement("div")) as unknown as Element);
 });
-afterAll(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
+// why: a frame still queued after the last test would run against the unstubbed document
+afterAll(() => { act(() => root.unmount()); for (const id of frames) clearTimeout(id); frames.clear(); vi.unstubAllGlobals(); });
 beforeEach(() => {
   Object.assign(device, { coarse: false, noHover: false, width: 1280 });
   doc.activeElement = null;

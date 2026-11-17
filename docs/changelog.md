@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-17: unit tests run in a new order each time, and the suite takes 58 s instead of 74 s
+
+- Unit tests now run shuffled, files and tests alike, and the run prints its seed. The first
+  shuffled runs found eight tests that passed only because of the order they ran in. Each now
+  sets up what it reads: a stub, a fresh module, its own store state, or a wait for the state it
+  checks instead of a 20 ms sleep. AGENTS.md has the rules.
+- The installed-update crash matrix alone set the suite's wall time: one file of 68 s while the
+  rest of the suite took 45 s on 12 cores. Its second-crash cases are now three files of their
+  own, and the suite went from 73.8 s to 58.2 s on the same 12 cores.
+- Each second-crash file checks that its cases reached every crash point; the check was watched
+  fail with one point left out. Test count up by 2.
+
 ## 2026-11-17: a window grace test no longer races a slow disk
 
 - One test checked two things on one 100 ms timer: a window away past its grace is let go once,

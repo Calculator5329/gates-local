@@ -113,8 +113,10 @@ it("with no GPU the page says so once, and the model row is its name and one ver
 });
 
 // Decision 13: context is chosen in the model picker only, so the verdict names the size the chat runs at, once.
+const CARD: GpuStatus = { vendor: "nvidia", name: "NVIDIA GeForce RTX 5070 Ti", totalBytes: 16 * GB, freeBytes: 12 * GB, occupants: [], systemMemoryAvailableBytes: 16 * GB, measuredAt: 1 };
+const CARD_MEMORY = { kind: "gpu", freeBytes: 12 * GB, usableBytes: 11 * GB };
 it("with a GPU the card is named once and the verdict names the size once", () => {
-  const text = shown({ vendor: "nvidia", name: "NVIDIA GeForce RTX 5070 Ti", totalBytes: 16 * GB, freeBytes: 12 * GB, occupants: [], systemMemoryAvailableBytes: 16 * GB, measuredAt: 1 }, "fits", { kind: "gpu", freeBytes: 12 * GB, usableBytes: 11 * GB });
+  const text = shown(CARD, "fits", CARD_MEMORY);
   expect(times(text, "RTX 5070 Ti")).toBe(1);
   expect(text).toContain("Should run well");
   expect(text).not.toContain("16k context");
@@ -123,6 +125,8 @@ it("with a GPU the card is named once and the verdict names the size once", () =
 });
 
 it("has no Default context control, and a saved default is not an error", () => {
+  // why: the chat on a card, drawn from this test's own state; tests run in a shuffled order
+  shown(CARD, "fits", CARD_MEMORY);
   const html = renderToStaticMarkup(createElement(GpuMemory));
   expect(html).not.toContain("Default context");
   expect(html).not.toContain("data-ctx");

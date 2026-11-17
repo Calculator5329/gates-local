@@ -81,6 +81,13 @@ async function mount(threadId: string, codes: readonly string[]) {
 }
 
 it("runs nothing until the desktop bridge has said, then hands the page over and frames it", async () => {
+  // why: sandbox.ts keeps the bridge's answer for the module's life, and an earlier test with no
+  // bridge already answered "on"; a fresh module graph is a desktop copy that has not said yet
+  vi.resetModules();
+  store = await import("../lib/store/store.ts");
+  pages = await import("./pages.ts");
+  ({ PagePanel } = await import("./PagePanel.tsx"));
+  store.setState({ serverOrigin: SERVER, fileToken: "t" });
   let answer!: (s: { status: string; sandboxOff?: boolean }) => void;
   win.gatesLocal = { getState: () => new Promise((r) => { answer = r; }), onState: () => () => undefined };
   await mount("b1", [page("A")]);

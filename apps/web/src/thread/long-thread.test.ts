@@ -47,8 +47,11 @@ let store: typeof import("../lib/store/store.ts");
 /** Change listeners attached to reduced-motion queries and not yet removed. */
 let motionListeners = 0;
 const isMotion = (query: string) => query.includes("reduced-motion");
+/** Reduced-motion queries over the whole file, never cleared: the module asks once in its life, whichever test paces first. */
+let motionAsked = 0;
 const matchMedia = (query: string) => {
   media.push(query);
+  if (isMotion(query)) motionAsked++;
   return {
     matches: false, media: query,
     addEventListener() { if (isMotion(query)) motionListeners++; },
@@ -168,7 +171,7 @@ it("keeps the live reply's element when it saves, and asks about reduced motion 
   expect(saved?.getAttribute("data-received")).toBe(String("The answer so far, and more, then the end".length));
   // no frame ran, so the reveal is still paced: a remounted saved row would show it all at once
   expect(Number(saved?.getAttribute("data-revealed"))).toBeLessThan("The answer so far, and more, then the end".length);
-  expect(media.filter((q) => q.includes("reduced-motion")), "one reduced-motion query for the module").toHaveLength(1);
+  expect(motionAsked, "one reduced-motion query for the module").toBe(1);
   idle.length = 0;
 });
 

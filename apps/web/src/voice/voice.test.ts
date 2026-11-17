@@ -56,13 +56,14 @@ vi.mock("../lib/store/drafts.ts", () => ({
 }));
 vi.mock("../lib/session/index.ts", () => ({ call: h.call, updateSettings: h.update, openSettings: vi.fn() }));
 vi.mock("../composer/draft-insertion.ts", () => ({ insertAtCursor: h.insert }));
-vi.mock("./voice-audio.ts", () => {
+vi.mock("./voice-audio.ts", () => fakeAudio());
+function fakeAudio() {
   h.audioLoaded = true;
   return {
     captureAudio: h.capture,
     insertTranscript: (draft: string, cursor: number, text: string) => ({ draft: draft.slice(0, cursor) + text + draft.slice(cursor), cursor: cursor + text.length }),
   };
-});
+}
 import { Voice } from "./Voice.tsx";
 import { VoiceSettings } from "./VoiceSettings.tsx";
 
@@ -110,8 +111,14 @@ beforeEach(() => {
 });
 
 it("rendering the microphone leaves capture unloaded; the first press loads and starts it", async () => {
+  // why: an earlier test may have loaded capture already, and a mock's factory runs once per registration;
+  // a fresh module graph with the mock registered again starts unloaded in any order
+  vi.resetModules();
+  vi.doMock("./voice-audio.ts", () => fakeAudio());
+  h.audioLoaded = false;
+  const { Voice: FreshVoice } = await import("./Voice.tsx");
   expect(h.audioLoaded).toBe(false);
-  const view = render(() => Voice({ textarea: { current: null } }));
+  const view = render(() => FreshVoice({ textarea: { current: null } }));
   expect(h.audioLoaded).toBe(false);
   props(view, "Dictate").onClick();
   await vi.waitFor(() => expect(h.capture).toHaveBeenCalledTimes(1));

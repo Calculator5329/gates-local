@@ -10,5 +10,8 @@ export default defineConfig({
     // a test about speed has to assert its own measured time.
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // A new order every run, so a test that leans on what an earlier one left behind fails
+    // where it leans. The run prints its seed; `--sequence.seed=<n>` replays that order.
+    sequence: { shuffle: true },
   },
 });

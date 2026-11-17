@@ -156,6 +156,9 @@ it("one change of the reduced-motion setting reaches every reply that paces", as
     expect(shown()).toEqual(texts);
   } finally {
     act(() => root.unmount());
+    // why: later tests import paced.ts afresh and must get the hook double again, in any order
+    vi.doMock("react", () => hooks);
+    vi.resetModules();
   }
 });
 

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import os, { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FitReport, GpuStatus, ImageChoice, ImageDownload, ImageEvent, ImagePresets, ModelLoad, Params } from "@gates-local/contracts";
 import { imageFitEdges } from "@gates-local/contracts/testing";
 import { startFakeOllama } from "../../../../test/fake-ollama/fake-ollama.ts";
@@ -1682,6 +1682,8 @@ describe("image presets (fake ComfyUI file lists)", () => {
       /** Free bytes on every download folder's volume. */
       let free = 10 ** 12;
       const download = { fetch: fileServer, allow: () => true, freeBytes: async () => free, intervalMs: 0 };
+      // every test starts with the fake server idle, whether or not it calls setup: a Stop test leaves holdAfter set
+      beforeEach(() => { served.length = 0; version = 1; holdAfter = undefined; free = 10 ** 12; });
       // a saved MOSS-Image copy with a model of the person's own: a file with no download address
       const own = structuredClone(mine);
       own["18:1"]!.inputs["unet_name"] = "my-own.safetensors";
@@ -1691,7 +1693,6 @@ describe("image presets (fake ComfyUI file lists)", () => {
         const kinds = ["checkpoints", "loras", "diffusion_models", "text_encoders", "vae"];
         const f = await fixture({ ...deps, download: records === "checked" ? download : { ...download, records: false } });
         f.workflows({ ...workflows, "/internal/folder_paths": Object.fromEntries(kinds.map((k) => [k, [path.join(root, k), "/elsewhere/" + k]])) });
-        served.length = 0; version = 1; holdAfter = undefined; free = 10 ** 12;
         return { f, root, done: (n: number) => vi.waitFor(() => expect(f.downloads.filter((p) => p.state !== "downloading" && p.state !== "verifying")).toHaveLength(n)) };
       };
 

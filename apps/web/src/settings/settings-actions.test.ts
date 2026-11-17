@@ -40,6 +40,9 @@ beforeAll(async () => {
   vi.stubGlobal("HTMLElement", FakeElement);
   vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
   vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (X11; Linux x86_64)" });
+  // why: the download fill's frame loop must find these in any test order; frames never fire here
+  vi.stubGlobal("requestAnimationFrame", () => 0);
+  vi.stubGlobal("cancelAnimationFrame", () => {});
   const { createRoot } = await import("react-dom/client");
   store = await import("../lib/store/store.ts");
   ({ SettingsView } = await import("./Settings.tsx"));
@@ -171,8 +174,6 @@ it("a source's menu puts the focus on its first item; a clone's has no Refresh, 
 
 // React runs this commit's effects inside act; the attribute log is what each commit drew.
 it("a finished download keeps counting in the commit that first has its fill full, and shows the check after it", async () => {
-  vi.stubGlobal("requestAnimationFrame", () => 0);
-  vi.stubGlobal("cancelAnimationFrame", () => {});
   let now = 0;
   const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
   const sample = { id: "chinook", label: "Chinook", description: "A music store", sizeBytes: 1000, url: "https://example.test/chinook.db", license: "MIT", licenseUrl: "https://example.test/LICENSE", tables: [{ name: "albums", rows: 347 }], questions: ["q1"] };

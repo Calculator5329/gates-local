@@ -104,6 +104,19 @@ feature as the screen does, with its folders, wire calls and browser specs.
 - Tests sit next to the code (`*.test.ts`) or in the package `test/`.
   Fakes for Ollama, nvidia-smi and processes live with the module that uses
   them.
+- Unit tests run in a new order every time (`sequence.shuffle`; the run
+  prints its seed, `--sequence.seed=<n>` replays it). A test sets up all it
+  reads and leaves nothing for the next: a global one test needs is stubbed
+  for the whole file and undone in `afterAll`; spies and timers are restored
+  before the test ends; frames or timers a stub queued are cancelled before
+  the stub goes; a test about a module's first load imports a fresh graph
+  (`vi.resetModules()`, and `vi.doMock` again for a mock whose factory records
+  the load). Wait for the state a test checks (`vi.waitFor`), never a fixed
+  sleep. A test that fails in some orders has a bug; never pin the order to
+  hide it. A suite whose last test sums the cases above it keeps its written
+  order with `describe(name, { shuffle: false }, ...)`.
+- No unit test file runs much longer than the rest: the slowest file sets the
+  suite's wall time, so a long matrix is split across files.
 - GPU: measure free VRAM before any real load; never exceed it; never set
   `num_gpu` 0; unload what a check loaded. Whisper is never touched.
 - Git: plain `git commit`, stage only your files, never `git stash`, never
