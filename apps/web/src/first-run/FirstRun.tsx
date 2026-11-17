@@ -277,6 +277,7 @@ function Waiting({ installing }: { installing: boolean }) {
   const install = useStore((s) => s.runtime?.install);
   const { stalled, words, retry } = useInstallStall(installing ? install : undefined);
   const own = useStore((s) => s.runtime?.state === "starting" && s.runtime.owner === "app");
+  const next = useStore(recommendedEntry);
   if (none) return <Connecting />;
   return (
     <Shell
@@ -295,6 +296,11 @@ function Waiting({ installing }: { installing: boolean }) {
             <Cta label="Retry" onGo={retry} link="Start chatting" onLink={startChat} />
           ) : (
             <Cta label="Start chatting" onGo={startChat} link="Settings" onLink={() => finishFirstRun("general")} />
+          )}
+          {next === undefined ? null : (
+            <p className="fr-note" data-testid="first-run.next-model">
+              Next: {next.label} · <span className="fig">{gb(next.downloadBytes)}</span> download
+            </p>
           )}
           <p className="fr-note">You can type now; replies start once the engine and a first model are in.</p>
         </>

@@ -68,20 +68,27 @@ it("an offer sent with no words is not judged by the note", () => {
 const textOf = (html: string) => html.replace(/<!-- -->/g, "").replace(/<[^>]+>/g, "");
 const BUTTON = /<button\b[^>]*>/g;
 
-it("when nothing runs, the note says in one line what is short, the GPU's and system memory apart, with the memory details behind one control", () => {
+// Council climb-025 Q16: "Gemma 4 12B · 16k ›" and "needs X · GPU Y + RAM Z · W short" said nothing in words.
+it("when nothing runs, the note says in one plain sentence what is wrong, with the memory figures behind one control", () => {
   const html = note({ short: { needBytes: 12 * GIB, gpuBytes: 8 * GIB, ramBytes: 2 * GIB, shortBytes: 2 * GIB } });
-  const line = html.match(/<span[^>]*data-testid="chat\.composer\.offer-short"[^>]*>([\s\S]*?)<\/span>/)?.[1] ?? "";
-  expect(textOf(line).trim()).toBe(`needs ${gb(12 * GIB)} · GPU ${gb(8 * GIB)} + RAM ${gb(2 * GIB)} · ${gb(2 * GIB)} short`);
+  const line = html.match(/<span[^>]*data-testid="chat\.composer\.offer-what"[^>]*>([\s\S]*?)<\/span>/)?.[1] ?? "";
+  expect(textOf(line).trim()).toBe("Not enough memory for Qwen 3.5 9B at 32k.");
+  expect(textOf(html), "the figures are in the details, not the line").not.toMatch(/GB|short|RAM/);
   const buttons = html.match(BUTTON) ?? [];
   expect(buttons, "one control, and no offer to take").toHaveLength(1);
   expect(buttons[0]).toContain('data-testid="chat.composer.offer-details"');
   expect(buttons[0]).toContain('aria-label="Memory details"');
 });
 
+it("a refusal that counted no system memory says it is the GPU's memory, and leads the offers it makes", () => {
+  const html = note({ short, model: { model: "qwen3.5:4b", numCtx: 8192, verdict: "fits" } });
+  expect(textOf(html)).toMatch(/^Not enough GPU memory for Qwen 3\.5 9B at 32k\.\s*Qwen 3\.5 4B/);
+});
+
 // Council climb-025 Q12: "Qwen 3.5 4B · 16k Qwen 3.5 9B holds 7.0 GB" ran the context into the holder's name.
 it("what another program holds is set apart from the model and context it is in the way of", () => {
   const html = note({ short, free: [{ kind: "model", name: "qwen3.5:4b", bytes: 7 * GIB }] });
-  expect(textOf(html)).toMatch(new RegExp(`· 32k\\s*—\\s*Qwen 3\\.5 4B holds ${gb(7 * GIB).replace(".", "\\.")}`));
+  expect(textOf(html)).toMatch(new RegExp(`at 32k\\.\\s*—\\s*Qwen 3\\.5 4B holds ${gb(7 * GIB).replace(".", "\\.")}`));
 });
 
 const BIG = "qwen3.5:9b";

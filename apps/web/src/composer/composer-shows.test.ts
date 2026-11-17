@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
-import type { CatalogEntry, ImageChoice, Message, ModelInfo } from "@gates-local/contracts";
+import type { CatalogEntry, ImageChoice, Message, ModelInfo, Reply } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import type { LiveTurn, State } from "../lib/store/store.ts";
 
@@ -234,7 +234,8 @@ it("a queued row waiting on a clock names it in a tip, and a row that shows a wo
 it("a row waiting on a download or on setup shows its percent and time left, no numbers once every byte is in, and none before a size is known", () => {
   const setupRow = repliesOf([{ id: "q1", threadId: "thread", text: "hello", waitFor: "setup" }]);
   show({ runtime: { ...INSTALLING, install: { receivedBytes: 42_000_000, totalBytes: 100_000_000, bytesPerSecond: 500_000 } }, replies: setupRow });
-  expect(words(numbers(rows()[0] ?? "") ?? "")).toBe("42% · 2 min");
+  // council climb-025 Q15: a countdown says it is one
+  expect(words(numbers(rows()[0] ?? "") ?? "")).toBe("42% · 2 min left");
   show({ runtime: { ...INSTALLING, install: { receivedBytes: 100_000_000, totalBytes: 100_000_000 } }, replies: setupRow });
   expect(numbers(rows()[0] ?? "")).toBeUndefined();
   const downloadRow = repliesOf([{ id: "q1", threadId: "thread", text: "hello", waitFor: "download" }]);
@@ -291,4 +292,14 @@ it("only a queued picture carries a kind icon; a queued chat message has none", 
 it("a queued message that just waits still has its status line, empty, ready to announce a word", () => {
   show({ replies: repliesOf([{ id: "q1", threadId: "thread", text: "next", waitFor: "reply" }]) });
   expect(rows()[0]).toContain('<span class="qt-s" role="status"></span>');
+});
+
+// Guards council climb-025 Q4: the tip said "Run at 8k context" beside a button that already shows 8k.
+it("a held row's smaller-context offer shows its figure, and its tip only names it", () => {
+  const offer = { context: { numCtx: 8192, verdict: "fits" as const }, short: { needBytes: 2, gpuBytes: 1, ramBytes: 0, shortBytes: 1 } };
+  const held = { id: "q1", threadId: "thread", rev: 1, messageId: "m-q1", text: "hi", at: 1, model: TAG, numCtx: 16384, stage: "held", held: { why: "refused", code: "wont-fit", message: "too big", offer } } as Reply;
+  show({ replies: new Map([["q1", held]]) });
+  const button = whole(rows()[0] ?? "", "chat.queue.offer-context-1");
+  expect(words(button)).toContain("8k");
+  expect(tipOf(button)).toBe("Context");
 });

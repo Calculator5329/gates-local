@@ -102,7 +102,7 @@ test.describe("at a small window", () => {
     const numbers = row.locator(".qt-n");
     await expect(numbers, "a one-digit percent on the waiting row").toHaveText(/^[1-9]%/);
     await page.screenshot({ path: info.outputPath("row2-one-digit.png") });
-    await expect(numbers, "a two-digit percent and the time left on the waiting row").toHaveText(/^[1-9]\d% · \d+ (s|min)$/, { timeout: 20_000 });
+    await expect(numbers, "a two-digit percent and the time left on the waiting row").toHaveText(/^[1-9]\d% · \d+ (s|min) left$/, { timeout: 20_000 });
     await page.screenshot({ path: info.outputPath("row2-two-digits.png") });
     // the clock's words are still its tip and what a screen reader says
     await expect.soft(row.locator(".qt-s"), "the queue row's state").toHaveAttribute("data-tip", "Sends when the download finishes");

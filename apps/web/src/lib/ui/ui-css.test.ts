@@ -91,6 +91,12 @@ it("the verdict label draws its dot and its words in the verdict's own colour", 
   expect(last(".vl .vd", "background", everywhere)).toBeUndefined();
 });
 
+// Guards council climb-025 Q17: at 360 the tapped model button's highlight stayed on screen as a
+// teal block over the picker's "Download models"; the app's own pressed states are the only ones.
+it("a tap leaves no browser highlight of its own", () => {
+  expect(last("html", "-webkit-tap-highlight-color", everywhere)).toBe("transparent");
+});
+
 it("a bottom sheet's title row is hidden off a phone and shown on one", () => {
   expect(last(".sh-h", "display", everywhere)).toBe("none");
   expect(sheet.filter((r) => r.at !== "" && squash(r.at) !== phoneAt && r.selectors.includes(".sh-h") && decl(r.body, "display") !== undefined)).toEqual([]);

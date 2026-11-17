@@ -72,6 +72,19 @@ it.each([
   for (const where of ["banner", "first", "settings"]) expect(html[where], where).toContain(`data-why="${detail}"`);
 });
 
+// Council climb-025 Q16: a release file that is gone (404) read as a site that "didn't respond".
+it.each([404, 410])("a download the site no longer has (HTTP %i) says so and what to do next; the status is in the details", async (status) => {
+  const detail = `Downloading Ollama failed: HTTP ${status} from https://github.com/ollama/ollama/releases/download/v0.12.0/ollama-linux-amd64.tgz. Check the network and retry; nothing was installed.`;
+  const gone = { ...base, failure: "download", detail } as const;
+  const p = await places(gone);
+  for (const where of ["banner", "first", "settings"]) {
+    expect(p[where], where).toContain("This download is no longer available. Retry after the app updates, or install Ollama from ollama.com.");
+    expect(p[where], where).not.toMatch(/didn't respond|HTTP|github/);
+  }
+  const html = await places(gone, (h) => h);
+  for (const where of ["banner", "first", "settings"]) expect(html[where], where).toContain(`data-why="${detail}"`);
+});
+
 // Council climb-025 Q16 (S-12): the wrong-runtime banner led with "port 5288" and "localhost:5288".
 it("a program other than Ollama in its place gets plain words on the banner; the address is in the details", async () => {
   const wrong = { state: "wrong-service", owner: "external", baseUrl: "http://127.0.0.1:5288" } as const;

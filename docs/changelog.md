@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-17: refusals and failures lead with a plain sentence; waits say what they are; phone tables stack; tips are names
+
+- The memory refusal note starts with one sentence ("Not enough GPU memory for Gemma 4 12B at 16k.", or "Not enough memory" when system memory counted too), then its offer buttons. The GB figures moved behind Memory details.
+- A missing picture model says "The picture model isn't installed." The file and the folder it belongs in are under Details, with an Image settings button. "ComfyUI didn't start" says where its log is. A reply that didn't finish on the last turn says "Retry, or pick another model." beside its Retry. A runtime download the site no longer has (HTTP 404 or 410) says "This download is no longer available. Retry after the app updates, or install Ollama from ollama.com.", with the status under the details. The wrong-port placeholder no longer says "port".
+- A waiting row's countdown says "left" ("7% · 10 s left"). On a phone the waiting message gets its own line, so it is no longer cut to "Hello fro…". While the engine downloads, the first-run screen names the next step ("Next: Qwen 3.5 9B · 6.1 GB download").
+- Under 420 px a reply's table shows each row as a card: the first cell as its title, then one named line per column. Nothing is cut at the edge and there is no sideways swipe. On a phone the image model button shows its whole name ("Klein 4B"); the picture size stays on the card and in the menu. A tapped control no longer leaves the browser's highlight behind, which had shown as a teal block over the picker's "Download models".
+- Tips are names: Send is "Send · Enter", and "Another chat's reply stops first" moved to the notice line under the composer. A failed download in the Models icon reads "Qwen 3 14B · Download failed". A queued row's smaller-context button is "Context". The stopped-reply mark is "Not sent to the model".
+
 ## 2026-11-17: a turn makes its model the app's; failures carry their button; a phone code block wraps
 
 - A chat turn that answers on a model already loaded (after a restart, or loaded by another client) makes that model the app's, so the next picture frees it without asking. Only that model is claimed, and only when Ollama's list of loaded models was read. A ComfyUI whose image config can't be read now counts as someone else's and is never freed without a click. Decision: "Other programs' memory is freed only with a click".

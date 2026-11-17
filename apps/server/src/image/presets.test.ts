@@ -599,7 +599,7 @@ describe("the picker and a send, through the image module", () => {
     });
     await f.module.presets();
     const job = await f.module.generate({ prompt: "a fox" }); await f.module.wait(job.jobId);
-    expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "image-model", choice: { preset: "template:image_sdxl_simple" }, message: "Install sd_xl_base_1.0.safetensors in ComfyUI, then try again." });
+    expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "image-model", choice: { preset: "template:image_sdxl_simple" }, message: "The picture model isn't installed.", detail: expect.stringMatching(/^sd_xl_base_1\.0\.safetensors belongs in .*checkpoints/) });
   });
 
   it("a Retry of a card made with a retired theme runs that theme again, its words around the first prompt", async () => {

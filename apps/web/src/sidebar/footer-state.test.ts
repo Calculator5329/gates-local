@@ -53,10 +53,12 @@ describe("Models", () => {
     expect(modelsIcon([pull({ name: "qwen3:14b", state: "downloading" })], name).tip).toBe("<b>Starting the download of Qwen 3 14B</b>");
     expect(modelsIcon([pull({ name: "qwen3:14b", state: "verifying", completedBytes: 9, totalBytes: 9 })], name)).toMatchObject({ progress: 1, tip: "<b>Checking Qwen 3 14B</b> after downloading it" });
   });
-  it("a failed download: red with a dot, which model and why", () => {
+  // council climb-025 Q4: the tip is a short status; the reason is on the download's row in Settings
+  it("a failed download: red with a dot, which model and a short status", () => {
     const i = modelsIcon([pull({ name: "qwen3:14b", state: "error", message: "pull model manifest: <file does not exist>" })], name);
     expect(i).toMatchObject({ state: "failed", failed: true, progress: null });
-    expect(i.tip).toBe("<b>Qwen 3 14B did not finish downloading.</b> pull model manifest: &lt;file does not exist&gt;");
+    expect(i.tip).toBe("<b>Qwen 3 14B</b> · Download failed");
+    expect(i.label).toBe("Models · Qwen 3 14B · Download failed");
   });
   it("a failure beside a running download keeps the ring and adds the dot and its line", () => {
     const i = modelsIcon([

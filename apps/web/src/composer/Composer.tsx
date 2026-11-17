@@ -202,11 +202,12 @@ export function Composer() {
   const memNo = v?.k === "no" && !isStreaming && !freed && !editing;
   const enter = touch ? "" : " · Enter";
   let sendTip = `Send${enter}`;
+  let freesFirst = false;
   if (editing) sendTip = `Update${enter}`;
   else if (isStreaming && !blocked) sendTip = `Queue${enter}`;
   else if (!queueable && !boot && !none && !blocked && !noModel) {
     if (memNo) sendTip = `Not enough memory at ${k(ctx)}`;
-    else if (text && freed) sendTip = `Send${enter}. Another chat's reply stops first`;
+    else freesFirst = text && freed;
   }
   if (!drawing && text && ((blocked && !queueable) || noModel)) sendTip = boot ? CONNECTING : noModel && ready ? needsModel : placeholder;
   const unlisted = !drawing && ready && !queueable && !noModel && model !== undefined && sendableModel(models, model) === undefined;
@@ -216,6 +217,9 @@ export function Composer() {
   if (pasting) sendTip = "Attaching…";
   const drawNo = !drawing ? null : images.length > 0 || files.length > 0 ? "Image takes words only" : !online ? "Gates Local isn't answering" : unset ? "Images are not set up" : pictured === undefined ? "Reading the image models…" : null;
   if (drawing && !editing && !isStreaming && !refused && !pasting) sendTip = drawNo ?? `Make image${enter}`;
+  // why: the tip names the button; what Send will do first is said on the notice line
+  const sendNote = freesFirst && sendTip === `Send${enter}` ? FREES_FIRST : null;
+  const shownNote = notice ?? sendNote;
   const sendDisabled = drawing ? !text || drawNo !== null || refused > 0 || pasting > 0
     : (blocked && !queueable) || (!blocked && memNo) || noModel || unlisted || !text || imageNo !== null || refused > 0 || pasting > 0;
   const memRefused = !drawing && !blocked && !queueable && !noModel && !unlisted && memNo && imageNo === null && !refused && !pasting;
@@ -409,9 +413,9 @@ export function Composer() {
           </div>
         </div>
       </form>
-      {notice !== null && noticeOffer?.notice === notice ? <RefusalNote o={noticeOffer} /> : notice !== null ? (
+      {notice !== null && noticeOffer?.notice === notice ? <RefusalNote o={noticeOffer} /> : shownNote !== null ? (
         <p className={`na c-note${memNo ? " no" : ""}${acts === undefined ? "" : " c-acted"}`} data-testid="chat.composer.notice" role="status">
-          {acts === undefined ? notice : <span>{notice}</span>}
+          {acts === undefined ? shownNote : <span>{shownNote}</span>}
           {acts?.map((a) => (
             <button key={a} type="button" className="co-act" data-testid={`chat.composer.notice-${a}`} onClick={() => noticeDo(a)}>{ACT_WORDS[a]}</button>
           ))}
@@ -421,7 +425,9 @@ export function Composer() {
   );
 }
 
-const ACT_WORDS: Record<NoticeActKind, string> = { "stop-other": "Stop the other reply", wait: "Wait", retry: "Retry" };
+const FREES_FIRST = "Another chat's reply stops first";
+
+const ACT_WORDS: Record<NoticeActKind, string> ={ "stop-other": "Stop the other reply", wait: "Wait", retry: "Retry" };
 
 // external: a browser sizes field-sizing:content itself; reading scrollHeight forces layout
 const sizesItself = typeof CSS !== "undefined" && CSS.supports("field-sizing", "content");
@@ -535,7 +541,7 @@ const CLOCKED = new Set<string | null>([AFTER_DOWNLOAD, AFTER_SETUP]);
 export function waitNumbers(p: { done: number; total?: number | undefined; rate?: number | undefined; checking?: boolean } | undefined, last: string): string {
   if (p === undefined || !p.total) return "";
   if (p.checking === true || p.done >= p.total) return last;
-  const left = p.rate ? timeLeft((p.total - p.done) / p.rate) : "";
+  const left = p.rate ? `${timeLeft((p.total - p.done) / p.rate)} left` : "";
   return `${Math.floor((p.done / p.total) * 100)}%|${left}`;
 }
 
@@ -595,7 +601,7 @@ function QueueOffer({ q, n }: { q: WaitingReply; n: number }) {
     <>
       {context === undefined ? null : (
         <button type="button" className="co-act" data-testid={`chat.queue.offer-context-${n}`} aria-pressed={q.numCtx === context.numCtx && q.model === tag}
-          data-tip={`Run at ${k(context.numCtx)} context`} onClick={andFocus(() => void chooseForQueued(q.id, tag, context.numCtx))}>
+          data-tip="Context" onClick={andFocus(() => void chooseForQueued(q.id, tag, context.numCtx))}>
           <span>{k(context.numCtx)}</span>
           <Slower words={context.words} />
         </button>

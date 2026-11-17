@@ -189,6 +189,15 @@ export function presetFiles(preset: Preset): string[] {
   return graphFiles(convertWorkflow(preset.workflow, EVERY_CLASS)).map((f) => f.name);
 }
 
+// external: ComfyUI's loader nodes read each input from one folder under models/
+const FOLDER_OF_INPUT: Readonly<Record<string, string>> = { unet_name: "diffusion_models", ckpt_name: "checkpoints", lora_name: "loras", vae_name: "vae" };
+
+export function folderOf(key: string): { folder?: string } {
+  const input = key.split(".").at(-1) ?? "";
+  const folder = FOLDER_OF_INPUT[input] ?? (input.startsWith("clip_name") ? "text_encoders" : undefined);
+  return folder === undefined ? {} : { folder };
+}
+
 export function findFile(files: LoaderFiles, file: Pick<GraphFile, "key" | "name">): string | undefined {
   const base = file.name.replaceAll("\\", "/").split("/").at(-1)!;
   return files[file.key]?.find((v) => v === file.name || v.replaceAll("\\", "/").endsWith(`/${base}`) || v === base);
@@ -271,7 +280,7 @@ export function jobGraph(preset: Preset, info: ObjectInfo, values: { prompt: str
   catch (error) { throw error instanceof WorkflowRefusal ? Object.assign(new Error(`${preset.name}: ${error.message}`), { code: "image-model" }) : error; }
   for (const file of graphFiles(graph)) {
     const listed = findFile(lists.files, file);
-    if (listed === undefined) throw Object.assign(new Error(`ComfyUI model ${file.name} is absent. Install it in ComfyUI's model folders, then retry.`), { code: "image-model", file: file.name });
+    if (listed === undefined) throw Object.assign(new Error(`ComfyUI model ${file.name} is absent. Install it in ComfyUI's model folders, then retry.`), { code: "image-model", file: file.name, ...folderOf(file.key) });
     graph[file.node]!.inputs[file.input] = listed;
   }
   const prompt = preset.wrap === undefined ? values.prompt : `${preset.wrap.prefix}${values.prompt}${preset.wrap.suffix}`;

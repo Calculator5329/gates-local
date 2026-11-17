@@ -62,10 +62,12 @@ export function RefusalNote({ o }: { o: NoticeOffer }) {
   const name = (tag: string) => describeModel(tag, catalog).name;
   const remembers = useStore((s) => s.unavailable["settings.update"] !== true);
   const { context, model, short, free } = o.offer;
+  // why: a refusal that counted system memory too is short of both, not of the GPU's alone
+  const whose = short.ramBytes > 0 ? "memory" : "GPU memory";
   return (
     <p className="na c-note no c-offer" data-testid="chat.composer.offer" role="status">
       <Icon id="alert" cls="s12" />
-      <span className="co-what">{name(o.model)} · {k(o.numCtx)}</span>
+      <span className="co-what" data-testid="chat.composer.offer-what">Not enough {whose} for {name(o.model)} at {k(o.numCtx)}.</span>
       {free !== undefined && free.length > 0 ? (
         <>
           <span className="co-to">—</span>
@@ -79,9 +81,6 @@ export function RefusalNote({ o }: { o: NoticeOffer }) {
         </>
       ) : context === undefined && model === undefined ? (
         <>
-          <span className="co-short" data-testid="chat.composer.offer-short">
-            needs {gb(short.needBytes)} · GPU {gb(short.gpuBytes)} + RAM {gb(short.ramBytes)} · {gb(short.shortBytes)} short
-          </span>
           <button type="button" className="co-act sq" data-testid="chat.composer.offer-details" aria-label="Memory details" data-tip="Memory details" onClick={() => openFit(o.model)}>
             <Icon id="gauge" />
           </button>

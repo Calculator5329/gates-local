@@ -110,7 +110,10 @@ it("a model that fits once another chat's reply stops can be sent to, and Send s
   const freed = sendButton();
   expect(freed, "no memory refusal").not.toContain('aria-disabled="true"');
   expect(freed).not.toContain("not enough memory");
-  expect(freed).toMatch(/Another chat(?:&#x27;|')s reply stops first/);
+  // council climb-025 Q4: the tip is the verb; the reason is on the composer's notice line
+  expect(freed).toContain('data-tip="Send · Enter"');
+  const note = renderToStaticMarkup(createElement(Composer)).match(/<p\b[^>]*data-testid="chat.composer.notice"[^>]*>([\s\S]*?)<\/p>/)?.[1] ?? "";
+  expect(note).toMatch(/^Another chat(?:&#x27;|')s reply stops first$/);
   setFixture({ ...ready, draft: "hello", turns: other, fitTable: tooBigUnless([]) });
   const refused = sendButton();
   expect(refused).toContain('aria-disabled="true"');

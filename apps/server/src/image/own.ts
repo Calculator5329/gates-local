@@ -12,6 +12,7 @@ export interface OwnComfy extends ComfyService {
   address(): string;
   onExit(listener: (pid: number) => void): void;
   modelsDir?(): string;
+  logFile?(): string;
   build?(): { version: string; cpu: boolean } | undefined;
   holdCard?(version: string): void;
   heldCard?(): string | undefined;
@@ -200,6 +201,7 @@ export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
     onHeld: (listener) => { heldListeners.push(listener); },
     address: () => opts.address ?? `http://127.0.0.1:${opts.port}`,
     modelsDir: () => path.join(engineDataDir(opts.appDataDir), "models"),
+    logFile: () => engineLogFile(opts.appDataDir),
     async inspect() {
       const active = child !== undefined;
       return { present: find() !== undefined, active, activeState: active ? "active" : "inactive", pid: child?.pid ?? 0 };

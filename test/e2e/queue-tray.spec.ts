@@ -67,6 +67,8 @@ test.describe("a message queued while a picture is being made", () => {
         await shoot(page, `image-queue-${size.width}-${scheme}`, marks);
       }
       seen.push([size.width, (await tray.boundingBox())!, (await page.locator(".composer").boundingBox())!]);
+      // council climb-025 Q17: the phone's image model button read "FX Klein…"
+      expect(await page.locator("#modelBtn>.t").evaluate((e) => e.scrollWidth - e.clientWidth), `the image model's name is cut at ${size.width} px`).toBeLessThanOrEqual(1);
     }
     // chat row 36, owner pick A: a shelf inside the message box, at its width, on its top
     await expect(page.locator(".composer .qt"), "the shelf is in the box").toHaveCount(1);

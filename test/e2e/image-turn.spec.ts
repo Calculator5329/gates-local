@@ -61,13 +61,20 @@ test("the chat model's image tool answers with a durable job card, never the inv
 });
 
 // no preset has every file: the card names the first default's file
-const MISSING = "Install flux-2-klein-4b-fp8.safetensors in ComfyUI, then try again.";
+// Council climb-025 Q16: "Install flux-2-klein-4b-fp8.safetensors in ComfyUI, then try again." led with a file name
+const MISSING = "The picture model isn't installed.";
 
 test("a retry takes over the failed card's box across clients and reloads, and one request stays one retry", async ({ page, open, context }, info) => {
   comfy.missing();
   await setup(page, open);
   const card = page.locator("[data-image-job]");
   await expect(card).toContainText(MISSING);
+  // the file and its folder are in the details; the app's own place to act is one click away
+  const details = card.getByTestId("chat.image-job.details");
+  await expect(details).not.toHaveAttribute("open");
+  await details.locator("summary").click();
+  await expect(details).toContainText(/flux-2-klein-4b-fp8\.safetensors belongs in .*diffusion_models/);
+  await expect(card.getByRole("button", { name: "Image settings" })).toBeVisible();
   await page.reload(); await waitReady(page);
   await expect(card).toContainText(MISSING);
   const box = await card.boundingBox();

@@ -60,6 +60,8 @@ for (const [w, h, tag] of [[1280, 800, "desk"], [390, 844, "phone"]] as const) {
       await stack.scenario("no-models", { pullTickMs: 400 });
       await open();
       await expect(page.locator(".fr h1")).toHaveText("Getting the chat engine ready");
+      // council climb-025 Q15: the screen names the next step, the first model and its size
+      await expect(page.getByTestId("first-run.next-model")).toHaveText(/^Next: .+ · \d+\.\d\sGB download$/);
       await shot("1-engine-downloading");
       await page.getByRole("button", { name: "Start chatting" }).click();
       await sendMessage(page, "Hello from a fresh install");
@@ -77,6 +79,8 @@ for (const [w, h, tag] of [[1280, 800, "desk"], [390, 844, "phone"]] as const) {
       const waitsOn = page.locator(".qt-w");
       await expect(waitsOn).toContainText(/Downloading Qwen/);
       expect(await waitsOn.evaluate((e) => e.scrollWidth - e.clientWidth), "what the row waits on is cut").toBeLessThanOrEqual(1);
+      // council climb-025 Q17: the phone row cut the message to "Hello fro…"
+      expect(await page.locator(".qt-t").evaluate((e) => e.scrollWidth - e.clientWidth), "the waiting message is cut").toBeLessThanOrEqual(1);
       await page.mouse.move(2, 2);
       await shot("2-engine-done");
       await shot("3-model-downloading");
@@ -88,7 +92,8 @@ for (const [w, h, tag] of [[1280, 800, "desk"], [390, 844, "phone"]] as const) {
 
     // Guards a bug seen on a fresh install: a stalled download kept its last figures with nothing to press.
     test("a stalled engine download says so and offers Retry, in the first window and the banner", async ({ page, open }, info) => {
-      const shot = (name: string) => page.screenshot({ path: info.outputPath(`${name}-${tag}.png`) });
+      // council climb-025 Q15: a shot taken mid fade-in read the banner's Retry as disabled
+      const shot = (name: string) => page.screenshot({ path: info.outputPath(`${name}-${tag}.png`), animations: "disabled" });
       // the fake's figures never move: 0.2 of 1.4 GB from the first read on, until the server calls it stalled
       const rt = await fakeRuntime(page, installing, { retry: installing });
       await open();

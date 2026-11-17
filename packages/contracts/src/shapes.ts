@@ -77,6 +77,7 @@ export const ImageEvent = S.Struct({
   progress: S.optional(S.Finite),
   imagePath: S.optional(S.String),
   message: S.optional(S.String),
+  detail: S.optional(S.String),
   errorKind: S.optional(S.String),
   retryJobId: S.optional(S.String),
   choice: S.optional(ImageChoice),

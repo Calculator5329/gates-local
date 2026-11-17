@@ -239,7 +239,7 @@ test("Stop on a slow connection shows the same seconds in the pressing window, a
 });
 
 test.describe("a reply the person stopped", () => {
-  const UNSEEN = "Stopped. The model won't see this reply.";
+  const UNSEEN = "Not sent to the model";
   const OLD_WORDS = /excluded from later model prompts|Its text is kept here|Stopped after|Interrupted before this reply finished/;
   // Guards the owner's ruling (N11): a stopped reply gets a stop square and its seconds, no line of words, and its text holds still.
   test("is marked by a stop square and its seconds in its actions row, with no line of words, and its text holds still", async ({ page, open }) => {

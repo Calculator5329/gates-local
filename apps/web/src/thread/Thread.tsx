@@ -15,7 +15,7 @@ import { presetName, sizeLabel } from "../image/image-choice.ts";
 import { reveal } from "./reveal.ts";
 import { usePacedText } from "./paced.ts";
 import { focusComposer } from "../composer/focus.ts";
-import { cancelImage, earlierOf, fileUrl, loadEarlier, onEarlier, reloadThread, retry, retryImage } from "../lib/session/index.ts";
+import { cancelImage, earlierOf, fileUrl, loadEarlier, onEarlier, openSettings, reloadThread, retry, retryImage } from "../lib/session/index.ts";
 import { AttachedFiles, AttachmentImages } from "../composer/attachment-images.tsx";
 import { type LiveTurn, NA, type State, type StopNote, getState, turnOf, unsavedQuestion, useStore } from "../lib/store/store.ts";
 import { drawsPicture, stopping, workMsAt } from "./turn.ts";
@@ -474,6 +474,7 @@ function ImageJob({ msg, thread, origin, token, tile = false }: { msg: Message; 
   const ran = job.choice ?? msg.imageJob!.choice;
   const model = useStore((s) => (ran === undefined ? undefined : presetName(s, ran.preset)));
   const turn = useStore((s) => turnOf(s, msg.threadId));
+  const canSet = useStore((s) => s.unavailable["settings.update"] !== true);
   const head = turn !== undefined && drawsPicture(turn) && turn.end === undefined && turn.userMessageId !== undefined ? turnCard(thread, turn.userMessageId) : undefined;
   const stopCovers = pending && head !== undefined && (head === msg.id || (msg.imageJob!.group !== undefined && thread.find((m) => m.id === head)?.imageJob?.group?.id === msg.imageJob!.group.id));
   const since = thread.find((m) => m.id === job.jobId)?.createdAt ?? msg.createdAt;
@@ -495,7 +496,16 @@ function ImageJob({ msg, thread, origin, token, tile = false }: { msg: Message; 
     {ran === undefined || pending || line || tile ? null : <span className="image-job-model">{model} · {sizeLabel(ran.width, ran.height)}</span>}
     {job.state === "done" && job.imagePath ? <ImageOut path={job.imagePath} origin={origin} token={token} /> : <div className="image-job-state" role="status" aria-label={pending ? jobWords(job) : undefined}>
       {pending ? <JobLine job={job} since={since} /> : <><Icon id="alert" /><p>{job.message ?? "The image did not finish; try again."}</p></>}
-      {stopCovers || job.phase === "stopping" ? null : <button type="button" className="qa" data-testid="chat.image-job.action" disabled={busy} onClick={() => void action()}>{pending ? "Cancel image" : "Try again"}</button>}
+      {pending || job.detail === undefined ? null : (
+        <details className="upd-more fp-more image-job-more" data-testid="chat.image-job.details">
+          <summary><Icon id="right" cls="s14" />Details</summary>
+          <p>{job.detail}</p>
+        </details>
+      )}
+      <span className="image-job-acts">
+        {stopCovers || job.phase === "stopping" ? null : <button type="button" className="qa" data-testid="chat.image-job.action" disabled={busy} onClick={() => void action()}>{pending ? "Cancel image" : "Try again"}</button>}
+        {!pending && job.errorKind === "image-model" && canSet ? <button type="button" className="qa" data-testid="chat.image-job.settings" onClick={() => openSettings("images")}>Image settings</button> : null}
+      </span>
       {error ? <p>{error}</p> : null}
     </div>}
   </div>;
@@ -507,7 +517,7 @@ const UserTurn = memo(function UserTurn({ msg, noted }: { msg: Message; noted: b
   return <UserBubble text={msg.content} images={msg.images} files={msg.files} time={turnTime(msg.createdAt)} noted={noted} />;
 });
 
-const UNSEEN = "Stopped. The model won't see this reply.";
+const UNSEEN = "Not sent to the model";
 
 function StopMark({ secs, said = false }: { secs?: number | undefined; said?: boolean }) {
   return (
@@ -539,7 +549,9 @@ interface ReplyView extends Files {
 }
 
 const SAYS_WHY = new Set(["context-too-small", "preempted", "runtime-changed"]);
-const failWords = (code: string | undefined): string => (code === undefined ? undefined : FAIL_WORDS[code]) ?? "The reply didn't finish.";
+// why: the next step is offered only where the line carries its Retry
+const failWords = (code: string | undefined, retryable: boolean): string =>
+  (code === undefined ? undefined : FAIL_WORDS[code]) ?? (retryable ? "The reply didn't finish. Retry, or pick another model." : "The reply didn't finish.");
 
 // why: a failure the person can act on says what to do; the runtime's own text stays out of sight
 const FAIL_WORDS: Readonly<Record<string, string>> = {
@@ -587,9 +599,9 @@ function Reply({ msg, live, text, paced, thinking, tools, rounds, secs, allowedL
       {msg?.imageJob ? <ImageCard msg={msg} thread={thread} origin={origin} token={token} /> : shown !== "" ? <Markdown text={shown} live={streaming || pending} allowedLinks={allowedLinks} /> : null}
       {(msg?.imageJob ? [] : msg?.images ?? []).map((p) => <ImageOut key={p} path={p} origin={origin} token={token} />)}
       {end?.kind === "error" ? (
-        <FailLine words={SAYS_WHY.has(end.code) ? end.message : failWords(end.code)}
+        <FailLine words={SAYS_WHY.has(end.code) ? end.message : failWords(end.code, true)}
           why={end.message} retryable />
-      ) : note?.kind === "failed" ? <FailLine words={failWords(note.code)} why={note.why} retryable={regen} /> : null}
+      ) : note?.kind === "failed" ? <FailLine words={failWords(note.code, regen)} why={note.why} retryable={regen} /> : null}
       {!streaming && !pending && !msg?.imageJob && !(text === "" && msg?.tools?.every(t => t.name === "image")) ? (
         <ActRow text={text} meta={meta} wait={wait} regen={regen} regenOff={stopping(live ?? undefined)} stop={stop} empty={text === "" && !folded && notes.length === 0 && !msg?.images?.length} />
       ) : null}
@@ -894,7 +906,7 @@ export function Timeline({ threadId }: { threadId: string }) {
                   {why.words}
                 </div>
               ) : m?.role === "user" && why?.kind === "failed" ? (
-                <div className="stop-note under-u"><FailLine words={failWords(why.code)} why={why.why} retryable={last} /></div>
+                <div className="stop-note under-u"><FailLine words={failWords(why.code, last)} why={why.why} retryable={last} /></div>
               ) : null}
             </Fragment>
           );

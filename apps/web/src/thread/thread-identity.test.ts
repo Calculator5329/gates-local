@@ -27,7 +27,8 @@ const times = (reason: "done" | "stopped" | "preempted" | "failed", secs: number
   ({ startedAt: 1_000, spans: [], callsAt: {}, ended: { reason, at: 1_000 + secs * 1_000 }, ...more });
 
 /** The stop square's name and tooltip: the one place the app says a stopped reply stays out of later prompts. */
-const UNSEEN = "Stopped. The model won&#x27;t see this reply.";
+// council climb-025 Q4: a name, not a sentence
+const UNSEEN = "Not sent to the model";
 /** Focusable (tabindex 0), so the keyboard reaches the square's tooltip. */
 const MARK = `role="img" data-testid="chat.reply.unseen-mark" tabindex="0" aria-label="${UNSEEN}" data-tip="${UNSEEN}"`;
 const OLD_WORDS = /excluded from later model prompts|Its text is kept here|Stopped after|Interrupted before this reply finished/;
@@ -80,7 +81,7 @@ it("a reply that did not finish is never drawn as stopped: no square, its words,
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   setState({ turns: {}, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "A retained partial answer", createdAt: 1, interrupted: true, times: times("failed", 9, { why: { code: "model-error", message: "the model crashed" } }) }] } });
   const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
-  expect(html).toMatch(/data-testid="chat.reply.failed" data-why="the model crashed"><svg[\s\S]*?<span>The reply didn&#x27;t finish.<\/span><button[^>]*data-testid="chat.reply.retry"/);
+  expect(html).toMatch(/data-testid="chat.reply.failed" data-why="the model crashed"><svg[\s\S]*?<span>The reply didn&#x27;t finish\. Retry, or pick another model\.<\/span><button[^>]*data-testid="chat.reply.retry"/);
   expect(html).not.toContain(MARK);
   expect(html).not.toContain('class="stop-note"');
   expect(html).toContain("A retained partial answer");

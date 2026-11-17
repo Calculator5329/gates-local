@@ -825,7 +825,8 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     expect(f.module.current().detail).not.toMatch(/may still be running/); expect(f.module.current().owner).toBe("none");
     f.configure({ die: false, answering: true, missingModel: true }); const second = await f.module.generate({ prompt: "a tree" }); await f.module.wait(second.jobId);
     // no preset's files at all: the card names the first default's first file
-    expect(f.events.at(-1)).toMatchObject({ errorKind: "image-model", message: "Install flux-2-klein-4b-fp8.safetensors in ComfyUI, then try again." });
+    // Council climb-025 Q16: the card's line is plain words; the file and its folder are its details
+    expect(f.events.at(-1)).toMatchObject({ errorKind: "image-model", message: "The picture model isn't installed.", detail: expect.stringMatching(/^flux-2-klein-4b-fp8\.safetensors belongs in .*diffusion_models/) });
     expect(f.module.current().detail).toMatch(/flux-2-klein-4b-fp8.*install/i);
   });
   it("uses the idle timer after an app-owned job", async () => {
@@ -1402,7 +1403,7 @@ describe("image presets (fake ComfyUI file lists)", () => {
     const own = { active: false, failed: 0, answered: 0 };
     let f!: Awaited<ReturnType<typeof fixture>>;
     const service = (start: () => void) => ({
-      installed: () => true, address: () => "http://127.0.0.1:41234",
+      installed: () => true, address: () => "http://127.0.0.1:41234", logFile: () => "/app/runtime/comfyui.log",
       inspect: async () => ({ present: true, active: own.active, activeState: own.active ? "active" : "inactive", pid: own.active ? 77 : 0 }),
       start: async () => { start(); },
       stop: async () => { own.active = false; },
@@ -1412,12 +1413,13 @@ describe("image presets (fake ComfyUI file lists)", () => {
     });
     f = await fixture({ own: service(() => {}) });
     f.configure({ answering: false });
-    await expect(f.module.start()).rejects.toThrow("ComfyUI started but is not running. Check its log, then try again.");
+    // Council climb-025 Q16: "Check its log" said where no log was; the app's own engine names its file
+    await expect(f.module.start()).rejects.toThrow("ComfyUI started but is not running. Its log is /app/runtime/comfyui.log.");
     expect(own.failed).toBe(1);
     // running and not answering yet: it is left to finish, and is not a build that failed
     f = await fixture({ startupTimeoutMs: 0, own: service(() => { own.active = true; }) });
     f.configure({ answering: false });
-    await expect(f.module.start()).rejects.toThrow("ComfyUI did not become ready within the startup timeout. Check its log, then try again.");
+    await expect(f.module.start()).rejects.toThrow("ComfyUI did not become ready within the startup timeout. Its log is /app/runtime/comfyui.log.");
     expect(own.failed).toBe(1);
     expect(own.answered).toBe(0);
     // the fake engine ends, and the module reads that, before the fixture closes
@@ -2256,7 +2258,7 @@ describe("image presets (fake ComfyUI file lists)", () => {
       f.choose({ preset: "flux2-klein-4b", width: 1024, height: 1024 });
       const job = await f.module.generate({ prompt: "a tree" }); await f.module.wait(job.jobId);
       expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "image-model", choice: { preset: "flux2-klein-4b" } });
-      expect(f.events.at(-1)?.message).toMatch(/flux-2-klein-4b-fp8/);
+      expect(f.events.at(-1)?.detail).toMatch(/flux-2-klein-4b-fp8/);
     });
 
     it("a retry of a failed default card settles again from the files ComfyUI has now", async () => {
@@ -2278,7 +2280,7 @@ describe("image presets (fake ComfyUI file lists)", () => {
     f.files({ noMoss: true });
     f.choose({ preset: "moss-image", width: 768, height: 1024 });
     const job = await f.module.generate({ prompt: "a tree" }); await f.module.wait(job.jobId);
-    expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "image-model", message: "Install qwen3.5_9b_w4a8_gptq.safetensors in ComfyUI, then try again." });
+    expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "image-model", message: "A file the picture model needs isn't installed.", detail: expect.stringMatching(/^qwen3\.5_9b_w4a8_gptq\.safetensors belongs in .*text_encoders/) });
   });
 
   it("a retry runs its failed job's preset and size, whatever is chosen now", async () => {
@@ -3129,7 +3131,8 @@ describe("what the image module keeps, reads and says", () => {
     } });
     f.configure({ answering: false });
     const at = Date.now();
-    await expect(f.module.start()).rejects.toThrow("ComfyUI stopped while it was starting. Check its log, then try again.");
+    // an engine that cannot say where its log is drops the advice rather than point nowhere
+    await expect(f.module.start()).rejects.toThrow(/^ComfyUI stopped while it was starting\.$/);
     expect(Date.now() - at).toBeLessThan(1_000);
     expect(f.module.engine().pid).toBeUndefined();
   });

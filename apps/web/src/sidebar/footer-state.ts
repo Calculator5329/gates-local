@@ -36,7 +36,8 @@ function tipLine(p: PullProgress, name: string): [boldEscaped: string, restEscap
     case "verifying":
       return [`Checking ${n}`, " after downloading it"];
     case "error":
-      return [`${n} did not finish downloading.`, p.message ? ` ${esc(p.message)}` : ""];
+      // why: the reason is on the download's row in Settings; the tip is the short status
+      return [n, " · Download failed"];
     default: {
       if (!p.totalBytes) return [`Starting the download of ${n}`, ""];
       const pct = Math.floor((p.completedBytes / p.totalBytes) * 100);

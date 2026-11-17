@@ -2,7 +2,7 @@
 // writing it again does not ask the question twice.
 import { expect, sendMessage, test, waitReady, stack } from "./fixtures.ts";
 
-const UNSEEN = "Stopped. The model won't see this reply.";
+const UNSEEN = "Not sent to the model";
 
 // Guards the owner's rule that Stop keeps the partial reply and never retries by itself.
 test("a stopped reply survives a reload and Regenerate replaces it without a second question", async ({ page, open }) => {
@@ -56,7 +56,7 @@ test("a stopped reply survives a reload and Regenerate replaces it without a sec
   await sendMessage(page, "And at boot?");
   const failed = page.getByTestId("chat.reply.failed");
   await expect(failed).toHaveCount(1, { timeout: 15_000 });
-  await expect(failed).toHaveText(/^The reply didn't finish\.\s*Retry$/);
+  await expect(failed).toHaveText(/^The reply didn't finish\. Retry, or pick another model\.\s*Retry$/);
   await expect(failed).not.toHaveAttribute("data-tip");
   await expect(failed).toHaveAttribute("data-why", /unexpected EOF/);
   await expect(page.getByTestId("chat.reply.retry")).toBeVisible();

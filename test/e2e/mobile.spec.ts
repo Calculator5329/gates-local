@@ -254,7 +254,7 @@ test.describe("Settings on a phone", () => {
 // a table's cut fell between columns so its last column looked lost, and the rail clipped its marker.
 test.describe("a thread at 360", () => {
   test.use({ ...NARROW, seed: "design-code" });
-  test("the model button keeps the size, a wide table is cut in its words and swipes, the rail marker is whole", async ({ page, open, seededThread }, info) => {
+  test("the model button keeps the size, a wide table stacks each row as a card with nothing cut, the rail marker is whole", async ({ page, open, seededThread }, info) => {
     await open(`#thread=${seededThread ?? ""}`);
     await waitReady(page);
     const name = page.locator("#modelBtn .picker-trigger-name");
@@ -266,16 +266,25 @@ test.describe("a thread at 360", () => {
     expect(room.text, `the short name shows whole (${room.parts})`).toBeLessThanOrEqual(room.box);
     const table = page.locator(".turn.a .md table").last();
     await table.scrollIntoViewIfNeeded();
+    // council climb-025 Q17: under about 420 px no column is cut at the box's edge; each row is a card
     const cut = await table.evaluate((el) => {
       const right = el.getBoundingClientRect().right;
-      const heads = [...el.querySelectorAll("th")].map((th) => ({ text: th.textContent ?? "", ...th.getBoundingClientRect().toJSON() as DOMRect }));
-      return { scrolls: el.scrollWidth > el.clientWidth, across: heads.filter((h) => h.left < right - 16 && h.right > right + 16).map((h) => h.text) };
+      return { scrolls: el.scrollWidth - el.clientWidth, past: [...el.querySelectorAll("td")].filter((td) => td.getBoundingClientRect().right > right + 1).map((td) => td.textContent ?? "") };
     });
-    expect(cut.scrolls, "the table scrolls inside its own box").toBe(true);
-    expect(cut.across, "a column runs past the box's edge, so the cut lands in words").not.toEqual([]);
+    expect(cut.scrolls, "the table fits its box").toBeLessThanOrEqual(1);
+    expect(cut.past, "cells past the box's edge").toEqual([]);
+    const pages = table.locator('td[data-label="Pages"]').first();
+    await pages.scrollIntoViewIfNeeded();
+    await expect(pages, "the last column's line names it").toBeInViewport({ ratio: 1 });
+    expect(await pages.evaluate((td) => getComputedStyle(td, "::before").content), "the line's name").toBe('"Pages"');
+    await table.scrollIntoViewIfNeeded();
     await page.screenshot({ path: info.outputPath("after-360-thread.png") });
-    await table.evaluate((el) => { el.scrollLeft = el.scrollWidth; });
-    await expect(table.locator("th", { hasText: "Pages" })).toBeInViewport({ ratio: 1 });
+    // the same cards at a common phone's 412
+    await page.setViewportSize({ width: 412, height: 780 });
+    await table.scrollIntoViewIfNeeded();
+    expect(await table.evaluate((el) => el.scrollWidth - el.clientWidth), "the table fits its box at 412").toBeLessThanOrEqual(1);
+    await page.screenshot({ path: info.outputPath("after-412-thread.png") });
+    await page.setViewportSize({ width: 360, height: 780 });
     await page.locator("#modelBtn").tap();
     await expect(page.locator("#picker")).toBeVisible();
     await page.locator("#picker").evaluate((e) => Promise.all(e.getAnimations().map((a) => a.finished)));
@@ -284,6 +293,8 @@ test.describe("a thread at 360", () => {
       return { right: b.right - Number.parseFloat(getComputedStyle(el, "::after").right), railRight: rail.right };
     });
     expect(mark.right, "the marker ends inside the rail").toBeLessThan(mark.railRight - 1);
+    // council climb-025 Q17: the tapped button's highlight showed as a teal block over "Download models"
+    expect(await page.locator("#modelBtn").evaluate((b) => getComputedStyle(b).getPropertyValue("-webkit-tap-highlight-color")), "the browser's tap highlight").toBe("rgba(0, 0, 0, 0)");
     await page.screenshot({ path: info.outputPath("after-360-picker.png") });
   });
 });

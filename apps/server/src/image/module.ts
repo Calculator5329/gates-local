@@ -366,18 +366,20 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     const canStart = ["inactive", "failed"].includes(before.activeState);
     move(writer, { state: "starting", answering: !canStart }, baseUrl);
     signal.throwIfAborted();
+    const logFile = service === deps.own ? deps.own.logFile?.() : undefined;
+    const where = service !== deps.own ? " Its log is in journalctl --user -u comfyui.service." : logFile === undefined ? "" : ` Its log is ${logFile}.`;
     const up = async () => {
       if (canStart) {
         await service.start();
         const after = await service.inspect();
-        if (!after.active || after.pid <= 0) throw new Error("ComfyUI started but is not running. Check its log, then try again.");
+        if (!after.active || after.pid <= 0) throw new Error(`ComfyUI started but is not running.${where}`);
         owned = { pid: after.pid, baseUrl };
       }
       const deadline = Date.now() + (deps.startupTimeoutMs ?? 60_000);
       while (!await comfy.healthy()) {
         signal.throwIfAborted();
-        if (Date.now() >= deadline) throw new Error("ComfyUI did not become ready within the startup timeout. Check its log, then try again.");
-        if (service === deps.own && !(await service.inspect()).active) { owned = undefined; throw new Error("ComfyUI stopped while it was starting. Check its log, then try again."); }
+        if (Date.now() >= deadline) throw new Error(`ComfyUI did not become ready within the startup timeout.${where}`);
+        if (service === deps.own && !(await service.inspect()).active) { owned = undefined; throw new Error(`ComfyUI stopped while it was starting.${where}`); }
         await delay(250, undefined, { signal });
       }
     };
@@ -420,6 +422,10 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     const firsts = (folders === undefined ? [] : MODEL_KINDS.map((k) => folders[k]?.[0])).filter((f): f is string => f !== undefined);
     if (folders === undefined || firsts.length === 0) return { picked: false };
     return { root: sharedFolder(firsts), picked: false, dirOf: (kind) => { const first = folders[kind]?.[0]; return first === undefined ? undefined : path.join(first, "gates-local"); } };
+  };
+  const folderFor = (cfg: Cfg, kind: string): string => {
+    const dir = downloadPlace(cfg)?.dirOf?.(kind);
+    return dir === undefined ? `ComfyUI's models/${kind} folder` : path.dirname(dir);
   };
   const freeAt = (dir: string) => (deps.download?.freeBytes ?? volumeFree)(dir).then((b) => Math.floor(b));
   const diskRow = async (cfg: Cfg): Promise<NonNullable<ImagePresets["disk"]> | undefined> => {
@@ -778,13 +784,20 @@ export function createImageModule(deps: ImageDeps): ImageModule {
           const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : stage;
           const missingFile = error instanceof Error && "file" in error && typeof error.file === "string" ? error.file : undefined;
           const noComfy = error instanceof Error && "code" in error && error.code === "image-missing";
+          const folder = error instanceof Error && "folder" in error && typeof error.folder === "string" ? error.folder : undefined;
+          const main = folder === "diffusion_models" || folder === "checkpoints" ? "The picture model isn't installed." : "A file the picture model needs isn't installed.";
+          const details: Record<string, string | undefined> = {
+            "image-missing": noComfy ? undefined : message,
+            "image-model": missingFile === undefined ? undefined
+              : folder === undefined ? `${missingFile} is missing from ComfyUI's model folders.` : `${missingFile} belongs in ${folderFor(cfg, folder)}.`,
+          };
           const reasons: Record<string, string> = {
             "image-config": "Check the ComfyUI address in Settings, then try again.",
             "image-off": "Turn on image generation in Settings, then try again.",
             "image-fit": "GPU memory could not be checked; check the GPU status and try again.",
             "wont-fit": "There is not enough GPU memory for this image.",
-            "image-missing": noComfy ? missingWords(cfg.baseUrl) : "ComfyUI did not start. Check its log, then try again.",
-            "image-model": missingFile === undefined ? "Pick an image model ComfyUI has, then try again." : `Install ${missingFile} in ComfyUI, then try again.`,
+            "image-missing": noComfy ? missingWords(cfg.baseUrl) : "ComfyUI didn't start.",
+            "image-model": missingFile === undefined ? "Pick an image model ComfyUI has, then try again." : main,
             "image-busy": "ComfyUI is busy; wait for its other job to finish and try again.",
             "image-disconnected": "ComfyUI disconnected; wait until it is ready and try again.",
             "image-workflow": "ComfyUI did not make an image; check its workflow and try again.",
@@ -796,7 +809,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
           const reason = controller.signal.aborted ? "The image was cancelled; try again when you are ready." : late !== undefined ? late
             : errorKind === "wont-fit" && error instanceof Error && "said" in error && typeof error.said === "string" ? error.said : reasons[errorKind];
           log(`job ${jobId} failed kind=${errorKind}`);
-          event(controller.signal.aborted ? "cancelled" : "error", { message: reason, errorKind });
+          const said = controller.signal.aborted || late !== undefined ? undefined : details[errorKind];
+          event(controller.signal.aborted ? "cancelled" : "error", { message: reason, errorKind, ...said === undefined ? {} : { detail: said } });
           const ran = activeJob === jobId;
           if (cancelDetail && ran) {
             move(writer, { state: "error", answering: stuckPromptId !== undefined, detail: `${message} ${cancelDetail}` }, cfg.baseUrl);

@@ -80,7 +80,8 @@ test("the tooltips carry the words, and the Models tooltip names the model", asy
   s.pull(QWEN4);
   await expect(models(page)).toHaveAttribute("data-tip", /Qwen 3 14B.*<br><b>Downloading Qwen 3\.5 4B<\/b>/);
   s.pull({ ...QWEN14, state: "error", completedBytes: 0, message: "no space left on device" });
-  await expect(models(page)).toHaveAttribute("data-tip", /<b>Qwen 3 14B did not finish downloading\.<\/b> no space left on device/);
+  // council climb-025 Q4: a short status; the reason is on the download's row
+  await expect(models(page)).toHaveAttribute("data-tip", /<b>Qwen 3 14B<\/b> · Download failed/);
 
   s.update("available");
   await expect(update).toHaveAccessibleName("Update to def5678");

@@ -141,6 +141,8 @@
 *{box-sizing:border-box}
 [hidden]{display:none !important}
 html,body{height:100%;margin:0}
+/* a tapped control shows the app's own pressed state; the browser's highlight outlived it under a sheet */
+html{-webkit-tap-highlight-color:transparent}
 body{background:var(--background);color:var(--foreground);font-family:var(--font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow:hidden}
 button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
 input{font:inherit;color:inherit}
@@ -414,7 +416,7 @@ div.think.fold:hover{color:var(--muted-foreground);background:none}
 .qt-w{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .qt-ws{display:none}
 /* what the clock waits for, as numbers: a fixed slot, the percent right-aligned in its own, so nothing moves as they change */
-.qt-n{width:12ch;white-space:nowrap;overflow:hidden;font-variant-numeric:tabular-nums}
+.qt-n{width:18ch;white-space:nowrap;overflow:hidden;font-variant-numeric:tabular-nums}
 .qt-p{display:inline-block;width:4ch;text-align:right}
 /* read aloud, not shown: the clock's words are its tip */
 .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
@@ -914,6 +916,10 @@ a.btn{text-decoration:none}
 .image-job .img-out,.image-job .img-miss{width:100%;height:100%;object-fit:contain}
 .image-job-state{display:flex;align-items:center;flex-direction:column;gap:12px;padding:24px;text-align:center;color:var(--muted-foreground)}
 .image-job-state p{margin:0;font-variant-numeric:tabular-nums}
+.image-job-acts{display:flex;gap:16px;justify-content:center}
+.upd-more.image-job-more{padding:0;border:0;max-width:100%;overflow-wrap:anywhere}
+.image-job-more summary{margin:0 auto}
+.image-job-more p{margin-top:6px}
 /* a pending card's live line, a chat reply's form: one row that never wraps, so the card keeps its size */
 .image-job-state{max-width:100%;min-width:0}
 /* one width for every stage's words, so the dot and the seconds stay put as the words change */
@@ -966,6 +972,13 @@ a.btn{text-decoration:none}
   .qt-wf{display:none}
   .qt-ws{display:inline}
   .qt-s:has(>.qt-w){max-width:85%}
+  /* a phone's waiting row puts the message on its own line, the wait and its buttons under it */
+  .qt-r:has(.qt-w){flex-wrap:wrap;row-gap:0;padding-top:4px}
+  .qt-r:has(.qt-w) .qt-t{flex-basis:100%}
+  .qt-r:has(.qt-w) .qt-k+.qt-t{flex-basis:calc(100% - 22px)}
+  .qt-r:has(.qt-w) .qt-s{margin-right:auto}
+  /* a phone's image button names the model whole; the size is on the picture's card and in its menu */
+  #modelBtn>.t+.picker-trigger-ctx{display:none}
 }
 .md h1,.md h2,.md h3,.md h4{color:var(--foreground);font-weight:600;line-height:1.35;margin:18px 0 8px}
 .md h1{font-size:1.33em}.md h2{font-size:1.2em}.md h3{font-size:1.07em}.md h4{font-size:1em}
@@ -976,7 +989,7 @@ a.btn{text-decoration:none}
 .c-note.no{color:var(--red-fg)}
 .c-acted{display:flex;flex-wrap:wrap;align-items:center;column-gap:6px;row-gap:2px}
 /* a memory refusal's note (RefusalNote.tsx): one line, the height of the words, its buttons inside it */
-.c-offer{display:flex;align-items:center;gap:6px;height:20px}
+.c-offer{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;min-height:20px}
 .c-offer>.ic{flex:none}
 .c-offer .co-what,.c-offer .co-short{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .c-offer .co-short{font-variant-numeric:tabular-nums}
@@ -1022,6 +1035,17 @@ a.btn{text-decoration:none}
 .md pre[data-more],.md table[data-more]{--fade-s:#000;--fade-e:#000;-webkit-mask-image:linear-gradient(to right,var(--fade-s),#000 24px,#000 calc(100% - 24px),var(--fade-e));mask-image:linear-gradient(to right,var(--fade-s),#000 24px,#000 calc(100% - 24px),var(--fade-e))}
 .md [data-more~="start"]{--fade-s:transparent}
 .md [data-more~="end"]{--fade-e:transparent}
+}
+/* under 420 px a table's row stands as a card: its first cell the title, then one named line per column */
+@media (max-width:420px){
+.md table[data-more]{-webkit-mask-image:none;mask-image:none}
+.md thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.md tbody,.md tr{display:block}
+.md tr{padding:8px 0;border-bottom:1px solid var(--border)}
+.md td[data-label]{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:12px;min-width:0;border:0;padding:2px 0;white-space:normal;text-align:left;overflow-wrap:anywhere}
+.md td[data-label]::before{content:attr(data-label);color:var(--muted-foreground)}
+.md td[data-label]:first-child{display:block;font-weight:500;color:var(--foreground)}
+.md td[data-label]:first-child::before{content:none}
 }
 @media (max-width:640px){
 .hdr{height:auto;min-height:52px;padding:env(safe-area-inset-top) 4px 0;gap:0}

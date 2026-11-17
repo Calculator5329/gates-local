@@ -53,7 +53,7 @@ export const PLACEHOLDER: Record<Rt, string> = {
   installing: "Ask anything…",
   starting: "Chat starts when Ollama is running…",
   missing: "Install Ollama to start chatting",
-  wrong: "Chat starts when Ollama answers on its port",
+  wrong: "Chat starts when Ollama answers…",
   stopped: "Chat starts when Ollama is running…",
   error: "Chat starts when Ollama is running…",
   offline: "Chat starts when Gates Local reconnects…",
@@ -111,10 +111,14 @@ export function failWords(failure: Failure): { title: string; stat: string } {
 // why: matches the server's two "site didn't answer" details (runtime/install.ts)
 const unreached = (detail: string | undefined): boolean => detail !== undefined && /^Could not reach |failed: HTTP \d+ from /.test(detail);
 
+// why: the server says "failed: HTTP <status> from"; a 404 or 410 means the file is gone
+const gone = (detail: string | undefined): boolean => detail !== undefined && /failed: HTTP (404|410) from /.test(detail);
+
 export const SITE_DOWN = "The download site didn't respond. Try again in a moment.";
+const DOWNLOAD_GONE = "This download is no longer available. Retry after the app updates, or install Ollama from ollama.com.";
 
 export function underTitle(detail: string | undefined, failure: Failure): string | undefined {
-  if (failure === "download") return unreached(detail) ? SITE_DOWN : detail?.replace(/^The Ollama download stopped at /, "Stopped at ");
+  if (failure === "download") return gone(detail) ? DOWNLOAD_GONE : unreached(detail) ? SITE_DOWN : detail?.replace(/^The Ollama download stopped at /, "Stopped at ");
   if (failure === "checksum") return FAIL_FALLBACK.checksum;
   if (failure === "disk") return detail?.replace(/^The disk is full\.\s*/, "") || undefined;
   return detail;

@@ -215,6 +215,8 @@ function Table({ b, partial, allowedLinks }: { b: Extract<Block, { t: "table" }>
     const short = [h, ...b.rows.map((r) => r[c] ?? "")].every((t) => t.length <= SHORT_CELL);
     return [b.num[c] ? "n" : "", short ? "s" : ""].filter(Boolean).join(" ") || undefined;
   });
+  // why: a phone stacks each row as a card, and each line there names its column
+  const label = b.head.map((h) => h.replaceAll(/[*_`]/g, "").trim());
   return (
     <table ref={ref}>
       <thead>
@@ -230,8 +232,8 @@ function Table({ b, partial, allowedLinks }: { b: Extract<Block, { t: "table" }>
         {b.rows.map((r, j) => (
           <tr key={j}>
             {b.head.map((_, col) => (
-              <td key={col} className={kind[col]}>
-                {inline(r[col] ?? "", partial, allowedLinks)}
+              <td key={col} className={kind[col]} data-label={label[col]}>
+                <span>{inline(r[col] ?? "", partial, allowedLinks)}</span>
               </td>
             ))}
           </tr>

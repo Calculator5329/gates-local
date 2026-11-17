@@ -23,7 +23,7 @@ test.describe("with the system Ollama chosen", () => {
     // council climb-025 Q16: the banner says it plainly; the port is in its Details
     await expect(page.locator(".banner")).toContainText("Another program is where Ollama should be");
     await expect(page.locator(".banner .bm")).toHaveAttribute("data-why", `Another program answers on localhost:${port}.`);
-    await expect(page.locator("#ta")).toHaveAttribute("placeholder", "Chat starts when Ollama answers on its port");
+    await expect(page.locator("#ta")).toHaveAttribute("placeholder", "Chat starts when Ollama answers…");
     await expect(page.getByTestId("chat.composer.send")).toBeDisabled();
 
     await gear(page).click();

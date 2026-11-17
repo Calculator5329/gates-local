@@ -81,7 +81,8 @@ const PLACEHOLDERS: readonly Row[] = [
   ["the box while Ollama installs", () => PLACEHOLDER.installing, "Ask anything…"],
   ["the box while Ollama starts", () => PLACEHOLDER.starting, "Chat starts when Ollama is running…"],
   ["the box with no Ollama", () => PLACEHOLDER.missing, "Install Ollama to start chatting"],
-  ["the box when something else holds the port", () => PLACEHOLDER.wrong, "Chat starts when Ollama answers on its port"],
+  // Council climb-025 Q16: "port" is the app's word, not the person's
+  ["the box when something else holds the port", () => PLACEHOLDER.wrong, "Chat starts when Ollama answers…"],
   ["the box while Ollama is stopped", () => PLACEHOLDER.stopped, "Chat starts when Ollama is running…"],
   ["the box after Ollama failed", () => PLACEHOLDER.error, "Chat starts when Ollama is running…"],
   ["the box while the server is away", () => PLACEHOLDER.offline, "Chat starts when Gates Local reconnects…"],

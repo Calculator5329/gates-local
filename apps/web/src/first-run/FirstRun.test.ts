@@ -47,6 +47,16 @@ describe("an engine download whose figures stop moving says so and offers Retry"
     expect(other).toContain("Looking for Ollama");
   });
 
+  // council climb-025 Q15: while the engine downloads, the screen names the next step too.
+  it("while the engine downloads, the first model and its download size are named once they are known", () => {
+    const next = { name: "gemma4:12b", label: "Gemma 4 12B", recommended: true, downloadBytes: 7_600_000_000, purpose: "chat", installed: false };
+    const t = plain({ ...installing(300_000_000), catalog: [next] }, FirstRun);
+    expect(t).toMatch(/Next: Gemma 4 12B · 7\.1\sGB download/);
+    expect(t.match(/Gemma 4 12B/g)).toHaveLength(1);
+    // before the catalog arrives nothing is guessed
+    expect(plain(installing(300_000_000), FirstRun)).not.toContain("Next:");
+  });
+
   it("a stall is the server's word, and only for the download; unpacking never stalls", () => {
     expect(stalledNow({ ...at(10), stalled: true })).toBe(true);
     // a stall at 0 bytes (the connection hung before the first byte) is a stall too

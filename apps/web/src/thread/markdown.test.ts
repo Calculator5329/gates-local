@@ -152,9 +152,21 @@ const rulesWith = (css: string, selector: string) => [...css.matchAll(/([^{}]+)\
 it("a table's column of short cells is marked to hold one line; a column of sentences wraps", () => {
   const out = html("| Title | Year | Publisher |\n| --- | --- | --- |\n| Effect: Schema, Services and Layers | 2026 | Northwind Technical Press |\n| Effect Schema in Practice | 2025 | Independent |");
   expect(out).toContain('<th>Title</th><th class="n s">Year</th><th class="s">Publisher</th>');
-  expect(out).toContain('<td>Effect: Schema, Services and Layers</td><td class="n s">2026</td><td class="s">Northwind Technical Press</td>');
+  expect(out).toContain('<td data-label="Title"><span>Effect: Schema, Services and Layers</span></td><td class="n s" data-label="Year"><span>2026</span></td><td class="s" data-label="Publisher"><span>Northwind Technical Press</span></td>');
   const css = readFileSync(new URL("../app/styles.css", import.meta.url), "utf8");
   expect(rulesWith(css, ".md td.s").join(";")).toContain("white-space:nowrap");
+});
+
+// Guards council climb-025 Q17: under about 420 px a table still cut a column at the box's edge.
+// There each row stands as a card: its first cell as the title, then one line per column, named.
+it("a table's cells carry their column's plain name, and under 420 px each row stacks as a card of named lines", () => {
+  const out = html("| **Name** | `Size` |\n| --- | --- |\n| Qwen | 9 |");
+  expect(out).toContain('<td class="s" data-label="Name"><span>Qwen</span></td><td class="n s" data-label="Size"><span>9</span></td>');
+  const css = readFileSync(new URL("../app/styles.css", import.meta.url), "utf8");
+  const phone = css.slice(css.indexOf("@media (max-width:420px)"));
+  expect(css).toContain("@media (max-width:420px)");
+  expect(rulesWith(phone, ".md td[data-label]::before").join(";")).toContain("content:attr(data-label)");
+  expect(rulesWith(phone, ".md tr").join(";")).toContain("display:block");
 });
 
 describe("what a reply's markdown draws", () => {

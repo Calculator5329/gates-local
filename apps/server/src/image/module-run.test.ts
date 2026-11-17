@@ -357,7 +357,8 @@ describe("a picture's run, from send to the engine's stop", () => {
 
   it("an engine the app could not get running says it did not start, not that none is set up", async () => {
     const f = await fixture(); f.configure({ answering: false, activeOverride: false });
-    expect(await sent(f)).toMatchObject({ state: "error", errorKind: "image-missing", message: "ComfyUI did not start. Check its log, then try again." });
+    // Council climb-025 Q16: the line is plain words; where to look is the detail, from the unit's journal
+    expect(await sent(f)).toMatchObject({ state: "error", errorKind: "image-missing", message: "ComfyUI didn't start.", detail: expect.stringMatching(/^ComfyUI started but is not running\. Its log is in journalctl --user -u comfyui\.service\.$/) });
     expect(f.calls).toContain("start");
   });
 
