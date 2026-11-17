@@ -315,7 +315,9 @@ export function readBlockingPlaywright(file: string, report: ReleaseReport): Tot
     if (Array.isArray(value["errors"])) for (const error of value["errors"]) {
       report.failures.push({ step: "e2e", test: title.join(" > ") || "Playwright runner", message: record(error) ? String(error["message"] ?? error["value"] ?? "") : String(error) });
     }
-    for (const key of ["suites", "specs", "tests", "results"]) visit(value[key], title);
+    // why: a test.fail() control that failed counts as expected, so its attempt's errors are no red
+    const counted = value["status"] !== "expected" && value["status"] !== "skipped";
+    for (const key of ["suites", "specs", "tests", "results"]) if (key !== "results" || counted) visit(value[key], title);
   };
   visit(raw);
   return { passed: Number(stats["expected"]), failed: Number(stats["unexpected"]) + Number(stats["flaky"]), skipped: Number(stats["skipped"]) };

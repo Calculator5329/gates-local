@@ -4,8 +4,10 @@ const STEP_MS = 40;
 
 export function harness(token: string, script: readonly PageAction[], stepMs: number) {
   const seen: string[] = [];
-  // oxlint-disable-next-line unicorn/consistent-function-scoping, gates/timer-needs-reason -- runs in the page's frame, which has none of the app's helpers; two frames let the page draw
-  const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  // why: Chrome draws a frame nobody sees about once a second, so a step waits for no more than this
+  const frameMs = 100;
+  // oxlint-disable-next-line unicorn/consistent-function-scoping, gates/timer-needs-reason -- runs in the page's frame, which has none of the app's helpers; two frames let the page draw, when it is drawn
+  const frame = () => new Promise((resolve) => { requestAnimationFrame(() => requestAnimationFrame(resolve)); setTimeout(resolve, frameMs); });
   // oxlint-disable-next-line gates/timer-needs-reason -- runs in the page's frame: the step's time between a person's actions
   const wait = () => new Promise((resolve) => setTimeout(resolve, stepMs)).then(frame);
   // oxlint-disable-next-line unicorn/consistent-function-scoping -- the frame runs this function from its source text, so its helpers live inside it

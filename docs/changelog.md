@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-17: the release check's browser reds were one product bug and one report bug
+
+- The release check no longer lists a browser test marked to fail, such as the image-stopping control, among its failures when it failed as it should. It never counted toward the failed total, but its errors sat in the list beside the real reds.
+- Measure's page checks finish in full Chrome and the desktop app. Chrome draws a frame nobody can see about once a second, and each step of a check waited for two drawn frames, so the seven-step total page ran past its 5 seconds and failed. A step now waits for two frames or 100 ms, whichever comes first.
+
 ## 2026-11-17: the release check runs verify alone again, before the browser shards
 
 - Beside four browser shards on one 8-core machine, verify took 308 s instead of 164 s, and four

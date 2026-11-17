@@ -209,6 +209,20 @@ describe("the page harness", () => {
     expect(events.slice(-5)).toEqual(["keydown:Backspace:ER", "beforeinput::ER", "input::", "keyup:Backspace:", "change::"]);
   });
 
+  // Full Chrome draws a frame nobody can see about once a second, so a step that waits for frames
+  // took up to two seconds and a seven-step page ran past its five.
+  it("a frame the browser stops drawing still runs its steps at the step's pace", async () => {
+    vi.useFakeTimers();
+    const p = framePage((input, out) => { input.addEventListener("keyup", () => { out.textContent = input.value; }); });
+    vi.stubGlobal("requestAnimationFrame", (f: () => void) => setTimeout(f, 1000));
+    const steps = Array.from({ length: 7 }, (_, i) => ({ do: "fill" as const, target: "#qty", text: String(i) }));
+    harness("t", [...steps, { do: "read", target: "#out" }], 40);
+    p.load();
+    await vi.advanceTimersByTimeAsync(1500);
+    vi.useRealTimers();
+    expect(p.posted).toEqual([{ token: "t", seen: ["6"] }]);
+  });
+
   it("a key the page cancels is not typed, as for a person", async () => {
     vi.useFakeTimers();
     const p = framePage((input, out) => {

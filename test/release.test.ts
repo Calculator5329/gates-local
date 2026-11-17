@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { checkTag, runReleaseCheck, runReleaseCommand, unitTotals, type ReleaseReport, cleanEnvironment, missingHostTools } from "../scripts/release.ts";
+import { checkTag, readBlockingPlaywright, runReleaseCheck, runReleaseCommand, unitTotals, type ReleaseReport, cleanEnvironment, missingHostTools } from "../scripts/release.ts";
 import { groupAlive, processAlive } from "@gates-local/update/process-state";
 
 const scratch: string[] = [];
@@ -256,6 +256,30 @@ test("a failing unit command stops the clean-clone check and writes a failed rep
 test("unit totals count the final runner summary, including skips", () => {
   expect(unitTotals("Tests 1 failed\n Test Files 85 passed\n Tests 1295 passed | 1 skipped (1296)\n")).toEqual({ passed: 1295, failed: 0, skipped: 1 });
   expect(unitTotals("# pass 0\n# fail 1\n# skipped 0\n")).toEqual({ passed: 0, failed: 1, skipped: 0 });
+});
+
+/** One attempt in a Playwright JSON report, and a spec of one test. */
+const attempt = (status: string, message?: string) => ({ status, errors: message ? [{ message }] : [] });
+const spec = (title: string, one: object) => ({ title, tests: [one] });
+
+// A control marked test.fail() fails as it should, and Playwright still keeps that attempt's errors.
+test("the browser report lists only the failures that count, not a control that failed as expected", () => {
+  const dir = mkdtempSync(path.join(homedir(), ".cache", "release-test-"));
+  scratch.push(dir);
+  const file = path.join(dir, "report.json");
+  writeFileSync(file, JSON.stringify({
+    stats: { expected: 2, unexpected: 1, flaky: 1, skipped: 0 },
+    suites: [{ title: "a.spec.ts", specs: [
+      spec("control", { expectedStatus: "failed", status: "expected", results: [attempt("failed", "expected red")] }),
+      spec("passes", { expectedStatus: "passed", status: "expected", results: [attempt("passed")] }),
+      spec("breaks", { expectedStatus: "passed", status: "unexpected", results: [attempt("failed", "a real red")] }),
+      spec("wobbles", { expectedStatus: "passed", status: "flaky", results: [attempt("failed", "a first try"), attempt("passed")] }),
+    ] }],
+    errors: [{ message: "runner broke" }],
+  }));
+  const report = { failures: [] } as unknown as ReleaseReport;
+  expect(readBlockingPlaywright(file, report)).toEqual({ passed: 2, failed: 2, skipped: 0 });
+  expect(report.failures.map((f) => `${f.test}: ${f.message}`)).toEqual(["Playwright runner: runner broke", "a.spec.ts > breaks: a real red", "a.spec.ts > wobbles: a first try"]);
 });
 
 function protocolFixture(extraCli: readonly string[] = []) {
