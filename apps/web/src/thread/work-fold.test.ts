@@ -208,10 +208,10 @@ describe("a stopped reply's time", () => {
 });
 
 describe("a reply that did not finish (decision 7)", () => {
-  it("says so once, with Retry and the runtime's words in the tip, and is never drawn as stopped", async () => {
+  it("says so once, with Retry, and keeps the runtime's words off the tip, and is never drawn as stopped", async () => {
     const failed = play(sent(), [push(0, { stage: "writing", readyAt: 0, attempt: 2 }), [500, { type: "delta", text: "Half" }], [1000, { type: "error", code: "stream-error", message: "model runner has unexpectedly stopped" }]]);
     const html = await live(2000, failed);
-    expect(html).toMatch(/data-testid="chat.reply.failed" data-tip="model runner has unexpectedly stopped"><svg[\s\S]*?<span>The reply didn&#x27;t finish.<\/span>/);
+    expect(html).toMatch(/data-testid="chat.reply.failed" data-why="model runner has unexpectedly stopped"><svg[\s\S]*?<span>The reply didn&#x27;t finish.<\/span>/);
     expect(html).toContain('data-testid="chat.reply.retry"');
     expect(html).not.toContain('class="stop-mark"');
     const after = await saved({ id: "s", threadId: T, role: "assistant", createdAt: 2, content: "Half", interrupted: true, times: stamped("failed", 1, undefined, { code: "stream-error", message: "model runner has unexpectedly stopped" }) });

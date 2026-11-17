@@ -81,12 +81,14 @@ it("a saved reply with no picture is not drawn again when a message is added; on
   expect(glRows.renders["a1"], "a plain saved reply").toBe(1);
 });
 
-it("a live reply that ended because its model gave way or its runtime changed, or because its context was too small, says the server's own words", async () => {
+it("a live reply that ended because its model gave way or its runtime changed, or because its context was too small, says the server's own words, and one the person can act on says what to do", async () => {
   const cases = [
     ["preempted", "Stopped so Gemma 4 E4B could load.", "Stopped so Gemma 4 E4B could load."],
     ["runtime-changed", "Stopped when the Ollama runtime changed.", "Stopped when the Ollama runtime changed."],
     ["context-too-small", "This chat no longer fits in the model's context.", "This chat no longer fits in the model's context."],
     ["model-error", "llama runner process has terminated", "The reply didn't finish."],
+    ["connection-failed", "connect ECONNREFUSED 127.0.0.1:5288", "Ollama stopped answering. Retry once it's running."],
+    ["model-not-found", "model 'gemma4:12b' not found", "This model isn't installed any more. Pick another in the model menu."],
   ] as const;
   for (const [code, message, words] of cases) {
     act(() => root.render(createElement("div")));
@@ -94,17 +96,19 @@ it("a live reply that ended because its model gave way or its runtime changed, o
     await mount(code);
     const line = failLine(".turn.a");
     expect(failWords(line), code).toBe(words);
-    expect(line?.getAttribute("data-tip"), code).toBe(message);
+    expect(line?.getAttribute("data-tip"), code).toBeNull();
+    expect(line?.getAttribute("data-why"), code).toBe(message);
   }
 });
 
-it("a question whose reply failed before its first word carries the failed reply's line: its words, the runtime's text in the tip, and Retry only on the last turn", async () => {
+it("a question whose reply failed before its first word carries the failed reply's line: its words, the runtime's text kept off the tip, and Retry only on the last turn", async () => {
   const question = ask("u0", "What guides ships?", { times: failed("the model crashed") });
   act(() => store.setState({ messages: { T: [question] } }));
   await mount("last");
   const last = failLine(".stop-note.under-u");
   expect(failWords(last)).toBe("The reply didn't finish.");
-  expect(last?.getAttribute("data-tip")).toBe("the model crashed");
+  expect(last?.getAttribute("data-tip")).toBeNull();
+  expect(last?.getAttribute("data-why")).toBe("the model crashed");
   expect(last?.querySelector('[data-testid="chat.reply.retry"]')?.textContent).toBe("Retry");
   act(() => store.setState({ messages: { T: [question, ask("u1"), answer("a1")] } }));
   const earlier = failLine(".stop-note.under-u");

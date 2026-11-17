@@ -75,12 +75,12 @@ it.each([
   expect(html).toContain('aria-label="Interrupted reply"');
 });
 
-it("a reply that did not finish is never drawn as stopped: no square, its words, Retry and the runtime's text in the tip (decision 7)", () => {
+it("a reply that did not finish is never drawn as stopped: no square, its words, Retry, and the runtime's text off the tip (decision 7)", () => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   setState({ turns: {}, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "A retained partial answer", createdAt: 1, interrupted: true, times: times("failed", 9, { why: { code: "model-error", message: "the model crashed" } }) }] } });
   const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
-  expect(html).toMatch(/data-testid="chat.reply.failed" data-tip="the model crashed"><svg[\s\S]*?<span>The reply didn&#x27;t finish.<\/span><button[^>]*data-testid="chat.reply.retry"/);
+  expect(html).toMatch(/data-testid="chat.reply.failed" data-why="the model crashed"><svg[\s\S]*?<span>The reply didn&#x27;t finish.<\/span><button[^>]*data-testid="chat.reply.retry"/);
   expect(html).not.toContain(MARK);
   expect(html).not.toContain('class="stop-note"');
   expect(html).toContain("A retained partial answer");

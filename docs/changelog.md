@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-17: a failure says what to do
+
+- A reply that fails because Ollama stopped answering, the model is gone, or the context size is wrong now says what to do instead of "The reply didn't finish." The runtime's own words no longer sit in a tooltip.
+- When Ollama didn't install or didn't start, the line under the title says what to do next instead of repeating the title.
+
 ## 2026-11-17: a pre-push hook checks types, lint and the build in about 4 s
 
 - `git config core.hooksPath .githooks` turns it on. Typecheck, lint and the client build run at

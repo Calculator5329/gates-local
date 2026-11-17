@@ -540,9 +540,17 @@ interface ReplyView extends Files {
 
 const SAYS_WHY = new Set(["context-too-small", "preempted", "runtime-changed"]);
 
+// why: a failure the person can act on says what to do; the runtime's own text stays out of sight
+const FAIL_WORDS: Readonly<Record<string, string>> = {
+  closed: "The connection dropped before this reply finished.",
+  "connection-failed": "Ollama stopped answering. Retry once it's running.",
+  "model-not-found": "This model isn't installed any more. Pick another in the model menu.",
+  "num-ctx-invalid": "This model can't use that context size. Pick another in the model menu.",
+};
+
 function FailLine({ words, why, retryable }: { words: string; why: string; retryable: boolean }) {
   return (
-    <div className="err-line" data-testid="chat.reply.failed" data-tip={why === "" ? undefined : esc(why)}>
+    <div className="err-line" data-testid="chat.reply.failed" data-why={why === "" ? undefined : why}>
       <Icon id="alert" cls="s14" />
       <span>{words}</span>
       {retryable ? (
@@ -578,7 +586,7 @@ function Reply({ msg, live, text, paced, thinking, tools, rounds, secs, allowedL
       {msg?.imageJob ? <ImageCard msg={msg} thread={thread} origin={origin} token={token} /> : shown !== "" ? <Markdown text={shown} live={streaming || pending} allowedLinks={allowedLinks} /> : null}
       {(msg?.imageJob ? [] : msg?.images ?? []).map((p) => <ImageOut key={p} path={p} origin={origin} token={token} />)}
       {end?.kind === "error" ? (
-        <FailLine words={SAYS_WHY.has(end.code) ? end.message : end.code === "closed" ? "The connection dropped before this reply finished." : "The reply didn't finish."}
+        <FailLine words={SAYS_WHY.has(end.code) ? end.message : FAIL_WORDS[end.code] ?? "The reply didn't finish."}
           why={end.message} retryable />
       ) : note?.kind === "failed" ? <FailLine words="The reply didn't finish." why={note.why} retryable={regen} /> : null}
       {!streaming && !pending && !msg?.imageJob && !(text === "" && msg?.tools?.every(t => t.name === "image")) ? (

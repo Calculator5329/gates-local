@@ -116,8 +116,9 @@ export const FAIL_FALLBACK: Record<NonNullable<Failure>, string> = {
   download: "Check the network, then retry.",
   checksum: "Nothing was installed. Retry once.",
   disk: "Free some space on this drive, then retry.",
-  install: "Gates Local couldn't unpack Ollama.",
-  start: "Gates Local couldn't start Ollama.",
+  // why: the title already says what failed, so the line under it says only what to do
+  install: "Retry. If it fails again, install Ollama from ollama.com.",
+  start: "Retry. If it still won't start, install Ollama from ollama.com.",
 };
 
 export function rtInfo(s: RtSource): { dot: string; text: ReactNode; tip: string } {

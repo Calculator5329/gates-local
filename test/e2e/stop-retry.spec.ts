@@ -51,13 +51,14 @@ test("a stopped reply survives a reload and Regenerate replaces it without a sec
   await expect(page.locator(".stop-note")).toHaveCount(0);
 
   // a reply that breaks after some words, and again on the server's one more try: one line with the
-  // alert, the short words and Retry, the runtime's own words in its tip, never the stop square (decision 7)
+  // alert, the short words and Retry, the runtime's own words kept off its tip, never the stop square (decision 7)
   await stack.scenario("mid-stream-error");
   await sendMessage(page, "And at boot?");
   const failed = page.getByTestId("chat.reply.failed");
   await expect(failed).toHaveCount(1, { timeout: 15_000 });
   await expect(failed).toHaveText(/^The reply didn't finish\.\s*Retry$/);
-  await expect(failed).toHaveAttribute("data-tip", /unexpected EOF/);
+  await expect(failed).not.toHaveAttribute("data-tip");
+  await expect(failed).toHaveAttribute("data-why", /unexpected EOF/);
   await expect(page.getByTestId("chat.reply.retry")).toBeVisible();
   await expect(page.locator(".turn.a").last().getByRole("img", { name: UNSEEN, exact: true })).toHaveCount(0);
   await expect(page.locator(".stop-note")).toHaveCount(0);
