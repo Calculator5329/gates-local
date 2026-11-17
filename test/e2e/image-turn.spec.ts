@@ -69,6 +69,9 @@ test("a retry takes over the failed card's box across clients and reloads, and o
   await setup(page, open);
   const card = page.locator("[data-image-job]");
   await expect(card).toContainText(MISSING);
+  // the failed card names the setup its missing file makes ready, so Try again keeps its size (council climb-025 Q12)
+  const named = card.locator(".image-job-model");
+  await expect(named).toHaveText("FLUX.2 Klein 4B · 1024×1024");
   // the file and its folder are in the details; the app's own place to act is one click away
   const details = card.getByTestId("chat.image-job.details");
   await expect(details).not.toHaveAttribute("open");
@@ -116,6 +119,7 @@ test("a retry takes over the failed card's box across clients and reloads, and o
     await expect(card).toHaveCount(1);
     await expect(card.getByRole("img", { name: "Generated image" })).toBeVisible();
     expect(await card.boundingBox()).toEqual(box);
+    await expect(named).toHaveText("FLUX.2 Klein 4B · 1024×1024");
     await page.screenshot({ path: info.outputPath("retried.png"), animations: "disabled" });
   } finally { client.close(); await other.close(); }
 });

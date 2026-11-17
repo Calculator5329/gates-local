@@ -15,7 +15,8 @@ const PHONE = { viewport: { width: 412, height: 915 }, isMobile: true, hasTouch:
 const SHORT = /^Slower now · Whisper in the way$/;
 // sizes keep their unit on the line: a no-break space before GB
 // nothing is loaded here, so the spill is a prediction: said as one, with ~ (council climb-025 Q12)
-const SENTENCE = /^Fits this card with Whisper \(2\.\d\sGB\) and others \(\d\.\d\sGB\) off it\. Would use ~\d\.\d\sGB of system memory\.$/;
+// each holder named as the memory rows name it, never folded into "others" (council climb-025 Q12)
+const SENTENCE = /^Fits this card with Whisper \(2\.\d\sGB\) and Media Vault vision \(1\.8\sGB\) off it\. Would use ~\d\.\d\sGB of system memory\.$/;
 
 /** In the test body, after the fixtures' own reset of the backend. */
 async function smallCard(): Promise<void> {
@@ -29,7 +30,10 @@ const outline = (page: Page) =>
     for (const el of document.querySelectorAll<HTMLElement>('[data-testid$="slow-now"], [data-testid$="slow-line"]')) el.style.setProperty("outline", "2px solid #f5a524");
   });
 
-/** The picture now, and the picture without this change's parts: origin's page for the same reading draws none of them. */
+/**
+ * The picture now, and the picture without the row's and the picker's reason. Settings' sentence
+ * stays: a page with the chip and no sentence never existed, and drawing one read as a contradiction.
+ */
 async function shots(page: Page, info: TestInfo, name: string, outlined = false): Promise<void> {
   if (!outlined) await outline(page);
   await page.screenshot({ path: info.outputPath(`${name}-after.png`), animations: "disabled" });
@@ -39,7 +43,6 @@ async function shots(page: Page, info: TestInfo, name: string, outlined = false)
       el.querySelector("small > span")?.remove();
       el.style.removeProperty("outline");
     }
-    for (const el of document.querySelectorAll<HTMLElement>('[data-testid="models.fit-panel.slow-now"]')) el.replaceWith("Runs entirely on the GPU.");
     document.getElementById("tip")?.style.setProperty("display", "none");
   });
   await page.screenshot({ path: info.outputPath(`${name}-before.png`), animations: "disabled" });

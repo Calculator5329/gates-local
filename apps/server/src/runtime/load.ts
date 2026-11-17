@@ -227,8 +227,13 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       const afterPs = stopped();
       if (afterPs) return finish(afterPs);
       if (!here.ok) return finish({ model, numCtx, state: "error", message: PS_UNREADABLE_MESSAGE });
-      if (here.models.has(tag) && record.oursAt(tag) === undefined) {
-        return finish({ model, numCtx, state: "ready", message: `${model} is already in memory, loaded by another program.` });
+      const resident = here.models.get(tag);
+      // decision: docs/decisions.md "Other programs' memory is freed only with a click"
+      if (resident !== undefined && record.oursAt(tag) === undefined) {
+        recordLoaded(tag, resident.contextLength ?? numCtx);
+        const ready = finish({ model, numCtx, state: "ready" });
+        deps.onLoaded?.();
+        return ready;
       }
       const report = noted(await deps.fit(model, numCtx, baseUrl, signal), handoff);
       const afterFit = stopped();
@@ -319,7 +324,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       let numCtx = 0;
       let admitting = false;
       let notice: Notice | undefined;
-      let residencyRead = false;
+      let reloaded = false;
       let answered = false;
       let ended = false;
       let counted = false;
@@ -399,8 +404,9 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
                   return reject(switched());
                 }
                 const entry = here.ok ? here.models.get(tag) : undefined;
-                residencyRead = here.ok;
                 numCtx = report.numCtx;
+                // why: Ollama loads a resident model again at another context, so this send loads it
+                reloaded = entry?.contextLength !== undefined && entry.contextLength !== numCtx;
                 if (report.verdict === "refuse") {
                   handed(false);
                   return resolve(report);
@@ -441,7 +447,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
           letGo();
           if (notice !== undefined && (gen === generation || deps.faultForTest === "record-without-generation-check")) loaded(model, numCtx, notice);
           // decision: docs/decisions.md "Other programs' memory is freed only with a click"
-          else if (residencyRead && gen === generation && record.oursAt(tag) !== numCtx) {
+          else if (reloaded && gen === generation) {
             recordLoaded(tag, numCtx);
             deps.onLoaded?.();
           }

@@ -31,7 +31,8 @@ test("on touch the Make images row keeps its height when the switch above flips,
   const row = page.locator('.set .srow[data-tool="images"]');
   const master = page.getByTestId("settings.tools.enable");
   await expect(master).toHaveAttribute("aria-checked", "true");
-  await expect(row).toContainText("Needs Generate images, in Image generation.");
+  // no picture engine here: the row names what Image generation shows, the address (council climb-025 Q12)
+  await expect(row).toContainText("Needs ComfyUI: set its address in Image generation.");
   const height = () => row.evaluate((e) => Math.round(e.getBoundingClientRect().height * 10) / 10);
   const lines = () => row.locator(".steady").evaluate((e) => Math.round(e.getBoundingClientRect().height * 10) / 10);
   const on = { row: await height(), reason: await lines() };

@@ -149,7 +149,7 @@ export const DRIP_REPLY = [
   "| Model | Download |",
   "| --- | --- |",
   "| Gemma 4 12B | 8.1 GB |",
-  "| Qwen 3.5 9B | 6.6 GB |",
+  "| Qwen 3.5 9B | 6.1 GB |",
   "",
   "A model fits when the free space is larger than its download. Keep some room for the context cache.",
 ].join("\n");

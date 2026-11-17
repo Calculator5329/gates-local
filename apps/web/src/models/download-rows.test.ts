@@ -122,10 +122,12 @@ it("on the phone a running download shows its progress and no ×, here and among
 
 const button = (p: PullProgress | undefined, size: string | undefined = "5.0 GB") => renderToStaticMarkup(createElement(view.DlButton, { size, label: "A", p, onCancel: () => undefined }));
 
-it("until the download's size is known, its button reads 0 and waits with an ellipsis", () => {
+it("until the download's size is known, its button reads 0 and says Starting, with a tip that names it, not an unlabelled …", () => {
   const html = button({ name: "a:1", state: "downloading", completedBytes: 3 * GIB });
   expect(html).toContain('aria-valuenow="0"');
-  expect(html).toContain('<i style="width:0%"></i><span>…</span>');
+  expect(html).toContain('<i style="width:0%"></i><span>Starting</span>');
+  expect(html).toMatch(/role="progressbar"[^>]*data-tip="Download"/);
+  expect(html).not.toContain("<span>…</span>");
 });
 
 it("a download's percent never reads past 100", () => {

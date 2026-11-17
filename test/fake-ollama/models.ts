@@ -63,7 +63,8 @@ export const FAKE_MODELS: readonly FakeModel[] = [
     parameterSize: "9.7B",
     parameterCount: 9_653_104_368,
     quantization: "Q4_K_M",
-    sizeBytes: Math.round(6.6 * GIB),
+    // the catalog's download size, so the first-run card and Models say one size (council climb-025 Q12)
+    sizeBytes: 6_550_825_550,
     capabilities: ["completion", "thinking", "tools"],
     blockCount: 32,
     headCount: 32,

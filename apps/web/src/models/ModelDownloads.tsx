@@ -114,9 +114,9 @@ export function DlButton({ size, label, p, installed = false, disabled = false, 
       {installed ? (
         <span className="dl-btn dl-done">Installed</span>
       ) : p ? (
-        <span className="dl-btn dl-run" role="progressbar" aria-label={`${label} download`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+        <span className="dl-btn dl-run" role="progressbar" aria-label={`${label} download`} data-tip="Download" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
           <i style={{ width: `${finishing ? 100 : pct}%` }} />
-          <span>{finishing ? "Finishing" : p.totalBytes ? `${pct}%` : "…"}</span>
+          <span>{finishing ? "Finishing" : p.totalBytes ? `${pct}%` : "Starting"}</span>
         </span>
       ) : (
         <button type="button" className="dl-btn" data-testid="models.download.start" aria-label={size === undefined ? "Download" : `Download ${size}`} disabled={disabled} onClick={onStart}>

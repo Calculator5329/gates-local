@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-17: the app's own models survive one restart; one verdict and one size on the fit card
+
+- The app writes the chat models it loaded (tag, context, when) to its data folder and reads them back at start, so a model it loaded stays its own across one restart and the next picture frees it without asking. An entry carried over once is dropped at the next start, and an entry from the other runtime mode is ignored. A chat turn alone no longer makes a model that was already loaded the app's: only a send that loads it (a new context), the model menu's load (even on a model already loaded) and a preload claim one. This replaces the first-token claim in "a turn makes its model the app's" below. Decision: "Other programs' memory is freed only with a click".
+- Settings' GPU memory Details opens with "Measured 9.0 GB" or "Estimated 9.0 GB", once, and its second line says the verdict the chip says ("Slower now" next to its sentence, not "Runs entirely on the GPU"). The "Measured on last load" line is gone. The sentence names every holder as the memory rows do ("Whisper (2.1 GB) and Media Vault vision (1.8 GB)"), never "and others".
+- The Models size column is headed "On disk". The test Ollama's Qwen 3.5 9B now has the catalog's download size, so first run and Models say one size.
+- With no picture engine, Settings › Tools' Make images row says "Needs ComfyUI: set its address in Image generation", which is what that page shows, instead of naming a Generate images switch the page lacks.
+- With no image setup ready, the default a send names is the one its missing files make ready: Klein at 1024×1024 when only Klein's model file is missing, so the failed card's size is the size Try again runs. With nothing ready the General cell still stands.
+- A download whose size is not known yet says "Starting" on its button, with the tip "Download", instead of an unlabelled "…".
+
 ## 2026-11-17: refusals and failures lead with a plain sentence; waits say what they are; phone tables stack; tips are names
 
 - The memory refusal note starts with one sentence ("Not enough GPU memory for Gemma 4 12B at 16k.", or "Not enough memory" when system memory counted too), then its offer buttons. The GB figures moved behind Memory details.

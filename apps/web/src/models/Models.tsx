@@ -209,7 +209,7 @@ function Installed() {
       <div className={measureShown ? "mp-card ms" : "mp-card"}>
         <div className="mp-th" aria-hidden="true">
           <span className="mp-thn">Model</span>
-          <span className="mp-sz">Size</span>
+          <span className="mp-sz">On disk</span>
           <span className="mp-fitc">On this computer</span>
           {measureShown ? (
             <>

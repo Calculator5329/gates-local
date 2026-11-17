@@ -5,12 +5,12 @@
 // shows and marks a model that cannot run now.
 //
 // The machine: a 10 GB card with the fake's resident programs on it (5.35 GiB usable once the app's
-// own model leaves) and a 6.4 GiB computer: system memory is judged by what the computer has, less a
-// 1 GiB reserve and the 2 GiB margin, so 3.4 GiB is usable for spill (fit.ts cardRamBytes). Together
-// 8.75 GiB. By the server's estimate Gemma 4 12B needs 9.85 GiB at 8k, more than that at every
+// own model leaves) and a 5.9 GiB computer: system memory is judged by what the computer has, less a
+// 1 GiB reserve and the 2 GiB margin, so 2.9 GiB is usable for spill (fit.ts cardRamBytes). Together
+// 8.25 GiB. By the server's estimate Gemma 4 12B needs 9.85 GiB at 8k, more than that at every
 // context offered, so the other installed model that runs is offered (Qwen 3.5 4B, 5.28 GiB at 16k,
-// on the card alone); Qwen 3.5 9B is refused at 16k (9.10) and runs at 8k (8.35) only partly in
-// system memory. On an 11 GiB computer (8 GiB of spill) every one of them runs.
+// on the card alone); Qwen 3.5 9B (6.1 GiB on disk) is refused at 16k (8.60) and runs at 8k (7.85)
+// only partly in system memory. On an 11 GiB computer (8 GiB of spill) every one of them runs.
 import type { Page } from "@playwright/test";
 import { FAKE_URL } from "./env.ts";
 import { expect, stack, test, waitReady } from "./fixtures.ts";
@@ -20,7 +20,7 @@ const INSTALLED = ["gemma4:12b", "qwen3.5:9b", "qwen3.5:4b"];
 
 async function smallMachine(): Promise<void> {
   await stack.scenario("models", { installed: INSTALLED });
-  await stack.computer(6.4);
+  await stack.computer(5.9);
   await stack.gpu(0, 10171);
 }
 

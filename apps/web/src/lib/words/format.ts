@@ -96,10 +96,13 @@ export interface SlowReason {
 
 export function slowReason(slow: { readonly inTheWay: readonly GpuOccupant[]; readonly spillRamBytes: number; readonly measured: boolean } | undefined, tps?: string, said: readonly string[] = []): SlowReason | undefined {
   if (slow === undefined || slow.inTheWay.length === 0) return undefined;
-  const first = slow.inTheWay.find((o) => o.kind !== "unknown");
-  const restBytes = slow.inTheWay.reduce((n, o) => (o === first ? n : n + o.bytes), 0);
+  const named = slow.inTheWay.filter((o) => o.kind !== "unknown");
+  const first = named[0];
+  const unnamedBytes = slow.inTheWay.reduce((n, o) => (o.kind === "unknown" ? n + o.bytes : n), 0);
   const who = first === undefined ? "other programs" : holderName(first);
-  const off = first === undefined ? `other programs (${gb(restBytes)})` : restBytes > 0 ? `${who} (${gb(first.bytes)}) and others (${gb(restBytes)})` : `${who} (${gb(first.bytes)})`;
+  // why: the sentence names each holder as the memory rows do, so no named row hides in "others"
+  const parts = [...named.map((o) => `${holderName(o)} (${gb(o.bytes)})`), ...unnamedBytes > 0 ? [`${holderName({ kind: "unknown", label: "" })} (${gb(unnamedBytes)})`] : []];
+  const off = first === undefined ? `other programs (${gb(unnamedBytes)})` : parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
   const slower = tps === undefined ? "Slower now" : `Slower now, ${tps}`;
   // why: a spill /api/ps reported is said in the present; a predicted one as a prediction, with ~
   const spill = slow.measured ? `${gb(slow.spillRamBytes)} is in system memory now.` : `Would use ~${gb(slow.spillRamBytes)} of system memory.`;

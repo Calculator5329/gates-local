@@ -259,6 +259,7 @@ function Tools() {
   const locked = useStore((s) => s.unavailable["settings.update"] === true);
   const sources = useStore((s) => s.sources);
   const status = useStore((s) => s.imageStatus);
+  const none = useStore(noImageEngine);
   const [err, run] = useAct();
   const on = settings === NA || settings?.tools === true;
   const windows = /\bWindows\b/.test(navigator.userAgent);
@@ -269,7 +270,8 @@ function Tools() {
   const runnable = presets !== NA && presets !== undefined && presets.presets.length > 0 && presets.noGpu === undefined;
   const imageTool = settings !== NA && settings !== undefined && (settings.imageTool ?? (settings.imageGen && runnable));
   const fixIt = <button type="button" className="link" data-go="images" data-testid="settings.tools.image-setup" tabIndex={on ? undefined : -1} onClick={() => openSettings("images")}>Image generation</button>;
-  const onWhy = settings === NA || settings?.imageGen !== true ? <>Needs Generate images, in {fixIt}.</>
+  // why: with no engine, Image generation has only the ComfyUI address, no Generate images switch
+  const onWhy = settings === NA || settings?.imageGen !== true ? none ? <>Needs ComfyUI: set its address in {fixIt}.</> : <>Needs Generate images, in {fixIt}.</>
     : status === NA ? "Not available in this build."
     : !image.usable ? <>ComfyUI: {image.word}. Set it up in {fixIt}.</>
     : null;

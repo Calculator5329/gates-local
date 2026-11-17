@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { FitReport, ModelLoad } from "@gates-local/contracts";
@@ -7,6 +7,7 @@ import { json, startFakeServer, type FakeServer, type Route } from "../fit/fake-
 import { checkFit } from "../fit/fit.ts";
 import { readGpuStatus } from "../fit/gpu-status.ts";
 import { createGpuLease } from "../gpu/lease.ts";
+import { OWN_MODELS_FILE, keptRecord } from "../gpu/kept-record.ts";
 import { createMemoryOwner } from "../gpu/memory.ts";
 import { defaultSettings } from "../settings/store.ts";
 import { createRuntimeHandlers } from "./handlers.ts";
@@ -142,15 +143,15 @@ describe("models.load", () => {
     expect(plain).toEqual({ model: "big:70b", numCtx: 16384, state: "error", message: "needs 30 GB, 12 GB free" });
   });
 
-  it("R-01: a model already resident that the app did not load is external: ready, no preload, never owned", async () => {
-    // `ollama run m` in a terminal.
+  it("R-01: models.load on a model already resident that the app did not load: ready, no preload, and now the app's (decision 2026-11-17)", async () => {
+    // `ollama run m` in a terminal, then the person picks m in the app.
     const s = await fakeOllama(["m:latest"]);
     const pushes: ModelLoad[] = [];
     const loader = loaderFor(s, pushes);
     const r = await loader.load("m", 16384);
-    expect(r.state).toBe("ready");
+    expect(r).toEqual({ model: "m", numCtx: 16384, state: "ready" });
     expect(pushes.map((p) => p.state)).toEqual(["ready"]);
-    expect(loader.appLoadedModels()).toEqual([]);
+    expect(loader.appLoadedModels()).toEqual(["m:latest"]);
     expect(generates(s)).toBe(0);
   });
 
@@ -360,7 +361,7 @@ async function turnOn(loader: ModelLoader, model: string) {
  * models is a reply running on"; who loaded a model no longer protects or exposes it.
  */
 describe("what the next thing may ask to leave: every resident model no running reply uses", () => {
-  it("a reply counts from its admission to its end, on a model warm before the app started too; the answer makes only that model the app's", async () => {
+  it("a reply counts from its admission to its end, on a model warm before the app started too; appLoadedModels never lists it", async () => {
     const s = await fakeOllama(["qwen3.5:9b", "other:7b"]);
     const loader = loaderFor(s, []);
     expect(loader.replying()).toEqual([]);
@@ -371,11 +372,14 @@ describe("what the next thing may ask to leave: every resident model no running 
     expect(loader.replying()).toEqual(["qwen3.5:9b"]);
     turn.end();
     expect(loader.replying(), "ended: the next thing may ask it to leave").toEqual([]);
-    // decision 2026-11-17: a model the app has used is the app's, a send among the ways it loads one
-    expect(loader.appLoadedModels(), "the turn ran on it, the other stays someone else's").toEqual(["qwen3.5:9b"]);
+    // decision 2026-11-17: a model loaded by another client or before the app started stays theirs
+    expect(loader.appLoadedModels(), "the picker's answer and the reclaim list keep their meaning").toEqual([]);
   });
-  it("after a restart, a turn that answers on the model that stayed loaded lets the next image free it without asking", async () => {
+  it("after a restart, the model the run before loaded leaves for the next image; a turn alone claims nothing", async () => {
     const ps = ["qwen3.5:9b", "other:7b"];
+    const dataDir = mkdtempSync(path.join(os.tmpdir(), "gates-local-kept-"));
+    // the run before loaded qwen3.5:9b and wrote it down; other:7b was never the app's
+    writeFileSync(path.join(dataDir, OWN_MODELS_FILE), JSON.stringify({ models: [{ tag: "qwen3.5:9b", numCtx: 16384, at: 1, mode: "system" }] }));
     const s = await fakeOllama(ps, [], {
       "POST /api/generate": (body, res) => {
         const request = body as { model: string; keep_alive?: number };
@@ -383,15 +387,17 @@ describe("what the next thing may ask to leave: every resident model no running 
         json(res, 200, { done: true });
       },
     });
-    const memory = createMemoryOwner({ ollamaUrl: () => s.baseUrl, listLoaded: () => listLoaded(s.baseUrl), replying: () => [], waitMs: 100, pollMs: 1 });
+    const record = keptRecord({ dataDir, mode: () => "system" });
+    const memory = createMemoryOwner({ ollamaUrl: () => s.baseUrl, listLoaded: () => listLoaded(s.baseUrl), replying: () => [], waitMs: 100, pollMs: 1, record });
     const loader = loaderFor(s, [], "fits", { memory });
+    expect(loader.appLoadedModels(), "taken back from the file").toEqual(["qwen3.5:9b"]);
     const image = { kind: "image" as const, setup: "p 512x512" };
-    const signal = new AbortController().signal;
-    expect((await memory.gate(() => memory.handoff(image, signal))).left, "before the turn: neither is the app's").toEqual([]);
-    await turnOn(loader, "qwen3.5:9b");
-    const handoff = await memory.gate(() => memory.handoff(image, signal));
-    expect(handoff.left, "the model the turn ran on leaves").toEqual(["qwen3.5:9b"]);
+    const handoff = await memory.gate(() => memory.handoff(image, new AbortController().signal));
+    expect(handoff.left, "the model the run before loaded leaves").toEqual(["qwen3.5:9b"]);
     expect(handoff.held.map((h) => h.name), "the other client's model stays, held").toEqual(["other:7b"]);
+    await turnOn(loader, "other:7b");
+    expect(loader.appLoadedModels(), "a turn on another client's model leaves it theirs").toEqual([]);
+    expect(JSON.parse(readFileSync(path.join(dataDir, OWN_MODELS_FILE), "utf8")), "the file follows the record").toEqual({ models: [] });
   });
   it("the GPU status marks a resident model protected only while a reply runs on it", async () => {
     const s = await fakeOllama(["qwen3.5:9b", "stray:7b"]);
@@ -604,12 +610,12 @@ describe("runtime generation", () => {
     // The GPU poll reads B's /api/ps, which lists m (someone else's there).
     loader.prune(["m:latest"]);
     expect(loader.appLoadedModels()).toEqual([]);
-    // A turn on B that answers on m makes it the app's (decision 2026-11-17), on B's own reading.
+    // A turn on B with m resident is warm: nothing claimed (decision 2026-11-17).
     const turn = loader.reserve("m");
     await turn.admit(16384);
     turn.firstToken();
     turn.end();
-    expect(loader.appLoadedModels()).toEqual(["m:latest"]);
+    expect(loader.appLoadedModels()).toEqual([]);
     // The switch itself pushes no "unloaded" for a model that stays resident elsewhere.
     expect(pushes.slice(before).filter((p) => p.state === "unloaded")).toEqual([]);
   });
@@ -722,8 +728,8 @@ describe("chat turn reservation", () => {
     expect(pushes[1]?.state).toBe("ready");
     cold.end();
     expect(loader.inUse("qwen3.5:9b")).toBe(false);
-    // decision 2026-11-17: both answered a turn of this app, so both are the app's to unload
-    expect(loader.appLoadedModels()).toEqual(["gemma4:12b", "qwen3.5:9b"]);
+    // decision 2026-11-17: only the model this app's turn loaded is the app's to unload
+    expect(loader.appLoadedModels()).toEqual(["qwen3.5:9b"]);
   });
 
   it("R-05: with a slow /api/ps the residency decision still lands before the first token, so the cold model is owned", async () => {

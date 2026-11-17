@@ -8,6 +8,7 @@ import { cached, procListeningPids, readGpuStatus, systemdMainPid } from "../fit
 import { createGpuWatcher, type GpuWatcher } from "../fit/gpu-watch.ts";
 import { answerHoldsOne } from "../fit/one-model.ts";
 import { defaultNvidiaSmi, forgetGpuReadings, readGpu } from "../fit/gpu.ts";
+import { keptRecord } from "../gpu/kept-record.ts";
 import { createMemoryOwner, type MemoryEngine, type MemoryOwner } from "../gpu/memory.ts";
 import { createGpuHandlers } from "../fit/handlers.ts";
 import { createSettingsHandlers } from "../settings/handlers.ts";
@@ -138,6 +139,7 @@ export async function createModelServices(options: ModelServicesOptions): Promis
   const owner = createMemoryOwner({
     ollamaUrl: () => runtime.baseUrl(),
     holdsOne,
+    record: keptRecord({ dataDir: options.dataDir, mode: () => runtime.mode(), holdsOne, log }),
     freeOthers: () => settings.get().freeOthers === true,
     listLoaded: (url, signal) => listLoaded(url, undefined, signal),
     replying: () => loader?.replying() ?? [],

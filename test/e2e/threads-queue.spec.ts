@@ -96,10 +96,10 @@ test("a send refused for memory is one on-hold row with its reason in both windo
   await configure(scenario);
   await page.locator("#ta").fill(WORDS);
   await expect.poll(loaded, "the first key typed loads the model").toContain(BIG);
-  // a 10 GB card and 6.4 GB of system memory (refusal-offer.spec.ts): this model no longer runs at 16k, and does at 8k
+  // a 10 GB card and 5.9 GB of system memory (refusal-offer.spec.ts): this model no longer runs at 16k, and does at 8k
   stale = true;
   await configure(scenario);
-  await stack.computer(6.4);
+  await stack.computer(5.9);
   await stack.gpu(0, 10171);
   expect(await loaded(), "the send finds the fake GPU empty").not.toContain(BIG);
   await page.locator("#ta").press("Enter");

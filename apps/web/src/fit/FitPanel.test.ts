@@ -174,6 +174,44 @@ it("no card read, but the runner lists the model on one: the numbers follow that
   expect(numbers).not.toContain("Runs in system memory");
 });
 
+const text = (part: string) => part.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+const IN_THE_WAY: GpuOccupant[] =[{ kind: "whisper", label: "whisper-server", bytes: 2 * GB, protected: true }];
+/** The verdict at the top of the card and the Details lines, for "chat" at 16k on a 16 GB card; `card` overrides the row's card verdict. */
+const details = (row: Partial<FitReport>, card?: object, loaded = false): { verdict: string; lines: string[] } => {
+  const r: FitReport = { model: "chat", numCtx: 16384, freeVramBytes: 16 * GB, needVramBytes: 9 * GB, spillRamBytes: 0, verdict: "fits", source: "estimate", measuredAt: 1, ...row };
+  store.state = {
+    model: "chat", numCtx: 16384, fitPanel: { model: null }, settings: { defaultNumCtx: 16384 },
+    gpu: { vendor: "nvidia", name: "RTX", totalBytes: 16 * GB, freeBytes: 12 * GB, occupants: [], systemMemoryAvailableBytes: 16 * GB, measuredAt: 1 },
+    models: [], catalog: [], loads: loaded ? { chat: { state: "ready", numCtx: 16384 } } : {}, messages: {}, firstToken: {}, unavailable: {},
+    fitTable: { reading: { boot: "b", seq: 1, measuredAt: 1 }, memory: { kind: "gpu", freeBytes: 12 * GB, usableBytes: 11 * GB }, rows: [{ ...said(r, false), ...card === undefined ? {} : { card } }] },
+  };
+  const html = renderToStaticMarkup(createElement(GpuMemory));
+  const numbers = html.split('class="fp-n fp-numbers"')[1]?.split("</div>")[0] ?? "";
+  return { verdict: text(html.split('class="fp-v')[1]?.split("</div>")[0]?.replace(/^[^>]*>/, "") ?? ""), lines: numbers.replace(/^[^>]*>/, "").split("<br/>").map(text) };
+};
+
+// Council climb-025 Q12: the chip said "Slower now · Whisper in the way" while Details said "Runs entirely on the GPU".
+it("Details says in a sentence the one verdict the card's chip says", () => {
+  const spill: FitReport = { model: "chat", numCtx: 16384, freeVramBytes: 16 * GB, needVramBytes: 9 * GB, spillRamBytes: 2 * GB, verdict: "spills", source: "estimate", measuredAt: 1 };
+  const slow = details({}, { verdict: "spills", freeVramBytes: 16 * GB, spillRamBytes: 2 * GB, inTheWay: IN_THE_WAY, words: fitWords(spill, "card", false) });
+  expect(slow.verdict).toMatch(/^Slower now · Whisper in the way$/);
+  expect(slow.lines[1]).toMatch(/^Fits this card with Whisper/);
+  const well = details({});
+  expect(well.verdict).toMatch(/^Should run well/);
+  expect(well.lines[1]).toBe("Runs entirely on the GPU.");
+});
+
+// Council climb-025 Q12: a measured load read "Estimated 9.1 GB" and "Measured 9.1 GB on last load".
+it("the opening line says whether the need was measured or estimated, once", () => {
+  const measured = details({ source: "measured" }, undefined, true);
+  expect(measured.lines[0]).toMatch(/^Measured 9\.0\sGB of a 16\sGB GPU\.$/);
+  expect(measured.lines.join(" ")).not.toMatch(/Estimated|Not measured/);
+  expect(measured.lines.join(" ").split("Measured")).toHaveLength(2);
+  const estimated = details({});
+  expect(estimated.lines[0]).toMatch(/^Estimated 9\.0\sGB of a 16\sGB GPU\.$/);
+  expect(estimated.lines.join(" ")).not.toMatch(/Measured/);
+});
+
 it("a refusal names the card as every other line does", () => {
   store.state = {
     model: "chat", numCtx: 16384, fitPanel: { model: null }, settings: { defaultNumCtx: 65536 },

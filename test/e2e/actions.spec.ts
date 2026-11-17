@@ -63,7 +63,7 @@ test.describe("while the server is down", () => {
     // Settings has no banner; the sidebar footer's Settings icon says it, with a dot and in its tooltip
     const gear = page.getByTestId("sidebar.foot.settings");
     await expect(gear).toHaveAccessibleName("Settings · Reconnecting");
-    await expect(gear).toHaveAttribute("data-tip", /^<b>Reconnecting<\/b>/);
+    await expect(gear).toHaveAttribute("data-tip", "Reconnecting");
     await page.getByTestId("settings.segment.theme-light").click();
     const saved = page.getByRole("alert");
     await expect(saved).toHaveText("Couldn't save the theme because Gates Local isn't connected; try again once it reconnects.");

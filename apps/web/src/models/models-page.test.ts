@@ -289,6 +289,13 @@ it("the remove dialog names the model that becomes the default, or says new chat
   expect(alone!.textContent).not.toContain("becomes the default");
 });
 
+it("the size column says it is the size on disk, so it is not read as the GPU need beside it", async () => {
+  await mount();
+  const head = byClass("mp-th")[0]!;
+  expect(byClass("mp-sz", head).map((el) => el.textContent)).toEqual(["On disk"]);
+  expect(byClass("mp-fitc", head).map((el) => el.textContent)).toEqual(["On this computer"]);
+});
+
 it("a row carries no verdict while the fit check runs, so it is not marked as unable to run", async () => {
   await mount();
   expect(rowOf("alpha:1b").classList).not.toContain("cant");

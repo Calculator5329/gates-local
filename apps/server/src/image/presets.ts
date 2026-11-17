@@ -330,7 +330,19 @@ export function defaultChoice(lists: ComfyLists | undefined, extra: readonly Pre
   const fitting = [cellChoice(generalCell(level)), ...level === "cpu" ? [] : order.filter((c) => fits(firstBytes(c.preset), room))];
   if (lists === undefined) return fitting[0];
   const available = availablePresets(lists, extra, room, ram);
-  return fitting.find((c) => available.some((p) => p.id === c.preset)) ?? fitting[0];
+  const ready = fitting.find((c) => available.some((p) => p.id === c.preset));
+  if (ready !== undefined) return ready;
+  const lacking = (c: ImageChoice): Set<string> | undefined => {
+    const preset = appPreset(c.preset);
+    try { return preset === undefined ? undefined : new Set(judge(preset, lists).missing.map((f) => f.name)); } catch { return undefined; }
+  };
+  const general = lacking(fitting[0]!);
+  // why: with none ready, name a setup the missing files make ready, so Try again runs that size
+  const nearer = general === undefined ? undefined : fitting.slice(1).find((c) => {
+    const own = lacking(c);
+    return own !== undefined && own.size < general.size && [...own].every((f) => general.has(f));
+  });
+  return nearer ?? fitting[0];
 }
 
 export interface KnownWorkflow {

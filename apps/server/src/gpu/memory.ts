@@ -33,6 +33,8 @@ export interface MemoryOwnerDeps {
   // why: the image module is made after the memory owner
   readonly engine?: () => MemoryEngine | undefined;
   readonly freeOthers?: () => boolean;
+  // why: the server keeps its record in the data folder, so its models stay its own on restart
+  readonly record?: LoadedRecord;
   readonly readFree?: (signal: AbortSignal) => Promise<number | undefined>;
   readonly onUnloaded?: (model: string) => void;
   readonly onChanged?: (state: MemoryState) => void;
@@ -153,7 +155,7 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
   let said = "";
   // why: the plan counts the old model as free, and a slow driver would put the next one off the card
   const oneChat = (want: Want | undefined) => want?.kind === "chat" && deps.holdsOne?.() === true;
-  const record = createLoadedRecord(() => deps.holdsOne?.() === true);
+  const record = deps.record ?? createLoadedRecord(() => deps.holdsOne?.() === true);
   // why: the app's own Ollama runs only what the app loaded, on this run or the one before it
   const ours = (tag: string) => deps.holdsOne?.() === true || record.oursAt(tag) !== undefined;
   // decision: docs/decisions.md "Other programs' memory is freed only with a click"

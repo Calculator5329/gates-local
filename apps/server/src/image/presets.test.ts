@@ -194,6 +194,9 @@ describe("the app's own setups, by GPU room", () => {
     expect(at(lists(), 5)).toBe("general--fit-4a-klein-compact8");
     expect(at(undefined, 5)).toBe("general--fit-4a-klein-compact8");
     expect(defaultChoice(all)).toEqual({ preset: "general--r2-2a-klein-compact8", width: 896, height: 896 });
+    // none ready, but Klein lacks one file and the General cell two: Klein at its own size, so installing
+    // the file the failed card names makes Try again run the size that card said (council climb-025 Q12)
+    expect(defaultChoice(lists({ ...KLEIN_FILES, diffusion_models: [] }), [], 16 * GIB)).toEqual({ preset: "flux2-klein-4b", width: 1024, height: 1024 });
     // under 32 GB of system memory MOSS-Image is never the default: the General cell stands, so the send names its files
     expect(defaultChoice(lists(MOSS_FILES), [], 16 * GIB, 16 * GIB)?.preset).toBe("general--r2-2a-klein-compact8");
     expect(defaultChoice(lists(ZIMAGE_FILES, MOSS_FILES), [], 5 * GIB, 16 * GIB)?.preset).toBe("general--fit-4a-klein-compact8");
@@ -214,7 +217,8 @@ describe("the app's own setups, by GPU room", () => {
     const zimage = workflowPreset(keepWorkflow("template:image_z_image_turbo", "Z-Image Turbo", "ComfyUI templates", template("image_z_image_turbo"), zinfo));
     const sdxl = workflowPreset(keepWorkflow("template:image_sdxl_simple", "SDXL", "ComfyUI templates", template("image_sdxl_simple"), zinfo));
     expect(ids(listPresets(comfyLists(zinfo), [zimage, sdxl]).ready)).toEqual(["template:image_z_image_turbo", "template:image_sdxl_simple"]);
-    expect(defaultChoice(comfyLists(zinfo), [zimage, sdxl])).toMatchObject({ preset: "general--r2-2a-klein-compact8" });
+    // the full encoder is here and the FP4 one is not: Klein, two files away, before the General cell's three
+    expect(defaultChoice(comfyLists(zinfo), [zimage, sdxl])).toMatchObject({ preset: "flux2-klein-4b" });
   });
 });
 

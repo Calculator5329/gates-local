@@ -158,8 +158,7 @@ function Speed({ model, name, numCtx, loaded }: { model: string; name: string; n
 }
 
 // why: on a card reading freeVramBytes is the whole card, so it is named as every line names it
-function Numbers({ r, v, name, gpu, loaded, slow }: { r: FitReport; v: Verdict; name: string; gpu: GpuStatus | undefined; loaded: boolean; slow?: SlowReason | undefined }) {
-  const ctx = k(r.numCtx);
+function Numbers({ r, v, name, gpu, slow }: { r: FitReport; v: Verdict; name: string; gpu: GpuStatus | undefined; slow: SlowReason | undefined }) {
   if (v.k === "no") {
     const sys = gpu ? ` plus ${gb(gpu.systemMemoryAvailableBytes)} of system memory` : "";
     return (
@@ -168,13 +167,13 @@ function Numbers({ r, v, name, gpu, loaded, slow }: { r: FitReport; v: Verdict; 
       </div>
     );
   }
+  // why: one line says how the need is known, so "measured" and "estimated" never sit together
+  const how = r.source === "measured" ? "Measured" : "Estimated";
   return (
     <div className="fp-n fp-numbers">
-      Estimated {gb(r.needVramBytes)}{noGpu(gpu) ? `; ${gpu?.detail ? gpuHead(gpu) : "no supported GPU"}` : ` of a ${cardGb(r.freeVramBytes)} GPU`}.
+      {how} {gb(r.needVramBytes)}{noGpu(gpu) ? `; ${gpu?.detail ? gpuHead(gpu) : "no supported GPU"}` : ` of a ${cardGb(r.freeVramBytes)} GPU`}.
       <br />
-      {v.k === "spill" ? `${gb(v.amt)} in system memory; slower replies.` : slow !== undefined ? <span data-testid="models.fit-panel.slow-now">{slow.sentence}</span> : noGpu(gpu) && r.words?.word !== "Runs on GPU" ? "Runs in system memory." : "Runs entirely on the GPU."}
-      <br />
-      {r.source === "measured" ? (loaded ? `Measured ${gb(r.needVramBytes)} on last load.` : "Measured at this context.") : `Not measured at ${ctx} yet.`}
+      {slow !== undefined ? <span data-testid="models.fit-panel.slow-now">{slow.sentence}</span> : v.k === "spill" ? `${gb(v.amt)} in system memory; slower replies.` : noGpu(gpu) && r.words?.word !== "Runs on GPU" ? "Runs in system memory." : "Runs entirely on the GPU."}
     </div>
   );
 }
@@ -241,12 +240,13 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
   const memory = cpu ? "memory" : "GPU memory";
   const fit = gpuRaw === undefined ? undefined : cardFit(fitFor(table, model, ctx));
   const tps = useStore((s) => tpsText(measureOf(s, model)?.tokensPerSecond));
-  const slow = slowReason(fit?.slowNow, tps);
+  // why: the chip and the Details sentence read this one verdict, so they cannot disagree
+  const slow = cpu || fit === undefined || verdictOf(fit).k === "no" ? undefined : slowReason(fit.slowNow, tps);
   return (
     <>
       {gpuNotice === undefined ? null : <div className="fp-n fp-note">{gpuNotice}</div>}
       <Row label={title} {...(gpuNotice === undefined && head !== "" ? { desc: head } : {})}>
-        {fit === undefined ? gpu?.vendor === "unreadable" ? null : table && gpuRaw !== undefined ? <span className="fp-n">{`No ${memory} reading for ${name}.`}</span> : <span className="fp-n" aria-busy="true"><FitSkel w="120px" /></span> : <FitLine r={fit} size={ctx} slow={cpu ? undefined : slow} />}
+        {fit === undefined ? gpu?.vendor === "unreadable" ? null : table && gpuRaw !== undefined ? <span className="fp-n">{`No ${memory} reading for ${name}.`}</span> : <span className="fp-n" aria-busy="true"><FitSkel w="120px" /></span> : <FitLine r={fit} size={ctx} slow={slow} />}
         {action}
       </Row>
       {fit === undefined ? null : (
@@ -255,7 +255,7 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
             <Icon id="right" cls="s14" />
             Details
           </summary>
-          <Numbers r={fit} v={verdictOf(fit)} name={name} gpu={gpu} loaded={loaded} slow={slow} />
+          <Numbers r={fit} v={verdictOf(fit)} name={name} gpu={gpu} slow={slow} />
           <Breakdown model={model} name={name} numCtx={ctx} gpuRaw={gpuRaw} report={fit} loaded={loaded} />
         </details>
       )}

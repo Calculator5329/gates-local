@@ -55,6 +55,22 @@ it.each([
   expect(row).toContain('class="srow tool dim"');
 });
 
+it.each([
+  ["no picture engine is anywhere", { state: "off", owner: "external", nowhere: true }],
+  ["no ComfyUI address is set", { state: "missing", owner: "external" }],
+] as const)("when %s, the row names what Image generation shows, the ComfyUI address, never a switch that page lacks", async (_why, imageStatus) => {
+  const { SettingsView } = await import("./Settings.tsx");
+  setState({ ...initial, conn: { kind: "open" }, view: "settings", section: "tools", settings: settings(false, false), sources: [], imageStatus, unavailable: {} });
+  const html = renderToStaticMarkup(createElement(SettingsView));
+  const row = html.slice(html.search(/data-tool="images"/));
+  expect(row).not.toContain("Generate images");
+  expect(row).toContain('Needs ComfyUI: set its address in <button type="button" class="link" data-go="images" data-testid="settings.tools.image-setup">Image generation</button>.');
+  setState({ section: "images" });
+  const page = renderToStaticMarkup(createElement(SettingsView));
+  expect(page, "the page the link opens has no Generate images switch").not.toContain('data-testid="settings.images.enable"');
+  expect(page).toContain('data-testid="settings.images.address"');
+});
+
 it("with the master switch off the hidden reason holds the same link box, out of the tab order, so the row keeps its height", async () => {
   const { SettingsView } = await import("./Settings.tsx");
   setState({ ...initial, conn: { kind: "open" }, view: "settings", section: "tools", settings: { ...settings(false, false), tools: false }, sources: [], imageStatus: { state: "off", owner: "external" }, unavailable: {} });

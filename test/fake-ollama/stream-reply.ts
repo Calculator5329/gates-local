@@ -18,7 +18,7 @@ export const STREAM_REPLY = [
   "| Model | Download | Context |",
   "| --- | --- | --- |",
   "| Gemma 4 12B | 8.1 GB | 16k |",
-  "| Qwen 3.5 9B | 6.6 GB | 16k |",
+  "| Qwen 3.5 9B | 6.1 GB | 16k |",
   "",
   "> A download that fits on disk still needs a separate GPU memory check.",
   "",
