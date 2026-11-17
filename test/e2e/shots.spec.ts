@@ -43,6 +43,13 @@ const settings = (label: string) => async (page: Page) => {
   await navButton(page, label).click();
 };
 
+// Models is its own pop-up on a desktop (footer icon) and a Settings section on a phone
+const models = async (p: Page) => {
+  if ((p.viewportSize()?.width ?? 1440) <= 640) return settings("Models")(p);
+  await p.getByTestId("sidebar.foot.models").click();
+  await expect(p.getByRole("dialog", { name: "Models" })).toBeVisible();
+};
+
 /**
  * A light shot picks Light with the real Theme control, so General shows Light
  * chosen and says so. Where Settings can't be reached (first run, a server that
@@ -74,7 +81,7 @@ const SHOTS: readonly Shot[] = [
   { name: "S-14-firstrun-found", light: "S-66-light-firstrun-found", start: "firstrun" },
   { name: "S-16-firstrun-nomodels", light: "S-76-light-firstrun-nomodels-before", scenario: "no-models", start: "firstrun" },
   { name: "S-17-settings-general", act: settings("General") },
-  { name: "S-18-settings-models", light: "S-90-light-settings-models", act: settings("Models") },
+  { name: "S-18-settings-models", light: "S-90-light-settings-models", act: models },
   { name: "S-19-settings-runtime", light: "S-60-light-settings-runtime", act: settings("Runtime") },
   { name: "S-20-settings-tools", act: settings("Tools") },
   { name: "S-22-settings-shortcuts", act: settings("Shortcuts") },
@@ -136,7 +143,6 @@ const lightName = (s: Shot) => s.light ?? s.name.replace(/^(S-\d+)-/, "$1-light-
 
 // Settings › Models in the states of the models-a4 design (its a4-NN shot is
 // named in the comment): one theme each, some at phone size.
-const models = settings("Models");
 const kebab = (tag: string) => async (p: Page) => {
   await models(p);
   await p.locator(`.mp-row[data-dm="${tag}"]`).getByTestId("models.row-menu.open").click();
@@ -247,7 +253,7 @@ const SETTINGS_PAGES: readonly (readonly [string, string, ((page: Page) => Promi
     },
   ],
   ["runtime", "Runtime"],
-  ["runtime-confirm", "Runtime", (p) => p.getByRole("button", { name: /^Use .*Ollama…$/ }).click()],
+  ["runtime-confirm", "Runtime", (p) => p.getByRole("button", { name: /^Use .*Ollama$/ }).click()],
   ["advanced", "Advanced"],
   ["advanced-details", "Advanced", (p) => p.getByText("Details", { exact: true }).click()],
   ["advanced-reset", "Advanced", (p) => p.getByTestId("settings.advanced.reset").click()],

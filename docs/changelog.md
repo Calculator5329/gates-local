@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-17: the screenshot rig reaches the Models pop-up again
+
+- The capture rig opened Models from Settings, which no longer lists it, so ten Models shots timed out; on a desktop it now uses the footer icon. The runtime confirm shot matches the button without its old ellipsis.
+
 ## 2026-11-17: 0.2.5 published; the packaged check reads the version from its new place
 
 - Gates Local 0.2.5 is out (docs/releasing.md). The packaged installed-copy check looked for the version in a value cell that the Settings rework moved into the row's label, so Linux packaging failed on a test script while the app showed "Version 0.2.5". The check now reads the row's version text.
