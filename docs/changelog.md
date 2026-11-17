@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-17: two server tests no longer fail on a busy test machine
+
+- The page-with-no-id window test waits for the server to handle the close instead of checking the instant the client sees it.
+- The rule that walks every order of two chats and a picture gets two minutes; it takes about 3 s alone and passed 30 s beside the timing run.
+
 ## 2026-11-17: unit tests run in a new order each time, and the suite takes 58 s instead of 74 s
 
 - Unit tests now run shuffled, files and tests alike, and the run prints its seed. The first

@@ -56,12 +56,12 @@ afterEach(async () => {
 });
 
 /** A rule, and the guards whose loss it has to notice. */
-function rule(name: string, guards: readonly Break[], script: (open: Open) => Promise<void>) {
-  it(name, () => script(opener(FROM_ENV)));
+function rule(name: string, guards: readonly Break[], script: (open: Open) => Promise<void>, timeout?: number) {
+  it(name, () => script(opener(FROM_ENV)), timeout);
   for (const guard of guards) {
     it(`${name}: seen failing with the guard off (${guard})`, async () => {
       await expect(script(opener(guard))).rejects.toMatchObject({ name: "AssertionError" });
-    });
+    }, timeout);
   }
 }
 
@@ -213,7 +213,8 @@ describe("never two things loading at once", () => {
         }
       }
     }
-  });
+    // why: real waits in every order and stop set: 2.7 s alone, past 30 s beside the perf run
+  }, 120_000);
 });
 
 describe("a running reply's model is never asked to leave", () => {

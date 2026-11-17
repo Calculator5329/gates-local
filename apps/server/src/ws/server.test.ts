@@ -222,7 +222,8 @@ describe("a window across its connections", () => {
   it("a page with no id is let go at its close, not after a grace", async () => {
     const w = await windows(60_000);
     await leave(await w.join());
-    expect(w.gone).toEqual([w.seen[0]]);
+    // why: the client sees close before the server handles it; 5 s is far short of the grace
+    await vi.waitFor(() => expect(w.gone).toEqual([w.seen[0]]), { timeout: 5000 });
   });
 
   it("a page that closed is let go after the short grace; a dropped connection still waits the long one", async () => {
