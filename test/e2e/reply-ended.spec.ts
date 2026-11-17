@@ -7,7 +7,7 @@
 import { writeFileSync } from "node:fs";
 import { createClient } from "@gates-local/contracts";
 import type { Locator, Page, TestInfo } from "@playwright/test";
-import { appUrl } from "./env.ts";
+import { FAKE_URL, appUrl } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 import { pick } from "./threads-support.ts";
 import { tap } from "./socket-tap.ts";
@@ -124,6 +124,8 @@ test("a reply that fails before it starts puts out the sidebar's working dot in 
 test("a reply that waited for its model to load says the wait beside its work, the same after a reload", async ({ page, open }, info) => {
   test.setTimeout(60_000);
   await stack.scenario("models", { loadDelayMs: 4000 });
+  let sentAt: number | undefined;
+  page.on("websocket", (ws) => ws.on("framesent", (f) => { if (sentAt === undefined && String(f.payload).includes('"method":"reply.send"')) sentAt = Date.now(); }));
   await open(); await waitReady(page);
   await pick(page, MODEL);
   await sendMessage(page, "hello");
@@ -134,7 +136,12 @@ test("a reply that waited for its model to load says the wait beside its work, t
   await shot(page, info, "waited", { wait, meta: reply.locator(".a-act .meta") });
   await expect(wait).toHaveText(/^\d+\.\d s$/);
   const said = await wait.innerText();
-  expect(Number.parseFloat(said), "the load counts from Enter").toBeGreaterThanOrEqual(4);
+  const { loads } = (await (await fetch(`${FAKE_URL}/__fake/state`)).json()) as { loads: { model: string; endedAt?: number }[] };
+  const endedAt = loads.findLast((l) => l.model === MODEL)?.endedAt;
+  expect(endedAt !== undefined && sentAt !== undefined, "the fake loaded the model and the page sent").toBe(true);
+  // why: picking a model starts its load, so the reply waits for the part of it still to run at the send
+  const after = Math.floor((endedAt! - sentAt!) / 100) / 10;
+  expect(Number.parseFloat(said), `the wait covers the load from the send on (${after} s)`).toBeGreaterThanOrEqual(after);
   await page.reload(); await waitReady(page);
   await page.locator(".turn.a").last().hover();
   await shot(page, info, "waited-after-reload", { wait: page.locator(".turn.a").last().locator("[data-testid='chat.reply.wait']") });

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-17: two browser checks measure the app, not how busy the machine is
+
+- The Settings switch check compares the three frames after a switch with three idle frames just before it (plus 30 ms, the idle part capped at 90 ms), instead of a fixed 80 ms. With four browser shards on one machine every frame took about 30 ms, idle ones too. The 4 px backdrop blur this check guards still fails it (163 ms against 120).
+- The load wait check holds the shown wait to the part of the load still running when the page sent the reply. Picking a model starts its load, so on a busy machine part of it ran before the send; the old fixed 4.0 s read 3.9 there.
+
 ## 2026-11-17: the release check's browser reds were one product bug and one report bug
 
 - The release check no longer lists a browser test marked to fail, such as the image-stopping control, among its failures when it failed as it should. It never counted toward the failed total, but its errors sat in the list beside the real reds.
