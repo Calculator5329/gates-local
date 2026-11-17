@@ -128,7 +128,8 @@ const automaticSwitch = (copy: Copy) => copy.group.getByRole("switch", { name: "
 /** The state row's label tip: what the state says beyond its one line. */
 const stateTip = (copy: Copy) => copy.group.locator(".srow").nth(1).locator(".tipped");
 /** The Version row's value: the version said once, so a match elsewhere in the group proves nothing. */
-const versionValue = (copy: Copy) => copy.group.locator(".srow").first().locator(".sv .mono");
+// The first row reads "Version <span class=mono>0.2.5</span>" in its label since 0.2.5.
+const versionValue = (copy: Copy) => copy.group.locator(".srow").first().locator(".mono").first();
 /** Row 2's label: the state, which is "Not checked yet" or "Checking…" until an answer arrives. */
 const stateLabel = (copy: Copy) => copy.group.locator(".srow").nth(1).locator(".sl b");
 

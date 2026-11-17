@@ -1,19 +1,20 @@
 # Releasing
 
-## Published 0.2.1, 2026-11-12
+## Published 0.2.5, 2026-11-17
 
-[Release 0.2.1](https://github.com/Calculator5329/gates-local/releases/tag/v0.2.1)
+[Release 0.2.5](https://github.com/Calculator5329/gates-local/releases/tag/v0.2.5)
 contains the Windows x64 installer, Linux x64 AppImage, `release.json` and
-its Ed25519 signature, all from `655e45eb5573296fbcb6aedb33ef4c5183281566`.
-Both native builds and packaged checks passed, including the Windows
-0.2.0 to 0.2.1 upgrade with saved-data checks. The fresh public-clone check
-passed 3,865 unit and 550 browser tests, with 30 and 8 skips respectively.
-Signature verification, both installer hashes, and GitHub's uploaded asset
-sizes and hashes were checked before publication. The public latest-release
-feed matches the signed manifest. Windows automatic installation remains
-unfinished; use the downloaded installer to update. These packaged checks
-did not run real models, observe SmartScreen/double-click, or establish a
-normal Linux FUSE launch; the release notes retain those limits.
+its Ed25519 signature, all from `fcf0e8c49f87b5bd6c044ad4a4a8ad8b097d8ad1`,
+plus the unchanged signed model list (`models.json`, revision 1). The release
+check passed 7,397 unit tests (4 skipped) and 369 browser tests in about 13
+minutes on four browser shards. Native Linux packaging, the packaged smoke and
+the plain update check passed; the packaged check script read the version from
+the 0.2.4 Settings layout and was corrected in the copy the AppImage was built
+from (the same fix is on dev). The Windows installer was built natively, but
+its install, upgrade and uninstall round did not run: the Windows test machine
+already held an installed copy, and the round stops rather than remove one it
+did not install. Signature verification and both installer hashes were checked
+before publication, and the public latest-release feed matches the signed files.
 
 ## Build installable copies
 

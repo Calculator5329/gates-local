@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-17: 0.2.5 published; the packaged check reads the version from its new place
+
+- Gates Local 0.2.5 is out (docs/releasing.md). The packaged installed-copy check looked for the version in a value cell that the Settings rework moved into the row's label, so Linux packaging failed on a test script while the app showed "Version 0.2.5". The check now reads the row's version text.
+- The follow-ups from the release check and the CI speed work are on the roadmap, with the release review's last open finding (a send that reached the server is still called unsent when its record never came back).
+
 ## 2026-11-17: the talk-mode Stop check holds its reply open
 
 - The release check failed the talk-mode test once: its second reply ended between the test seeing Stop and clicking it, so the click waited 30 s on a disabled Send. The fake's whole reply runs about 0.7 s, shorter than a poll gap on a busy machine. The test now holds that reply after its first sentence (the fake's holdAfterTokens, which the models scenario now honours too), and lifts the hold before the third turn.

@@ -743,6 +743,8 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Accept:* a refused send in the window shows the offer the server made, with a test across the real socket.
 - [ ] Pictures scrolls back to the picked picture whenever its list changes, so a new picture arriving pulls a person who scrolled away back to their pick.
       *Accept:* a new picture leaves the scroll where the person put it; opening Pictures still shows the pick.
+- [ ] A send that reached the server but whose numbered record never came back (a dead socket that still reads open) is still called unsent. Sending it again is harmless, since the same message id is dropped as a repeat, unless the box held other words by then.
+      *Accept:* a send that reached the server is never called unsent, with a test that drops the record on a socket that stays open.
 
 ## Next: slices 2 to 4
 
@@ -1021,6 +1023,27 @@ RS-03 remains dropped.
       *Accept:* those groups have an equivalent supported home and recorded comparisons remain readable.
 
 ## Next: test suite health
+
+*2026-11-17, from the 0.2.5 release check and the CI speed work:*
+
+- [ ] The release check's browser shards all run on one machine. Spread them across the test machines, so a release does not wait on the busiest one.
+      *Accept:* one release check runs its shards on at least two machines and sums one report.
+- [ ] `session.test` failed three times on the second test machine (seeds 1794900758983, 1794901863240), and never reproduced locally.
+      *Accept:* those seeds replayed on that machine, the race named and fixed, or shown to be the machine.
+- [ ] The voice dictation check has a fixed 50 ms limit that a busy machine misses.
+      *Accept:* the limit moves to the timing project, or the check measures against its own idle baseline.
+- [ ] The image-stopping control test polls for 2 s.
+      *Accept:* it waits on state.
+- [ ] `pages.spec` "a page arrives" ran past 30 s once in a full suite.
+      *Accept:* the slow step named, and the test waits on state or the step gets faster.
+- [ ] Five fit table tests wait on a 20 ms sleep.
+      *Accept:* they wait on state.
+- [ ] A lane's browser run picks its specs by hand.
+      *Accept:* the specs a change can touch are chosen from its paths, and a lane's run lists what it skipped.
+- [ ] The dev browser suite runs on four shards (517 s); six would take about 320 s by estimate.
+      *Accept:* six shards measured on the test machines, and the faster count kept.
+- [ ] A reply's wait counts from the send, not from Enter. The window's checks before the send (running replies, a new chat) take about 100 ms on a busy machine and are left out.
+      *Accept:* the wait counts from Enter, a stop-to-continue dialog between Enter and the send is not counted, and a test holds both.
 
 - [ ] <!-- workspace:id=work:59afc336-b09f-5253-9af1-a8b0ecee7160 --> Test audit 2026-11-11, breaks still caught by nothing: an outside Ollama shown with the wrong version (`runtime/runtime.ts`), a relative data folder accepted by the Linux install (`desktop/src/linux-install.ts`), the Regenerate spinner, a stale "check failed" message, "0 KB" chips. Removing the wait for the image sweep before a thread delete changes nothing a test can see, so that wait is either not needed or not testable as written: decide which.
       *Accept:* one unit test per break, each watched failing against the break.
