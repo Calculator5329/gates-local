@@ -1,6 +1,6 @@
 // A tab's window id: a reload keeps it, a duplicated tab (whose copied sessionStorage names a
 // window another open tab holds) takes its own.
-import { expect, it, onTestFinished } from "vitest";
+import { expect, it, onTestFinished, vi } from "vitest";
 import { claimWindow, type Locks } from "./window-id.ts";
 
 function fakeLocks(): Locks & { held: Set<string> } {
@@ -72,4 +72,20 @@ it.each([["has no Web Locks", undefined], ["refuses the lock request", refused]]
   const ids = await Promise.all([claimWindow(fakeStorage("a"), locks, one, make), claimWindow(fakeStorage("a"), locks, two, make)]);
   expect(ids).toContain("a");
   expect(new Set(ids).size).toBe(2);
+});
+
+it.each([2, 3])("%i tabs that ask one after another, each later one with a lower number, end with one window each", async (count) => {
+  const all = tabs(count);
+  const asks = vi.spyOn(crypto, "randomUUID");
+  onTestFinished(() => asks.mockRestore());
+  // why: each ask is heard before the next tab listens, and the later ask is the lower one
+  for (let i = count; i > 0; i--) asks.mockReturnValueOnce(`${i}0000000-0000-4000-8000-000000000000`);
+  const ids: Promise<string>[] = [];
+  for (const tab of all) {
+    ids.push(claimWindow(fakeStorage("a"), undefined, tab, make));
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  const got = await Promise.all(ids);
+  expect(got.filter((id) => id === "a")).toHaveLength(1);
+  expect(new Set(got).size).toBe(count);
 });

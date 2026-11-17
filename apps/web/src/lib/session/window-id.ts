@@ -28,10 +28,11 @@ function unclaimed(tabs: Tabs | undefined, id: string): Promise<boolean> {
     const heard = (e: MessageEvent) => {
       const m = said(e.data);
       if (m.taken === id && m.to === me) return done(false);
-      // why: two tabs asking for one window at once: the lower ask keeps it, so exactly one does
-      const lower = m.ask === id && m.by !== undefined && m.by > me;
+      if (m.ask !== id || m.by === undefined) return;
+      // why: tabs asking for one window at once: the lowest ask keeps it, whichever was heard first
+      if (m.by < me) return done(false);
       // oxlint-disable-next-line unicorn/require-post-message-target-origin -- a BroadcastChannel reaches only this origin and takes no target
-      if (lower) tabs.postMessage({ taken: id, to: m.by });
+      tabs.postMessage({ taken: id, to: m.by });
     };
     const done = (open: boolean) => { clearTimeout(timer); tabs.removeEventListener("message", heard); answered(open); };
     // oxlint-disable-next-line gates/timer-needs-reason -- a limit on a real wait: an open tab answers within a few ms, silence means none holds it

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-16: tabs that ask for one copied window a moment apart end with one each
+
+- Without Web Locks, a tab that asked for its copied window before a second tab was listening
+  never heard that tab's later, lower ask, so both kept the window. A tab still waiting now gives
+  the window up when it hears a lower ask, whichever came first.
+- One test is new, watched fail: two and three tabs asking 10 ms apart, each later ask lower.
+
 ## 2026-11-16: the performance history has a 0.2.5 column
 
 - Measured on the test machine against 0.2.4 at 4e6cb911: no journey over a second; opening a 2,000-message thread is faster (111 to 95 ms, 157 to 110 ms with 200 mounted); hovering a 200-message thread with every turn mounted, Show earlier, a cold composer and the queue's next token are slower by 9 to 28 ms.
