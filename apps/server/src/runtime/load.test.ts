@@ -155,6 +155,17 @@ describe("models.load", () => {
     expect(generates(s)).toBe(0);
   });
 
+  it("a load asked by typing, on a model already resident that the app did not load: ready, and still not the app's", async () => {
+    const s = await fakeOllama(["m:latest"]);
+    const loader = loaderFor(s, []);
+    expect(await loader.load("m", 16384, { typed: true })).toEqual({ model: "m", numCtx: 16384, state: "ready" });
+    expect(loader.appLoadedModels(), "typing issued no load, so the model stays theirs").toEqual([]);
+    expect(generates(s)).toBe(0);
+    const handlers = createRuntimeHandlers({ loader } as unknown as Parameters<typeof createRuntimeHandlers>[0]);
+    await handlers["models.load"]({ model: "m", numCtx: 16384, typed: true });
+    expect(loader.appLoadedModels(), "the wire's typed flag reaches the loader").toEqual([]);
+  });
+
   it("reselecting an owned resident model at the same context never queues an empty generate behind its reply", async () => {
     const s = await fakeOllama([]);
     const pushes: ModelLoad[] = [];

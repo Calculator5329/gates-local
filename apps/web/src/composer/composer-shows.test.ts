@@ -303,3 +303,13 @@ it("a held row's smaller-context offer shows its figure, and its tip only names 
   expect(words(button)).toContain("8k");
   expect(tipOf(button)).toBe("Context");
 });
+
+it("a held row whose refusal can only free another program's memory shows what it holds and Free it, as the composer's note does", () => {
+  const offer = { short: { needBytes: 2, gpuBytes: 1, ramBytes: 0, shortBytes: 1 }, free: [{ kind: "engine" as const, name: "ComfyUI", bytes: 9 * 1024 ** 3 }] };
+  const held = { id: "q1", threadId: "thread", rev: 1, messageId: "m-q1", text: "hi", at: 1, model: TAG, numCtx: 16384, stage: "held", held: { why: "refused", code: "wont-fit", message: "too big", offer } } as Reply;
+  show({ replies: new Map([["q1", held]]) });
+  const row = rows()[0] ?? "";
+  expect(words(row)).toMatch(/ComfyUI holds 9\.0\sGB/);
+  expect(words(whole(row, "chat.queue.offer-free-1"))).toBe("Free it");
+  expect(unescaped(words(whole(row, "chat.queue.offer-free-always-1")))).toBe("Don't ask again");
+});

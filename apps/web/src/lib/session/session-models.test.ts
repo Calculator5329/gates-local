@@ -389,7 +389,7 @@ describe("the model starts loading on the first key typed", () => {
     expect(model).toBeDefined();
     session.typedInComposer();
     session.typedInComposer();
-    await vi.waitFor(() => expect(asked).toEqual([{ model, numCtx: store.getState().numCtx }]));
+    await vi.waitFor(() => expect(asked).toEqual([{ model, numCtx: store.getState().numCtx, typed: true }]));
     session.typedInComposer();
     await settle();
     expect(asked).toHaveLength(1);

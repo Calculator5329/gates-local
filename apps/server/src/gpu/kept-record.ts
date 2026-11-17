@@ -26,12 +26,22 @@ export interface KeptRecordOptions {
   readonly log?: (line: string) => void;
 }
 
-function readKept(file: string, mode: string, log: (line: string) => void): OwnModel[] {
+// why: undefined is a file there that could be neither read nor moved aside, so nothing is written
+function readKept(file: string, mode: string, at: number, log: (line: string) => void): OwnModel[] | undefined {
   let raw: readonly unknown[];
   try {
     raw = decodeFile(JSON.parse(readFileSync(file, "utf8"))).models;
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "ENOENT") log(`${OWN_MODELS_FILE} unreadable, so no model is the app's from the last run: ${(e as Error).message}`);
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
+    // why: a file the app cannot read may not be its own, so it is kept beside the new one
+    const aside = `${file}.unreadable-${at}`;
+    try {
+      renameSync(file, aside);
+    } catch (moving) {
+      log(`${OWN_MODELS_FILE} unreadable and could not be moved aside, so it is left as it is: ${(moving as Error).message}`);
+      return undefined;
+    }
+    log(`${OWN_MODELS_FILE} unreadable, so no model is the app's from the last run; moved to ${path.basename(aside)}: ${(e as Error).message}`);
     return [];
   }
   const kept: OwnModel[] = [];
@@ -49,12 +59,14 @@ export function keptRecord(options: KeptRecordOptions): LoadedRecord {
   const file = path.join(options.dataDir, OWN_MODELS_FILE);
   const record = createLoadedRecord(options.holdsOne);
   const since = new Map<string, { readonly at: number; readonly mode: string; readonly carried?: true }>();
-  const carried = readKept(file, options.mode(), log);
+  const read = readKept(file, options.mode(), now(), log);
+  const carried = read ?? [];
   for (const m of carried) since.set(canonicalTag(m.tag), { at: m.at, mode: m.mode, carried: true });
   record.restore({ listed: [], ours: carried.map((m) => [canonicalTag(m.tag), m.numCtx] as const) });
 
   let said: string | undefined;
   const save = () => {
+    if (read === undefined) return;
     const models = record.ours().flatMap((tag): OwnModel[] => {
       const numCtx = record.oursAt(tag);
       const when = since.get(tag);
@@ -83,6 +95,7 @@ export function keptRecord(options: KeptRecordOptions): LoadedRecord {
     listed: () => record.listed(),
     ours: () => record.ours(),
     oursAt: (model) => record.oursAt(model),
+    fromLastRun: (model) => since.get(canonicalTag(model))?.carried === true,
     loaded(model, numCtx) {
       since.set(canonicalTag(model), { at: now(), mode: options.mode() });
       return saved(record.loaded(model, numCtx));

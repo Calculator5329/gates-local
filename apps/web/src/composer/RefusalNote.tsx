@@ -1,9 +1,9 @@
-import type { FitWords } from "@gates-local/contracts";
+import type { FitWords, OtherHolder } from "@gates-local/contracts";
 import { CONTEXT_SIZES, describeModel, gb, k } from "../lib/words/format.ts";
 import { openFit } from "../fit/fit-actions.ts";
 import { Icon } from "../lib/ui/icons.tsx";
 import { MakerMark } from "../models/MakerMark.tsx";
-import { getDraft } from "../lib/store/drafts.ts";
+import { currentDraftKey, getDraft } from "../lib/store/drafts.ts";
 import { chooseForQueued, freeMemory, pickModel, send, sendQueuedNow, setContext, updateSettings } from "../lib/session/index.ts";
 import { NA, type NoticeOffer, type State, getState, setState, useStore, waitingReplies } from "../lib/store/store.ts";
 import { closeTip } from "../lib/ui/ui.tsx";
@@ -32,26 +32,53 @@ export function takeOffer(kind: "context" | "model"): void {
   void chooseForQueued(held.id, model, choice.numCtx).then((chosen) => { if (chosen) sendQueuedNow(held.id); });
 }
 
+async function freed(free: readonly OtherHolder[], remember: boolean): Promise<boolean> {
+  const failed = (remember ? await updateSettings({ freeOthers: true }) : null) ?? await freeMemory(free);
+  if (failed !== null) setState({ notice: failed });
+  return failed === null;
+}
+
 export async function takeFree(remember: boolean): Promise<void> {
   const s = getState();
   const o = s.noticeOffer;
   const free = o?.offer.free;
   if (o === null || o.notice !== s.notice || free === undefined || free.length === 0) return;
+  const key = currentDraftKey();
+  const draft = getDraft(key);
+  const held = waitingReplies(s).find((q) => q.threadId === s.threadId && q.stage === "held");
   closeTip();
   setState({ notice: null, noticeOffer: null });
-  const failed = (remember ? await updateSettings({ freeOthers: true }) : null) ?? await freeMemory(free);
-  if (failed !== null) {
-    setState({ notice: failed });
-    return;
-  }
-  const draft = getDraft();
+  if (!await freed(free, remember)) return;
+  // why: the person may have moved to another chat or typed while the memory was freed
+  const here = currentDraftKey() === key;
   if (draft.text.trim() !== "" || draft.images.length > 0 || (draft.files?.length ?? 0) > 0) {
-    void send(draft.text);
+    if (here && getDraft(key) === draft) void send(draft.text);
     return;
   }
-  const held = waitingReplies(s).find((q) => q.threadId === s.threadId && q.stage === "held");
   if (held !== undefined) sendQueuedNow(held.id);
-  else pickModel(o.model);
+  else if (here) pickModel(o.model);
+}
+
+export async function freeForQueued(id: string, free: readonly OtherHolder[], remember: boolean): Promise<void> {
+  closeTip();
+  if (await freed(free, remember)) sendQueuedNow(id);
+}
+
+export function FreeOffer({ free, take, ids }: { free: readonly OtherHolder[]; take: (remember: boolean) => void; ids: { held: string; free: string; always: string } }) {
+  const catalog = useStore(catalogOf);
+  const remembers = useStore((s) => s.unavailable["settings.update"] !== true);
+  const name = (tag: string) => describeModel(tag, catalog).name;
+  return (
+    <>
+      <span className="co-short" data-testid={ids.held}>
+        {free.map((h) => `${h.kind === "model" ? name(h.name) : h.name} holds ${gb(h.bytes)}`).join(" · ")}
+      </span>
+      <button type="button" className="co-act" data-testid={ids.free} onClick={() => take(false)}>Free it</button>
+      {remembers ? (
+        <button type="button" className="co-act" data-testid={ids.always} onClick={() => take(true)}>Don't ask again</button>
+      ) : null}
+    </>
+  );
 }
 
 export const Slower =({ words }: { words: FitWords | undefined }) =>
@@ -60,7 +87,6 @@ export const Slower =({ words }: { words: FitWords | undefined }) =>
 export function RefusalNote({ o }: { o: NoticeOffer }) {
   const catalog = useStore(catalogOf);
   const name = (tag: string) => describeModel(tag, catalog).name;
-  const remembers = useStore((s) => s.unavailable["settings.update"] !== true);
   const { context, model, short, free } = o.offer;
   // why: a refusal that counted system memory too is short of both, not of the GPU's alone
   const whose = short.ramBytes > 0 ? "memory" : "GPU memory";
@@ -71,13 +97,8 @@ export function RefusalNote({ o }: { o: NoticeOffer }) {
       {free !== undefined && free.length > 0 ? (
         <>
           <span className="co-to">—</span>
-          <span className="co-short" data-testid="chat.composer.offer-held">
-            {free.map((h) => `${h.kind === "model" ? name(h.name) : h.name} holds ${gb(h.bytes)}`).join(" · ")}
-          </span>
-          <button type="button" className="co-act" data-testid="chat.composer.offer-free" onClick={() => void takeFree(false)}>Free it</button>
-          {remembers ? (
-            <button type="button" className="co-act" data-testid="chat.composer.offer-free-always" onClick={() => void takeFree(true)}>Don't ask again</button>
-          ) : null}
+          <FreeOffer free={free} take={(remember) => void takeFree(remember)}
+            ids={{ held: "chat.composer.offer-held", free: "chat.composer.offer-free", always: "chat.composer.offer-free-always" }} />
         </>
       ) : context === undefined && model === undefined ? (
         <>

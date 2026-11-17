@@ -881,12 +881,17 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       const answer: EngineLeave = await comfy.free(signal);
       return answer;
     },
-    ours() {
+    async ours() {
       let cfg: ReturnType<typeof config>;
       try { cfg = config(); }
       // decision: docs/decisions.md "Other programs' memory is freed only with a click"
       catch { return false; }
-      return !cfg.enabled || owned?.baseUrl === cfg.baseUrl;
+      if (!cfg.enabled) return true;
+      const started = owned;
+      if (started?.baseUrl !== cfg.baseUrl) return false;
+      // why: another ComfyUI can answer at the same address once the one the app started has gone
+      const unit = await serviceAt(started.baseUrl).inspect().catch(() => undefined);
+      return unit?.active === true && unit.pid === started.pid;
     },
     // external: ComfyUI's /system_stats gives what torch holds on each card as torch_vram_total
     async holds(signal) {

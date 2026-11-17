@@ -4,7 +4,9 @@
 // free and 4.32 GB of system memory available; qwen3.5:4b (3.3 GB) was installed.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { chooseOffer, offerAfterRefusal } from "./alternatives.ts";
+import * as S from "effect/Schema";
+import { methods, type OtherHolder } from "@gates-local/contracts";
+import { chooseOffer, offerAfterRefusal, withFree } from "./alternatives.ts";
 import { json, startFakeServer } from "./fake-http.ts";
 import { DEFAULT_MARGINS, decideFit, planLoad } from "./fit.ts";
 
@@ -102,4 +104,12 @@ describe("offerAfterRefusal", () => {
       await ollama.close();
     }
   });
+});
+
+it("an offer to free 17 holders names only what one Free it can send, the largest first", () => {
+  const held = Array.from({ length: 17 }, (_, i): OtherHolder => ({ kind: "model", name: `m${i}:1b`, bytes: (i + 1) * 1e8 }));
+  const free = withFree(undefined, gemma16k, held)?.free ?? [];
+  expect(() => S.decodeUnknownSync(methods["memory.free"].params)({ free }), "memory.free accepts what was offered").not.toThrow();
+  expect(free.map((h) => h.name)).toEqual(held.toReversed().slice(0, free.length).map((h) => h.name));
+  expect(free, "the smallest one is left out").toHaveLength(16);
 });

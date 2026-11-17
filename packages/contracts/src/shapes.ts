@@ -455,6 +455,8 @@ const OfferVerdict = S.Literals(["fits", "spills"]);
  */
 export const OtherHolder = S.Struct({ kind: S.Literals(["model", "engine"]), name: S.String, bytes: Count });
 export type OtherHolder = typeof OtherHolder.Type;
+/** The most holders one memory.free takes, and so the most a refusal offers to free. */
+export const FREE_AT_ONCE = 16;
 
 /**
  * What a memory refusal ("wont-fit") offers, worked out from the reading that refused it

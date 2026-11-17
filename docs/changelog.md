@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-17: Free it sends only the message it was pressed for; held rows offer it too; the app's models are checked before they are freed
+
+- Free it remembers the chat and the words it was pressed for. If you move to another chat or change the words while the memory is freed, nothing is sent, and the other chat's words are left alone. A held message is sent again by its own id, whichever chat you are in by then.
+- A queued message held because another program has the memory shows the same line as the composer's note ("ComfyUI holds 9.0 GB"), with Free it and Don't ask again. Free it frees the memory, then sends that message.
+- If `own-models.json` in the data folder can't be read, the app moves it aside as `own-models.json.unreadable-<time>`, says so in the log, and then writes its own. It no longer writes over it.
+- A refusal offers to free at most 16 programs, the largest first, which is what one Free it can send.
+- Typing in the composer no longer makes a model another client loaded the app's. Picking a model in the picker or in Models still does.
+- A model kept as the app's from the last run is freed without asking only when Ollama shows it at the same context as before. At any other context, or with no context shown, it counts as someone else's.
+- Before freeing a ComfyUI it started without asking, the app checks that the same process is still running. If another ComfyUI now answers at that address, it counts as someone else's.
+
 ## 2026-11-17: the app's own models survive one restart; one verdict and one size on the fit card
 
 - The app writes the chat models it loaded (tag, context, when) to its data folder and reads them back at start, so a model it loaded stays its own across one restart and the next picture frees it without asking. An entry carried over once is dropped at the next start, and an entry from the other runtime mode is ignored. A chat turn alone no longer makes a model that was already loaded the app's: only a send that loads it (a new context), the model menu's load (even on a model already loaded) and a preload claim one. This replaces the first-token claim in "a turn makes its model the app's" below. Decision: "Other programs' memory is freed only with a click".

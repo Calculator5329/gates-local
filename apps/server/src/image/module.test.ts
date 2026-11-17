@@ -1057,9 +1057,18 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
 
   it("a ComfyUI address that cannot be read is not the app's: its memory is freed only with a click (decision 2026-11-17)", async () => {
     const f = await fixture(); f.configure({ comfyUrl: "http://someone:secret@127.0.0.1:8188" });
-    expect(f.module.ours?.()).toBe(false);
+    expect(await f.module.ours?.()).toBe(false);
     f.configure({ comfyUrl: "http://127.0.0.1:8188" });
-    expect(f.module.ours?.(), "a readable address the app did not start is not the app's either").toBe(false);
+    expect(await f.module.ours?.(), "a readable address the app did not start is not the app's either").toBe(false);
+  });
+
+  it("a ComfyUI the app started, replaced by another process at the same address, is no longer the app's", async () => {
+    const f = await fixture(); f.configure({ answering: false });
+    const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+    expect(f.calls).toContain("start");
+    expect(await f.module.ours?.(), "the one it started").toBe(true);
+    f.configure({ pid: 99 });
+    expect(await f.module.ours?.(), "another process now answers there").toBe(false);
   });
 
   it("re-arms idle stop after a transient queue failure", async () => {

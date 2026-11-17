@@ -1,7 +1,11 @@
 // The memory owner alone: what it asks to leave, what it never touches, and when it waits.
+import { mkdtempSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { MemoryState } from "@gates-local/contracts";
 import { describe, expect, it } from "vitest";
 import type { LoadedModel } from "../runtime/types.ts";
+import { keptRecord } from "./kept-record.ts";
 import { createMemoryOwner, LEAVE_POLL_MS, LEAVE_WAIT_MS, type EngineLeave, type MemoryOwnerDeps } from "./memory.ts";
 
 const BASE = "http://ollama.test";
@@ -219,6 +223,24 @@ describe("one thing in memory: the handoff", () => {
     m.ended();
     expect((await m.handoff(image, signal)).engine).toBe("freed");
     expect(asks).toBe(2);
+  });
+
+  it.each([
+    ["the context it was saved at", 16384, true],
+    ["another context: someone else's copy now", 32768, false],
+    ["no context in /api/ps", undefined, false],
+  ])("a model carried from the last run is asked to leave only when /api/ps shows it at %s", async (_, contextLength, asked) => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "gates-local-carried-"));
+    keptRecord({ dataDir: dir, mode: () => "system" }).loaded("old:7b", 16384);
+    const o = ollama(["old:7b"]);
+    const listLoaded = async () => [...o.listed].map((name): LoadedModel => {
+      const { contextLength: _saved, ...rest } = row(name);
+      return contextLength === undefined ? rest : { ...rest, contextLength };
+    });
+    const m = owner(o, { listLoaded, record: keptRecord({ dataDir: dir, mode: () => "system" }) });
+    const h = await m.gate(() => m.handoff(chat("b:2b"), signal));
+    expect(o.asked).toEqual(asked ? ["old:7b"] : []);
+    expect(h.held).toEqual(asked ? [] : [{ kind: "model", name: "old:7b", bytes: 1e9 }]);
   });
 });
 

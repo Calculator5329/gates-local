@@ -51,7 +51,7 @@ export interface TurnReservation extends TurnLoad {
 }
 
 export interface ModelLoader {
-  load(model: string, numCtx: number): Promise<ModelLoad>;
+  load(model: string, numCtx: number, options?: { readonly typed?: boolean }): Promise<ModelLoad>;
   reserve(model: string): TurnReservation;
   inUse(model: string): boolean;
   busyModels(): string[];
@@ -134,7 +134,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
   const removing = new Set<string>();
   const notices = new Set<Notice>();
   const pendingLoads = new Set<Promise<ModelLoad>>();
-  const running = new Map<string, { readonly numCtx: number; readonly gen: number; readonly run: Promise<ModelLoad> }>();
+  const running = new Map<string, { readonly numCtx: number; readonly gen: number; readonly claims: boolean; readonly run: Promise<ModelLoad> }>();
   let generation = 0;
   let forgotten: LoadedSnapshot | undefined;
   let switching = false;
@@ -200,7 +200,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
     if (removing.has(canonicalTag(model))) throw new ModelActionError("model-removing", removingMessage(model));
   };
 
-  const loadModel = async (model: string, requested: number, baseUrl: string, gen: number, signal: AbortSignal): Promise<ModelLoad> => {
+  const loadModel = async (model: string, requested: number, baseUrl: string, gen: number, signal: AbortSignal, claims: boolean): Promise<ModelLoad> => {
     const tag = canonicalTag(model);
     let notice: Notice | undefined;
     let numCtx = requested;
@@ -230,7 +230,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       const resident = here.models.get(tag);
       // decision: docs/decisions.md "Other programs' memory is freed only with a click"
       if (resident !== undefined && record.oursAt(tag) === undefined) {
-        recordLoaded(tag, resident.contextLength ?? numCtx);
+        if (claims) recordLoaded(tag, resident.contextLength ?? numCtx);
         const ready = finish({ model, numCtx, state: "ready" });
         deps.onLoaded?.();
         return ready;
@@ -288,7 +288,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
   };
 
   return {
-    load(model, numCtx) {
+    load(model, numCtx, options = {}) {
       try {
         refuseNew(model);
       } catch (e) {
@@ -297,16 +297,18 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       const baseUrl = deps.baseUrl();
       if (baseUrl === undefined) return Promise.reject(new ModelActionError("runtime-not-ready", "Ollama is not running, so no model can be loaded."));
       const tag = canonicalTag(model);
+      const claims = options.typed !== true;
       const joined = running.get(tag);
-      if (joined !== undefined && joined.numCtx === numCtx && joined.gen === generation) return joined.run;
+      // why: a pick that joined a typed load would not make the model the app's
+      if (joined !== undefined && joined.numCtx === numCtx && joined.gen === generation && (joined.claims || !claims)) return joined.run;
       hold(tag);
-      const run = loadModel(model, numCtx, baseUrl, generation, current.signal).finally(() => {
+      const run = loadModel(model, numCtx, baseUrl, generation, current.signal, claims).finally(() => {
         letGoOf(tag);
         pendingLoads.delete(run);
         if (running.get(tag)?.run === run) running.delete(tag);
       });
       pendingLoads.add(run);
-      running.set(tag, { numCtx, gen: generation, run });
+      running.set(tag, { numCtx, gen: generation, claims, run });
       return run;
     },
 

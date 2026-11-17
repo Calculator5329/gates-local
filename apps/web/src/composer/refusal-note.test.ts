@@ -1,7 +1,7 @@
 // The note under a refused send prints the words the server judged each offer with: it holds no verdict of its own.
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeAll, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { fitWords, gb } from "@gates-local/contracts";
 import type { FitOffer } from "@gates-local/contracts";
 import { repliesOf } from "../../test/queue.ts";
@@ -12,7 +12,9 @@ const session = vi.hoisted(() => ({
   sent: [] as string[],
   picked: [] as string[],
   sized: [] as number[],
+  freed: [] as unknown[],
   answer: { fn: null as unknown as () => Promise<boolean> },
+  freeing: { fn: null as unknown as () => Promise<string | null> },
 }));
 vi.mock("../lib/session/index.ts", async (original) => ({
   ...await original<typeof import("../lib/session/index.ts")>(),
@@ -21,21 +23,28 @@ vi.mock("../lib/session/index.ts", async (original) => ({
   send: (text: string) => { session.sent.push(text); return Promise.resolve(); },
   pickModel: (model: string) => { session.picked.push(model); },
   setContext: (numCtx: number) => { session.sized.push(numCtx); },
+  freeMemory: (free: unknown) => { session.freed.push(free); return session.freeing.fn(); },
 }));
 
 let RefusalNote: typeof import("./RefusalNote.tsx")["RefusalNote"];
 let takeOffer: typeof import("./RefusalNote.tsx")["takeOffer"];
+let takeFree: typeof import("./RefusalNote.tsx")["takeFree"];
+let freeForQueued: typeof import("./RefusalNote.tsx")["freeForQueued"];
 let store: typeof import("../lib/store/store.ts");
+let drafts: typeof import("../lib/store/drafts.ts");
 beforeAll(async () => {
   vi.stubGlobal("window", {});
-  ({ RefusalNote, takeOffer } = await import("./RefusalNote.tsx"));
+  ({ RefusalNote, takeOffer, takeFree, freeForQueued } = await import("./RefusalNote.tsx"));
   store = await import("../lib/store/store.ts");
+  drafts = await import("../lib/store/drafts.ts");
   vi.unstubAllGlobals();
 });
 beforeEach(() => {
-  for (const list of [session.chosen, session.sentNow, session.sent, session.picked, session.sized]) list.length = 0;
+  for (const list of [session.chosen, session.sentNow, session.sent, session.picked, session.sized, session.freed]) list.length = 0;
   session.answer.fn = () => Promise.resolve(true);
+  session.freeing.fn = () => Promise.resolve(null);
 });
+afterEach(() => { for (const key of ["a", "b", "chat"]) drafts.clearDraft(key); });
 
 const GIB = 1024 ** 3;
 const report = (verdict: "fits" | "spills") => ({ verdict, numCtx: 8192, needVramBytes: 9 * GIB, freeVramBytes: 8 * GIB, spillRamBytes: verdict === "spills" ? GIB : 0, source: "estimate" as const });
@@ -134,4 +143,72 @@ it("a held message taken with an offer goes only once the server says it has the
   answers[1]?.(true);
   await settle();
   expect(session.sentNow).toEqual(["held"]);
+});
+
+const FREE = [{ kind: "model" as const, name: "other:7b", bytes: 7 * GIB }];
+const freeNote = (threadId: string) => store.setState({
+  view: "thread", threadId, model: BIG, notice: "Not enough memory",
+  noticeOffer: { notice: "Not enough memory", model: BIG, numCtx: 32768, offer: { short, free: FREE } }, replies: new Map(),
+});
+/** Free it's memory.free answers when `finish` is called. */
+const slowFree = () => {
+  const finish: (() => void)[] = [];
+  session.freeing.fn = () => new Promise<null>((resolve) => { finish.push(() => resolve(null)); });
+  return () => finish.splice(0).forEach((f) => f());
+};
+
+it("Free it pressed in one chat sends that chat's words after the free, and nothing of the chat the person moved to meanwhile", async () => {
+  const finish = slowFree();
+  freeNote("a");
+  drafts.replaceDraft("a", { text: "Plan A" });
+  drafts.replaceDraft("b", { text: "Plan B" });
+  const taking = takeFree(false);
+  store.setState({ threadId: "b" });
+  finish();
+  await taking;
+  expect(session.freed).toEqual([FREE]);
+  expect(session.sent, "the other chat's words are not sent").toEqual([]);
+  expect(session.picked, "the other chat's model is not changed").toEqual([]);
+  expect(drafts.getDraft("b").text).toBe("Plan B");
+
+  freeNote("a");
+  const again = takeFree(false);
+  finish();
+  await again;
+  expect(session.sent, "still in the chat with the same words: they go").toEqual(["Plan A"]);
+});
+
+it("Free it with words edited while the memory was freed sends nothing; the box keeps the new words", async () => {
+  const finish = slowFree();
+  freeNote("a");
+  drafts.replaceDraft("a", { text: "Plan A" });
+  const taking = takeFree(false);
+  drafts.replaceDraft("a", { text: "Plan A, but longer" });
+  finish();
+  await taking;
+  expect(session.sent).toEqual([]);
+  expect(drafts.getDraft("a").text).toBe("Plan A, but longer");
+});
+
+it("a held message freed for retries by its own id, in whichever chat the person is by then", async () => {
+  const finish = slowFree();
+  heldNote("Not enough memory");
+  store.setState({ noticeOffer: { notice: "Not enough memory", model: BIG, numCtx: 32768, offer: { short, free: FREE } } });
+  drafts.replaceDraft("b", { text: "Plan B" });
+  const taking = takeFree(false);
+  store.setState({ threadId: "b" });
+  finish();
+  await taking;
+  expect(session.sentNow).toEqual(["held"]);
+  expect(session.sent).toEqual([]);
+});
+
+it("Free it on a queued row frees what that row's refusal named, then sends that row, and not when the free failed", async () => {
+  await freeForQueued("q7", FREE, false);
+  expect(session.freed).toEqual([FREE]);
+  expect(session.sentNow).toEqual(["q7"]);
+  session.freeing.fn = () => Promise.resolve("Could not free the memory");
+  await freeForQueued("q7", FREE, false);
+  expect(session.sentNow, "a failed free sends nothing").toEqual(["q7"]);
+  expect(store.getState().notice).toBe("Could not free the memory");
 });

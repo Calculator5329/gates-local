@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -54,5 +54,21 @@ describe("the app's own chat models, kept across one restart", () => {
     const lines: string[] = [];
     expect(keptRecord({ dataDir: broken, mode: () => "system", log: (l) => lines.push(l) }).ours()).toEqual([]);
     expect(lines.join("\n")).toContain("unreadable");
+  });
+
+  it.each([
+    ["not JSON", "{ not json"],
+    ["JSON of another shape", `{"version":2,"entries":[]}\n`],
+  ])("a file the app cannot decode (%s) is moved aside once, never written over", (_, text) => {
+    const dir = folder();
+    writeFileSync(path.join(dir, OWN_MODELS_FILE), text);
+    const lines: string[] = [];
+    keptRecord({ dataDir: dir, mode: () => "system", now: () => 77, log: (l) => lines.push(l) }).loaded("m:7b", 8192);
+    const aside = path.join(dir, `${OWN_MODELS_FILE}.unreadable-77`);
+    expect(existsSync(aside) ? readFileSync(aside, "utf8") : "missing", "the person's file, as it was").toBe(text);
+    expect(saved(dir).models.map((m) => m.tag), "then the app writes its own").toEqual(["m:7b"]);
+    expect(lines.join("\n")).toContain(`${OWN_MODELS_FILE}.unreadable-77`);
+    keptRecord({ dataDir: dir, mode: () => "system", now: () => 78 });
+    expect(readdirSync(dir).filter((f) => f.includes("unreadable")), "the app's own file is read, not moved again").toEqual([`${OWN_MODELS_FILE}.unreadable-77`]);
   });
 });

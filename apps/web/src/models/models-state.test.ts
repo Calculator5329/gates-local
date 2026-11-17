@@ -196,6 +196,20 @@ describe("typing loads the model", () => {
     await settle();
     expect(loadsAsked(asked)).toEqual([QWEN, GEMMA]);
   });
+
+  it("a load asked by typing says so, and a pick from the picker does not, so only a pick takes over a model someone else loaded", async () => {
+    typingReady();
+    const { effects, asked } = world(store, loadAnswer);
+    const { typedInComposer, pickModel } = models.createModels(effects);
+    typedInComposer();
+    await settle();
+    pickModel(GEMMA);
+    await settle();
+    expect(asked.filter((a) => a.method === "models.load").map((a) => a.params)).toEqual([
+      { model: QWEN, numCtx: expect.any(Number), typed: true },
+      { model: GEMMA, numCtx: expect.any(Number) },
+    ]);
+  });
 });
 
 describe("downloads", () => {

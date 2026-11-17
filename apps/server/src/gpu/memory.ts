@@ -14,7 +14,7 @@ export type EngineLeave = "freed" | "busy" | "absent";
 export interface MemoryEngine {
   leave(signal: AbortSignal): Promise<EngineLeave>;
   // why: absent means the app started it, as every engine did before decision 2026-11-17
-  ours?(): boolean;
+  ours?(): boolean | Promise<boolean>;
   holds?(signal: AbortSignal): Promise<number | undefined>;
 }
 
@@ -52,6 +52,7 @@ export interface LoadedRecord {
   listed(): readonly string[];
   ours(): readonly string[];
   oursAt(model: string): number | undefined;
+  fromLastRun?(model: string): boolean;
   loaded(model: string, numCtx: number): readonly (readonly [string, number])[];
   left(model: string): number | undefined;
   observe(listed: readonly Pick<LoadedModel, "name">[]): readonly (readonly [string, number])[];
@@ -158,6 +159,11 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
   const record = deps.record ?? createLoadedRecord(() => deps.holdsOne?.() === true);
   // why: the app's own Ollama runs only what the app loaded, on this run or the one before it
   const ours = (tag: string) => deps.holdsOne?.() === true || record.oursAt(tag) !== undefined;
+  // why: a model carried from the last run may since have been replaced by another client's copy
+  const oursLive = (m: LoadedModel) => {
+    const tag = canonicalTag(m.name);
+    return ours(tag) && (deps.holdsOne?.() === true || record.fromLastRun?.(tag) !== true || m.contextLength === record.oursAt(tag));
+  };
   // decision: docs/decisions.md "Other programs' memory is freed only with a click"
   const othersMayGo = () => deps.freeOthers?.() === true;
 
@@ -199,7 +205,7 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
   };
 
   type ChatLeft = { left: string[]; stayed: string[] | undefined; held: OtherHolder[]; target?: number };
-  const chatLeaves = async (want: Want | undefined, signal: AbortSignal, mayAsk: (tag: string) => boolean, onLeave?: (on: boolean) => void): Promise<ChatLeft> => {
+  const chatLeaves = async (want: Want | undefined, signal: AbortSignal, mayAsk: (m: LoadedModel) => boolean, onLeave?: (on: boolean) => void): Promise<ChatLeft> => {
     const baseUrl = deps.ollamaUrl();
     if (baseUrl === undefined) return { left: [], stayed: [], held: [] };
     let listed: readonly LoadedModel[];
@@ -215,8 +221,8 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
     const kept = (m: LoadedModel) => want?.kind === "chat" && canonicalTag(m.name) === canonicalTag(want.model);
     const busy = listed.filter((m) => !kept(m) && replying.has(canonicalTag(m.name))).map((m) => m.name);
     const idle = listed.filter((m) => !kept(m) && !replying.has(canonicalTag(m.name)));
-    const asked = idle.filter((m) => mayAsk(canonicalTag(m.name))).map((m) => m.name);
-    const held = idle.filter((m) => !mayAsk(canonicalTag(m.name))).map((m): OtherHolder => ({ kind: "model", name: m.name, bytes: m.sizeVramBytes }));
+    const asked = idle.filter(mayAsk).map((m) => m.name);
+    const held = idle.filter((m) => !mayAsk(m)).map((m): OtherHolder => ({ kind: "model", name: m.name, bytes: m.sizeVramBytes }));
     if (asked.length === 0) return { left: [], stayed: busy, held };
     onLeave?.(true);
     const before = oneChat(want) ? await freeNow(signal) : undefined;
@@ -275,7 +281,7 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
     if (want.kind === "image" && engineHolds === want.setup) return { engine: "kept" };
     const engine = deps.engine?.();
     // why: a picture runs on that ComfyUI and replaces its setup anyway, so only a chat leaves it be
-    if (engine !== undefined && want.kind === "chat" && engine.ours?.() === false && !othersMayGo()) return await foreignEngine(engine, signal);
+    if (engine !== undefined && want.kind === "chat" && !othersMayGo() && await engine.ours?.() === false) return await foreignEngine(engine, signal);
     if (engineHolds === "empty") return { engine: "idle" };
     if (engine === undefined) return { engine: "absent" };
     return { engine: await askEngine(engine, signal) };
@@ -334,7 +340,7 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
         options.onLeave?.(on);
       };
       try {
-        const mayAsk = (tag: string) => ours(tag) || othersMayGo();
+        const mayAsk = (m: LoadedModel) => oursLive(m) || othersMayGo();
         const chat = await sendSpan("chat-leave", () => chatLeaves(want, signal, mayAsk, tell));
         const { engine, held } = await sendSpan("engine-leave", () => engineLeaves(want, signal));
         if (engine === "freed") tell(true);
@@ -352,7 +358,7 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
     },
     async free(holders, signal) {
       const named = new Set(holders.filter((h) => h.kind === "model").map((h) => canonicalTag(h.name)));
-      const chat = named.size === 0 ? { left: [], stayed: [], held: [] } : await chatLeaves(undefined, signal, (tag) => named.has(tag));
+      const chat = named.size === 0 ? { left: [], stayed: [], held: [] } : await chatLeaves(undefined, signal, (m) => named.has(canonicalTag(m.name)));
       const engine = deps.engine?.();
       const asked = engine !== undefined && holders.some((h) => h.kind === "engine") ? await askEngine(engine, signal) : "idle";
       await afterLeaving(chat, asked, signal);

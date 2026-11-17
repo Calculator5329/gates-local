@@ -13,7 +13,7 @@ import { ctxFor, describeModel, k, noGpu, slowReason, timeLeft, verdictOf } from
 import { DownloadBar, LoadRing } from "./LoadBar.tsx";
 import { loadGuess } from "../lib/store/load-times.ts";
 import { MakerMark } from "../models/MakerMark.tsx";
-import { RefusalNote, Slower } from "./RefusalNote.tsx";
+import { FreeOffer, RefusalNote, Slower, freeForQueued } from "./RefusalNote.tsx";
 import { compactName, pickerLabels } from "../picker/picker-models.ts";
 import { imagePickerScreen, pickerScreen, threadScreen } from "../app/screen-loaders.ts";
 import { chosenImage, imageCount, imageMode, imagesUnset, runKey, sizeLabel } from "../image/image-choice.ts";
@@ -595,10 +595,14 @@ function QueueOffer({ q, n }: { q: WaitingReply; n: number }) {
   const fallback = useStore((s) => s.model);
   const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
   if (q.stage !== "held" || q.held.why !== "refused" || q.held.code !== "wont-fit" || q.held.offer === undefined) return null;
-  const { context, model } = q.held.offer;
+  const { context, model, free } = q.held.offer;
   const tag = q.model ?? fallback ?? "";
   return (
     <>
+      {free === undefined || free.length === 0 ? null : (
+        <FreeOffer free={free} take={(remember) => { void freeForQueued(q.id, free, remember); focusComposer(); }}
+          ids={{ held: `chat.queue.offer-held-${n}`, free: `chat.queue.offer-free-${n}`, always: `chat.queue.offer-free-always-${n}` }} />
+      )}
       {context === undefined ? null : (
         <button type="button" className="co-act" data-testid={`chat.queue.offer-context-${n}`} aria-pressed={q.numCtx === context.numCtx && q.model === tag}
           data-tip="Context" onClick={andFocus(() => void chooseForQueued(q.id, tag, context.numCtx))}>

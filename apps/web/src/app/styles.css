@@ -991,8 +991,8 @@ a.btn{text-decoration:none}
 /* a memory refusal's note (RefusalNote.tsx): one line, the height of the words, its buttons inside it */
 .c-offer{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;min-height:20px}
 .c-offer>.ic{flex:none}
-.c-offer .co-what,.c-offer .co-short{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.c-offer .co-short{font-variant-numeric:tabular-nums}
+.c-offer .co-what,.c-offer .co-short,.qt-r .co-short{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.c-offer .co-short,.qt-r .co-short{font-variant-numeric:tabular-nums}
 .c-offer .co-to{color:var(--muted-foreground)}
 .co-act{flex:none;display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 6px;border:1px solid var(--border-strong);border-radius:var(--r-sm);font-size:13px;line-height:18px;color:var(--foreground);background:var(--card)}
 .co-act:hover{background:var(--hover)}
