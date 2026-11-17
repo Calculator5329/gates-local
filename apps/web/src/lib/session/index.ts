@@ -122,7 +122,7 @@ const chat = createChat({ applyServerEvent,
   untrackedDone,
   openThread: (threadId) => openThread(threadId), blockingFor,
 });
-export const { send, confirmStopAsk, stop, retry, sendQueuedNow, cancelQueuedEdit } = chat;
+export const { send, confirmStopAsk, noticeDo, stop, retry, sendQueuedNow, cancelQueuedEdit } = chat;
 const { onWords, lostTurn, catchUp, connected, recordChanged, replyListed, listMissed, editEnded } = chat;
 
 const modelsSession = createModels({ applyServerEvent,

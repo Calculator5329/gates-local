@@ -1,4 +1,4 @@
-import { type ReactNode, memo, useCallback, useRef } from "react";
+import { type ReactNode, memo, useCallback, useRef, useState } from "react";
 import { useCopy } from "../lib/ui/copy.ts";
 import { observeBox } from "../lib/ui/kit/events.ts";
 import { isPageDoc, linkKey, mayBePage } from "@gates-local/contracts";
@@ -179,10 +179,14 @@ function useEdges<T extends HTMLElement>(content: unknown) {
 function CodeBlock({ lang, code }: { lang: string; code: string }) {
   const [copied, copy] = useCopy(code);
   const pre = useEdges<HTMLPreElement>(code);
+  const [wrap, setWrap] = useState(false);
   return (
     <div className="cb">
       <div className="cb-h">
         {lang !== "" ? <span className="cb-lang">{lang}</span> : null}
+        <button type="button" className="cb-wrap" data-testid="chat.markdown.wrap-code" aria-label="Wrap lines" data-tip="Wrap lines" aria-pressed={wrap} onClick={() => setWrap((w) => !w)}>
+          <Icon id="wrap" />
+        </button>
         <button
           type="button"
           className={copied !== null ? "cb-copy on" : "cb-copy"}
@@ -195,7 +199,7 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
           {copied !== null ? <span role="status">{copied ? "Copied" : "Couldn't copy"}</span> : null}
         </button>
       </div>
-      <pre ref={pre}>
+      <pre ref={pre} className={wrap ? "wrap" : undefined}>
         <code>{code}</code>
       </pre>
     </div>

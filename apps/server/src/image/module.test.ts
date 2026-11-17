@@ -738,7 +738,8 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
         await response.text();
         turn.firstToken(); turn.end();
       }
-      expect(loader.appLoadedModels(), "warm: the loader never loaded it").toEqual([]);
+      // decision 2026-11-17: a turn of this app that answered on it makes it the app's
+      expect(loader.appLoadedModels(), "the app's once a turn answered on it").toEqual(turns > 0 ? [MODEL] : []);
       const running = open ? loader.reserve(MODEL) : undefined;
       await running?.admit(16384);
       const resident = () => fake.state().loaded.length > 0;
@@ -763,8 +764,8 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
       expect(f.ollamaPosts).toEqual([{ model: MODEL, keep_alive: 0 }]);
       expect(fake.state().loaded).toEqual([]);
     });
-    it("a warm model in an Ollama the person runs: another program's, so it stays and the refusal names it", async () => {
-      const { f, fake, MODEL } = await warmModel(1, false, false);
+    it("a warm model in an Ollama the person runs, with no turn of this app: another program's, so it stays and the refusal names it", async () => {
+      const { f, fake, MODEL } = await warmModel(0, false, false);
       expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "wont-fit" });
       expect(f.events.at(-1)?.message).toContain("a chat model this app did not load holds 7.0 GiB");
       expect(f.ollamaPosts, "nothing unloaded").toEqual([]);
@@ -1051,6 +1052,13 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
     expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "image-fit" });
     expect(f.calls).not.toContain("/prompt"); expect(f.calls).not.toContain("/api/generate");
+  });
+
+  it("a ComfyUI address that cannot be read is not the app's: its memory is freed only with a click (decision 2026-11-17)", async () => {
+    const f = await fixture(); f.configure({ comfyUrl: "http://someone:secret@127.0.0.1:8188" });
+    expect(f.module.ours?.()).toBe(false);
+    f.configure({ comfyUrl: "http://127.0.0.1:8188" });
+    expect(f.module.ours?.(), "a readable address the app did not start is not the app's either").toBe(false);
   });
 
   it("re-arms idle stop after a transient queue failure", async () => {

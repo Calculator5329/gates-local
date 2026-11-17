@@ -59,7 +59,7 @@ export const PLACEHOLDER: Record<Rt, string> = {
   offline: "Chat starts when Gates Local reconnects…",
 };
 
-export type InstallSize = { receivedBytes: number; totalBytes: number; bytesPerSecond?: number | undefined; diskBytes?: number | undefined };
+export type InstallSize = { receivedBytes: number; totalBytes: number; bytesPerSecond?: number | undefined; diskBytes?: number | undefined; stalled?: true | undefined; quietMs?: number | undefined };
 
 export const installStep = (i: InstallSize | undefined): string => (i !== undefined && i.receivedBytes >= i.totalBytes ? "Unpacking Ollama" : "Downloading Ollama");
 
@@ -80,7 +80,10 @@ export const STALLED = "Download stalled";
 export function useInstallStall(i: InstallSize | undefined): { stalled: boolean; words: string | undefined; retry: () => void } {
   const stalled = stalledNow(i);
   const { bytesPerSecond: _, ...still } = i ?? { receivedBytes: 0, totalBytes: 0 };
-  return { stalled, words: installWords(stalled ? still : i), retry: retryInstall };
+  // why: the one reason the server can know, at its own bound, so it stays true while it waits
+  const quiet = stalled && i?.quietMs !== undefined ? `no data for over ${Math.max(1, Math.round(i.quietMs / 1000))}${NBSP}s` : undefined;
+  const figures = installWords(stalled ? still : i);
+  return { stalled, words: quiet === undefined ? figures : figures === undefined ? quiet : `${figures} · ${quiet}`, retry: retryInstall };
 }
 
 const retryInstall = () => { void recheckRuntime(); };
@@ -105,15 +108,21 @@ export function failWords(failure: Failure): { title: string; stat: string } {
   }
 }
 
+// why: matches the server's two "site didn't answer" details (runtime/install.ts)
+const unreached = (detail: string | undefined): boolean => detail !== undefined && /^Could not reach |failed: HTTP \d+ from /.test(detail);
+
+export const SITE_DOWN = "The download site didn't respond. Try again in a moment.";
+
 export function underTitle(detail: string | undefined, failure: Failure): string | undefined {
-  if (failure === "download") return detail?.replace(/^The Ollama download stopped at /, "Stopped at ");
+  if (failure === "download") return unreached(detail) ? SITE_DOWN : detail?.replace(/^The Ollama download stopped at /, "Stopped at ");
   if (failure === "checksum") return FAIL_FALLBACK.checksum;
   if (failure === "disk") return detail?.replace(/^The disk is full\.\s*/, "") || undefined;
   return detail;
 }
 
-// why: the checksum and its figures help no one deciding what to do, so they go to data-why
-export const failWhy = (detail: string | undefined, failure: Failure): string | undefined => (failure === "checksum" ? detail : undefined);
+// why: a checksum, an HTTP status or an address helps no one deciding what to do: data-why
+export const failWhy = (detail: string | undefined, failure: Failure): string | undefined =>
+  failure === "checksum" || (failure === "download" && unreached(detail)) ? detail : undefined;
 
 export const FAIL_FALLBACK: Record<NonNullable<Failure>, string> = {
   download: "Check the network, then retry.",

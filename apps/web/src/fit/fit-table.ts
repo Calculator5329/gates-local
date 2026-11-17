@@ -4,6 +4,7 @@ import { cardGb, ctxFor } from "../lib/words/format.ts";
 export interface SlowNow {
   readonly inTheWay: readonly GpuOccupant[];
   readonly spillRamBytes: number;
+  readonly measured: boolean;
 }
 
 export type TableFit = FitReport & Pick<FitRow, "stops" | "card"> & { readonly slowNow?: SlowNow };
@@ -14,7 +15,7 @@ export function cardFit(fit: TableFit | undefined): TableFit | undefined {
   if (report === undefined) {
     const { shortfallBytes: _rightNow, card, ...rest } = fit;
     const { inTheWay, ...verdict } = card;
-    report = { ...rest, ...verdict, ...(inTheWay === undefined ? {} : { slowNow: { inTheWay, spillRamBytes: fit.spillRamBytes } }) };
+    report = { ...rest, ...verdict, ...(inTheWay === undefined ? {} : { slowNow: { inTheWay, spillRamBytes: fit.spillRamBytes, measured: fit.source === "measured" } }) };
     cards.set(fit, report);
   }
   return report;

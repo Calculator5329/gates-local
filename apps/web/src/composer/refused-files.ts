@@ -7,6 +7,7 @@ export interface RefusedFile {
   readonly name: string;
   readonly size: number;
   readonly reason: string;
+  readonly short: string;
   readonly library: boolean;
   readonly folder?: boolean;
 }

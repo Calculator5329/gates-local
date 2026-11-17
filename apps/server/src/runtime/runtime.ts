@@ -484,7 +484,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
         const i = current.state === "installing" ? current.install : undefined;
         if (i === undefined || i.stalled === true || !mine.fetching || Date.now() - mine.lastBytesAt < stallMs) return;
         const { bytesPerSecond: _, ...still } = i;
-        setStatus({ ...current, install: { ...still, stalled: true } });
+        setStatus({ ...current, install: { ...still, stalled: true, quietMs: stallMs } });
       }, Math.max(50, Math.min(1000, stallMs / 4)));
       try {
         const r = await installPinned({

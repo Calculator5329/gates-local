@@ -10,9 +10,9 @@ import { releaseFiles } from "./file-holds.ts";
 export function RefusedFiles() {
   const files = useRefused();
   return files.map(f => (
-    <span className="attachment file" key={f.id} data-tip={esc(f.reason)}>
+    <span className="attachment file" key={f.id}>
       <Icon id="clip" />
-      <span className="af-t"><b>{f.name}</b><small>{f.folder ? "Folder" : sizeOf(f.size)} · not sent</small></span>
+      <span className="af-t"><b>{f.name}</b><small>{f.folder ? "Folder" : sizeOf(f.size)} · {f.short}</small></span>
       <span className="vh" id={`refused-${f.id}`}>{f.reason}</span>
       {f.library ? <button type="button" className="ibtn xs" data-testid="chat.attachment.refused-library" aria-label={`Add ${f.name} to your Library`} aria-describedby={`refused-${f.id}`} data-tip="Open Settings › Library" onClick={() => openSettings("library")}><Icon id="book" /></button> : null}
       <button type="button" className="ibtn xs" data-testid="chat.attachment.refused-remove" aria-label={`Remove ${f.name}`} aria-describedby={`refused-${f.id}`} onClick={() => removeRefused(currentDraftKey(), f.id)}>×</button>

@@ -21,7 +21,7 @@ export type RuntimeStatus = {
   modelsDir?: string;
   holdsOne?: boolean;
   failure?: "download" | "checksum" | "disk" | "install" | "start";
-  install?: { receivedBytes: number; totalBytes: number; bytesPerSecond?: number; stalled?: true };
+  install?: { receivedBytes: number; totalBytes: number; bytesPerSecond?: number; stalled?: true; quietMs?: number };
 };
 
 export type ModelInfo = {

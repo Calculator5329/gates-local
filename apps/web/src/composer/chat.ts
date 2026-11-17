@@ -1,7 +1,7 @@
 import { type AttachedFile, type BlockingTurn, type ImageChoice, type Message, type Params, type Payload, type Reply, type ReplyCall, type ReplyChange, type ReplyListed, type ReplyOutcome, type ReplyTimes, type SoFar, type StopConsent, WireError } from "@gates-local/contracts";
 import { ctxFor, describeModel, k } from "../lib/words/format.ts";
 import { firstChatPull, sendableModel } from "../models/pick.ts";
-import { type LiveTurn, NA, type State, type StopAsk, type TurnClock, type WaitingReply, behindSetup, chatReady, getState, isWaiting, runningTurn, setState, streamingHere, turnOf, waitingReplies } from "../lib/store/store.ts";
+import { type LiveTurn, NA, type NoticeAct, type NoticeActKind, type State, type StopAsk, type TurnClock, type WaitingReply, behindSetup, chatReady, getState, isWaiting, runningTurn, setState, streamingHere, turnOf, waitingReplies } from "../lib/store/store.ts";
 import { imageReason } from "./paste.ts";
 import { drawChoice, imageMode } from "../image/image-choice.ts";
 import { releaseFiles } from "./file-holds.ts";
@@ -111,7 +111,8 @@ function clockOf(r: Exclude<Reply, WaitingReply | { readonly stage: "done" | "st
   };
 }
 
-type Outgoing = Omit<StopAsk, "blocking">;
+// why: wait queues behind another chat's reply, neither asking first nor stopping it
+type Outgoing = Omit<StopAsk, "blocking"> & { readonly wait?: true };
 
 export function sendsBeforeReady(s: State): boolean {
   if (s.conn.kind !== "open") return false;
@@ -139,6 +140,10 @@ function gone(out: Outgoing): boolean {
 
 export function cancelStopAsk(): void {
   setState({ stopAsk: null });
+}
+
+function offer(notice: string, acts: NoticeAct["acts"]): void {
+  setState({ notice, noticeAct: { notice, acts } });
 }
 
 const unstarted = (turn: LiveTurn | undefined, id: string): turn is LiveTurn => turn !== undefined && turn.turnId === id && turn.userMessageId === undefined;
@@ -689,7 +694,7 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
   }
 
   // why: a Library question sends with keepDraft: the composer's own draft is left as it is
-  async function send(text: string, opts: { reuseThread?: boolean; keepDraft?: true; draw?: ImageChoice } = {}): Promise<void> {
+  async function send(text: string, opts: { reuseThread?: boolean; keepDraft?: true; draw?: ImageChoice; act?: NoticeActKind } = {}): Promise<void> {
     const content = text.trim();
     const s = getState();
     const key = currentDraftKey();
@@ -713,6 +718,8 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     const model = sendableModel(s.models, s.model);
     if (model === undefined && draw === undefined && !early) return;
     const out: Outgoing = { content, images, ...attached, messageId, model: model ?? "", threadId, keepDraft: apart, ...(draw === undefined ? {} : { draw }) };
+    if (opts.act === "wait") return launch({ ...out, wait: true }, false);
+    if (opts.act === "stop-other") return launch(out, true, namedTurns);
     // why: behind setup or a reply in its own chat it waits, so it stops nothing and needs no warning
     if (early || streamingHere(s)) return launch(out, false);
     return admit(out);
@@ -754,7 +761,7 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     const draft = getDraft(out.threadId);
     if (!out.keepDraft && draft.text.trim() === out.content && draft.images === out.images && (draft.files ?? []).length === (out.files ?? []).length) clearDraft(out.threadId);
     if (out.threadId === null && !out.keepDraft) moveDraft(null, threadId);
-    setState({ notice: null, stopAsk: null });
+    setState({ notice: null, noticeAct: null, stopAsk: null });
     const consent: StopConsent | undefined = !stopOthers ? undefined : stopTurns === undefined ? { kind: "standing" } : { kind: "named", replies: [...stopTurns] };
     await sendOne(threadId, out, consent);
   }
@@ -773,7 +780,7 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
       ...(out.files?.length ? { files: [...out.files] } : {}),
       ...(draw === undefined ? {} : { draw, ...(drawCount === undefined ? {} : { drawCount }) }),
       ...(retryOf === undefined ? {} : { retryOf }),
-      ...(consent === undefined ? { askFirst: true } : { consent }),
+      ...(consent !== undefined ? { consent } : out.wait === true ? {} : { askFirst: true }),
     };
     // why: the next new chat starts on the model last sent to (navigation.ts newThread)
     if (draw === undefined && out.model !== "") setState({ chosen: out.model });
@@ -805,7 +812,8 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
         unpressed(params.id);
         if (retryOf !== undefined) return setState({ notice: refusal("closed", out.model, null) });
         backInBox(params);
-        return setState({ notice: inView(threadId) ? refusal("closed", out.model, "box") : draftElsewhere(threadId) });
+        if (!inView(threadId)) return setState({ notice: draftElsewhere(threadId) });
+        return offer(refusal("closed", out.model, "box"), ["retry"]);
     }
   }
 
@@ -849,8 +857,23 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
       : code === "gpu-unreadable" ? `${said}${again ? "" : " Your message is back in the box."}`
       : code === "image-input" ? said
       : refusal(code, model, again ? null : "box", p.numCtx);
-    const offer = code === "wont-fit" && here && e instanceof WireError ? e.offer : undefined;
-    setState({ notice, noticeOffer: offer === undefined ? null : { notice, model, numCtx: p.numCtx ?? ctxFor(s.numCtx, s.models, model), offer } });
+    const fit = code === "wont-fit" && here && e instanceof WireError ? e.offer : undefined;
+    setState({ notice, noticeOffer: fit === undefined ? null : { notice, model, numCtx: p.numCtx ?? ctxFor(s.numCtx, s.models, model), offer: fit }, noticeAct: null });
+    if (again || !here) return;
+    namedTurns = (blocking ?? []).flatMap((t) => t.turnId ?? []);
+    if (code === "would-stop") offer(notice, namedTurns.length > 0 ? ["stop-other", "wait"] : ["wait"]);
+    else if (code === "closed" || code === "timeout") offer(notice, ["retry"]);
+  }
+
+  // why: the replies a would-stop named; Stop the other reply stops only these
+  let namedTurns: readonly string[] = [];
+
+  // why: the words went back in the box, so each act sends the box again, as Send would
+  function noticeDo(act: NoticeActKind): void {
+    const s = getState();
+    if (s.noticeAct === null || s.noticeAct.notice !== s.notice || !s.noticeAct.acts.includes(act)) return;
+    setState({ noticeAct: null });
+    void send(getDraft(currentDraftKey()).text, { act });
   }
 
   function queueNow(id: string, stopOthers: boolean, stopTurns?: readonly string[]): void {
@@ -1065,7 +1088,7 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
   }
 
   return {
-    send, confirmStopAsk, stop, retry, sendQueuedNow, cancelQueuedEdit,
+    send, confirmStopAsk, noticeDo, stop, retry, sendQueuedNow, cancelQueuedEdit,
     onWords, lostTurn, catchUp, connected, recordChanged, replyListed, listMissed: takeHeld, editEnded,
   };
 }

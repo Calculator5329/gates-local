@@ -339,6 +339,8 @@ describe("missing", () => {
     });
     // what has arrived so far is kept, and no speed is claimed for a download that sends nothing
     expect(stalled.install?.bytesPerSecond).toBeUndefined();
+    // the one reason it can know, as its own bound (council climb-025 Q15)
+    expect(stalled.install?.quietMs).toBe(200);
     release.mode = "ok";
     const s = await rt.ensure();
     expect(s.state).toBe("ready");

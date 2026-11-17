@@ -92,9 +92,11 @@ test("the tooltips carry the words, and the Models tooltip names the model", asy
 
   s.runtime("wrong-service");
   await expect(settings(page)).toHaveAccessibleName(/^Settings · Port \d+ · busy$/);
-  await expect(settings(page)).toHaveAttribute("data-tip", /^<b>Port \d+ · busy<\/b><br>Something other than Ollama answers on port \d+\.<br>Settings · Ctrl ,$/);
+  // council climb-025 Q4: the tip names the state only; its sentence is under the status in Settings › Runtime
+  await expect(settings(page)).toHaveAttribute("data-tip", /^Port \d+ · busy$/);
   await settings(page).click();
   await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
+  await expect(page.locator(".set-in")).toContainText(/Something other than Ollama answers on port \d+\./);
 });
 
 // Guards the owner's ruling (decision 23): with nothing running, one click restarts; the ask shows only when something would stop.
@@ -156,7 +158,7 @@ test.describe("the Settings icon and the runtime", () => {
       const gear = page.getByTestId("sidebar.foot.settings");
       await expect(gear.locator(".fdot.red")).toBeVisible();
       await expect(gear).toHaveAccessibleName("Settings · Port 5288 · busy");
-      await expect(gear).toHaveAttribute("data-tip", /^<b>Port 5288 · busy<\/b>/);
+      await expect(gear).toHaveAttribute("data-tip", "Port 5288 · busy");
       await gear.click();
       await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
     });

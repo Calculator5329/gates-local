@@ -3,7 +3,7 @@
 import "./picker.css";
 import { type KeyboardEvent, useRef, useState } from "react";
 import type { ContextSize, FitTable, ModelInfo } from "@gates-local/contracts";
-import { CONTEXT_SIZES, type SlowReason, type Verdict, ctxFor, gb, k, noGpu, slowReason, verdictOf } from "../lib/words/format.ts";
+import { CONTEXT_SIZES, type SlowReason, type Verdict, ctxFor, gb, k, needBasis, noGpu, shownNeed as needText, slowReason, verdictOf } from "../lib/words/format.ts";
 import { markWhole } from "../models/MemoryMark.tsx";
 import { openFit } from "../fit/fit-actions.ts";
 import { answers, canPick, cardFit, cardLine, fitFor, refusedNow, stopsChat } from "../fit/fit-table.ts";
@@ -15,7 +15,7 @@ import { usePopover } from "../lib/ui/kit/popover.ts";
 import { pickerEntry } from "./picker-entry.ts";
 import { activeEntry, contextRuler, makerGroups, makerOf, pickerEntries, suggestedOf, type Maker } from "./picker-models.ts";
 import { focusComposer } from "../composer/focus.ts";
-import { openSettings, pickModel, setContext, updateSettings } from "../lib/session/index.ts";
+import { openSettings, pickModel, refreshModels, setContext, updateSettings } from "../lib/session/index.ts";
 import { NA, type State, getState, useStore } from "../lib/store/store.ts";
 import { FitSkel, PHONE, closePop, closeTip, esc, isTouch, openTip, tabStops, useMedia } from "../lib/ui/ui.tsx";
 
@@ -30,15 +30,16 @@ function savedFavorites(): string[] {
   } catch { return []; }
 }
 
-const shownNeed = (v: Verdict) => `${v.measured ? "" : "~"}${gb(v.need)}`;
+const shownNeed = (v: Verdict) => needText(v.need, v.measured);
 const SlowMark = () => <span style={{ display: "inline-flex", color: "var(--amber-fg)" }}><Icon id="gauge" cls="s12" /></span>;
 
 export function ContextMemory({ v, cpu, frees = false, ready = true, notNow = false, slow }: { v: Verdict | undefined; cpu: boolean; frees?: boolean; ready?: boolean; notNow?: boolean; slow?: SlowReason | undefined }) {
   if (!v) return ready ? <span className="pk-cost none">–</span> : <span className="pk-cost"><FitSkel w="104px" /></span>;
   const ruler = contextRuler(v);
   const slowNow = slow !== undefined && !frees && !notNow && !cpu && v.k === "gpu";
-  const word = v.short;
-  return <span className={`pk-cost ${notNow && !frees ? "no" : v.k}`} role="img" aria-label={`${gb(v.need)} ${v.measured ? "measured" : "estimated"}; ${word}${slowNow ? `; slower now. ${slow.sentence}` : ""}`} {...slowNow ? { "data-tip": esc(slow.short), "data-testid": "models.picker.slow-now" } : {}}>
+  // why: one verdict, the row says Slower now as Models, the tip and Settings do
+  const word = slowNow ? "Slower now" : v.short;
+  return <span className={`pk-cost ${notNow && !frees ? "no" : v.k}`} role="img" aria-label={`${gb(v.need)} ${needBasis(v.measured)}; ${word}${slowNow ? `. ${slow.sentence}` : ""}`} {...slowNow ? { "data-tip": esc(slow.way), "data-testid": "models.picker.slow-now" } : {}}>
     <span className="pk-cost-caption"><span>{shownNeed(v)}</span><small>{notNow && !frees && v.k !== "no" ? <Icon id="xc" /> : null}{slowNow ? <SlowMark /> : null}{word}</small></span>
     {cpu ? null : <span className="pk-cost-track"><i className="pk-cost-room" /><i className="pk-cost-fill" style={{ width: `${ruler.fill}%` }} />{ruler.overflow > 0 ? <i className="pk-cost-over" style={{ width: `${ruler.overflow}%` }} /> : null}<i className="pk-cost-edge" />{ruler.continues ? <b>→</b> : null}</span>}
   </span>;
@@ -176,7 +177,7 @@ export function Picker() {
   }
   const facts = (row: Row) => {
     const fit = !row.v ? answered ? "No memory reading" : "Checking memory"
-      : `${gb(row.v.need)} ${row.v.measured ? "measured" : "estimated"}; ${row.frees ? "sending stops another chat first" : row.notNow ? "not enough memory now" : row.v.k === "no" ? "not enough memory" : cpu ? "runs in system memory" : row.v.k === "gpu" ? row.slow ? `fits on GPU; slower now. ${row.slow.sentence}` : "fits on GPU" : `${gb(row.v.amt)} in system memory, slower`}`;
+      : `${gb(row.v.need)} ${needBasis(row.v.measured)}; ${row.frees ? "sending stops another chat first" : row.notNow ? "not enough memory now" : row.v.k === "no" ? "not enough memory" : cpu ? "runs in system memory" : row.v.k === "gpu" ? row.slow ? `slower now. ${row.slow.sentence}` : "fits on GPU" : `${gb(row.v.amt)} in system memory, slower`}`;
     const speed = speedWords(speeds, row.tag);
     const said = speed === undefined ? fit : `${fit}; ${speed}`;
     return row.downloading === undefined ? said : `Downloading, ${row.downloading}%. ${said}`;
@@ -199,7 +200,7 @@ export function Picker() {
               <span className="vh" id={`pk-facts-${i}`}>{facts(r)}</span>
               <button className="pk-favorite" data-testid="models.picker.favorite" aria-label={`${favorites.includes(r.tag) ? "Unfavorite" : "Favorite"} ${r.label}`} aria-pressed={favorites.includes(r.tag)} onClick={() => toggleFavorite(r.tag)}><Icon id="star" /></button>
             </div>)}
-            {visible.length === 0 ? <div className="pk-empty">{models === undefined ? "Couldn't read installed models." : group === "favorites" && !q ? "No favorites yet. Star a model to keep it here." : "No installed model matches."}</div> : null}
+            {visible.length === 0 ? <div className="pk-empty">{models === undefined ? <>Couldn't read installed models. <button type="button" className="co-act" data-testid="models.picker.retry" onClick={() => void refreshModels()}>Retry</button></> : group === "favorites" && !q ? "No favorites yet. Star a model to keep it here." : "No installed model matches."}</div> : null}
           </div>
           <button className="pk-more" data-testid="models.picker.more" disabled={filtered.length <= limit || q !== ""} onClick={() => setExpanded(!expanded)}>{expanded ? "Show less" : "Show more"}</button>
         </div>

@@ -366,7 +366,7 @@ function SettingsButton() {
   const none = useStore(unread);
   // why: before the runtime's first answer the gear claims nothing about it, past the boot bound too.
   const info = boot || none || rtOf({ conn, runtime, settings }) === "ready" ? null : rtInfo({ conn, runtime, settings });
-  const g = settingsIcon(info && { text: plain(info.text), tip: info.tip, dot: info.dot });
+  const g = settingsIcon(info && { text: plain(info.text), dot: info.dot });
   return (
     <FootButton
       testId="sidebar.foot.settings"

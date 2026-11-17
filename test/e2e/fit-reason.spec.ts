@@ -14,7 +14,8 @@ const CARD_MIB = 11 * 1024;
 const PHONE = { viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true };
 const SHORT = /^Slower now · Whisper in the way$/;
 // sizes keep their unit on the line: a no-break space before GB
-const SENTENCE = /^Fits this card with Whisper \(2\.\d\sGB\) and others \(\d\.\d\sGB\) off it\. \d\.\d\sGB is in system memory now\.$/;
+// nothing is loaded here, so the spill is a prediction: said as one, with ~ (council climb-025 Q12)
+const SENTENCE = /^Fits this card with Whisper \(2\.\d\sGB\) and others \(\d\.\d\sGB\) off it\. Would use ~\d\.\d\sGB of system memory\.$/;
 
 /** In the test body, after the fixtures' own reset of the backend. */
 async function smallCard(): Promise<void> {
@@ -85,11 +86,12 @@ test("a model the card holds says what is in the way on its row, its picker chip
   await page.locator('#picker .pk-r[data-m="qwen3.5:9b"]').hover();
   const chip = page.locator('#picker [data-ctx="16384"]').getByTestId("models.picker.slow-now");
   await expect(chip).toBeVisible();
-  await expect(chip.locator("small")).toHaveText("Fits");
-  await expect(chip).toHaveAttribute("aria-label", /; Fits; slower now\. Fits this card with Whisper/);
+  // one verdict: the chip says what its tip, the Models row and Settings say; the tip names who
+  await expect(chip.locator("small")).toHaveText("Slower now");
+  await expect(chip).toHaveAttribute("aria-label", /; Slower now\. Fits this card with Whisper/);
   await outline(page);
   await chip.hover();
-  await expect(page.locator("#tip.open")).toHaveText(SHORT);
+  await expect(page.locator("#tip.open")).toHaveText("Whisper in the way");
   await expect(page.locator("#tip")).toBeVisible();
   await shots(page, info, "picker-desktop", true);
 });
@@ -117,7 +119,7 @@ test.describe("on a phone", () => {
     await expect(page.locator("#picker .pk-context")).toBeVisible();
     const chip = page.locator('#picker [data-ctx="16384"]').getByTestId("models.picker.slow-now");
     await expect(chip).toBeVisible();
-    await expect(chip).toHaveAttribute("aria-label", /; Fits; slower now\. Fits this card with Whisper/);
+    await expect(chip).toHaveAttribute("aria-label", /; Slower now\. Fits this card with Whisper/);
     await shots(page, info, "picker-phone");
   });
 });

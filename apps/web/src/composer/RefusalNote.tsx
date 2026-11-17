@@ -68,6 +68,7 @@ export function RefusalNote({ o }: { o: NoticeOffer }) {
       <span className="co-what">{name(o.model)} · {k(o.numCtx)}</span>
       {free !== undefined && free.length > 0 ? (
         <>
+          <span className="co-to">—</span>
           <span className="co-short" data-testid="chat.composer.offer-held">
             {free.map((h) => `${h.kind === "model" ? name(h.name) : h.name} holds ${gb(h.bytes)}`).join(" · ")}
           </span>

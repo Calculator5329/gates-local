@@ -246,6 +246,47 @@ it("a send refused says why in plain words, and says the words are back in the b
   expect(getState().notice, "a Retry's words were never in the box").toBe("Chat starts when Ollama is ready.");
 });
 
+// Council climb-025 Q16: a failure said what was wrong and left nothing to press.
+it("a send refused because another chat's reply holds the memory offers Stop the other reply and Wait; each sends the words once", async () => {
+  setState({ ...READY, view: "thread", threadId: "t1" });
+  const other: BlockingTurn = { threadId: "t2", title: "Trip", model: MODEL, turnId: "r9" };
+  const refuse = async () => {
+    answers.set("reply.send", () => Promise.reject(new WireError("would-stop", "the server's own words", [other])));
+    await chat.send("hello");
+    await settle();
+    answers.delete("reply.send");
+    calls.length = 0;
+  };
+  await refuse();
+  expect(getState().noticeAct).toEqual({ notice: getState().notice, acts: ["stop-other", "wait"] });
+  chat.noticeDo("wait");
+  await settle();
+  expect(sends()).toHaveLength(1);
+  expect(sends()[0]?.text).toBe("hello");
+  expect(sends()[0], "Wait queues behind the other reply: it neither asks first nor stops anything").not.toHaveProperty("askFirst");
+  expect(sends()[0]).not.toHaveProperty("consent");
+  await refuse();
+  chat.noticeDo("stop-other");
+  await settle();
+  expect(sends()).toHaveLength(1);
+  expect(sends()[0]?.consent).toEqual({ kind: "named", replies: ["r9"] });
+  expect(getState().noticeAct).toBeNull();
+});
+
+it("Gates Local stopped answering offers Retry, which sends the words in the box again", async () => {
+  setState({ ...READY, view: "thread", threadId: "t1" });
+  answers.set("reply.send", () => Promise.resolve({ answer: "not-reached", why: "closed" }));
+  await chat.send("hello");
+  await settle();
+  expect(getState().notice).toBe("Gates Local stopped answering. Your message is back in the box.");
+  expect(getState().noticeAct).toEqual({ notice: getState().notice, acts: ["retry"] });
+  answers.delete("reply.send");
+  calls.length = 0;
+  chat.noticeDo("retry");
+  await settle();
+  expect(sends().map((p) => p.text)).toEqual(["hello"]);
+});
+
 it.each([
   ["the server already said it has it is not", true, null, ""],
   ["the server never said it has it is", false, "back", "hello"],

@@ -409,7 +409,10 @@ div.think.fold:hover{color:var(--muted-foreground);background:none}
 .qt-t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--foreground)}
 .qt-s{flex:0 1 auto;min-width:0;max-width:50%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .qt-s:empty{margin-left:-8px}   /* kept in the tree for screen readers, empty, takes no gap */
-.qt-s:has(>.ic){display:inline-flex;flex:none;align-items:center;gap:6px}
+.qt-s:has(>.ic){display:inline-flex;flex:0 1 auto;max-width:75%;align-items:center;gap:6px}
+.qt-s>.ic,.qt-d,.qt-n{flex:none}
+.qt-w{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.qt-ws{display:none}
 /* what the clock waits for, as numbers: a fixed slot, the percent right-aligned in its own, so nothing moves as they change */
 .qt-n{width:12ch;white-space:nowrap;overflow:hidden;font-variant-numeric:tabular-nums}
 .qt-p{display:inline-block;width:4ch;text-align:right}
@@ -952,6 +955,18 @@ a.btn{text-decoration:none}
 .cb-copy:hover{background:var(--hover);color:var(--foreground)}
 .md .cb:hover .cb-copy,.md .cb:focus-within .cb-copy,.cb-copy.on{opacity:1}
 @media (hover:none){.cb-copy{opacity:1}}
+/* a phone's Wrap toggle reads a long command in place; the head with Copy rides the thread's top under its fade */
+.md pre.wrap{white-space:pre-wrap}
+.cb-wrap{display:none}
+@media (max-width:480px){
+  .cb-wrap{display:inline-flex;align-items:center;justify-content:center;margin-left:auto;width:44px;height:44px;border-radius:var(--r-sm);color:var(--muted-foreground)}
+  .cb-wrap[aria-pressed="true"]{color:var(--foreground);background:var(--hover)}
+  .cb-wrap+.cb-copy{margin-left:0}
+  .md .cb-h{position:sticky;top:20px;z-index:1;margin:1px 1px 0;background:var(--code-bg);border-radius:var(--r-lg) var(--r-lg) 0 0}
+  .qt-wf{display:none}
+  .qt-ws{display:inline}
+  .qt-s:has(>.qt-w){max-width:85%}
+}
 .md h1,.md h2,.md h3,.md h4{color:var(--foreground);font-weight:600;line-height:1.35;margin:18px 0 8px}
 .md h1{font-size:1.33em}.md h2{font-size:1.2em}.md h3{font-size:1.07em}.md h4{font-size:1em}
 .md a{color:var(--foreground);text-decoration:underline;text-decoration-color:var(--border-strong);text-underline-offset:3px}
@@ -959,6 +974,7 @@ a.btn{text-decoration:none}
 /* port additions: the notice above the composer and the header rename field */
 .c-note{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);width:calc(100% - 48px);max-width:var(--composer-w);margin:0;line-height:20px;background:var(--background)}
 .c-note.no{color:var(--red-fg)}
+.c-acted{display:flex;flex-wrap:wrap;align-items:center;column-gap:6px;row-gap:2px}
 /* a memory refusal's note (RefusalNote.tsx): one line, the height of the words, its buttons inside it */
 .c-offer{display:flex;align-items:center;gap:6px;height:20px}
 .c-offer>.ic{flex:none}
@@ -1385,7 +1401,9 @@ button.dl-btn:disabled,button.dl-btn:disabled:hover{opacity:.45;cursor:not-allow
   .mp-meta .mp-fit.x{padding:13px 0;margin:-13px 0}
   .mp-kebab{min-width:44px;min-height:44px}
   .mp-acts{gap:4px}
-  .mp-menu{width:min(304px,calc(100vw - 32px))}
+  /* a row's ⋯ menu is a bottom sheet, as the thread menu is (.pop on a phone) */
+  .mp-menu{position:fixed;inset:auto 0 0;width:auto;max-height:70dvh;overflow-y:auto;z-index:50;border:0;border-top:1px solid var(--popover-border);border-radius:var(--r-lg) var(--r-lg) 0 0;box-shadow:none;padding:0 4px max(8px,env(safe-area-inset-bottom))}
+  .mp-menu .mp-mi{min-height:48px}
   .mp-tabs .mp-tab{min-height:44px}
   /* the download rows and the typed name, stacked to fit: layout only */
   .mp .dlrow{flex-wrap:wrap;gap:8px 16px}

@@ -105,11 +105,11 @@ export function VLabel({ v, cls = "vl", hidden }: { v: Verdict; cls?: string; hi
   );
 }
 
-export function SheetHead({ title }: { title: string }) {
+export function SheetHead({ title, onClose = () => closePop(true) }: { title: string; onClose?: () => void }) {
   return (
     <div className="sh-h">
       <span className="fp-h fp-t">{title}</span>
-      <button type="button" className="ibtn" data-testid="ui.sheet.close" aria-label="Close" onClick={() => closePop(true)}>
+      <button type="button" className="ibtn" data-testid="ui.sheet.close" aria-label="Close" onClick={onClose}>
         <Icon id="x" />
       </button>
     </div>

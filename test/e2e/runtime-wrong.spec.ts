@@ -16,10 +16,13 @@ test.describe("with the system Ollama chosen", () => {
     await open();
     const port = String(runtimePorts.system);
     await expect(gear(page)).toHaveAccessibleName(`Settings · Port ${port} · busy`);
-    await expect(gear(page)).toHaveAttribute("data-tip", new RegExp(`^<b>Port ${port} · busy</b>`));
+    // council climb-025 Q4: the gear's tip names the state only
+    await expect(gear(page)).toHaveAttribute("data-tip", `Port ${port} · busy`);
     await expect(gear(page).locator(".fdot.red")).toBeVisible();
     await expect(page.locator(".banner")).toBeVisible();
-    await expect(page.locator(".banner")).toContainText(port);
+    // council climb-025 Q16: the banner says it plainly; the port is in its Details
+    await expect(page.locator(".banner")).toContainText("Another program is where Ollama should be");
+    await expect(page.locator(".banner .bm")).toHaveAttribute("data-why", `Another program answers on localhost:${port}.`);
     await expect(page.locator("#ta")).toHaveAttribute("placeholder", "Chat starts when Ollama answers on its port");
     await expect(page.getByTestId("chat.composer.send")).toBeDisabled();
 
@@ -39,9 +42,9 @@ test.describe("with the system Ollama chosen", () => {
   });
 
   // Guards the W-06 fix: chat stayed blocked after Ollama came back (unsure: an audit item, kept as the only recovery test).
-  test("once Ollama answers on the port, Retry looks again and chat is ready (W-06)", async ({ page, open, runtimePorts }) => {
+  test("once Ollama answers on the port, Retry looks again and chat is ready (W-06)", async ({ page, open }) => {
     await open();
-    await expect(page.locator(".banner")).toContainText(String(runtimePorts.system));
+    await expect(page.locator(".banner")).toContainText("Another program is where Ollama should be");
     // the stack control turns the fake into a healthy Ollama on the same port
     await stack.scenario("models");
     await page.getByTestId("chat.banner.retry").click();

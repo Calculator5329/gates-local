@@ -97,9 +97,9 @@ export function Banner() {
       return <Installing install={install} />;
     case "wrong":
       return (
-        <Shell icon={<Icon id="alert" cls="err" />} role="alert" title={`Something other than Ollama is on port ${port}`}>
-          <div className="bm">
-            Another program holds <span className="mono">localhost:{port}</span>. Gates Local won't stop it, and can run its own Ollama on another port.
+        <Shell icon={<Icon id="alert" cls="err" />} role="alert" title="Another program is where Ollama should be">
+          <div className="bm" data-why={`Another program answers on localhost:${port}.`}>
+            Gates Local won't stop it. It can run its own Ollama instead.
           </div>
           <div className="ba">
             <UseOwnButton />

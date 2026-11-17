@@ -43,13 +43,14 @@ import {
   openSettings,
   pickImageCount,
   sendsBeforeReady,
+  noticeDo,
   removeQueued,
   send,
   sendQueuedNow,
   stop,
   typedInComposer,
 } from "../lib/session/index.ts";
-import { NA, type State, type WaitingReply, behindSetup, getState, runningTurn, setState, streamingHere, useStore, waitingReplies } from "../lib/store/store.ts";
+import { NA, type NoticeActKind, type State, type WaitingReply, behindSetup, getState, runningTurn, setState, streamingHere, useStore, waitingReplies } from "../lib/store/store.ts";
 import { drawsPicture } from "../thread/turn.ts";
 import { editDraft, getDraft, useDraft } from "../lib/store/drafts.ts";
 import { PHONE, SheetHead, Skel, closePop, closeTip, esc, isTouch, openTip, place, togglePop, useMedia } from "../lib/ui/ui.tsx";
@@ -121,6 +122,7 @@ export function Composer() {
   const askingNow = useStore((s) => s.asking === true);
   const notice = useStore((s) => s.notice);
   const noticeOffer = useStore((s) => s.noticeOffer);
+  const acts = useStore((s) => (s.noticeAct !== null && s.noticeAct.notice === s.notice ? s.noticeAct.acts : undefined));
   const fit =useStore((s) => fitFor(s.fitTable, s.model, ctxFor(s.numCtx, s.models, s.model)));
   const models = useStore((s) => s.models);
   const catalog = useStore(catalogOf);
@@ -408,13 +410,18 @@ export function Composer() {
         </div>
       </form>
       {notice !== null && noticeOffer?.notice === notice ? <RefusalNote o={noticeOffer} /> : notice !== null ? (
-        <p className={`na c-note${memNo ? " no" : ""}`} data-testid="chat.composer.notice" role="status">
-          {notice}
+        <p className={`na c-note${memNo ? " no" : ""}${acts === undefined ? "" : " c-acted"}`} data-testid="chat.composer.notice" role="status">
+          {acts === undefined ? notice : <span>{notice}</span>}
+          {acts?.map((a) => (
+            <button key={a} type="button" className="co-act" data-testid={`chat.composer.notice-${a}`} onClick={() => noticeDo(a)}>{ACT_WORDS[a]}</button>
+          ))}
         </p>
       ) : null}
     </>
   );
 }
+
+const ACT_WORDS: Record<NoticeActKind, string> = { "stop-other": "Stop the other reply", wait: "Wait", retry: "Retry" };
 
 // external: a browser sizes field-sizing:content itself; reading scrollHeight forces layout
 const sizesItself = typeof CSS !== "undefined" && CSS.supports("field-sizing", "content");
@@ -542,6 +549,19 @@ const setupNumbers = (s: State): string => {
   return waitNumbers(i === undefined ? undefined : { done: i.receivedBytes, total: i.totalBytes, rate: i.bytesPerSecond }, "Unpacking");
 };
 
+const waitingOn = (s: State, words: string | null, at: string): string =>
+  words === AFTER_SETUP
+    ? at === "Unpacking" ? "Unpacking Ollama" : s.runtime?.state === "starting" ? "Starting Ollama" : "Downloading Ollama"
+    : `${at === "Checking" ? "Checking" : "Downloading"} ${describeModel(firstPull(s) ?? "", catalogOf(s)).name || "the model"}`;
+
+// why: a phone's row says ⤓ "Qwen 9B", the model button's short form, never "Downloading Q…"
+const shortWait = (what: string): { readonly words: string; readonly icon: "download" | "clock" } | undefined => {
+  const [verb = "", ...name] = what.split(" ");
+  const short = compactName(name.join(" "));
+  if (short === undefined) return undefined;
+  return verb === "Downloading" ? { words: short, icon: "download" } : { words: `${verb} ${short}`, icon: "clock" };
+};
+
 function WaitNumbers({ value }: { value: string }) {
   const [pct, left] = value.split("|");
   return (
@@ -592,6 +612,22 @@ function QueueOffer({ q, n }: { q: WaitingReply; n: number }) {
   );
 }
 
+// why: council climb-025 Q15: a clock, "7%" and "10 s" alone never said what the question waits on
+function ClockedWait({ words, at }: { words: string; at: string }) {
+  const what = useStore((s) => waitingOn(s, words, at));
+  const counting = at.includes("|");
+  const short = shortWait(what);
+  return (
+    <>
+      <Icon id="clock" cls={short === undefined ? "s14" : "s14 qt-wf"} />
+      {short === undefined ? null : <Icon id={short.icon} cls="s14 qt-ws" />}
+      <span className="vh">{words}</span>
+      <span className="qt-w">{short === undefined ? what : <><span className="qt-wf">{what}</span><span className="qt-ws">{short.words}</span></>}</span>
+      {counting ? <><span className="qt-d" aria-hidden="true">·</span><WaitNumbers value={at} /></> : null}
+    </>
+  );
+}
+
 const SHELF_ROWS = 3;
 
 function QueueTray() {
@@ -625,7 +661,7 @@ function QueueTray() {
             <span className="qt-t">{q.text}{q.images?.length ? ` · ${q.images.length} image${q.images.length === 1 ? "" : "s"}` : ""}{q.files?.length ? ` · ${q.files.length} file${q.files.length === 1 ? "" : "s"}` : ""}</span>
             {/* external: a browser announces changes in a live region, not one added already filled */}
             <span className="qt-s" role="status" data-tip={CLOCKED.has(words) ? words ?? undefined : undefined}>
-              {CLOCKED.has(words) ? <><Icon id="clock" cls="s14" /><span className="vh">{words}</span><WaitNumbers value={words === AFTER_SETUP ? setupAt : downloadAt} /></> : words ?? ""}
+              {CLOCKED.has(words) ? <ClockedWait words={words ?? ""} at={words === AFTER_SETUP ? setupAt : downloadAt} /> : words ?? ""}
             </span>
             {editing ? null : <QueueOffer q={q} n={i + 1} />}
             {!behindSetup(q) && !editing ? (

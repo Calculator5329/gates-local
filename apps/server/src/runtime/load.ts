@@ -319,6 +319,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       let numCtx = 0;
       let admitting = false;
       let notice: Notice | undefined;
+      let residencyRead = false;
       let answered = false;
       let ended = false;
       let counted = false;
@@ -398,6 +399,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
                   return reject(switched());
                 }
                 const entry = here.ok ? here.models.get(tag) : undefined;
+                residencyRead = here.ok;
                 numCtx = report.numCtx;
                 if (report.verdict === "refuse") {
                   handed(false);
@@ -438,6 +440,11 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
           handed(true);
           letGo();
           if (notice !== undefined && (gen === generation || deps.faultForTest === "record-without-generation-check")) loaded(model, numCtx, notice);
+          // decision: docs/decisions.md "Other programs' memory is freed only with a click"
+          else if (residencyRead && gen === generation && record.oursAt(tag) !== numCtx) {
+            recordLoaded(tag, numCtx);
+            deps.onLoaded?.();
+          }
         },
         end() {
           if (ended) return;

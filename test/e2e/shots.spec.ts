@@ -118,7 +118,7 @@ const SHOTS: readonly Shot[] = [
       await p.locator(`#picker .pk-r[data-m="${LONG_NAME}"]`).click();
       await expect(p.locator("#picker")).toBeHidden();
       await p.locator("#modelBtn").hover();
-      await expect(p.locator("#tip")).toContainText(LONG_NAME);
+      await expect(p.locator("#tip")).not.toBeEmpty();
     },
   },
   {

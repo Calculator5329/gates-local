@@ -5,7 +5,7 @@ import { fitWords, withNow, type FitRow } from "@gates-local/contracts";
 
 const mock = vi.hoisted(() => ({ state: undefined as unknown }));
 vi.mock("../lib/store/store.ts", () => ({ NA: "na", chatReady: () => true, useStore: (fn: (s: unknown) => unknown) => fn(mock.state), getState: () => mock.state, setState: () => undefined, streamingHere: () => false }));
-vi.mock("../lib/session/index.ts", () => Object.fromEntries(["pickModel", "pull", "openSettings", "setContext", "firstPull", "sendsBeforeReady"].map(name => [name, () => undefined])));
+vi.mock("../lib/session/index.ts", () => Object.fromEntries(["pickModel", "pull", "openSettings", "setContext", "firstPull", "sendsBeforeReady", "refreshModels"].map(name => [name, () => undefined])));
 const { Picker, ContextMemory } = await import("./Picker.tsx");
 
 /** The picker for one installed model; `tabled`: the first fit table has arrived. */
@@ -61,6 +61,30 @@ describe("approved model picker", () => {
     const v = { basis: "now" as const, k: "gpu" as const, label: "", mark: "", short: "Fits", chip: "on GPU", word: "Runs on GPU", detail: "", amt: 0, need: 7 * gib, avail: 9 * gib, measured: false };
     expect(caption(renderToStaticMarkup(createElement(ContextMemory, { v, cpu: false })))).toMatch(/^~7\.0\sGB$/u);
     expect(caption(renderToStaticMarkup(createElement(ContextMemory, { v: { ...v, measured: true }, cpu: false })))).toMatch(/^7\.0\sGB$/u);
+  });
+  // Council climb-025 Q12: the picker said "~22.4 GB" where Models said "~22 / 16 GB", and "Fits" where its tip said "Slower now".
+  it("says a need at the Models row's precision: one decimal under 10 GB, whole above", () => {
+    const gib = 1024 ** 3;
+    const v = { basis: "now" as const, k: "spill" as const, label: "", mark: "", short: "Slower", chip: "system memory", word: "", detail: "", amt: 0, need: 22.4 * gib, avail: 9 * gib, measured: false };
+    expect(caption(renderToStaticMarkup(createElement(ContextMemory, { v, cpu: false })))).toMatch(/^~22\sGB$/u);
+  });
+  it("a context the card holds but other programs slow down now says Slower now, the verdict its tip, Models and Settings give", () => {
+    const gib = 1024 ** 3;
+    const v = { basis: "card" as const, k: "gpu" as const, label: "", mark: "", short: "Fits", chip: "on GPU", word: "Runs on GPU", detail: "", amt: 0, need: 7 * gib, avail: 9 * gib, measured: false };
+    const html = renderToStaticMarkup(createElement(ContextMemory, { v, cpu: false, slow: { short: "Slower now · Whisper in the way", way: "Whisper in the way", sentence: "Fits this card with Whisper (2.0 GB) off it." } }));
+    const word = /<small>(.*?)<\/small>/.exec(html)?.[1]?.replace(/<[^>]+>/g, "");
+    expect(word).toBe("Slower now");
+    expect(html).not.toContain(">Fits<");
+    expect(html).toContain('data-tip="Whisper in the way"');
+  });
+  // Council climb-025 Q16: "Couldn't read installed models." left nothing to press.
+  it("an installed list it could not read offers Retry beside the words", () => {
+    markup();
+    mock.state = { ...(mock.state as object), models: undefined };
+    const html = renderToStaticMarkup(createElement(Picker));
+    const empty = /<div class="pk-empty">([\s\S]*?)<\/div>/.exec(html)?.[1] ?? "";
+    expect(empty.replaceAll("&#x27;", "'")).toContain("Couldn't read installed models.");
+    expect(empty).toMatch(/<button[^>]*data-testid="models\.picker\.retry"[^>]*>Retry<\/button>/);
   });
   it("offers a Context length column and an actual Download models control", () => {
     const html = markup();

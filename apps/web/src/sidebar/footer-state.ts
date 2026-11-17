@@ -11,9 +11,10 @@ export interface SettingsIcon {
   readonly opensRuntime: boolean;
 }
 
-export function settingsIcon(rt: { readonly text: string; readonly tip: string; readonly dot: string } | null): SettingsIcon {
+// why: the state's sentence is said under its status in Settings › Runtime, where the click goes
+export function settingsIcon(rt: { readonly text: string; readonly dot: string } | null): SettingsIcon {
   if (rt === null) return { dot: null, tip: SETTINGS, label: "Settings", opensRuntime: false };
-  return { dot: rt.dot === "err" ? "red" : "amber", tip: `<b>${esc(rt.text)}</b><br>${rt.tip === "" ? "" : `${rt.tip}<br>`}${SETTINGS}`, label: `Settings · ${rt.text}`, opensRuntime: true };
+  return { dot: rt.dot === "err" ? "red" : "amber", tip: esc(rt.text), label: `Settings · ${rt.text}`, opensRuntime: true };
 }
 
 export interface ModelsIcon {

@@ -19,8 +19,8 @@ vi.mock("../lib/ui/ui.tsx", async original => ({ ...await original<typeof import
 const GIB = 1024 ** 3;
 const MODEL = "qwen3:14b";
 const CONTEXTS = [8192, 16384, 32768, 65536] as const;
-/** Reading 1 says 10.x GB for each context, reading 2 says 20.x GB: a shown number names its reading. */
-const need = (reading: number, numCtx: number) => Math.round((reading * 10 + numCtx / 8192 / 10) * GIB);
+/** Reading 1 says 1.x GB for each context, reading 2 says 2.x GB: a shown number names its reading (one decimal under 10 GB). */
+const need = (reading: number, numCtx: number) => Math.round((reading + numCtx / 8192 / 10) * GIB);
 const valuesOf = (reading: number) => CONTEXTS.map((c) => `${(need(reading, c) / GIB).toFixed(1)}`);
 const tableOf = (reading: number, boot = "b1"): FitTable => ({
   reading: { boot, seq: reading, measuredAt: reading },

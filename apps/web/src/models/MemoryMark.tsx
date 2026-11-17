@@ -1,21 +1,14 @@
 import type { FitReport } from "@gates-local/contracts";
-import { NBSP, cardGb, needBasis, roughly, slowReason } from "../lib/words/format.ts";
+import { NBSP, cardGb, needAmount as amount, needBasis, roughly, slowReason } from "../lib/words/format.ts";
 import type { TableFit } from "../fit/fit-table.ts";
 import { Icon } from "../lib/ui/icons.tsx";
 import { type State, useStore } from "../lib/store/store.ts";
-
-const GIB = 1024 ** 3;
 
 export function markWhole(s: Pick<State, "fitTable" | "gpu">): number | undefined {
   const memory = s.fitTable?.memory;
   if (memory !== undefined && memory.kind !== "unreadable" && memory.totalBytes !== undefined) return memory.totalBytes;
   return s.gpu !== undefined && s.gpu !== "na" ? s.gpu.totalBytes : undefined;
 }
-
-const amount = (bytes: number) => {
-  const g = bytes / GIB;
-  return g < 9.95 ? g.toFixed(1) : String(Math.round(g));
-};
 
 export function markText(need: number, whole: number): string {
   return `${amount(need)} / ${cardGb(whole).replace(NBSP, " ")}`;

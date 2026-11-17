@@ -78,6 +78,12 @@ it("when nothing runs, the note says in one line what is short, the GPU's and sy
   expect(buttons[0]).toContain('aria-label="Memory details"');
 });
 
+// Council climb-025 Q12: "Qwen 3.5 4B · 16k Qwen 3.5 9B holds 7.0 GB" ran the context into the holder's name.
+it("what another program holds is set apart from the model and context it is in the way of", () => {
+  const html = note({ short, free: [{ kind: "model", name: "qwen3.5:4b", bytes: 7 * GIB }] });
+  expect(textOf(html)).toMatch(new RegExp(`· 32k\\s*—\\s*Qwen 3\\.5 4B holds ${gb(7 * GIB).replace(".", "\\.")}`));
+});
+
 const BIG = "qwen3.5:9b";
 const SMALL = "qwen3.5:4b";
 const heldNote = (notice: string) => {

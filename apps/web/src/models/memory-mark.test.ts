@@ -17,7 +17,7 @@ const table = (memory: FitTable["memory"]): FitTable => ({ reading: { boot: "b",
 
 const fitWith = (inTheWay: readonly GpuOccupant[] | undefined): TableFit => ({
   model: "a:1", numCtx: 16384, verdict: "fits", freeVramBytes: 16 * GIB, needVramBytes: 6 * GIB, spillRamBytes: 0, source: "estimate", measuredAt: 0, stops: [],
-  ...(inTheWay === undefined ? {} : { slowNow: { inTheWay, spillRamBytes: GIB } }),
+  ...(inTheWay === undefined ? {} : { slowNow: { inTheWay, spillRamBytes: GIB, measured: false } }),
 });
 const whisper: GpuOccupant = { label: "whisper-large", bytes: 2 * GIB, kind: "whisper", protected: true };
 const comfy: GpuOccupant = { label: "ComfyUI", bytes: 2 * GIB, kind: "other-app", protected: true };
@@ -90,7 +90,7 @@ it("the slower-now line puts the measured speed after Slower now, before who is 
 });
 
 it("the slower-now line has no tip, and its screen-reader words are the sentence with the sizes", () => {
-  const sentence = "Fits this card with Whisper (2.0 GB) off it. 1.0 GB is in system memory now.";
+  const sentence = "Fits this card with Whisper (2.0 GB) off it. Would use ~1.0 GB of system memory.";
   const html = slow({ fit: fitWith([whisper]) });
   expect(html).not.toContain("data-tip");
   expect(html).toContain(`<span class="vh">. ${sentence}</span>`);

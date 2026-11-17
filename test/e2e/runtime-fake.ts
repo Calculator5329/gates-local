@@ -26,7 +26,7 @@ export const installing = (r: Status): Status => ({
 export const stalled = (r: Status): Status => {
   const s = installing(r);
   const { bytesPerSecond: _, ...install } = s["install"] as Status;
-  return { ...s, install: { ...install, stalled: true } };
+  return { ...s, install: { ...install, stalled: true, quietMs: 5000 } };
 };
 
 /**

@@ -57,6 +57,8 @@ function show(patch: Partial<State> & { draft?: string; images?: string[] } = {}
 const composer = () => renderToStaticMarkup(createElement(Composer));
 const opts = () => renderToStaticMarkup(createElement(OptsMenu));
 const words = (markup: string) => markup.replace(/<[^>]+>/g, "");
+/** A queue row's words as a wide window shows them, without the phone's short form. */
+const wide = (row: string) => words(row.replace(/<span class="qt-ws">[^<]*<\/span>/, ""));
 const unescaped = (s: string) => s.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"').replaceAll("&#x27;", "'").replaceAll("&amp;", "&");
 const opening = (markup: string, testId: string) => markup.match(new RegExp(`<button\\b[^>]*data-testid="${testId.replaceAll(".", "\\.")}"[^>]*>`))?.[0] ?? "";
 const whole = (markup: string, testId: string) => markup.match(new RegExp(`<button\\b[^>]*data-testid="${testId.replaceAll(".", "\\.")}"[^>]*>[\\s\\S]*?</button>`))?.[0] ?? "";
@@ -229,17 +231,44 @@ it("a queued row waiting on a clock names it in a tip, and a row that shows a wo
   expect(tipOf(statusTag(clocked ?? ""))).toBe("Sends when setup finishes");
 });
 
-it("a row waiting on a download or on setup shows its percent and time left, one word once every byte is in, and nothing before a size is known", () => {
+it("a row waiting on a download or on setup shows its percent and time left, no numbers once every byte is in, and none before a size is known", () => {
   const setupRow = repliesOf([{ id: "q1", threadId: "thread", text: "hello", waitFor: "setup" }]);
   show({ runtime: { ...INSTALLING, install: { receivedBytes: 42_000_000, totalBytes: 100_000_000, bytesPerSecond: 500_000 } }, replies: setupRow });
   expect(words(numbers(rows()[0] ?? "") ?? "")).toBe("42% · 2 min");
   show({ runtime: { ...INSTALLING, install: { receivedBytes: 100_000_000, totalBytes: 100_000_000 } }, replies: setupRow });
-  expect(numbers(rows()[0] ?? "")).toBe("Unpacking");
+  expect(numbers(rows()[0] ?? "")).toBeUndefined();
   const downloadRow = repliesOf([{ id: "q1", threadId: "thread", text: "hello", waitFor: "download" }]);
   show({ models: [], pulls: { [TAG]: { name: TAG, state: "verifying", completedBytes: 10, totalBytes: 10 } }, replies: downloadRow });
-  expect(numbers(rows()[0] ?? "")).toBe("Checking");
+  expect(numbers(rows()[0] ?? "")).toBeUndefined();
   show({ models: [], pulls: { [TAG]: { name: TAG, state: "downloading", completedBytes: 0 } }, replies: downloadRow });
-  expect(numbers(rows()[0] ?? "")).toBe("");
+  expect(numbers(rows()[0] ?? "")).toBeUndefined();
+  expect(words(rows()[0] ?? "")).toContain("Downloading Qwen 3.5 9B");
+});
+
+// Council climb-025 Q15: the first queued question showed a clock, "7%" and "10 s", and not what it waited for.
+it("a row waiting on the first download says what is downloading beside its numbers, and what is checked once every byte is in", () => {
+  const downloadRow = repliesOf([{ id: "q1", threadId: "thread", text: "hello", waitFor: "download" }]);
+  show({ models: [], pulls: { [TAG]: { name: TAG, state: "downloading", completedBytes: 7, totalBytes: 100, bytesPerSecond: 9.3 } }, replies: downloadRow });
+  expect(wide(rows()[0] ?? "")).toMatch(/Downloading Qwen 3\.5 9B·\s*7% · 10 s/);
+  // a phone says the download as its icon and the model's short form, so the row is not cut to "Downloading Q…"
+  expect(rows()[0]).toContain('<span class="qt-wf">Downloading Qwen 3.5 9B</span><span class="qt-ws">Qwen 9B</span>');
+  expect(rows()[0]).toMatch(/<svg class="ic s14 qt-wf"[^>]*><use href="#i-clock"><\/use><\/svg><svg class="ic s14 qt-ws"[^>]*><use href="#i-download">/);
+  const css = readFileSync(new URL("../app/styles.css", import.meta.url), "utf8");
+  expect(css).toMatch(/\n\.qt-ws\{display:none\}/);
+  const phone = css.slice(css.indexOf("@media (max-width:480px){\n  .cb-wrap{")).split(/\n\}\n/)[0] ?? "";
+  expect(phone).toMatch(/\.qt-wf\{display:none\}/);
+  expect(phone).toMatch(/\.qt-ws\{display:inline\}/);
+  show({ models: [], pulls: { [TAG]: { name: TAG, state: "verifying", completedBytes: 100, totalBytes: 100 } }, replies: downloadRow });
+  expect(wide(rows()[0] ?? "")).toContain("Checking Qwen 3.5 9B");
+  expect(rows()[0]).not.toContain('class="qt-n"');
+});
+
+it("a row waiting on setup says what setup is doing beside its numbers", () => {
+  const setupRow = repliesOf([{ id: "q1", threadId: "thread", text: "hello", waitFor: "setup" }]);
+  show({ runtime: { ...INSTALLING, install: { receivedBytes: 42_000_000, totalBytes: 100_000_000, bytesPerSecond: 500_000 } }, replies: setupRow });
+  expect(words(rows()[0] ?? "")).toMatch(/Downloading Ollama·\s*42% · 2 min/);
+  show({ runtime: { ...INSTALLING, install: { receivedBytes: 100_000_000, totalBytes: 100_000_000 } }, replies: setupRow });
+  expect(words(rows()[0] ?? "")).toContain("Unpacking Ollama");
 });
 
 it("a reader hears a waiting row's clock as words, never its numbers digit by digit", () => {

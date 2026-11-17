@@ -69,9 +69,15 @@ export interface Verdict extends FitWords {
 
 const UNSAID: Record<FitReport["verdict"], VerdictKind> = { fits: "gpu", spills: "spill", refuse: "no" };
 
-// why: copies Picker.tsx shownNeed: "~" before an estimate, a measured need plain
 export const roughly = (measured: boolean) => (measured ? "" : "~");
 export const needBasis = (measured: boolean) => (measured ? "measured" : "estimated");
+
+export function needAmount(bytes: number): string {
+  const g = bytes / GIB;
+  return g < 9.95 ? g.toFixed(1) : String(Math.round(g));
+}
+
+export const shownNeed = (need: number, measured: boolean) => `${roughly(measured)}${needAmount(need)}${NBSP}GB`;
 
 export function verdictOf(r: FitReport): Verdict {
   const words = r.words ?? { basis: "now", k: UNSAID[r.verdict], label: "", word: "", chip: "", detail: "", mark: "", short: "", amt: 0 };
@@ -84,19 +90,23 @@ export function holderName(o: Pick<GpuOccupant, "kind" | "label">): string {
 
 export interface SlowReason {
   readonly short: string;
+  readonly way: string;
   readonly sentence: string;
 }
 
-export function slowReason(slow: { readonly inTheWay: readonly GpuOccupant[]; readonly spillRamBytes: number } | undefined, tps?: string, said: readonly string[] = []): SlowReason | undefined {
+export function slowReason(slow: { readonly inTheWay: readonly GpuOccupant[]; readonly spillRamBytes: number; readonly measured: boolean } | undefined, tps?: string, said: readonly string[] = []): SlowReason | undefined {
   if (slow === undefined || slow.inTheWay.length === 0) return undefined;
   const first = slow.inTheWay.find((o) => o.kind !== "unknown");
   const restBytes = slow.inTheWay.reduce((n, o) => (o === first ? n : n + o.bytes), 0);
   const who = first === undefined ? "other programs" : holderName(first);
   const off = first === undefined ? `other programs (${gb(restBytes)})` : restBytes > 0 ? `${who} (${gb(first.bytes)}) and others (${gb(restBytes)})` : `${who} (${gb(first.bytes)})`;
   const slower = tps === undefined ? "Slower now" : `Slower now, ${tps}`;
+  // why: a spill /api/ps reported is said in the present; a predicted one as a prediction, with ~
+  const spill = slow.measured ? `${gb(slow.spillRamBytes)} is in system memory now.` : `Would use ~${gb(slow.spillRamBytes)} of system memory.`;
   return {
     short: first !== undefined && said.includes(first.label) ? slower : `${slower} · ${who} in the way`,
-    sentence: `Fits this card with ${off} off it. ${gb(slow.spillRamBytes)} is in system memory now.`,
+    way: `${who} in the way`,
+    sentence: `Fits this card with ${off} off it. ${spill}`,
   };
 }
 
@@ -199,7 +209,7 @@ export function etaText(p: PullProgress, { speed = true }: { speed?: boolean } =
   const total = p.totalBytes;
   if (total && p.completedBytes >= total) return "Finishing the download";
   // external: Ollama names a pull's files one by one; the total is unknown till then
-  const parts = [total ? `${(p.completedBytes / 1024 ** 3).toFixed(1)} of ${gb(total)}` : p.completedBytes > 0 ? `${gb(p.completedBytes)} so far` : "Starting"];
+  const parts = [total ? `${(p.completedBytes / 1024 ** 3).toFixed(1)} of ${gb(total)}` : p.completedBytes > 0 ? `${gb(p.completedBytes)} so far` : "Starting the download"];
   if (p.bytesPerSecond) {
     if (speed) parts.push(`${Math.round(p.bytesPerSecond / 1e6)} MB/s`);
     if (total) parts.push(`about ${timeLeft((total - p.completedBytes) / p.bytesPerSecond)} left`);

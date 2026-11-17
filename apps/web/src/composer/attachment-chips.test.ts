@@ -57,22 +57,23 @@ const chipEls = () => all((el) => el.classList.includes("attachment"));
 const byTestId = (id: string, from: FakeNode) => all((el) => el.getAttribute("data-testid") === id, from);
 const sizeLine = (chip: FakeElement) => all((el) => el.tagName === "SMALL", chip)[0]?.textContent;
 type Refused = Omit<import("./refused-files.ts").RefusedFile, "id">;
-const file = (over: Partial<Refused> = {}): Refused => ({ name: "notes.bin", size: 2048, reason: "Too big to send", library: false, ...over });
+const file = (over: Partial<Refused> = {}): Refused => ({ name: "notes.bin", size: 2048, reason: "Too big to send", short: "too big", library: false, ...over });
 
 function showRefused(threadId: string) {
   act(() => store.setState({ view: "thread", threadId }));
   act(() => root.render(createElement(chips.RefusedFiles)));
 }
 
-it("a refused file's chip shows its name, its size and not sent, keeps the reason in its tip, and its Remove takes it away", async () => {
+// council climb-025 Q4: "not sent" hid the reason in a two-sentence tip
+it("a refused file's chip shows its name, its size and the short reason, has no tip, and its Remove takes it away", async () => {
   const id = nextChat();
   refused.refuseFiles(id, [file()]);
   showRefused(id);
   const [chip, ...more] = chipEls();
   expect(more).toEqual([]);
-  expect(chip!.getAttribute("data-tip")).toBe("Too big to send");
+  expect(chip!.getAttribute("data-tip")).toBeNull();
   expect(all((el) => el.tagName === "B", chip)[0]?.textContent).toBe("notes.bin");
-  expect(sizeLine(chip!)).toBe("2 KB · not sent");
+  expect(sizeLine(chip!)).toBe("2 KB · too big");
   const remove = byTestId("chat.attachment.refused-remove", chip!)[0];
   expect(remove?.getAttribute("aria-label")).toBe("Remove notes.bin");
   await click(remove);
@@ -109,9 +110,9 @@ it("only a file the Library can hold offers the way into Settings › Library, a
 
 it("a dropped folder's chip says Folder where a file's says its size", () => {
   const id = nextChat();
-  refused.refuseFiles(id, [file({ name: "photos", size: 0, folder: true }), file({ name: "clip.mov", size: 3 * 1024 ** 2 })]);
+  refused.refuseFiles(id, [file({ name: "photos", size: 0, folder: true, short: "add it to Library" }), file({ name: "clip.mov", size: 60 * 1024 ** 2, short: "over 50 MB" })]);
   showRefused(id);
-  expect(chipEls().map(sizeLine)).toEqual(["Folder · not sent", "3.0 MB · not sent"]);
+  expect(chipEls().map(sizeLine)).toEqual(["Folder · add it to Library", "60.0 MB · over 50 MB"]);
 });
 
 it("refused chips belong to the draft they were refused in and live only in memory: another chat shows none, and a reload brings none back", async () => {

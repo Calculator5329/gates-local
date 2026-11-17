@@ -288,12 +288,58 @@ test.describe("a thread at 360", () => {
   });
 });
 
+// Guards council climb-025 Q17: a long command was cut at the edge with no way to read it whole in place.
+test.describe("a code block on a phone", () => {
+  test.use({ ...PHONE, seed: "design-code" });
+  test("Wrap sits beside Copy, the hidden side fades, and Copy stays on screen over a tall block", async ({ page, open, seededThread }, info) => {
+    await open(`#thread=${seededThread ?? ""}`);
+    await waitReady(page);
+    const block = page.locator(".turn.a .md .cb").last();
+    const pre = block.locator("pre");
+    await block.scrollIntoViewIfNeeded();
+    await expect(pre).toHaveAttribute("data-more", /\bend\b/);
+    expect(await pre.evaluate((el) => getComputedStyle(el).maskImage), "the right edge fades").toContain("gradient");
+    const wrap = block.getByTestId("chat.markdown.wrap-code");
+    const copy = block.getByTestId("chat.markdown.copy-code");
+    await expect(wrap).toHaveAttribute("aria-pressed", "false");
+    const [w, c] = [await wrap.boundingBox(), await copy.boundingBox()];
+    expect(Math.min(w?.width ?? 0, w?.height ?? 0), "Wrap size").toBeGreaterThanOrEqual(44);
+    expect(Math.abs((w?.y ?? 0) - (c?.y ?? 99)), "Wrap is on Copy's row").toBeLessThanOrEqual(1);
+    expect((w?.x ?? 0) + (w?.width ?? 0), "Wrap sits left of Copy").toBeLessThanOrEqual((c?.x ?? 0) + 1);
+    await page.screenshot({ path: info.outputPath("after-412-code.png") });
+    await wrap.tap();
+    await expect(wrap).toHaveAttribute("aria-pressed", "true");
+    const scroll = await pre.evaluate((el) => ({ wide: el.scrollWidth - el.clientWidth, more: el.dataset.more ?? "" }));
+    expect(scroll.wide, "a wrapped block no longer scrolls sideways").toBeLessThanOrEqual(1);
+    expect(scroll.more, "and has no hidden side").toBe("");
+    const tl = page.locator(".tl");
+    await block.evaluate((el) => {
+      const s = el.closest<HTMLElement>(".tl")!;
+      s.scrollTop += el.getBoundingClientRect().top - s.getBoundingClientRect().top + 80;
+    });
+    const [top, box] = [(await tl.boundingBox())?.y ?? 0, await copy.boundingBox()];
+    expect(box?.y ?? -1, "Copy rides the top of the thread while the block is under it").toBeGreaterThanOrEqual(top + 16);
+    await page.screenshot({ path: info.outputPath("after-412-code-wrapped.png") });
+  });
+});
+
+test.describe("a code block on a tablet", () => {
+  test.use({ viewport: { width: 768, height: 1024 }, isMobile: true, hasTouch: true, seed: "design-code" });
+  test("has no Wrap toggle above 480 px", async ({ page, open, seededThread }) => {
+    await open(`#thread=${seededThread ?? ""}`);
+    await waitReady(page);
+    const block = page.locator(".turn.a .md .cb").last();
+    await expect(block.getByTestId("chat.markdown.copy-code")).toBeVisible();
+    await expect(block.getByTestId("chat.markdown.wrap-code")).toBeHidden();
+  });
+});
+
 for (const [width, use] of [["412", PHONE], ["360", NARROW]] as const) {
   test.describe(`Settings at ${width}`, () => {
     test.use(use);
 
     // Guards the owner's ruling: Remove lives in a model row's ⋯ menu.
-    test("Remove stays in a row's ⋯ menu, 44 px to reach and on the screen", async ({ page, open }) => {
+    test("Remove stays in a row's ⋯ menu, 44 px to reach and on the screen", async ({ page, open }, info) => {
       await open();
       await waitReady(page);
       await phoneSettings(page, "Models");
@@ -303,6 +349,13 @@ for (const [width, use] of [["412", PHONE], ["360", NARROW]] as const) {
       const more = row.getByTestId("models.row-menu.open");
       const b = await more.boundingBox();
       expect(Math.min(b?.width ?? 0, b?.height ?? 0), "⋯ size").toBeGreaterThanOrEqual(44);
+      await more.tap();
+      // council climb-025 Q17: the row's ⋯ menu opens as a bottom sheet, as the thread menu does
+      await expectSheet(page, ".mp-menu");
+      await expect(page.locator(".mp-menu").getByTestId("ui.sheet.close")).toBeVisible();
+      await page.screenshot({ path: info.outputPath(`after-${width}-model-sheet.png`) });
+      await page.locator(".mp-menu").getByTestId("ui.sheet.close").tap();
+      await expect(page.locator(".mp-menu")).toHaveCount(0);
       await more.tap();
       const remove = row.getByRole("menuitem", { name: /^Remove…/ });
       await expect(remove).toBeInViewport({ ratio: 1 });

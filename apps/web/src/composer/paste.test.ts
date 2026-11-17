@@ -29,9 +29,10 @@ it("splits a drop into files and folders by entry, as T3 Code does; a folder nam
 it("refuses a folder and an empty image at their chips with reasons true for each", async () => {
   await attachFiles([new File([], "blank.png", { type: "image/png" })], ["x.png"]);
   const [folder, blank] = getRefused();
-  expect(folder).toMatchObject({ name: "x.png", folder: true, library: true });
+  // council climb-025 Q4: the chip shows the short reason; the sentence is for screen readers only
+  expect(folder).toMatchObject({ name: "x.png", folder: true, library: true, short: "add it to Library" });
   expect(folder!.reason).toContain("x.png is a folder");
-  expect(blank).toMatchObject({ name: "blank.png", size: 0, library: false });
+  expect(blank).toMatchObject({ name: "blank.png", size: 0, library: false, short: "empty" });
   expect(blank!.reason).toBe("blank.png is empty (0 bytes), so there is no image to send.");
   for (const f of getRefused()) removeRefused(null, f.id);
 });
@@ -64,7 +65,7 @@ it("a file over 50 MB is refused at its chip in plain words and never read", asy
   const read = vi.spyOn(big, "arrayBuffer");
   await attachFiles([big]);
   const [chip] = getRefused();
-  expect(chip).toMatchObject({ name: "big.log", library: false, reason: "big.log is over 50 MB, so it was not attached." });
+  expect(chip).toMatchObject({ name: "big.log", library: false, short: "over 50 MB", reason: "big.log is over 50 MB, so it was not attached." });
   expect(read).not.toHaveBeenCalled();
   for (const f of getRefused()) removeRefused(null, f.id);
 });

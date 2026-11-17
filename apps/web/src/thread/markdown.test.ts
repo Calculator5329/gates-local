@@ -189,7 +189,9 @@ describe("what a reply's markdown draws", () => {
   it("a code block names its language at the top left and its copy button sits at the top right, shown on hover or keyboard focus", () => {
     const css = readFileSync(new URL("../app/styles.css", import.meta.url), "utf8").replaceAll("\r\n", "\n");
     const out = html("```sh\necho hi\n```");
-    expect(out).toMatch(/<div class="cb-h"><span class="cb-lang">sh<\/span><button[^>]*class="cb-copy"/);
+    // council climb-025 Q17: Wrap sits before Copy, shown only at 480 px and below (mobile.spec.ts)
+    expect(out).toMatch(/<div class="cb-h"><span class="cb-lang">sh<\/span><button[^>]*class="cb-wrap"[^>]*aria-pressed="false"[^>]*>.*?<\/button><button[^>]*class="cb-copy"/);
+    expect(rulesWith(css, ".cb-wrap").some((body) => body.includes("display:none"))).toBe(true);
     expect(rulesWith(css, ".md .cb-h").some((body) => body.includes("display:flex"))).toBe(true);
     expect(rulesWith(css, ".cb-copy").some((body) => body.includes("margin-left:auto") && body.includes("opacity:0"))).toBe(true);
     expect(rulesWith(css, ".md .cb:hover .cb-copy").some((body) => body.includes("opacity:1"))).toBe(true);

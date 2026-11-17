@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useRef, useState } from "react";
+import { type KeyboardEvent, type TouchEvent, useRef, useState } from "react";
 import type { ModelInfo, PullProgress } from "@gates-local/contracts";
 import { copyText } from "../lib/ui/copy.ts";
 import { noGpu, verdictOf } from "../lib/words/format.ts";
@@ -30,10 +30,23 @@ import { DialogHead } from "../lib/ui/Panel.tsx";
 import { leaveSettings, pull } from "../lib/session/index.ts";
 import { COMPUTER_ONLY, Fail, useAct, useOutside, walk } from "../lib/ui/settings-ui.tsx";
 import { NA, type State, setState, useStore } from "../lib/store/store.ts";
-import { FitSkel, PHONE, closeTip, useMedia } from "../lib/ui/ui.tsx";
+import { FitSkel, PHONE, SheetHead, closeTip, useMedia } from "../lib/ui/ui.tsx";
 import { focusFirstOf, requestFocus } from "../lib/ui/kit/focus.ts";
 
 const focusFirstItem = focusFirstOf("[role=menuitem]");
+
+// why: the row menu is not the app's pop, so App's swipe-down on a sheet head never reaches it
+let swipeFrom: number | null = null;
+const swipeStart = (e: TouchEvent<HTMLElement>) => {
+  const t = e.target instanceof Element ? e.target : null;
+  swipeFrom = t !== null && t.closest("button") === null && t.closest(".sh-h") !== null ? (e.touches[0]?.clientY ?? null) : null;
+};
+const swipedDown = (e: TouchEvent<HTMLElement>) => {
+  const from = swipeFrom;
+  swipeFrom = null;
+  const to = e.changedTouches[0]?.clientY;
+  return from !== null && to !== undefined && to - from >= 48;
+};
 
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
 const cannotSaveDefault = (s: State) => s.settings === NA || s.unavailable["settings.update"] === true;
@@ -311,8 +324,10 @@ function RowMenu({ r, saved, onRemove }: { r: InstalledRow; saved: string | unde
       >
         <Icon id="more" />
       </button>
+      {open ? <div className="scrim pop-scrim" data-testid="models.row-menu.scrim" aria-hidden="true" onClick={() => close(false)} /> : null}
       {open ? (
-        <div ref={focusFirstItem} className="mp-menu" role="menu" aria-label={r.label.text}>
+        <div ref={focusFirstItem} className="mp-menu" role="menu" aria-label={r.label.text} onTouchStart={swipeStart} onTouchEnd={(e) => swipedDown(e) && close(false)}>
+          <SheetHead title={r.label.text} onClose={() => close(false)} />
           {!settingsNA && canBeDefault(r, saved) ? (
             <button
               type="button"

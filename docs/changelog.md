@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-17: a turn makes its model the app's; failures carry their button; a phone code block wraps
+
+- A chat turn that answers on a model already loaded (after a restart, or loaded by another client) makes that model the app's, so the next picture frees it without asking. Only that model is claimed, and only when Ollama's list of loaded models was read. A ComfyUI whose image config can't be read now counts as someone else's and is never freed without a click. Decision: "Other programs' memory is freed only with a click".
+- A predicted spill reads "Would use ~2.7 GB of system memory."; the present tense ("is in system memory now") is kept for a split Ollama reported. The picker's row says "Slower now" when its tip, Models and Settings do, its tip names only what is in the way, and it writes a need at the Models row's precision (one decimal under 10 GB, whole GB above). The refusal note puts a dash between the context and what holds the memory.
+- "Another chat's reply is using the memory" offers "Stop the other reply" and "Wait" (the message queues behind it). "Gates Local stopped answering." offers Retry, and so does "Couldn't read installed models." in the picker. A runtime download the site didn't answer says "The download site didn't respond. Try again in a moment."; the status and address go to the details. The wrong-port banner says "Another program is where Ollama should be", with the address in its details.
+- A message waiting on the first download says what it waits for ("Downloading Qwen 3.5 9B · 7% · 10 s", or "Downloading Ollama", "Unpacking Ollama", "Starting Ollama"); a phone shows the download icon and the model's short form ("Qwen 9B · 7% · 10 s"), so the row is not cut. The first model's card says "Starting the download", and a stalled runtime download says "no data for over N s".
+- On a phone, a code block has a Wrap toggle beside Copy, its head with Copy stays at the top while the block scrolls, and a fade at the right edge shows more is hidden. A Models row's ⋯ menu opens as a bottom sheet with a close button, a scrim and swipe-down.
+- The Settings icon's tip names the runtime's state only ("Ollama stopped"); its sentence is under the status in Settings › Runtime. A refused attachment shows its short reason on the chip ("Folder · add it to Library", "over 50 MB") and has no tip.
+
 ## 2026-11-17: the screenshot rig can photograph a side-by-side scene list and record motion
 
 - `GL_E2E_COMPARE=1 pnpm e2e:shots --grep compare` photographs ten scenes another chat app can show too (a new chat, a long reply with code, the model picker, Settings, a running reply, two chats running, queued messages, a tool step, an error, first run) at 1440, 1280, 390 and 360 px, dark and light, with fixed words typed. Without the switch the rig is unchanged.

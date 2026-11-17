@@ -56,6 +56,33 @@ it("a download that stopped says so everywhere, with Retry, and never that Ollam
   }
 });
 
+// Council climb-025 Q16: a failed download put "HTTP 503" and the whole address in the main line.
+it.each([
+  ["answered with an error", "Downloading Ollama failed: HTTP 503 from https://github.com/ollama/ollama/releases/download/v0.12.0/ollama-linux-amd64.tgz. Check the network and retry; nothing was installed."],
+  ["never answered", "Could not reach https://github.com/ollama/ollama/releases/download/v0.12.0/ollama-linux-amd64.tgz (fetch failed). Check the network and retry; nothing was installed."],
+])("a download site that %s gets one plain line; the status and the address are in the details", async (_, detail) => {
+  const unreached = { ...base, failure: "download", detail } as const;
+  const p = await places(unreached);
+  for (const where of ["banner", "first", "settings"]) {
+    expect(p[where], where).toContain("The download site didn't respond. Try again in a moment.");
+    expect(p[where], where).not.toMatch(/HTTP|https?:|github/);
+    expect(p[where], where).toContain("Retry");
+  }
+  const html = await places(unreached, (h) => h);
+  for (const where of ["banner", "first", "settings"]) expect(html[where], where).toContain(`data-why="${detail}"`);
+});
+
+// Council climb-025 Q16 (S-12): the wrong-runtime banner led with "port 5288" and "localhost:5288".
+it("a program other than Ollama in its place gets plain words on the banner; the address is in the details", async () => {
+  const wrong = { state: "wrong-service", owner: "external", baseUrl: "http://127.0.0.1:5288" } as const;
+  const p = await places(wrong);
+  expect(p["banner"]).toContain("Another program is where Ollama should be");
+  expect(p["banner"]).not.toMatch(/port|localhost|5288/i);
+  expect(p["banner"]).toContain("Retry");
+  const html = await places(wrong, (h) => h);
+  expect(html["banner"]).toContain('data-why="Another program answers on localhost:5288."');
+});
+
 it("a download that didn't match its checksum says it couldn't be verified and to download it again; the checksum is in the details", async () => {
   const detail = `The Ollama download did not match its pinned checksum (expected sha256 ${"a".repeat(64)}, got ${"b".repeat(64)}). Nothing was installed. Retry once; if it fails again the release file changed and the pinned manifest needs updating.`;
   const mismatch = { ...base, failure: "checksum", detail } as const;
@@ -129,6 +156,13 @@ describe("a stalled engine download is one reading: the first window, the banner
     }
     // the gear sends the person to Settings › Runtime, so Retry is there as on the banner and the first window
     for (const where of ["banner", "first", "settings"]) expect(p[where], where).toContain("Retry");
+  });
+
+  // Council climb-025 Q15: "Download stalled" gave no reason.
+  it("a stalled download says the one reason the server knows: no data for its bound", async () => {
+    const now = installing(500_000_000);
+    const p = await places({ ...now, install: { ...now.install, stalled: true, quietMs: 5000 } });
+    for (const where of ["banner", "first", "settings"]) expect(p[where], where).toMatch(/Download stalled[\s\S]*no data for over 5 s/);
   });
 
   it("Settings › Runtime shows a running download's figures in the same words as the banner and the first window", async () => {

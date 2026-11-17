@@ -330,6 +330,7 @@ export const RuntimeStatus = S.Struct({
     bytesPerSecond: S.optional(S.Finite),
     diskBytes: S.optional(Count),
     stalled: S.optional(S.Literal(true)),
+    quietMs: S.optional(Count),
   })),
 });
 export type RuntimeStatus = typeof RuntimeStatus.Type;

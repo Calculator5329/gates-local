@@ -870,7 +870,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     ours() {
       let cfg: ReturnType<typeof config>;
       try { cfg = config(); }
-      catch { return true; }
+      // decision: docs/decisions.md "Other programs' memory is freed only with a click"
+      catch { return false; }
       return !cfg.enabled || owned?.baseUrl === cfg.baseUrl;
     },
     // external: ComfyUI's /system_stats gives what torch holds on each card as torch_vram_total

@@ -94,12 +94,12 @@ export function attachFiles(files: readonly File[], folders: readonly string[] =
   const version = getDraft(key).version;
   const images: File[] = [];
   const others: File[] = [];
-  const refused: Omit<RefusedFile, "id">[] = folders.map(name => ({ name, size: 0, folder: true, library: true, reason: `${name} is a folder, so it was not attached. Add the folder to your Library and the model can read its files with its tools.` }));
+  const refused: Omit<RefusedFile, "id">[] = folders.map(name => ({ name, size: 0, folder: true, library: true, short: "add it to Library", reason: `${name} is a folder, so it was not attached. Add the folder to your Library and the model can read its files with its tools.` }));
   for (const file of files) {
     const type = imageTypeOf(file);
-    if (SENDABLE.test(type) && file.size === 0) refused.push({ name: file.name, size: 0, library: false, reason: `${file.name} is empty (0 bytes), so there is no image to send.` });
+    if (SENDABLE.test(type) && file.size === 0) refused.push({ name: file.name, size: 0, library: false, short: "empty", reason: `${file.name} is empty (0 bytes), so there is no image to send.` });
     else if (SENDABLE.test(type)) images.push(type === file.type ? file : new File([file], file.name, { type }));
-    else if (file.size > MAX_FILE_BYTES) refused.push({ name: file.name, size: file.size, library: false, reason: `${file.name} is over 50 MB, so it was not attached.` });
+    else if (file.size > MAX_FILE_BYTES) refused.push({ name: file.name, size: file.size, library: false, short: "over 50 MB", reason: `${file.name} is over 50 MB, so it was not attached.` });
     else others.push(file);
   }
   refuseFiles(key, refused);

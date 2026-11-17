@@ -103,6 +103,12 @@ export interface NoticeOffer {
   readonly offer: FitOffer;
 }
 
+export type NoticeActKind = "stop-other" | "wait" | "retry";
+export interface NoticeAct {
+  readonly notice: string;
+  readonly acts: readonly NoticeActKind[];
+}
+
 export interface State {
   readonly conn: Conn;
   readonly hydrationSettled: boolean;
@@ -181,6 +187,7 @@ export interface State {
   readonly unavailable: Readonly<Record<string, true>>;
   readonly notice: string | null;
   readonly noticeOffer: NoticeOffer | null;
+  readonly noticeAct: NoticeAct | null;
   readonly loadErrors: Readonly<Record<string, string>>;
   readonly afterCommit: readonly CommitJob[];
 }
@@ -255,6 +262,7 @@ const initial: State = {
   unavailable: {},
   notice: null,
   noticeOffer: null,
+  noticeAct: null,
   loadErrors: {},
   afterCommit: [],
 };

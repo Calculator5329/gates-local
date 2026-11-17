@@ -9,7 +9,7 @@ export type IconId =
   | "x" | "xc" | "clock" | "plus" | "clip" | "alert" | "lock" | "file" | "image" | "bulb" | "copy" | "redo"
   | "spin" | "download" | "more" | "chat" | "book" | "cpu" | "server" | "db" | "folder" | "sliders"
   | "pencil" | "trash" | "box" | "wrench" | "keyboard" | "menu" | "gauge" | "right" | "speed"
-  | "refresh" | "fetch" | "external" | "bot" | "bars" | "page" | "code" | "snail";
+  | "refresh" | "fetch" | "external" | "bot" | "bars" | "page" | "code" | "snail" | "wrap";
 
 export function Icon({ id, cls }: { id: IconId; cls?: string }) {
   return (
@@ -87,6 +87,7 @@ export function Sprite() {
         <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6" /><path d="m20 4-9 9" /><path d="M19 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4" /></symbol>
         <symbol id="i-page" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18" /><path d="M6.5 6.5h.01M9.5 6.5h.01" /></symbol>
         <symbol id="i-code" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6" /><path d="m8 6-6 6 6 6" /></symbol>
+        <symbol id="i-wrap" viewBox="0 0 24 24"><path d="M3 6h18" /><path d="M3 12h15a3 3 0 1 1 0 6h-4" /><path d="m16 16-2 2 2 2" /><path d="M3 18h7" /></symbol>
       </defs>
     </svg>
   );

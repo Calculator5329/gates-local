@@ -12,17 +12,18 @@ describe("Settings", () => {
   it("a ready runtime: the gear alone, the shortcut in its tooltip", () => {
     expect(settingsIcon(null)).toEqual({ dot: null, tip: "Settings · Ctrl ,", label: "Settings", opensRuntime: false });
   });
-  it("a runtime that needs the person: an amber dot, the row's words first and its tooltip kept, and the click goes to Runtime", () => {
-    const i = settingsIcon({ text: "Reconnecting", tip: "The Gates Local server stopped answering. Trying again.", dot: "run" });
+  // council climb-025 Q4: the tip stacked a title, a sentence and "Settings"; the sentence lives in Settings › Runtime
+  it("a runtime that needs the person: an amber dot, a tip that names the state only, and the click goes to Runtime", () => {
+    const i = settingsIcon({ text: "Reconnecting", dot: "run" });
     expect(i).toMatchObject({ dot: "amber", opensRuntime: true, label: "Settings · Reconnecting" });
-    expect(i.tip).toBe("<b>Reconnecting</b><br>The Gates Local server stopped answering. Trying again.<br>Settings · Ctrl ,");
-    expect(settingsIcon({ text: "Ollama stopped", tip: "x", dot: "warn" }).dot).toBe("amber");
+    expect(i.tip).toBe("Reconnecting");
+    expect(settingsIcon({ text: "Ollama stopped", dot: "warn" })).toMatchObject({ dot: "amber", tip: "Ollama stopped" });
   });
   it("where the row's dot was red, the gear's dot is red", () => {
-    expect(settingsIcon({ text: "Port 11434 · busy", tip: "Something other than Ollama answers on port 11434.", dot: "err" })).toMatchObject({ dot: "red", label: "Settings · Port 11434 · busy" });
+    expect(settingsIcon({ text: "Port 11434 · busy", dot: "err" })).toMatchObject({ dot: "red", label: "Settings · Port 11434 · busy" });
   });
   it("escapes the row's words", () => {
-    expect(settingsIcon({ text: "<x>", tip: "t", dot: "err" }).tip).toContain("<b>&lt;x&gt;</b>");
+    expect(settingsIcon({ text: "<x>", dot: "err" }).tip).toBe("&lt;x&gt;");
   });
 });
 

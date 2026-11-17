@@ -50,7 +50,7 @@ test("a message queued behind the first download says it once, and the model but
   // said once: the queue row's clock, whose tip says when it sends; not the field, not the button
   await expect.soft(page.locator("#ta"), "the field's placeholder").toHaveAttribute("placeholder", "Ask anything…");
   await expect.soft(row.locator(".qt-s"), "the queue row's state").toHaveAttribute("data-tip", "Sends when the download finishes");
-  await expect.soft(row.locator(".qt-s svg"), "the queue row's clock").toBeVisible();
+  await expect.soft(row.locator(".qt-s svg", { has: page.locator("use[href='#i-clock']") }), "the queue row's clock").toBeVisible();
   await expect.soft(btn, "the model button's words").not.toContainText(/download/i);
   await expect.soft(btn.locator(".ldbar"), "the download's bar").toBeVisible();
   await expect.soft(btn, "the download's percent, in the tip").toHaveAttribute("data-tip", /\d+%/);

@@ -231,13 +231,19 @@ describe("who holds the card, in the app's words", () => {
 
 describe("why a model the card holds is slower right now", () => {
   it("names the first program it can name and sums every other holder, unnamed ones too", () => {
-    const why = slowReason({ inTheWay: [holder("unknown", "pid 4312", 3), holder("other-app", "blender", 2), holder("whisper", "whisper-server", 1)], spillRamBytes: 1.5 * GIB });
-    expect(why).toEqual({ short: "Slower now · blender in the way", sentence: `Fits this card with blender (2.0${SP}GB) and others (4.0${SP}GB) off it. 1.5${SP}GB is in system memory now.` });
+    const why = slowReason({ inTheWay: [holder("unknown", "pid 4312", 3), holder("other-app", "blender", 2), holder("whisper", "whisper-server", 1)], spillRamBytes: 1.5 * GIB, measured: true });
+    expect(why).toEqual({ short: "Slower now · blender in the way", way: "blender in the way", sentence: `Fits this card with blender (2.0${SP}GB) and others (4.0${SP}GB) off it. 1.5${SP}GB is in system memory now.` });
   });
 
   it("says other programs when no holder in the way can be named", () => {
-    const why = slowReason({ inTheWay: [holder("unknown", "pid 4312", 1), holder("unknown", "pid 977", 0.5)], spillRamBytes: 1 * GIB });
-    expect(why).toEqual({ short: "Slower now · other programs in the way", sentence: `Fits this card with other programs (1.5${SP}GB) off it. 1.0${SP}GB is in system memory now.` });
+    const why = slowReason({ inTheWay: [holder("unknown", "pid 4312", 1), holder("unknown", "pid 977", 0.5)], spillRamBytes: 1 * GIB, measured: true });
+    expect(why).toEqual({ short: "Slower now · other programs in the way", way: "other programs in the way", sentence: `Fits this card with other programs (1.5${SP}GB) off it. 1.0${SP}GB is in system memory now.` });
+  });
+
+  // Council climb-025 Q12: the card said "2.7 GB is in system memory now" beside "Not measured at 16k yet".
+  it("a spill nobody measured is said as a prediction with ~; only a measured split is said in the present tense", () => {
+    const why = slowReason({ inTheWay: [holder("whisper", "whisper-server", 2)], spillRamBytes: 2.7 * GIB, measured: false });
+    expect(why?.sentence).toBe(`Fits this card with Whisper (2.0${SP}GB) off it. Would use ~2.7${SP}GB of system memory.`);
   });
 });
 

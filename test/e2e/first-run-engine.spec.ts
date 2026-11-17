@@ -73,6 +73,10 @@ for (const [w, h, tag] of [[1280, 800, "desk"], [390, 844, "phone"]] as const) {
       // its own Ollama up: the first model starts at once, as the model button's bar, said once (scorecard Q15)
       await expect(page.locator("#modelBtn .ldbar")).toBeVisible();
       await expect(page.locator(".banner", { hasText: "Your message waits for a model" })).toHaveCount(0);
+      // council climb-025 Q15: the waiting row says what it waits on, whole, at either width
+      const waitsOn = page.locator(".qt-w");
+      await expect(waitsOn).toContainText(/Downloading Qwen/);
+      expect(await waitsOn.evaluate((e) => e.scrollWidth - e.clientWidth), "what the row waits on is cut").toBeLessThanOrEqual(1);
       await page.mouse.move(2, 2);
       await shot("2-engine-done");
       await shot("3-model-downloading");
@@ -94,12 +98,15 @@ for (const [w, h, tag] of [[1280, 800, "desk"], [390, 844, "phone"]] as const) {
       await expect(page.locator(".fr-st")).toHaveText("Download stalled");
       await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
       await expect(page.locator(".fr .sub")).toContainText("of 1.4 GB");
+      // the one reason the server knows, at its bound (council climb-025 Q15)
+      await expect(page.locator(".fr .sub")).toContainText(/no data for over 5\ss/);
       await page.mouse.move(2, 2);
       await shot("1-first-window-stalled");
 
       await page.getByRole("button", { name: "Start chatting" }).click();
       const banner = page.locator(".banner", { hasText: "Getting the chat engine ready" });
       await expect(banner).toContainText("Download stalled");
+      await expect(banner).toContainText(/no data for over 5\ss/);
       await page.mouse.move(2, 2);
       await shot("2-banner-stalled");
       await banner.getByRole("button", { name: "Retry" }).click();
