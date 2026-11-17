@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-17: the talk-mode Stop check holds its reply open
+
+- The release check failed the talk-mode test once: its second reply ended between the test seeing Stop and clicking it, so the click waited 30 s on a disabled Send. The fake's whole reply runs about 0.7 s, shorter than a poll gap on a busy machine. The test now holds that reply after its first sentence (the fake's holdAfterTokens, which the models scenario now honours too), and lifts the hold before the third turn.
+
 ## 2026-11-17: desktop specs share one release shard; the Settings frame-pace check is a timing test
 
 - The release check's browser shards all draw on one display, so they share its clipboard and focus. The paste test in one shard read the copy test's clipboard from another and went red. The shard planner now puts every desktop spec in the same shard, one after another.

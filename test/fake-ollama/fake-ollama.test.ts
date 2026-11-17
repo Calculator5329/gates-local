@@ -155,6 +155,16 @@ describe("fake ollama", () => {
     expect(contentOf(lines)).toMatch(/^You asked: hello there\./);
   });
 
+  it("models: holds the reply after its first tokens until released, and answers the rest", async () => {
+    fake.setScenario("models", { holdAfterTokens: 4, tokenDelayMs: 0, firstTokenDelayMs: 0 });
+    const reply = hello();
+    await vi.waitFor(() => expect(fake.state().turns[0]?.firstTokenAt).toBeDefined());
+    await new Promise((r) => setTimeout(r, 50));
+    expect(fake.state().turns[0]?.outcome, "held after four tokens").toBeUndefined();
+    await post(fake, "/__fake/release", {});
+    expect(contentOf(await reply)).toMatch(/^You asked: hello there\. Here is/);
+  });
+
   it("skips thinking when think is false, and loads the model at the asked context", async () => {
     const lines = await ndjson(
       await post(fake, "/api/chat", { model: "qwen3.5:9b", think: false, options: { num_ctx: 32768 }, messages: [{ role: "user", content: "x" }] }),

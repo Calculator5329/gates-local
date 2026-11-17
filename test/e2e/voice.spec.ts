@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fakeWhisper, wav } from "../../apps/server/src/voice/testing.ts";
-import { expect, test, waitReady } from "./fixtures.ts";
+import { expect, stack, test, waitReady } from "./fixtures.ts";
 
 const fixtureDir = path.join(homedir(), ".cache", "gates-local-voice-fixture");
 mkdirSync(fixtureDir, { recursive: true });
@@ -147,6 +147,8 @@ test("talk mode: hold to talk sends, the reply is read aloud, the speaker turns 
   await page.locator("#ta").focus();
   await page.keyboard.press("Space");
   await expect(page.locator("#ta")).toHaveValue("");
+  // why: Stop needs the reply still running; the fake's whole reply is shorter than a busy poll gap
+  await stack.scenario("models", { holdAfterTokens: 6 });
   // hold Space: the same as holding the microphone
   await page.keyboard.down("Space");
   await expect(mic).toHaveClass(/\blistening\b/);
@@ -167,6 +169,8 @@ test("talk mode: hold to talk sends, the reply is read aloud, the speaker turns 
   await expect(page.locator(".turn.a")).toHaveCount(2);
   expect((await speech(page)).said, "nothing more of the stopped reply is read").toEqual(stopped.said);
 
+  // the next reply runs to its end
+  await stack.scenario("models");
   // the speaker turns the reading off and stops it now
   const before = (await speech(page)).cancels;
   await speaker.click();

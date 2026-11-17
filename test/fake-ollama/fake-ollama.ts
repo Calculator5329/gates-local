@@ -4,7 +4,7 @@
 // `node test/fake-ollama/main.ts --port <n>`.
 //
 // POST /__fake/scenario {"scenario": "...", ...options} switches behaviour:
-//   models            three installed models (the default)
+//   models            three installed models (the default); holdAfterTokens pauses as in slow-drip
 //   no-models         nothing installed; /api/pull can add one
 //   slow-first-token  the first token waits firstTokenDelayMs (default 2500)
 //   mid-stream-error  the stream breaks with an error after a few tokens
@@ -66,7 +66,7 @@ export interface FakeOptions {
   errorAfterTokens: number;
   /** threads: when nonzero, only the first this-many replies to a prompt break at errorAfterTokens; later ones finish. */
   errorReplies: number;
-  /** slow-drip/threads: pause after this many tokens until released or cancelled; 0 never pauses. */
+  /** slow-drip/threads/models: pause after this many tokens until released or cancelled; 0 never pauses. */
   holdAfterTokens: number;
   /** Any scenario that thinks: pause after this many thinking tokens until released or cancelled; 0 never pauses. */
   holdThinkingAfterTokens: number;
@@ -543,7 +543,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
       }
       for (const t of calls && timing.quietToolRounds > 0 ? [] : echo ?? (mode === "slow-drip" ? (timing.longDrip ? STREAM_REPLY.match(/\s*\S+/g) ?? [] : dripTokens()) : mode === "threads" ? (threadReply(prompt).match(/\s*\S+/g) ?? []) : tokens(replyWords(prompt, timing.replyWords)))) {
         if (abort.signal.aborted) return;
-        if ((mode === "slow-drip" || mode === "threads") && timing.holdAfterTokens > 0 && sent === timing.holdAfterTokens && !released.has(turn.id)) {
+        if ((mode === "slow-drip" || mode === "threads" || mode === "models") && timing.holdAfterTokens > 0 && sent === timing.holdAfterTokens && !released.has(turn.id)) {
           await new Promise<void>((resolve) => {
             const done = () => { releases.delete(turn.id); abort.signal.removeEventListener("abort", done); resolve(); };
             releases.set(turn.id, done);
