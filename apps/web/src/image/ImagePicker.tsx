@@ -9,6 +9,7 @@ import { ImageMark } from "./ImageMark.tsx";
 import { memoryRuler } from "../picker/picker-models.ts";
 import { focusComposer } from "../composer/focus.ts";
 import { downloadImageSetup, folderDialog, pickImage, saveImageFolder, startImage, stopImageDownload } from "../lib/session/index.ts";
+import { type Failed, imageFailure } from "../lib/words/image-failure.ts";
 import { NA, useStore } from "../lib/store/store.ts";
 import { PHONE, closePop, closeTip, tabStops, useMedia } from "../lib/ui/ui.tsx";
 import { requestFocus } from "../lib/ui/kit/focus.ts";
@@ -105,13 +106,13 @@ export function ImagePicker() {
   const [highlight, setHighlight] = useState<string | null>(null);
   const [step, setStep] = useState<"models" | "sizes">("models");
   const [error, setError] = useState<string | null>(null);
-  const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
+  const [rowError, setRowError] = useState<({ id: string } & Failed) | null>(null);
   const [saving, setSaving] = useState(false);
   const [starting, setStarting] = useState<"start" | "check" | null>(null);
   const canDownload = useStore((s) => s.unavailable["image.download"] !== true);
   const canStop = useStore((s) => s.unavailable["image.stopDownload"] !== true);
   const canStart = useStore((s) => s.unavailable["image.start"] !== true);
-  const [startError, setStartError] = useState<string | null>(null);
+  const [startError, setStartError] = useState<Failed | null>(null);
   const [folderField, setFolderField] = useState<string | null>(null);
   const [folderError, setFolderError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -172,7 +173,7 @@ export function ImagePicker() {
   async function fetchSetup(p: Row) {
     setRowError(null);
     const failed = await downloadImageSetup(p.id);
-    if (failed !== null) setRowError({ id: p.id, message: failed });
+    if (failed !== null) setRowError({ id: p.id, ...failed });
   }
   async function changeFolder() {
     setFolderError(null);
@@ -239,13 +240,14 @@ export function ImagePicker() {
     const failed = mine !== undefined && mine.ended === true && mine.state === "error";
     const waits = downloading && (mine !== undefined || (p.needs?.files ?? []).some((f) => fetching.has(baseName(f))));
     const button = p.needs?.download === true && canDownload && !waits;
-    const reason = rowError?.id === p.id ? rowError.message : waits ? "Waiting on the download" : failed ? mine.message ?? "The download failed." : needsText(p, button);
+    const said: Failed = rowError?.id === p.id ? rowError : waits ? { message: "Waiting on the download" } : failed ? (mine.message === undefined ? { message: "The download failed." } : imageFailure(`download ${p.name}`, mine.message)) : { message: needsText(p, button) };
+    const reason = said.message;
     return <div key={p.id} className={`pk-r off${style === undefined ? "" : " style"}${p.id === active?.id ? " hl" : ""}`} role="option" data-testid="image.picker.unready-option" aria-selected={false} data-preset={p.id} data-state={waits ? "waiting" : "needs"} onMouseMove={() => setHighlight(p.id)}>
       <button type="button" className="pk-select" data-testid="image.picker.unready-select" tabIndex={-1} aria-disabled="true" aria-label={style ?? p.name} aria-describedby={`pk-why-${p.id}`} onClick={() => choose(p)}>{rowLabel(p, style)}</button>
       {button
         ? <button type="button" className="pk-act" data-testid="image.picker.download" aria-label={`${kept ? "Resume downloading" : "Download"} ${p.name}`} data-tip={kept ? "Resume" : "Download"} disabled={downloading} onClick={() => { setHighlight(p.id); void fetchSetup(p); }}><Icon id={kept ? "redo" : "download"} /></button>
         : null}
-      <div className="pk-why" id={`pk-why-${p.id}`} data-tipt={reason}><span className="pk-why-t t">{reason}</span></div>
+      <div className="pk-why" id={`pk-why-${p.id}`} data-tipt={reason} data-why={said.why}><span className="pk-why-t t">{reason}</span></div>
     </div>;
   }
 
@@ -264,7 +266,7 @@ export function ImagePicker() {
       numbers = <>
         <span className="prog" role="progressbar" aria-label={`${name} download`} aria-valuenow={pct}><i style={{ width: `${pct}%` }} /></span>
         <span className="pk-disk-n" data-testid="image.picker.download-amount">{run.state === "queued" ? "Starting" : total ? `${gb(done)} of ${gb(total)}${time}` : gb(done)}</span>
-        {downloading && canStop ? <button type="button" className="pk-act" data-testid="image.picker.stop-download" aria-label={`Stop downloading ${name}`} data-tip="Stop" onClick={() => void stopImageDownload(run.preset).then((failed) => { if (failed !== null) setRowError({ id: run.preset, message: failed }); })}><Icon id="x" /></button> : null}
+        {downloading && canStop ? <button type="button" className="pk-act" data-testid="image.picker.stop-download" aria-label={`Stop downloading ${name}`} data-tip="Stop" onClick={() => void stopImageDownload(run.preset).then((failed) => { if (failed !== null) setRowError({ id: run.preset, ...failed }); })}><Icon id="x" /></button> : null}
       </>;
     } else if (download?.ended === true && download.state === "done" && download.message !== undefined && left === undefined) {
       numbers = <span className="pk-disk-n pk-disk-note" role="status" data-testid="image.picker.download-note">{download.message}</span>;
@@ -298,7 +300,7 @@ export function ImagePicker() {
     const label = starting === "start" || state === "starting" ? "Starting ComfyUI…" : starting === "check" ? "Checking…" : as === "start" ? "Start ComfyUI" : "Check again";
     return <div ref={entry} id="imagePicker" className="model-picker image-picker open" role="dialog" data-testid="image.picker.blank" aria-label="Choose an image model" aria-modal={phone} onKeyDown={keys}>
       <div className="pk-blank">
-        <p>{empty}{startError === null ? null : <span className="pk-blank-error" role="status">{startError}</span>}</p>
+        <p>{empty}{startError === null ? null : <span className="pk-blank-error" role="status" data-why={startError.why}>{startError.message}</span>}</p>
         {known === undefined || !canStart ? null : <button type="button" className="btn outline" data-testid="image.picker.start-comfy" disabled={starting !== null || state === "starting"} onClick={() => void start(as)}>{label}</button>}
         {close}
       </div>

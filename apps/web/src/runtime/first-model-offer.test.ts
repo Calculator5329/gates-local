@@ -66,7 +66,7 @@ it("first run, the two-second boot and a runtime not read yet each keep the bann
 const at = (extra: Partial<State>) => ({ ...initial, conn: { kind: "open" }, runtime: methodSamples["runtime.status"].result, models: [], catalog, pulls: {}, view: "new", threadId: null, ...extra }) as State;
 
 it("no first model is offered by an Ollama too old to say which models chat, or by a build that cannot download", async () => {
-  const { firstModelOffer } = await import("./Banner.tsx");
+  const { firstModelOffer } = await import("./first-offer.ts");
   expect(firstModelOffer(at({}))?.name).toBe(offered.name);
   const unreported = { name: "qwen3.5:9b", digest: "q", sizeBytes: 1, modifiedAt: "", capabilities: ["unknown", "unreported"] } as const;
   expect(firstModelOffer(at({ models: [unreported] })), "too old").toBeUndefined();

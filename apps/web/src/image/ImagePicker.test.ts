@@ -10,6 +10,7 @@ const probe = vi.hoisted(() => ({
   // useState by call order: a slot set here starts at that value, and every setter call is kept
   slots: {} as Record<number, unknown>, sets: [] as [number, unknown][], slot: 0,
   chosen: undefined as unknown, ruler: undefined as unknown, place: undefined as ((root: unknown) => void) | undefined,
+  answer: null as unknown,
 }));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
@@ -22,7 +23,7 @@ vi.mock("react", async (original) => ({
 vi.mock("../lib/store/store.ts", () => ({ NA: "na", useStore: (fn: (s: unknown) => unknown) => fn(probe.state) }));
 vi.mock("../lib/session/index.ts", () => ({
   ...Object.fromEntries(["downloadImageSetup", "pickImage", "saveImageFolder", "startImage", "stopImageDownload"]
-    .map((name) => [name, async (...args: unknown[]) => { probe.calls.push(name); probe.args.push([name, args]); return null; }])),
+    .map((name) => [name, async (...args: unknown[]) => { probe.calls.push(name); probe.args.push([name, args]); return probe.answer; }])),
   folderDialog: () => undefined,
 }));
 vi.mock("../composer/focus.ts", () => ({ focusComposer: () => undefined }));
@@ -71,7 +72,7 @@ const running: ImageDownload = { preset: "flux2-klein-4b", name: "qwen_3_4b.safe
 function picker(over: Record<string, unknown> = {}) {
   probe.state = { pop: { id: "images" }, imagePresets: { presets: [ready], others, readAt: 1 }, imageStatus: { state: "ready" }, imageDownload: undefined, gpu: undefined, unavailable: {}, ...over };
 }
-beforeEach(() => { probe.calls = []; probe.args = []; probe.slots = {}; probe.sets = []; probe.chosen = undefined; probe.ruler = undefined; });
+beforeEach(() => { probe.calls = []; probe.args = []; probe.slots = {}; probe.sets = []; probe.chosen = undefined; probe.ruler = undefined; probe.answer = null; });
 
 const disk = () => {
   const found = tree().find((n) => n.props["data-testid"] === "image.picker.disk");
@@ -321,12 +322,33 @@ it("a closed picker forgets the menu pressed on its rail", () => {
   expect(probe.sets).toContainEqual([0, null]);
 });
 
-it("a download that failed says why on its row, or that it failed", () => {
-  const failed: ImageDownload = { ...running, state: "error", ended: true, message: "The disk is full." };
+const whyOf = (all: Node[]) => all.find((n) => n.props["className"] === "pk-why");
+
+it("a download that failed says what failed, why and what to do on its row; the server's own words are in the details", () => {
+  const raw = "qwen_3_4b.safetensors: the download stopped at 2.1 GB of 7.8 GB. Download it again to carry on.";
+  const failed: ImageDownload = { ...running, state: "error", ended: true, message: raw };
   picker({ imageDownload: failed });
-  expect(text(row("flux2-klein-4b").node)).toContain("The disk is full.");
+  const { node, all } = row("flux2-klein-4b");
+  expect(text(node)).toContain("Couldn't download FLUX.2 Klein 4B because the download stopped partway; download it again to carry on.");
+  expect(text(node)).not.toContain("qwen_3_4b");
+  expect(whyOf(all)?.props["data-why"]).toBe(raw);
   picker({ imageDownload: { ...failed, message: undefined } });
   expect(text(row("flux2-klein-4b").node)).toContain("The download failed.");
+});
+
+it("a refused Download says the template words on its row, the server's words in the details", async () => {
+  picker();
+  const said = { message: "Couldn't download the image setup because ComfyUI isn't running on this computer; start it first.", why: "Start ComfyUI on this computer first: downloads go into its model folders." };
+  probe.answer = said;
+  const button = row("other").all.find((n) => n.props["data-testid"] === "image.picker.download");
+  expect(button, "the row offers its download").toBeDefined();
+  (button!.props["onClick"] as () => void)();
+  await vi.waitFor(() => expect(probe.sets.some(([, v]) => (v as { id?: string } | null)?.id === "other")).toBe(true));
+  const [slot, value] = probe.sets.find(([, v]) => (v as { id?: string } | null)?.id === "other")!;
+  probe.slots[slot] = value;
+  const { node, all } = row("other");
+  expect(text(node)).toContain(said.message);
+  expect(whyOf(all)?.props["data-why"]).toBe(said.why);
 });
 
 it("a highlighted setup with files left to fetch shows those numbers in place of the last download's note", () => {

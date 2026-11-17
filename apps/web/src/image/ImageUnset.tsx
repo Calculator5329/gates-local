@@ -54,6 +54,7 @@ export function ImageUnset() {
   const notRunning = useStore((s) => s.imageStatus !== NA && s.imageStatus?.addressSet === true && s.imageStatus.state === "missing");
   const [checking, setChecking] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [noteWhy, setNoteWhy] = useState<string | undefined>(undefined);
   const ref = useRef<HTMLDivElement>(null);
   const progress = setup?.progress;
   const running = progress !== undefined && progress.step !== "done" && progress.step !== "error";
@@ -65,7 +66,7 @@ export function ImageUnset() {
   }, [kb, setup?.why, setup?.model?.preset]);
   const check = async () => {
     setChecking(true);
-    setNote(null);
+    setNote(null); setNoteWhy(undefined);
     const error = await checkImageStatus();
     setChecking(false);
     if (error !== null) setNote(error);
@@ -73,12 +74,12 @@ export function ImageUnset() {
     else { closePop(); setState({ image: true }); }
   };
   const go = async () => {
-    setNote(null);
-    const error = await startImageSetup();
-    if (error !== null) setNote(error);
+    setNote(null); setNoteWhy(undefined);
+    const failed = await startImageSetup();
+    if (failed !== null) { setNote(failed.message); setNoteWhy(failed.why); }
   };
   const useOwn = async () => {
-    setNote(null);
+    setNote(null); setNoteWhy(undefined);
     const error = await updateSettings({ comfyUrl: null });
     if (error !== null) { setNote(error); return; }
     await Promise.all([checkImageStatus(), loadImageSetup()]);
@@ -90,7 +91,7 @@ export function ImageUnset() {
         <SheetHead title="Image" />
         <p className="unset-t" id="imageUnsetT">ComfyUI is not running</p>
         <p className="unset-d" id="imageUnsetAddress"><code>{address}</code></p>
-        {note === null ? null : <p className="unset-d" role="status">{note}</p>}
+        {note === null ? null : <p className="unset-d" role="status" data-why={noteWhy}>{note}</p>}
         <div className="unset-acts">
           <button type="button" className="btn" data-testid="image.unset.check-again" disabled={checking} onClick={() => void check()}>{checking ? "Checking…" : "Check again"}</button>
           {canSetUp && canSave ? <button type="button" className="btn outline" data-testid="image.unset.use-own" onClick={() => void useOwn()}>Set up here instead</button> : null}
@@ -106,7 +107,7 @@ export function ImageUnset() {
         ? <p className="unset-d" id="imageSetupWhy">{setup.why}</p>
         : offer ? null : <p className="unset-d">Image mode needs ComfyUI, and none answered{address === undefined ? "" : <> at <code>{address}</code></>}.</p>}
       {offer && progress !== undefined && progress.step !== "done" ? <Running p={progress} /> : offer ? <Plan s={setup} /> : null}
-      {note === null ? null : <p className="unset-d" role="status">{note}</p>}
+      {note === null ? null : <p className="unset-d" role="status" data-why={noteWhy}>{note}</p>}
       <div className="unset-acts">
         {offer ? <button type="button" className="btn" data-testid="image.unset.set-up" disabled={running} onClick={() => void go()}>{running ? "Setting up…" : progress?.step === "error" ? "Try again" : "Set up images"}</button> : null}
         <button type="button" className={offer ? "btn outline" : "btn"} data-testid="image.unset.settings" onClick={() => { closePop(); openSettings("images"); }}>{offer ? "Settings" : "Open Settings"}</button>

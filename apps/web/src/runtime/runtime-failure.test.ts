@@ -25,7 +25,7 @@ afterEach(() => { setState(initial); vi.unstubAllGlobals(); });
 
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/\s+/g, " ");
 
-async function places(runtime: State["runtime"]): Promise<Record<string, string>> {
+async function places(runtime: State["runtime"], words: (html: string) => string = text): Promise<Record<string, string>> {
   const { Banner } = await import("./Banner.tsx");
   const { rtInfo } = await import("./words.tsx");
   const { FirstRun } = await import("../first-run/FirstRun.tsx");
@@ -38,7 +38,7 @@ async function places(runtime: State["runtime"]): Promise<Record<string, string>
   const first = renderToStaticMarkup(createElement(FirstRun));
   at("settings", { section: "runtime" });
   const settings = renderToStaticMarkup(createElement(SettingsView));
-  return { banner: text(banner), gear: text(renderToStaticMarkup(createElement("div", null, gear.text))), first: text(first), settings: text(settings) };
+  return { banner: words(banner), gear: words(renderToStaticMarkup(createElement("div", null, gear.text))), first: words(first), settings: words(settings) };
 }
 
 it("a download that stopped says so everywhere, with Retry, and never that Ollama didn't start", async () => {
@@ -56,18 +56,20 @@ it("a download that stopped says so everywhere, with Retry, and never that Ollam
   }
 });
 
-it("a download that didn't match its checksum says the checksum everywhere, once, and never the network", async () => {
-  const mismatch = { ...base, failure: "checksum", detail: `The Ollama download did not match its pinned checksum (expected sha256 ${"a".repeat(64)}, got ${"b".repeat(64)}). Nothing was installed. Retry once; if it fails again the release file changed and the pinned manifest needs updating.` } as const;
+it("a download that didn't match its checksum says it couldn't be verified and to download it again; the checksum is in the details", async () => {
+  const detail = `The Ollama download did not match its pinned checksum (expected sha256 ${"a".repeat(64)}, got ${"b".repeat(64)}). Nothing was installed. Retry once; if it fails again the release file changed and the pinned manifest needs updating.`;
+  const mismatch = { ...base, failure: "checksum", detail } as const;
   const p = await places(mismatch);
-  expect(p["gear"]).toContain("The Ollama download didn't match its checksum");
-  expect(p["settings"]).toContain("Checksum didn't match");
-  for (const where of ["banner", "first"]) expect(p[where], where).toContain("The Ollama download didn't match its checksum");
+  expect(p["gear"]).toContain("The download couldn't be verified");
+  expect(p["settings"]).toContain("Couldn't verify download");
+  for (const where of ["banner", "first"]) expect(p[where], where).toContain("The download couldn't be verified");
+  for (const where of ["banner", "first", "settings"]) expect(p[where], where).toContain("Download it again.");
   for (const [where, words] of Object.entries(p)) {
-    expect(words, where).not.toMatch(/network|didn't start|didn't finish|didn't install/i);
-    // the title names the checksum; the sentence under it does not say it again
-    expect(words.match(/checksum/gi)?.length ?? 0, where).toBe(1);
+    expect(words, where).not.toMatch(/network|didn't start|didn't finish|didn't install|checksum|sha256/i);
   }
   for (const where of ["banner", "first", "settings"]) expect(p[where], where).toContain("Retry");
+  const html = await places(mismatch, (h) => h);
+  for (const where of ["banner", "first", "settings"]) expect(html[where], where).toContain(`data-why="${detail}"`);
 });
 
 it("a disk too small for Ollama says the disk everywhere, with the needed figure once, and never an unpack or the network", async () => {

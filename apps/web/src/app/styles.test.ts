@@ -106,4 +106,15 @@ describe("styles.css", () => {
     expect(rule?.[1]).toContain("env(safe-area-inset-bottom)");
   });
 
+  // Guards the owner's scorecard (Q17): the rail scrolls, so it clipped a marker drawn past its edge to half a bar.
+  it("the picker rail's chosen-family marker sits inside its button, whole, at every width", () => {
+    const markers = [...css.matchAll(/\.pk-fam\[aria-pressed=true\]:after\{([^}]*)\}/g)].map((m) => m[1] ?? "");
+    expect(markers.length).toBeGreaterThanOrEqual(2);
+    for (const rule of markers) {
+      const right = /(?:^|;)right:(-?\d+)px/.exec(rule)?.[1];
+      if (right !== undefined) expect(Number(right), rule).toBeGreaterThanOrEqual(2);
+      expect(rule, "rounded on both sides, not a tab cut at the edge").not.toMatch(/border-radius:[^;]* 0 0 /);
+    }
+  });
+
 });

@@ -202,14 +202,21 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
   );
 }
 
+const SHORT_CELL = 32;
+
 function Table({ b, partial, allowedLinks }: { b: Extract<Block, { t: "table" }>; partial: boolean; allowedLinks?: ReadonlySet<string> }) {
   const ref = useEdges<HTMLTableElement>(b.rows.length);
+  // why: a short column holds one line on a phone, so a sideways cut lands in its words
+  const kind = b.head.map((h, c) => {
+    const short = [h, ...b.rows.map((r) => r[c] ?? "")].every((t) => t.length <= SHORT_CELL);
+    return [b.num[c] ? "n" : "", short ? "s" : ""].filter(Boolean).join(" ") || undefined;
+  });
   return (
     <table ref={ref}>
       <thead>
         <tr>
           {b.head.map((cell, j) => (
-            <th key={j} className={b.num[j] ? "n" : undefined}>
+            <th key={j} className={kind[j]}>
               {inline(cell, partial, allowedLinks)}
             </th>
           ))}
@@ -219,7 +226,7 @@ function Table({ b, partial, allowedLinks }: { b: Extract<Block, { t: "table" }>
         {b.rows.map((r, j) => (
           <tr key={j}>
             {b.head.map((_, col) => (
-              <td key={col} className={b.num[col] ? "n" : undefined}>
+              <td key={col} className={kind[col]}>
                 {inline(r[col] ?? "", partial, allowedLinks)}
               </td>
             ))}

@@ -1,5 +1,5 @@
 // Journey: what a person reads when something fails before the first chat. A download that is not
-// the pinned file names its checksum, a full disk names the disk, a failed first model says so in
+// the pinned file says it couldn't be verified (the checksum in its details), a full disk names the disk, a failed first model says so in
 // its offer, and with no card read a model that fits never says the GPU. Each state is shot at
 // desktop width with the changed words outlined.
 import { fitWords, type FitRow, type FitTable } from "@gates-local/contracts";
@@ -22,11 +22,16 @@ async function shot(page: Page, info: TestInfo, name: string, selector: string):
   await page.screenshot({ path: info.outputPath(`${name}.png`), animations: "disabled" });
 }
 
-test("a download that is not the pinned file says its checksum, without the hashes", async ({ page, open }, info) => {
-  await fakeRuntime(page, failed("checksum", `The Ollama download did not match its pinned checksum (expected sha256 ${HEX}, got ${"fedcba9876543210".repeat(4)}). Nothing was installed. Retry once; if it fails again the release file changed and the pinned manifest needs updating.`));
+// Scorecard Q16: the headline says what happened and what to do in plain words; the checksum is the details'.
+test("a download that is not the pinned file says it couldn't be verified, with the checksum kept in the details", async ({ page, open }, info) => {
+  const detail = `The Ollama download did not match its pinned checksum (expected sha256 ${HEX}, got ${"fedcba9876543210".repeat(4)}). Nothing was installed. Retry once; if it fails again the release file changed and the pinned manifest needs updating.`;
+  await fakeRuntime(page, failed("checksum", detail));
   await open();
-  await expect(page.locator(".fr h1")).toHaveText("The Ollama download didn't match its checksum");
+  await expect(page.locator(".fr h1")).toHaveText("The download couldn't be verified");
+  await expect(page.locator(".fr .sub")).toContainText("Download it again.");
+  await expect(page.locator(".fr .sub")).toHaveAttribute("data-why", detail);
   await expect(page.locator(".fr")).not.toContainText("sha256");
+  await expect(page.locator(".fr")).not.toContainText("checksum");
   await expect(page.locator(".fr")).not.toContainText("Check the network");
   await shot(page, info, "checksum", ".fr h1, .fr .sub");
 });

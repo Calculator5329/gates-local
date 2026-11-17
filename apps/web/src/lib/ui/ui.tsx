@@ -185,12 +185,12 @@ const holdTip = (el: HTMLDivElement | null): (() => void) | undefined => {
     const pop = getState().pop;
     if (!t.isConnected || (pop !== null && t.closest(`#${POP_EL[pop.id]}`) === null)) return hide();
     if (t.getAttribute("aria-expanded") === "true" && t.closest(".cf, .hdr")) return hide();
-    let html = t.getAttribute("data-tip");
-    if (!html) {
-      const tt = t.querySelector(".t, .pk-nm");
-      if (!tt || tt.scrollWidth <= tt.clientWidth) return hide();
-      html = esc(t.getAttribute("data-tipt") ?? "");
-    }
+    // why: the plain-text name joins the tip only while the anchor cuts or shortens it
+    const text = t.getAttribute("data-tipt");
+    const tt = text ? t.querySelector(".t, .pk-nm, .picker-trigger-name") : null;
+    const cut = tt !== null && (tt.scrollWidth > tt.clientWidth || tt.getAttribute("data-fit") === "short");
+    const html = [cut && text ? esc(text) : "", t.getAttribute("data-tip") ?? ""].filter(Boolean).join("<br>");
+    if (!html) return hide();
     tipFor = t;
     remember(t);
     el.innerHTML = html;

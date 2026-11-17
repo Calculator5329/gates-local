@@ -5,7 +5,7 @@
 import { type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type RefObject, Suspense, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { type AttachedFile, IMAGE_COUNT_MAX, type ModelInfo } from "@gates-local/contracts";
 import { useActionPress } from "./composer-press.ts";
-import { firstModelOffer } from "../runtime/Banner.tsx";
+import { firstModelOffer } from "../runtime/first-offer.ts";
 import { CONNECTING, PLACEHOLDER, booting, rtOf, unread } from "../runtime/words.tsx";
 import { openFit } from "../fit/fit-actions.ts";
 import { cardFit, fitFor, stopsChat } from "../fit/fit-table.ts";
@@ -14,7 +14,7 @@ import { DownloadBar, LoadRing } from "./LoadBar.tsx";
 import { loadGuess } from "../lib/store/load-times.ts";
 import { MakerMark } from "../models/MakerMark.tsx";
 import { RefusalNote, Slower } from "./RefusalNote.tsx";
-import { pickerLabels } from "../picker/picker-models.ts";
+import { compactName, pickerLabels } from "../picker/picker-models.ts";
 import { imagePickerScreen, pickerScreen, threadScreen } from "../app/screen-loaders.ts";
 import { chosenImage, imageCount, imageMode, imagesUnset, runKey, sizeLabel } from "../image/image-choice.ts";
 import { ImageMark } from "../image/ImageMark.tsx";
@@ -82,9 +82,17 @@ function thinkNote(model: ModelInfo | undefined, name: string, downloading: bool
   return canThink(model) ? null : `${name} does not reason before answering`;
 }
 
-function tagTip(name: string, tag: string): string {
-  return name === tag ? `<b class="mono">${esc(tag)}</b>` : `<b>${esc(name)}</b> · <span class="mono">${esc(tag)}</span>`;
-}
+// why: one identity at module level, so the observer comes and goes with the drawn name
+const fitName = (el: HTMLSpanElement | null): (() => void) | undefined => {
+  const full = el?.querySelector<HTMLElement>(".ptn-f");
+  if (!el || !full || typeof ResizeObserver === "undefined") return;
+  const fit = () => { el.dataset["fit"] = full.offsetWidth > el.clientWidth ? "short" : "full"; };
+  const seen = new ResizeObserver(fit);
+  seen.observe(el);
+  seen.observe(full);
+  fit();
+  return () => seen.disconnect();
+};
 
 function pickerIntent(): void {
   if (imageMode(getState())) { void imagePickerScreen.load(); return; }
@@ -168,16 +176,18 @@ export function Composer() {
   const noModel = (model === undefined || why !== undefined) && !queueable;
   const thinkNa = blocked ? null : thinkUnavailable(models?.find((m) => m.name === model), first !== undefined);
 
+  // why: the name shows on the button, so the tip adds it only when the button cuts it (ui.tsx)
   const modelTip =
     shownTag === undefined
       ? "Model"
       : rt === "installing"
-        ? `${tagTip(name, shownTag)}<br>Downloads next`
+        ? "Downloads next"
         : first !== undefined
-          ? `${tagTip(name, shownTag)}<br>Downloading ${firstProgress}%`
+          ? `Downloading ${firstProgress}%`
           : loading
-            ? `${tagTip(name, shownTag)}<br>Loading into ${cpu ? "memory" : "GPU memory"}${loadMs === undefined ? "" : `, ${loadGuess(loadMs)}`}`
-            : slowWhy === undefined ? tagTip(name, shownTag) : `${tagTip(name, shownTag)}<br>${esc(slowWhy)}`;
+            ? `Loading into ${cpu ? "memory" : "GPU memory"}${loadMs === undefined ? "" : `, ${loadGuess(loadMs)}`}`
+            : slowWhy === undefined ? undefined : esc(slowWhy);
+  const short = compactName(name);
 
   const ctx = ctxFor(numCtx, models, model);
   const pct = Math.min(1, used / ctx);
@@ -352,6 +362,7 @@ export function Composer() {
               aria-busy={!drawing && (boot || loading || pickerPending) || undefined}
               aria-label={!drawing && boot && shownTag === undefined ? "Model" : undefined}
               data-tip={drawing ? (named === undefined ? undefined : esc(named.preset.name)) : modelTip}
+              data-tipt={drawing || shownTag === undefined ? undefined : name}
               onPointerEnter={pickerIntent}
               onFocus={pickerFocus}
               onPointerDown={pickerIntent}
@@ -369,7 +380,7 @@ export function Composer() {
                 {named === undefined ? null : <small className="picker-trigger-ctx">{sizeLabel(named.width, named.height)}</small>}
               </> : boot && shownTag === undefined ? <Skel w="8.5em" /> : <>
                 {shownTag === undefined ? null : <MakerMark tag={shownTag} busy={pickerPending} />}
-                <span className="picker-trigger-name">{name}</span>
+                <span key={name} className="picker-trigger-name" ref={short === undefined ? undefined : fitName}><span className="ptn-f">{name}</span>{short === undefined ? null : <span className="ptn-s" aria-hidden="true">{short}</span>}</span>
                 <small className="picker-trigger-ctx">{k(ctx)}</small>
                 {first === undefined ? null : <DownloadBar pct={firstProgress} />}
               </>}

@@ -55,7 +55,8 @@ it("the model spills on the card itself: the tip says so in the table's words", 
 
 it("a model that fits says nothing of system memory", () => {
   setState({ fitTable: table({}, {}) });
-  const said = tip();
-  expect(said).not.toBe("");
-  expect(said).not.toMatch(/system memory|slower/i);
+  const button = renderToStaticMarkup(createElement(Composer)).match(/<button\b[^>]*id="modelBtn"[^>]*>/)?.[0] ?? "";
+  expect(button, "the model button was drawn").toContain("data-tipt=");
+  expect(tip(), "nothing beside the name").toBe("");
+  expect(button).not.toMatch(/system memory|slower/i);
 });

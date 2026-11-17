@@ -250,6 +250,44 @@ test.describe("Settings on a phone", () => {
   });
 });
 
+// Guards the owner's scorecard (Q17) at 360 px: the model button cut to "Qwen …" and hid the size,
+// a table's cut fell between columns so its last column looked lost, and the rail clipped its marker.
+test.describe("a thread at 360", () => {
+  test.use({ ...NARROW, seed: "design-code" });
+  test("the model button keeps the size, a wide table is cut in its words and swipes, the rail marker is whole", async ({ page, open, seededThread }, info) => {
+    await open(`#thread=${seededThread ?? ""}`);
+    await waitReady(page);
+    const name = page.locator("#modelBtn .picker-trigger-name");
+    await expect(name).toHaveAttribute("data-fit", "short");
+    await expect(name.locator(".ptn-s")).toBeVisible();
+    await expect(name.locator(".ptn-s")).toHaveText("Qwen 9B");
+    await expect(name.locator(".ptn-f"), "the full name stays for screen readers").toHaveText("Qwen 3.5 9B");
+    const room = await name.evaluate((el) => ({ text: el.querySelector<HTMLElement>(".ptn-s")?.offsetWidth ?? 0, box: el.clientWidth, parts: [...el.parentElement!.children].map((c) => `${c.className}:${Math.round(c.getBoundingClientRect().width)}`).join(" ") }));
+    expect(room.text, `the short name shows whole (${room.parts})`).toBeLessThanOrEqual(room.box);
+    const table = page.locator(".turn.a .md table").last();
+    await table.scrollIntoViewIfNeeded();
+    const cut = await table.evaluate((el) => {
+      const right = el.getBoundingClientRect().right;
+      const heads = [...el.querySelectorAll("th")].map((th) => ({ text: th.textContent ?? "", ...th.getBoundingClientRect().toJSON() as DOMRect }));
+      return { scrolls: el.scrollWidth > el.clientWidth, across: heads.filter((h) => h.left < right - 16 && h.right > right + 16).map((h) => h.text) };
+    });
+    expect(cut.scrolls, "the table scrolls inside its own box").toBe(true);
+    expect(cut.across, "a column runs past the box's edge, so the cut lands in words").not.toEqual([]);
+    await page.screenshot({ path: info.outputPath("after-360-thread.png") });
+    await table.evaluate((el) => { el.scrollLeft = el.scrollWidth; });
+    await expect(table.locator("th", { hasText: "Pages" })).toBeInViewport({ ratio: 1 });
+    await page.locator("#modelBtn").tap();
+    await expect(page.locator("#picker")).toBeVisible();
+    await page.locator("#picker").evaluate((e) => Promise.all(e.getAnimations().map((a) => a.finished)));
+    const mark = await page.locator('#picker .pk-fam[aria-pressed="true"]').evaluate((el) => {
+      const rail = el.closest(".pk-rail")!.getBoundingClientRect(), b = el.getBoundingClientRect();
+      return { right: b.right - Number.parseFloat(getComputedStyle(el, "::after").right), railRight: rail.right };
+    });
+    expect(mark.right, "the marker ends inside the rail").toBeLessThan(mark.railRight - 1);
+    await page.screenshot({ path: info.outputPath("after-360-picker.png") });
+  });
+});
+
 for (const [width, use] of [["412", PHONE], ["360", NARROW]] as const) {
   test.describe(`Settings at ${width}`, () => {
     test.use(use);

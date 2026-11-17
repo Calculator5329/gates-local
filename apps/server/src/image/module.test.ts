@@ -440,7 +440,8 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
   });
   it("reports an active external unit awaiting HTTP as starting, without adopting or starting it", async () => {
     const f = await fixture(); f.configure({ answering: false, activeOverride: true });
-    expect(await f.module.status()).toMatchObject({ state: "starting", owner: "external" });
+    // the status says what failed, why and what to do, in the words every failure uses
+    expect(await f.module.status()).toMatchObject({ state: "starting", owner: "external", detail: "Couldn't reach ComfyUI because it is still starting; try again in a moment." });
     await f.module.stopIdle(); expect(f.calls).not.toContain("start"); expect(f.calls).not.toContain("stop");
   });
   it("saves a fitting image, pushes progress, appends to its thread and leaves external Comfy running", async () => {

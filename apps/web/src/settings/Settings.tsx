@@ -1,6 +1,7 @@
 import { type CSSProperties, useRef, useState } from "react";
 import { type Accent, type ImageSetupProgress, type ImageStatus, type ShellStatus, type Source, type Theme, cardBytes, MIN_ROOM } from "@gates-local/contracts";
-import { STALLED, failWords, installStep, portOf, rtInfo, rtOf, searching, underTitle, useInstallStall } from "../runtime/words.tsx";
+import { imageFailure, said } from "../lib/words/image-failure.ts";
+import { STALLED, failWhy, failWords, installStep, portOf, rtInfo, rtOf, searching, underTitle, useInstallStall } from "../runtime/words.tsx";
 import { GpuMemory } from "../fit/FitPanel.tsx";
 import { count, folderWords, gb, noGpu, sourceDetail } from "../lib/words/format.ts";
 import { noImageEngine } from "../image/image-choice.ts";
@@ -100,7 +101,7 @@ function Runtime() {
               : "No Ollama is installed. Gates Local can install its own."
             : rt === "wrong"
               ? `Something other than Ollama answers on port ${port}.`
-              : (underTitle(runtime?.detail, runtime?.failure) ?? info.tip);
+              : <span data-why={failWhy(runtime?.detail, runtime?.failure)}>{underTitle(runtime?.detail, runtime?.failure) ?? info.tip}</span>;
   const canSwitch = settings !== NA && settings !== undefined;
   const ownCopy = rt === "ready" || !canSwitch ? app : settings.runtimeMode === "app";
   const nothingToSwitchTo = !ownCopy && runtime?.noAppCopy === true;
@@ -349,7 +350,7 @@ function ImageSetUp() {
     : setup?.cpu !== undefined ? `No GPU: a picture takes ${Math.round(setup.cpu.low / 60)} to ${Math.round(setup.cpu.high / 60)} minutes.`
     : undefined;
   const go = async () => {
-    if (await run(updateSettings({ imageGen: true }))) await run(startImageSetup());
+    if (await run(updateSettings({ imageGen: true }))) await run(startImageSetup().then(said));
   };
   const size = (
     <span className="mono setup-size" data-testid="settings.images.setup-size">
@@ -385,8 +386,8 @@ function CardBuild() {
     </span>
   );
   return (
-    <Row label="Pictures run on the processor" desc={<>{desc}{size}</>} err={err ?? (progress?.step === "error" ? progress.message ?? null : null)}>
-      <button type="button" className="btn" data-testid="settings.images.use-card" disabled={running || short} onClick={() => void run(startImageSetup())}>
+    <Row label="Pictures run on the processor" desc={<>{desc}{size}</>} err={err ?? (progress?.step === "error" && progress.message !== undefined ? imageFailure("set up images", progress.message).message : null)}>
+      <button type="button" className="btn" data-testid="settings.images.use-card" disabled={running || short} onClick={() => void run(startImageSetup().then(said))}>
         <span className="steady">
           <span aria-hidden={running}>{progress?.step === "error" ? "Try again" : "Use the card"}</span>
           <span aria-hidden={!running}>Setting up…</span>

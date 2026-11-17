@@ -94,7 +94,7 @@ export function failWords(failure: Failure): { title: string; stat: string } {
     case "download":
       return { title: "The Ollama download didn't finish", stat: "Download didn't finish" };
     case "checksum":
-      return { title: "The Ollama download didn't match its checksum", stat: "Checksum didn't match" };
+      return { title: "The download couldn't be verified", stat: "Couldn't verify download" };
     case "disk":
       return { title: "Not enough disk space for Ollama", stat: "Not enough disk space" };
     case "install":
@@ -107,14 +107,17 @@ export function failWords(failure: Failure): { title: string; stat: string } {
 
 export function underTitle(detail: string | undefined, failure: Failure): string | undefined {
   if (failure === "download") return detail?.replace(/^The Ollama download stopped at /, "Stopped at ");
-  if (failure === "checksum") return detail?.replace(/^The Ollama download [^.]*\.\s*/, "") || undefined;
+  if (failure === "checksum") return FAIL_FALLBACK.checksum;
   if (failure === "disk") return detail?.replace(/^The disk is full\.\s*/, "") || undefined;
   return detail;
 }
 
+// why: the checksum and its figures help no one deciding what to do, so they go to data-why
+export const failWhy = (detail: string | undefined, failure: Failure): string | undefined => (failure === "checksum" ? detail : undefined);
+
 export const FAIL_FALLBACK: Record<NonNullable<Failure>, string> = {
   download: "Check the network, then retry.",
-  checksum: "Nothing was installed. Retry once.",
+  checksum: "Download it again.",
   disk: "Free some space on this drive, then retry.",
   // why: the title already says what failed, so the line under it says only what to do
   install: "Retry. If it fails again, install Ollama from ollama.com.",

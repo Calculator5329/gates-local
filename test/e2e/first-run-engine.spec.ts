@@ -2,11 +2,11 @@
 // Journeys: a fresh install while the chat engine downloads, at desktop and phone width.
 // - The first window holds still. Its heading sits at one height through every state a fresh
 //   install passes on a build that installs its own Ollama (looking for one, its own downloading,
-//   its own starting, Ollama ready with no model, the first model downloading, the model ready);
-//   what changes below it changes in place. Such a build never says "isn't installed": it installs.
+//   its own starting, the first model downloading by itself, the model ready); what changes below
+//   it changes in place. Such a build never says "isn't installed": it installs.
 // - The person leaves the first window while the engine downloads, types a message, and the engine
-//   then finishes with no model installed. The offer of a first model follows them into the chat
-//   with its one button; one click downloads it and the waiting message gets its reply.
+//   then finishes with no model installed. The first model starts downloading by itself, shown on
+//   the model button, and the waiting message gets its reply.
 // - The engine's download stops sending. Once the server says it stalled (its figures held for the
 //   server's stall time) the first window says so and offers Retry; the banner in the chat does the
 //   same, and Retry's new attempt reads as downloading again.
@@ -40,9 +40,8 @@ for (const [w, h, tag] of [[1280, 800, "desk"], [390, 844, "phone"]] as const) {
       await at("fetching-runtime", "Getting the chat engine ready", "Downloading Ollama");
       rt.set(startingOwn);
       await at("starting-runtime", "Starting up", "Starting Ollama");
+      // its own Ollama up: the first model starts downloading with no second ask (scorecard Q15)
       rt.real();
-      await at("runtime-ready", "Download your first model");
-      await page.getByRole("button", { name: "Download and start" }).click();
       await at("model-downloading", "Downloading your first model");
       await expect(heading).toHaveText("Ready to chat", { timeout: 30_000 });
       await at("model-ready", "Ready to chat");
@@ -71,16 +70,11 @@ for (const [w, h, tag] of [[1280, 800, "desk"], [390, 844, "phone"]] as const) {
 
       rt.real();
       await expect(installBanner).toHaveCount(0);
+      // its own Ollama up: the first model starts at once, as the model button's bar, said once (scorecard Q15)
+      await expect(page.locator("#modelBtn .ldbar")).toBeVisible();
+      await expect(page.locator(".banner", { hasText: "Your message waits for a model" })).toHaveCount(0);
       await page.mouse.move(2, 2);
       await shot("2-engine-done");
-      const offer = page.locator(".banner", { hasText: "Your message waits for a model" });
-      await expect(offer).toBeVisible();
-      await expect(offer).toContainText("GB download");
-      await offer.getByRole("button", { name: "Download and start" }).click();
-
-      // the download is the model button's bar from here, said once
-      await expect(offer).toHaveCount(0);
-      await expect(page.locator("#modelBtn .ldbar")).toBeVisible();
       await shot("3-model-downloading");
       // the model is in: the waiting message goes and gets its reply, and the offer is gone
       await expect(page.locator(".turn.a").last().locator(".md")).toContainText("You asked: Hello from a fresh install", { timeout: 30_000 });

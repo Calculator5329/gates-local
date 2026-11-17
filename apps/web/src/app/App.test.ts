@@ -193,7 +193,7 @@ it("a phone's Settings list says the runtime's install step and failure in the w
   await mount({ ...OPEN, view: "settings", setList: true, conn: { kind: "open" }, runtime: { ...runtime, state: "installing", install: { receivedBytes: 5, totalBytes: 5 } } });
   expect(sectionValue("runtime")).toBe("Unpacking Ollama");
   await set({ runtime: { ...runtime, state: "error", failure: "checksum" } });
-  expect(sectionValue("runtime")).toBe("Checksum didn't match");
+  expect(sectionValue("runtime")).toBe("Couldn't verify download");
   await set({ runtime: { ...runtime, state: "error" } });
   expect(sectionValue("runtime")).toBe("Didn't start");
 });

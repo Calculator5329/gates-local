@@ -1,12 +1,13 @@
 // Journey: first launch with Ollama but no models. First run recommends a
-// model from models.catalog and downloads it with models.pull (the fake
-// Ollama streams the pull), with Cancel, then the chat opens.
+// model from models.catalog; Download and start pulls it with models.pull (the
+// fake Ollama streams the pull) and opens the chat at once.
 import { expect, sendMessage, stack, test } from "./fixtures.ts";
 
 test.use({ scenario: "no-models", skipFirstRun: false });
 
-// Guards the owner's ask for first run with no models: download one, then chat.
-test("no models: download, cancel, download again, then chat", async ({ page, open }) => {
+// Guards the owner's ask for first run with no models: download one, then chat. Scorecard Q15: the
+// chat opens with the press, so the first message waits in the composer while the download runs.
+test("no models: Download and start opens the chat at once, the first message waits for the download", async ({ page, open }) => {
   await open();
   await expect(page.getByRole("heading", { name: "Download your first model" })).toBeVisible();
   await test.step("inspect the first model recommendation", async () => {
@@ -19,12 +20,8 @@ test("no models: download, cancel, download again, then chat", async ({ page, op
   await expect(page.locator(".fr")).not.toContainText("not available in this build");
   });
   await page.getByRole("button", { name: "Download and start" }).click();
-  await expect(page.getByRole("heading", { name: "Downloading your first model" })).toBeVisible();
-  await expect(page.getByRole("progressbar")).toBeVisible();
-  await page.getByTestId("models.download.cancel").click();
-  await expect(page.locator(".fr-note")).toContainText("Download cancelled");
-  await page.getByRole("button", { name: "Download and start" }).click();
-  await page.getByRole("button", { name: "Start chatting" }).click();
+  await expect(page.locator(".fr"), "the first window is gone with the press").toHaveCount(0);
+  await expect(page.locator("#modelBtn .ldbar"), "the download shows on the model button").toBeVisible();
   await sendMessage(page, "Hello there");
   await expect(page.locator(".qt-r .qt-s")).toHaveAttribute("data-tip", "Sends when the download finishes");
   await expect(page.locator(".turn.a .md").last()).toContainText("You asked: Hello there", { timeout: 20_000 });

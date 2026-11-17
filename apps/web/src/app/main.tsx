@@ -6,9 +6,10 @@ import { watchComposer } from "../composer/Composer.tsx";
 import { readAloud } from "../voice/talk.ts";
 import { watchPickerReady } from "../picker/picker-entry.ts";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
-import { connect, initialView, threadFromHash } from "../lib/session/index.ts";
+import { connect, initialView, pull, threadFromHash } from "../lib/session/index.ts";
 import { computerOnlyMethods } from "../lib/session/platform.ts";
-import { setState } from "../lib/store/store.ts";
+import { getState, setState, subscribe } from "../lib/store/store.ts";
+import { watchFirstModel } from "../runtime/first-model.ts";
 import { syncTitleBar } from "./titlebar.ts";
 import "./styles.css";
 // why: static imports put these in the startup chunk, so drafts restore before connect()
@@ -23,6 +24,7 @@ watchApp();
 watchComposer();
 readAloud();
 watchPickerReady();
+watchFirstModel({ getState, subscribe, pull });
 
 const root = document.getElementById("root");
 if (root === null) throw new Error("missing #root");

@@ -33,12 +33,14 @@ import { setPageReads } from "../../pages/pages.ts";
 import { createUsage } from "../../usage/usage.ts";
 import { createPictures } from "../../pictures/pictures.ts";
 import { type ActionResult, codeOf, createConnection, failure, isNA } from "./connection.ts";
+import { type Failed, imageFailure } from "../words/image-failure.ts";
 import { every } from "../ui/kit/now.ts";
 
 // why: re-exports keep the UI's imports while the session moves into modules
 export { threadMarkdown } from "../../thread/threads.ts";
 export { sendsBeforeReady, firstPull, cancelStopAsk, canRetry, removeQueued, editQueued, editedElsewhere, chooseForQueued } from "../../composer/chat.ts";
 export { type ActionCall, type ActionResult, failure, isNA } from "./connection.ts";
+export type { Failed } from "../words/image-failure.ts";
 export { fileUrl, dataFolder, openDataFolder, canOpenFolder, canUpdateHere, canShowUpdate, showUpdate, folderDialog } from "./platform.ts";
 export { threadFromHash } from "../../app/navigation.ts";
 
@@ -385,11 +387,11 @@ export async function readImageRun(choice: ImageChoice): Promise<void> {
   } catch {}
 }
 
-async function imageAct<T>(what: string, run: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; message: string }> {
+async function imageAct<T>(what: string, run: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; failed: Failed }> {
   try { return { ok: true, value: await run() }; }
   catch (e) {
     const code = codeOf(e);
-    return { ok: false, message: code.startsWith("image") && e instanceof Error ? e.message : failure(what, e) };
+    return { ok: false, failed: code.startsWith("image") && e instanceof Error ? imageFailure(what, e.message) : { message: failure(what, e) } };
   }
 }
 
@@ -398,36 +400,35 @@ export async function loadImageSetup(): Promise<ActionResult> {
     const { progress: _read, ...look } = info;
     applyServerEvent((s) => ({ imageSetup: newer(IMAGE_SETUP, sync) ? info : { ...look, ...s.imageSetup?.progress === undefined ? {} : { progress: s.imageSetup.progress } } }));
   } }));
-  return r.ok ? null : r.message;
+  return r.ok ? null : r.failed.message;
 }
 
-export async function startImageSetup(): Promise<ActionResult> {
+export async function startImageSetup(): Promise<Failed | null> {
   const r = await imageAct("set up images", () => call("image.setup", {}));
-  return r.ok ? null : r.message;
+  return r.ok ? null : r.failed;
 }
 
-export async function downloadImageSetup(preset: string): Promise<ActionResult> {
+export async function downloadImageSetup(preset: string): Promise<Failed | null> {
   const placeholder = { name: preset, preset, file: 1, files: 1, state: "queued" as const, completedBytes: 0 };
   applyServerEvent({ imageDownload: placeholder });
   const r = await imageAct("download the image setup", () => call("image.download", { preset }));
   if (!r.ok || r.value.files.length === 0) applyServerEvent((s) => s.imageDownload === placeholder ? { imageDownload: undefined } : {});
-  return r.ok ? null : r.message;
+  return r.ok ? null : r.failed;
 }
 
 export const saveImageFolder = (folder: string | null): Promise<ActionResult> => updateSettings({ imageFolder: folder });
 
-export async function stopImageDownload(preset: string): Promise<ActionResult> {
+export async function stopImageDownload(preset: string): Promise<Failed | null> {
   const r = await imageAct("stop the download", () => call("image.stopDownload", { preset }));
-  if (!r.ok) return r.message;
+  if (!r.ok) return r.failed;
   if (!r.value.stopped) applyServerEvent((s) => s.imageDownload?.preset === preset ? { imageDownload: undefined } : {});
   return null;
 }
 
-export async function startImage(): Promise<ActionResult> {
+export async function startImage(): Promise<Failed | null> {
   const r = await imageAct("start ComfyUI", () => call("image.start", {}, { onResult: (imagePresets, sync) => { if (newer(IMAGE_PRESETS, sync)) applyServerEvent({ imagePresets }); } }));
-  return r.ok ? null : r.message;
+  return r.ok ? null : r.failed;
 }
-
 const SOURCE_WORDS = { folder: "folder", file: "file", sqlite: "database" } as const;
 
 export async function addSource(kind: "folder" | "file" | "sqlite", path: string): Promise<ActionResult> {

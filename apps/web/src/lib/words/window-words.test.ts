@@ -14,7 +14,7 @@ import { NO_GPU_TEXT, count } from "./format.ts";
 // external: the runtime words load the session, which writes to window as it starts
 vi.stubGlobal("window", {});
 afterAll(() => { vi.unstubAllGlobals(); });
-const { FAIL_FALLBACK, PLACEHOLDER, failWords, installStep, installWords, ownCopyNote, rtInfo, underTitle } = await import("../../runtime/words.tsx");
+const { FAIL_FALLBACK, PLACEHOLDER, failWhy, failWords, installStep, installWords, ownCopyNote, rtInfo, underTitle } = await import("../../runtime/words.tsx");
 
 const GIB = 1024 ** 3;
 const plain = (text: string | undefined | null) => text?.replaceAll(" ", " ");
@@ -56,19 +56,21 @@ const CARDS: readonly Row[] = [
 
 const FAILS: readonly Row[] = [
   ["a download that did not finish", () => failWords("download"), { title: "The Ollama download didn't finish", stat: "Download didn't finish" }],
-  ["a download that failed its checksum", () => failWords("checksum"), { title: "The Ollama download didn't match its checksum", stat: "Checksum didn't match" }],
+  ["a download that failed its checksum", () => failWords("checksum"), { title: "The download couldn't be verified", stat: "Couldn't verify download" }],
   ["a full disk", () => failWords("disk"), { title: "Not enough disk space for Ollama", stat: "Not enough disk space" }],
   ["an install that failed", () => failWords("install"), { title: "Ollama didn't install", stat: "Didn't install" }],
   ["a start that failed", () => failWords("start"), { title: "Ollama didn't start", stat: "Didn't start" }],
   ["a failure that names no step", () => failWords(undefined), { title: "Ollama didn't start", stat: "Didn't start" }],
   ["a stopped download's next step", () => FAIL_FALLBACK.download, "Check the network, then retry."],
-  ["a checksum failure's next step", () => FAIL_FALLBACK.checksum, "Nothing was installed. Retry once."],
+  ["a checksum failure's next step", () => FAIL_FALLBACK.checksum, "Download it again."],
   ["a full disk's next step", () => FAIL_FALLBACK.disk, "Free some space on this drive, then retry."],
   ["a failed install's next step", () => FAIL_FALLBACK.install, "Retry. If it fails again, install Ollama from ollama.com."],
   ["a failed start's next step", () => FAIL_FALLBACK.start, "Retry. If it still won't start, install Ollama from ollama.com."],
   ["a stopped download, under its title", () => underTitle("The Ollama download stopped at 0.6 of 1.5 GB (no data for 30 s).", "download"), "Stopped at 0.6 of 1.5 GB (no data for 30 s)."],
-  ["a checksum failure, under its title", () => underTitle("The Ollama download didn't match its checksum. Nothing was installed.", "checksum"), "Nothing was installed."],
-  ["a checksum failure with nothing more to say", () => underTitle("The Ollama download didn't match its checksum.", "checksum"), undefined],
+  // the checksum and its figures go to the details (data-why); the line says what to do
+  ["a checksum failure, under its title", () => underTitle("The Ollama download didn't match its checksum. Nothing was installed.", "checksum"), "Download it again."],
+  ["a checksum failure's details", () => failWhy("The Ollama download didn't match its checksum.", "checksum"), "The Ollama download didn't match its checksum."],
+  ["a stopped download keeps its figures on the line, so has no details", () => failWhy("The Ollama download stopped at 0.6 of 1.5 GB.", "download"), undefined],
   ["a full disk, under its title", () => underTitle("The disk is full. Free 2 GB on this drive.", "disk"), "Free 2 GB on this drive."],
   ["a full disk with nothing more to say", () => underTitle("The disk is full.", "disk"), undefined],
   ["a failed start, under its title", () => underTitle("Ollama exited during startup.", "start"), "Ollama exited during startup."],

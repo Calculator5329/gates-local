@@ -1,8 +1,8 @@
 import { type ReactNode, useState } from "react";
 import type { CatalogEntry } from "@gates-local/contracts";
 import { suggestedOf } from "../picker/picker-models.ts";
-import { recommendedEntry } from "../runtime/Banner.tsx";
-import { CONNECTING, INSTALL_TITLE, STALLED, booting, failWords, installStep, installWords, ownCopyNote, portOf, rtOf, underTitle, unread, useInstallStall } from "../runtime/words.tsx";
+import { recommendedEntry } from "../runtime/first-offer.ts";
+import { CONNECTING, INSTALL_TITLE, STALLED, booting, failWhy, failWords, installStep, installWords, ownCopyNote, portOf, rtOf, underTitle, unread, useInstallStall } from "../runtime/words.tsx";
 import { DlButton, canCancelPull } from "../models/ModelDownloads.tsx";
 import { type Verdict, cardGb, ctxFor, describeModel, etaText, gb, k, noGpu, verdictOf } from "../lib/words/format.ts";
 import { Icon } from "../lib/ui/icons.tsx";
@@ -34,6 +34,12 @@ function Cta({ label, onGo, link, onLink }: { label: string; onGo: () => void; l
 function startChat(): void {
   finishFirstRun("chat");
   focusComposer();
+}
+
+// why: the first message queues while the model downloads, and the model button shows its progress
+function downloadAndChat(name: string): void {
+  void pull(name);
+  startChat();
 }
 
 const pendingWord = (phase: RowPhase): string => (phase === "checking" ? "Checking…" : "Couldn't check");
@@ -167,7 +173,7 @@ function NoModels() {
             label="Download and start"
             onGo={() => {
               setCancelled(false);
-              void pull(entry.name);
+              downloadAndChat(entry.name);
             }}
           />
           <p className="fr-note">
@@ -179,7 +185,7 @@ function NoModels() {
           </p>
         </>
       ) : (
-        <Cta label="Download and start" onGo={() => void pull(entry.name)} link="Choose another model" onLink={() => openSettings("models", true)} />
+        <Cta label="Download and start" onGo={() => downloadAndChat(entry.name)} link="Choose another model" onLink={() => openSettings("models", true)} />
       )}
     </Shell>
   );
@@ -252,6 +258,7 @@ function NoOllama() {
       }
       title={title}
       sub={sub}
+      why={rt === "error" ? failWhy(detail, failure) : undefined}
     >
       {rt === "error" && computerOnly ? <p className="fr-note na">Gates Local can't fix this from here. On the computer, press Retry in Gates Local.</p> : null}
       <Cta label="Retry" onGo={() => void recheckRuntime()} link="Settings" onLink={() => finishFirstRun("runtime")} />

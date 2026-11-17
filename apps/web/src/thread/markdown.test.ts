@@ -147,6 +147,16 @@ const rulesWith = (css: string, selector: string) => [...css.matchAll(/([^{}]+)\
   .filter((m) => (m[1] ?? "").split(",").map((s) => s.trim()).includes(selector))
   .map((m) => m[2] ?? "");
 
+// Guards the owner's scorecard (Q17): at 360 px a table's cut fell between two columns, so the
+// last column looked lost rather than a swipe away. Short columns hold one line, so the cut lands in words.
+it("a table's column of short cells is marked to hold one line; a column of sentences wraps", () => {
+  const out = html("| Title | Year | Publisher |\n| --- | --- | --- |\n| Effect: Schema, Services and Layers | 2026 | Northwind Technical Press |\n| Effect Schema in Practice | 2025 | Independent |");
+  expect(out).toContain('<th>Title</th><th class="n s">Year</th><th class="s">Publisher</th>');
+  expect(out).toContain('<td>Effect: Schema, Services and Layers</td><td class="n s">2026</td><td class="s">Northwind Technical Press</td>');
+  const css = readFileSync(new URL("../app/styles.css", import.meta.url), "utf8");
+  expect(rulesWith(css, ".md td.s").join(";")).toContain("white-space:nowrap");
+});
+
 describe("what a reply's markdown draws", () => {
   it("text that looks like HTML shows as text in prose, a heading or a quote, and quotes and numbered lists draw as themselves", () => {
     const prose = html("Say <script>alert(1)</script> and <b>loud</b>");

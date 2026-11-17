@@ -66,19 +66,19 @@ describe("the count menu's time for a setup and size", () => {
 });
 
 describe("the picker's image actions", () => {
-  it("say the server's own words when it refuses, and the connection's words when the connection failed", async () => {
+  it("say what failed, why and what to do when the server refuses, with its own words in the details, and the connection's words when the connection failed", async () => {
     await boot();
     const own = "Set a ComfyUI HTTP address without credentials or query parameters in Settings.";
     b.server.answer("image.setup", refuse("image-config", own));
-    expect(await session.startImageSetup()).toBe(own);
+    expect(await session.startImageSetup()).toEqual({ message: "Couldn't set up images because the ComfyUI address has a user name, password or query in it; set a plain address in Settings › Images.", why: own });
     b.server.answer("image.stopDownload", refuse("image-download", "Nothing of klein is downloading."));
-    expect(await session.stopImageDownload("klein")).toBe("Nothing of klein is downloading.");
+    expect(await session.stopImageDownload("klein")).toEqual({ message: "Couldn't stop the download because it had already ended; nothing is left to stop.", why: "Nothing of klein is downloading." });
     b.server.answer("image.setup", refuse("internal", "ENOSPC: no space left on device, write"));
-    expect(await session.startImageSetup(), "a fault that is not the image module's own words").toBe("Couldn't set up images because Gates Local refused it (ENOSPC: no space left on device, write); try again.");
+    expect(await session.startImageSetup(), "a fault that is not the image module's own words").toEqual({ message: "Couldn't set up images because Gates Local refused it (ENOSPC: no space left on device, write); try again." });
     b.server.accepting = false;
     b.server.socket.close();
     await until(() => store.getState().conn.kind === "down", 2000, "the connection down");
-    expect(await session.startImageSetup()).toBe("Couldn't set up images because Gates Local isn't connected; try again once it reconnects.");
+    expect(await session.startImageSetup()).toEqual({ message: "Couldn't set up images because Gates Local isn't connected; try again once it reconnects." });
   });
 
   it("asking ComfyUI again shows its fresh answer where Settings reads the status", async () => {
@@ -125,8 +125,9 @@ describe("a setup's download row", () => {
 
   it("the queued row goes when the download did not start, and a push since it keeps the say", async () => {
     await boot();
-    b.server.answer("image.download", refuse("image-download", "Start ComfyUI on this computer first: downloads go into its model folders."));
-    expect(await session.downloadImageSetup("klein")).toBe("Start ComfyUI on this computer first: downloads go into its model folders.");
+    const own = "Start ComfyUI on this computer first: downloads go into its model folders.";
+    b.server.answer("image.download", refuse("image-download", own));
+    expect(await session.downloadImageSetup("klein")).toEqual({ message: "Couldn't download the image setup because ComfyUI isn't running on this computer; start it first.", why: own });
     expect(store.getState().imageDownload, "a refused download").toBeUndefined();
     b.server.answer("image.download", () => ({ files: [] }));
     expect(await session.downloadImageSetup("klein")).toBeNull();

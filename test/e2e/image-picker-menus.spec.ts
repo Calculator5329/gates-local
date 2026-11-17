@@ -187,8 +187,10 @@ test("(d) a greyed row's reason that does not fit shows whole in its tip", async
   await picker.getByTestId("image.picker.other").click();
   const klein = picker.locator('.pk-r[data-preset="flux2-klein-4b"]');
   await klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" }).click();
-  const reason = "ComfyUI has not said where its models go. Pick a folder for the image files first.";
+  // scorecard Q16: the row says it in the plain template; the server's own words stay in data-why
+  const reason = "Couldn't download the image setup because ComfyUI hasn't said where its models go; pick a folder for the image files.";
   await expect(klein.locator(".pk-why")).toHaveText(reason);
+  await expect(klein.locator(".pk-why")).toHaveAttribute("data-why", "ComfyUI has not said where its models go. Pick a folder for the image files first.");
   await shot(page, info, "finding-d.png", klein);
   expect(await klein.locator(".pk-why-t").evaluate((el) => el.scrollWidth > el.clientWidth), "the reason is cut on the row").toBe(true);
   await klein.locator(".pk-why").hover();

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-17: first run goes straight to the chat; plain failure words; the phone keeps the model's size
+
+- Download and start on the first window opens the chat at once. The first message waits in the composer while the model downloads, and the model button shows the download.
+- On a fresh install the first model starts downloading as soon as the app's own Ollama can take it, with no second click. The two downloads cannot overlap: Ollama takes a pull only while it is running, and a runtime change stops every pull. So this is the earliest start that holds. An Ollama that was already there still gets the offer and its button.
+- A download that fails its check says "The download couldn't be verified. Download it again."; the checksum moves to the details. The image setup's and the image download's failures say what failed, why and what to do in one sentence. The server's own words move to the details.
+- At 360 px the model button shows a short name that keeps the size ("Qwen 9B") when the full name doesn't fit. A table's short columns keep their text on one line, so its cut lands in words and reads as a swipe. The model picker's family marker sits inside the rail instead of being clipped.
+- The model button's tip no longer repeats the name with its Ollama tag. It shows the full name only when the button cuts or shortens it, plus any status (downloading, loading, slower).
+
 ## 2026-11-17: the screenshot rig reaches the Models pop-up again
 
 - The capture rig opened Models from Settings, which no longer lists it, so ten Models shots timed out; on a desktop it now uses the footer icon. The runtime confirm shot matches the button without its old ellipsis.

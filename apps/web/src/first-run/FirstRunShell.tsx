@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-export function Shell({ st, title, sub, wait = false, children }: { st: ReactNode; title: string; sub?: ReactNode; wait?: boolean; children?: ReactNode }) {
+export function Shell({ st, title, sub, why, wait = false, children }: { st: ReactNode; title: string; sub?: ReactNode; why?: string | undefined; wait?: boolean; children?: ReactNode }) {
   return (
     <div className="fr">
       <div className="fr-brand">
@@ -9,7 +9,7 @@ export function Shell({ st, title, sub, wait = false, children }: { st: ReactNod
       </div>
       <div className="fr-st">{st}</div>
       <h1 {...(wait ? { "data-wait": "", "data-watch": "title" } : {})}>{title}</h1>
-      {sub === undefined ? null : <p className="sub">{sub}</p>}
+      {sub === undefined ? null : <p className="sub" data-why={why}>{sub}</p>}
       {children}
     </div>
   );

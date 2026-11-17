@@ -146,7 +146,6 @@ test.describe("first download", () => {
   test("the Thinking pill waits for the first chat model to finish downloading (F70)", async ({ page, open }) => {
     await open();
     await page.getByRole("button", { name: "Download and start" }).click();
-    await page.getByRole("button", { name: "Start chatting" }).click();
     const pill = page.getByTestId("chat.composer.thinking");
     await expect(pill).toHaveAttribute("aria-disabled", "true");
     await expect(pill).toHaveAttribute("aria-pressed", "false");

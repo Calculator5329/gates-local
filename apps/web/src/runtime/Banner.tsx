@@ -1,14 +1,13 @@
 // Layout adapts T3 Code (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt.
 // The banner docked above the composer, one per runtime state; its words are words.tsx.
 import type { ReactNode } from "react";
-import type { CatalogEntry } from "@gates-local/contracts";
 import { describeModel, gb } from "../lib/words/format.ts";
-import { rowOf } from "../fit/fit-table.ts";
 import { Icon } from "../lib/ui/icons.tsx";
-import { canChat, chatBlockedReason, modelNameKey } from "../models/pick.ts";
+import { modelNameKey } from "../models/pick.ts";
+import { firstModelOffer } from "./first-offer.ts";
 import { firstPull, openSettings, pull, recheckRuntime } from "../lib/session/index.ts";
 import { NA, type State, useStore, waitingReplies } from "../lib/store/store.ts";
-import { booting, FAIL_FALLBACK, failWords, INSTALL_TITLE, type InstallSize, installStep, ownCopyNote, portOf, rtOf, searching, STALLED, underTitle, unread, useInstallStall } from "./words.tsx";
+import { booting, FAIL_FALLBACK, failWhy, failWords, INSTALL_TITLE, type InstallSize, installStep, ownCopyNote, portOf, rtOf, searching, STALLED, underTitle, unread, useInstallStall } from "./words.tsx";
 
 function Shell({ icon, role, title, children }: { icon: ReactNode; role: "status" | "alert"; title: string; children: ReactNode }) {
   return (
@@ -33,18 +32,6 @@ const RetryButton = ({ primary }: { primary?: boolean }) => (
     Retry
   </button>
 );
-
-export function recommendedEntry(s: State): CatalogEntry | undefined {
-  if (s.catalog === NA || s.catalog === undefined) return undefined;
-  const picks = s.catalog.filter((c) => c.recommended).toSorted((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
-  return picks.find((c) => rowOf(s, c.name)?.verdict !== "refuse") ?? picks[0];
-}
-
-export function firstModelOffer(s: State): CatalogEntry | undefined {
-  if (s.runtime?.state !== "ready" || s.models === undefined || s.models.some(canChat)) return undefined;
-  if (chatBlockedReason(s.models, undefined) !== undefined || s.unavailable["models.pull"] === true) return undefined;
-  return recommendedEntry(s);
-}
 
 const waitsHere = (s: State): boolean => s.threadId !== null && waitingReplies(s).some((q) => q.threadId === s.threadId && q.draw === undefined);
 
@@ -163,7 +150,7 @@ export function Banner() {
     case "error":
       return (
         <Shell icon={<Icon id="alert" cls="err" />} role="alert" title={failWords(failure).title}>
-          <div className="bm">{underTitle(detail, failure) ?? FAIL_FALLBACK[failure ?? "start"]}</div>
+          <div className="bm" data-why={failWhy(detail, failure)}>{underTitle(detail, failure) ?? FAIL_FALLBACK[failure ?? "start"]}</div>
           <div className="ba">
             <RetryButton primary />
           </div>

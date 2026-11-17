@@ -115,14 +115,16 @@ it("words removed while a tooltip waits cancel the wait, even if they come back 
 /** A name in a row: data-tipt holds the full name, its `.pk-nm` (or `.t`) the text the row may cut. */
 class CutName extends ElementFixture {
   name = "Qwen 3.5 <9B> Instruct";
-  shown = { scrollWidth: 180, clientWidth: 180 };
+  shown = { scrollWidth: 180, clientWidth: 180, fit: null as string | null, getAttribute(a: string) { return a === "data-fit" ? this.fit : null; } };
   override getAttribute(name: string) { return name === "data-tipt" ? this.name : null; }
-  override querySelector(selector: string) { return selector === ".t, .pk-nm" ? this.shown : null; }
+  override querySelector(selector: string) { return selector.split(", ").includes(".pk-nm") ? this.shown : null; }
 }
 
-it.each([["cut by its row", 260, true], ["shown whole", 180, false]] as const)("a name %s: the cut-name tip opens only when the row cuts it", async (_, width, opens) => {
+// "shortened": the model button swaps in its short form ("Qwen 9B"), which is cut text all the same
+it.each([["cut by its row", 260, null, true], ["shown whole", 180, null, false], ["shortened", 180, "short", true]] as const)("a name %s: the cut-name tip opens only when the row cuts it", async (_, width, fit, opens) => {
   const name = new CutName();
   name.shown.scrollWidth = width;
+  name.shown.fit = fit;
   listeners.get("mouseover")!({ target: name });
   await vi.advanceTimersByTimeAsync(400);
   expect(tip.classes.has("open")).toBe(opens);

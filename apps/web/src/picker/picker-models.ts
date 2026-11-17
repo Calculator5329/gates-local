@@ -26,6 +26,12 @@ export function pickerLabel(tag: string, catalogLabel?: string): string {
   return friendlyName(tag);
 }
 
+export function compactName(label: string): string | undefined {
+  const m = /^(\S+)\s.*?\b(\d+(?:\.\d+)?[BM])\b/i.exec(label);
+  const short = m === null ? undefined : `${m[1]} ${m[2]}`;
+  return short === label ? undefined : short;
+}
+
 export function pickerLabels(tags: readonly string[], catalog: readonly { name: string; label: string }[] = []): ReadonlyMap<string, string> {
   const labels = new Map([...new Set(tags)].map(tag => [tag, pickerLabel(tag, catalog.find(c => c.name === tag)?.label)]));
   const groups = new Map<string, string[]>();

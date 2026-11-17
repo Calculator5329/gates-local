@@ -20,7 +20,6 @@ test("a message queued behind the first download says it once, and the model but
   const slowed = await fetch(`${CONTROL_URL}/scenario`, { method: "POST", body: JSON.stringify({ scenario: "no-models", pullTickMs: 700 }) });
   expect(slowed.ok, "the fake took the slower download").toBe(true);
   await page.getByRole("button", { name: "Download and start" }).click();
-  await page.getByRole("button", { name: "Start chatting" }).click();
   const btn = page.locator("#modelBtn");
   await page.evaluate(() => {
     const frames: Frame[] = [];
@@ -79,7 +78,6 @@ test.describe("at a small window", () => {
     // about one percent a tick, so the one-digit percents last a few seconds
     await stack.scenario("no-models", { pullTickMs: 400, pullChunkBytes: 64 * 1024 ** 2 });
     await page.getByRole("button", { name: "Download and start" }).click();
-    await page.getByRole("button", { name: "Start chatting" }).click();
     await page.evaluate(() => {
       const frames: SlotFrame[] = [];
       (window as unknown as { slotFrames: SlotFrame[] }).slotFrames = frames;

@@ -39,10 +39,12 @@ const tooBig: State["fitTable"] = {
 
 let Composer: typeof import("./Composer.tsx")["Composer"];
 let OptsMenu: typeof import("./Composer.tsx")["OptsMenu"];
+let picker: typeof import("../picker/picker-models.ts");
 beforeAll(async () => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   ({ Composer, OptsMenu } = await import("./Composer.tsx"));
+  picker = await import("../picker/picker-models.ts");
 });
 afterEach(() => { clearDraft("thread"); clearDraft(null); setState(initial); device.touch = false; });
 afterAll(() => vi.unstubAllGlobals());
@@ -61,6 +63,7 @@ const whole = (markup: string, testId: string) => markup.match(new RegExp(`<butt
 const tipOf = (tag: string) => unescaped(tag.match(/data-tip="([^"]*)"/)?.[1] ?? "");
 const modelButton = () => composer().match(/<button\b[^>]*id="modelBtn"[\s\S]*?<\/button>/)?.[0] ?? "";
 const modelTip = () => tipOf(modelButton().match(/^<button\b[^>]*>/)?.[0] ?? "");
+const modelTipt = () => unescaped(modelButton().match(/^<button\b[^>]*>/)?.[0].match(/data-tipt="([^"]*)"/)?.[1] ?? "");
 const send = () => opening(composer(), "chat.composer.send");
 const placeholder = () => composer().match(/<textarea[^>]*placeholder="([^"]*)"/)?.[1];
 const rows = () => composer().match(/<li class="qt-r"[\s\S]*?<\/li>/g) ?? [];
@@ -91,13 +94,27 @@ it("the phone's options menu says in plain words why Thinking is off, since its 
   expect(cannot).not.toContain("data-tip");
 });
 
-it("the model button's tip is the model's name and its tag, and a tag that is its own name is said once", () => {
+// Guards the owner's scorecard (Q4): the tip said the name and the near-same Ollama tag over three lines.
+it("the model button's tip is only the full name, and only for a button that cuts it; never the Ollama tag", () => {
   show();
-  expect(modelTip()).toBe(`<b>${NAME}</b> · <span class="mono">${TAG}</span>`);
+  const tag = modelButton().match(/^<button\b[^>]*>/)?.[0] ?? "";
+  expect(tag, "nothing to say beside the name").not.toMatch(/data-tip="/);
+  expect(modelTipt()).toBe(NAME);
+  expect(modelButton()).not.toContain(TAG);
   show({ models: [model("mymodel", ["completion"])], model: "mymodel", catalog: [] });
-  const tip = modelTip();
-  expect(tip).toBe('<b class="mono">mymodel</b>');
-  expect(said(tip, "mymodel")).toBe(1);
+  expect(modelTipt()).toBe("mymodel");
+  expect(said(modelButton().replace(/^<button\b[^>]*>/, ""), "mymodel"), "a tag-only name has no short form to add").toBe(1);
+});
+
+// Guards the owner's scorecard (Q17): at 360 px the button cut "Qwen 3.5 9B" to "Qwen …" and lost the size.
+it("the model button carries a compact name that keeps the size, for a button too narrow for the full one", () => {
+  show();
+  expect(modelButton()).toContain(`<span class="picker-trigger-name"><span class="ptn-f">${NAME}</span><span class="ptn-s" aria-hidden="true">Qwen 9B</span></span>`);
+  const { compactName } = picker;
+  expect(compactName("Gemma 4 12B")).toBe("Gemma 12B");
+  expect(compactName("Qwen 3.8 27B · q8_0")).toBe("Qwen 27B");
+  expect(compactName("gpt-oss 20B"), "already compact").toBeUndefined();
+  expect(compactName("mymodel"), "no size to keep").toBeUndefined();
 });
 
 it("while the chosen model loads, a draft that would not fit is still refused for memory", () => {
@@ -123,8 +140,9 @@ it("during setup the Thinking pill gives no reason of its own and the box greys 
 
 it("while the engine installs, the model button keeps its name alone and its tip says the model downloads next", () => {
   show({ runtime: INSTALLING, models: [] });
-  expect(modelTip()).toBe(`<b>${NAME}</b> · <span class="mono">${TAG}</span><br>Downloads next`);
-  expect(modelButton()).toContain(`<span class="picker-trigger-name">${NAME}</span>`);
+  expect(modelTip()).toBe("Downloads next");
+  expect(modelTipt()).toBe(NAME);
+  expect(modelButton()).toContain(`<span class="ptn-f">${NAME}</span>`);
 });
 
 it("the box shows everyday words before anything is read, and with Image on asks for a picture unless the server is gone", () => {

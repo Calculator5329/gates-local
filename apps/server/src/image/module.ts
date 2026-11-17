@@ -308,7 +308,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     const unit = cfg.managed ? await serviceAt(cfg.baseUrl).inspect() : { present: false, active: false, activeState: "unknown", pid: 0 };
     const starting =unit.present && !["inactive", "failed"].includes(unit.activeState);
     if (owned?.baseUrl === cfg.baseUrl && (!unit.active || unit.pid !== owned.pid)) owned = undefined;
-    return move(READ, starting ? { state: "starting", answering: true, detail: "ComfyUI is running or changing state but its HTTP interface is not ready yet." }
+    return move(READ, starting ? { state: "starting", answering: true, detail: "Couldn't reach ComfyUI because it is still starting; try again in a moment." }
       : unit.present ? { state: "stopped", detail: "ComfyUI will start when you make an image." } : { state: "missing", detail: missingWords(cfg.baseUrl, true) }, cfg.baseUrl);
   };
   const measure = deps.readGpu ?? (async () => {

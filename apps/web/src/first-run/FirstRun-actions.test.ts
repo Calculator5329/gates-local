@@ -4,7 +4,7 @@
 import { isValidElement, type ReactElement } from "react";
 import { expect, it, vi } from "vitest";
 
-const probe = vi.hoisted(() => ({ state: undefined as unknown, recheck: vi.fn() }));
+const probe = vi.hoisted(() => ({ state: undefined as unknown, recheck: vi.fn(), pull: vi.fn(), finish: vi.fn() }));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
   useEffect: () => undefined,
@@ -12,8 +12,10 @@ vi.mock("react", async (original) => ({
 }));
 vi.mock("../lib/store/store.ts", () => ({ NA: "na", useStore: (fn: (s: unknown) => unknown) => fn(probe.state) }));
 vi.mock("../lib/session/index.ts", () => ({
-  ...Object.fromEntries(["finishFirstRun", "firstPull", "openSettings", "pull", "cancelPull"].map((name) => [name, () => undefined])),
+  ...Object.fromEntries(["firstPull", "openSettings", "cancelPull"].map((name) => [name, () => undefined])),
   recheckRuntime: probe.recheck,
+  pull: probe.pull,
+  finishFirstRun: probe.finish,
 }));
 vi.mock("../composer/focus.ts", () => ({ focusComposer: () => undefined }));
 vi.mock("../settings/Settings.tsx", () => ({ DlDetail: () => null }));
@@ -44,4 +46,19 @@ it("Retry on a phone with no model asks the server to look for models again", ()
   expect(retry).toHaveLength(1);
   (retry[0]!.props["onClick"] as () => void)();
   expect(probe.recheck).toHaveBeenCalledTimes(1);
+});
+
+it("Download and start starts the download and opens the chat at once, so the first message can wait in the composer", () => {
+  probe.state = {
+    conn: { kind: "open" },
+    runtime: { state: "ready", owner: "app" },
+    models: [], numCtx: 16384, pulls: {}, settings: {}, unavailable: {}, hydrationSettled: true,
+    fitTable: { reading: { boot: "b", seq: 1, measuredAt: 0 }, memory: { kind: "gpu", freeBytes: 2 ** 34, usableBytes: 2 ** 34 }, rows: [{ model: "qwen3.5:9b", numCtx: 16384, freeVramBytes: 2 ** 34, needVramBytes: 2 ** 30, spillRamBytes: 0, shortfallBytes: 0, verdict: "fits", source: "estimate", stops: [] }] },
+    catalog: [{ name: "qwen3.5:9b", label: "Qwen 3.5 9B", downloadBytes: 6e9, installed: false, recommended: true, rank: 0 }],
+  };
+  const go = nodes(FirstRun()).filter(n => n.type === "button" && n.props["data-testid"] === "first-run.cta.go");
+  expect(go).toHaveLength(1);
+  (go[0]!.props["onClick"] as () => void)();
+  expect(probe.pull).toHaveBeenCalledWith("qwen3.5:9b");
+  expect(probe.finish).toHaveBeenCalledWith("chat");
 });

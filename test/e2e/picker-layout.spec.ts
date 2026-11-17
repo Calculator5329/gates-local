@@ -339,11 +339,16 @@ function longName(width: number): void {
     await expect(page.locator("#picker")).toBeHidden();
 
     const btn = page.locator("#modelBtn");
-    await expect(btn).toHaveAttribute("data-tip", new RegExp(LONG_NAME));
-    // the whole tag once: a tag the catalog does not know is its own name
-    expect((await btn.getAttribute("data-tip"))?.split(LONG_NAME).length, "the tag appears once in the tooltip").toBe(2);
-    const label = await btn.locator(":scope > span:not(.maker-mark)").evaluate((el) => ({ clipped: el.scrollWidth > el.clientWidth, ellipsis: getComputedStyle(el).textOverflow }));
-    expect.soft(label).toEqual({ clipped: true, ellipsis: "ellipsis" });
+    // scorecard Q4: the tip holds the whole display name, shown while the button cuts it, and never the Ollama tag
+    await expect(btn).toHaveAttribute("data-tipt", "gemma 4 26B A4B IT ultra heretic GGUF Q4_K_M uncensored");
+    expect(`${await btn.getAttribute("data-tip") ?? ""}${await btn.getAttribute("data-tipt") ?? ""}`, "the tag is not in the tooltip").not.toContain(LONG_NAME);
+    await btn.hover();
+    await expect(page.locator("#tip")).toHaveText("gemma 4 26B A4B IT ultra heretic GGUF Q4_K_M uncensored");
+    // scorecard Q17: a name too long for the button shows its family and size, not a cut word
+    const label = btn.locator(":scope > .picker-trigger-name");
+    await expect(label).toHaveAttribute("data-fit", "short");
+    await expect(label.locator(".ptn-s")).toHaveText("gemma 26B");
+    expect(await label.evaluate((el) => (el.querySelector<HTMLElement>(".ptn-s")?.offsetWidth ?? Infinity) <= el.clientWidth), "the short name fits whole").toBe(true);
 
     const after = await footer(page);
     expect(after.overflow).toBe(0);
