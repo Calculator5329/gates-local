@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-17: the screenshot rig can photograph a side-by-side scene list and record motion
+
+- `GL_E2E_COMPARE=1 pnpm e2e:shots --grep compare` photographs ten scenes another chat app can show too (a new chat, a long reply with code, the model picker, Settings, a running reply, two chats running, queued messages, a tool step, an error, first run) at 1440, 1280, 390 and 360 px, dark and light, with fixed words typed. Without the switch the rig is unchanged.
+- The same switch records eight motions (send to first word, the thinking line, a reply ending, the picker opening and closing, a pop-up opening, a queue row added and sent, a new chat in the sidebar, Stop) at 1440 and 390 px. Each motion is a video, every painted frame, a contact sheet of a frame every 33 ms with its time, and the boxes of what moved on every animation frame (`test/e2e/burst.ts`, which imports nothing of the app).
+
 ## 2026-11-17: other programs' memory is freed only with a click; one verdict on the fit card; "~" marks an estimate
 
 - A send or a model pick no longer unloads a chat model the app did not load (another client's, or one loaded before the app started) and no longer asks a ComfyUI somebody else started to free its memory. The app's own models, and the ComfyUI it started, still leave without a word. When the request still does not fit, the note names what holds the memory and its size ("Qwen 3.5 9B holds 7.0 GB") with "Free it" (the phone may press it too) and, on the computer, "Don't ask again". The setting is also in Settings › Advanced. Whisper and every other GPU program are only measured. Decision: "Other programs' memory is freed only with a click".

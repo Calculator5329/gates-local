@@ -10,8 +10,10 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
 import { LONG_NAME } from "../fake-ollama/models.ts";
-import { CHECKOUT_CACHE, SHOTS_DIR } from "./env.ts";
-import { type RuntimeMode, type Scenario, expect, listButton, navButton, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { type Step, burst } from "./burst.ts";
+import { CHECKOUT_CACHE, SHOTS_DIR, appUrl } from "./env.ts";
+import { type RuntimeMode, type Scenario, type Seed, expect, listButton, navButton, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { TRACK } from "./flicker-probe.ts";
 import { settled } from "./waits.ts";
 
 /** Thu 2026-11-12 14:00 in Chicago (CST, UTC-6). */
@@ -417,4 +419,249 @@ for (const shot of MOBILE) {
       });
     }
   }
+}
+
+// ------------------------------------------------- the side-by-side kit (GL_E2E_COMPARE=1)
+// One scene list another chat app can show too, with the same words typed, at 1440, 1280, 390
+// and 360 px, dark and light: <SHOTS_DIR>/compare/still/<scene>--<width>--<theme>.png. Then the
+// motions as bursts (burst.ts): <SHOTS_DIR>/compare/burst/<motion>--<width>--dark.{png,json,webm}
+// and the frames in a folder of that name. Run alone: `pnpm e2e:shots --grep compare`.
+
+const COMPARE_DIR = path.join(SHOTS_DIR, "compare");
+const PROMPT = "How do I check disk space before a download?";
+const FIRST_CHAT = "Keep the first chat answering";
+const SECOND_CHAT = "Keep the second chat answering too";
+const COMPARE_SIZES = [
+  { width: 1440, height: 900 },
+  { width: 1280, height: 800 },
+  { width: 390, height: 844 },
+  { width: 360, height: 780 },
+] as const;
+const phoneSize = (vp: { width: number }) => vp.width <= 640;
+const stopButton = (p: Page) => p.getByRole("button", { name: "Stop", exact: true });
+/** Sends what is typed: Enter on a computer; on a phone Enter is a new line, so its Send button. */
+const submit = async (p: Page) => {
+  if (isPhoneWidth(p)) await p.getByTestId("chat.composer.send").click();
+  else await p.locator("#ta").press("Enter");
+};
+const post = async (p: Page, text: string) => {
+  await p.locator("#ta").fill(text);
+  await submit(p);
+};
+
+const newThread = async (p: Page) => {
+  await (isPhoneWidth(p) ? p.getByTestId("chat.header.new-thread") : p.getByTestId("sidebar.top.new-thread")).click();
+  await expect(p.locator(".turn")).toHaveCount(0);
+};
+/** A reply that streams to its 46th word, the code block's second line, and holds there. */
+const heldReply = async (p: Page) => {
+  await stack.scenario("slow-drip", { holdAfterTokens: 46 });
+  await post(p, PROMPT);
+  await expect(p.locator(".turn.a").last().locator(".md pre").last()).toContainText("du -sh");
+};
+
+interface CompareScene {
+  readonly name: string;
+  readonly seed?: Seed;
+  readonly scenario?: Scenario;
+  readonly start?: "new" | "thread" | "firstrun";
+  readonly act?: (p: Page) => Promise<void>;
+}
+
+const COMPARE_SCENES: readonly CompareScene[] = [
+  { name: "empty-new-chat" },
+  {
+    name: "long-reply-code",
+    act: async (p) => {
+      await stack.scenario("slow-drip", { tokenDelayMs: 0, firstTokenDelayMs: 0 });
+      await post(p, PROMPT);
+      await expect(p.locator(".turn.a").last().locator(".md table")).toBeVisible();
+      await expect(stopButton(p)).toHaveCount(0);
+    },
+  },
+  { name: "model-picker", act: async (p) => { await p.locator("#modelBtn").click(); await expect(p.locator("#picker")).toBeVisible(); } },
+  { name: "settings", act: settings("General") },
+  { name: "running-reply", act: heldReply },
+  {
+    name: "two-chats-running",
+    act: async (p) => {
+      await stack.scenario("slow-drip", { holdAfterTokens: 12 });
+      await post(p, FIRST_CHAT);
+      await expect(stopButton(p)).toBeVisible();
+      await newThread(p);
+      await post(p, SECOND_CHAT);
+      await expect(stopButton(p)).toBeVisible();
+      if (isPhoneWidth(p)) await drawer(p);
+      await expect(p.locator(".sb-row").getByLabel("Reply in progress", { exact: true })).toHaveCount(2);
+    },
+  },
+  {
+    name: "queued-messages",
+    act: async (p) => {
+      await heldReply(p);
+      await post(p, "And on a second drive?");
+      await post(p, "And on a USB stick?");
+      await expect(p.locator(".qt-r")).toHaveCount(2);
+    },
+  },
+  // a saved reply with tool steps: the first thought and the first step opened
+  { name: "tool-step", seed: "design", start: "thread", act: async (p) => { await p.locator("button.think.fold").first().click(); await p.locator(".wr").first().click(); } },
+  {
+    name: "error",
+    act: async (p) => {
+      await stack.scenario("mid-stream-error");
+      await post(p, PROMPT);
+      await expect(p.getByTestId("chat.reply.failed")).toBeVisible({ timeout: 15_000 });
+    },
+  },
+  { name: "first-run", start: "firstrun" },
+];
+
+interface CompareMotion {
+  readonly name: string;
+  /** Run before the burst starts. */
+  readonly before?: (p: Page) => Promise<void>;
+  readonly steps: readonly Step[];
+}
+
+const COMPARE_MOTIONS: readonly CompareMotion[] = [
+  {
+    name: "send-to-first-token",
+    before: async (p) => { await stack.scenario("slow-drip"); await p.locator("#ta").fill(PROMPT); },
+    steps: [async (p) => { await submit(p); await expect(p.locator(".turn.a .md")).not.toBeEmpty(); }],
+  },
+  {
+    name: "thinking-line",
+    before: async (p) => { await stack.scenario("slow-drip", { holdThinkingAfterTokens: 14, tokenDelayMs: 70 }); await p.locator("#ta").fill(PROMPT); },
+    steps: [async (p) => { await submit(p); await expect(p.locator(".turn.a button.think")).toContainText("Thinking"); }],
+  },
+  {
+    name: "reply-streams-and-ends",
+    before: async (p) => {
+      await stack.scenario("slow-drip", { tokenDelayMs: 25 });
+      await post(p, PROMPT);
+      await expect(p.locator(".turn.a .md")).toContainText("Compare the free space");
+    },
+    steps: [async (p) => { await expect(stopButton(p)).toHaveCount(0, { timeout: 10_000 }); }],
+  },
+  {
+    name: "picker-open-close",
+    steps: [
+      async (p) => { await p.locator("#modelBtn").click(); await expect(p.locator("#picker")).toBeVisible(); await settled(p); },
+      async (p) => { await p.keyboard.press("Escape"); await expect(p.locator("#picker")).toBeHidden(); },
+    ],
+  },
+  {
+    name: "popup-open",
+    steps: [async (p) => {
+      await p.keyboard.press("Control+Comma");
+      // a phone's Settings fills the screen, with a way back instead of a frame
+      await expect(isPhoneWidth(p) ? p.getByTestId("settings.shell.back") : p.getByRole("dialog", { name: "Settings" })).toBeVisible();
+    }],
+  },
+  {
+    name: "queue-row-added-and-sent",
+    before: async (p) => { await heldReply(p); await p.locator("#ta").fill("And on a second drive?"); },
+    steps: [
+      async (p) => { await submit(p); await expect(p.locator(".qt-r")).toHaveCount(1); await settled(p); },
+      async (p) => { await p.locator(".qt-r [data-send-now]").click(); await expect(p.locator(".qt-r")).toHaveCount(0); },
+    ],
+  },
+  {
+    name: "new-thread-in-sidebar",
+    before: async (p) => {
+      await stack.scenario("slow-drip", { tokenDelayMs: 0, firstTokenDelayMs: 0 });
+      await post(p, PROMPT);
+      await expect(stopButton(p)).toHaveCount(0);
+    },
+    steps: [
+      async (p) => { await newThread(p); },
+      async (p) => { await post(p, FIRST_CHAT); await expect(p.locator(".turn.u")).toHaveCount(1); },
+    ],
+  },
+  {
+    name: "stop",
+    before: heldReply,
+    steps: [async (p) => { await stopButton(p).click(); await expect(stopButton(p)).toHaveCount(0); }],
+  },
+];
+
+const COMPARE_TRACK = [...TRACK.split(", "), "#picker", ".qt", ".qt-r", "button.think", ".turn.a .md", "[role=dialog]", ".hdr", "#ta"];
+const commit = process.env["GL_E2E_COMMIT"] ?? "unknown";
+
+if (process.env["GL_E2E_COMPARE"] === "1") {
+  test.describe("compare stills", () => {
+    test.beforeAll(() => mkdirSync(path.join(COMPARE_DIR, "still"), { recursive: true }));
+    for (const scene of COMPARE_SCENES) {
+      for (const vp of COMPARE_SIZES) {
+        for (const theme of ["dark", "light"] as const) {
+          const file = `${scene.name}--${vp.width}--${theme}`;
+          test.describe(file, () => {
+            const phone = phoneSize(vp);
+            test.use({
+              viewport: vp,
+              deviceScaleFactor: phone ? 2 : 1,
+              isMobile: phone,
+              hasTouch: phone,
+              colorScheme: theme,
+              scenario: scene.scenario ?? "models",
+              skipFirstRun: scene.start !== "firstrun",
+              seed: scene.seed ?? 0,
+            });
+            // Not a regression test: a screenshot tool, run on its own.
+            test("shot", async ({ page, open, seededThread }) => {
+              await page.clock.setFixedTime(NOW);
+              await open(scene.start === "thread" ? `#thread=${seededThread ?? ""}` : "");
+              if (scene.start === "firstrun") await expect(page.locator(".first").getByRole("heading").first()).toBeVisible();
+              else await waitReady(page);
+              // the app keeps its own theme (dark until changed), so light is picked as a person would
+              if (theme === "light") {
+                await goLight(page, scene.start !== "firstrun");
+                const back = page.getByTestId("settings.shell.back");
+                if (await back.isVisible()) await back.click();
+                if (scene.start !== "firstrun") await expect(page.locator("#ta")).toBeVisible();
+              }
+              await scene.act?.(page);
+              await settled(page);
+              await page.screenshot({ path: path.join(COMPARE_DIR, "still", `${file}.png`), animations: "disabled", caret: "hide" });
+            });
+          });
+        }
+      }
+    }
+  });
+
+  test.describe("compare bursts", () => {
+    for (const motion of COMPARE_MOTIONS) {
+      for (const vp of [COMPARE_SIZES[0], COMPARE_SIZES[2]]) {
+        const name = `${motion.name}--${vp.width}--dark`;
+        test.describe(name, () => {
+          const phone = phoneSize(vp);
+          test.use({ seed: 0 });
+          // Not a regression test: a recording tool, run on its own. Its own context, since
+          // Playwright sets a video only for a whole file.
+          test("burst", async ({ browser, seededThread }) => {
+            void seededThread; // the stack resets before the page opens
+            test.setTimeout(60_000);
+            const context = await browser.newContext({
+              viewport: vp, deviceScaleFactor: phone ? 2 : 1, isMobile: phone, hasTouch: phone, colorScheme: "dark",
+              timezoneId: "America/Chicago", locale: "en-US", recordVideo: { dir: test.info().outputPath("video"), size: vp },
+            });
+            const page = await context.newPage();
+            await page.addInitScript(() => localStorage.setItem("gates-local.first-run-done", "1"));
+            await page.goto(appUrl(""));
+            await waitReady(page);
+            await motion.before?.(page);
+            await settled(page);
+            const dir = path.join(COMPARE_DIR, "burst");
+            const result = await burst(page, { dir, name, track: COMPARE_TRACK, meta: { app: "Gates Local", viewport: `${vp.width}x${vp.height}`, theme: "dark", commit } }, motion.steps);
+            test.info().annotations.push({ type: "burst", description: `${result.painted} frames painted, ${result.frames} sampled` });
+            const video = page.video();
+            await context.close();
+            await video?.saveAs(path.join(dir, `${name}.webm`));
+          });
+        });
+      }
+    }
+  });
 }
