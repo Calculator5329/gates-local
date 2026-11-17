@@ -209,16 +209,20 @@ describe("a window across its connections", () => {
     expect(w.gone).toEqual([]);
   });
 
-  it("a window away past the grace is let go once; a page with no id is let go at its close", async () => {
+  it("a window away past the grace is let go once, and its next connection is a new window", async () => {
     const w = await windows(100);
     await leave(await w.join("window-bbbb"));
-    await leave(await w.join());
-    expect(w.gone).toEqual([w.seen[1]]);
+    await vi.waitFor(() => expect(w.gone).toEqual([w.seen[0]]), { timeout: 5000 });
     await later(250);
-    expect(w.gone).toEqual([w.seen[1], w.seen[0]]);
-    // its next connection is a new window
+    expect(w.gone, "let go once").toEqual([w.seen[0]]);
     await w.join("window-bbbb");
-    expect(w.seen[2]).not.toBe(w.seen[0]);
+    expect(w.seen[1]).not.toBe(w.seen[0]);
+  });
+
+  it("a page with no id is let go at its close, not after a grace", async () => {
+    const w = await windows(60_000);
+    await leave(await w.join());
+    expect(w.gone).toEqual([w.seen[0]]);
   });
 
   it("a page that closed is let go after the short grace; a dropped connection still waits the long one", async () => {

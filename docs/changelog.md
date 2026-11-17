@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-17: a window grace test no longer races a slow disk
+
+- One test checked two things on one 100 ms timer: a window away past its grace is let go once,
+  and a page with no id is let go at its close. When the second page took longer than 100 ms to
+  join and leave, the first window was let go first and the test failed. That happened once in a
+  release check on a busy test machine. It is now two tests, each with its own timer, and they
+  pass with a 150 ms stall put in where the old one failed.
+- No product code changed.
+
 ## 2026-11-16: a send waiting a long time for the graphics card is not called unsent, and a failed start shows the words
 
 - A send waits for the graphics card with no limit, behind pictures or a Measure run, and then
