@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-17: a pre-push hook checks types, lint and the build in about 4 s
+
+- `git config core.hooksPath .githooks` turns it on. Typecheck, lint and the client build run at
+  once: 3.5 s on 12 cores, where the three one after another take about 6.4 s. Over its 9 s
+  budget the push stops and the line says each check's time, so a check that got slow is seen
+  the day it does. Unit and browser tests stay with the landing and release checks. Test count
+  up by 3.
+
 ## 2026-11-17: the release check's browser step runs in shards beside verify, 27 min down to 12
 
 - The correctness half used to run verify, then the whole browser project with one worker. verify

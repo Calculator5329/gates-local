@@ -56,6 +56,10 @@ decision.
   what it added and why in its report so obvious bloat gets noticed in review.
   Missing assets and unmeasurable sizes still fail. Timing comparisons remain
   informational too.
+- `git config core.hooksPath .githooks` once per clone turns on the pre-push
+  hook: typecheck, lint and build at once (`scripts/pre-push.ts`, about 4 s).
+  Past its 9 s budget it fails and prints each check's time; find what got
+  slow rather than raising the budget.
 - Node 24 runs the TypeScript sources directly (type stripping): erasable
   syntax only, relative imports end in `.ts`. Electron 45 ships Node
   24.22, which has `node:sqlite` and type stripping too.

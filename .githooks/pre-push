@@ -1,0 +1,4 @@
+#!/bin/sh
+# Typecheck, lint and the client build before a push, under a 9 s budget (scripts/pre-push.ts).
+# Enable once per clone: git config core.hooksPath .githooks
+exec node "$(git rev-parse --show-toplevel)/scripts/pre-push.ts"
