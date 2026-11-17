@@ -145,7 +145,7 @@ describe("the Updates group", () => {
 
   it("shows only the version for a copy that is not a clone, or when the server has no updates", () => {
     const plain = text(view({ status: { ...CLONE, version: { kind: "not-a-clone" } } }));
-    expect(plain).toContain("Can't update: not a git clone.");
+    expect(plain).toContain("This copy can't update itself. Install Gates Local from its release page to get updates.");
     expect(plain).not.toContain("Check for updates");
     const na = text(view({ status: "na" }));
     expect(na).toContain("To update, run pnpm run app-update in the Gates Local folder.");

@@ -196,7 +196,7 @@ export function UpdatesView(p: UpdatesViewProps) {
   const label = p.status === undefined ? <>Version <Skel w="4em" /></> : versionLabel(p.status.version);
   const desc =
     p.status === undefined ? <Skel w="14em" />
-    : kind === "not-a-clone" ? "Can't update: not a git clone."
+    : kind === "not-a-clone" ? "This copy can't update itself. Install Gates Local from its release page to get updates."
     : kind === "unreadable" && p.status.version.kind === "unreadable" ? `Could not read the version: ${p.status.version.detail}.`
     : <StateLine text={stateLine(check, p.checking, canControl, canUpdate)} err={err} calm={!troubled(check)} kept={keptDownload(check) ? stateLine(check, false, canControl, canUpdate) : null} />;
   const more = fold ? (

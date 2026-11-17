@@ -488,7 +488,7 @@ div.think.fold:hover{color:var(--muted-foreground);background:none}
    the padding is the same on both sides. A longer name widens it up to 240 px, past which the name is cut
    (the tag is its tooltip); the mark and the number are never cut. The 13em is the width it asks for, not a
    floor: when the row has less room (a page open beside the chat) the name is cut first and Send stays inside. */
-.cf-r>#modelBtn{flex:0 1 auto;width:calc-size(max-content,max(13em,size));min-width:0;max-width:240px;justify-content:flex-start}
+.cf-r>#modelBtn{flex:0 1 auto;width:13em;min-width:0;justify-content:flex-start}
 #modelBtn>.picker-trigger-name,#modelBtn>.t{min-width:0;overflow:hidden;text-overflow:ellipsis}
 #modelBtn>.picker-trigger-ctx{margin-left:auto}
 /* a download (LoadBar.tsx): 2 px on the model button's bottom edge, filled to its percent */
@@ -571,7 +571,7 @@ div.think.fold:hover{color:var(--muted-foreground);background:none}
 .meter.hi{color:var(--amber-fg)}
 /* send: gray disabled disc, solid green with a black arrow when ready, neutral stop (F02) */
 .send{width:32px;height:32px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--green);color:var(--on-green);transition:transform .15s,background-color .15s,color .15s}
-.send:hover{transform:scale(1.05)}
+.send:hover{filter:brightness(1.12)}
 .send:disabled,.send[aria-disabled="true"]{background:var(--send-off-bg);color:var(--send-off-fg);cursor:default;transform:none}
 .send.stop{background:var(--stop-bg);color:var(--stop-fg)}
 .send .sqr{width:10px;height:10px;border-radius:0;background:currentColor;display:block}
@@ -1068,7 +1068,6 @@ a.btn{text-decoration:none}
 .set-bar .sp{justify-self:end}
 .set-h h1{display:none}
 .sl-r .val{margin-left:auto;font-size:14px;color:var(--muted-foreground);white-space:nowrap}
-.lg-r .nm .ic{display:none}
 /* first run: the steps read top to bottom, the button stays in reach */
 .first{align-items:stretch;padding:24px 16px}
 .fr{display:flex;flex-direction:column;min-height:100%}

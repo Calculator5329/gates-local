@@ -29,6 +29,15 @@ test.describe("with the system Ollama chosen", () => {
     await expect(page.locator(".set")).toContainText(`Something other than Ollama answers on port ${port}.`);
   });
 
+  // Guards the owner's rule that an error says the one thing that fixes it (scorecard Q16, 2026-11-17).
+  test("the wrong-port banner offers Gates Local's own Ollama and opens its confirm in Settings", async ({ page, open }) => {
+    await open();
+    await page.getByTestId("chat.banner.use-own").click();
+    await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Confirm switch" })).toContainText("Use Gates Local's own Ollama?");
+    await expect(page.getByTestId("settings.runtime.switch-confirm")).toBeVisible();
+  });
+
   // Guards the W-06 fix: chat stayed blocked after Ollama came back (unsure: an audit item, kept as the only recovery test).
   test("once Ollama answers on the port, Retry looks again and chat is ready (W-06)", async ({ page, open, runtimePorts }) => {
     await open();

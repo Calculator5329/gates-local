@@ -100,13 +100,13 @@ export function createNavigation({ editEnded, catchUp, chooseModel, newChatModel
     setHash(null);
   }
 
-  function openSettings(section?: Section, addPage = false): void {
+  function openSettings(section?: Section, addPage = false, ownerConfirm = false): void {
     const nav = beginNavigation();
     dropPendingPanel();
     const show = () => {
       if (nav !== navGen) return;
       pendingSettings = null;
-      setState((s) => ({ view: "settings", section: section ?? (s.section === "models" ? "general" : s.section), addPage, ownerConfirm: false, panel: null }));
+      setState((s) => ({ view: "settings", section: section ?? (s.section === "models" ? "general" : s.section), addPage, ownerConfirm, panel: null }));
       enterScreen();
       sectionShown(getState().section);
     };

@@ -87,7 +87,7 @@ test("a model the card holds says what is in the way on its row, its picker chip
   await expect(chip).toHaveAttribute("aria-label", /; Fits; slower now\. Fits this card with Whisper/);
   await outline(page);
   await chip.hover();
-  await expect(page.locator("#tip.open")).toHaveText(new RegExp(`^${SHORT.source.slice(1, -1)}\\. ${SENTENCE.source.slice(1, -1)}$`));
+  await expect(page.locator("#tip.open")).toHaveText(SHORT);
   await expect(page.locator("#tip")).toBeVisible();
   await shots(page, info, "picker-desktop", true);
 });

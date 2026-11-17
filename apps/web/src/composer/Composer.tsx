@@ -803,7 +803,6 @@ export function PlusMenu() {
         role="menuitem"
         data-testid="chat.plus-menu.attach"
         data-attach
-        data-tip="Images go with this message. Other files show as not sent. You can also drop files on the window."
         onClick={() => {
           closePop();
           document.getElementById("attachInput")?.click();

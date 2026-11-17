@@ -3,7 +3,6 @@ import { NBSP, cardGb, slowReason } from "../lib/words/format.ts";
 import type { TableFit } from "../fit/fit-table.ts";
 import { Icon } from "../lib/ui/icons.tsx";
 import { type State, useStore } from "../lib/store/store.ts";
-import { esc } from "../lib/ui/ui.tsx";
 
 const GIB = 1024 ** 3;
 
@@ -52,10 +51,10 @@ export function SlowLine({ fit, tps, tip = true, listed = false, testId = "model
   if (why === undefined) return null;
   const saidBelow = !why.short.endsWith(" in the way");
   return (
-    <div className="mm-why" data-testid={testId} {...(tip ? { "data-tip": esc(why.sentence) } : {})}>
+    <div className="mm-why" data-testid={testId}>
       <Icon id="gauge" cls="s14" />
       <span>{why.short}</span>
-      {tip && !saidBelow ?<span className="vh">. {why.sentence}</span> : null}
+      {tip && !saidBelow ? <span className="vh">. {why.sentence}</span> : null}
     </div>
   );
 }

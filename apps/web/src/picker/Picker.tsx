@@ -38,7 +38,7 @@ export function ContextMemory({ v, cpu, frees = false, ready = true, notNow = fa
   const ruler = contextRuler(v);
   const slowNow = slow !== undefined && !frees && !notNow && !cpu && v.k === "gpu";
   const word = v.short;
-  return <span className={`pk-cost ${notNow && !frees ? "no" : v.k}`} role="img" aria-label={`${gb(v.need)} ${v.measured ? "measured" : "estimated"}; ${word}${slowNow ? `; slower now. ${slow.sentence}` : ""}`} {...slowNow ? { "data-tip": esc(`${slow.short}. ${slow.sentence}`), "data-testid": "models.picker.slow-now" } : {}}>
+  return <span className={`pk-cost ${notNow && !frees ? "no" : v.k}`} role="img" aria-label={`${gb(v.need)} ${v.measured ? "measured" : "estimated"}; ${word}${slowNow ? `; slower now. ${slow.sentence}` : ""}`} {...slowNow ? { "data-tip": esc(slow.short), "data-testid": "models.picker.slow-now" } : {}}>
     <span className="pk-cost-caption"><span>{shownNeed(v)}</span><small>{notNow && !frees && v.k !== "no" ? <Icon id="xc" /> : null}{slowNow ? <SlowMark /> : null}{word}</small></span>
     {cpu ? null : <span className="pk-cost-track"><i className="pk-cost-room" /><i className="pk-cost-fill" style={{ width: `${ruler.fill}%` }} />{ruler.overflow > 0 ? <i className="pk-cost-over" style={{ width: `${ruler.overflow}%` }} /> : null}<i className="pk-cost-edge" />{ruler.continues ? <b>→</b> : null}</span>}
   </span>;

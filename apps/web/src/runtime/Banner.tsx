@@ -6,7 +6,7 @@ import { describeModel, gb } from "../lib/words/format.ts";
 import { rowOf } from "../fit/fit-table.ts";
 import { Icon } from "../lib/ui/icons.tsx";
 import { canChat, chatBlockedReason, modelNameKey } from "../models/pick.ts";
-import { firstPull, pull, recheckRuntime } from "../lib/session/index.ts";
+import { firstPull, openSettings, pull, recheckRuntime } from "../lib/session/index.ts";
 import { NA, type State, useStore, waitingReplies } from "../lib/store/store.ts";
 import { booting, FAIL_FALLBACK, failWords, INSTALL_TITLE, type InstallSize, installStep, ownCopyNote, portOf, rtOf, searching, STALLED, underTitle, unread, useInstallStall } from "./words.tsx";
 
@@ -20,6 +20,12 @@ function Shell({ icon, role, title, children }: { icon: ReactNode; role: "status
       </div>
     </div>
   );
+}
+
+// why: the switch keeps its own confirm in Settings, so the banner opens it rather than switching
+function UseOwnButton() {
+  const can = useStore((s) => s.settings !== NA && s.settings !== undefined && s.settings.runtimeMode !== "app" && s.runtime?.noAppCopy !== true && s.unavailable["settings.update"] !== true);
+  return can ? <button type="button" className="btn primary" data-testid="chat.banner.use-own" onClick={() => openSettings("runtime", false, true)}>Use Gates Local's Ollama</button> : null;
 }
 
 const RetryButton = ({ primary }: { primary?: boolean }) => (
@@ -104,11 +110,12 @@ export function Banner() {
       return <Installing install={install} />;
     case "wrong":
       return (
-        <Shell icon={<Icon id="alert" cls="err" />} role="alert" title={`Port ${port} answers, but not as Ollama`}>
+        <Shell icon={<Icon id="alert" cls="err" />} role="alert" title={`Something other than Ollama is on port ${port}`}>
           <div className="bm">
-            Another service holds <span className="mono">localhost:{port}</span> and doesn't speak the Ollama API. Gates Local won't stop it.
+            Another program holds <span className="mono">localhost:{port}</span>. Gates Local won't stop it, and can run its own Ollama on another port.
           </div>
           <div className="ba">
+            <UseOwnButton />
             <RetryButton />
           </div>
         </Shell>

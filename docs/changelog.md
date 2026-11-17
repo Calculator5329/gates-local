@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-17: tips name things, the wrong-port banner offers the fix, and the phone shows its locks
+
+- The attach row in the plus menu no longer carries a paragraph tip; the row already says what it does.
+- The slower-now line and the picker's slow mark keep a short name as their tip; the full sentence stays for screen readers and in the panel below.
+- When something other than Ollama holds the port, the banner says so in one line and offers "Use Gates Local's Ollama", which opens the switch's own confirm in Settings.
+- Send no longer grows on hover, and the model button keeps one width as the model changes.
+- On a phone, the memory legend shows its lock icons, so the note under it points at something.
+- A copy that can't update itself says how to get one that can.
+
 ## 2026-11-17: two server tests no longer fail on a busy test machine
 
 - The page-with-no-id window test waits for the server to handle the close instead of checking the instant the client sees it.

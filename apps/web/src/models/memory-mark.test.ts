@@ -24,7 +24,6 @@ const comfy: GpuOccupant = { label: "ComfyUI", bytes: 2 * GIB, kind: "other-app"
 
 const slow = (props: Parameters<typeof SlowLine>[0]) => renderToStaticMarkup(createElement(SlowLine, props)).replaceAll("\u00a0", " ");
 const text = (html: string) => html.replace(/<[^>]+>/g, "");
-const tipOf = (html: string) => /data-tip="([^"]*)"/.exec(html)?.[1]?.replaceAll("&amp;", "&");
 
 function hueOf(colour: string): { hue: number; sat: number } {
   const hsl = /^hsl\((\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)%/.exec(colour);
@@ -90,10 +89,10 @@ it("the slower-now line puts the measured speed after Slower now, before who is 
   expect(text(slow({ fit: fitWith([whisper]), tip: false }))).toBe("Slower now · Whisper in the way");
 });
 
-it("the slower-now line's tip and its screen-reader words are the sentence with the sizes", () => {
+it("the slower-now line has no tip, and its screen-reader words are the sentence with the sizes", () => {
   const sentence = "Fits this card with Whisper (2.0 GB) off it. 1.0 GB is in system memory now.";
   const html = slow({ fit: fitWith([whisper]) });
-  expect(tipOf(html)).toBe(sentence);
+  expect(html).not.toContain("data-tip");
   expect(html).toContain(`<span class="vh">. ${sentence}</span>`);
   expect(text(html)).toBe(`Slower now · Whisper in the way. ${sentence}`);
 });
