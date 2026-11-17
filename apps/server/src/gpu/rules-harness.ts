@@ -1,7 +1,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { FitReport, ImageChoice, ImageEvent, ModelLoad, RuntimeMode, RuntimeStatus } from "@gates-local/contracts";
+import type { FitReport, ImageChoice, ImageEvent, ModelLoad, OtherHolder, RuntimeMode, RuntimeStatus } from "@gates-local/contracts";
 import { comfyInfo, MOSS_FILES, ZIMAGE_FILES } from "../../test/comfy/info.ts";
 import { MIB } from "../fit/constants.ts";
 import { planLoad } from "../fit/fit.ts";
@@ -77,6 +77,9 @@ export interface WorldOptions {
   readonly whisper?: boolean;
   readonly otherProgramMib?: number;
   readonly loadedByOthers?: readonly Model[];
+  // why: idle in the runtime's Ollama and in the app's record, as a load of an earlier run leaves it
+  readonly appLoadedBefore?: readonly Model[];
+  readonly freeOthers?: boolean;
   readonly comfy?: "stopped" | "idle" | "holding" | "busy";
   readonly comfySticks?: boolean;
   readonly ollamaKeepsLoading?: boolean;
@@ -97,6 +100,7 @@ export interface ChatView {
   readonly wouldStop?: readonly string[];
   readonly error?: string;
   readonly report?: FitReport;
+  readonly held?: readonly OtherHolder[];
 }
 
 interface Chat {
@@ -437,6 +441,7 @@ export async function createWorld(options: WorldOptions) {
   const owner = createMemoryOwner({
     ollamaUrl: () => runtime.baseUrl(),
     holdsOne,
+    freeOthers: () => options.freeOthers === true,
     listLoaded: listed,
     replying: () => loader.replying(),
     engine: () => image,
@@ -488,6 +493,10 @@ export async function createWorld(options: WorldOptions) {
   await runtime.ensure();
   for (const model of options.loadedByOthers ?? []) ollamas[runtime.mode()].holdsIdle(model);
   for (const model of options.appOllamaRuns ?? []) ollamas.app.holdsIdle(model);
+  for (const model of options.appLoadedBefore ?? []) {
+    ollamas[runtime.mode()].holdsIdle(model);
+    owner.loaded.loaded(model, NUM_CTX);
+  }
 
   const pass = async (ms = 1_000) => {
     for (let left = ms; left > 0; left -= 250) {
@@ -552,15 +561,17 @@ export async function createWorld(options: WorldOptions) {
             if (ahead.verdict === "refuse" && image.current().state === "off") { me.view = { state: "refused", refusal: ahead.message ?? "", report: ahead }; return; }
           }
           release = await lease.acquire("chat", turn.signal);
+          let held: readonly OtherHolder[] | undefined;
           const report = await reservation.admit(numCtx, {
             fit: async (signal, context) => {
               const r = await plan(signal, context);
+              held = context?.handoff?.held;
               if (r.verdict !== "refuse") me.admitted = true;
               return r;
             },
             signal: turn.signal,
           });
-          if (report.verdict === "refuse") { me.view = { state: "refused", refusal: report.message ?? "", report }; return; }
+          if (report.verdict === "refuse") { me.view = { state: "refused", refusal: report.message ?? "", report, ...held === undefined ? {} : { held } }; return; }
           me.admitted = true;
           me.view = { state: "loading", report };
           turn.signal.addEventListener("abort", () => request.abort(turn.signal.reason), { once: true });
@@ -608,6 +619,12 @@ export async function createWorld(options: WorldOptions) {
       await pass();
     },
     preloaded: async () => Promise.all(preloads),
+    // why: the steps of memory.free in services.ts: the owner frees inside the load gate
+    async personFrees(holders: readonly OtherHolder[]) {
+      const freeing = owner.gate(() => owner.free(holders, new AbortController().signal));
+      await pass(5_000);
+      return freeing;
+    },
 
     async pictureSends(sent: { setup?: "one" | "other" } = {}) {
       const { jobId } = await image.generate({ prompt: "a tree", choice: SETUPS[sent.setup ?? "one"] });

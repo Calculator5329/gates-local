@@ -1,5 +1,5 @@
 import type { FitReport } from "@gates-local/contracts";
-import { NBSP, cardGb, slowReason } from "../lib/words/format.ts";
+import { NBSP, cardGb, needBasis, roughly, slowReason } from "../lib/words/format.ts";
 import type { TableFit } from "../fit/fit-table.ts";
 import { Icon } from "../lib/ui/icons.tsx";
 import { type State, useStore } from "../lib/store/store.ts";
@@ -30,17 +30,18 @@ const KIND: Record<FitReport["verdict"], string> = { fits: "gpu", spills: "spill
 export function MemoryMark({ report, words }: { report: FitReport; words: string }) {
   const whole = useStore(markWhole);
   const need = report.needVramBytes;
+  const measured = report.source === "measured";
   const text = whole === undefined ? `${amount(need)} GB` : markText(need, whole);
   const fill = whole === undefined ? 0 : markFill(report.verdict, need, whole);
   return (
     <span
       className={`mm ${KIND[report.verdict]}`}
       role="img"
-      aria-label={`${words}: ${text.replace(" / ", " of ")}`}
+      aria-label={`${words}: ${text.replace(" / ", " of ")}, ${needBasis(measured)}`}
       data-testid="models.fit.memory-mark"
     >
       <span className="mm-bar" aria-hidden="true"><i style={{ width: `${(fill * 100).toFixed(1)}%` }} /></span>
-      <span className="mm-n" aria-hidden="true">{text}</span>
+      <span className="mm-n" aria-hidden="true">{roughly(measured)}{text}</span>
     </span>
   );
 }

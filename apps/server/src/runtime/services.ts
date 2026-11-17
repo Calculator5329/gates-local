@@ -125,7 +125,7 @@ export async function createModelServices(options: ModelServicesOptions): Promis
         modelLabel,
         mayUnload: () => {
           const replying = new Set(loader?.replying() ?? []);
-          return owner.loaded.listed().filter((tag) => !replying.has(tag));
+          return owner.loaded.listed().filter((tag) => !replying.has(tag) && !owner.stays(tag));
         },
         residentModels: async () => ((await loader?.residentModels()) ?? []).map((m) => ({ name: canonicalTag(m.name), sizeVramBytes: m.sizeVramBytes })),
       }),
@@ -138,6 +138,7 @@ export async function createModelServices(options: ModelServicesOptions): Promis
   const owner = createMemoryOwner({
     ollamaUrl: () => runtime.baseUrl(),
     holdsOne,
+    freeOthers: () => settings.get().freeOthers === true,
     listLoaded: (url, signal) => listLoaded(url, undefined, signal),
     replying: () => loader?.replying() ?? [],
     engine: () => engine,
@@ -162,6 +163,7 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     memory: owner,
     offer: (refused, baseUrl) => offerAfterRefusal({
       ...options.fit,
+      stays: owner.stays,
       baseUrl,
       models: catalogModels(catalog.current() ?? []).filter((m) => m.installed).map((m) => m.name),
       defaultNumCtx: settings.get().defaultNumCtx,
@@ -215,6 +217,11 @@ export async function createModelServices(options: ModelServicesOptions): Promis
 
   const handlers = {
     "memory.status": () => owner.status(),
+    "memory.free": async ({ free }, ctx) => {
+      const freed = await owner.gate(() => owner.free(free, ctx.signal ?? new AbortController().signal));
+      gpu.poke();
+      return { left: freed.left };
+    },
     ...createSettingsHandlers({ settings, push: options.push, baseUrl: () => runtime.baseUrl() }),
     ...createGpuHandlers({ gpu }),
     ...createRuntimeHandlers({

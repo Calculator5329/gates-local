@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-17: other programs' memory is freed only with a click; one verdict on the fit card; "~" marks an estimate
+
+- A send or a model pick no longer unloads a chat model the app did not load (another client's, or one loaded before the app started) and no longer asks a ComfyUI somebody else started to free its memory. The app's own models, and the ComfyUI it started, still leave without a word. When the request still does not fit, the note names what holds the memory and its size ("Qwen 3.5 9B holds 7.0 GB") with "Free it" (the phone may press it too) and, on the computer, "Don't ask again". The setting is also in Settings › Advanced. Whisper and every other GPU program are only measured. Decision: "Other programs' memory is freed only with a click".
+- Settings' GPU memory card shows one verdict: "Slower now · Whisper in the way" replaces "Should run well at 16k" while something is in the way.
+- The memory mark in Models writes an estimate as "~9.1 / 16 GB" and a measured need plainly, as the picker does; a screen reader hears "estimated" or "measured".
+
 ## 2026-11-17: first run goes straight to the chat; plain failure words; the phone keeps the model's size
 
 - Download and start on the first window opens the chat at once. The first message waits in the composer while the model downloads, and the model button shows the download.

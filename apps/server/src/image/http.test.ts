@@ -55,16 +55,18 @@ it("renders over fake HTTP and real WebSocket frames, ignoring unrelated object_
   const store = openThreadStore(path.join(dataDir, "store.sqlite"));
   const events: ImageEvent[] = [];
   const baseUrl = `http://127.0.0.1:${address.port}`;
+  // The one owner of memory, as services.ts wires it: the app's chat model leaves, then the engine frees.
+  const memory = createMemoryOwner({
+    ollamaUrl: () => baseUrl,
+    listLoaded: async () => (freeBytes < 20 ? [{ name: "app-only", sizeBytes: 1, sizeVramBytes: 1 }] : []),
+    replying: () => [],
+    engine: () => image,
+    pollMs: 1,
+  });
+  memory.loaded.loaded("app-only", 4096);
   const image = createImageModule({ dataDir, store, lease: createGpuLease(), requiredBytes: 10,
     settings: () => ({ imageGen: true, comfyUrl: baseUrl }),
-    // The one owner of memory, as services.ts wires it: the chat model leaves, then the engine frees.
-    memory: createMemoryOwner({
-      ollamaUrl: () => baseUrl,
-      listLoaded: async () => (freeBytes < 20 ? [{ name: "app-only", sizeBytes: 1, sizeVramBytes: 1 }] : []),
-      replying: () => [],
-      engine: () => image,
-      pollMs: 1,
-    }),
+    memory,
     readGpu: async () => ({ freeBytes, holders: "whisper; external-chat" }),
     service: { inspect: async () => { throw new Error("custom URL must not inspect units"); }, start: async () => { throw new Error("must not start"); }, stop: async () => { throw new Error("must not stop"); } },
     push: (channel, payload) => { if (channel === "image.event") events.push(payload as ImageEvent); },

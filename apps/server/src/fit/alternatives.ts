@@ -1,4 +1,4 @@
-import type { FitOffer } from "@gates-local/contracts";
+import type { FitOffer, OtherHolder } from "@gates-local/contracts";
 import { cardMargins, DEFAULT_MARGINS, planWith, takeReadings, type FitDeps, type Margins, type Readings } from "./fit.ts";
 import { GPU_REUSE_MS } from "./gpu.ts";
 import { sameModel } from "./ollama.ts";
@@ -24,6 +24,12 @@ export function chooseOffer(input: { refused: FitReport; contexts: readonly FitR
     ...(model && runs(model) ? { model: { model: model.model, numCtx: model.numCtx, verdict: model.verdict, ...said(model) } } : {}),
     short: { needBytes: refused.needVramBytes, gpuBytes, ramBytes, shortBytes },
   };
+}
+
+// why: a refusal with no smaller choice still carries "Free it", with the refusal's own sums
+export function withFree(offer: FitOffer | undefined, refused: FitReport, held: readonly OtherHolder[] | undefined): FitOffer | undefined {
+  if (held === undefined || held.length === 0 || refused.verdict !== "refuse") return offer;
+  return { ...offer ?? chooseOffer({ refused, contexts: [], models: [] }), free: [...held] };
 }
 
 export interface OfferDeps extends FitDeps {

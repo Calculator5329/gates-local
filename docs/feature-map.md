@@ -49,7 +49,7 @@ has a path.
 | **Thinking pill** | Turns thinking on or off for this chat; greyed with the reason for a model that does not think. The composer toolbar, and Chat options. | web: `composer/Composer.tsx`<br>server: `settings/turn.ts` | `model-pick` |
 | **Chat options** | A menu of the chat's switches: Thinking and Image. The sliders button in the composer toolbar. | web: `composer/Composer.tsx` | `image-count` |
 | **Context used**<br>also: context meter | How much of the context the chat has used, as a ring, with the numbers on hover. The composer toolbar. | web: `composer/Composer.tsx`<br>server: `chat/window.ts` | `model-context`, `small-context` |
-| **Composer note**<br>also: refusal note, refusal offer | One line above the composer when a send cannot go: what is wrong and the one way on. Above the composer. | web: `composer/RefusalNote.tsx`, `composer/Composer.tsx`<br>server: `fit/alternatives.ts`, `app/admit.ts` | `refusal-offer`, `small-context` |
+| **Composer note**<br>also: refusal note, refusal offer | One line above the composer when a send cannot go: what is wrong and the one way on. Above the composer. | web: `composer/RefusalNote.tsx`, `composer/Composer.tsx`<br>server: `fit/alternatives.ts`, `app/admit.ts`, `gpu/memory.ts` | `refusal-offer`, `small-context` |
 | **Start screen**<br>also: new-chat heading, starter, setup icons | A new chat's mark and composer, with ringed icons for what is not set up yet (Library search, Image generation). A new thread before its first message. | web: `composer/starter.ts`, `app/App.tsx` | `start-mark` |
 
 ## Images in a chat

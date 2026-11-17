@@ -2,7 +2,8 @@
 // card, and nothing said so. When the card fits a model and right now it spills, the model row, the
 // picker's context chip and Settings › Advanced say what is in the way, biggest first with its
 // size, in the words of the GPU memory panel: the short form on the row, the sentence one step
-// away (a tip, or Details). The verdict stays the card's. Nothing offers to stop another program.
+// away (a tip, or Details). The rows keep the card's verdict; Settings shows one verdict, "slower
+// now" in place of it. Nothing offers to stop another program.
 import type { Page, TestInfo } from "@playwright/test";
 import { decodeRequest } from "@gates-local/contracts";
 import { expect, listButton, openModels, stack, test, waitReady } from "./fixtures.ts";
@@ -71,9 +72,10 @@ test("a model the card holds says what is in the way on its row, its picker chip
   await page.keyboard.press("Control+Comma");
   await page.getByTestId("settings.nav.open-advanced").click();
   const gpu = page.locator(".set #gpuMemory");
-  await expect(gpu.getByTestId("models.fit-panel.slow-line")).toHaveText(SHORT);
-  // the status is the card's verdict, as before
-  await expect(gpu.locator(".fp-v")).toHaveText(/^Should run well\s?at 16k$/);
+  // one verdict on the card: "slower now" stands in for "Should run well at 16k" while something is in the way
+  await expect(gpu.locator(".fp-v")).toHaveText(SHORT);
+  await expect(gpu.locator(".fp-v")).toHaveAttribute("data-testid", "models.fit-panel.slow-line");
+  await expect(gpu).not.toContainText("Should run well");
   await gpu.getByTestId("models.fit-panel.details").click();
   await expect(gpu.getByTestId("models.fit-panel.slow-now")).toHaveText(SENTENCE);
   await shots(page, info, "fit-panel-desktop");

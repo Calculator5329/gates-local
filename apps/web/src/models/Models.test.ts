@@ -128,7 +128,9 @@ describe("Models on a computer with no supported GPU", () => {
     const html = render(noGpuComputer({ addPage: true, numCtx: 65536,
       catalog: [entry(name, "Qwen 3 14B", "spills", 10)], fitTable: tableOf(measured) }));
     // the mark says the table's 9 GB, not the catalog's 10 (a row has no tooltip, decision 19)
-    expect(html).toContain('aria-label="Runs in system memory, slower: 9.0 GB"');
+    // measured: plain on screen, "measured" in its name (the picker's rule)
+    expect(html).toContain('aria-label="Runs in system memory, slower: 9.0 GB, measured"');
+    expect(html).toContain('<span class="mm-n" aria-hidden="true">9.0 GB</span>');
     expect(html).not.toMatch(/Measured 9\.0(?:&#160;| | )GB of memory with 64k of context/);
     expect(html).not.toContain("Measured after the first load");
   });
@@ -140,7 +142,9 @@ describe("Models on a computer with no supported GPU", () => {
       catalog: [{ ...entry(name, "Qwen 3 14B", "spills", 10), fit: at16 }],
       fitTable: tableOn(false, at64) }));
     // the only row spills: its mark says so in amber with the 64k need (decision 11), nothing above the list
-    expect(html).toContain('aria-label="Partly in system memory, slower: 15 GB"');
+    // an estimate: "~" on screen, "estimated" in its name
+    expect(html).toContain('aria-label="Partly in system memory, slower: 15 GB, estimated"');
+    expect(html).toContain('<span class="mm-n" aria-hidden="true">~15 GB</span>');
     expect(html).not.toContain("These are bigger than your GPU");
     expect(html).not.toMatch(/Estimated 15\.0(?:&#160;| | )GB of memory with 64k of context/);
     expect(html).not.toContain("Runs on GPU");

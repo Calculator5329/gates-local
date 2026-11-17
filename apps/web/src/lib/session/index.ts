@@ -5,6 +5,7 @@ import {
   type ImageChoice,
   type ImageSetupProgress,
   type ModelMeasure,
+  type OtherHolder,
   type Payload,
   type SyncMetadata,
   type SyncRow,
@@ -345,6 +346,11 @@ export async function retryImage(threadId: string, prompt: string, retryOf: stri
   if (!result.ok) return result.message;
   applyServerEvent(() => { imageSaved(threadId); });
   return result.value;
+}
+
+export async function freeMemory(free: readonly OtherHolder[]): Promise<ActionResult> {
+  const r = await act("memory.free", { free: [...free] }, "free the memory");
+  return r.ok ? null : r.message;
 }
 
 export async function cancelImage(jobId: string): Promise<ActionResult> {

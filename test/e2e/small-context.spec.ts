@@ -23,7 +23,7 @@ test.describe("a model with a 2,048 context window", () => {
     await openModels(page);
     const row = page.locator('.mp-row[data-dm="tiny-chat:2k"]');
     // the memory mark's words are its name (row 28)
-    await expect(row.locator(".mp-fitc .mm")).toHaveAttribute("aria-label", /^Should run well: \d\.\d of \d+ GB$/);
+    await expect(row.locator(".mp-fitc .mm")).toHaveAttribute("aria-label", /^Should run well: \d\.\d of \d+ GB, (measured|estimated)$/);
     await expect(row).not.toHaveClass(/\bcant\b/);
     await expect(page.locator(".mp")).not.toContainText(/supports up to|too small|unsupported|won't run/i);
     // no Default card (decision 10): the chip marks the default, and no row names the saved 16k

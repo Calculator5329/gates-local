@@ -447,16 +447,27 @@ export type FitTable = typeof FitTable.Type;
 const OfferVerdict = S.Literals(["fits", "spills"]);
 
 /**
+ * Memory another program holds that the app left in place (decision "Other programs' memory is freed
+ * only with a click"): a chat model the app did not load ("model", its tag) or a ComfyUI it did not
+ * start ("engine", name "ComfyUI"). bytes: what it holds on the card.
+ */
+export const OtherHolder = S.Struct({ kind: S.Literals(["model", "engine"]), name: S.String, bytes: Count });
+export type OtherHolder = typeof OtherHolder.Type;
+
+/**
  * What a memory refusal ("wont-fit") offers, worked out from the reading that refused it
  * (apps/server/src/fit/alternatives.ts). context: the largest smaller context of the refused model
  * that runs. model: only when no context of it runs, the largest installed chat model that does, at
  * the default context. short: what the refused load lacks, the usable GPU memory and the usable
  * system memory apart (margins already taken off), for the one line said when nothing else runs.
+ * free: what other programs hold that the app did not ask to leave; the window offers "Free it"
+ * (memory.free) and then sends again.
  */
 export const FitOffer = S.Struct({
   context: S.optional(S.Struct({ numCtx: PositiveInt, verdict: OfferVerdict, words: S.optional(FitWords) })),
   model: S.optional(S.Struct({ model: S.String, numCtx: PositiveInt, verdict: OfferVerdict, words: S.optional(FitWords) })),
   short: S.Struct({ needBytes: Count, gpuBytes: Count, ramBytes: Count, shortBytes: Count }),
+  free: S.optional(S.Array(OtherHolder)),
 });
 export type FitOffer = typeof FitOffer.Type;
 
@@ -717,6 +728,7 @@ export const Settings = S.Struct({
   whisperUrl: S.optional(S.String),
   updateEveryChange: S.optional(S.Boolean),
   updateAutomatic: S.optional(S.Boolean),
+  freeOthers: S.optional(S.Boolean),
   accent: S.optional(Accent),
   systemPrompt: S.optional(S.String),
   modelSettings: S.optional(S.Record(S.String, ModelSettings)),
@@ -738,6 +750,7 @@ export const SettingsPatch = S.Struct({
   whisperUrl: S.optional(S.NullOr(S.String)),
   updateEveryChange: S.optional(S.Boolean),
   updateAutomatic: S.optional(S.Boolean),
+  freeOthers: S.optional(S.Boolean),
   accent: S.optional(Accent),
   systemPrompt: S.optional(S.NullOr(S.String)),
   modelSettings: S.optional(S.Null),

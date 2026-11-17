@@ -1,4 +1,4 @@
-import type { MemoryState, MemoryThing } from "@gates-local/contracts";
+import type { MemoryState, MemoryThing, OtherHolder } from "@gates-local/contracts";
 import { setTimeout as delay } from "node:timers/promises";
 import { VRAM_SAFETY_MARGIN_BYTES } from "../fit/constants.ts";
 import { forgetGpuReadings } from "../fit/gpu.ts";
@@ -13,12 +13,16 @@ export type EngineLeave = "freed" | "busy" | "absent";
 
 export interface MemoryEngine {
   leave(signal: AbortSignal): Promise<EngineLeave>;
+  // why: absent means the app started it, as every engine did before decision 2026-11-17
+  ours?(): boolean;
+  holds?(signal: AbortSignal): Promise<number | undefined>;
 }
 
 export interface Handoff {
   readonly left: readonly string[];
   readonly stayed: readonly string[] | undefined;
-  readonly engine: EngineLeave | "kept" | "idle";
+  readonly engine: EngineLeave | "kept" | "idle" | "foreign";
+  readonly held: readonly OtherHolder[];
 }
 
 export interface MemoryOwnerDeps {
@@ -28,6 +32,7 @@ export interface MemoryOwnerDeps {
   readonly replying: () => readonly string[];
   // why: the image module is made after the memory owner
   readonly engine?: () => MemoryEngine | undefined;
+  readonly freeOthers?: () => boolean;
   readonly readFree?: (signal: AbortSignal) => Promise<number | undefined>;
   readonly onUnloaded?: (model: string) => void;
   readonly onChanged?: (state: MemoryState) => void;
@@ -112,6 +117,8 @@ export interface MemoryOwner {
   readonly gate: LoadGate;
   readonly loaded: LoadedRecord;
   handoff(want: Want, signal: AbortSignal, options?: { onLeave?: (on: boolean) => void }): Promise<Handoff>;
+  free(holders: readonly OtherHolder[], signal: AbortSignal): Promise<Handoff>;
+  stays(model: string): boolean;
   stage(want: Want, stage: "measuring" | "loading"): void;
   settled(want: Want): void;
   ended(): void;
@@ -145,7 +152,12 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
   let engineHolds: string | "unknown" | "empty" = "unknown";
   let said = "";
   // why: the plan counts the old model as free, and a slow driver would put the next one off the card
-  const oneChat = (want: Want) => want.kind === "chat" && deps.holdsOne?.() === true;
+  const oneChat = (want: Want | undefined) => want?.kind === "chat" && deps.holdsOne?.() === true;
+  const record = createLoadedRecord(() => deps.holdsOne?.() === true);
+  // why: the app's own Ollama runs only what the app loaded, on this run or the one before it
+  const ours = (tag: string) => deps.holdsOne?.() === true || record.oursAt(tag) !== undefined;
+  // decision: docs/decisions.md "Other programs' memory is freed only with a click"
+  const othersMayGo = () => deps.freeOthers?.() === true;
 
   const state = (): MemoryState => ({ ...resident === undefined ? {} : { resident }, ...handoff === undefined ? {} : { handoff } });
   const changed = () => {
@@ -184,27 +196,30 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
     return await deps.readFree?.(signal);
   };
 
-  const chatLeaves = async (want: Want, signal: AbortSignal, onLeave?: (on: boolean) => void): Promise<{ left: string[]; stayed: string[] | undefined; target?: number }> => {
+  type ChatLeft = { left: string[]; stayed: string[] | undefined; held: OtherHolder[]; target?: number };
+  const chatLeaves = async (want: Want | undefined, signal: AbortSignal, mayAsk: (tag: string) => boolean, onLeave?: (on: boolean) => void): Promise<ChatLeft> => {
     const baseUrl = deps.ollamaUrl();
-    if (baseUrl === undefined) return { left: [], stayed: [] };
+    if (baseUrl === undefined) return { left: [], stayed: [], held: [] };
     let listed: readonly LoadedModel[];
     try {
       listed = await deps.listLoaded(baseUrl, signal);
     } catch (e) {
       signal.throwIfAborted();
       log(`reading /api/ps before a handoff failed: ${(e as Error).message}`);
-      return { left: [], stayed: undefined };
+      return { left: [], stayed: undefined, held: [] };
     }
     const replying = new Set(deps.faultForTest === "ask-replying-models" ? [] : deps.replying().map(canonicalTag));
     // external: Ollama replaces the wanted model's copy at another num_ctx itself, so that model stays.
-    const kept = (m: LoadedModel) => want.kind === "chat" && canonicalTag(m.name) === canonicalTag(want.model);
+    const kept = (m: LoadedModel) => want?.kind === "chat" && canonicalTag(m.name) === canonicalTag(want.model);
     const busy = listed.filter((m) => !kept(m) && replying.has(canonicalTag(m.name))).map((m) => m.name);
-    const asked = listed.filter((m) => !kept(m) && !replying.has(canonicalTag(m.name))).map((m) => m.name);
-    if (asked.length === 0) return { left: [], stayed: busy };
+    const idle = listed.filter((m) => !kept(m) && !replying.has(canonicalTag(m.name)));
+    const asked = idle.filter((m) => mayAsk(canonicalTag(m.name))).map((m) => m.name);
+    const held = idle.filter((m) => !mayAsk(canonicalTag(m.name))).map((m): OtherHolder => ({ kind: "model", name: m.name, bytes: m.sizeVramBytes }));
+    if (asked.length === 0) return { left: [], stayed: busy, held };
     onLeave?.(true);
     const before = oneChat(want) ? await freeNow(signal) : undefined;
-    const held = listed.filter((m) => asked.includes(m.name)).reduce((sum, m) => sum + m.sizeVramBytes, 0);
-    const target = before === undefined ? {} : { target: before + held };
+    const askedBytes = listed.filter((m) => asked.includes(m.name)).reduce((sum, m) => sum + m.sizeVramBytes, 0);
+    const target = before === undefined ? {} : { target: before + askedBytes };
     for (const model of asked) await unload(baseUrl, model, signal);
     // external: Ollama answers an unload before its runner has gone, so /api/ps is read until it goes.
     const deadline = now() + waitMs;
@@ -224,14 +239,10 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
     const left = asked.filter((m) => !still.has(canonicalTag(m)));
     const url = deps.ollamaUrl();
     if (url === undefined || url === baseUrl) for (const model of left) deps.onUnloaded?.(model);
-    return { left, stayed: [...busy, ...asked.filter((m) => still.has(canonicalTag(m)))], ...target };
+    return { left, stayed: [...busy, ...asked.filter((m) => still.has(canonicalTag(m)))], held, ...target };
   };
 
-  const engineLeaves = async (want: Want, signal: AbortSignal): Promise<Handoff["engine"]> => {
-    if (want.kind === "image" && engineHolds === want.setup) return "kept";
-    if (engineHolds === "empty") return "idle";
-    const engine = deps.engine?.();
-    if (engine === undefined) return "absent";
+  const askEngine = async (engine: MemoryEngine, signal: AbortSignal): Promise<EngineLeave> => {
     let answer: EngineLeave;
     try {
       answer = await engine.leave(signal);
@@ -242,6 +253,30 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
     }
     if (answer !== "busy") engineHolds = "empty";
     return answer;
+  };
+
+  // why: what a ComfyUI the app did not start holds is read each time; the person may use it any time
+  const foreignEngine = async (engine: MemoryEngine, signal: AbortSignal): Promise<{ engine: Handoff["engine"]; held?: OtherHolder }> => {
+    let bytes: number | undefined;
+    try {
+      bytes = await engine.holds?.(signal);
+    } catch (e) {
+      signal.throwIfAborted();
+      log(`reading what ComfyUI holds failed: ${(e as Error).message}`);
+    }
+    if (bytes === undefined) return { engine: "absent" };
+    if (bytes <= 0) return { engine: "idle" };
+    return { engine: "foreign", held: { kind: "engine", name: "ComfyUI", bytes } };
+  };
+
+  const engineLeaves = async (want: Want, signal: AbortSignal): Promise<{ engine: Handoff["engine"]; held?: OtherHolder }> => {
+    if (want.kind === "image" && engineHolds === want.setup) return { engine: "kept" };
+    const engine = deps.engine?.();
+    // why: a picture runs on that ComfyUI and replaces its setup anyway, so only a chat leaves it be
+    if (engine !== undefined && want.kind === "chat" && engine.ours?.() === false && !othersMayGo()) return await foreignEngine(engine, signal);
+    if (engineHolds === "empty") return { engine: "idle" };
+    if (engine === undefined) return { engine: "absent" };
+    return { engine: await askEngine(engine, signal) };
   };
 
   // external: nvidia-smi's free memory can lag a runner's exit by a read, so one flat read is not enough.
@@ -270,9 +305,23 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
     }
   };
 
+  const afterLeaving = async (chat: ChatLeft, engine: Handoff["engine"], signal: AbortSignal) => {
+    if (chat.left.length === 0 && engine !== "freed") return;
+    const was = resident;
+    if (was?.kind === "image" && engine === "freed") resident = undefined;
+    if (was?.kind === "chat" && chat.left.some((m) => canonicalTag(m) === was.model)) resident = undefined;
+    try {
+      await sendSpan("settle", () => settle(signal, chat.target));
+    } catch (e) {
+      signal.throwIfAborted();
+      log(`reading the GPU after a handoff failed: ${(e as Error).message}`);
+    }
+    forgetGpuReadings();
+  };
+
   return {
     gate,
-    loaded: createLoadedRecord(() => deps.holdsOne?.() === true),
+    loaded: record,
     async handoff(want, signal, options = {}) {
       handoff = { to: thing(want), stage: "leaving" };
       changed();
@@ -283,25 +332,15 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
         options.onLeave?.(on);
       };
       try {
-        const chat = await sendSpan("chat-leave", () => chatLeaves(want, signal, tell));
-        const engine = await sendSpan("engine-leave", () => engineLeaves(want, signal));
+        const mayAsk = (tag: string) => ours(tag) || othersMayGo();
+        const chat = await sendSpan("chat-leave", () => chatLeaves(want, signal, mayAsk, tell));
+        const { engine, held } = await sendSpan("engine-leave", () => engineLeaves(want, signal));
         if (engine === "freed") tell(true);
-        if (chat.left.length > 0 || engine === "freed") {
-          const was = resident;
-          if (was?.kind === "image" && engine === "freed") resident = undefined;
-          if (was?.kind === "chat" && chat.left.some((m) => canonicalTag(m) === was.model)) resident = undefined;
-          try {
-            await sendSpan("settle", () => settle(signal, chat.target));
-          } catch (e) {
-            signal.throwIfAborted();
-            log(`reading the GPU after a handoff failed: ${(e as Error).message}`);
-          }
-          forgetGpuReadings();
-        }
+        await afterLeaving(chat, engine, signal);
         tell(false);
         handoff = { to: thing(want), stage: "measuring" };
         changed();
-        return { left: chat.left, stayed: chat.stayed, engine };
+        return { left: chat.left, stayed: chat.stayed, engine, held: held === undefined ? chat.held : [...chat.held, held] };
       } catch (e) {
         tell(false);
         handoff = undefined;
@@ -309,6 +348,16 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
         throw e;
       }
     },
+    async free(holders, signal) {
+      const named = new Set(holders.filter((h) => h.kind === "model").map((h) => canonicalTag(h.name)));
+      const chat = named.size === 0 ? { left: [], stayed: [], held: [] } : await chatLeaves(undefined, signal, (tag) => named.has(tag));
+      const engine = deps.engine?.();
+      const asked = engine !== undefined && holders.some((h) => h.kind === "engine") ? await askEngine(engine, signal) : "idle";
+      await afterLeaving(chat, asked, signal);
+      changed();
+      return { left: asked === "freed" ? [...chat.left, "ComfyUI"] : chat.left, stayed: chat.stayed, engine: asked, held: [] };
+    },
+    stays: (model) => !ours(canonicalTag(model)) && !othersMayGo(),
     stage(want, stage) {
       handoff = { to: thing(want), stage };
       changed();

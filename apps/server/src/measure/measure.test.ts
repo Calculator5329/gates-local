@@ -896,6 +896,8 @@ describe("models.measure", () => {
       return rt.fetcher(url, init);
     }) as typeof fetch;
     const owner = createMemoryOwner({ ollamaUrl: () => "http://runtime", listLoaded: async () => listed, replying: () => [], fetch: fetcher, waitMs: 50, pollMs: 1 });
+    // the app loaded the idle model earlier: a model another program loaded is not asked to leave
+    owner.loaded.loaded("idle:7b", 4096);
     const pushes: [string, unknown][] = [];
     const measure = createMeasure({
       dataDir: dir(),

@@ -147,7 +147,7 @@ interface Rig {
  * takes the load gate and its handoff. `ps` is what Ollama has in memory at the start; `onUnload`
  * runs when an unload request takes a row out (a test moves the GPU and RAM readings there).
  */
-async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: ThreadStore, dir: string, memory?: MemoryOwner) => ImageModule; show?: unknown; admit?: () => void; onTerminal?: () => void; onDelta?: (turnId: string) => void; log?: (line: string) => void; dbPath?: string; draftEveryMs?: number; settings?: AppDeps["settings"]; loader?: boolean; ps?: PsRow[]; tags?: typeof TAGS; gpu?: Partial<Gpu>; onUnload?: (model: string) => void; engine?: () => MemoryEngine | undefined } = {}): Promise<Rig> {
+async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: ThreadStore, dir: string, memory?: MemoryOwner) => ImageModule; show?: unknown; admit?: () => void; onTerminal?: () => void; onDelta?: (turnId: string) => void; log?: (line: string) => void; dbPath?: string; draftEveryMs?: number; settings?: AppDeps["settings"]; loader?: boolean; ps?: PsRow[]; tags?: typeof TAGS; gpu?: Partial<Gpu>; onUnload?: (model: string) => void; engine?: () => MemoryEngine | undefined; freeOthers?: boolean } = {}): Promise<Rig> {
   const ollamaUp = opts.ollamaUp ?? true;
   let chat: ChatRoute = quickReply;
   let show: ChatRoute = (res) => json(res, 200, opts.show ?? SHOW);
@@ -233,6 +233,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
         ollamaUrl: () => runtime.baseUrl(),
         listLoaded: (url, signal) => listLoaded(url, undefined, signal),
         replying: () => loader?.replying() ?? [],
+        freeOthers: () => opts.freeOthers === true,
         engine: opts.engine ?? (() => imageModule),
         readFree: async () => gpu.freeMib * 1024 ** 2,
         onUnloaded: (model) => loader?.unloaded(model),
@@ -1419,6 +1420,8 @@ describe("one thing in memory: a send asks the rest to leave, then measures", ()
       onUnload: () => { if (gpu) Object.assign(gpu, { usedMib: 1297, freeMib: 4670, memAvailableKb: kbOf(1.8) }); },
     });
     gpu = r.gpu;
+    // the app loaded qwen3.5:4b for the person's chat before this send, as in the report
+    r.memory?.loaded.loaded("qwen3.5:4b", 4096);
     const t = await r.client.call("threads.create", {});
     const { turnId } = await sendTurn(r, { threadId: t.id, content: "hello", model: "gemma4:e4b", numCtx: 16384 });
     const { event } = await r.waitFor("turn", (p) => p.turnId === turnId && p.event.type === "error", 10_000);
@@ -1456,10 +1459,10 @@ describe("one thing in memory: a send asks the rest to leave, then measures", ()
     await r.waitFor("turn", (p) => p.turnId === first.turnId && p.event.type === "done");
   });
 
-  it("chat, then an image, then chat with both runtimes external: unload chat, free the engine, load chat, each after the last answered", async () => {
+  it("chat, then an image, then chat with both runtimes external and \"don't ask again\" saved: unload chat, free the engine, load chat, each after the last answered", async () => {
     const order: string[] = [];
     const comfy = externalComfy(order);
-    const r = await rig({ loader: true, image: comfy.build, onUnload: (model) => order.push(`unload ${model}`) });
+    const r = await rig({ loader: true, image: comfy.build, onUnload: (model) => order.push(`unload ${model}`), freeOthers: true });
     cleanups.push(() => comfy.module().close());
     r.setChat((res, body) => {
       order.push(`chat ${(body as { model: string }).model}`);

@@ -98,7 +98,7 @@ for (const profile of PROFILES) {
       expect((await tags(big.locator(".dlrow[data-cat]"))).toSorted()).toEqual([...profile.tooBig].toSorted());
       for (const row of await big.locator(".dlrow").all()) {
         // what it needs, as the memory mark over the computer's whole (row 28)
-        await expect(row.locator(".mm")).toHaveAttribute("aria-label", /^Too big for this computer: (\d\.\d|\d{2,}) of \d+ GB$/);
+        await expect(row.locator(".mm")).toHaveAttribute("aria-label", /^Too big for this computer: (\d\.\d|\d{2,}) of \d+ GB, estimated$/);
         await expect(row.getByRole("button")).toHaveCount(0);
       }
     }

@@ -42,8 +42,8 @@ test("another program's GPU memory leaves the download verdicts as they were, an
 // Row 10 addendum, the owner 2026-11-13: Settings › Advanced said Gemma 4 12B "Needs 2.9 GB more"
 // on a 16 GB card because a lane's ComfyUI held 9.2 GB, and he called it inaccurate. His ruling:
 // a model is measured against the memory on the card; what other apps hold right now is shown,
-// never the verdict.
-test("another program's GPU memory leaves the Settings verdicts as they were, and Details shows it as in use right now", async ({ page, open }, info) => {
+// never the verdict. Since 2026-11-17 (Q12) the card shows one verdict: "slower now" with what is in the way.
+test("another program's GPU memory never makes Settings say a model needs more, and Details shows it as in use right now", async ({ page, open }, info) => {
   await open();
   await waitReady(page);
   const gpu = await openGpuMemory(page);
@@ -61,8 +61,11 @@ test("another program's GPU memory leaves the Settings verdicts as they were, an
   });
   await page.screenshot({ path: info.outputPath("settings-heavy.png"), animations: "disabled" });
 
-  expect({ status: await status.textContent() }, "the verdicts, idle then with blender running").toEqual(idle);
-  await expect(gpu.locator(".fp-more")).not.toContainText("Needs");
+  // one verdict (2026-11-17, Q12): "slower now" names what is in the way in place of the card's
+  // verdict, and never says the model needs more than the card
+  expect(idle.status).not.toMatch(/Slower now/);
+  await expect(status).toHaveText("Slower now · blender in the way");
+  await expect(gpu).not.toContainText("Needs");
   await expect(gpu.getByText("In use right now", { exact: true })).toBeVisible();
   await expect(gpu.locator(".legend .lg-r", { hasText: "blender" })).toContainText("9.7 GB");
 });

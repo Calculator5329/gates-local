@@ -248,8 +248,8 @@ describe("a running reply's model is never asked to leave", () => {
 });
 
 describe("whisper is never asked to leave, stopped or changed", () => {
-  rule("everything else on the card is asked to leave for a chat; nothing names whisper", ["ask-everything-on-the-card"], async (open) => {
-    const w = await open({ comfy: "holding", loadedByOthers: ["small:1b"], otherProgramMib: 1_000 });
+  rule("with \"don't ask again\" saved, everything else on the card is asked to leave for a chat; nothing names whisper", ["ask-everything-on-the-card"], async (open) => {
+    const w = await open({ comfy: "holding", loadedByOthers: ["small:1b"], otherProgramMib: 1_000, freeOthers: true });
     await w.chatSends("c1");
     expect(w.askedToLeave()).toEqual(["small:1b"]);
     expect(w.rec.freed).toHaveLength(1);
@@ -269,6 +269,61 @@ describe("whisper is never asked to leave, stopped or changed", () => {
     await w.chatSends("c1", { model: "big:30b" });
     expect(w.chat("c1").state).toBe("refused");
     expect(w.chat("c1").refusal).not.toMatch(/whisper/i);
+  });
+});
+
+describe("other programs' memory is freed only with a click", () => {
+  it("the app's own idle model leaves without a word; another program's stays, and the refusal names it with its size", async () => {
+    const w = await whole({ comfy: "stopped", appLoadedBefore: ["small:1b"], loadedByOthers: ["m2:7b"] });
+    await w.chatSends("c1", { model: "m1:7b" });
+    expect(w.askedToLeave()).toEqual(["small:1b"]);
+    expect(w.chat("c1").state).toBe("refused");
+    expect(w.chat("c1").held).toEqual([{ kind: "model", name: "m2:7b", bytes: 7_232 * 1024 ** 2 }]);
+    expect(w.card().names).toEqual(["whisper", "m2:7b"]);
+    expect(w.rec.whisper).toEqual([]);
+  });
+
+  it("Free it asks that model to leave, then the same chat measures, decides and loads", async () => {
+    const w = await whole({ comfy: "stopped", loadedByOthers: ["m2:7b"] });
+    await w.chatSends("c1", { model: "m1:7b" });
+    const held = w.chat("c1").held ?? [];
+    expect(held.map((h) => h.name)).toEqual(["m2:7b"]);
+    expect((await w.personFrees(held)).left).toEqual(["m2:7b"]);
+    await w.chatSends("c2", { model: "m1:7b" });
+    expect(w.askedToLeave()).toEqual(["m2:7b"]);
+    expect(w.chat("c2").state).toBe("loading");
+    expect(w.card().names).toEqual(["whisper", "m1:7b"]);
+  });
+
+  it("a ComfyUI the app did not start is not asked for a chat: named with what it holds; Free it frees it, never stops it", async () => {
+    const w = await whole({ comfy: "holding" });
+    await w.chatSends("c1", { model: "m1:7b" });
+    expect(w.rec.freed).toEqual([]);
+    expect(w.chat("c1").state).toBe("refused");
+    expect(w.chat("c1").held?.map((h) => [h.kind, h.name])).toEqual([["engine", "ComfyUI"]]);
+    await w.personFrees(w.chat("c1").held ?? []);
+    expect(w.rec.freed).toHaveLength(1);
+    await w.chatSends("c2", { model: "m1:7b" });
+    expect(w.chat("c2").state).toBe("loading");
+    expect(w.rec.stops).toEqual([]);
+  });
+
+  it("\"don't ask again\" saved: another program's model and ComfyUI are asked without a refusal", async () => {
+    const w = await whole({ comfy: "holding", loadedByOthers: ["m2:7b"], freeOthers: true });
+    await w.chatSends("c1", { model: "m1:7b" });
+    expect(w.askedToLeave()).toEqual(["m2:7b"]);
+    expect(w.rec.freed).toHaveLength(1);
+    expect(w.chat("c1").state).toBe("loading");
+  });
+
+  it("whisper is only measured: never named as something to free, with or without the setting", async () => {
+    for (const freeOthers of [false, true]) {
+      const w = await whole({ comfy: "stopped", otherProgramMib: 9_000, freeOthers });
+      await w.chatSends("c1", { model: "m1:7b" });
+      expect(w.chat("c1").state).toBe("refused");
+      expect(w.chat("c1").held ?? []).toEqual([]);
+      expect(w.rec.whisper).toEqual([]);
+    }
   });
 });
 
@@ -363,7 +418,7 @@ describe("a switch of runtime never leaves a stale record", () => {
   it("a model that leaves the old runtime after the switch takes nothing out of the new runtime's record", async () => {
     // the old runtime goes on listing its idle model after it was asked to unload it; the app's
     // own Ollama, left by an earlier run, holds the same model
-    const w = await whole({ comfy: "stopped", loadedByOthers: ["m1:7b"], slowToLeave: ["m1:7b"], appOllamaRuns: ["small:1b"] });
+    const w = await whole({ comfy: "stopped", appLoadedBefore: ["m1:7b"], slowToLeave: ["m1:7b"], appOllamaRuns: ["small:1b"] });
     await w.pictureSends();
     expect(w.askedToLeave()).toEqual(["m1:7b"]);
     await w.switchBegins("app");
@@ -376,7 +431,7 @@ describe("a switch of runtime never leaves a stale record", () => {
   });
 
   it("a model with the same name in both runtimes stays listed when the old runtime's copy leaves late", async () => {
-    const w = await whole({ comfy: "stopped", loadedByOthers: ["m1:7b"], slowToLeave: ["m1:7b"], appOllamaRuns: ["m1:7b"] });
+    const w = await whole({ comfy: "stopped", appLoadedBefore: ["m1:7b"], slowToLeave: ["m1:7b"], appOllamaRuns: ["m1:7b"] });
     await w.pictureSends();
     expect(w.askedToLeave()).toEqual(["m1:7b"]);
     await w.switchBegins("app");
@@ -409,7 +464,7 @@ describe("an exclusive claim does not wait for ever", () => {
   });
 
   rule("a preload never holds the load gate while it waits for the card", ["gate-before-lease"], async (open) => {
-    const w = await open({ comfy: "idle" });
+    const w = await open({ comfy: "idle", freeOthers: true });
     // the picture has the card and has not reached the gate yet
     w.comfyHoldsItsAnswer();
     await w.pictureSends();
@@ -428,7 +483,7 @@ describe("an exclusive claim does not wait for ever", () => {
 
 describe("a load is refused, or let in, from a measurement taken after everything left", () => {
   rule("a full card with an idle model: the model leaves, and the load fits from the reading after it", ["fit-from-the-first-reading"], async (open) => {
-    const w = await open({ loadedByOthers: ["m2:7b"] });
+    const w = await open({ appLoadedBefore: ["m2:7b"] });
     await w.chatSends("c1", { model: "m1:7b" });
     expect(w.askedToLeave()).toEqual(["m2:7b"]);
     expect(w.chat("c1").state).toBe("loading");
@@ -438,7 +493,7 @@ describe("a load is refused, or let in, from a measurement taken after everythin
   });
 
   rule("room at arrival that another program takes during the handoff: refused from the later reading", ["fit-from-the-first-reading"], async (open) => {
-    const w = await open({ loadedByOthers: ["m2:7b"] });
+    const w = await open({ appLoadedBefore: ["m2:7b"] });
     w.whenNextAskedToLeave(() => w.otherProgramTakes(7_000));
     await w.chatSends("c1", { model: "m1:7b" });
     expect(w.askedToLeave()).toEqual(["m2:7b"]);
@@ -451,7 +506,7 @@ describe("a load is refused, or let in, from a measurement taken after everythin
 
 describe("a refusal says what would have to leave", () => {
   rule("a chat refused while ComfyUI runs somebody else's job says ComfyUI was not asked", ["refusal-names-nothing"], async (open) => {
-    const w = await open({ comfy: "busy" });
+    const w = await open({ comfy: "busy", freeOthers: true });
     await w.chatSends("c1", { model: "m1:7b" });
     expect(w.chat("c1").state).toBe("refused");
     expect(w.rec.freed).toEqual([]);
@@ -459,7 +514,7 @@ describe("a refusal says what would have to leave", () => {
   });
 
   it("a preload refused while ComfyUI runs somebody else's job says the same", async () => {
-    const w = await whole({ comfy: "busy" });
+    const w = await whole({ comfy: "busy", freeOthers: true });
     await w.preloads("m1:7b");
     const [load] = await w.preloaded();
     expect(load).toMatchObject({ state: "error" });
@@ -474,7 +529,7 @@ describe("a refusal says what would have to leave", () => {
   });
 
   it("a picture refused beside a model that would not leave names that model", async () => {
-    const w = await whole({ comfy: "idle", loadedByOthers: ["m2:7b"], slowToLeave: ["m2:7b"] });
+    const w = await whole({ comfy: "idle", appLoadedBefore: ["m2:7b"], slowToLeave: ["m2:7b"] });
     await w.pictureSends();
     await w.pass(21_000);
     expect(w.askedToLeave()).toEqual(["m2:7b"]);
@@ -519,7 +574,8 @@ const CARDS: Record<string, Card> = {
     if (wantsLoaded(arrival)) await appLoaded(w, "small:1b");
     return { w, model: wantsLoaded(arrival) ? "small:1b" : "m1:7b" };
   },
-  "an idle model": async (open, arrival) => ({ w: await open({ comfy: "stopped", loadedByOthers: ["m2:7b"] }), model: wantsLoaded(arrival) ? "m2:7b" : "m1:7b" }),
+  "an idle model": async (open, arrival) => ({ w: await open({ comfy: "stopped", appLoadedBefore: ["m2:7b"] }), model: wantsLoaded(arrival) ? "m2:7b" : "m1:7b" }),
+  "another program's idle model": async (open, arrival) => ({ w: await open({ comfy: "stopped", loadedByOthers: ["m2:7b"] }), model: wantsLoaded(arrival) ? "m2:7b" : "m1:7b" }),
   "a replying model": async (open, arrival) => {
     const w = await open({ comfy: "stopped" });
     await replying(w, "c0", "m2:7b");
@@ -600,6 +656,13 @@ const TABLE: Record<keyof typeof CARDS, Record<Arrival, Expected>> = {
     "a picture": { asked: ["m2:7b"], freed: false, outcome: "loads" },
     "a picture for the setup ComfyUI holds": { asked: ["m2:7b"], freed: false, outcome: "loads" },
   },
+  // stays until the person presses "Free it" (the chat's refusal carries it); a picture's refusal names it
+  "another program's idle model": {
+    "a chat for a model not loaded": { ...nothingAsked, outcome: "refused", says: CHAT_DOES_NOT_FIT },
+    "a chat for the model already loaded": { ...nothingAsked, outcome: "replies" },
+    "a picture": { ...nothingAsked, outcome: "refused", says: "The image needs 8.0 GiB and 7.0 GiB is free; a chat model this app did not load holds 7.1 GiB, stop it." },
+    "a picture for the setup ComfyUI holds": { ...nothingAsked, outcome: "refused", says: "The image needs 8.0 GiB and 7.0 GiB is free; a chat model this app did not load holds 7.1 GiB, stop it." },
+  },
   "a replying model": {
     // refused with the reply it would stop, before anything is asked of the card
     "a chat for a model not loaded": { ...nothingAsked, outcome: "refused", says: ["m2:7b"] },
@@ -609,8 +672,8 @@ const TABLE: Record<keyof typeof CARDS, Record<Arrival, Expected>> = {
   },
   "ComfyUI idle, holding its models": {
     "a chat for a model not loaded": { asked: [], freed: true, outcome: "loads" },
-    // asked to free its memory even so: one thing in memory, whatever the chat needs
-    "a chat for the model already loaded": { asked: [], freed: true, outcome: "replies" },
+    // somebody else started this ComfyUI: the model is in memory beside it, so nothing is asked
+    "a chat for the model already loaded": { ...nothingAsked, outcome: "replies" },
     "a picture": { asked: [], freed: true, outcome: "loads" },
     "a picture for the setup ComfyUI holds": { ...nothingAsked, outcome: "runs" },
   },

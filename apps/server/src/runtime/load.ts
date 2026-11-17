@@ -1,4 +1,5 @@
 import type { FitOffer, FitReport, ModelLoad } from "@gates-local/contracts";
+import { withFree } from "../fit/alternatives.ts";
 import { createFifoGate, type LoadGate } from "../gpu/gate.ts";
 import type { GpuLease } from "../gpu/lease.ts";
 import { ENGINE_BUSY_NOTE, createLoadedRecord, snapshotWithout, type Handoff, type LoadedSnapshot, type MemoryOwner, type Want } from "../gpu/memory.ts";
@@ -234,7 +235,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       if (afterFit) return finish(afterFit);
       numCtx = report.numCtx;
       if (report.verdict === "refuse") {
-        const offer = await deps.offer?.(report, baseUrl).catch(() => undefined);
+        const offer = withFree(await deps.offer?.(report, baseUrl).catch(() => undefined), report, handoff?.held);
         return finish({ model, numCtx, state: "error", message: report.message ?? `${model} at num_ctx ${numCtx} does not fit.`, ...(offer === undefined ? {} : { offer }) });
       }
       if (here.models.get(tag)?.contextLength === numCtx) return finish({ model, numCtx, state: "ready" });

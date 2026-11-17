@@ -867,6 +867,22 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       const answer: EngineLeave = await comfy.free(signal);
       return answer;
     },
+    ours() {
+      let cfg: ReturnType<typeof config>;
+      try { cfg = config(); }
+      catch { return true; }
+      return !cfg.enabled || owned?.baseUrl === cfg.baseUrl;
+    },
+    // external: ComfyUI's /system_stats gives what torch holds on each card as torch_vram_total
+    async holds(signal) {
+      let cfg: ReturnType<typeof config>;
+      try { cfg = config(); }
+      catch { return undefined; }
+      if (!cfg.enabled) return undefined;
+      if (!await isLocalHost(cfg.hostname, deps.localAddresses?.() ?? localAddresses(), deps.lookupHost ?? lookupHost, signal)) return undefined;
+      const stats = await client(cfg.baseUrl).stats(signal).catch(() => undefined);
+      return stats?.devices.filter((d) => d.type !== "cpu").reduce((sum, d) => sum + (d.torch_vram_total ?? 0), 0);
+    },
     killRuntimeNow() {
       if (!owned) return;
       const { pid, baseUrl } = owned;

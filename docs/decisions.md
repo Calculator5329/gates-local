@@ -1,5 +1,36 @@
 # Decisions
 
+## 2026-11-17 · Other programs' memory is freed only with a click
+
+**Amends:** "2026-11-13 · One thing in GPU memory, one owner of it", where every idle
+chat model was asked to leave "whoever loaded it" and a ComfyUI "whoever started it".
+
+**Owner's words:** "q14 B". Option B as asked: "Free our own models automatically, ask
+about anyone else's. When there isn't enough memory because of another program, show
+'ComfyUI holds 9 GB [Free it]' with a 'don't ask again' option."
+
+**Decided:**
+
+- The memory owner still asks the app's own things to leave without a word: a chat
+  model this app loaded (a send, `models.load`, a preload, recorded across one
+  restart), every model in the Ollama the app started (it runs only what the app
+  loaded), and the ComfyUI the app started.
+- A model loaded by another client or before the app started, and a ComfyUI the app
+  did not start, stay. They are measured like whisper and count as taken.
+- When the request still does not fit, the refusal carries what they hold
+  (`FitOffer.free`) and the composer shows one line: "ComfyUI holds 9 GB", a
+  **Free it** button and a **Don't ask again** button.
+- **Free it** (`memory.free`, allowed on the phone) sends the same unload or `/free`
+  as before, inside the load gate. The send, held reply or preload then runs again
+  in the usual order: measure, decide, load.
+- **Don't ask again** saves `freeOthers` (Settings › Advanced › GPU memory; computer
+  only, since the phone may not change settings). With it on, the owner asks other
+  programs' memory to leave too, as on 11-13.
+- A picture still frees a ComfyUI it runs on, whoever started it, since the job
+  replaces its setup anyway. Other clients' chat models beside a picture stay and the
+  picture's refusal names them.
+- Whisper and every other GPU program are measured only, never touched.
+
 ## 2026-11-09 · Drafts belong to their conversation
 
 Each thread keeps its own text, images and failed-send identity. The new-chat
@@ -363,7 +394,7 @@ take a new reading, decide from that reading alone, load. The planner no longer
 guesses which idle models will leave, and the image job no longer keeps its own
 unload list or credits ComfyUI's memory as free.
 
-What may be asked to leave:
+What may be asked to leave (amended 2026-11-17: other programs' memory only with a click):
 
 - A chat model in the Ollama the app talks to, whoever loaded it, unless a running
   reply of this app uses it: an unload request (`keep_alive: 0`). Never a stop.

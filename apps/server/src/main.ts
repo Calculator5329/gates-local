@@ -317,7 +317,8 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
       ? { status: () => runtime.status(), baseUrl: () => runtime.baseUrl(), onChange: (l) => runtime.onChange(l), ensure: () => runtime.discover(), lookIfDown: () => runtime.lookIfDown() }
       : runtime,
     catalog,
-    fit,
+    // why: the table and the offers count what the memory owner leaves in place as taken
+    fit: { ...fit, stays: services.memory.stays },
     push: (channel, payload, changes) => server?.push(channel, payload, changes),
     models: services,
     log,

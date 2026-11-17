@@ -11,7 +11,6 @@ import { Row } from "../lib/ui/settings-ui.tsx";
 import { FitSkel } from "../lib/ui/ui.tsx";
 export { openFit } from "./fit-actions.ts";
 import { FIT_DOT } from "../models/models-rules.ts";
-import { SlowLine } from "../models/MemoryMark.tsx";
 
 const gpuHead = (gpu: GpuStatus | undefined): string =>
   gpu === undefined ? "" : gpu.vendor === "none" ? gpu.detail ? "NVIDIA GPU unavailable" : "No supported GPU" : gpu.totalBytes ? `${shortGpu(gpu.name)} · ${cardGb(gpu.totalBytes)}` : shortGpu(gpu.name);
@@ -199,9 +198,16 @@ function Breakdown({ model, name, numCtx, gpuRaw, report, loaded }: { model: str
   );
 }
 
-function FitLine({ r, size }: { r: FitReport; size: number }) {
+function FitLine({ r, size, slow }: { r: FitReport; size: number; slow: SlowReason | undefined }) {
   const v = verdictOf(r);
   const at = `at ${k(size)}`;
+  // why: one verdict on the card: "slower now" is the truer one while something is in the way
+  if (slow !== undefined && v.k !== "no") return (
+    <div className="fp-v slow" data-testid="models.fit-panel.slow-line">
+      <Icon id="gauge" cls="s14" />
+      <span>{slow.short}</span>
+    </div>
+  );
   return (
     <div className="fp-v">
       {v.k === "no" ? (
@@ -240,10 +246,9 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
     <>
       {gpuNotice === undefined ? null : <div className="fp-n fp-note">{gpuNotice}</div>}
       <Row label={title} {...(gpuNotice === undefined && head !== "" ? { desc: head } : {})}>
-        {fit === undefined ? gpu?.vendor === "unreadable" ? null : table && gpuRaw !== undefined ? <span className="fp-n">{`No ${memory} reading for ${name}.`}</span> : <span className="fp-n" aria-busy="true"><FitSkel w="120px" /></span> : <FitLine r={fit} size={ctx} />}
+        {fit === undefined ? gpu?.vendor === "unreadable" ? null : table && gpuRaw !== undefined ? <span className="fp-n">{`No ${memory} reading for ${name}.`}</span> : <span className="fp-n" aria-busy="true"><FitSkel w="120px" /></span> : <FitLine r={fit} size={ctx} slow={cpu ? undefined : slow} />}
         {action}
       </Row>
-      {cpu ? null : <SlowLine fit={fit} tps={tps} tip={false} testId="models.fit-panel.slow-line" />}
       {fit === undefined ? null : (
         <details className="upd-more fp-more">
           <summary data-testid="models.fit-panel.details">

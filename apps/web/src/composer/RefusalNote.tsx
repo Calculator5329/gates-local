@@ -4,7 +4,7 @@ import { openFit } from "../fit/fit-actions.ts";
 import { Icon } from "../lib/ui/icons.tsx";
 import { MakerMark } from "../models/MakerMark.tsx";
 import { getDraft } from "../lib/store/drafts.ts";
-import { chooseForQueued, pickModel, send, sendQueuedNow, setContext } from "../lib/session/index.ts";
+import { chooseForQueued, freeMemory, pickModel, send, sendQueuedNow, setContext, updateSettings } from "../lib/session/index.ts";
 import { NA, type NoticeOffer, type State, getState, setState, useStore, waitingReplies } from "../lib/store/store.ts";
 import { closeTip } from "../lib/ui/ui.tsx";
 
@@ -32,18 +32,51 @@ export function takeOffer(kind: "context" | "model"): void {
   void chooseForQueued(held.id, model, choice.numCtx).then((chosen) => { if (chosen) sendQueuedNow(held.id); });
 }
 
-export const Slower = ({ words }: { words: FitWords | undefined }) =>
+export async function takeFree(remember: boolean): Promise<void> {
+  const s = getState();
+  const o = s.noticeOffer;
+  const free = o?.offer.free;
+  if (o === null || o.notice !== s.notice || free === undefined || free.length === 0) return;
+  closeTip();
+  setState({ notice: null, noticeOffer: null });
+  const failed = (remember ? await updateSettings({ freeOthers: true }) : null) ?? await freeMemory(free);
+  if (failed !== null) {
+    setState({ notice: failed });
+    return;
+  }
+  const draft = getDraft();
+  if (draft.text.trim() !== "" || draft.images.length > 0 || (draft.files?.length ?? 0) > 0) {
+    void send(draft.text);
+    return;
+  }
+  const held = waitingReplies(s).find((q) => q.threadId === s.threadId && q.stage === "held");
+  if (held !== undefined) sendQueuedNow(held.id);
+  else pickModel(o.model);
+}
+
+export const Slower =({ words }: { words: FitWords | undefined }) =>
   words?.k !== "spill" ? null : <span className="co-slow" role="img" aria-label={words.short} data-tip={words.short} data-testid="chat.composer.offer-slower"><Icon id="gauge" /></span>;
 
 export function RefusalNote({ o }: { o: NoticeOffer }) {
   const catalog = useStore(catalogOf);
   const name = (tag: string) => describeModel(tag, catalog).name;
-  const { context, model, short } = o.offer;
+  const remembers = useStore((s) => s.unavailable["settings.update"] !== true);
+  const { context, model, short, free } = o.offer;
   return (
     <p className="na c-note no c-offer" data-testid="chat.composer.offer" role="status">
       <Icon id="alert" cls="s12" />
       <span className="co-what">{name(o.model)} · {k(o.numCtx)}</span>
-      {context === undefined && model === undefined ? (
+      {free !== undefined && free.length > 0 ? (
+        <>
+          <span className="co-short" data-testid="chat.composer.offer-held">
+            {free.map((h) => `${h.kind === "model" ? name(h.name) : h.name} holds ${gb(h.bytes)}`).join(" · ")}
+          </span>
+          <button type="button" className="co-act" data-testid="chat.composer.offer-free" onClick={() => void takeFree(false)}>Free it</button>
+          {remembers ? (
+            <button type="button" className="co-act" data-testid="chat.composer.offer-free-always" onClick={() => void takeFree(true)}>Don't ask again</button>
+          ) : null}
+        </>
+      ) : context === undefined && model === undefined ? (
         <>
           <span className="co-short" data-testid="chat.composer.offer-short">
             needs {gb(short.needBytes)} · GPU {gb(short.gpuBytes)} + RAM {gb(short.ramBytes)} · {gb(short.shortBytes)} short

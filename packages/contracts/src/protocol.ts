@@ -37,6 +37,7 @@ import {
   ThreadPage,
   NumCtx,
   MemoryState,
+  OtherHolder,
   ModelLoad,
   PullProgress,
   RuntimeStatus,
@@ -247,6 +248,8 @@ export const methods = {
   "settings.modelDefaults": { params: S.Struct({ model: S.String.check(S.isMinLength(1)) }), result: ModelDefaults, phone: "allow" },
   "gpu.status": { params: NoParams, result: GpuStatus, phone: "allow", sync: GPU },
   "memory.status": { params: NoParams, result: MemoryState, phone: "allow", sync: MEMORY },
+  // why: "Free it" is part of sending, so the phone may press it; remembering it is settings.update
+  "memory.free": { params: S.Struct({ free: S.Array(OtherHolder).check(S.isMaxLength(16)) }), result: S.Struct({ left: S.Array(S.String) }), phone: "allow" },
   "models.catalog": { params: NoParams, result: S.Array(CatalogEntry), phone: "allow", sync: CATALOG },
   "models.suggested": { params: NoParams, result: SuggestedList, phone: "allow", sync: SUGGESTED },
   "models.estimate": { params: S.Struct({ name: S.String.check(S.isMinLength(1)), numCtx: NumCtx }), result: ModelEstimate, phone: "allow" },

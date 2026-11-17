@@ -792,6 +792,18 @@ function ResetSettings() {
   );
 }
 
+function FreeOthers() {
+  const on = useStore((s) => s.settings !== NA && s.settings?.freeOthers === true);
+  const locked = useStore((s) => s.unavailable["settings.update"] === true);
+  const [err, run] = useAct();
+  return (
+    <Row label="Free other programs' memory" desc="Without asking, when a chat needs it." err={err}>
+      {locked ? <Status dot={on ? "ok" : "off"}>{on ? "On" : "Off"}</Status>
+        : <button type="button" className="switch" role="switch" data-testid="settings.advanced.free-others" aria-checked={on} aria-label="Free other programs' memory without asking" onClick={() => void run(updateSettings({ freeOthers: !on }))} />}
+    </Row>
+  );
+}
+
 function Advanced() {
   const cpu = useStore((s) => noGpu(s.gpu));
   const canReset = useStore((s) => s.settings !== NA && s.unavailable["settings.update"] !== true);
@@ -800,6 +812,7 @@ function Advanced() {
       <Head title="Advanced" />
       <Grp title={cpu ? "System memory" : "GPU memory"}>
         <GpuMemory />
+        {cpu ? null : <FreeOthers />}
       </Grp>
       <Grp>
         <DataFolder />

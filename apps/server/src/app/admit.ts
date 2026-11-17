@@ -1,11 +1,11 @@
-import type { AttachedFile, BlockingTurn, FitOffer, Message } from "@gates-local/contracts";
+import type { AttachedFile, BlockingTurn, FitOffer, Message, OtherHolder } from "@gates-local/contracts";
 import { accountImages, imagePrompt, saveAttachments, visionHistory } from "../chat/attachments.ts";
 import { checkFiles, fileLine, fileSources } from "../chat/files.ts";
 import { condensePages } from "../chat/pages.ts";
 import { sendMark } from "../chat/send-times.ts";
 import type { TurnMessage } from "../chat/types.ts";
 import { fitToWindow, OMITTED_IMAGE } from "../chat/window.ts";
-import { offerAfterRefusal } from "../fit/alternatives.ts";
+import { offerAfterRefusal, withFree } from "../fit/alternatives.ts";
 import { planLoad } from "../fit/fit.ts";
 import { untilAborted } from "../fit/gpu.ts";
 import { fetchShow, sameModel } from "../fit/ollama.ts";
@@ -129,9 +129,10 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, said
         if (images.length && !vision) throw new AppError("image-input", `${model} cannot see images. Pick a model that reads images, or remove the attachments.`);
         if (images.length && deps.dataDir === undefined) throw new AppError("image-input", "Image storage is not available.");
         const turnSignal = turn.controller.signal;
+        let held: readonly OtherHolder[] | undefined;
         const refusal = async (report: FitReport) => {
           const e = new AppError("wont-fit", report.message ?? `${model} at num_ctx ${numCtx} does not fit (fit check refused).`, report);
-          const offer = await offerFor(baseUrl, report);
+          const offer = withFree(await offerFor(baseUrl, report), report, held);
           if (offer !== undefined) e.offer = offer;
           return e;
         };
@@ -171,6 +172,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, said
         }
         const admitted = async (signal: AbortSignal, context?: AdmitContext) => {
           const r = (await fit(signal, context)).report;
+          held = context?.handoff?.held;
           if (r.verdict !== "refuse") turn.inMemory = true;
           return r;
         };

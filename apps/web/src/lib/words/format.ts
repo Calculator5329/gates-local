@@ -69,6 +69,10 @@ export interface Verdict extends FitWords {
 
 const UNSAID: Record<FitReport["verdict"], VerdictKind> = { fits: "gpu", spills: "spill", refuse: "no" };
 
+// why: copies Picker.tsx shownNeed: "~" before an estimate, a measured need plain
+export const roughly = (measured: boolean) => (measured ? "" : "~");
+export const needBasis = (measured: boolean) => (measured ? "measured" : "estimated");
+
 export function verdictOf(r: FitReport): Verdict {
   const words = r.words ?? { basis: "now", k: UNSAID[r.verdict], label: "", word: "", chip: "", detail: "", mark: "", short: "", amt: 0 };
   return { ...words, need: r.needVramBytes, avail: r.freeVramBytes, measured: r.source === "measured" };

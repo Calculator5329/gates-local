@@ -48,3 +48,20 @@ it("a memory refusal's offer shows in the note only while the note still says th
   expect(offerShown()).toBe(false);
   expect(notice()).toContain("The image models are still being read.");
 });
+
+// decision: docs/decisions.md "Other programs' memory is freed only with a click"
+it("a refusal another program's memory causes names it with its size, offers Free it, and the phone cannot save don't ask again", () => {
+  const refused = "qwen3.5:9b at 32K doesn't fit in GPU memory.";
+  const short = { needBytes: 0, gpuBytes: 0, ramBytes: 0, shortBytes: 0 };
+  const free = [{ kind: "engine" as const, name: "ComfyUI", bytes: 9 * 1024 ** 3 }];
+  setState({ notice: refused, noticeOffer: { notice: refused, model: "qwen3.5:9b", numCtx: 32768, offer: { short, free } }, unavailable: {} });
+  const html = renderToStaticMarkup(createElement(Composer));
+  expect(html).toMatch(/data-testid="chat\.composer\.offer-held"[^>]*>ComfyUI holds 9\.0 GB</);
+  expect(html).toContain('data-testid="chat.composer.offer-free"');
+  expect(html).toContain('data-testid="chat.composer.offer-free-always"');
+  expect(html).not.toContain('data-testid="chat.composer.offer-short"');
+  setState({ unavailable: { "settings.update": true } });
+  const phone = renderToStaticMarkup(createElement(Composer));
+  expect(phone).toContain('data-testid="chat.composer.offer-free"');
+  expect(phone).not.toContain('data-testid="chat.composer.offer-free-always"');
+});

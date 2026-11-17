@@ -27,15 +27,71 @@ function owner(o: ReturnType<typeof ollama>, more: Partial<MemoryOwnerDeps> = {}
 
 const signal = new AbortController().signal;
 const chat = (model: string) => ({ kind: "chat" as const, model, numCtx: 16384 });
+const appLoaded = (m: ReturnType<typeof owner>, ...tags: string[]) => { for (const tag of tags) m.loaded.loaded(tag, 16384); return m; };
 
 describe("one thing in memory: the handoff", () => {
-  it("asks every other model to leave, whoever loaded it, and keeps the one wanted", async () => {
+  it("asks every other model the app loaded to leave and keeps the one wanted", async () => {
     const o = ollama(["a:1b", "b:2b", "c:3b"]);
-    const m = owner(o);
+    const m = appLoaded(owner(o), "a:1b", "b:2b", "c:3b");
     const h = await m.gate(() => m.handoff(chat("b:2b"), signal));
     expect(o.asked.toSorted()).toEqual(["a:1b", "c:3b"]);
     expect(h.left.toSorted()).toEqual(["a:1b", "c:3b"]);
+    expect(h.held).toEqual([]);
     expect([...o.listed]).toEqual(["b:2b"]);
+  });
+
+  it("a model another program loaded is not asked: it stays and is named with what it holds", async () => {
+    const o = ollama(["mine:1b", "theirs:7b"]);
+    const m = appLoaded(owner(o), "mine:1b");
+    const h = await m.gate(() => m.handoff(chat("b:2b"), signal));
+    expect(o.asked).toEqual(["mine:1b"]);
+    expect(h.left).toEqual(["mine:1b"]);
+    expect(h.held).toEqual([{ kind: "model", name: "theirs:7b", bytes: 1e9 }]);
+    expect([...o.listed]).toEqual(["theirs:7b"]);
+  });
+
+  it("with \"don't ask again\" saved, another program's model is asked to leave too", async () => {
+    const o = ollama(["mine:1b", "theirs:7b"]);
+    const m = appLoaded(owner(o, { freeOthers: () => true }), "mine:1b");
+    const h = await m.gate(() => m.handoff(chat("b:2b"), signal));
+    expect(o.asked.toSorted()).toEqual(["mine:1b", "theirs:7b"]);
+    expect(h.held).toEqual([]);
+  });
+
+  it("free: asks only the named models to leave, then they are gone", async () => {
+    const o = ollama(["mine:1b", "theirs:7b", "other:3b"]);
+    const m = owner(o);
+    const h = await m.gate(() => m.free([{ kind: "model", name: "theirs:7b", bytes: 1e9 }], signal));
+    expect(o.asked).toEqual(["theirs:7b"]);
+    expect(h.left).toEqual(["theirs:7b"]);
+    expect([...o.listed].toSorted()).toEqual(["mine:1b", "other:3b"]);
+  });
+
+  it("a ComfyUI the app did not start: a chat leaves it and names what it holds; a picture frees it", async () => {
+    let asks = 0;
+    const engine = { leave: async () => { asks += 1; return "freed" as const; }, ours: () => false, holds: async () => 9e9 };
+    const m = owner(ollama([]), { engine: () => engine });
+    const h = await m.handoff(chat("b:2b"), signal);
+    expect(h).toMatchObject({ engine: "foreign", held: [{ kind: "engine", name: "ComfyUI", bytes: 9e9 }] });
+    expect(asks).toBe(0);
+    expect((await m.handoff({ kind: "image", setup: "p 512x512" }, signal)).engine).toBe("freed");
+    expect(asks).toBe(1);
+  });
+
+  it("a ComfyUI the app did not start: Free it asks it, and with \"don't ask again\" a chat asks it", async () => {
+    let asks = 0;
+    const engine = { leave: async () => { asks += 1; return "freed" as const; }, ours: () => false, holds: async () => 9e9 };
+    const m = owner(ollama([]), { engine: () => engine });
+    expect((await m.free([{ kind: "engine", name: "ComfyUI", bytes: 9e9 }], signal)).left).toEqual(["ComfyUI"]);
+    expect(asks).toBe(1);
+    const always = owner(ollama([]), { engine: () => engine, freeOthers: () => true });
+    expect((await always.handoff(chat("b:2b"), signal)).engine).toBe("freed");
+    expect(asks).toBe(2);
+  });
+
+  it("a ComfyUI the app did not start that holds nothing is idle and named nowhere", async () => {
+    const m = owner(ollama([]), { engine: () => ({ leave: async () => "freed" as const, ours: () => false, holds: async () => 0 }) });
+    expect(await m.handoff(chat("b:2b"), signal)).toMatchObject({ engine: "idle", held: [] });
   });
 
   it("never asks a model a running reply uses to leave (a reply on A while B is sent)", async () => {
@@ -50,14 +106,14 @@ describe("one thing in memory: the handoff", () => {
     const o = ollama(["a:1b"]);
     const urls: string[] = [];
     const fetch = (async (input: unknown, init?: RequestInit) => { urls.push(String(input)); return o.fetch(input as string, init); }) as typeof globalThis.fetch;
-    const m = owner(o, { fetch });
+    const m = appLoaded(owner(o, { fetch }), "a:1b");
     await m.handoff(chat("b:2b"), signal);
     expect(urls).toEqual([`${BASE}/api/generate`]);
   });
 
   it("a model that never leaves: the wait ends at its bound and it is named as stayed", async () => {
     const o = ollama(["a:1b"], ["a:1b"]);
-    const m = owner(o, { waitMs: 60 });
+    const m = appLoaded(owner(o, { waitMs: 60 }), "a:1b");
     const started = Date.now();
     const h = await m.handoff(chat("b:2b"), signal);
     expect(Date.now() - started).toBeGreaterThanOrEqual(55);
@@ -92,14 +148,14 @@ describe("one thing in memory: the handoff", () => {
   it("after something left, the settle reads the GPU until two reads in a row stop rising", async () => {
     const reads = [1e9, 3e9, 5e9, 5e9, 5e9, 5e9];
     let i = 0;
-    const m = owner(ollama(["a:1b"]), { readFree: async () => reads[Math.min(i++, reads.length - 1)]! });
+    const m = appLoaded(owner(ollama(["a:1b"]), { readFree: async () => reads[Math.min(i++, reads.length - 1)]! }), "a:1b");
     await m.handoff(chat("b:2b"), signal);
     expect(i).toBe(5);
   });
 
   it("a computer with no card to read has nothing to settle: one reading, no waiting", async () => {
     let i = 0;
-    const m = owner(ollama(["a:1b"]), { readFree: async () => { i++; return undefined; }, pollMs: 250, waitMs: 20_000 });
+    const m = appLoaded(owner(ollama(["a:1b"]), { readFree: async () => { i++; return undefined; }, pollMs: 250, waitMs: 20_000 }), "a:1b");
     const started = performance.now();
     await m.handoff(chat("b:2b"), signal);
     expect(i).toBe(1);

@@ -117,6 +117,7 @@ export function applyPatch(current: Settings, patch: SettingsPatch): Settings {
     ...(tool === undefined ? {} : { imageTool: tool }),
     ...(patch.updateEveryChange === undefined ? {} : { updateEveryChange: patch.updateEveryChange }),
     ...(patch.updateAutomatic === undefined ? {} : { updateAutomatic: patch.updateAutomatic }),
+    ...(patch.freeOthers === undefined ? {} : { freeOthers: patch.freeOthers }),
     ...(patch.accent === undefined ? {} : { accent: patch.accent }),
   };
 }

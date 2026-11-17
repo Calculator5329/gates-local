@@ -29,6 +29,11 @@ async function turns(): Promise<{ model: string; numCtx: number; prompt: string 
   return ((await (await fetch(`${FAKE_URL}/__fake/state`)).json()) as { turns: { model: string; numCtx: number; prompt: string }[] }).turns;
 }
 
+/** The models the fake Ollama holds in memory. */
+async function state(): Promise<{ loaded: { name: string }[] }> {
+  return (await (await fetch(`${FAKE_URL}/__fake/state`)).json()) as { loaded: { name: string }[] };
+}
+
 async function pick(page: Page, tag: string): Promise<void> {
   await page.locator("#modelBtn").click();
   await page.locator(`#picker .pk-r[data-m="${tag}"] .pk-select`).click();
@@ -87,6 +92,30 @@ test("WIN-MEM-02: a smaller context runs, partly in system memory: the note offe
   await expect(page.locator(".think.run")).toHaveCount(0, { timeout: 10_000 });
   await expect.poll(async () => (await turns()).at(-1)).toMatchObject({ model: "qwen3.5:9b", numCtx: 8192 });
   await expect(page.locator("#modelBtn")).toContainText("8k");
+  await expect(note).toHaveCount(0);
+});
+
+// decision: docs/decisions.md "Other programs' memory is freed only with a click"
+test("another program's model is not asked to leave: the note names it with its size, and Free it frees it and sends", async ({ page }, info) => {
+  // another client of the same Ollama loads Qwen 3.5 9B; the app never loaded it
+  await fetch(`${FAKE_URL}/api/generate`, { method: "POST", body: JSON.stringify({ model: "qwen3.5:9b", options: { num_ctx: 4096 } }) });
+  await page.locator("#ta").fill("Hello there");
+  await pick(page, "qwen3.5:4b");
+  const note = page.getByTestId("chat.composer.offer");
+  await expect(note).toContainText("Qwen 3.5 4B");
+  const held = note.getByTestId("chat.composer.offer-held");
+  await expect(held).toHaveText(/^Qwen 3\.5 9B holds \d+\.\d GB$/);
+  await expect(note.getByTestId("chat.composer.offer-free-always")).toBeVisible();
+  await settled(page);
+  await shot(page, info.outputPath("note-free-it.png"), NOTE);
+  // nothing was asked of it, and nothing was sent
+  expect((await state()).loaded.map((l) => l.name)).toContain("qwen3.5:9b");
+  expect(await turns()).toEqual([]);
+  await note.getByTestId("chat.composer.offer-free").click();
+  await expect(page.locator(".turn.a")).toHaveCount(1);
+  await expect(page.locator(".think.run")).toHaveCount(0, { timeout: 10_000 });
+  await expect.poll(async () => (await turns()).at(-1)).toMatchObject({ model: "qwen3.5:4b", numCtx: 16384 });
+  expect((await state()).loaded.map((l) => l.name)).not.toContain("qwen3.5:9b");
   await expect(note).toHaveCount(0);
 });
 

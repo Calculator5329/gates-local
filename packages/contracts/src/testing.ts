@@ -225,6 +225,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "settings.modelDefaults": { params: { model: "qwen3.5:9b" }, result: { system: "", parameters: "temperature 0.8" } },
   "gpu.status": { params: {}, result: gpu },
   "memory.status": { params: {}, result: { resident: { kind: "chat", model: "qwen3.5:9b", numCtx: 16384, since: 1 } } },
+  "memory.free": { params: { free: [{ kind: "engine", name: "ComfyUI", bytes: 9_663_676_416 }] }, result: { left: ["ComfyUI"] } },
   "models.catalog": {
     params: {},
     result: [

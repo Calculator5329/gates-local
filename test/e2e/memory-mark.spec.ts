@@ -7,8 +7,8 @@ import { expect, openModels, stack, test, waitReady } from "./fixtures.ts";
 import { holds } from "./waits.ts";
 
 const BLENDER_MIB = Math.round(9.7 * 1024);
-/** One decimal under 10 GB, whole from 10 up, as the picture reads ("6.6 / 16 GB", "17 / 16 GB"). */
-const MARK = /^(\d\.\d|\d{2,}) \/ (\d+) GB$/;
+/** One decimal under 10 GB, whole from 10 up, as the picture reads ("6.6 / 16 GB", "17 / 16 GB"); "~" before an estimate, as the picker writes it. */
+const MARK = /^~?(\d\.\d|\d{2,}) \/ (\d+) GB$/;
 
 /** The mark's number, and its fill as a share of its bar. */
 async function readMark(mark: Locator) {
@@ -71,7 +71,9 @@ test("one memory mark in Models and Download, against the card, with other progr
   await holds(page, 1000, () => tip.isVisible(), false, { message: "a tooltip over the mark" });
   await page.screenshot({ path: info.outputPath("mark-download-hover.png"), animations: "disabled" });
   await expect(tip).toBeHidden();
-  await expect(row.locator(".mm")).toHaveAttribute("aria-label", /^Runs on the GPU: (\d\.\d|\d{2,}) of 16 GB$/);
+  // a model not downloaded yet is an estimate: "~" on screen, said in words to a screen reader
+  await expect(row.locator(".mm-n")).toHaveText(/^~/);
+  await expect(row.locator(".mm")).toHaveAttribute("aria-label", /^Runs on the GPU: (\d\.\d|\d{2,}) of 16 GB, estimated$/);
 });
 
 // The computer keeps some of its memory for itself, so a model can be too big while needing less than the whole.

@@ -69,6 +69,8 @@ interface OwnerOptions {
   /** The owner's bound on each wait (unload, settle) and its poll. */
   waitMs?: number;
   pollMs?: number;
+  /** The Ollama is the app's own, which holds only what the app loaded. */
+  holdsOne?: boolean;
 }
 
 /**
@@ -118,7 +120,7 @@ async function fixture(options: Partial<ImageDeps> & OwnerOptions = {}, realOlla
   let socket: EventTarget | undefined;
   const store = openThreadStore(path.join(dataDir, "threads.sqlite"));
   instances.push({ close: async () => store.close() });
-  const { onModelUnloaded, replying, waitMs = 50, pollMs = 5, ...imageOptions } = options;
+  const { onModelUnloaded, replying, waitMs = 50, pollMs = 5, holdsOne, ...imageOptions } = options;
   // The settle after something left reads the same GPU the fit does (services.ts: one nvidia-smi).
   const reader = "readGpu" in imageOptions ? imageOptions.readGpu : async () => ({ freeBytes });
   const ollamaUrl = realOllama ?? "http://fake-ollama";
@@ -131,6 +133,7 @@ async function fixture(options: Partial<ImageDeps> & OwnerOptions = {}, realOlla
       return ((await res.json()) as { models: { name: string }[] }).models.map((m) => ({ name: m.name, sizeBytes: 0, sizeVramBytes: 0 }));
     },
     replying: () => replying?.() ?? [],
+    ...(holdsOne === undefined ? {} : { holdsOne: () => holdsOne }),
     engine: () => module,
     fetch: (input, init) => fakeFetch(input, init),
     onUnloaded: (model) => onModelUnloaded?.(model),
@@ -231,7 +234,8 @@ async function fixture(options: Partial<ImageDeps> & OwnerOptions = {}, realOlla
     pickFolder: (folder: string | undefined) => { imageFolder = folder; },
     sendFrames: (make: typeof frames) => { frames = make; },
     workflows: (routes: Record<string, unknown>) => { workflowRoutes = routes; },
-    ollamaLists: (models: string[] | undefined) => { listed = models; },
+    // A name that starts "foreign" is another program's; the rest are models this app loaded.
+    ollamaLists: (models: string[] | undefined) => { listed = models; for (const m of models ?? []) if (!m.startsWith("foreign")) memory.loaded.loaded(m, 16384); },
     stickyChat: (models: string[]) => { sticky = models; },
     configure: (v: { enabled?: boolean; answering?: boolean; present?: boolean; pid?: number; freeBytes?: number; hold?: boolean; missingModel?: boolean; die?: boolean; swapPidOnQueue?: boolean; freeAfterStart?: number; activeOverride?: boolean; activeState?: string; resident?: number; comfyUrl?: string; cpu?: boolean; gpuError?: boolean; stuck?: boolean; queueErrors?: number; busy?: boolean; noImage?: boolean; invalidPng?: boolean }) => {
       enabled = v.enabled ?? enabled; answering = v.answering ?? answering; present = v.present ?? present;
@@ -464,13 +468,13 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     f.configure({ pid: 99 }); const count = f.calls.filter((c) => c === "stop").length;
     await f.module.stopIdle(); expect(f.calls.filter((c) => c === "stop")).toHaveLength(count);
   });
-  it("asks every chat model no reply uses to leave, whoever loaded it, and measures again; a different setup still short refuses with numbers and occupants", async () => {
+  it("asks every chat model this app loaded that no reply uses to leave, and measures again; a different setup still short refuses with numbers and occupants", async () => {
     const f = await fixture({ replying: () => ["replying-chat"] }); f.configure({ freeBytes: 5000 });
     f.ollamaLists(["foreign-chat", "app-chat", "replying-chat"]);
     const first = await f.module.generate({ prompt: "a tree" }); await f.module.wait(first.jobId);
-    expect(f.events.at(-1)?.state).toBe("done"); expect(f.calls.filter((c) => c === "/api/generate")).toHaveLength(2);
-    expect(f.ollamaPosts, "a model a running reply uses is never asked").toEqual([{ model: "foreign-chat", keep_alive: 0 }, { model: "app-chat", keep_alive: 0 }]);
-    expect(await (await f.ps()).json()).toEqual({ models: [{ name: "replying-chat" }] });
+    expect(f.events.at(-1)?.state).toBe("done"); expect(f.calls.filter((c) => c === "/api/generate")).toHaveLength(1);
+    expect(f.ollamaPosts, "another program's model and a model a running reply uses are never asked").toEqual([{ model: "app-chat", keep_alive: 0 }]);
+    expect(await (await f.ps()).json()).toEqual({ models: [{ name: "foreign-chat" }, { name: "replying-chat" }] });
     f.configure({ freeBytes: 100 }); f.choose({ preset: "moss-image", width: 1024, height: 1024 });
     const next = await f.module.generate({ prompt: "a tree" }); await f.module.wait(next.jobId);
     expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "wont-fit" });
@@ -571,7 +575,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     it("every model of the app's Ollama left and Ollama memory still holds the most: another Ollama's, not called this app's", async () => {
       const { f, said } = await refuse({ readGpu: async () => ({ freeBytes: 3.5 * gib, holders: "ollama", tenants: [
         { pid: 8, label: "ollama", role: "ollama", usedBytes: 7 * gib }] }) });
-      expect(f.ollamaPosts, "both were asked, whoever loaded them").toEqual([{ model: "foreign-chat", keep_alive: 0 }, { model: "app-chat", keep_alive: 0 }]);
+      expect(f.ollamaPosts, "only the app's was asked; another program's stays").toEqual([{ model: "app-chat", keep_alive: 0 }]);
       expect(said).toBe("The image needs 9.0 GiB and 3.5 GiB is free; a chat model this app did not load holds 7.0 GiB, stop it.");
     });
     it("nothing is credited to ComfyUI: the need is the setup's whole need, and ComfyUI is never named as the holder", async () => {
@@ -698,6 +702,8 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
       const f = await fixture({ requiredBytes: undefined, replying: () => loader.replying(),
         onModelUnloaded: (model) => loader.unloaded(model),
         readGpu: async () => ({ freeBytes: resident() ? size.bytes - gib : size.bytes + 6 * gib, holders: "ollama", tenants: resident() ? [chat(7 * gib)] : [] }) }, fake.url);
+      // services.ts gives the loader and the memory owner one record
+      f.memory.loaded.loaded(MODEL, 16384);
       f.files({ flux: true });
       const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
       expect(f.events.at(-1)?.state).toBe("done");
@@ -716,7 +722,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
      * `turns` chat turns of this app run on it, then an image needs its memory; with `open` one more
      * turn is still replying on it when the image asks.
      */
-    async function warmModel(turns: number, open = false) {
+    async function warmModel(turns: number, open = false, holdsOne = true) {
       const fake = await startFakeOllama({ scenario: "threads", options: { firstTokenDelayMs: 0, tokenDelayMs: 0 } });
       instances.push({ close: () => fake.close() });
       const MODEL = "qwen3.5:9b";
@@ -736,7 +742,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
       const running = open ? loader.reserve(MODEL) : undefined;
       await running?.admit(16384);
       const resident = () => fake.state().loaded.length > 0;
-      const f = await fixture({ requiredBytes: undefined, replying: () => loader.replying(),
+      const f = await fixture({ requiredBytes: undefined, replying: () => loader.replying(), holdsOne,
         onModelUnloaded: (model) => loader.unloaded(model),
         readGpu: async () => ({ freeBytes: resident() ? size.bytes - gib : size.bytes + 6 * gib, holders: "ollama", tenants: resident() ? [chat(7 * gib)] : [] }) }, fake.url);
       f.files({ flux: true });
@@ -751,11 +757,18 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
       expect(fake.state().loaded).toEqual([]);
       expect(loader.replying()).toEqual([]);
     });
-    it("the same warm model with no turn of this app: asked to leave all the same, whoever loaded it (WIN-MEM-01)", async () => {
+    it("the same warm model with no turn of this app, in the app's own Ollama: asked to leave all the same (WIN-MEM-01)", async () => {
       const { f, fake, MODEL } = await warmModel(0);
       expect(f.events.at(-1)?.state).toBe("done");
       expect(f.ollamaPosts).toEqual([{ model: MODEL, keep_alive: 0 }]);
       expect(fake.state().loaded).toEqual([]);
+    });
+    it("a warm model in an Ollama the person runs: another program's, so it stays and the refusal names it", async () => {
+      const { f, fake, MODEL } = await warmModel(1, false, false);
+      expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "wont-fit" });
+      expect(f.events.at(-1)?.message).toContain("a chat model this app did not load holds 7.0 GiB");
+      expect(f.ollamaPosts, "nothing unloaded").toEqual([]);
+      expect(fake.state().loaded.map((l) => l.name)).toEqual([MODEL]);
     });
     it("a reply still running on the warm model: never asked to leave, and the refusal names it", async () => {
       const { f, fake, MODEL } = await warmModel(0, true);

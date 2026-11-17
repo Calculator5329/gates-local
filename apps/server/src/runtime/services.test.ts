@@ -85,7 +85,7 @@ it("S-08: two services with different data dirs run their own Ollama against the
   expect(await models(rb.baseUrl)).toBe(appModelsDir(b));
 });
 
-it("one thing in memory: the handoff asks a model the app never loaded to leave an Ollama it did not start, and never stops that Ollama", async () => {
+it("one thing in memory: a model the app never loaded stays and is named; Free it asks it to leave an Ollama the app did not start, never stopping that Ollama", async () => {
   const MODEL = "qwen3.5:9b";
   let ps = [{ name: MODEL, size: 1, size_vram: 1, context_length: 16384 }];
   const asked: unknown[] = [];
@@ -107,7 +107,9 @@ it("one thing in memory: the handoff asks a model the app never loaded to leave 
   expect(system.loader.appLoadedModels(), "resident from before the app: not the app's load").toEqual([]);
 
   const handoff = await system.memory.gate(() => system.memory.handoff({ kind: "chat", model: "gemma4:e4b", numCtx: 16384 }, new AbortController().signal));
-  expect(handoff).toMatchObject({ left: [MODEL], stayed: [] });
+  expect(handoff).toMatchObject({ left: [], stayed: [], held: [{ kind: "model", name: MODEL, bytes: 1 }] });
+  expect(asked, "another program's model is not asked without a click").toEqual([]);
+  expect(await system.handlers["memory.free"]!({ free: handoff.held }, { clientId: 1 })).toEqual({ left: [MODEL] });
   expect(asked, "an unload request (keep_alive 0) is all an Ollama the app did not start is asked").toEqual([{ model: MODEL, keep_alive: 0 }]);
   expect(system.runtime.status(), "still the external Ollama, never stopped or adopted").toMatchObject({ state: "ready", owner: "external" });
   expect(system.memory.status().handoff).toMatchObject({ to: { kind: "chat", model: "gemma4:e4b" }, stage: "measuring" });
@@ -1121,6 +1123,8 @@ describe("a load that needs a busy model's GPU: turns.blocking and reply.send co
     const comfy = await ownedIdleComfy(lease, work);
     // Y needs about 7830 MiB plus the 512 MiB margin: 1000 free + X's 1907 + ComfyUI's 6000, and neither alone is enough.
     const t = await withX(withComfyToo(comfy, 6000, () => resident()), { image: comfy.image, lease }, twoModels(2e9));
+    // X was resident before this app started; the app loaded it all the same, so it may be asked to leave.
+    t.r.s.memory.loaded.loaded(MODEL, 16384);
     const sent = await settled(Promise.resolve(sendStarted(t.r.app, { threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx)), "chat send admission");
     expect(sent).toMatchObject({ resolved: { turnId: expect.any(String) } });
     const y = (sent as { resolved: { turnId: string } }).resolved;
@@ -1192,6 +1196,8 @@ describe("a load that needs a busy model's GPU: turns.blocking and reply.send co
       // Z's 9 GB comes back to nvidia-smi once Z was asked to leave.
       { fit: { runNvidiaSmi: smiAfter(1000, () => [{ name: Z, vram: 9e9 }]), readMeminfo: async () => "MemAvailable: 1000000 kB\n" } },
     );
+    // Z is a model this app loaded, so it is asked to leave without a word.
+    r.s.memory.loaded.loaded(Z, 16384);
     const table = await r.app.handlers["fit.table"]({}, ctx);
     expect(table.rows.find((row) => row.model === Y && row.numCtx === 16384)).toMatchObject({ verdict: "fits" });
     expect(await r.s.handlers["models.load"]!({ model: Y, numCtx: 16384 }, ctx)).toMatchObject({ state: "ready" });
