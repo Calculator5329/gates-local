@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
 import { readGpuStatus } from "@gates-local/server/fit/gpu-status.ts";
-import { fitWords, type FitReport, type GpuStatus } from "@gates-local/contracts";
+import { fitWords, type FitReport, type GpuOccupant, type GpuStatus } from "@gates-local/contracts";
 import { NO_GPU_TEXT } from "../lib/words/format.ts";
 
 const store = vi.hoisted(() => ({ state: undefined as unknown }));
@@ -64,11 +64,12 @@ it("waits for the GPU reading before showing a row, so Details never grows when 
   expect(html).not.toContain("couldn't read the GPU");
 });
 
-/** The memory bar and its legend for "chat" on a 16 GB card beside Whisper, `loaded` or not. */
-const bar = (loaded: boolean): string => {
+const WHISPER: GpuOccupant = { kind: "whisper", label: "whisper", bytes: 2e9, protected: false };
+/** The memory bar and its legend for "chat" on a 16 GB card beside Whisper, `loaded` or not; `occupants` as the card reading lists them. */
+const bar = (loaded: boolean, occupants: readonly GpuOccupant[] = loaded ? [{ kind: "chat-model", label: "chat", bytes: 5e9, protected: false }, WHISPER] : [WHISPER], freeBytes = 12e9): string => {
   store.state = {
     model: "chat", numCtx: 16384, fitPanel: { model: null }, settings: { defaultNumCtx: 16384 },
-    gpu: { vendor: "nvidia", name: "RTX", totalBytes: 16e9, freeBytes: 12e9, occupants: [{ kind: "whisper", label: "whisper", bytes: 2e9, protected: false }], systemMemoryAvailableBytes: 16e9, measuredAt: 1 },
+    gpu: { vendor: "nvidia", name: "RTX", totalBytes: 16e9, freeBytes, occupants, systemMemoryAvailableBytes: 16e9, measuredAt: 1 },
     models: [], catalog: [], loads: loaded ? { chat: { state: "ready", numCtx: 16384 } } : {}, messages: {}, firstToken: {}, unavailable: {},
     fitTable: { reading: { boot: "b", seq: 1, measuredAt: 1 }, memory: { kind: "gpu", freeBytes: 12e9, usableBytes: 11e9 }, rows: [{ model: "chat", numCtx: 16384, freeVramBytes: 16e9, needVramBytes: 5e9, spillRamBytes: 0, verdict: "fits", source: "estimate", stops: [] }] },
   };
@@ -79,6 +80,32 @@ it("the bar draws the model only while it is loaded, never an estimate of where 
   expect(bar(true)).toContain("sw-chat");
   expect(bar(false)).not.toContain("sw-chat");
   expect(bar(false)).not.toContain("<small>loaded</small>");
+});
+
+/** A legend row's name and amount, tags dropped. */
+const legendRows = (html: string): string[] => [...html.matchAll(/<div class="lg-r">(.*?)<\/div>/g)].map((m) => (m[1] ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+
+it("the bar is the card reading: another loaded chat model is drawn, and free is what the card says is free", () => {
+  const rows = legendRows(bar(false, [{ kind: "chat-model", label: "Gemma 4", bytes: 6e9, protected: false }, WHISPER], 8e9));
+  expect(rows).toContain("Gemma 4 chat model 5.6 GB");
+  expect(rows).toContain("Currently free 7.5 GB");
+});
+
+/** A finished reply from "chat" that started at `startedAt` and showed its first word at `firstTokenAt`. */
+const reply = (startedAt: number, firstTokenAt: number) => ({ role: "assistant", model: "chat", times: { startedAt, firstTokenAt } });
+
+it("the speed is this model's newest reply, whichever chat holds it", () => {
+  bar(false);
+  store.state = { ...(store.state as object), messages: { older: [reply(1_000, 6_000)], newer: [reply(9_000, 10_000)] } };
+  const html = renderToStaticMarkup(createElement(GpuMemory));
+  expect(html).toContain("<b>1.0 s</b>");
+  expect(html).not.toContain("<b>5.0 s</b>");
+});
+
+it("this model's segment is what it holds on the card, not the estimate of what it needs", () => {
+  const rows = legendRows(bar(true, [{ kind: "chat-model", label: "chat", bytes: 6.5e9, protected: false }, WHISPER], 7e9));
+  expect(rows).toContain("chat loaded 6.1 GB");
+  expect(rows).toContain("Currently free 6.5 GB");
 });
 
 it("keeps the existing no-GPU wording when nvidia-smi is absent", async () => {

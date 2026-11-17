@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-17: the GPU memory bar is the card reading
+
+- The memory bar in a model's details draws every loaded chat model at what it holds, and "Currently free" is the card's own free reading. Before, other loaded chat models were left off, so free read too high, and this model was drawn at its estimate.
+- The speed under it comes from the model's newest reply in any chat, not the first chat that has one.
+
 ## 2026-11-17: a failure says what to do
 
 - A reply that fails because Ollama stopped answering, the model is gone, or the context size is wrong now says what to do instead of "The reply didn't finish." The runtime's own words no longer sit in a tooltip.

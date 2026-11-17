@@ -27,6 +27,8 @@ export function shortGpu(name: string | undefined): string {
 function occName(o: GpuOccupant): { nm: string; small: string } {
   const nm = holderName(o);
   switch (o.kind) {
+    case "chat-model":
+      return { nm, small: "chat model" };
     case "whisper":
       return { nm, small: "speech-to-text" };
     case "image":
@@ -44,10 +46,12 @@ function occName(o: GpuOccupant): { nm: string; small: string } {
 const swOf = (o: GpuOccupant, i: number) => (o.kind === "whisper" ? "sw-whisper" : i % 2 === 0 ? "sw-occ" : "sw-other");
 const occupantKey = (o: GpuOccupant) => JSON.stringify([o.kind, o.label, o.protected]);
 
-function MemoryBar({ gpu, name, v, loaded }: { gpu: GpuStatus; name: string; v: Verdict; loaded: boolean }) {
+function MemoryBar({ gpu, name, loaded }: { gpu: GpuStatus; name: string; loaded: boolean }) {
   const tot = r1(gpu.totalBytes ?? 0);
   if (tot <= 0) return null;
-  const occ = gpu.occupants.filter((o) => o.kind !== "chat-model");
+  // why: every segment is what the card reading measured; this model is the one drawn as the chat
+  const own = loaded ? gpu.occupants.find((o) => o.kind === "chat-model" && o.label === name) : undefined;
+  const occ = gpu.occupants.filter((o) => o !== own);
   const counts = new Map<string, number>();
   const parts = occ.map(o => {
     const identity = occupantKey(o), n = counts.get(identity) ?? 0;
@@ -55,8 +59,8 @@ function MemoryBar({ gpu, name, v, loaded }: { gpu: GpuStatus; name: string; v: 
     return { o, gb: r1(o.bytes), key: `${identity}:${n}` };
   });
   const used = parts.reduce((a, p) => a + p.gb, 0);
-  const ch = !loaded || v.k === "no" ? 0 : Math.min(r1(v.need), Math.max(0, Math.round((tot - used) * 10) / 10));
-  const un = Math.max(0, Math.round((tot - used - ch) * 10) / 10);
+  const ch = own === undefined ? 0 : r1(own.bytes);
+  const un = gpu.freeBytes === undefined ? Math.max(0, Math.round((tot - used - ch) * 10) / 10) : r1(gpu.freeBytes);
   const w = (x: number) => `${((x / tot) * 100).toFixed(2)}%`;
   return (
     <>
@@ -107,18 +111,20 @@ function MemoryBar({ gpu, name, v, loaded }: { gpu: GpuStatus; name: string; v: 
   );
 }
 
+// why: the newest reply in any chat, so the numbers are from the model's last load
 function speedOf(s: State, model: string): { ttft: number; tps: number | null } | null {
+  let best: { at: number; ttft: number; tps: number | null } | null = null;
   for (const msgs of Object.values(s.messages)) {
     for (let i = msgs.length - 1; i >= 0; i--) {
       const m = msgs[i];
       if (m?.role !== "assistant" || m.model !== model) continue;
       const first = m.times?.firstTokenAt;
       if (first === undefined || m.times === undefined) continue;
-      const ft = first - m.times.startedAt;
-      return { ttft: ft, tps: decodeSpeed(m.stats) ?? null };
+      if (best === null || m.times.startedAt > best.at) best = { at: m.times.startedAt, ttft: first - m.times.startedAt, tps: decodeSpeed(m.stats) ?? null };
+      break;
     }
   }
-  return null;
+  return best === null ? null : { ttft: best.ttft, tps: best.tps };
 }
 
 function Speed({ model, name, numCtx, loaded }: { model: string; name: string; numCtx: number; loaded: boolean }) {
@@ -186,7 +192,7 @@ function Breakdown({ model, name, numCtx, gpuRaw, report, loaded }: { model: str
       {gpu === undefined ? (
         <div className="na">Gates Local couldn't read the GPU just now.</div>
       ) : (
-        <MemoryBar gpu={gpu} name={name} v={v} loaded={loaded} />
+        <MemoryBar gpu={gpu} name={name} loaded={loaded} />
       )}
       {v.k === "no" ? null : <Speed model={model} name={name} numCtx={numCtx} loaded={loaded} />}
     </>
