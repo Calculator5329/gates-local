@@ -262,6 +262,7 @@ test.describe("a thread at 360", () => {
     await expect(name.locator(".ptn-s")).toBeVisible();
     await expect(name.locator(".ptn-s")).toHaveText("Qwen 9B");
     await expect(name.locator(".ptn-f"), "the full name stays for screen readers").toHaveText("Qwen 3.5 9B");
+    await expect(page.locator("#modelBtn"), "a screen reader hears the full name, not both").toHaveAccessibleName(/^Qwen 3\.5 9B(?!.*Qwen 9B)/);
     const room = await name.evaluate((el) => ({ text: el.querySelector<HTMLElement>(".ptn-s")?.offsetWidth ?? 0, box: el.clientWidth, parts: [...el.parentElement!.children].map((c) => `${c.className}:${Math.round(c.getBoundingClientRect().width)}`).join(" ") }));
     expect(room.text, `the short name shows whole (${room.parts})`).toBeLessThanOrEqual(room.box);
     const table = page.locator(".turn.a .md table").last();

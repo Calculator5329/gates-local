@@ -19,7 +19,8 @@ function watchReady(): void {
   const seen = () => {
     if (w.glReadyModel !== undefined || document.querySelector(".composer:not(.blocked)") === null) return;
     if (document.querySelector("#modelBtn [data-skel]") !== null) return;
-    w.glReadyModel = document.querySelector("#modelBtn > span:not(.maker-mark)")?.textContent ?? null;
+    // the full name; a phone's short form beside it is aria-hidden and drawn only when this one does not fit
+    w.glReadyModel = document.querySelector("#modelBtn .ptn-f")?.textContent ?? null;
   };
   new MutationObserver(seen).observe(document, { childList: true, subtree: true, attributes: true, characterData: true });
 }
