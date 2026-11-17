@@ -126,8 +126,20 @@ describe("kept server failure evidence", () => {
   });
 
   it("keeps the actual termination separately from a readiness timeout", async () => {
-    const { supervisor, dataDir } = setup("never-ready", { readyTimeoutMs: 200 });
-    const state = await supervisor.start();
+    // The 200 ms are the supervisor's clock, not the machine's: on a busy machine the child took
+    // longer than that to start and was ended before its first line. The clock moves only once
+    // that line is in, then once more for the stderr flush after the child has ended.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { supervisor, dataDir, logs } = setup("never-ready", { readyTimeoutMs: 200 });
+    const starting = supervisor.start();
+    while (!logs.includes("[server] loading models...")) await new Promise((resolve) => setImmediate(resolve));
+    const child = vi.mocked(spawn).mock.results.at(-1)!.value as ReturnType<typeof spawn>;
+    const ended = once(child, "exit");
+    await vi.advanceTimersByTimeAsync(200);
+    await ended;
+    await vi.advanceTimersByTimeAsync(50);
+    const state = await starting;
+    vi.useRealTimers();
     const files = readdirSync(dataDir).filter(name => name.startsWith("server-failure-"));
     expect(files).toHaveLength(1);
     const kept = JSON.parse(readFileSync(join(dataDir, files[0]!), "utf8"));
@@ -218,6 +230,7 @@ function setup(mode: string, extra: Partial<SupervisorOptions> = {}) {
 }
 
 afterEach(async () => {
+  vi.useRealTimers();
   await Promise.all(live.splice(0).map((s) => s.stop()));
   for (const dir of dirs.splice(0)) {
     for (const record of launches(dir)) pids.add(record.pid);

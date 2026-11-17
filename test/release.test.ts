@@ -272,12 +272,16 @@ function protocolFixture(extraCli: readonly string[] = []) {
     'if (process.argv.includes("--version")) { console.log("Playwright protocol fixture"); process.exit(0); }',
     'if (process.argv.includes("install")) process.exit(0);',
     'const name = process.argv.includes("--project=timing") ? "timing" : "e2e";',
+    // specs.json, when committed, names several spec files; each picked file reports one passing test.
+    'const specs = fs.existsSync("specs.json") ? JSON.parse(fs.readFileSync("specs.json", "utf8")) : ["fixture.spec.ts"];',
+    'if (process.argv.includes("--list")) { console.log(JSON.stringify({ config: {}, errors: [], stats: { expected: 0, unexpected: 0, flaky: 0, skipped: specs.length }, suites: specs.map(file => ({ title: file, file, specs: [{ title: file, file, tests: [{}] }], suites: [] })) })); process.exit(0); }',
+    'let picked = name === "e2e" ? process.argv.filter(a => /^\\/.*\\$\\/$/.test(a)).length || specs.length : 1;',
     ...extraCli,
     'const failed = name === "timing";',
     'const status = failed ? "failed" : "passed";',
     'fs.mkdirSync(process.env.GL_E2E_RESULTS, { recursive: true });',
     'fs.writeFileSync(require("node:path").join(process.env.GL_E2E_RESULTS, "diagnostic.txt"), "protocol fixture, no browser");',
-    `fs.writeFileSync(process.env.PLAYWRIGHT_JSON_OUTPUT_FILE, JSON.stringify({ stats: { expected: failed ? 0 : 1, unexpected: failed ? 1 : 0, flaky: 0, skipped: 0 }, suites: [{ title: "fixture", specs: [{ title: name, tests: [{ projectName: name, annotations: [{ type: "measured", description: "paint 200 ms" }, { type: "budget", description: "paint <120 ms" }], results: [{ status, errors: failed ? [{ message: "paint exceeded budget" }] : [] }] }] }] }] }));`,
+    `fs.writeFileSync(process.env.PLAYWRIGHT_JSON_OUTPUT_FILE, JSON.stringify({ stats: { expected: failed ? 0 : picked, unexpected: failed ? 1 : 0, flaky: 0, skipped: 0 }, suites: [{ title: "fixture", file: "fixture.spec.ts", specs: [{ title: name, tests: [{ projectName: name, annotations: [{ type: "measured", description: "paint 200 ms" }, { type: "budget", description: "paint <120 ms" }], results: [{ status, duration: 1000, errors: failed ? [{ message: "paint exceeded budget" }] : [] }] }] }] }] }));`,
     'process.exitCode = failed ? 1 : 0;',
   ].join("\n"), { mode: 0o755 });
   execFileSync("pnpm", ["install", "--lockfile-only"], { cwd: f.cwd, stdio: "ignore" });
@@ -382,6 +386,54 @@ test("the check splits in two: the correctness half runs the tests and can tag, 
   expect(timing.timing).toMatchObject({ completed: true, reportPath: expect.stringContaining("timing.json") });
   expect(timing.tests.unit.passed + timing.tests.e2e.passed).toBe(0);
   await expect(checkTag(f.cwd, "v1.0.0", timing)).rejects.toThrow(/timing-only report ran no tests/);
+}, 30_000);
+
+function shardedFixture(extraCli: readonly string[] = []) {
+  const f = protocolFixture(extraCli);
+  writeFileSync(path.join(f.cwd, "specs.json"), JSON.stringify(["a.spec.ts", "b.spec.ts", "c.spec.ts", "d.spec.ts", "e.spec.ts"]));
+  f.git("add", "specs.json"); f.git("commit", "-m", "five spec files"); f.git("push", "origin", "main");
+  return { ...f, sha: f.git("rev-parse", "HEAD") };
+}
+
+test("the browser step runs as shards at once, each on its own network and folders, and together they run every listed test", async () => {
+  const f = shardedFixture(['if (name === "e2e") fs.writeFileSync(process.env.PLAYWRIGHT_JSON_OUTPUT_FILE + ".seen", JSON.stringify({ home: process.env.HOME, data: process.env.GL_E2E_DATA_ROOT, prebuilt: process.env.GL_E2E_PREBUILT, net: fs.readlinkSync("/proc/self/ns/net") }));']);
+  const durations = path.join(f.dir, "durations.json");
+  writeFileSync(durations, JSON.stringify({ "a.spec.ts": 100, "b.spec.ts": 10, "c.spec.ts": 10, "d.spec.ts": 10, "e.spec.ts": 10 }));
+  const report = await runReleaseCheck({ cwd: f.cwd, remote: f.remote, commit: f.sha, reportPath: path.join(f.dir, "sharded.json"), part: "correctness", shards: 3, durations });
+  expect(report.status, JSON.stringify(report.failures)).toBe("passed");
+  // the table balanced this run (a.spec.ts alone in a shard) and the finished run rewrote it
+  expect(JSON.parse(readFileSync(durations, "utf8"))).toEqual({ "fixture.spec.ts": 1 });
+  expect(report.tests.e2e).toEqual({ passed: 5, failed: 0, skipped: 0 });
+  expect(report.steps.filter((step) => step.name === "e2e")).toHaveLength(1);
+  const plan = JSON.parse(readFileSync(path.join(f.dir, "sharded.json.artifacts", "e2e-plan.json"), "utf8")) as { isolated: boolean; listed: number; shards: string[][] };
+  expect(plan.listed).toBe(5);
+  expect(plan.shards.flat().toSorted()).toEqual(["a.spec.ts", "b.spec.ts", "c.spec.ts", "d.spec.ts", "e.spec.ts"]);
+  if (!plan.isolated) return expect(report.limits?.join("\n")).toContain("ran as one shard");
+  expect(plan.shards).toHaveLength(3);
+  expect(plan.shards).toContainEqual(["a.spec.ts"]);
+  const seen = [1, 2, 3].map((i) => JSON.parse(readFileSync(path.join(f.dir, "sharded.json.artifacts", `e2e-${i}.json.seen`), "utf8")) as Record<string, string>);
+  for (const key of ["home", "data", "net"]) expect(new Set(seen.map((s) => s[key])).size, key).toBe(3);
+  expect(seen.map((s) => s["prebuilt"])).toEqual(["1", "1", "1"]);
+}, 30_000);
+
+test("a shard that runs fewer tests than it was given fails the check by name", async () => {
+  const f = shardedFixture(['if (process.argv.some((a) => a.includes("b\\\\.spec"))) picked -= 1;']);
+  const report = await runReleaseCheck({ cwd: f.cwd, remote: f.remote, commit: f.sha, reportPath: path.join(f.dir, "short.json"), part: "correctness", shards: 2 });
+  expect(report.status).toBe("failed");
+  expect(report.failures).toContainEqual(expect.objectContaining({ step: "e2e", test: "shard coverage", message: "The shards ran 4 of the 5 listed tests." }));
+  await expect(checkTag(f.cwd, "v1.0.0", report)).rejects.toThrow();
+}, 30_000);
+
+test("verify runs beside the browser step, and a unit red keeps the browser verdict in the report", async () => {
+  const f = protocolFixture();
+  writeFileSync(path.join(f.cwd, "unit.cjs"), 'require("node:test")("intentional unit failure", () => { throw new Error("intentional unit failure"); });');
+  f.git("add", "unit.cjs"); f.git("commit", "-m", "failing unit"); f.git("push", "origin", "main");
+  const report = await runReleaseCheck({ cwd: f.cwd, remote: f.remote, commit: f.git("rev-parse", "HEAD"), reportPath: path.join(f.dir, "both.json"), part: "correctness" });
+  expect(report.status).toBe("failed");
+  expect(report.steps.map((step) => [step.name, step.status])).toEqual([["clone", "passed"], ["checkout", "passed"], ["install", "passed"], ["verify", "failed"], ["build", "passed"], ["desktop-build", "passed"], ["browser", "passed"], ["e2e", "passed"]]);
+  expect(report.tests.e2e.passed).toBe(1);
+  expect(report.tests.unit.failed).toBe(1);
+  await expect(checkTag(f.cwd, "v1.0.0", report)).rejects.toThrow(/failed/);
 }, 30_000);
 
 test("RJ tagging never reads timing information", async () => {

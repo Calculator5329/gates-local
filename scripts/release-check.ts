@@ -14,11 +14,18 @@ try {
     "performance-base": { type: "string" },
     // --part correctness|timing: run one half (the pool runs them as two jobs); absent runs both.
     part: { type: "string" },
+    // --shards N: browser shards at once (default half the cores); --durations FILE: this machine's seconds-per-file table.
+    shards: { type: "string" }, durations: { type: "string" },
   } });
+  const shardText = values.shards ?? process.env["GL_E2E_SHARDS"];
+  const shards = shardText === undefined ? undefined : Number(shardText);
+  if (shards !== undefined && (!Number.isSafeInteger(shards) || shards < 1)) throw new Error("--shards must be a whole number of at least 1");
+  // The last run's seconds per spec file on this machine balance the next run's shards.
+  const durations = path.resolve(values.durations ?? process.env["GL_E2E_DURATIONS"] ?? path.join(homedir(), ".cache", "gates-local-e2e", "durations.json"));
   const part = values.part;
   if (part !== undefined && part !== "correctness" && part !== "timing") throw new Error("--part must be correctness or timing");
   const reportPath = path.resolve(values.report ?? path.join(homedir(), ".cache", "gates-local-release", `report-${Date.now()}.json`));
-  const report = await runReleaseCheck({ cwd: process.cwd(), remote: values.remote, commit: values.commit, reportPath, storeDir: values["store-dir"], browserPath: values["browser-path"], performanceBase: values["performance-base"], part, signal: abort.signal, hostTools: missingHostTools });
+  const report = await runReleaseCheck({ cwd: process.cwd(), remote: values.remote, commit: values.commit, reportPath, storeDir: values["store-dir"], browserPath: values["browser-path"], performanceBase: values["performance-base"], part, shards, durations, signal: abort.signal, hostTools: missingHostTools });
   console.log(`Release check ${part ? part + " half " : ""}${report.status}: ${reportPath} (${(report.durationMs / 1000).toFixed(1)}s)`);
   if (part !== "correctness") console.log(`Performance comparison: ${JSON.stringify(report.performance ?? { status: "unavailable", note: "Correctness checks did not complete." })}`);
   process.exitCode = abort.signal.aborted ? 130 : report.status === "passed" ? 0 : 1;

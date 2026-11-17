@@ -20,7 +20,9 @@ function browser(): { channel?: string; launchOptions?: LaunchOptions } {
   return {};
 }
 
-const preview = `pnpm --filter @gates-local/web build && pnpm --filter @gates-local/web exec vite preview --host 127.0.0.1 --port ${WEB_PORT} --strictPort`;
+const serve = `pnpm --filter @gates-local/web exec vite preview --host 127.0.0.1 --port ${WEB_PORT} --strictPort`;
+// GL_E2E_PREBUILT=1: the caller built the client already (parallel shards must not rebuild it at once).
+const preview = process.env["GL_E2E_PREBUILT"] === "1" ? serve : `pnpm --filter @gates-local/web build && ${serve}`;
 const realSmoke = process.env["GATES_REAL_SMOKE"] === "1";
 
 export default defineConfig({

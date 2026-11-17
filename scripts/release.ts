@@ -6,6 +6,7 @@ import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { compare, newestRelease, parseRelease } from "@gates-local/update/semver";
 import { groupAlive, processAlive } from "@gates-local/update/process-state";
+import { ISOLATE, canIsolate, defaultShards, durationsFrom, fileFilter, listSpecs, planShards, readDurations, shardEnv } from "./e2e-shards.ts";
 
 export interface Totals { passed: number; failed: number; skipped: number }
 export interface Step { name: string; blocking: boolean; status: "passed" | "failed"; exitCode: number; durationMs: number }
@@ -50,6 +51,10 @@ export interface ReleaseReport {
 }
 export interface CheckOptions { cwd: string; remote?: string; commit?: string; reportPath: string; storeDir?: string; browserPath?: string; signal?: AbortSignal; timingTimeoutMs?: number; performanceBase?: string; performanceTimeoutMs?: number;
   part?: "correctness" | "timing";
+  /** Browser shards that run at once (default: half the cores, at most eight). */
+  shards?: number;
+  /** This machine's seconds-per-spec-file table: it balances the shards and a complete run rewrites it. Absent: test counts. */
+  durations?: string;
   /** Host tools this machine lacks. The command passes missingHostTools; a named tool stops the check before the clone. */
   hostTools?: () => string[] }
 
@@ -362,8 +367,8 @@ export async function runReleaseCheck(options: CheckOptions): Promise<ReleaseRep
     const temp = path.join(scratch, "t");
     mkdirSync(home); mkdirSync(temp);
     const env = cleanEnvironment(home, temp, options.cwd, options.browserPath);
-    const execute = async (argv: string[], cwd: string, log: string, timeoutMs?: number) => {
-      const result = await runReleaseCommand(argv, cwd, env, log, options.signal, timeoutMs);
+    const execute = async (argv: string[], cwd: string, log: string, timeoutMs?: number, runEnv: NodeJS.ProcessEnv = env) => {
+      const result = await runReleaseCommand(argv, cwd, runEnv, log, options.signal, timeoutMs);
       if (result.treeStillRunning) cleanupUnsafeReason = "command process group could not be confirmed stopped";
       if (result.possibleEscapedDescendants) {
         cleanupUnsafeReason = ESCAPED_OUTPUT;
@@ -384,9 +389,11 @@ export async function runReleaseCheck(options: CheckOptions): Promise<ReleaseRep
     const step = async (name: string, argv: string[], cwd: string, blocking = true) => {
       active = name;
       const start = Date.now();
-      const r = await execute(argv, cwd, path.join(artifacts, `${name}.log`));
-      const saved: Step = { name, blocking, status: r.code === 0 ? "passed" : "failed", exitCode: r.code, durationMs: Date.now() - start };
+      // Listed in start order: verify runs beside the build and browser steps.
+      const saved: Step = { name, blocking, status: "failed", exitCode: -1, durationMs: 0 };
       report.steps.push(saved);
+      const r = await execute(argv, cwd, path.join(artifacts, `${name}.log`));
+      Object.assign(saved, { status: r.code === 0 ? "passed" : "failed", exitCode: r.code, durationMs: Date.now() - start });
       if (r.interrupted || options.signal?.aborted) {
         if (name === "e2e" && scratch) retainResults(name, path.join(scratch, `${name}-results`));
         throw new Error(`Release check interrupted during ${name}`);
@@ -407,33 +414,88 @@ export async function runReleaseCheck(options: CheckOptions): Promise<ReleaseRep
       requirePass(pw);
       validateBrowserToolchain(clone, env);
     }
-    if (options.part !== "timing") {
-      const verify = await step("verify", ["pnpm", "verify"], clone);
+    // verify shares nothing with the build and browser steps: it runs beside them, and both verdicts are kept.
+    const verifying = options.part !== "timing" ? step("verify", ["pnpm", "verify"], clone) : undefined;
+    void verifying?.catch(() => undefined);
+    let browserError: { step: string; error: unknown } | undefined;
+    let playwright: string[] = [];
+    try {
+      requirePass(await step("build", ["pnpm", "build"], clone));
+      requirePass(await step("desktop-build", ["pnpm", "--filter", "@gates-local/desktop", "build"], clone));
+      requirePass(pw);
+      playwright = playwrightCommand(clone);
+      // A supplied Playwright cache is validated above and never downloaded here.
+      if (!options.browserPath) requirePass(await step("browser", ["pnpm", "exec", "playwright", "install", "chromium"], clone));
+      if (options.part !== "timing") {
+        active = "e2e";
+        const config = ["-c", "test/e2e/playwright.config.ts", "--project=e2e"];
+        const listed = listSpecs(playwright, clone, env, config);
+        if (listed.total === 0) throw new Error("The browser project listed no tests");
+        const isolated = canIsolate(env);
+        const wanted = options.shards ?? defaultShards();
+        if (!isolated) report.limits?.push("This machine cannot give the browser step a private network, so it ran as one shard on the host network.");
+        // Electron fetches its binary on first use, and a shard has no network: fetch it here.
+        const desktop = path.join(clone, "apps", "desktop");
+        if (isolated && existsSync(path.join(desktop, "package.json"))) requirePass(await execute(["node", "-e", "require('electron')"], desktop, path.join(artifacts, "electron.log")));
+        const plan = planShards(listed.files, isolated ? wanted : 1, options.durations ? readDurations(options.durations) : {});
+        const testDir = path.join(clone, "test", "e2e");
+        writeFileSync(path.join(artifacts, "e2e-plan.json"), JSON.stringify({ isolated, listed: listed.total, shards: plan }, null, 1) + "\n");
+        const saved: Step = { name: "e2e", blocking: true, status: "failed", exitCode: -1, durationMs: 0 };
+        report.steps.push(saved);
+        const start = Date.now();
+        const shards = await Promise.all(plan.map(async (files, i) => {
+          const name = plan.length === 1 ? "e2e" : `e2e-${i + 1}`;
+          const shardReport = path.join(artifacts, `${name}.json`);
+          const shardEnvironment = shardEnv(env, path.join(scratch ?? "", "e2e"), i + 1, shardReport);
+          const argv = [...playwright, "test", ...config, "--forbid-only", "--reporter=list,json", ...files.map((f) => fileFilter(testDir, f))];
+          const r = await execute(isolated ? [...ISOLATE, ...argv] : argv, clone, path.join(artifacts, `${name}.log`), undefined, shardEnvironment);
+          return { name, r, shardReport, results: shardEnvironment["GL_E2E_RESULTS"] ?? "" };
+        }));
+        const failedShard = shards.find((s) => s.r.code !== 0);
+        Object.assign(saved, { status: failedShard ? "failed" : "passed", exitCode: failedShard?.r.code ?? 0, durationMs: Date.now() - start });
+        if (shards.some((s) => s.r.interrupted) || options.signal?.aborted) {
+          for (const s of shards) retainResults(s.name, s.results);
+          throw new Error("Release check interrupted during e2e");
+        }
+        const total = emptyTotals();
+        for (const s of shards) {
+          try {
+            const t = readBlockingPlaywright(s.shardReport, report);
+            total.passed += t.passed; total.failed += t.failed; total.skipped += t.skipped;
+          } catch (error) {
+            report.failures.push({ step: "e2e", test: `${s.name} report`, message: errorText(error) });
+          }
+          if (s.r.code) retainResults(s.name, s.results);
+        }
+        report.tests.e2e = total;
+        const ran = total.passed + total.failed + total.skipped;
+        if (ran !== listed.total) report.failures.push({ step: "e2e", test: "shard coverage", message: `The shards ran ${ran} of the ${listed.total} listed tests.` });
+        try {
+          const measured = durationsFrom(shards.filter((s) => existsSync(s.shardReport)).map((s) => JSON.parse(readFileSync(s.shardReport, "utf8")) as unknown));
+          const table = JSON.stringify(measured, null, 1) + "\n";
+          writeFileSync(path.join(artifacts, "e2e-durations.json"), table);
+          if (options.durations && Object.keys(measured).length > 0 && shards.every((s) => existsSync(s.shardReport))) { mkdirSync(path.dirname(options.durations), { recursive: true }); writeFileSync(options.durations, table); }
+        } catch (error) { report.failures.push({ step: "e2e", test: "durations", message: errorText(error) }); }
+        if (failedShard) requirePass(failedShard.r);
+        if (report.tests.e2e.passed === 0 || report.tests.e2e.failed || report.failures.length) throw new Error("Blocking browser project failed; inspect its report and artifacts");
+      }
+    } catch (error) {
+      browserError = { step: active, error };
+    }
+    if (verifying) {
+      const verify = await verifying;
       report.tests.unit = unitTotals(verify.output);
       if (verify.code) {
         const failures = stripVTControlCharacters(verify.output).split(/(?=^[ \t]*FAIL {2,})/m).slice(1).map((s) => s.trim());
         for (const failure of failures) report.failures.push({ step: "verify", test: failure.split("\n")[0]?.trim() ?? "unit", message: failure.slice(0, 24_000) });
       }
+      const unitsPassed = verify.code === 0 && report.tests.unit.passed > 0 && report.tests.unit.failed === 0;
+      if (!unitsPassed && browserError) report.failures.push({ step: browserError.step, test: "command", message: errorText(browserError.error) });
+      active = "verify";
       requirePass(verify);
-      if (report.tests.unit.passed === 0 || report.tests.unit.failed) throw new Error("verify did not report passing unit tests");
+      if (!unitsPassed) throw new Error("verify did not report passing unit tests");
     }
-    requirePass(await step("build", ["pnpm", "build"], clone));
-    requirePass(await step("desktop-build", ["pnpm", "--filter", "@gates-local/desktop", "build"], clone));
-    requirePass(pw);
-    const playwright = playwrightCommand(clone);
-    // A supplied Playwright cache is validated above and never downloaded here.
-    if (!options.browserPath) requirePass(await step("browser", ["pnpm", "exec", "playwright", "install", "chromium"], clone));
-    if (options.part !== "timing") {
-      const browserReport = path.join(artifacts, "e2e.json");
-      env["PLAYWRIGHT_JSON_OUTPUT_FILE"] = browserReport;
-      env["GL_E2E_RESULTS"] = path.join(scratch, "e2e-results");
-      env["GL_E2E_DATA_ROOT"] = path.join(scratch, "e2e-data");
-      const browser = await step("e2e", [...playwright, "test", "-c", "test/e2e/playwright.config.ts", "--project=e2e", "--forbid-only", "--reporter=list,json"], clone);
-      try { report.tests.e2e = readBlockingPlaywright(browserReport, report); }
-      finally { if (browser.code || report.failures.length) retainResults("e2e", env["GL_E2E_RESULTS"]); }
-      requirePass(browser);
-      if (report.tests.e2e.passed === 0 || report.tests.e2e.failed || report.failures.length) throw new Error("Blocking browser project failed; inspect its report and artifacts");
-    }
+    if (browserError) { active = browserError.step; throw browserError.error; }
     if (options.part === "correctness") {
       // The timing half runs as its own job on a timing host (pool release.sh).
       report.status = "passed";

@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-17: the release check's browser step runs in shards beside verify, 27 min down to 12
+
+- The correctness half used to run verify, then the whole browser project with one worker. verify
+  now runs beside the build and browser steps, and the browser project is split into shards
+  (half the cores by default, `--shards N` or `GL_E2E_SHARDS` to choose). Each shard has its own
+  home, ports, data folders and private network, so shards cannot reach each other's servers.
+- Shards are balanced by each spec file's seconds from the machine's last complete run
+  (`--durations`, kept in the machine's cache), and by test counts when there is no table yet. A
+  check that ran fewer tests than the list holds fails, so no file can fall between shards.
+- Two things a fresh shard home lacked are set up first: Electron's binary (fetched before the
+  shards start, since a shard has no network) and the parent folder of the phone socket.
+- On one 8-core machine, same commit: 1627 s before; 732 s with 4 shards, 803 s with 3. One
+  machine's cores are now the limit: the shards' test times add up to about 2150 s against
+  1437 s for one worker alone. Getting under 5 minutes needs the shards spread over machines.
+- Two unit tests that went red when verify shared the machine with the shards now pass on a busy
+  machine: the supervisor's readiness-timeout test runs on a fake clock, and RG-05 lists both
+  Playwright projects in one pass. Test count up by 8.
+
 ## 2026-11-17: tips name things, the wrong-port banner offers the fix, and the phone shows its locks
 
 - The attach row in the plus menu no longer carries a paragraph tip; the row already says what it does.
@@ -25,6 +43,8 @@
   own, and the suite went from 73.8 s to 58.2 s on the same 12 cores.
 - Each second-crash file checks that its cases reached every crash point; the check was watched
   fail with one point left out. Test count up by 2.
+
+
 
 ## 2026-11-17: a window grace test no longer races a slow disk
 

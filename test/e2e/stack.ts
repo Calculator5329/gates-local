@@ -67,6 +67,8 @@ const phoneDir = path.join(homedir(), ".cache", "gates-local-e2e", `phone-${crea
 const phoneSocket = path.join(phoneDir, "phone.sock");
 const gpuState = path.join(runDir, "gpu-state.json");
 mkdirSync(runDir, { recursive: true });
+// The server makes only the socket's own folder (0700); a fresh home has no parent for it yet.
+mkdirSync(path.dirname(phoneDir), { recursive: true });
 /** The server's /proc/meminfo: the fixture's 32 GB until POST /gpu gives a memGib, and again at each reset. */
 const meminfo = path.join(runDir, "meminfo.txt");
 const MEMINFO_FIXTURE = readFileSync(path.join(ROOT, "test/fake-ollama/meminfo.txt"), "utf8");
