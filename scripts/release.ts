@@ -414,9 +414,11 @@ export async function runReleaseCheck(options: CheckOptions): Promise<ReleaseRep
       requirePass(pw);
       validateBrowserToolchain(clone, env);
     }
-    // verify shares nothing with the build and browser steps: it runs beside them, and both verdicts are kept.
-    const verifying = options.part !== "timing" ? step("verify", ["pnpm", "verify"], clone) : undefined;
-    void verifying?.catch(() => undefined);
+    // verify runs alone, before the build and browser steps. Beside the browser shards it was
+    // starved: on 8 cores its time doubled, unit tests that wait 50 ms for an answer timed out, and
+    // the check took no less time, since the shards fill every core either way. A unit red still
+    // lets the browser step run, and the report keeps both verdicts.
+    const verified = options.part !== "timing" ? await step("verify", ["pnpm", "verify"], clone) : undefined;
     let browserError: { step: string; error: unknown } | undefined;
     let playwright: string[] = [];
     try {
@@ -482,8 +484,8 @@ export async function runReleaseCheck(options: CheckOptions): Promise<ReleaseRep
     } catch (error) {
       browserError = { step: active, error };
     }
-    if (verifying) {
-      const verify = await verifying;
+    if (verified) {
+      const verify = verified;
       report.tests.unit = unitTotals(verify.output);
       if (verify.code) {
         const failures = stripVTControlCharacters(verify.output).split(/(?=^[ \t]*FAIL {2,})/m).slice(1).map((s) => s.trim());

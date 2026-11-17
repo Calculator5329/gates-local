@@ -424,7 +424,7 @@ test("a shard that runs fewer tests than it was given fails the check by name", 
   await expect(checkTag(f.cwd, "v1.0.0", report)).rejects.toThrow();
 }, 30_000);
 
-test("verify runs beside the browser step, and a unit red keeps the browser verdict in the report", async () => {
+test("verify runs first, and a unit red still runs the browser step and keeps its verdict in the report", async () => {
   const f = protocolFixture();
   writeFileSync(path.join(f.cwd, "unit.cjs"), 'require("node:test")("intentional unit failure", () => { throw new Error("intentional unit failure"); });');
   f.git("add", "unit.cjs"); f.git("commit", "-m", "failing unit"); f.git("push", "origin", "main");

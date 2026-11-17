@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-17: the release check runs verify alone again, before the browser shards
+
+- Beside four browser shards on one 8-core machine, verify took 308 s instead of 164 s, and four
+  unit tests that wait a few milliseconds for an answer went red. The check took no less time
+  that way: the shards fill every core. verify now runs first and alone; a unit red still lets the
+  browser step run, and the report keeps both verdicts.
+- Same machine and commit, 4 shards: 753 s with verify beside, 780 s with verify first (verify
+  164 s, browser 590 s). Before the shards: 1627 s.
+
 ## 2026-11-17: a saved failure keeps its plain words
 
 - A failed reply read back from history, or after the window reloads, says what to do from its failure code (Ollama stopped answering, model not installed, and so on), the same words the live failure showed. Before, every saved failure fell back to "The reply didn't finish."
