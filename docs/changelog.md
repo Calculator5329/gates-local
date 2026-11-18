@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-17: 0.2.6 published
+
+- Gates Local 0.2.6 is out (docs/releasing.md). It carries the first-run, memory-ownership, error-wording, phone and tooltip work since 0.2.5, with the fixes from the release reads.
+
 ## 2026-11-17: typing never reloads another client's copy of a model the app loaded last time
 
 - A model the app loaded before it closed, now running in Ollama at a different context, is another client's copy. Typing in a chat set to that model leaves it as it is instead of reloading it at the chat's context.
