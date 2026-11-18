@@ -229,7 +229,9 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       if (!here.ok) return finish({ model, numCtx, state: "error", message: PS_UNREADABLE_MESSAGE });
       const resident = here.models.get(tag);
       // decision: docs/decisions.md "Other programs' memory is freed only with a click"
-      if (resident !== undefined && record.oursAt(tag) === undefined) {
+      // why: a model the run before loaded, now at another context, is another client's copy
+      const replaced = record.fromLastRun?.(tag) === true && memory?.stays(tag, { contextLength: resident?.contextLength }) === true;
+      if (resident !== undefined && (record.oursAt(tag) === undefined || replaced)) {
         if (claims) recordLoaded(tag, resident.contextLength ?? numCtx);
         const ready = finish({ model, numCtx, state: "ready" });
         deps.onLoaded?.();

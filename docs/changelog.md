@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-17: typing never reloads another client's copy of a model the app loaded last time
+
+- A model the app loaded before it closed, now running in Ollama at a different context, is another client's copy. Typing in a chat set to that model leaves it as it is instead of reloading it at the chat's context.
+
 ## 2026-11-17: the app's model file is never lost; a page left open from before the update claims nothing
 
 - If any entry in `own-models.json` can't be read, the whole file is moved aside as before, instead of the app quietly writing an empty list over it.

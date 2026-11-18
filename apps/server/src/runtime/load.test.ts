@@ -163,6 +163,18 @@ describe("models.load", () => {
     expect(generates(s)).toBe(0);
   });
 
+  it("typing on a model the run before loaded, now resident at another context: another client's copy, so no reload", async () => {
+    // the app loaded m at 32k and closed; another client then loaded m at 16k
+    const dataDir = mkdtempSync(path.join(os.tmpdir(), "gates-local-kept-"));
+    writeFileSync(path.join(dataDir, OWN_MODELS_FILE), JSON.stringify({ models: [{ tag: "m:latest", numCtx: 32768, at: 1, mode: "system" }] }));
+    const s = await fakeOllama(["m:latest"]);
+    const record = keptRecord({ dataDir, mode: () => "system" });
+    const memory = createMemoryOwner({ ollamaUrl: () => s.baseUrl, listLoaded: () => listLoaded(s.baseUrl), replying: () => [], waitMs: 100, pollMs: 1, record });
+    const loader = loaderFor(s, [], "fits", { memory });
+    expect(await loader.load("m", 32768, { typed: true })).toMatchObject({ model: "m", state: "ready" });
+    expect(generates(s), "the other client's 16k runner is not replaced").toBe(0);
+  });
+
   it("models.load from the wire claims a resident model only when it says pick, so a page from an older build claims nothing", async () => {
     const s = await fakeOllama(["m:latest"]);
     const loader = loaderFor(s, []);
