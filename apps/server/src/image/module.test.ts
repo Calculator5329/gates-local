@@ -808,6 +808,16 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     expect(f.events.at(-1)?.state).toBe("cancelled"); expect(f.calls).not.toContain("/interrupt");
     expect(f.lease.status().waiting).toEqual([]); release();
   });
+  // council climb-025 Q16: "try again when you are ready" sat beside the card's own Try again
+  it("a cancelled picture says what cancelled it when that is known, and gives no advice", async () => {
+    const f = await fixture(); const release = await f.lease.acquire("chat");
+    const cancelled = await f.module.generate({ prompt: "a tree" });
+    f.module.cancel(cancelled.jobId); await f.module.wait(cancelled.jobId);
+    expect(f.events.at(-1)).toMatchObject({ state: "cancelled", message: "The image was cancelled." });
+    const closing = await f.module.generate({ prompt: "a ship" });
+    const closed = f.module.close(); release(); await closed; await f.module.wait(closing.jobId);
+    expect(f.events.at(-1)).toMatchObject({ jobId: closing.jobId, state: "cancelled", message: "The image was cancelled when Gates Local closed." });
+  });
   it("interrupts its running job and releases the lease", async () => {
     const f = await fixture(); f.configure({ hold: true });
     const { jobId } = await f.module.generate({ prompt: "a tree" });

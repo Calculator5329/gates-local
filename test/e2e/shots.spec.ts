@@ -188,7 +188,8 @@ const MODELS_SHOTS: readonly ModelsShot[] = [
     act: async (p) => {
       await kebab("qwen3.5:9b")(p);
       await p.getByRole("menuitem", { name: /^Remove…/ }).click();
-      await expect(p.getByRole("dialog")).toBeVisible();
+      // the confirm is a dialog inside the Models dialog, so it is named by its test id
+      await expect(p.getByTestId("models.remove.dialog")).toBeVisible();
     },
   },
   // a4-05, a4-12

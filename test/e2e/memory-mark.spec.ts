@@ -8,7 +8,7 @@ import { holds } from "./waits.ts";
 
 const BLENDER_MIB = Math.round(9.7 * 1024);
 /** One decimal under 10 GB, whole from 10 up, as the picture reads ("6.6 / 16 GB", "17 / 16 GB"); "~" before an estimate, as the picker writes it. */
-const MARK = /^~?(\d\.\d|\d{2,}) \/ (\d+) GB$/;
+const MARK = /^(?:Needs )?~?(\d\.\d|\d{2,}) \/ (\d+) GB$/;
 
 /** The mark's number, and its fill as a share of its bar. */
 async function readMark(mark: Locator) {
@@ -72,7 +72,7 @@ test("one memory mark in Models and Download, against the card, with other progr
   await page.screenshot({ path: info.outputPath("mark-download-hover.png"), animations: "disabled" });
   await expect(tip).toBeHidden();
   // a model not downloaded yet is an estimate: "~" on screen, said in words to a screen reader
-  await expect(row.locator(".mm-n")).toHaveText(/^~/);
+  await expect(row.locator(".mm-n")).toHaveText(/^Needs ~/);
   await expect(row.locator(".mm")).toHaveAttribute("aria-label", /^Runs on the GPU: (\d\.\d|\d{2,}) of 16 GB, estimated$/);
 });
 

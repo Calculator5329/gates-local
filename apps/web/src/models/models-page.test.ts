@@ -89,7 +89,7 @@ async function mount(over: Partial<import("../lib/store/store.ts").State> = {}) 
   store.setState({
     conn: { kind: "open" }, view: "settings", section: "models", addPage: false, catalog: CATALOG as never,
     models: [installed("alpha:1b"), installed("beta:2b"), installed("gamma:3b")] as never, model: "alpha:1b",
-    settings: { defaultModel: "alpha:1b" } as never, fitTable: undefined, pulls: {}, speeds: undefined, measures: undefined, measuring: {}, unavailable: {},
+    settings: { defaultModel: "alpha:1b" } as never, fitTable: undefined, pulls: {}, speeds: undefined, measures: undefined, measuring: {}, unavailable: {}, runtime: undefined,
     ...over,
   });
   act(() => root.render(createElement(ModelsPage)));
@@ -128,6 +128,15 @@ it("wider than a phone, the tabs sit in the pop-up's header and only the list be
   const css = readFileSync(new URL("../lib/ui/panel.css", import.meta.url), "utf8");
   expect(css).toMatch(/\n\.dlg-head\{flex:none;/);
   expect(css).toMatch(/\n\.dlg-body\{[^}]*min-height:0;overflow-y:auto/);
+});
+
+// council climb-025 Q14: Remove on a system Ollama deletes from a store other apps read too
+it.each([["external", true], ["none", true], ["app", false]] as const)("Remove on a runtime owned by %s says other apps lose the model: %s", async (owner, says) => {
+  await mount({ runtime: { state: "ready", owner, baseUrl: "http://127.0.0.1:11434" } as never });
+  const dialog = await openRemove("beta:2b");
+  const words = dialog?.textContent ?? "";
+  expect(words).toContain("Chats you made with Beta stay");
+  expect(words.includes("Other apps that use this Ollama lose it too."), words).toBe(says);
 });
 
 it("a removal that worked but whose next default could not be saved closes the dialog, says so once, and is not tried again", async () => {

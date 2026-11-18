@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import type { RuntimeStatus } from "@gates-local/contracts";
+import { useNow } from "../lib/ui/kit/now.ts";
 import { NBSP, etaText, gb } from "../lib/words/format.ts";
 import { recheckRuntime } from "../lib/session/index.ts";
 import { NA, type State } from "../lib/store/store.ts";
@@ -18,6 +19,13 @@ export function unread(s: Pick<State, "runtime">): boolean {
 export const searching = (s: Pick<State, "runtime">): boolean => s.runtime?.state === "starting" && s.runtime.owner !== "app";
 
 export const CONNECTING = "Connecting…";
+
+// why: the server sends no start time for a look, so it counts from when this place first showed it
+export function Looked() {
+  const [from] = useState(Date.now);
+  const now = useNow(1000);
+  return <span className="fig">{` · ${Math.max(0, Math.floor((now - from) / 1000))} s`}</span>;
+}
 
 type RtSource = Pick<State, "conn" | "runtime"> & Partial<Pick<State, "settings">>;
 
@@ -117,16 +125,35 @@ const gone = (detail: string | undefined): boolean => detail !== undefined && /f
 export const SITE_DOWN = "The download site didn't respond. Try again in a moment.";
 const DOWNLOAD_GONE = "This download is no longer available. Retry after the app updates, or install Ollama from ollama.com.";
 
+// why: the server's "The Ollama download stopped at <figures> (<reason>)" (runtime/install.ts)
+const STOPPED_AT = /^The Ollama download stopped at (.+?) \([^)]*\)/;
+
+function downloadLine(detail: string | undefined): string {
+  if (gone(detail)) return DOWNLOAD_GONE;
+  if (unreached(detail)) return SITE_DOWN;
+  const at = detail === undefined ? undefined : STOPPED_AT.exec(detail)?.[1];
+  return at === undefined ? FAIL_FALLBACK.download : `Stopped at ${at}. ${FAIL_FALLBACK.download}`;
+}
+
 export function underTitle(detail: string | undefined, failure: Failure): string | undefined {
-  if (failure === "download") return gone(detail) ? DOWNLOAD_GONE : unreached(detail) ? SITE_DOWN : detail?.replace(/^The Ollama download stopped at /, "Stopped at ");
+  if (failure === "download") return downloadLine(detail);
   if (failure === "checksum") return FAIL_FALLBACK.checksum;
   if (failure === "disk") return detail?.replace(/^The disk is full\.\s*/, "") || undefined;
   return detail;
 }
 
-// why: a checksum, an HTTP status or an address helps no one deciding what to do: data-why
+// why: a checksum, an HTTP status, an address or a socket's reason helps no one deciding: data-why
 export const failWhy = (detail: string | undefined, failure: Failure): string | undefined =>
-  failure === "checksum" || (failure === "download" && unreached(detail)) ? detail : undefined;
+  failure === "checksum" || failure === "download" ? detail : undefined;
+
+// why: the state also covers a port that did not answer in time; this is the banner's name for it
+export const PORT_TAKEN = "Another program is where Ollama should be";
+export const PORT_TAKEN_SHORT = "Another program in its place";
+export const PORT_TAKEN_BODY = "Gates Local won't stop it. It can run its own Ollama instead.";
+
+// why: the switch keeps its own confirm in Settings, so a place offering it opens Settings
+export const canUseOwn = (s: Pick<State, "settings" | "runtime" | "unavailable">): boolean =>
+  s.settings !== NA && s.settings !== undefined && s.settings.runtimeMode !== "app" && s.runtime?.noAppCopy !== true && s.unavailable["settings.update"] !== true;
 
 export const FAIL_FALLBACK: Record<NonNullable<Failure>, string> = {
   download: "Check the network, then retry.",
@@ -157,7 +184,7 @@ export function rtInfo(s: RtSource): { dot: string; text: ReactNode; tip: string
     case "missing":
       return { dot: "warn", text: <b>Ollama not installed</b>, tip: own === "" ? "No Ollama install found. Gates Local can install its own copy." : `No Ollama install found. ${own}` };
     case "wrong":
-      return { dot: "err", text: <><b>Port {port}</b> · busy</>, tip: `Something other than Ollama answers on port ${port}.` };
+      return { dot: "err", text: <b>{PORT_TAKEN_SHORT}</b>, tip: `Something other than Ollama answers on port ${port}.` };
     case "stopped":
       return { dot: "warn", text: <b>Ollama stopped</b>, tip: own === "" ? `Nothing answers on port ${port}. Start Ollama, then retry.` : `${own} It starts when Gates Local opens.` };
     case "error":

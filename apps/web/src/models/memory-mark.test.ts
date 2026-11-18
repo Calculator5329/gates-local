@@ -90,7 +90,7 @@ it("the slower-now line puts the measured speed after Slower now, before who is 
 });
 
 it("the slower-now line has no tip, and its screen-reader words are the sentence with the sizes", () => {
-  const sentence = "Fits this card with Whisper (2.0 GB) off it. Would use ~1.0 GB of system memory.";
+  const sentence = "Fits this card with Whisper (2.0 GB) off it. Would use ~1.0 GB of system memory, with 0.5 GB of the card kept free.";
   const html = slow({ fit: fitWith([whisper]) });
   expect(html).not.toContain("data-tip");
   expect(html).toContain(`<span class="vh">. ${sentence}</span>`);

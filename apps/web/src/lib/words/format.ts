@@ -10,6 +10,12 @@ export function cardGb(bytes: number): string {
   return `${Math.round(bytes / GIB)}${NBSP}GB`;
 }
 
+// why: "an" before a size said with a vowel sound: 8, 11, 18, 80-89
+export function aGpu(bytes: number): string {
+  const n = Math.round(bytes / GIB);
+  return `${String(n).startsWith("8") || n === 11 || n === 18 ? "an" : "a"} ${cardGb(bytes)} GPU`;
+}
+
 export function shortAge(ms: number, now: number): string {
   const s = Math.floor((now - ms) / 1000);
   if (s < 60) return "now";
@@ -71,6 +77,7 @@ const UNSAID: Record<FitReport["verdict"], VerdictKind> = { fits: "gpu", spills:
 
 export const roughly = (measured: boolean) => (measured ? "" : "~");
 export const needBasis = (measured: boolean) => (measured ? "measured" : "estimated");
+export const needHow = (measured: boolean) => (measured ? "Measured" : "Estimated");
 
 export function needAmount(bytes: number): string {
   const g = bytes / GIB;
@@ -87,6 +94,9 @@ export function verdictOf(r: FitReport): Verdict {
 export function holderName(o: Pick<GpuOccupant, "kind" | "label">): string {
   return o.kind === "whisper" ? "Whisper" : o.kind === "unknown" ? "Other" : o.label;
 }
+
+// why: the server's VRAM safety margin (fit/constants.ts), which a predicted spill includes
+const CARD_RESERVE = 512 * 1024 ** 2;
 
 export interface SlowReason {
   readonly short: string;
@@ -105,7 +115,7 @@ export function slowReason(slow: { readonly inTheWay: readonly GpuOccupant[]; re
   const off = first === undefined ? `other programs (${gb(unnamedBytes)})` : parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
   const slower = tps === undefined ? "Slower now" : `Slower now, ${tps}`;
   // why: a spill /api/ps reported is said in the present; a predicted one as a prediction, with ~
-  const spill = slow.measured ? `${gb(slow.spillRamBytes)} is in system memory now.` : `Would use ~${gb(slow.spillRamBytes)} of system memory.`;
+  const spill = slow.measured ? `${gb(slow.spillRamBytes)} is in system memory now.` : `Would use ~${gb(slow.spillRamBytes)} of system memory, with ${gb(CARD_RESERVE)} of the card kept free.`;
   return {
     short: first !== undefined && said.includes(first.label) ? slower : `${slower} · ${who} in the way`,
     way: `${who} in the way`,

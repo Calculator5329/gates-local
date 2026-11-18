@@ -212,6 +212,12 @@ it("the opening line says whether the need was measured or estimated, once", () 
   expect(estimated.lines.join(" ")).not.toMatch(/Measured/);
 });
 
+// council climb-025 Q12: "a 11 GB GPU"
+it.each([[11, "an"], [8, "an"], [18, "an"], [16, "a"], [12, "a"]])("a %i GB card takes %s", (size, article) => {
+  const line = details({ freeVramBytes: size * GB }).lines[0];
+  expect(line).toMatch(new RegExp(`^Estimated 9\\.0\\sGB of ${article} ${size}\\sGB GPU\\.$`));
+});
+
 it("a refusal names the card as every other line does", () => {
   store.state = {
     model: "chat", numCtx: 16384, fitPanel: { model: null }, settings: { defaultNumCtx: 65536 },

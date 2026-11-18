@@ -7,7 +7,7 @@ import { modelNameKey } from "../models/pick.ts";
 import { firstModelOffer } from "./first-offer.ts";
 import { firstPull, openSettings, pull, recheckRuntime } from "../lib/session/index.ts";
 import { NA, type State, useStore, waitingReplies } from "../lib/store/store.ts";
-import { booting, FAIL_FALLBACK, failWhy, failWords, INSTALL_TITLE, type InstallSize, installStep, ownCopyNote, portOf, rtOf, searching, STALLED, underTitle, unread, useInstallStall } from "./words.tsx";
+import { booting, canUseOwn, FAIL_FALLBACK, failWhy, failWords, INSTALL_TITLE, type InstallSize, installStep, Looked, ownCopyNote, portOf, PORT_TAKEN, PORT_TAKEN_BODY, rtOf, searching, STALLED, underTitle, unread, useInstallStall } from "./words.tsx";
 
 function Shell({ icon, role, title, children }: { icon: ReactNode; role: "status" | "alert"; title: string; children: ReactNode }) {
   return (
@@ -21,9 +21,8 @@ function Shell({ icon, role, title, children }: { icon: ReactNode; role: "status
   );
 }
 
-// why: the switch keeps its own confirm in Settings, so the banner opens it rather than switching
 function UseOwnButton() {
-  const can = useStore((s) => s.settings !== NA && s.settings !== undefined && s.settings.runtimeMode !== "app" && s.runtime?.noAppCopy !== true && s.unavailable["settings.update"] !== true);
+  const can = useStore(canUseOwn);
   return can ? <button type="button" className="btn primary" data-testid="chat.banner.use-own" onClick={() => openSettings("runtime", false, true)}>Use Gates Local's Ollama</button> : null;
 }
 
@@ -97,9 +96,9 @@ export function Banner() {
       return <Installing install={install} />;
     case "wrong":
       return (
-        <Shell icon={<Icon id="alert" cls="err" />} role="alert" title="Another program is where Ollama should be">
+        <Shell icon={<Icon id="alert" cls="err" />} role="alert" title={PORT_TAKEN}>
           <div className="bm" data-why={`Another program answers on localhost:${port}.`}>
-            Gates Local won't stop it. It can run its own Ollama instead.
+            {PORT_TAKEN_BODY}
           </div>
           <div className="ba">
             <UseOwnButton />
@@ -111,7 +110,7 @@ export function Banner() {
       return looking ? (
         <Shell icon={<Icon id="spin" cls="spin warn" />} role="status" title="Looking for Ollama">
           <div className="bm">
-            Checking <span className="mono">localhost:{port}</span>.
+            Checking <span className="mono">localhost:{port}</span><Looked />
           </div>
         </Shell>
       ) : (

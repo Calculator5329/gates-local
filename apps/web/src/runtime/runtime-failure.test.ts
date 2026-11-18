@@ -25,12 +25,12 @@ afterEach(() => { setState(initial); vi.unstubAllGlobals(); });
 
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/\s+/g, " ");
 
-async function places(runtime: State["runtime"], words: (html: string) => string = text): Promise<Record<string, string>> {
+async function places(runtime: State["runtime"], words: (html: string) => string = text, more: Partial<State> = {}): Promise<Record<string, string>> {
   const { Banner } = await import("./Banner.tsx");
   const { rtInfo } = await import("./words.tsx");
   const { FirstRun } = await import("../first-run/FirstRun.tsx");
   const { SettingsView } = await import("../settings/Settings.tsx");
-  const at = (view: State["view"], extra: Partial<State> = {}) => setState({ ...initial, conn: { kind: "open" }, runtime, models: [], view, ...extra });
+  const at = (view: State["view"], extra: Partial<State> = {}) => setState({ ...initial, conn: { kind: "open" }, runtime, models: [], view, ...more, ...extra });
   at("new");
   const banner = renderToStaticMarkup(createElement(Banner));
   const gear = rtInfo({ conn: { kind: "open" }, runtime });
@@ -54,6 +54,33 @@ it("a download that stopped says so everywhere, with Retry, and never that Ollam
     expect(p[where], where).toContain("Stopped at 0.6 of 1.5 GB");
     expect(p[where]?.match(/Ollama download/g)?.length ?? 0, where).toBeLessThanOrEqual(1);
   }
+});
+
+// Council climb-025 Q16: a download cut mid-way put the server's own reason ("terminated") in the main line.
+it("a download cut mid-way keeps its figures and the next step on the line; the server's reason is in the details", async () => {
+  const detail = "The Ollama download stopped at 0.6 of 1.5 GB (terminated). Check the network and retry; nothing was installed.";
+  const p = await places({ ...base, failure: "download", detail });
+  for (const where of ["banner", "first", "settings"]) {
+    expect(p[where], where).toContain("Stopped at 0.6 of 1.5 GB. Check the network, then retry.");
+    expect(p[where], where).not.toMatch(/terminated|nothing was installed/);
+  }
+  const html = await places({ ...base, failure: "download", detail }, (h) => h);
+  for (const where of ["banner", "first", "settings"]) expect(html[where], where).toContain(`data-why="${detail}"`);
+});
+
+// Council climb-025 Q16: the first window's busy port had only Retry; one name for the state everywhere.
+it("a program in Ollama's place has the banner's words and its Use Gates Local's Ollama everywhere", async () => {
+  const wrong = { state: "wrong-service", owner: "none", baseUrl: "http://127.0.0.1:11434" } as const;
+  const settings = { defaultNumCtx: 16384, thinking: true, theme: "dark", runtimeMode: "system", tools: true, imageGen: true } as const;
+  const p = await places(wrong, text, { settings });
+  for (const where of ["banner", "first"]) {
+    expect(p[where], where).toContain("Another program is where Ollama should be");
+    expect(p[where], where).toContain("Use Gates Local's Ollama");
+  }
+  for (const where of ["gear", "settings"]) expect(p[where], where).toContain("Another program in its place");
+  for (const [where, words] of Object.entries(p)) expect(words, where).not.toMatch(/Port \d+ busy|Port \d+ · busy|port busy/i);
+  const { RT_WORD } = await import("../app/App.tsx");
+  expect(RT_WORD.wrong).toBe("Another program in its place");
 });
 
 // Council climb-025 Q16: a failed download put "HTTP 503" and the whole address in the main line.

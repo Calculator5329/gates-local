@@ -23,7 +23,7 @@ test("no models: Download and start opens the chat at once, the first message wa
   await expect(page.locator(".fr"), "the first window is gone with the press").toHaveCount(0);
   await expect(page.locator("#modelBtn .ldbar"), "the download shows on the model button").toBeVisible();
   await sendMessage(page, "Hello there");
-  await expect(page.locator(".qt-r .qt-s")).toHaveAttribute("data-tip", "Sends when the download finishes");
+  await expect(page.locator(".qt-r .qt-s .vh")).toHaveText("Sends when the download finishes");
   await expect(page.locator(".turn.a .md").last()).toContainText("You asked: Hello there", { timeout: 20_000 });
 });
 
@@ -32,9 +32,11 @@ test.describe("when Ollama answers only after the page opened", () => {
   // Guards a bug that happened on a fresh Windows install: the catalog read before Ollama answered recommended nothing, so first run sent people to a terminal.
   test("first run offers the recommended download, not a terminal command", async ({ page, open }) => {
     await open();
-    await expect(page.getByTestId("first-run.cta.go")).toHaveText("Retry");
+    // council climb-025 Q16: the busy port offers Gates Local's own Ollama; Retry is the link beside it
+    await expect(page.getByTestId("first-run.cta.go")).toHaveText("Use Gates Local's Ollama");
+    await expect(page.getByTestId("first-run.cta.link")).toHaveText("Retry");
     await stack.scenario("no-models");
-    await page.getByTestId("first-run.cta.go").click();
+    await page.getByTestId("first-run.cta.link").click();
     await expect(page.getByRole("heading", { name: "Download your first model" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Download and start" })).toBeEnabled();
     await expect(page.locator(".fr")).not.toContainText("ollama pull");

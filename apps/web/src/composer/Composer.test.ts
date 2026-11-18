@@ -182,17 +182,18 @@ it("F6: before the first read, Send claims nothing about Ollama or models and th
   expect(model).toMatch(/aria-label="Model"/);
 });
 
-it("chat row 31: during setup the field keeps Ask anything…, and a queued message says when it goes once, as a clock with a tip", () => {
+// council climb-025 Q4: the clock's tip went; the row says what it waits for, the sentence is for a screen reader
+it("chat row 31: during setup the field keeps Ask anything…, and a queued message says when it goes once, as a clock", () => {
   const installing: State = { ...ready, runtime: { state: "installing", owner: "app", baseUrl: "http://127.0.0.1:5288", version: "test" } };
   setFixture(installing);
   expect(renderToStaticMarkup(createElement(Composer)), "the field is the ready field").toMatch(/placeholder="Ask anything…"/);
   setFixture({ ...installing, replies: repliesOf([{ id: "q", threadId: "thread", text: "hello", at: 1, waitFor: "setup" }]) });
   const html = renderToStaticMarkup(createElement(Composer));
   const row = html.match(/<ul class="qt"[\s\S]*?<\/ul>/)?.[0] ?? "";
-  expect(row).toMatch(/data-tip="Sends when setup finishes"/);
+  expect(row).not.toMatch(/data-tip="Sends when/);
   expect(row).toMatch(/<span class="vh">Sends when setup finishes<\/span>/);
   expect(row, "no word beside the clock").not.toMatch(/After setup/);
-  expect(html.split("setup finishes").length - 1, "said once, in the row").toBe(2);
+  expect(html.split("setup finishes").length - 1, "said once, in the row").toBe(1);
 });
 
 // Chat row 36, owner pick A (2026-11-13): the queue is a shelf inside the message box, three icons a row, more than three fold to a count.

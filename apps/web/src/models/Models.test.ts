@@ -86,7 +86,7 @@ describe("Models on a computer with no supported GPU", () => {
     const checked = render(noGpuComputer({ models: [], addPage: true, catalog: [offered] }));
     // decision 11: the mark's colour and number say it; no line above the list, no words on the row
     expect(checked).not.toContain("No supported GPU, so these run");
-    expect(checked).toContain('class="mm spill"');
+    expect(checked).toContain('class="mm spill lead"');
     expect(checked).not.toContain('class="vl spill"');
     expect(checked).toMatch(RECOMMENDED);
     expect(checked).not.toContain("data-skel");
@@ -130,7 +130,7 @@ describe("Models on a computer with no supported GPU", () => {
     // the mark says the table's 9 GB, not the catalog's 10 (a row has no tooltip, decision 19)
     // measured: plain on screen, "measured" in its name (the picker's rule)
     expect(html).toContain('aria-label="Runs in system memory, slower: 9.0 GB, measured"');
-    expect(html).toContain('<span class="mm-n" aria-hidden="true">9.0 GB</span>');
+    expect(html).toContain('<span class="mm-n" aria-hidden="true">Needs 9.0 GB</span>');
     expect(html).not.toMatch(/Measured 9\.0(?:&#160;| | )GB of memory with 64k of context/);
     expect(html).not.toContain("Measured after the first load");
   });
@@ -144,7 +144,7 @@ describe("Models on a computer with no supported GPU", () => {
     // the only row spills: its mark says so in amber with the 64k need (decision 11), nothing above the list
     // an estimate: "~" on screen, "estimated" in its name
     expect(html).toContain('aria-label="Partly in system memory, slower: 15 GB, estimated"');
-    expect(html).toContain('<span class="mm-n" aria-hidden="true">~15 GB</span>');
+    expect(html).toContain('<span class="mm-n" aria-hidden="true">Needs ~15 GB</span>');
     expect(html).not.toContain("These are bigger than your GPU");
     expect(html).not.toMatch(/Estimated 15\.0(?:&#160;| | )GB of memory with 64k of context/);
     expect(html).not.toContain("Runs on GPU");

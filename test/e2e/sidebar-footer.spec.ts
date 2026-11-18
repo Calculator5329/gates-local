@@ -29,10 +29,10 @@ test("one row of five icon buttons whose boxes never move, in any state or in Se
     expect(await footerWords(page), `${what} put words in the footer`).toEqual([]);
   };
   s.pull(QWEN14);
-  await expect(models(page)).toHaveAttribute("data-tip", /Downloading Qwen 3 14B/);
+  await expect(models(page)).toHaveAttribute("data-tip", /^<b>Qwen 3 14B<\/b> · /);
   await same("a download");
   s.pull(QWEN4);
-  await expect(models(page)).toHaveAttribute("data-tip", /Downloading Qwen 3\.5 4B/);
+  await expect(models(page)).toHaveAttribute("data-tip", /^<b>Models<\/b> · 2 downloading$/);
   await same("two downloads");
   s.pull({ ...QWEN4, state: "error", completedBytes: 0, message: "no space left on device" });
   await expect(models(page).locator(".fdot.red")).toHaveCount(1);
@@ -73,15 +73,16 @@ test("the tooltips carry the words, and the Models tooltip names the model", asy
   await expect(update).toHaveAttribute("data-tip", "Check for updates");
 
   s.pull(QWEN14);
-  await expect(models(page)).toHaveAttribute("data-tip", /^<b>Downloading Qwen 3 14B<\/b> · 61% · 5\.3 of 8\.6 GB$/);
-  await expect(models(page)).toHaveAccessibleName(/^Models · Downloading Qwen 3 14B · 61%/);
+  // council climb-025 Q4: a name and a short status; the sizes and the reason are on the download's row
+  await expect(models(page)).toHaveAttribute("data-tip", /^<b>Qwen 3 14B<\/b> · 61%$/);
+  await expect(models(page), "no sizes").not.toHaveAttribute("data-tip", /8\.6 GB$/);
+  await expect(models(page)).toHaveAccessibleName("Models · Qwen 3 14B · 61%");
   await models(page).hover();
-  await expect(page.locator("#tip.open")).toContainText("Downloading Qwen 3 14B · 61%");
+  await expect(page.locator("#tip.open")).toHaveText("Qwen 3 14B · 61%");
   s.pull(QWEN4);
-  await expect(models(page)).toHaveAttribute("data-tip", /Qwen 3 14B.*<br><b>Downloading Qwen 3\.5 4B<\/b>/);
+  await expect(models(page)).toHaveAttribute("data-tip", /^<b>Models<\/b> · 2 downloading$/);
   s.pull({ ...QWEN14, state: "error", completedBytes: 0, message: "no space left on device" });
-  // council climb-025 Q4: a short status; the reason is on the download's row
-  await expect(models(page)).toHaveAttribute("data-tip", /<b>Qwen 3 14B<\/b> · Download failed/);
+  await expect(models(page)).toHaveAttribute("data-tip", /^<b>Models<\/b> · 1 downloading · 1 failed$/);
 
   s.update("available");
   await expect(update).toHaveAccessibleName("Update to def5678");
@@ -92,9 +93,9 @@ test("the tooltips carry the words, and the Models tooltip names the model", asy
   await expect(update).toHaveAttribute("data-tip", "Update failed");
 
   s.runtime("wrong-service");
-  await expect(settings(page)).toHaveAccessibleName(/^Settings · Port \d+ · busy$/);
+  await expect(settings(page)).toHaveAccessibleName("Settings · Another program in its place");
   // council climb-025 Q4: the tip names the state only; its sentence is under the status in Settings › Runtime
-  await expect(settings(page)).toHaveAttribute("data-tip", /^Port \d+ · busy$/);
+  await expect(settings(page)).toHaveAttribute("data-tip", "Another program in its place");
   await settings(page).click();
   await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
   await expect(page.locator(".set-in")).toContainText(/Something other than Ollama answers on port \d+\./);
@@ -158,8 +159,8 @@ test.describe("the Settings icon and the runtime", () => {
       await open();
       const gear = page.getByTestId("sidebar.foot.settings");
       await expect(gear.locator(".fdot.red")).toBeVisible();
-      await expect(gear).toHaveAccessibleName("Settings · Port 5288 · busy");
-      await expect(gear).toHaveAttribute("data-tip", "Port 5288 · busy");
+      await expect(gear).toHaveAccessibleName("Settings · Another program in its place");
+      await expect(gear).toHaveAttribute("data-tip", "Another program in its place");
       await gear.click();
       await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
     });

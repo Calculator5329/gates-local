@@ -160,7 +160,7 @@ it("the size button and the × box are the same two fixed-width boxes in every s
   const css = readFileSync(new URL("../app/styles.css", import.meta.url), "utf8");
   const sheet = rules(css);
   const base = (selector: string) => sheet.find((r) => r.selectors.length === 1 && r.selectors[0] === selector)?.decls ?? [];
-  expect(base(".dl-btn")).toEqual(expect.arrayContaining(["box-sizing:border-box", "width:104px", "height:32px"]));
+  expect(base(".dl-btn")).toEqual(expect.arrayContaining(["box-sizing:border-box", "width:140px", "height:32px"]));
   expect(base(".dl-x")).toEqual(expect.arrayContaining(["box-sizing:border-box", "width:32px", "height:32px"]));
   expect(base(".dl-side")).toEqual(["display:contents"]);
   expect(base(".dl-x.off")).toEqual(["visibility:hidden"]);
@@ -168,6 +168,14 @@ it("the size button and the × box are the same two fixed-width boxes in every s
   const stateRules = sheet.filter((r) => r.selectors.some((s) => /\.dl-(?:btn|x|run|done|skel)\b/.test(lastCompound(s)) && !/^\.dl-(?:btn|x)$/.test(lastCompound(s)) && s !== ".dl-x.off"));
   expect(stateRules.length).toBeGreaterThan(0);
   for (const r of stateRules) expect(r.decls.filter((d) => sizing.test(d)), r.selectors.join(",")).toEqual([]);
+});
+
+// council climb-025 Q12: "~6.0 / 16 GB" and "5.0 GB" sat side by side as two bare sizes
+it("on the Download tab the memory figure says it is the need and the button says it downloads that size", async () => {
+  await mountTab({ catalog: [entry("a:1", false)], fitTable: tableOf([fitOf("a:1", "fits")]) });
+  const row = rowOf("a:1")!;
+  expect(all((el) => el.classList.includes("mm-n"), row)[0]?.textContent).toMatch(/^Needs ~6\.0 \/ 16\sGB$/);
+  expect(byTestId("models.download.start", row)?.textContent).toMatch(/^Download 5\.0\sGB$/);
 });
 
 it("while the download's size is unknown its button says plain Download, with no size", () => {

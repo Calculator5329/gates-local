@@ -20,7 +20,7 @@ export function markFill(verdict: FitReport["verdict"], need: number, whole: num
 
 const KIND: Record<FitReport["verdict"], string> = { fits: "gpu", spills: "spill", refuse: "no" };
 
-export function MemoryMark({ report, words }: { report: FitReport; words: string }) {
+export function MemoryMark({ report, words, lead }: { report: FitReport; words: string; lead?: string }) {
   const whole = useStore(markWhole);
   const need = report.needVramBytes;
   const measured = report.source === "measured";
@@ -28,13 +28,13 @@ export function MemoryMark({ report, words }: { report: FitReport; words: string
   const fill = whole === undefined ? 0 : markFill(report.verdict, need, whole);
   return (
     <span
-      className={`mm ${KIND[report.verdict]}`}
+      className={`mm ${KIND[report.verdict]}${lead === undefined ? "" : " lead"}`}
       role="img"
       aria-label={`${words}: ${text.replace(" / ", " of ")}, ${needBasis(measured)}`}
       data-testid="models.fit.memory-mark"
     >
       <span className="mm-bar" aria-hidden="true"><i style={{ width: `${(fill * 100).toFixed(1)}%` }} /></span>
-      <span className="mm-n" aria-hidden="true">{roughly(measured)}{text}</span>
+      <span className="mm-n" aria-hidden="true">{lead === undefined ? "" : `${lead} `}{roughly(measured)}{text}</span>
     </span>
   );
 }

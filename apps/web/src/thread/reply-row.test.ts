@@ -124,6 +124,17 @@ it("a question whose reply failed before its first word carries the failed reply
   expect(last?.querySelector('[data-testid="chat.reply.retry"]')?.textContent).toBe("Retry");
   act(() => store.setState({ messages: { T: [question, ask("u1"), answer("a1")] } }));
   const earlier = failLine(".stop-note.under-u");
-  expect(failWords(earlier), "no Retry here, so the line does not offer one").toBe("The reply didn't finish.");
+  // council climb-025 Q16: with no Retry here, the line ended with no next step
+  expect(failWords(earlier), "no Retry here, so the line names the step there is").toBe("The reply didn't finish. Ask again below.");
   expect(earlier?.querySelector('[data-testid="chat.reply.retry"]')).toBeNull();
+});
+
+// council climb-025 Q16: "The connection dropped before this reply finished." ended there
+it("a reply cut by a dropped connection says what to do: Retry once it reconnects on the last turn, ask again on an earlier one", async () => {
+  const question = ask("u0", "What guides ships?", { times: failed("socket closed before reply.send answered", "closed") });
+  act(() => store.setState({ messages: { T: [question] } }));
+  await mount("closed-last");
+  expect(failWords(failLine(".stop-note.under-u"))).toBe("The connection dropped before this reply finished. Retry once it reconnects.");
+  act(() => store.setState({ messages: { T: [question, ask("u1"), answer("a1")] } }));
+  expect(failWords(failLine(".stop-note.under-u"))).toBe("The connection dropped before this reply finished. Ask again below.");
 });

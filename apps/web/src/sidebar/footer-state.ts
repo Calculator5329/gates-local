@@ -1,5 +1,4 @@
 import type { PullProgress } from "@gates-local/contracts";
-import { NBSP, gb } from "../lib/words/format.ts";
 import { esc } from "../lib/ui/ui.tsx";
 
 const SETTINGS = "Settings · Ctrl ,";
@@ -25,25 +24,28 @@ export interface ModelsIcon {
   readonly label: string;
 }
 
-const unescape = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
 const active = (p: PullProgress) => p.state === "queued" || p.state === "downloading" || p.state === "verifying";
 
-function tipLine(p: PullProgress, name: string): [boldEscaped: string, restEscaped: string] {
-  const n = esc(name);
+// why: the tip is a name and a short status; the sizes and the reason are on the download's row
+function status(p: PullProgress): string {
   switch (p.state) {
     case "queued":
-      return [n, " is waiting to download"];
+      return "Waiting";
     case "verifying":
-      return [`Checking ${n}`, " after downloading it"];
+      return "Checking";
     case "error":
-      // why: the reason is on the download's row in Settings; the tip is the short status
-      return [n, " · Download failed"];
-    default: {
-      if (!p.totalBytes) return [`Starting the download of ${n}`, ""];
-      const pct = Math.floor((p.completedBytes / p.totalBytes) * 100);
-      return [`Downloading ${n}`, ` · ${pct}% · ${gb(p.completedBytes).replace(`${NBSP}GB`, "")} of ${gb(p.totalBytes)}`];
-    }
+      return "Download failed";
+    default:
+      return p.totalBytes ? `${Math.floor((p.completedBytes / p.totalBytes) * 100)}%` : "Starting";
   }
+}
+
+function tipLine(running: readonly PullProgress[], failed: readonly PullProgress[], nameOf: (tag: string) => string): [name: string, status: string] {
+  const all = [...running, ...failed];
+  const only = all.length === 1 ? all[0] : undefined;
+  if (only !== undefined) return [nameOf(only.name), status(only)];
+  const counts = [running.length > 0 ? `${running.length} downloading` : "", failed.length > 0 ? `${failed.length} failed` : ""];
+  return ["Models", counts.filter(Boolean).join(" · ")];
 }
 
 export function finishedInBurst(kept: readonly PullProgress[], pulls: readonly PullProgress[]): PullProgress[] {
@@ -63,12 +65,12 @@ export function modelsIcon(pulls: readonly PullProgress[], nameOf: (tag: string)
   const whole = running.length > 0 ? finished.reduce((n, p) => n + (p.totalBytes ?? 0), 0) : 0;
   const total = sized.reduce((n, p) => n + (p.totalBytes ?? 0), whole);
   const done = sized.reduce((n, p) => n + Math.min(p.completedBytes, p.totalBytes ?? 0), whole);
-  const lines = [...running, ...failed].map((p) => tipLine(p, nameOf(p.name)));
+  const [what, how] = tipLine(running, failed, nameOf);
   return {
     state: running.length > 0 ? "downloading" : "failed",
     progress: total > 0 ? done / total : null,
     failed: failed.length > 0,
-    tip: lines.map(([bold, rest]) => `<b>${bold}</b>${rest}`).join("<br>"),
-    label: `Models · ${lines.map(([bold, rest]) => unescape(bold + rest)).join(". ")}`,
+    tip: `<b>${esc(what)}</b> · ${how}`,
+    label: what === "Models" ? `Models · ${how}` : `Models · ${what} · ${how}`,
   };
 }

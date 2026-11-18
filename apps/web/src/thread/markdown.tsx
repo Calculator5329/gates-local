@@ -179,7 +179,8 @@ function useEdges<T extends HTMLElement>(content: unknown) {
 function CodeBlock({ lang, code }: { lang: string; code: string }) {
   const [copied, copy] = useCopy(code);
   const pre = useEdges<HTMLPreElement>(code);
-  const [wrap, setWrap] = useState(false);
+  // why: under 420 px an unwrapped command is cut mid-token; the toggle still unwraps it
+  const [wrap, setWrap] = useState(() => typeof matchMedia === "function" && matchMedia("(max-width: 419px)").matches);
   return (
     <div className="cb">
       <div className="cb-h">

@@ -2,9 +2,9 @@ import { type ReactNode, useState } from "react";
 import type { CatalogEntry } from "@gates-local/contracts";
 import { suggestedOf } from "../picker/picker-models.ts";
 import { recommendedEntry } from "../runtime/first-offer.ts";
-import { CONNECTING, INSTALL_TITLE, STALLED, booting, failWhy, failWords, installStep, installWords, ownCopyNote, portOf, rtOf, underTitle, unread, useInstallStall } from "../runtime/words.tsx";
+import { CONNECTING, INSTALL_TITLE, Looked, PORT_TAKEN, PORT_TAKEN_BODY, STALLED, booting, canUseOwn, failWhy, failWords, installStep, installWords, ownCopyNote, portOf, rtOf, underTitle, unread, useInstallStall } from "../runtime/words.tsx";
 import { DlButton, canCancelPull } from "../models/ModelDownloads.tsx";
-import { type Verdict, cardGb, ctxFor, describeModel, etaText, gb, k, noGpu, verdictOf } from "../lib/words/format.ts";
+import { type Verdict, aGpu, ctxFor, describeModel, etaText, gb, k, needHow, noGpu, verdictOf } from "../lib/words/format.ts";
 import { Icon } from "../lib/ui/icons.tsx";
 import { type RowPhase, phaseOf, rowOf } from "../fit/fit-table.ts";
 import { finishFirstRun, firstPull, openSettings, pull, cancelPull, recheckRuntime } from "../lib/session/index.ts";
@@ -97,7 +97,7 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
             {fit ? (
               <tr>
                 <td>{cpu ? "Memory" : "GPU memory"}</td>
-                <td>{cpu ? `Estimated ${gb(fit.needVramBytes)}, all in system memory (no supported GPU)` : `Estimated ${gb(fit.needVramBytes)} of a ${cardGb(fit.freeVramBytes)} GPU`}</td>
+                <td>{`${needHow(fit.source === "measured")} ${gb(fit.needVramBytes)}${cpu ? ", all in system memory (no supported GPU)" : ` of ${aGpu(fit.freeVramBytes)}`}`}</td>
               </tr>
             ) : null}
           </tbody>
@@ -237,12 +237,13 @@ function NoOllama() {
   const failure = useStore((s) => s.runtime?.failure);
   const note = useStore(ownCopyNote);
   const computerOnly = useStore((s) => s.unavailable["runtime.retry"] === true);
+  const useOwn = useStore(canUseOwn) && rt === "wrong";
   const own = note !== "";
   const around = own ? `${note} ` : "";
   const port = portOf(baseUrl);
   const [title, st, sub]: [string, string, string | undefined] =
     rt === "wrong"
-      ? ["Ollama isn't answering", `Something else holds port ${port}`, undefined]
+      ? [PORT_TAKEN, "Ollama", PORT_TAKEN_BODY]
       : rt === "stopped"
         ? ["Ollama is stopped", "Ollama", own ? `${around}It starts when Gates Local opens; press Retry to check again.` : "Start Ollama, then press Retry."]
         : rt === "error"
@@ -258,10 +259,14 @@ function NoOllama() {
       }
       title={title}
       sub={sub}
-      why={rt === "error" ? failWhy(detail, failure) : undefined}
+      why={rt === "error" ? failWhy(detail, failure) : rt === "wrong" ? `Another program answers on localhost:${port}.` : undefined}
     >
       {rt === "error" && computerOnly ? <p className="fr-note na">Gates Local can't fix this from here. On the computer, press Retry in Gates Local.</p> : null}
-      <Cta label="Retry" onGo={() => void recheckRuntime()} link="Settings" onLink={() => finishFirstRun("runtime")} />
+      {useOwn ? (
+        <Cta label="Use Gates Local's Ollama" onGo={() => openSettings("runtime", false, true)} link="Retry" onLink={() => void recheckRuntime()} />
+      ) : (
+        <Cta label="Retry" onGo={() => void recheckRuntime()} link="Settings" onLink={() => finishFirstRun("runtime")} />
+      )}
     </Shell>
   );
 }
@@ -284,7 +289,7 @@ function Waiting({ installing }: { installing: boolean }) {
       st={
         <>
           <span className={stalled ? "dot warn" : "dot run"} />
-          {stalled ? STALLED : installing ? installStep(install) : own ? "Starting Ollama" : "Looking for Ollama"}
+          {stalled ? STALLED : installing ? installStep(install) : own ? "Starting Ollama" : <span>Looking for Ollama<Looked /></span>}
         </>
       }
       title={installing ? INSTALL_TITLE : "Starting up"}

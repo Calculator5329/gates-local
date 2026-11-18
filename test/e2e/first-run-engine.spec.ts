@@ -28,14 +28,15 @@ for (const [w, h, tag] of [[1280, 800, "desk"], [390, 844, "phone"]] as const) {
       const heading = page.locator(".fr h1");
       const status = page.locator(".fr-st");
       const tops: Record<string, number> = {};
-      const at = async (state: string, title: string, line?: string) => {
+      const at = async (state: string, title: string, line?: string | RegExp) => {
         await expect(heading).toHaveText(title);
         if (line !== undefined) await expect(status).toHaveText(line);
         await page.mouse.move(2, 2);
         tops[state] = (await heading.boundingBox())?.y ?? Number.NaN;
         await page.screenshot({ path: info.outputPath(`${state}-${tag}.png`) });
       };
-      await at("looking", "Starting up", "Looking for Ollama");
+      // council climb-025 Q15: the look counts its seconds
+      await at("looking", "Starting up", /^Looking for Ollama · \d+ s$/);
       rt.set(installing);
       await at("fetching-runtime", "Getting the chat engine ready", "Downloading Ollama");
       rt.set(startingOwn);

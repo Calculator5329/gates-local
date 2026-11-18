@@ -16,7 +16,7 @@ const SHORT = /^Slower now · Whisper in the way$/;
 // sizes keep their unit on the line: a no-break space before GB
 // nothing is loaded here, so the spill is a prediction: said as one, with ~ (council climb-025 Q12)
 // each holder named as the memory rows name it, never folded into "others" (council climb-025 Q12)
-const SENTENCE = /^Fits this card with Whisper \(2\.\d\sGB\) and Media Vault vision \(1\.8\sGB\) off it\. Would use ~\d\.\d\sGB of system memory\.$/;
+const SENTENCE = /^Fits this card with Whisper \(2\.\d\sGB\) and Media Vault vision \(1\.8\sGB\) off it\. Would use ~\d\.\d\sGB of system memory, with 0\.5\sGB of the card kept free\.$/;
 
 /** In the test body, after the fixtures' own reset of the backend. */
 async function smallCard(): Promise<void> {

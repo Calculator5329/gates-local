@@ -160,6 +160,9 @@ const same = (a: ImageChoice, b: ImageChoice) => a.preset === b.preset && a.widt
 // why: a busy processor took 9 minutes a step, so its limit is over five times the 4-minute promise
 export const RUN_LIMIT_MS = { card: 600_000, cpu: 1_800_000 } as const;
 const QUEUE_LIMIT_MS = 1_800_000;
+const SHUTTING_DOWN = "Image generation is shutting down.";
+// why: the card carries its own Try again, so the line says only what cancelled it, when known
+const cancelWords = (why: unknown) => (why instanceof Error && why.message === SHUTTING_DOWN ? "The image was cancelled when Gates Local closed." : "The image was cancelled.");
 const minutes = (ms: number) => Math.round(ms / 60_000);
 export const ranLong = (min: number, stopped = true) => stopped
   ? `The picture took longer than the ${min}-minute limit on this computer, so the image engine stopped it. Try again when you are ready.`
@@ -806,7 +809,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             "image-save": "The image could not be saved; check free disk space and try again.",
           };
           const errorKind = controller.signal.aborted ? "cancelled" : timedOut ? "timeout" : Object.hasOwn(reasons, code) ? code : stage;
-          const reason = controller.signal.aborted ? "The image was cancelled; try again when you are ready." : late !== undefined ? late
+          const reason = controller.signal.aborted ? cancelWords(controller.signal.reason) : late !== undefined ? late
             : errorKind === "wont-fit" && error instanceof Error && "said" in error && typeof error.said === "string" ? error.said : reasons[errorKind];
           log(`job ${jobId} failed kind=${errorKind}`);
           const said = controller.signal.aborted || late !== undefined ? undefined : details[errorKind];
@@ -925,11 +928,11 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     },
     async close() {
       closed = true; clearIdle();
-      closing.abort(new Error("Image generation is shutting down."));
-      downloads?.abort(new Error("Image generation is shutting down."));
+      closing.abort(new Error(SHUTTING_DOWN));
+      downloads?.abort(new Error(SHUTTING_DOWN));
       await downloading;
       const pending = [...jobs.values()];
-      for (const job of pending) if (!job.committing) job.controller.abort(new Error("Image generation is shutting down."));
+      for (const job of pending) if (!job.committing) job.controller.abort(new Error(SHUTTING_DOWN));
       await Promise.all(pending.map((job) => job.ended));
       await module.stopIdle();
     },

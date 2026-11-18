@@ -1,7 +1,7 @@
 import { type CSSProperties, useRef, useState } from "react";
 import { type Accent, type ImageSetupProgress, type ImageStatus, type ShellStatus, type Source, type Theme, cardBytes, MIN_ROOM } from "@gates-local/contracts";
 import { imageFailure, said } from "../lib/words/image-failure.ts";
-import { STALLED, failWhy, failWords, installStep, portOf, rtInfo, rtOf, searching, underTitle, useInstallStall } from "../runtime/words.tsx";
+import { PORT_TAKEN_SHORT, STALLED, failWhy, failWords, installStep, portOf, rtInfo, rtOf, searching, underTitle, useInstallStall } from "../runtime/words.tsx";
 import { GpuMemory } from "../fit/FitPanel.tsx";
 import { count, folderWords, gb, noGpu, sourceDetail } from "../lib/words/format.ts";
 import { noImageEngine } from "../image/image-choice.ts";
@@ -85,7 +85,7 @@ function Runtime() {
   const stall = useInstallStall(rt === "installing" ? runtime?.install : undefined);
   const words = rt === "installing" ? stall.words : undefined;
   const stat =
-    rt === "ready" ? "Running" : rt === "installing" ? (stall.stalled ? STALLED : installStep(runtime?.install)) : rt === "starting" ? (searching({ runtime }) ? "Looking" : "Starting") : rt === "missing" ? "Not installed" : rt === "wrong" ? `Port ${port} busy` : rt === "offline" ? "Reconnecting" : rt === "stopped" ? "Stopped" : failWords(runtime?.failure).stat;
+    rt === "ready" ? "Running" : rt === "installing" ? (stall.stalled ? STALLED : installStep(runtime?.install)) : rt === "starting" ? (searching({ runtime }) ? "Looking" : "Starting") : rt === "missing" ? "Not installed" : rt === "wrong" ? PORT_TAKEN_SHORT : rt === "offline" ? "Reconnecting" : rt === "stopped" ? "Stopped" : failWords(runtime?.failure).stat;
   const statD =
     rt === "ready"
       ? app
@@ -155,7 +155,7 @@ function Runtime() {
                   <li>
                     Ollama goes in <span className="mono">{folders.appCopy}</span>, its models in <span className="mono">{folders.appModels}</span>. Yours are in <span className="mono">{folders.models}</span>.
                   </li>
-                  <li>It runs on port 11435. The system Ollama keeps running for other apps.</li>
+                  <li>The system Ollama keeps running for other apps.</li>
                 </ul>
               </>
             )}

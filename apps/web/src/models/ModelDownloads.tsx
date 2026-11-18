@@ -120,8 +120,7 @@ export function DlButton({ size, label, p, installed = false, disabled = false, 
         </span>
       ) : (
         <button type="button" className="dl-btn" data-testid="models.download.start" aria-label={size === undefined ? "Download" : `Download ${size}`} disabled={disabled} onClick={onStart}>
-          <Icon id="download" />
-          {size ?? "Download"}
+          {size === undefined ? "Download" : `Download ${size}`}
         </button>
       )}
       {p && onCancel && !installed ? (
@@ -171,7 +170,7 @@ function DlRow({ c, report, actions }: { c: CatalogEntry; report: FitReport | un
           )}
         </span>
       </div>
-      {report && v ? <MemoryMark report={report} words={v.mark} /> :<span className="mm" aria-hidden="true" />}
+      {report && v ? <MemoryMark report={report} words={v.mark} lead="Needs" /> : <span className="mm lead" aria-hidden="true" />}
       <DlButton
         size={gb(c.downloadBytes)}
         label={name}
@@ -193,7 +192,7 @@ function BigRow({ c, report }: { c: CatalogEntry; report: FitReport }) {
         <b>{name}</b>
         <span className="d">{c.purpose}</span>
       </div>
-      <MemoryMark report={report} words={verdictOf(report).mark} />
+      <MemoryMark report={report} words={verdictOf(report).mark} lead="Needs" />
     </div>
   );
 }

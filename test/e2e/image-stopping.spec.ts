@@ -16,7 +16,7 @@ test.beforeEach(async () => { comfy = await fakeComfy(); comfy.withApp(); });
 test.afterEach(async () => { await comfy.close(); });
 
 const STOPPING = "Stopping the picture";
-const STOPPED = "The image was cancelled; try again when you are ready.";
+const STOPPED = "The image was cancelled.";
 const QUESTION = "What colour is a nebula?";
 const PHONE = { width: 390, height: 844 };
 

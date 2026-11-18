@@ -66,11 +66,12 @@ const FAILS: readonly Row[] = [
   ["a full disk's next step", () => FAIL_FALLBACK.disk, "Free some space on this drive, then retry."],
   ["a failed install's next step", () => FAIL_FALLBACK.install, "Retry. If it fails again, install Ollama from ollama.com."],
   ["a failed start's next step", () => FAIL_FALLBACK.start, "Retry. If it still won't start, install Ollama from ollama.com."],
-  ["a stopped download, under its title", () => underTitle("The Ollama download stopped at 0.6 of 1.5 GB (no data for 30 s).", "download"), "Stopped at 0.6 of 1.5 GB (no data for 30 s)."],
+  ["a stopped download, under its title", () => underTitle("The Ollama download stopped at 0.6 of 1.5 GB (no data for 30 s).", "download"), "Stopped at 0.6 of 1.5 GB. Check the network, then retry."],
   // the checksum and its figures go to the details (data-why); the line says what to do
   ["a checksum failure, under its title", () => underTitle("The Ollama download didn't match its checksum. Nothing was installed.", "checksum"), "Download it again."],
   ["a checksum failure's details", () => failWhy("The Ollama download didn't match its checksum.", "checksum"), "The Ollama download didn't match its checksum."],
-  ["a stopped download keeps its figures on the line, so has no details", () => failWhy("The Ollama download stopped at 0.6 of 1.5 GB.", "download"), undefined],
+  // council climb-025 Q16: the line is plain words and a step; the raw detail is in the details
+  ["a stopped download's details", () => failWhy("The Ollama download stopped at 0.6 of 1.5 GB.", "download"), "The Ollama download stopped at 0.6 of 1.5 GB."],
   ["a full disk, under its title", () => underTitle("The disk is full. Free 2 GB on this drive.", "disk"), "Free 2 GB on this drive."],
   ["a full disk with nothing more to say", () => underTitle("The disk is full.", "disk"), undefined],
   ["a failed start, under its title", () => underTitle("Ollama exited during startup.", "start"), "Ollama exited during startup."],
@@ -114,7 +115,7 @@ const GEAR: readonly Row[] = [
   ["starting the app's own Ollama", () => gear({ conn: open, runtime: runtime({ state: "starting", owner: "app", baseUrl: "http://127.0.0.1:5288" }) }), { dot: "run", text: "Starting Ollama", tip: "Waiting for the server on port 5288." }],
   ["no Ollama anywhere", () => gear({ conn: open, runtime: runtime({ state: "missing", owner: "none" }) }), { dot: "warn", text: "Ollama not installed", tip: "No Ollama install found. Gates Local can install its own copy." }],
   ["no Ollama, with the app's own copy picked", () => gear({ ...ON_PORT, settings: settings({ runtimeMode: "app" }) }), { dot: "warn", text: "Ollama not installed", tip: "No Ollama install found. Gates Local uses its own Ollama on port 5288." }],
-  ["something else on the port", () => gear({ conn: open, runtime: runtime({ state: "wrong-service", owner: "none" }) }), { dot: "err", text: "Port 11434 · busy", tip: "Something other than Ollama answers on port 11434." }],
+  ["something else on the port", () => gear({ conn: open, runtime: runtime({ state: "wrong-service", owner: "none" }) }), { dot: "err", text: "Another program in its place", tip: "Something other than Ollama answers on port 11434." }],
   ["a stopped system Ollama", () => gear({ conn: open, runtime: runtime({ state: "stopped", owner: "none" }) }), { dot: "warn", text: "Ollama stopped", tip: "Nothing answers on port 11434. Start Ollama, then retry." }],
   ["a stopped copy of the app's own", () => gear({ conn: open, runtime: runtime({ state: "stopped", owner: "none", baseUrl: "http://127.0.0.1:5288" }), settings: settings({ runtimeMode: "app" }) }), { dot: "warn", text: "Ollama stopped", tip: "Gates Local uses its own Ollama on port 5288. It starts when Gates Local opens." }],
   ["a download that stopped", () => gear({ conn: open, runtime: runtime({ state: "error", owner: "none", failure: "download" }) }), { dot: "err", text: "The Ollama download didn't finish", tip: "Open Settings › Runtime for details and Retry." }],

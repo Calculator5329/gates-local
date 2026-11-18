@@ -88,8 +88,8 @@ describe("a retry takes over its failed card's box", () => {
     [{ state: "running", progress: 0, phase: "freeing" }, "Freeing memory", '<span class="lv-w">Freeing memory</span>'],
     [{ state: "running", progress: 0.5, phase: "stopping", stage: "sampling", steps: { done: 2, total: 4 } }, "Stopping the picture", '<span class="lv-w">Stopping the picture</span>'],
     [{ state: "running", progress: 0.4 }, "Making image", '<span class="lv-w">Working</span>'],
-    // the sampler has begun and counted no step: on the processor that is over a minute of model load
-    [{ state: "running", progress: 0, stage: "sampling" }, "Making image", '<span class="lv-w">Starting</span>'],
+    // the sampler has begun and counted no step: on the processor that is over a minute of model load, so it names the model
+    [{ state: "running", progress: 0, stage: "sampling" }, "Making image", '<span class="lv-w">Loading z-image-int8</span>'],
     [{ state: "running", progress: 0.4, stage: "sampling", steps: { done: 2, total: 4 } }, "Making image", '<span class="lv-w">Sampling 2/4</span>'],
   ] as const)("while the retry is %o the one box says %s, not the old reason", async (retry, words, shown) => {
     const { html, boxes } = await render(retry);
@@ -248,6 +248,17 @@ describe("the picture card", () => {
   ] as const)("a running picture at %o (sampled before: %s) says %s", async (stage, sampled, words) => {
     const { stageWords } = await import("./Thread.tsx");
     expect(stageWords({ jobId: "j", state: "running", ...stage }, sampled)).toBe(words);
+  });
+
+  // council climb-025 Q15: the sampler's first moments read a bare "Starting", naming nothing
+  it.each([
+    [{ stage: "sampling" }, true, "Klein 4B", "Loading Klein 4B"],
+    [{ stage: "sampling" }, true, undefined, "Loading the model"],
+    [{ stage: "loading" }, false, "Klein 4B", "First run: loading Klein 4B"],
+    [{ stage: "loading" }, true, "Klein 4B", "Loading Klein 4B"],
+  ] as const)("a running picture at %o (sampled before: %s) with model %s says %s", async (stage, sampled, model, words) => {
+    const { stageWords } = await import("./Thread.tsx");
+    expect(stageWords({ jobId: "j", state: "running", ...stage }, sampled, model)).toBe(words);
   });
 
   it("the tiles of a several-picture card leave the model and size to the card's top line, which names them once", async () => {

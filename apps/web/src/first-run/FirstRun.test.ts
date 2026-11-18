@@ -47,6 +47,13 @@ describe("an engine download whose figures stop moving says so and offers Retry"
     expect(other).toContain("Looking for Ollama");
   });
 
+  // council climb-025 Q15: "Looking for Ollama" gave no sense of how long it had looked
+  it("looking for Ollama counts its seconds, in the first window and the banner", () => {
+    const looking = { ...installing(0), runtime: { state: "starting", owner: "none", baseUrl: "http://127.0.0.1:11434" } };
+    expect(plain(looking, FirstRun)).toMatch(/Looking for Ollama · 0 s/);
+    expect(plain({ ...looking, view: "new" }, Banner)).toMatch(/Looking for Ollama.*· 0 s/);
+  });
+
   // council climb-025 Q15: while the engine downloads, the screen names the next step too.
   it("while the engine downloads, the first model and its download size are named once they are known", () => {
     const next = { name: "gemma4:12b", label: "Gemma 4 12B", recommended: true, downloadBytes: 7_600_000_000, purpose: "chat", installed: false };
@@ -337,15 +344,27 @@ it("PL-03: a model the table has no reading for says Couldn't check in the title
   expect(raw(state)).toContain('class="dot warn"');
 });
 
-it("F5: a busy port says its cause in the status line, one line and no sentence", () => {
-  const state = { ...oldOllama([]), models: [], runtime: { state: "wrong-service", owner: "external", baseUrl: "http://localhost:11434" } };
+// council climb-025 Q16: the first window's busy port had only Retry, under a name no other place used
+it("F5: a busy port has the banner's words and its Use Gates Local's Ollama, with Retry beside it", () => {
+  const wrong = { state: "wrong-service", owner: "external", baseUrl: "http://localhost:11434" };
+  const state = { ...oldOllama([]), models: [], runtime: wrong, settings: { runtimeMode: "system" } };
   const t = text(state);
-  expect(t).toContain("Ollama isn't answering");
-  // the state also covers a port that did not answer in time, which can be a hung Ollama
-  expect(t).toContain("Something else holds port 11434");
-  expect(t).not.toContain("Another program");
-  expect(t).not.toContain("is busy");
-  expect(raw(state)).not.toMatch(/class="(sub|fr-sub)"/);
+  expect(t).toContain("Another program is where Ollama should be");
+  expect(t).not.toMatch(/Ollama isn't answering|Something else holds|is busy/);
+  expect(raw(state)).toMatch(/data-testid="first-run.cta.go"[^>]*>(<[^>]+>)*Use Gates Local&#x27;s Ollama/);
+  expect(t).toContain("Retry");
+  // no own copy to switch to: Retry is the step
+  const noCopy = text({ ...state, runtime: { ...wrong, noAppCopy: true } });
+  expect(noCopy).not.toContain("Use Gates Local's Ollama");
+  expect(noCopy).toContain("Retry");
+});
+
+// council climb-025 Q12: Details said "Estimated" beside a need the last load measured, and "a 11 GB GPU"
+it("first run's Details says whether the need was measured or estimated, with the card's article", () => {
+  const ready = { ...cpuOnly("fits"), gpu: { vendor: "nvidia" } };
+  const at = (source: "measured" | "estimate", gib: number) => text({ ...ready, fitTable: tableOf([{ ...row("qwen3.5:4b", "fits"), source, freeVramBytes: gib * 2 ** 30 }]) });
+  expect(at("measured", 16)).toMatch(/GPU memory Measured 8\.0\sGB of a 16\sGB GPU/);
+  expect(at("estimate", 11)).toMatch(/GPU memory Estimated 8\.0\sGB of an 11\sGB GPU/);
 });
 
 it("Ready to chat is the title, the status line and the card: no sentence under it, no blurb, no footer", () => {

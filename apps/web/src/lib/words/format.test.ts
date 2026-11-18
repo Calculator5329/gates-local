@@ -238,7 +238,7 @@ describe("why a model the card holds is slower right now", () => {
   // Council climb-025 Q12: "Whisper (2.1 GB) and others (1.8 GB)" where the rows said Media Vault vision 1.8 GB and Other 0.2 GB.
   it("a program the rows name is never folded into others", () => {
     const why = slowReason({ inTheWay: [holder("whisper", "whisper-server", 2.1), holder("other-app", "Media Vault vision", 1.8), holder("unknown", "pid 9", 0.2)], spillRamBytes: 2.7 * GIB, measured: false });
-    expect(why?.sentence).toBe(`Fits this card with Whisper (2.1${SP}GB), Media Vault vision (1.8${SP}GB) and Other (0.2${SP}GB) off it. Would use ~2.7${SP}GB of system memory.`);
+    expect(why?.sentence).toBe(`Fits this card with Whisper (2.1${SP}GB), Media Vault vision (1.8${SP}GB) and Other (0.2${SP}GB) off it. Would use ~2.7${SP}GB of system memory, with 0.5${SP}GB of the card kept free.`);
     expect(why?.sentence).not.toContain("others");
   });
 
@@ -250,7 +250,13 @@ describe("why a model the card holds is slower right now", () => {
   // Council climb-025 Q12: the card said "2.7 GB is in system memory now" beside "Not measured at 16k yet".
   it("a spill nobody measured is said as a prediction with ~; only a measured split is said in the present tense", () => {
     const why = slowReason({ inTheWay: [holder("whisper", "whisper-server", 2)], spillRamBytes: 2.7 * GIB, measured: false });
-    expect(why?.sentence).toBe(`Fits this card with Whisper (2.0${SP}GB) off it. Would use ~2.7${SP}GB of system memory.`);
+    expect(why?.sentence).toBe(`Fits this card with Whisper (2.0${SP}GB) off it. Would use ~2.7${SP}GB of system memory, with 0.5${SP}GB of the card kept free.`);
+  });
+
+  // council climb-025 Q12: the predicted spill was 0.5 GB more than need minus free, and nothing said why
+  it("a predicted spill names the card's 0.5 GB reserve; a measured one is what the runtime reported, so it does not", () => {
+    expect(slowReason({ inTheWay: [holder("whisper", "whisper-server", 2)], spillRamBytes: 2.7 * GIB, measured: false })?.sentence).toContain(`with 0.5${SP}GB of the card kept free.`);
+    expect(slowReason({ inTheWay: [holder("whisper", "whisper-server", 2)], spillRamBytes: 2.7 * GIB, measured: true })?.sentence).not.toContain("kept free");
   });
 });
 

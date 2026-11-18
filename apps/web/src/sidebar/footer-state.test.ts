@@ -31,27 +31,29 @@ describe("Models", () => {
   it("nothing happening: the chip and its name", () => {
     expect(modelsIcon([], name)).toEqual({ state: "idle", progress: null, failed: false, tip: "Models", label: "Models" });
   });
-  it("one download: the ring and a tooltip that names the model", () => {
+  // council climb-025 Q4: the tip joined a sentence per download with <br>; it is a name and a short status
+  it("one download: the ring and a tooltip that is the model's name and its percent", () => {
     const i = modelsIcon([pull({ name: "qwen3:14b", state: "downloading", completedBytes: 5.7 * GIB, totalBytes: 9.3 * GIB })], name);
     expect(i.state).toBe("downloading");
     expect(i.progress).toBeCloseTo(5.7 / 9.3);
-    expect(i.tip).toBe("<b>Downloading Qwen 3 14B</b> · 61% · 5.7 of 9.3 GB");
-    expect(i.label).toBe("Models · Downloading Qwen 3 14B · 61% · 5.7 of 9.3 GB");
+    expect(i.tip).toBe("<b>Qwen 3 14B</b> · 61%");
+    expect(i.label).toBe("Models · Qwen 3 14B · 61%");
+    expect(i.tip, "no sizes").not.toContain(" GB");
+    expect(i.label, "no sizes").not.toContain(" GB");
   });
-  it("several at once: the ring shows the total and each has its own line", () => {
+  it("several at once: the ring shows the total and the tip counts them, never one line each", () => {
     const i = modelsIcon([
       pull({ name: "qwen3:14b", state: "downloading", completedBytes: 1 * GIB, totalBytes: 9 * GIB }),
       pull({ name: "gemma4:12b", state: "downloading", completedBytes: 3 * GIB, totalBytes: 7 * GIB }),
     ], name);
     expect(i.progress).toBeCloseTo(4 / 16);
-    expect(i.tip.split("<br>")).toHaveLength(2);
-    expect(i.tip).toContain("Qwen 3 14B");
-    expect(i.tip).toContain("Gemma 4 12B");
+    expect(i.tip).toBe("<b>Models</b> · 2 downloading");
+    expect(i.label).toBe("Models · 2 downloading");
   });
-  it("queued, starting and verifying have honest words; no size yet is a turning ring", () => {
-    expect(modelsIcon([pull({ name: "qwen3:14b", state: "queued" })], name)).toMatchObject({ state: "downloading", progress: null, tip: "<b>Qwen 3 14B</b> is waiting to download" });
-    expect(modelsIcon([pull({ name: "qwen3:14b", state: "downloading" })], name).tip).toBe("<b>Starting the download of Qwen 3 14B</b>");
-    expect(modelsIcon([pull({ name: "qwen3:14b", state: "verifying", completedBytes: 9, totalBytes: 9 })], name)).toMatchObject({ progress: 1, tip: "<b>Checking Qwen 3 14B</b> after downloading it" });
+  it("queued, starting and verifying have one honest word; no size yet is a turning ring", () => {
+    expect(modelsIcon([pull({ name: "qwen3:14b", state: "queued" })], name)).toMatchObject({ state: "downloading", progress: null, tip: "<b>Qwen 3 14B</b> · Waiting" });
+    expect(modelsIcon([pull({ name: "qwen3:14b", state: "downloading" })], name).tip).toBe("<b>Qwen 3 14B</b> · Starting");
+    expect(modelsIcon([pull({ name: "qwen3:14b", state: "verifying", completedBytes: 9, totalBytes: 9 })], name)).toMatchObject({ progress: 1, tip: "<b>Qwen 3 14B</b> · Checking" });
   });
   // council climb-025 Q4: the tip is a short status; the reason is on the download's row in Settings
   it("a failed download: red with a dot, which model and a short status", () => {
@@ -66,7 +68,7 @@ describe("Models", () => {
       pull({ name: "gemma4:12b", state: "downloading", completedBytes: 1, totalBytes: 2 }),
     ], name);
     expect(i).toMatchObject({ state: "downloading", failed: true, progress: 0.5 });
-    expect(i.tip.split("<br>")).toHaveLength(2);
+    expect(i.tip).toBe("<b>Models</b> · 1 downloading · 1 failed");
   });
   it("the ring never goes backwards in one burst: a download that finished stays in the total until none runs", () => {
     const a = pull({ name: "qwen3:14b", state: "downloading", completedBytes: 8 * GIB, totalBytes: 9 * GIB });
@@ -81,7 +83,7 @@ describe("Models", () => {
     const settled = modelsIcon([b], name, kept);
     expect(atDone).toBeGreaterThanOrEqual(before);
     expect(settled.progress).toBeCloseTo(10 / 16);
-    expect(settled.tip.split("<br>")).toHaveLength(1);
+    expect(settled.tip).toBe("<b>Gemma 4 12B</b> · 14%");
     // the burst ends when nothing runs: the next download starts its own total
     expect(finishedInBurst(kept, [])).toEqual([]);
     expect(finishedInBurst(kept, [{ ...b, state: "done" }])).toEqual([]);

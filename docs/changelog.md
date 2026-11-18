@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-17: phone code starts wrapped; failures end with a next step; one name for a taken port; memory figures say what they are
+
+- Under 420 px a reply's code block starts wrapped. Wrap still unwraps it.
+- Removing a model from an Ollama the app does not own says "Other apps that use this Ollama lose it too."
+- A reply that can't be retried ends "Ask again below." A dropped connection ends "Retry once it reconnects." when Retry is on the line.
+- A cancelled picture says "The image was cancelled.", or "The image was cancelled when Gates Local closed." when closing the app cancelled it. The advice to try again is gone, since the card carries Try again.
+- A runtime download cut off partway says "Stopped at 0.6 of 1.5 GB. Check the network, then retry." Other download failures get a plain line. The raw detail is under the details.
+- When another program holds Ollama's port, every place calls it the same thing: the banner and first run say "Another program is where Ollama should be", and the gear, Settings and the status call it "Another program in its place". First run now offers "Use Gates Local's Ollama", with Retry as a link beside it. The switch's confirm no longer gives a port number.
+- The spill sentence names the reserve: "Would use ~2.7 GB of system memory, with 0.5 GB of the card kept free." The card reads "an 11 GB GPU" (also 8 and 18). First run's Details say "Measured" or "Estimated", as Settings does. On the Download tab the memory figure reads "Needs ~6.0 / 16 GB" and the button reads "Download 5.0 GB". On a phone the figure sits above its bar, so the bar keeps its length.
+- While a picture model loads, the card names it ("Loading Klein 4B") instead of "Starting". "Looking for Ollama" counts its seconds.
+- The tip "Sends when the download finishes" is gone from the queued row (its clock already says it), and so is the Image button's tip. The Models icon's tip is a name and a short status ("Qwen 3 14B · 61%"), or a count when several run ("2 downloading · 1 failed").
+
 ## 2026-11-17: 0.2.6 published
 
 - Gates Local 0.2.6 is out (docs/releasing.md). It carries the first-run, memory-ownership, error-wording, phone and tooltip work since 0.2.5, with the fixes from the release reads.

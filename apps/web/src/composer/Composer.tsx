@@ -315,7 +315,6 @@ export function Composer() {
                 aria-pressed={image}
                 aria-label="Image"
                 aria-expanded={!image && unset ? pop === "unset" : undefined}
-                data-tip={!image && unset ? undefined : "Image"}
                 onClick={(e) => {
                   if (!image && unset) { togglePop("unset", e.detail === 0); return; }
                   setState({ image: !image });
@@ -670,7 +669,7 @@ function QueueTray() {
             {q.draw === undefined ? null : <span className="qt-k" data-tip="Image"><Icon id="image" cls="s14" /></span>}
             <span className="qt-t">{q.text}{q.images?.length ? ` · ${q.images.length} image${q.images.length === 1 ? "" : "s"}` : ""}{q.files?.length ? ` · ${q.files.length} file${q.files.length === 1 ? "" : "s"}` : ""}</span>
             {/* external: a browser announces changes in a live region, not one added already filled */}
-            <span className="qt-s" role="status" data-tip={CLOCKED.has(words) ? words ?? undefined : undefined}>
+            <span className="qt-s" role="status">
               {CLOCKED.has(words) ? <ClockedWait words={words ?? ""} at={words === AFTER_SETUP ? setupAt : downloadAt} /> : words ?? ""}
             </span>
             {editing ? null : <QueueOffer q={q} n={i + 1} />}

@@ -220,7 +220,8 @@ it("at phone width the pills and the meter leave the composer row, and the Chat 
   expect(words(menu)).toContain("Context 61% used");
 });
 
-it("a queued row waiting on a clock names it in a tip, and a row that shows a word has no tip", () => {
+// council climb-025 Q4: "Sends when the download finishes" sat in a tip over a row that says what it waits for
+it("a queued row has no tip: one waiting on a clock shows what it waits for, with the sentence for a screen reader", () => {
   show({ runtime: INSTALLING, replies: repliesOf([
     { id: "q1", threadId: "thread", text: "first", waitFor: "reply", held: true },
     { id: "q2", threadId: "thread", text: "second", waitFor: "setup" },
@@ -228,7 +229,21 @@ it("a queued row waiting on a clock names it in a tip, and a row that shows a wo
   const [held, clocked] = rows();
   expect(words(held ?? "")).toContain("On hold");
   expect(statusTag(held ?? "")).toBe('<span class="qt-s" role="status">');
-  expect(tipOf(statusTag(clocked ?? ""))).toBe("Sends when setup finishes");
+  expect(statusTag(clocked ?? "")).toBe('<span class="qt-s" role="status">');
+  expect(clocked).toContain('<span class="vh">Sends when setup finishes</span>');
+  show({ models: [], pulls: { [TAG]: { name: TAG, state: "downloading", completedBytes: 7, totalBytes: 100 } }, replies: repliesOf([{ id: "q1", threadId: "thread", text: "hello", waitFor: "download" }]) });
+  const [download] = rows();
+  expect(statusTag(download ?? "")).toBe('<span class="qt-s" role="status">');
+  expect(download).toContain('<span class="vh">Sends when the download finishes</span>');
+  expect(download).toContain("Downloading Qwen 3.5 9B");
+});
+
+// council climb-025 Q4: the Image button's tip said "Image" beside its own word Image
+it("the Image button has no tip, since it reads Image", () => {
+  show(IMAGE_ON);
+  const tag = renderToStaticMarkup(createElement(Composer)).match(/<button\b[^>]*id="imageBtn"[^>]*>/)?.[0] ?? "";
+  expect(tag).toContain('aria-label="Image"');
+  expect(tag).not.toContain("data-tip");
 });
 
 it("a row waiting on a download or on setup shows its percent and time left, no numbers once every byte is in, and none before a size is known", () => {

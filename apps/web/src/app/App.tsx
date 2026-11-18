@@ -7,7 +7,7 @@
 import type { Message } from "@gates-local/contracts";
 import { useEffect, useRef, useState } from "react";
 import { Banner } from "../runtime/Banner.tsx";
-import { type Rt, failWords, installStep, rtOf } from "../runtime/words.tsx";
+import { PORT_TAKEN_SHORT, type Rt, failWords, installStep, rtOf } from "../runtime/words.tsx";
 import { Composer, CountMenu, OptsMenu, PlusMenu } from "../composer/Composer.tsx";
 import { ImageUnset } from "../image/ImageUnset.tsx";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
@@ -172,7 +172,7 @@ function SettingsBar() {
   );
 }
 
-const RT_WORD: Record<Rt, string> = { ready: "Running", installing: "Installing", starting: "Starting", missing: "Not installed", wrong: "Port busy", stopped: "Stopped", error: "Didn't start", offline: "Reconnecting" };
+export const RT_WORD: Record<Rt, string> = { ready: "Running", installing: "Installing", starting: "Starting", missing: "Not installed", wrong: PORT_TAKEN_SHORT, stopped: "Stopped", error: "Didn't start", offline: "Reconnecting" };
 
 function listValue(s: State, id: Section): string {
   const settings = s.settings === NA ? undefined : s.settings;

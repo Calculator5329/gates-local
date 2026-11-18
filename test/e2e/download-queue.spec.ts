@@ -47,9 +47,10 @@ test("a message queued behind the first download says it once, and the model but
   await expect(row).toBeVisible();
   await page.screenshot({ path: info.outputPath("queued-download.png") });
   writeFileSync(info.outputPath("queued-download.json"), JSON.stringify({ button: await btn.boundingBox(), row: await row.boundingBox(), field: await page.locator("#ta").boundingBox() }));
-  // said once: the queue row's clock, whose tip says when it sends; not the field, not the button
+  // said once: the queue row's clock and its waiting words; not the field, not the button, no tip (climb-025 Q4)
   await expect.soft(page.locator("#ta"), "the field's placeholder").toHaveAttribute("placeholder", "Ask anything…");
-  await expect.soft(row.locator(".qt-s"), "the queue row's state").toHaveAttribute("data-tip", "Sends when the download finishes");
+  await expect.soft(row.locator(".qt-s"), "the queue row's state has no tip").not.toHaveAttribute("data-tip");
+  await expect.soft(row.locator(".qt-s .vh"), "the queue row's state, to a screen reader").toHaveText("Sends when the download finishes");
   await expect.soft(row.locator(".qt-s svg", { has: page.locator("use[href='#i-clock']") }), "the queue row's clock").toBeVisible();
   await expect.soft(btn, "the model button's words").not.toContainText(/download/i);
   await expect.soft(btn.locator(".ldbar"), "the download's bar").toBeVisible();
@@ -104,8 +105,9 @@ test.describe("at a small window", () => {
     await page.screenshot({ path: info.outputPath("row2-one-digit.png") });
     await expect(numbers, "a two-digit percent and the time left on the waiting row").toHaveText(/^[1-9]\d% · \d+ (s|min) left$/, { timeout: 20_000 });
     await page.screenshot({ path: info.outputPath("row2-two-digits.png") });
-    // the clock's words are still its tip and what a screen reader says
-    await expect.soft(row.locator(".qt-s"), "the queue row's state").toHaveAttribute("data-tip", "Sends when the download finishes");
+    // the clock's words are what a screen reader says; no tip repeats them (climb-025 Q4)
+    await expect.soft(row.locator(".qt-s"), "the queue row's state has no tip").not.toHaveAttribute("data-tip");
+    await expect.soft(row.locator(".qt-s .vh"), "the queue row's state, to a screen reader").toHaveText("Sends when the download finishes");
     await expect(row).toHaveCount(0, { timeout: 60_000 });
     await expect(page.locator(".turn.a .md").last()).toContainText("You asked: Name a grey cat?", { timeout: 20_000 });
     const frames = await page.evaluate(() => (window as unknown as { slotFrames: SlotFrame[] }).slotFrames);

@@ -86,9 +86,9 @@ for (const profile of PROFILES) {
     await expect(list.locator(".dlrow .vl")).toHaveCount(0);
     if (profile.runs === "split") await expect(list.locator(".dlrow .mm.spill").first()).toBeVisible();
     if (profile.runs === "gpu") await expect(list.locator(".dlrow .mm.spill")).toHaveCount(0);
-    // the size is the button's label
+    // the button says what it does and the size (council climb-025 Q12)
     const idle = profile.download === "qwen3.5:4b" ? "gemma4:12b" : "qwen3.5:4b";
-    await expect(list.locator(`.dlrow[data-cat="${idle}"]`).getByRole("button", { name: /^Download \d+\.\d\sGB$/ })).toHaveText(/^\d+\.\d\sGB$/);
+    await expect(list.locator(`.dlrow[data-cat="${idle}"]`).getByRole("button", { name: /^Download \d+\.\d\sGB$/ })).toHaveText(/^Download \d+\.\d\sGB$/);
 
     const big = list.locator("details.dl-bigs");
     if (profile.tooBig.length === 0) await expect(big).toHaveCount(0);

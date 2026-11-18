@@ -437,25 +437,26 @@ function jobWords(job: ImageEvent): string {
   return "Making image";
 }
 
-export function stageWords(job: ImageEvent, sampled: boolean): string {
+export function stageWords(job: ImageEvent, sampled: boolean, model?: string): string {
   if (job.phase === "stopping") return "Stopping the picture";
   if (job.phase === "freeing") return "Freeing memory";
   if (job.state === "queued") return "Waiting for the GPU";
+  const what = model ?? "the model";
   switch (job.stage) {
     case "queued": return "In the queue";
-    case "loading": return sampled ? "Loading the model" : "First run: loading the model";
+    case "loading": return sampled ? `Loading ${what}` : `First run: loading ${what}`;
     case "encoding": return "Reading the prompt";
     // external: ComfyUI's socket names no load while the sampler node moves models in
-    case "sampling": return job.steps === undefined ? "Starting" : `Sampling ${job.steps.done}/${job.steps.total}`;
+    case "sampling": return job.steps === undefined ? `Loading ${what}` : `Sampling ${job.steps.done}/${job.steps.total}`;
     case "decoding": return "Decoding";
     default: return "Working";
   }
 }
 
-function JobLine({ job, since }: { job: ImageEvent; since: number }) {
+function JobLine({ job, since, model }: { job: ImageEvent; since: number; model: string | undefined }) {
   const now = useNow(1000);
   const secs = Math.max(0, Math.floor((now - since) / 1000));
-  return <p className="image-job-live" aria-hidden="true"><i className="lv-dot" /><span className="lv-w">{stageWords(job, job.sampled === true)}</span><span className="lv-t">{` · ${secs} s`}</span></p>;
+  return <p className="image-job-live" aria-hidden="true"><i className="lv-dot" /><span className="lv-w">{stageWords(job, job.sampled === true, model)}</span><span className="lv-t">{` · ${secs} s`}</span></p>;
 }
 
 function turnCard(thread: readonly Message[], userMessageId: string): string | undefined {
@@ -495,7 +496,7 @@ function ImageJob({ msg, thread, origin, token, tile = false }: { msg: Message; 
   const card = <div className={line ? "image-job line" : "image-job"} style={line ? undefined : size} data-job={job.jobId} data-image-job={job.state} data-fit={job.state === "error" && job.errorKind === "wont-fit" ? "refuse" : undefined}>
     {ran === undefined || pending || line || tile ? null : <span className="image-job-model">{model} · {sizeLabel(ran.width, ran.height)}</span>}
     {job.state === "done" && job.imagePath ? <ImageOut path={job.imagePath} origin={origin} token={token} /> : <div className="image-job-state" role="status" aria-label={pending ? jobWords(job) : undefined}>
-      {pending ? <JobLine job={job} since={since} /> : <><Icon id="alert" /><p>{job.message ?? "The image did not finish; try again."}</p></>}
+      {pending ? <JobLine job={job} since={since} model={model} /> : <><Icon id="alert" /><p>{job.message ?? "The image did not finish; try again."}</p></>}
       {pending || job.detail === undefined ? null : (
         <details className="upd-more fp-more image-job-more" data-testid="chat.image-job.details">
           <summary><Icon id="right" cls="s14" />Details</summary>
@@ -549,13 +550,17 @@ interface ReplyView extends Files {
 }
 
 const SAYS_WHY = new Set(["context-too-small", "preempted", "runtime-changed"]);
-// why: the next step is offered only where the line carries its Retry
-const failWords = (code: string | undefined, retryable: boolean): string =>
-  (code === undefined ? undefined : FAIL_WORDS[code]) ?? (retryable ? "The reply didn't finish. Retry, or pick another model." : "The reply didn't finish.");
+// why: Retry is named only where the line carries it; an earlier turn's step is the composer
+const failWords = (code: string | undefined, retryable: boolean): string => {
+  const said = code === undefined ? undefined : FAIL_WORDS[code];
+  if (said !== undefined) return said;
+  const cut = code === "closed" ? "The connection dropped before this reply finished." : "The reply didn't finish.";
+  if (!retryable) return `${cut} Ask again below.`;
+  return code === "closed" ? `${cut} Retry once it reconnects.` : `${cut} Retry, or pick another model.`;
+};
 
 // why: a failure the person can act on says what to do; the runtime's own text stays out of sight
 const FAIL_WORDS: Readonly<Record<string, string>> = {
-  closed: "The connection dropped before this reply finished.",
   "connection-failed": "Ollama stopped answering. Retry once it's running.",
   "model-not-found": "This model isn't installed any more. Pick another in the model menu.",
   "num-ctx-invalid": "This model can't use that context size. Pick another in the model menu.",

@@ -136,7 +136,7 @@ it("F2: a table that has no reading for a row answers it: grouped at once, that 
   expect(groups(shown)).toEqual({ Recommended: ["a:1"], "Also available": ["b:1"], "Something else": [] });
   expect(shown).toContain('data-cat="b:1">');
   // the unanswered row keeps an empty mark slot, so its row does not move when the answer lands
-  expect(shown).toMatch(/data-cat="b:1">(?:(?!data-cat)[\s\S])*<span class="mm" aria-hidden="true"><\/span>/);
+  expect(shown).toMatch(/data-cat="b:1">(?:(?!data-cat)[\s\S])*<span class="mm lead" aria-hidden="true"><\/span>/);
 });
 
 it("F2: once grouped, the groups stay put, except that a row whose verdict becomes does-not-fit leaves Recommended once and never comes back", () => {
@@ -199,8 +199,8 @@ it("a row's memory is its mark alone: no tooltip on the row, its name or its mar
   expect(Object.keys(tips).toSorted()).toEqual(["a:1", "b:1", "c:1"]);
   for (const [cat, list] of Object.entries(tips)) expect(list, `${cat}: no tooltip`).toEqual([]);
   // the mark's words are its accessible name, what its colour says
-  expect(html).toMatch(/data-cat="a:1"[\s\S]*?class="mm gpu" role="img" aria-label="Runs on the GPU: /);
-  expect(html).toMatch(/data-cat="b:1"[\s\S]*?class="mm spill" role="img" aria-label="Partly in system memory, slower: /);
+  expect(html).toMatch(/data-cat="a:1"[\s\S]*?class="mm gpu lead" role="img" aria-label="Runs on the GPU: /);
+  expect(html).toMatch(/data-cat="b:1"[\s\S]*?class="mm spill lead" role="img" aria-label="Partly in system memory, slower: /);
 });
 
 it("an empty Recommended keeps its header slot for the visit when the placeholder drew one, so what is below stays put", () => {
@@ -241,5 +241,5 @@ it("a verdict is said by each row's mark alone, with no line above the list, and
     expect(html).not.toMatch(/These (?:run on|are bigger)/);
     expect(html).not.toContain('class="vl ');
   }
-  expect(render(state)).toMatch(/data-cat="b:1"[\s\S]*?class="mm spill"/);
+  expect(render(state)).toMatch(/data-cat="b:1"[\s\S]*?class="mm spill lead"/);
 });

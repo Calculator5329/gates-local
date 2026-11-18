@@ -15,9 +15,10 @@ test.describe("with the system Ollama chosen", () => {
   test("a wrong service on the Ollama port blocks chat and says why", async ({ page, open, runtimePorts }) => {
     await open();
     const port = String(runtimePorts.system);
-    await expect(gear(page)).toHaveAccessibleName(`Settings · Port ${port} · busy`);
+    // council climb-025 Q16: one name for this state everywhere
+    await expect(gear(page)).toHaveAccessibleName("Settings · Another program in its place");
     // council climb-025 Q4: the gear's tip names the state only
-    await expect(gear(page)).toHaveAttribute("data-tip", `Port ${port} · busy`);
+    await expect(gear(page)).toHaveAttribute("data-tip", "Another program in its place");
     await expect(gear(page).locator(".fdot.red")).toBeVisible();
     await expect(page.locator(".banner")).toBeVisible();
     // council climb-025 Q16: the banner says it plainly; the port is in its Details
@@ -28,7 +29,7 @@ test.describe("with the system Ollama chosen", () => {
 
     await gear(page).click();
     await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
-    await expect(page.locator(".set")).toContainText(`Port ${port} busy`);
+    await expect(page.locator(".set")).toContainText("Another program in its place");
     await expect(page.locator(".set")).toContainText(`Something other than Ollama answers on port ${port}.`);
   });
 

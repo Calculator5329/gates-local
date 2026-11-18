@@ -406,6 +406,7 @@ function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: Inst
   const box = useRef<HTMLDivElement>(null);
   const [cancelRef] = useState(() => (el: HTMLButtonElement | null) => { cancel.current = el; el?.focus(); });
   const name = row.label.text;
+  const shared = useStore((s) => s.runtime !== undefined && s.runtime.owner !== "app");
   const nextName = next ? (rows.find((r) => r.name === next)?.label.text ?? next) : null;
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") {
@@ -426,6 +427,7 @@ function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: Inst
         <p>
           Frees {sizeText(row.info.sizeBytes)}. Chats you made with {name} stay, and you can download it again later.
         </p>
+        {shared ? <p>Other apps that use this Ollama lose it too.</p> : null}
         {next === undefined ? null : nextName ? (
           <p>
             <b>{nextName}</b>, the next model in your list, becomes the default for new chats.

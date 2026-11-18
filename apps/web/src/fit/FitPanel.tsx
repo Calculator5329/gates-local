@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { FitReport, GpuOccupant, GpuStatus } from "@gates-local/contracts";
-import { NO_GPU_TEXT, type SlowReason, type Verdict, cardGb, decodeSpeed, describeModel, gb, holderName, k, noGpu, slowReason, verdictOf } from "../lib/words/format.ts";
+import { NO_GPU_TEXT, type SlowReason, type Verdict, aGpu, cardGb, decodeSpeed, describeModel, gb, holderName, k, needHow, noGpu, slowReason, verdictOf } from "../lib/words/format.ts";
 import { Icon } from "../lib/ui/icons.tsx";
 import { cardFit, fitFor } from "./fit-table.ts";
 import { tpsText } from "../models/model-speed.tsx";
@@ -168,10 +168,10 @@ function Numbers({ r, v, name, gpu, slow }: { r: FitReport; v: Verdict; name: st
     );
   }
   // why: one line says how the need is known, so "measured" and "estimated" never sit together
-  const how = r.source === "measured" ? "Measured" : "Estimated";
+  const how = needHow(r.source === "measured");
   return (
     <div className="fp-n fp-numbers">
-      {how} {gb(r.needVramBytes)}{noGpu(gpu) ? `; ${gpu?.detail ? gpuHead(gpu) : "no supported GPU"}` : ` of a ${cardGb(r.freeVramBytes)} GPU`}.
+      {how} {gb(r.needVramBytes)}{noGpu(gpu) ? `; ${gpu?.detail ? gpuHead(gpu) : "no supported GPU"}` : ` of ${aGpu(r.freeVramBytes)}`}.
       <br />
       {slow !== undefined ? <span data-testid="models.fit-panel.slow-now">{slow.sentence}</span> : v.k === "spill" ? `${gb(v.amt)} in system memory; slower replies.` : noGpu(gpu) && r.words?.word !== "Runs on GPU" ? "Runs in system memory." : "Runs entirely on the GPU."}
     </div>

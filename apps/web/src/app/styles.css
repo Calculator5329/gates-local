@@ -1221,6 +1221,8 @@ a.btn{text-decoration:none}
 .mm.gpu .mm-bar i{background:var(--green)}.mm.spill .mm-bar i{background:var(--amber)}.mm.no .mm-bar i{background:var(--faint)}
 .mm-n{flex:none;width:78px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .mm.no .mm-n{color:var(--muted-foreground)}
+/* the Download tab's mark carries "Needs", so its figure gets a wider fixed box */
+.mm.lead{width:234px}.mm.lead .mm-n{width:136px}
 /* the card holds it, right now it is slower: who is in the way, one quiet line; the sizes are its tip */
 .mm-why{display:flex;align-items:center;gap:4px;margin-top:2px;width:max-content;max-width:100%;font-size:12.5px;line-height:16px;color:var(--amber-fg);cursor:default}
 .mm-why>span:not(.vh){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1330,7 +1332,7 @@ a.btn{text-decoration:none}
 /* Row 18, layout A: the size is the button, a running download fills that same box, and the ×
    beside it keeps its box in every state, so nothing on the row moves. */
 .dl-a{flex:none;display:flex;justify-content:flex-end;align-items:center;gap:8px}
-.dl-btn{position:relative;box-sizing:border-box;width:104px;height:32px;padding:0 10px;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:none;overflow:hidden;border-radius:var(--r-ctl);box-shadow:inset 0 0 0 1px var(--border-strong);font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--foreground)}
+.dl-btn{position:relative;box-sizing:border-box;width:140px;height:32px;padding:0 10px;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:none;overflow:hidden;border-radius:var(--r-ctl);box-shadow:inset 0 0 0 1px var(--border-strong);font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--foreground)}
 .dl-btn .ic{width:14px;height:14px;color:var(--muted-foreground)}
 button.dl-btn:hover{background:var(--hover)}
 button.dl-btn:disabled,button.dl-btn:disabled:hover{opacity:.45;cursor:not-allowed;background:transparent}
@@ -1356,7 +1358,7 @@ button.dl-btn:disabled,button.dl-btn:disabled:hover{opacity:.45;cursor:not-allow
 .dl-big .sl{opacity:.6}
 .dlrow>.mm{font-size:13px}
 /* no button on a too-big row: its mark keeps the column the other marks are in (the button and × beside it) */
-.dl-big>.mm{margin-right:160px}
+.dl-big>.mm{margin-right:196px}
 /* the typed name: its verdict under the field, and the menu that holds Download anyway */
 .dl-typed-a{position:relative;display:flex}
 .dl-typed{font-size:13px;color:var(--muted-foreground)}.dl-typed.no{color:var(--red-fg)}
@@ -1436,6 +1438,10 @@ button.dl-btn:disabled,button.dl-btn:disabled:hover{opacity:.45;cursor:not-allow
   .mp .dlrow>.mm{flex:1 1 0;width:auto;min-width:0;gap:8px;margin-right:0}
   .mp .dlrow>.mm .mm-bar{flex:0 1 88px;min-width:16px;width:auto}
   .mp .dlrow>.mm .mm-n{width:auto}
+  /* "Needs ..." leaves no room beside it for the bar: the figure sits over a bar as wide as it */
+  .mp .dlrow>.mm.lead{flex-direction:column-reverse;align-items:stretch;justify-content:center;gap:6px}
+  .mp .dlrow>.mm.lead .mm-bar{flex:none;width:100%}
+  .mp .dlrow>.mm.lead .mm-n{text-align:left}
   .mp .dl-a{min-height:44px}
   .mp .dl-btn,.mp .dl-x{height:44px}.mp .dl-x{width:44px}
   .mp .dlrow .qa,.mp .srow .qa{min-height:44px}

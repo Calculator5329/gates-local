@@ -209,4 +209,19 @@ describe("what a reply's markdown draws", () => {
     expect(rulesWith(css, ".md .cb:hover .cb-copy").some((body) => body.includes("opacity:1"))).toBe(true);
     expect(rulesWith(css, ".md .cb:focus-within .cb-copy").some((body) => body.includes("opacity:1"))).toBe(true);
   });
+
+  // council climb-025 Q17: at 360 px an unwrapped command was cut mid-token with no cue
+  it.each([[360, true], [412, true], [430, false], [1280, false]])("at %i px a code block starts wrapped: %s, and its Wrap toggle says so", (width, wrapped) => {
+    vi.stubGlobal("matchMedia", (q: string) => {
+      const max = /max-width:\s*(\d+)px/.exec(q)?.[1];
+      return { matches: max !== undefined && width <= Number(max) };
+    });
+    try {
+      const out = html("```sh\nsqlite3 -readonly -header -column library.db\n```");
+      expect(out).toMatch(new RegExp(`class="cb-wrap"[^>]*aria-pressed="${wrapped}"`));
+      expect(out.includes('<pre class="wrap">'), "the block's class").toBe(wrapped);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
