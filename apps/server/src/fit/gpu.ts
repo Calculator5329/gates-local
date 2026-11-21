@@ -179,8 +179,12 @@ function noUsableGpu(error: unknown): { kind: "none"; detail?: string } | undefi
 
 type SmiRead<T> = { kind: "ok"; totals: T; apps: string } | { kind: "none"; detail?: string } | { kind: "unreadable"; detail: string };
 
-export const gpuReadFailure = (reason: string): string =>
-  `Gates Local could not read GPU memory (${reason}), so it cannot check whether a model fits. Try again. If this keeps happening, run nvidia-smi in a terminal to check the NVIDIA driver.`;
+// external: nvidia-smi says this when the driver's files are newer than the module the kernel loaded
+const DRIVER_UPDATED = /Driver\/library version mismatch/i;
+
+export const gpuReadFailure = (reason: string): string => DRIVER_UPDATED.test(reason)
+  ? "The NVIDIA driver was updated and needs a restart, so Gates Local cannot read GPU memory (nvidia-smi: Driver/library version mismatch). Restart the computer."
+  : `Gates Local could not read GPU memory (${reason}), so it cannot check whether a model fits. Try again. If this keeps happening, run nvidia-smi in a terminal to check the NVIDIA driver.`;
 
 export function gpuReadingConflict(unavailableDetail: string | undefined, residentVramBytes: readonly number[]): string | undefined {
   return unavailableDetail !== undefined && residentVramBytes.some(bytes => bytes > 0)

@@ -523,6 +523,12 @@ export function queueWords(q: WaitingReply, editing: boolean, first: string | un
   return elsewhere && at.stage === "queued" ? AFTER_OTHER_REPLY : null;
 }
 
+// why: the row has no room for what fixes an unreadable GPU; the server's sentence says it
+export function heldFix(q: WaitingReply): string | undefined {
+  const at = q.stage === "editing" ? q.back : q;
+  return at.stage === "held" && at.held.why === "refused" && at.held.code === "gpu-unreadable" ? at.held.message : undefined;
+}
+
 export const replyElsewhere = (s: State): boolean => {
   const here = s.threadId === null ? undefined : s.turns[s.threadId];
   return (here === undefined || here.end !== undefined) && Object.entries(s.turns).some(([id, t]) => id !== s.threadId && t.end === undefined && !drawsPicture(t));
@@ -532,7 +538,7 @@ export const EDITED_ELSEWHERE = "Being edited in another window";
 const AFTER_OTHER_REPLY = "Sends when another chat's reply ends";
 const RETRYING = "Retrying the reply before it";
 const RETRY_FAILED = "On hold: the reply before it didn't finish";
-const HELD_FOR: Partial<Record<string, string>> = { "wont-fit": "On hold: not enough memory", "would-stop": "On hold: another chat's reply is using the memory" };
+const HELD_FOR: Partial<Record<string, string>> = { "wont-fit": "On hold: not enough memory", "would-stop": "On hold: another chat's reply is using the memory", "gpu-unreadable": "On hold: can't read GPU memory" };
 export const AFTER_DOWNLOAD = "Sends when the download finishes";
 export const AFTER_SETUP = "Sends when setup finishes";
 const CLOCKED = new Set<string | null>([AFTER_DOWNLOAD, AFTER_SETUP]);
@@ -669,7 +675,7 @@ function QueueTray() {
             {q.draw === undefined ? null : <span className="qt-k" data-tip="Image"><Icon id="image" cls="s14" /></span>}
             <span className="qt-t">{q.text}{q.images?.length ? ` · ${q.images.length} image${q.images.length === 1 ? "" : "s"}` : ""}{q.files?.length ? ` · ${q.files.length} file${q.files.length === 1 ? "" : "s"}` : ""}</span>
             {/* external: a browser announces changes in a live region, not one added already filled */}
-            <span className="qt-s" role="status">
+            <span className="qt-s" role="status" data-tip={editing ? undefined : heldFix(q)}>
               {CLOCKED.has(words) ? <ClockedWait words={words ?? ""} at={words === AFTER_SETUP ? setupAt : downloadAt} /> : words ?? ""}
             </span>
             {editing ? null : <QueueOffer q={q} n={i + 1} />}

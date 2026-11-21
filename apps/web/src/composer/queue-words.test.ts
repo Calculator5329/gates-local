@@ -46,3 +46,13 @@ it("a message waiting for a download keeps its own words whatever setup does", (
   expect(queueWords(q({ waitFor: "download" }), false, "qwen3.5:9b", undefined, false)).toBe(AFTER_DOWNLOAD);
   expect(queueWords(q({ waitFor: "download" }), false, undefined, undefined, false)).toBe("Download stopped");
 });
+
+it("a message held because GPU memory could not be read says so on its row, and the server's sentence is the row's tooltip", async () => {
+  const { heldFix } = await import("./Composer.tsx");
+  const message = "The NVIDIA driver was updated and needs a restart. Restart the computer.";
+  const held = q({ waitFor: "reply", held: true, why: { code: "gpu-unreadable", message } });
+  expect(queueWords(held, false, undefined, undefined, false)).toBe("On hold: can't read GPU memory");
+  expect(heldFix(held)).toBe(message);
+  expect(heldFix(q({ waitFor: "reply", held: true, why: { code: "wont-fit", message: "too big" } })), "a row that says its own reason has no tooltip").toBeUndefined();
+  expect(heldFix(q({ waitFor: "reply", held: true }))).toBeUndefined();
+});

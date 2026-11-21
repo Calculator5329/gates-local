@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-20: a message held because GPU memory can't be read says so
+
+- A queued message the app held because it could not read GPU memory now says "On hold: can't read GPU memory" on its row, with the reason and what fixes it in the row's tooltip. It used to say only "On hold".
+- When nvidia-smi answers "Driver/library version mismatch" (the NVIDIA driver was updated and the computer has not restarted since), the app says so and says to restart the computer, in place of the general advice to run nvidia-smi.
+
 ## 2026-11-20: Usage shows a bar a day, with dates, and each model's speed as a range
 
 - The chart is one bar a day (an hour on 24 h), each model a stacked part in its own colour, largest at the bottom. A day you used the app is a bar, not a lone dot.

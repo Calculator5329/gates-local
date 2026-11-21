@@ -165,6 +165,11 @@ function held() {
   return { run, signals, release: () => { for (const go of waiting.splice(0)) go(); } };
 }
 
+const driverUpdated: NvidiaSmiRunner = async (args) => {
+  if (!args[0]?.startsWith("--query-gpu")) return MACHINE_APPS;
+  throw new Error("Failed to initialize NVML: Driver/library version mismatch\nNVML library version: 620.70");
+};
+
 describe("nvidia-smi parsing", () => {
   it("keeps stdout from the real runner's non-zero exit for classification", async () => {
     const run = createNvidiaSmiRunner(process.execPath, ["-e", 'process.stdout.write("No devices were found\\n"); process.exit(1)', "--"]);
@@ -229,10 +234,15 @@ describe("nvidia-smi parsing", () => {
     await expect(measuredFit({ baseUrl: s.baseUrl, model: "resident", numCtx: 16384, runNvidiaSmi: run })).rejects.toMatchObject({ code: "gpu-unreadable", message: status.detail });
   });
 
+  it("a driver updated under a running computer is named, with the one thing that fixes it", async () => {
+    const status = await readGpuStatus({ runNvidiaSmi: driverUpdated, readMeminfo: async () => MACHINE_MEMINFO });
+    expect(status.vendor).toBe("unreadable");
+    expect(status.detail).toBe("The NVIDIA driver was updated and needs a restart, so Gates Local cannot read GPU memory (nvidia-smi: Driver/library version mismatch). Restart the computer.");
+  });
+
   it.each([
     "garbled table",
     "Failed to initialize NVML: Unknown Error",
-    "Failed to initialize NVML: Driver/library version mismatch",
     "Failed to initialize NVML: Insufficient Permissions",
     "Unable to determine the device handle for GPU 0000:01:00.0: Unknown Error",
     "The diagnostic contains No devices were found but does not establish GPU availability",
