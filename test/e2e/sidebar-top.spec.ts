@@ -158,6 +158,8 @@ for (const overlay of [false, true]) {
 }
 
 test("New thread by click and by Ctrl N; search by click and Ctrl K, filtering, Escape, the row holding still", async ({ page, open }) => {
+  // the seed is dated NOW: the page reads the same day, so the list never regroups as NOW ages
+  await page.clock.setFixedTime(NOW);
   await page.setViewportSize({ width: 1280, height: 800 });
   await open();
   await waitReady(page);

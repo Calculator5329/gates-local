@@ -21,6 +21,12 @@ test.use({
   locale: "en-US",
 });
 
+/**
+ * The page reads the seed's day, so a test's thread list never regroups as NOW ages.
+ * Release-gate journeys call it first; a test that times a reply's seconds does not.
+ */
+const pinClock = (page: Page) => page.clock.setFixedTime(NOW);
+
 /** The page itself never scrolls sideways. */
 async function noSideScroll(page: Page, state: string): Promise<void> {
   const [sw, iw] = await page.evaluate(() => [document.scrollingElement?.scrollWidth ?? 0, window.innerWidth]);
@@ -93,6 +99,7 @@ test("the thread, drawer, new thread, sheets and settings never scroll the page 
 
 // Guards the owner's ruling that the phone is for chat: the drawer picks a thread.
 test("the drawer opens and closes, and picking a thread closes it", async ({ page, open, seededThread }) => {
+  await pinClock(page);
   await open(`#thread=${seededThread ?? ""}`);
   await waitReady(page);
   const title = page.locator(".hdr h2");
@@ -186,6 +193,7 @@ test("Stop on the phone with a message queued: the computer shows the reply stop
 
 // Guards the owner's ruling that the phone is for chat: a model is picked from the phone.
 test("the picker opens as a bottom sheet and picks a model", async ({ page, open }) => {
+  await pinClock(page);
   await open();
   await waitReady(page);
   await page.locator("#modelBtn").tap();
@@ -208,6 +216,7 @@ test("the picker opens as a bottom sheet and picks a model", async ({ page, open
 
 // Guards the owner's ruling that the phone is for chat: Settings goes back to it (unsure: he may want phone Settings untested).
 test("settings opens a section and goes back to the list and the chat", async ({ page, open }) => {
+  await pinClock(page);
   await open();
   await waitReady(page);
   await openDrawer(page);

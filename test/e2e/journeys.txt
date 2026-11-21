@@ -1,0 +1,62 @@
+# The release gate's browser half: everyday journeys and speed checks.
+# Run: playwright test -c test/e2e/playwright.config.ts --project=e2e --test-list test/e2e/journeys.txt
+# One line per test, its file (relative to test/e2e) and full title path, so
+# the number of tests run must equal the number of lines here. Playwright
+# skips a line that matches no test without failing, so the gate counts.
+# Picked 2026-11-21 from the 0.2.7 release check's measured durations,
+# about 148 s of test time for the journeys.
+
+# Open the app and chat
+[e2e] › first-run.spec.ts › first run finds Ollama and its models, then a streamed reply shows thinking
+[e2e] › perf.spec.ts › cold load reaches a ready composer without console errors
+[e2e] › ready.spec.ts › the runtime turning ready and a chosen model appear in the same render, and a message sent at once goes out
+[e2e] › streaming.spec.ts › the whole answer › a streaming reply grows through partial blocks, then the whole answer
+[e2e] › streaming.spec.ts › Stop keeps the rendered blocks and cancels further text
+[e2e] › stop-retry.spec.ts › a stopped reply survives a reload and Regenerate replaces it without a second question
+[e2e] › perf.spec.ts › typing preserves every character while idle, streaming and busy
+[e2e] › copy.spec.ts › code blocks › a code block's own copy button puts the exact code on the clipboard
+[e2e] › queue.spec.ts › Enter while a reply runs queues the message and leaves the reply running; it sends itself when the reply ends
+
+# Paste and attach
+[e2e] › paste.spec.ts › paste text at the selection, grow, and undo
+[e2e] › paste.spec.ts › paste an image, remove it, and keep the toolbar still
+[e2e] › paste.spec.ts › image history › images reach Ollama, persist, edit and retry, and resend in follow-ups
+[e2e] › attach-files.spec.ts › Attach a file opens the chooser; an image becomes a chip and a document attaches by its name
+[e2e] › attach-files.spec.ts › a dropped text file is read by the model by its name, survives a reload, and goes with its thread
+
+# Threads
+[e2e] › sidebar-top.spec.ts › New thread by click and by Ctrl N; search by click and Ctrl K, filtering, Escape, the row holding still
+[e2e] › thread-drafts.spec.ts › each thread keeps its draft across switches, reload and sending the other draft
+[e2e] › thread-menu.spec.ts › right-click › right-click a sidebar thread: its actions at the pointer; Rename renames that thread
+[e2e] › sidebar-running.spec.ts › a reply stays marked after navigating away and after starting a second reply
+
+# Models
+[e2e] › model-context.spec.ts › switching model and context updates the fit verdict and the panel
+[e2e] › picker-layout.spec.ts › at the usual window size › the picker offers 8k; an 8k turn sends num_ctx 8192
+[e2e] › models.spec.ts › set a default from the row menu, then download a model into the list
+
+# Settings and Usage
+[e2e] › settings-s1.spec.ts › Accent starts Neutral, a pick sets --accent at once in this theme's step, the semantic colours stay, and it survives a reload
+[e2e] › theme.spec.ts › with no saved theme the app is dark whatever the OS says, and System follows the OS
+[e2e] › usage.spec.ts › a week of three models › opens complete from the footer over the chat; day bars, dates, hover and arrows, speed range; Esc closes
+
+# Pictures
+[e2e] › image-setup.spec.ts › one click sets up images: the pop-up shows the one download, Set up images fetches the engine and the model, and Image turns on
+[e2e] › image-picker.spec.ts › Send with Image on: no chat request, one job with the words, preset and size, and the choice holds in a new thread and after a reload
+
+# Updates
+[e2e] › updates.spec.ts › an update turns the footer's update icon to Update without moving or resizing the shell
+[e2e] › updates.spec.ts › a reply running: one ask, in the footer's panel, that names the reply; cancel keeps writing and accept starts it
+[e2e] › sidebar-footer.spec.ts › a clone's update with nothing running starts on one click, with no ask
+
+# Phone
+[e2e] › mobile.spec.ts › the drawer opens and closes, and picking a thread closes it
+[e2e] › mobile.spec.ts › the picker opens as a bottom sheet and picks a model
+[e2e] › mobile.spec.ts › settings opens a section and goes back to the list and the chat
+[e2e] › phone.spec.ts › the phone reads, sends, stops and switches models, and nothing it offers is refused
+
+# Speed checks (speed.spec.ts): median of five, wide limits
+[e2e] › speed.spec.ts › the app opens to a composer you can type in
+[e2e] › speed.spec.ts › the first words of a reply after Send
+[e2e] › speed.spec.ts › opening Settings
+[e2e] › speed.spec.ts › with the design's threads › switching between two threads

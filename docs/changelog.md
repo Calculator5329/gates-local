@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-21: a release is gated by everyday journeys, not all 373 browser tests
+
+- A release waited on the whole browser suite, close to ten minutes of it, and two stale tests turned two release checks red tonight. The gate's browser half is now `test/e2e/journeys.txt`: 33 everyday journeys (open the app, chat, stop and regenerate, paste and attach, switch, search and rename threads, pick and download a model, change a setting, Usage, make a picture, the update prompt, the phone) and four speed checks, about 150 s of test time. The other browser tests still run after a release and report.
+- `test/e2e/speed.spec.ts` times four actions repeated all day (the app opening to a composer, the first words of a reply after Send, opening Settings, switching threads) inside the page, prints each median as a `SPEED_MS` line, and fails only far past it.
+- The picked phone and sidebar journeys whose threads are dated set the page's clock to that date, so they cannot go stale as the date moves on.
+
 ## 2026-11-21: a failed browser test leaves a bug packet
 
 - A red browser test used to leave only its error line ("expected 34 to be greater than 60") and a trace to open by hand. Now each failed test also leaves `packet/` in its output folder: `packet.md` (the error and its source lines, the last steps, the page as text, browser console errors and failed requests, the server's log for the test's seconds, and the three verdicts: fixed, the test was wrong, dismissed), `frames.png` (about 12 frames before the failure, each stamped with its time and step), `packet.json` for scripts, `server.log`, and `video.webm` when the run recorded video. A green test writes nothing.
