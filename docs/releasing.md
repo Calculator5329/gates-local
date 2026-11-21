@@ -44,6 +44,21 @@ seconds and ended at 253. A rehearsal twenty minutes earlier, where the Linux
 round went to another machine, had the gate done at 92 seconds and the
 installer at 161.
 
+After the release the Linux packaging round was given a fixed machine, a second
+test machine that does no timing, so it can no longer take the quiet one. A
+rehearsal of the whole command with that change, on the commit after this
+release, had the gate green at 81 seconds, the installer built at 157 and
+everything signed and ready to publish at 161 seconds; publishing itself took
+16 seconds in this release. That is a rehearsal, not a release. If the second
+machine is off, the round falls back to the quiet machine and the wait returns.
+
+The whole release check on this commit ended 13 minutes after the release
+with every unit test green and one browser test red out of 378: a three-thread
+test left the pointer on a sidebar row, the list reordered, and the row that
+slid under the pointer showed its menu in place of its reply-in-progress mark.
+The test was changed to move the pointer away; the app was not. The Measure
+chat's browser tests passed in that check.
+
 Before the release the gate went red on the commit that first held the wording
 fixes: two journeys still described the old picker and sidebar (the word
 "Fits" beside a size that fits; the row menu measured against the running mark

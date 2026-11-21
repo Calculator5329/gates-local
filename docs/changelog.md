@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-21: the release rehearses at 2 minutes 41 seconds
+
+- 0.2.8 lost 98 seconds because the Linux packaging round took the one quiet machine the timed journeys and the Windows build need. The round now has a fixed second machine. A rehearsal of the whole release command was signed and ready to publish at 161 seconds (gate green at 81, installer at 157); a real publish adds about 16. No real release has run this way yet.
+- Two gate jobs that started in the same instant on one machine could collide on a name and lose a report; the job names now differ.
+
 ## 2026-11-21: the three-thread test moves the pointer off the sidebar
 
 - The whole check after 0.2.8 had one red browser test: with three threads replying, the test clicked a row and left the pointer there, the list reordered, and the row that slid under the pointer showed its menu in place of its reply-in-progress mark. The test now moves the pointer to the composer after the click, as a person reading the reply would. The app is unchanged; whether a running row should keep its mark under the pointer is an open line on the roadmap.
