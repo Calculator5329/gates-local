@@ -1229,7 +1229,7 @@ a.btn{text-decoration:none}
 .mp-card.ms .mp-row>.mp-acts{grid-column:-2}
 .mp-spd,.mp-score{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;font-size:13.5px}
 .mp-row>.mp-spd{color:var(--muted-foreground);cursor:default}
-.mp-row>.mp-score{display:flex;align-items:center;justify-content:flex-end;gap:4px;height:28px;padding:0 6px;margin-right:-6px;border:0;background:none;font-family:inherit;font-weight:600;color:var(--foreground);cursor:pointer;border-radius:var(--r-sm)}
+.mp-row>.mp-score{display:flex;align-items:center;justify-content:flex-end;justify-self:end;gap:4px;min-width:36px;height:28px;padding:0 6px;margin-right:-6px;border:0;background:none;font-family:inherit;font-weight:600;color:var(--foreground);cursor:pointer;border-radius:var(--r-sm)}
 .mp-row>.mp-score:hover{background:var(--hover)}
 .mp-row>.mp-score.old{color:var(--muted-foreground);font-weight:500}
 .mp-slow{color:var(--amber-fg);flex:none}
