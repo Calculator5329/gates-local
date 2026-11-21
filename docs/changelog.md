@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-21: the screenshot rig follows the new Models and Settings
+
+- Seven pictures in the screenshot rig had stopped being taken, because the rig still went to Settings the old way. Models now opens from its own sidebar button on a computer or tablet, and a tablet's Settings has its own section list, so the tablet Models and Runtime pictures and the desktop Models picture go there now. The "Image generation, on" pictures waited for a set-up button that no longer shows when a ComfyUI address is saved; they now turn the switch on and show the connection rows, which is the state their name describes. The app is unchanged.
+
 ## 2026-11-21: a replying thread keeps its dot under the pointer
 
 - Sidebar, with a mouse: since 0.2.8 the row menu took the place of a thread's reply-in-progress dot while the pointer rested on the row, so a thread that was still answering looked idle. The dot now stays where it is and the menu sits to its left. Rows that show a time are unchanged: the menu takes the time's place.

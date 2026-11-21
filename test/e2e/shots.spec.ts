@@ -299,9 +299,10 @@ const SETTINGS_PAGES: readonly (readonly [string, string, ((page: Page) => Promi
     "image-generation-on",
     "Image generation",
     async (p) => {
-      // nothing answers at this address and the app has no engine: Set up images, no switch
-      await expect(p.getByText("Set up images").first()).toBeVisible();
-      await expect(p.getByTestId("settings.images.enable")).toHaveCount(0);
+      // a saved address keeps the switch; turned on, Connection shows that nothing answers there
+      await p.getByTestId("settings.images.enable").click();
+      await expect(p.getByTestId("settings.images.enable")).toHaveAttribute("aria-checked", "true");
+      await expect(p.getByTestId("settings.images.address")).toBeVisible();
     },
   ],
   ["runtime", "Runtime"],
@@ -323,7 +324,8 @@ test.describe("settings sections", () => {
           await page.clock.setFixedTime(NOW);
           await open(`#thread=${seededThread ?? ""}`);
           await waitReady(page);
-          await settings(label)(page);
+          // Models left the desktop Settings nav for its own pop-up; a phone still lists it
+          await (label === "Models" ? models(page) : settings(label)(page));
           await act?.(page);
           await settled(page);
           await page.screenshot({ path: path.join(SHOTS_DIR, `settings-${file}-${width}.png`), animations: "disabled", caret: "hide" });
@@ -389,15 +391,16 @@ const threadMenu = async (p: Page) => {
 };
 const phoneSettings = (section?: string) => async (p: Page) => {
   await drawer(p);
-  await p.getByTestId("sidebar.foot.settings").tap();
-  if (section === undefined) return;
-  if (isPhoneWidth(p)) {
-    await listButton(p, section).tap();
+  // a tablet's Models is the drawer footer's pop-up, not a Settings section
+  if (section === "Models" && !isPhoneWidth(p)) {
+    await p.getByTestId("sidebar.foot.models").tap();
+    await expect(p.getByRole("dialog", { name: "Models" }).locator(".mp")).toBeVisible();
     return;
   }
-  // a tablet's sections are in the drawer
-  await p.getByTestId("chat.header.open-threads").tap();
-  await navButton(p, section).tap();
+  await p.getByTestId("sidebar.foot.settings").tap();
+  if (section === undefined) return;
+  // a phone's sections are a list; a tablet's Settings is a pop-up with its own section nav
+  await (isPhoneWidth(p) ? listButton(p, section) : navButton(p, section)).tap();
 };
 
 const MOBILE: readonly MobileShot[] = [
