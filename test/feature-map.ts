@@ -417,15 +417,15 @@ export const FEATURES: readonly Feature[] = [
     id: "start-screen",
     name: "Start screen",
     group: "Composer",
-    what: "A new chat's mark and composer, with ringed icons for what is not set up yet (Library search, Image generation).",
+    what: "A new chat's mark and composer, and nothing else.",
     where: "A new thread before its first message.",
-    aka: ["new-chat heading", "starter", "setup icons"],
+    aka: ["new-chat heading", "starter"],
     window: ["composer/starter.ts", "app/App.tsx"],
     server: [],
     calls: [],
     pushes: [],
     specs: ["start-mark.spec.ts"],
-    testIds: ["chat.setup.open-*"],
+    testIds: [],
   },
 
   // ---------------------------------------------------------------- Images in a chat

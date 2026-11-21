@@ -9,11 +9,14 @@ import { holds } from "./waits.ts";
 const BLENDER_MIB = Math.round(9.7 * 1024);
 /** One decimal under 10 GB, whole from 10 up, as the picture reads ("6.6 / 16 GB", "17 / 16 GB"); "~" before an estimate, as the picker writes it. */
 const MARK = /^~?(\d\.\d|\d{2,}) \/ (\d+) GB$/;
+/** The installed list says the need alone ("~8.6 GB", 2026-11-21): the card's size would repeat on every row. */
+const BARE = /^~?(\d\.\d|\d{2,}) GB$/;
 
-/** The mark's number, and its fill as a share of its bar. */
+/** The mark's number, the whole it is against (from its spoken label, which always names it), and its fill as a share of its bar. */
 async function readMark(mark: Locator) {
   const text = (await mark.locator(".mm-n").textContent()) ?? "";
-  const [, need, whole] = MARK.exec(text) ?? [];
+  const need = (MARK.exec(text) ?? BARE.exec(text))?.[1];
+  const whole = / of (\d+) GB/.exec((await mark.getAttribute("aria-label")) ?? "")?.[1];
   const fill = await mark.evaluate((el) => {
     const bar = el.querySelector(".mm-bar")?.getBoundingClientRect().width ?? 0;
     const f = el.querySelector(".mm-bar i")?.getBoundingClientRect().width ?? 0;
@@ -22,12 +25,12 @@ async function readMark(mark: Locator) {
   return { text, need: Number(need), whole: Number(whole), fill };
 }
 
-async function expectMarks(rows: Locator, whole: number) {
+async function expectMarks(rows: Locator, whole: number, bare = false) {
   const all = await rows.all();
   expect(all.length, "rows to check").toBeGreaterThan(0);
   for (const row of all) {
     const m = await readMark(row.locator(".mm:visible"));
-    expect(m.text,`${await row.getAttribute("data-dm") ?? await row.getAttribute("data-cat")}: "need / card GB"`).toMatch(MARK);
+    expect(m.text,`${await row.getAttribute("data-dm") ?? await row.getAttribute("data-cat")}: ${bare ? '"need GB"' : '"need / card GB"'}`).toMatch(bare ? BARE : MARK);
     expect(m.whole, "the bar is the whole card").toBe(whole);
     // the fill is the need over the card, whole when it needs more than the card has
     expect(m.fill).toBeCloseTo(Math.min(1, m.need / whole), 1);
@@ -51,7 +54,7 @@ test("one memory mark on installed and offered rows, against the card, with othe
   await expect(installed.first().locator(".mm:visible")).toHaveCount(1);
   // another program takes GPU memory once the app has seen the card at rest (fit-card.spec.ts)
   await stack.gpu(BLENDER_MIB);
-  await expectMarks(installed, 16);
+  await expectMarks(installed, 16, true);
   await saidOnceUnder(page, page.locator(".mp-others"), page.getByTestId("models.list.installed"));
   await page.screenshot({ path: info.outputPath("mark-models.png"), animations: "disabled" });
 

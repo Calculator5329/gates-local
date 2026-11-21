@@ -212,6 +212,12 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .sb-row .sb-menu{width:24px;height:24px;flex:none;opacity:0;pointer-events:none}
 .sb-row:hover .sb-menu,.sb-row:focus-within .sb-menu,.sb-row.menu-open .sb-menu{opacity:1;pointer-events:auto}
 @media (hover:none){.sb-row .sb-menu{width:44px;height:44px;opacity:1;pointer-events:auto}}
+/* with a mouse the menu holds no slot of its own: on hover, focus or an open menu it takes the time's place */
+@media (hover:hover){
+  .sb-row{position:relative;padding-right:10px}
+  .sb-row .sb-menu{position:absolute;right:6px;top:50%;margin-top:-12px}
+  .sb-row:hover .sb-status,.sb-row:focus-within .sb-status,.sb-row.menu-open .sb-status{visibility:hidden}
+}
 .sb-status{width:56px;flex:none;display:flex;align-items:center;justify-content:flex-end}
 .sb-row .ago{font-size:12px;font-weight:400;color:var(--muted-foreground);font-variant-numeric:tabular-nums;flex:none}
 /* one working dot, one color in every phase: it breathes in size, never in opacity (F50) */
@@ -457,13 +463,6 @@ div.think.fold:hover{color:var(--muted-foreground);background:none}
    --accent; until then the theme's foreground), and under the bar only what is not set up yet */
 .start-mark{display:block;width:34px;height:34px;margin:0 auto 28px;color:var(--accent,var(--foreground))}
 .start-mark svg{display:block;width:100%;height:100%}
-.setup-row{display:flex;justify-content:center;gap:6px;margin-top:16px;min-height:36px}
-.setup-row:empty{visibility:hidden}
-.setup-ic{position:relative;width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;border-radius:var(--r-ctl);color:var(--muted-foreground);box-shadow:inset 0 0 0 1px var(--border);transition:background-color .12s,color .12s,box-shadow .12s}
-.setup-ic:hover{color:var(--foreground);background:var(--hover);box-shadow:inset 0 0 0 1px var(--border-strong)}
-.setup-ic .ic{width:17px;height:17px}
-/* not set up: a hollow amber ring (green means ready everywhere else) */
-.unset{position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:50%;box-shadow:inset 0 0 0 1.5px var(--amber)}
 
 /* ---------- composer (F01 F07 F08 F13) ---------- */
 .cw{position:relative;flex:none;padding:0 24px 16px}
@@ -1077,10 +1076,8 @@ a.btn{text-decoration:none}
 #modelBtn>.picker-trigger-ctx{min-width:3ch}
 .draft{padding:16px 12px 0}
 .draft-in{flex:1 0 auto;display:flex;flex-direction:column}
-/* the mark sits low in the free space, the setup icons just above the docked bar, in thumb reach */
+/* the mark sits low in the free space, just above the docked bar */
 .start-mark{margin:auto auto 24px}
-.setup-row{order:1;margin:0;min-height:44px}
-.setup-ic{width:44px;height:44px}
 .draft-in .banner-slot{order:2;padding:12px 0 0}
 #draftComposerSlot{order:3;position:sticky;bottom:0;margin-top:16px;padding-bottom:max(12px,env(safe-area-inset-bottom));background:var(--background)}
 .pop{position:fixed;inset:auto 0 0!important;width:auto!important;max-height:70dvh;overflow-y:auto;z-index:50;border:0;border-top:1px solid var(--popover-border);border-radius:var(--r-lg) var(--r-lg) 0 0;background:var(--popover);padding-bottom:env(safe-area-inset-bottom)}
@@ -1228,18 +1225,22 @@ a.btn{text-decoration:none}
 .fp-set>.mm-why{margin:-4px 16px 10px}
 /* Measure (row 29): Speed and Score after the mark on the installed list, one button across both until
    measured; a downloading row keeps its menu in the last column */
-.mp-card.ms{--mp-cols:minmax(0,1fr) 80px 200px 84px 56px 40px}
+.mp-card.ms{--mp-cols:minmax(0,1fr) 80px 200px 64px 64px 40px}
 .mp-card.ms .mp-row>.mp-acts{grid-column:-2}
 .mp-spd,.mp-score{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;font-size:13.5px}
 .mp-row>.mp-spd{color:var(--muted-foreground);cursor:default}
-.mp-row>.mp-score{display:flex;align-items:center;justify-content:flex-end;gap:4px;height:28px;padding:0 4px;margin-right:-4px;border:0;background:none;font-family:inherit;font-weight:600;color:var(--foreground);cursor:pointer;border-radius:var(--r-sm)}
+.mp-row>.mp-score{display:flex;align-items:center;justify-content:flex-end;gap:4px;height:28px;padding:0 6px;margin-right:-6px;border:0;background:none;font-family:inherit;font-weight:600;color:var(--foreground);cursor:pointer;border-radius:var(--r-sm)}
 .mp-row>.mp-score:hover{background:var(--hover)}
 .mp-row>.mp-score.old{color:var(--muted-foreground);font-weight:500}
 .mp-slow{color:var(--amber-fg);flex:none}
 .mp-th .mp-spd,.mp-th .mp-score{font-size:inherit}
 .mp-meas{grid-column:span 2;display:flex;justify-content:flex-end;min-width:0;padding-left:12px}
 .mp-mbtn{width:100%;height:28px;padding:0 8px;gap:6px;justify-content:center;font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap}
-.btn.mp-mbtn.running:disabled,.btn.mp-mbtn.running:disabled:hover{color:var(--foreground);border-color:var(--border-strong);cursor:progress}
+/* idle: a quiet 28px icon whose right edge meets the score numbers'; running: borderless muted text, no fill bar */
+.mp-meas .btn.mp-mbtn:not(.running){width:28px;padding:0;margin-right:-6px;border-color:transparent;background:none;color:var(--muted-foreground)}
+.mp-meas .btn.mp-mbtn:not(.running):hover:not(:disabled){background:var(--hover);color:var(--foreground)}
+.mp-meas .btn.mp-mbtn.running,.mp-meas .btn.mp-mbtn.running:disabled,.mp-meas .btn.mp-mbtn.running:disabled:hover{width:auto;padding:0 6px;margin-right:-6px;border-color:transparent;background:none;color:var(--muted-foreground);opacity:1;cursor:progress}
+.mp-mbtn.running .fill{display:none}
 .mp-others{margin:10px 0 0;color:var(--muted-foreground);font-size:13px}
 .mp-nm{min-width:0;display:flex;flex-direction:column;justify-content:center;padding-right:16px}
 .mp-l1{display:flex;align-items:center;gap:8px;min-width:0;line-height:20px;white-space:nowrap}
@@ -1431,6 +1432,9 @@ button.dl-btn:disabled,button.dl-btn:disabled:hover{opacity:.45;cursor:not-allow
   .mp .srow .sl{flex:1 1 100%}
   .mp .srow .sv{flex:1 1 100%;min-width:0;justify-content:flex-start}
   .mp .srow .inp{flex:1;min-width:0;height:44px}
+  /* the model-name box takes the row so its whole example shows; Download wraps under it */
+  .mp .srow .sv:has(>.inp){flex-wrap:wrap}
+  .mp .srow .sv>.inp{flex:1 1 100%}
 }
 
 /* Picker frame stays eager for its import-error screen. */

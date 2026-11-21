@@ -3,13 +3,12 @@ import { type Accent, type ImageSetupProgress, type ImageStatus, type ShellStatu
 import { imageFailure, said } from "../lib/words/image-failure.ts";
 import { PORT_TAKEN_SHORT, STALLED, failWhy, failWords, installStep, portOf, rtInfo, rtOf, searching, underTitle, useInstallStall } from "../runtime/words.tsx";
 import { GpuMemory } from "../fit/FitPanel.tsx";
-import { count, folderWords, gb, noGpu, sourceDetail } from "../lib/words/format.ts";
+import { folderWords, gb, noGpu, sourceDetail } from "../lib/words/format.ts";
 import { noImageEngine } from "../image/image-choice.ts";
 import { handleKey } from "../lib/ui/handles.ts";
 import { Icon, type IconId } from "../lib/ui/icons.tsx";
 import LibraryImports from "./LibraryImports.tsx";
 import { ModelsPage } from "../models/Models.tsx";
-import { sizeText } from "../models/models-rules.ts";
 import { addSource, canOpenFolder, checkImageStatus, folderDialog, openDataFolder, openSettings, recheckRuntime, refreshSource, removeSource, resetSettings, saveImageFolder, startImageSetup, updateSettings } from "../lib/session/index.ts";
 import { NA, setState, useStore } from "../lib/store/store.ts";
 import { CopyButton, PathText, Status } from "../lib/ui/settings-controls.tsx";
@@ -77,7 +76,6 @@ function Runtime() {
   const runtime = useStore((s) => s.runtime);
   const confirm = useStore((s) => s.ownerConfirm);
   const settings = useStore((s) => s.settings);
-  const models = useStore((s) => s.models);
   const rt = rtOf({ conn, runtime });
   const info = rtInfo({ conn, runtime, settings });
   const port = portOf(runtime?.baseUrl);
@@ -107,7 +105,6 @@ function Runtime() {
   const nothingToSwitchTo = !ownCopy && runtime?.noAppCopy === true;
   const [err, run] = useAct();
   const [openErr, runOpen] = useAct();
-  const total = (models ?? []).reduce((a, m) => a + m.sizeBytes, 0);
   const folders = folderWords();
   const folder = window.gatesLocal === undefined || (app && runtime?.state === "ready") ? runtime?.modelsDir : undefined;
   const locked = useStore((s) => s.unavailable["settings.update"] === true);
@@ -182,15 +179,10 @@ function Runtime() {
             <CopyButton text={runtime.baseUrl} label="Copy Ollama address" handle="ollama-address" />
           </Row>
         )}
-        {folder === undefined && !models ? null : (
+        {folder === undefined ? null : (
           <Row
-            label={folder === undefined ? "Models" : "Models folder"}
-            desc={
-              <>
-                {folder === undefined ? null : <PathText path={folder} />}
-                {models ? <span className="d">{`${count(models.length, "model")} · ${sizeText(total)}`}</span> : null}
-              </>
-            }
+            label="Models folder"
+            desc={<PathText path={folder} />}
             err={openErr}
           >
             {folder !== undefined && canOpenFolder() ? (
@@ -198,7 +190,7 @@ function Runtime() {
                 Open
               </button>
             ) : null}
-            {folder === undefined ? null : <CopyButton text={folder} label="Copy models folder path" handle="models-folder" />}
+            <CopyButton text={folder} label="Copy models folder path" handle="models-folder" />
           </Row>
         )}
       </Grp>

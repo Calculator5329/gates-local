@@ -188,7 +188,7 @@ it("a measured model's speed shows only in its Speed column, not on its name lin
   expect(byClass("tps", nameLine("beta:2b")), "an unmeasured model's speed is on its name line").toHaveLength(1);
   expect(byClass("tps", nameLine("alpha:1b"))).toHaveLength(0);
   expect(nameLine("alpha:1b").textContent).not.toContain("tok/s");
-  expect(elementsIn(rowOf("alpha:1b")).find((el) => el.classList.includes("mp-spd"))?.textContent).toBe("102 tok/s");
+  expect(elementsIn(rowOf("alpha:1b")).find((el) => el.classList.includes("mp-spd"))?.textContent).toBe("102");
 });
 
 it("a model with no purpose has no second line under its name", async () => {

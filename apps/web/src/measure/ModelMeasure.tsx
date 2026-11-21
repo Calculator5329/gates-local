@@ -3,7 +3,7 @@ import type { ModelMeasure } from "@gates-local/contracts";
 import { handleKey } from "../lib/ui/handles.ts";
 import { EARLIER_WORDS, MeasureDetail, SLOW_WORDS, isEarlier, isOlder, shortWords } from "./MeasureDetail.tsx";
 import { Icon } from "../lib/ui/icons.tsx";
-import { tpsText } from "../models/model-speed.tsx";
+import { speedNumber, tpsText } from "../models/model-speed.tsx";
 import { measureModel } from "../lib/session/index.ts";
 import { measureOf, measuringNow } from "./measures.ts";
 import { Fail } from "../lib/ui/settings-ui.tsx";
@@ -29,7 +29,6 @@ export function ScoreMarks({ m }: { m: ModelMeasure }) {
     <>
       {isEarlier(m) ? <span data-tip={EARLIER_WORDS} data-testid="settings.models.score-earlier"><Icon id="clock" cls="s14" /></span> : null}
       {short ? <span className="mp-slow" data-tip={esc(short)} data-testid="settings.models.score-short"><Icon id="bars" cls="s14" /></span> : null}
-      {m.think ? <span data-tip="Thinking on" data-testid="settings.models.score-think"><Icon id="bulb" cls="s14" /></span> : null}
     </>
   );
 }
@@ -68,7 +67,7 @@ export function MeasureCells({ name, label }: { name: string; label: string }) {
   if (m !== undefined && run === undefined) {
     return (
       <>
-        <span className="mp-spd">{tpsText(m.tokensPerSecond) ?? "–"}</span>
+        <span className="mp-spd">{speedNumber(m.tokensPerSecond) ?? "–"}</span>
         <button
           type="button"
           className={`mp-score${isOlder(m) || isEarlier(m) ? " old" : ""}`}
@@ -89,7 +88,8 @@ export function MeasureCells({ name, label }: { name: string; label: string }) {
 }
 
 function MeasureButton({ name, label, run, other }: { name: string; label: string; run: ReturnType<typeof running>; other: boolean }) {
-  const text = run === undefined ? "Measure" : run.state !== "running" ? "Starting" : run.done === run.total - 1 ? "Pages wait for the window" : `Measuring ${run.done} of ${run.total}`;
+  // why: idle is an icon whose tip says Measure; running words must fit the two 64px cells
+  const text = run === undefined ? "" : run.state !== "running" ? "Starting" : run.done === 0 ? "Loading model" : run.done === run.total - 1 ? "Grading pages" : `${run.done} / ${run.total}`;
   return (
     <span className="mp-meas">
       <button
@@ -99,8 +99,8 @@ function MeasureButton({ name, label, run, other }: { name: string; label: strin
         style={{ "--f": run && run.total > 0 ? run.done / run.total : 0 } as React.CSSProperties}
         disabled={run !== undefined || other}
         aria-busy={run !== undefined || undefined}
-        aria-label={run ? `${text}, ${label}` : `Measure ${label}`}
-        data-tip={run === undefined && other ? "One model at a time" : undefined}
+        aria-label={run ? `Measuring ${label}: ${text.replace(" / ", " of ")}` : `Measure ${label}`}
+        data-tip={run === undefined ? (other ? "One model at a time" : "Measure") : undefined}
         onClick={() => void measureModel(name)}
       >
         <span className="fill" aria-hidden="true" />

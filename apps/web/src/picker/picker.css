@@ -54,14 +54,14 @@
 .pk-ctx-row:disabled{color:var(--faint);cursor:not-allowed}
 .pk-context-check{display:flex;justify-content:flex-end;align-items:center}
 .pk-cap{font-size:12px;text-align:right;font-weight:400;color:var(--muted-foreground)}
-.pk-cost{display:block;justify-self:end;width:144px;min-width:0;height:28px;color:var(--foreground);font-variant-numeric:tabular-nums}
+.pk-cost{display:block;justify-self:end;width:144px;min-width:0;height:30px;color:var(--foreground);font-variant-numeric:tabular-nums}
 .pk-cost.none{font-size:11px;line-height:28px;text-align:right;color:var(--muted-foreground)}
 .pk-cost.pending{height:auto;font-size:11px;text-align:right;color:var(--muted-foreground)}
-.pk-cost-caption{height:14px;display:flex;justify-content:space-between;align-items:center;gap:4px;font-size:10px;line-height:12px}
-.pk-cost-caption small{font-size:10px;color:var(--muted-foreground)}
+.pk-cost-caption{height:16px;display:flex;justify-content:space-between;align-items:center;gap:4px;font-size:12.5px;line-height:16px}
+.pk-cost-caption small{font-size:12.5px;color:var(--muted-foreground)}
 .pk-cost.spill small{color:var(--amber-fg)}
 .pk-cost.no small{color:var(--red-fg)}
-.pk-cost-track{position:relative;display:block;width:104px;height:12px;margin-top:4px}
+.pk-cost-track{position:relative;display:block;width:104px;height:12px;margin-top:2px}
 .pk-cost-track i{position:absolute;top:0;height:6px;display:block}
 .pk-cost-room{left:0;width:100%;background:var(--track)}
 .pk-cost-fill{left:0;background:var(--green)}

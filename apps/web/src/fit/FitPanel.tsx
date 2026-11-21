@@ -126,33 +126,26 @@ function speedOf(s: State, model: string): { ttft: number; tps: number | null } 
   return best === null ? null : { ttft: best.ttft, tps: best.tps };
 }
 
-function Speed({ model, name, numCtx, loaded }: { model: string; name: string; numCtx: number; loaded: boolean }) {
+function Speed({ model, loaded }: { model: string; loaded: boolean }) {
   const ttft = useStore((s) => speedOf(s, model)?.ttft);
   const tps = useStore((s) => speedOf(s, model)?.tps ?? null);
+  if (ttft === undefined) return null;
   return (
     <>
       <div className="fp-sep" />
-      {ttft === undefined ? (
-        <div className="fp-n" style={{ margin: 0 }}>
-          Speed: not measured yet.<span className="ph-hide"> It shows after {name} replies at {k(numCtx)}.</span>
+      <div className="fp-mt">{loaded ? "Measured on last load" : "Speed"}</div>
+      <div className="meas">
+        <div>
+          <b>{(ttft / 1000).toFixed(1)} s</b>
+          <span>first token</span>
         </div>
-      ) : (
-        <>
-          <div className="fp-mt">{loaded ? "Measured on last load" : "Speed"}</div>
-          <div className="meas">
-            <div>
-              <b>{(ttft / 1000).toFixed(1)} s</b>
-              <span>first token</span>
-            </div>
-            {tps !== null ? (
-              <div>
-                <b>{tps} tok/s</b>
-                <span>generation</span>
-              </div>
-            ) : null}
+        {tps !== null ? (
+          <div>
+            <b>{tps} tok/s</b>
+            <span>generation</span>
           </div>
-        </>
-      )}
+        ) : null}
+      </div>
     </>
   );
 }
@@ -178,11 +171,11 @@ function Numbers({ r, v, name, gpu, slow }: { r: FitReport; v: Verdict; name: st
   );
 }
 
-function Breakdown({ model, name, numCtx, gpuRaw, report, loaded }: { model: string; name: string; numCtx: number; gpuRaw: GpuStatus | "na" | undefined; report: FitReport; loaded: boolean }) {
+function Breakdown({ model, name, gpuRaw, report, loaded }: { model: string; name: string; gpuRaw: GpuStatus | "na" | undefined; report: FitReport; loaded: boolean }) {
   const gpu = gpuRaw === NA ? undefined : gpuRaw;
   const v = verdictOf(report);
-  if (gpuRaw === NA) return v.k === "no" ? null : <Speed model={model} name={name} numCtx={numCtx} loaded={loaded} />;
-  if (gpu !== undefined && gpu.vendor !== "nvidia") return v.k === "no" ? null : <Speed model={model} name={name} numCtx={numCtx} loaded={loaded} />;
+  if (gpuRaw === NA) return v.k === "no" ? null : <Speed model={model} loaded={loaded} />;
+  if (gpu !== undefined && gpu.vendor !== "nvidia") return v.k === "no" ? null : <Speed model={model} loaded={loaded} />;
   return (
     <>
       <div className="fp-sep" />
@@ -192,7 +185,7 @@ function Breakdown({ model, name, numCtx, gpuRaw, report, loaded }: { model: str
       ) : (
         <MemoryBar gpu={gpu} name={name} loaded={loaded} />
       )}
-      {v.k === "no" ? null : <Speed model={model} name={name} numCtx={numCtx} loaded={loaded} />}
+      {v.k === "no" ? null : <Speed model={model} loaded={loaded} />}
     </>
   );
 }
@@ -256,7 +249,7 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
             Details
           </summary>
           <Numbers r={fit} v={verdictOf(fit)} name={name} gpu={gpu} slow={slow} />
-          <Breakdown model={model} name={name} numCtx={ctx} gpuRaw={gpuRaw} report={fit} loaded={loaded} />
+          <Breakdown model={model} name={name} gpuRaw={gpuRaw} report={fit} loaded={loaded} />
         </details>
       )}
     </>

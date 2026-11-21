@@ -2,7 +2,7 @@ import { Icon } from "../lib/ui/icons.tsx";
 import { modelNameKey } from "./pick.ts";
 import { NA, type State, useStore } from "../lib/store/store.ts";
 
-function speedNumber(value: unknown): string | undefined {
+export function speedNumber(value: unknown): string | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   const tenths = Math.round(value * 10) / 10;
   if (tenths <= 0) return undefined;

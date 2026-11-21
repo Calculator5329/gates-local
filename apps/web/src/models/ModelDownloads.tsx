@@ -241,7 +241,7 @@ export function CustomPull({ actions, numCtx }: { actions: DownloadActions; numC
   return (
     <Row
       err={actions.error(tag)}
-      label="Any model from the Ollama library"
+      label={null}
       desc={
         said === undefined ? (
           <a className="link" data-testid="models.custom.library-link" href="https://ollama.com/library" target="_blank" rel="noreferrer noopener" aria-label="Browse the Ollama library at ollama.com/library (opens your browser)">
@@ -471,7 +471,7 @@ export function TableHeadRow({ measureShown }: { measureShown: boolean }) {
       <span className="mp-fitc">On this computer</span>
       {measureShown ? (
         <>
-          <span className="mp-spd">Speed</span>
+          <span className="mp-spd">tok/s</span>
           <span className="mp-score">Score</span>
         </>
       ) : null}

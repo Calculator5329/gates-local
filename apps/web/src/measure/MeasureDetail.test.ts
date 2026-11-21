@@ -85,8 +85,8 @@ describe("two scores side by side", () => {
     expect(marks(short)).not.toContain("data-tipt");
   });
 
-  it("marks one made with Thinking on, and the detail names every part shorter than its full set", () => {
-    expect(marks(short)).toContain('data-tip="Thinking on"');
+  it("no mark for Thinking on (the detail says it), and the detail names every part shorter than its full set", () => {
+    expect(marks(short)).not.toContain("Thinking on");
     expect(marks({ ...full, think: false })).toBe("");
     expect(notes(short)).toContain("The score leaves Database out, and counts Tools over 2 of its 3 checks.");
   });

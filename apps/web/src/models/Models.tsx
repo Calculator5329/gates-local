@@ -57,7 +57,7 @@ function Fit({ report }: { report: TableFit | undefined }) {
   if (report === undefined) return tabled ? <span className="mp-fit none">–</span> : <span className="mp-fit none" aria-busy="true"><FitSkel w="120px" /></span>;
   return (
     <span className="mp-fit">
-      <MemoryMark report={report} words={verdictOf(report).label} />
+      <MemoryMark report={report} words={verdictOf(report).label} bare />
     </span>
   );
 }

@@ -926,7 +926,6 @@ export function PlusMenu() {
           <Icon id="image" />
           <span>
             <b>Set up image generation…</b>
-            <small>Off until you set it up</small>
           </span>
         </button>
       )}

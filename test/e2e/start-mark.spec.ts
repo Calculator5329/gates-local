@@ -1,11 +1,8 @@
 /// <reference lib="dom" />
 // The start screen, direction Mark (chat row 20): the gate mark above the bar
 // in the accent colour (the theme's foreground until Settings defines one),
-// the bar as it was, and under it only what is not set up yet: the library's
-// icon and the image's, each with an amber ring, each opening its Settings
-// section. A set-up machine shows the mark and the bar and nothing else.
-import { writeFileSync } from "node:fs";
-import { createClient } from "@gates-local/contracts";
+// the bar as it was, and nothing else. The set-up icons that sat under the bar
+// left on 2026-11-21; the plus menu offers the same two.
 import type { Page } from "@playwright/test";
 import { expect, test, waitReady } from "./fixtures.ts";
 
@@ -29,28 +26,11 @@ function resolve(page: Page, value: string): Promise<string> {
   }, value);
 }
 
-async function setUp(page: Page, what: { library?: string; images?: boolean }): Promise<void> {
-  const server = new URL(page.url()).searchParams.get("server");
-  if (!server) throw new Error("No test server");
-  const client = createClient(new WebSocket(server));
-  try {
-    if (what.library !== undefined) {
-      writeFileSync(what.library, "Notes on cron.\n");
-      await client.call("sources.add", { kind: "file", path: what.library });
-    }
-    if (what.images) await client.call("settings.update", { imageGen: true });
-  } finally {
-    client.close();
-  }
-  await page.reload();
-  await waitReady(page);
-}
-
 test.describe("the start screen", () => {
   test.use({ viewport: { width: 1920, height: 1080 } });
 
-  // Guards the owner's pick of the Mark start screen: no headline or cards, the mark in the accent, an icon per thing not set up.
-  test("a new install: the mark above the bar, and the library and image icons with amber rings under it", async ({ page, open }) => {
+  // Guards the owner's pick of the Mark start screen: no headline or cards, the mark in the accent, nothing under the bar.
+  test("a new install: the mark above the bar, and nothing else", async ({ page, open }) => {
     await open();
     await waitReady(page);
     await expect(page.locator(".draft .composer")).toBeVisible();
@@ -68,36 +48,7 @@ test.describe("the start screen", () => {
     await expect(page.locator(".start-mark"), "the mark follows --accent once Settings defines it").toHaveCSS("color", "rgb(1, 2, 3)");
     await page.evaluate(() => document.documentElement.style.removeProperty("--accent"));
 
-    const icons = page.locator(".setup-row .setup-ic");
-    await expect(icons).toHaveCount(2);
-    await expect(icons.nth(0)).toHaveAccessibleName("Set up library search");
-    await expect(icons.nth(0)).toHaveAttribute("data-tip", "Library search");
-    await expect(icons.nth(1)).toHaveAccessibleName("Set up image generation");
-    await expect(icons.nth(1)).toHaveAttribute("data-tip", "Image generation");
-    await expect(icons.locator(".unset")).toHaveCount(2);
-
-    await icons.nth(0).click();
-    await expect(page.locator(".snav .sb-act.on")).toHaveText("Library");
-    await page.keyboard.press("Escape");
-    await waitReady(page);
-    await page.getByTestId("chat.setup.open-images").click();
-    await expect(page.locator(".snav .sb-act.on")).toHaveText("Image generation");
-  });
-
-  // Guards the owner's rules to show only what is true and that nothing moves: set-up icons go, the bar stays put.
-  test("images set up: only the library icon is left; everything set up: the mark and the bar, nothing else, the bar where it was", async ({ page, open }) => {
-    await open();
-    await waitReady(page);
-    const before = await page.locator(".draft .composer").boundingBox();
-
-    await setUp(page, { images: true });
-    await expect(page.locator(".setup-row .setup-ic")).toHaveCount(1);
-    await expect(page.locator(".setup-row .setup-ic")).toHaveAccessibleName("Set up library search");
-
-    await setUp(page, { library: test.info().outputPath("notes.txt") });
-    await expect(page.locator(".setup-row .setup-ic")).toHaveCount(0);
+    // set-up icons left 2026-11-21: the plus menu offers library search and image generation
     await expect(page.locator(".draft-in > :visible")).toHaveCount(2); // the mark and the bar's slot
-    const after = await page.locator(".draft .composer").boundingBox();
-    expect(after?.y, "the bar does not move when the icons go").toBe(before?.y);
   });
 });

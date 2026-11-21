@@ -16,7 +16,7 @@ import { FAKE_URL, SERVER_PORT, TOKEN } from "./env.ts";
 /** A run's steps: the speed request, each check, and the pages. */
 const RUN_STEPS = CASES.length + 2;
 /** The Measure button while a run goes. */
-const BUSY = new RegExp(`^(Starting|Measuring \\d+ of ${RUN_STEPS})$`);
+const BUSY = new RegExp(`^(Starting|Loading model|\\d+ / ${RUN_STEPS}|Grading pages)$`);
 
 const chatRequests = async (model: string) => {
   const state = (await (await fetch(`${FAKE_URL}/__fake/state`)).json()) as { requests: { path: string; body: { model?: string } }[] };
@@ -37,12 +37,13 @@ test("Measure runs only on a click, grades pages in this window, and the score o
 
   await button.click();
   // a warm-up, twenty checks and the pages: the button is the progress, one model at a time
-  await expect(button).toHaveText(new RegExp(`^Measuring \\d+ of ${RUN_STEPS}$`));
+  await expect(button).toHaveText(new RegExp(`^\\d+ / ${RUN_STEPS}$`));
   await expect(page.getByTestId("settings.models.measure-gemma4-12b")).toBeDisabled();
 
   const speed = row.locator(".mp-spd");
   const score = page.getByTestId("settings.models.score-qwen3-5-9b");
-  await expect(speed).toHaveText(/^\d+(\.\d)? tok\/s$/, { timeout: 60_000 });
+  // the header says tok/s once; the row shows the number alone
+  await expect(speed).toHaveText(/^\d+(\.\d)?$/, { timeout: 60_000 });
   // the pages were graded here, so the score covers all five parts
   await expect(score).toHaveText("90");
   await expect(score).toHaveAttribute("aria-label", /^Score 90 of 100, /);
@@ -98,7 +99,7 @@ test("Measure runs only on a click, grades pages in this window, and the score o
   await page.setViewportSize({ width: 390, height: 844 });
   const line = page.getByTestId("settings.models.measure-line-qwen3-5-9b");
   await expect(line).toBeVisible();
-  await expect(line).toHaveText(`${kept} · score 90`);
+  await expect(line).toHaveText(`${kept} tok/s · score 90`);
   await line.click();
   await expect(detail).toBeVisible();
   await expect(detail.getByTestId("models.measure.part-pages")).toContainText("2/3");
@@ -145,7 +146,7 @@ test("a window opened during a Measure sees the run, and only the window that st
   await waitReady(second);
   await openModels(second);
   await expect(second.getByTestId("settings.models.measure-gemma4-12b")).toBeVisible();
-  await second.locator(".mp-card").screenshot({ path: info.outputPath("measure-second-window.png"), animations: "disabled" });
+  await second.getByTestId("models.list.installed").screenshot({ path: info.outputPath("measure-second-window.png"), animations: "disabled" });
   await expect(second.getByTestId("settings.models.measure-qwen3-5-9b")).toHaveText(BUSY);
   await expect(second.getByTestId("settings.models.measure-gemma4-12b")).toBeDisabled();
   await expect(page.getByTestId("settings.models.score-qwen3-5-9b")).toHaveText("90", { timeout: 60_000 });
@@ -177,7 +178,7 @@ test("a reload during a Measure still shows it measuring, and one of two open wi
   await openModels(page);
   await expect(button).toHaveText(BUSY);
   await expect(button).toBeDisabled();
-  await page.locator(".mp-card").screenshot({ path: info.outputPath("measure-after-reload.png"), animations: "disabled" });
+  await page.getByTestId("models.list.installed").screenshot({ path: info.outputPath("measure-after-reload.png"), animations: "disabled" });
   const second = await page.context().newPage();
   const sentSecond = pagesSent(second);
   await second.goto(page.url());
@@ -227,9 +228,9 @@ test("a score that left a part out is marked beside its number, and a full one i
   await expect(full.getByTestId("settings.models.score-short")).toHaveCount(0);
   await expect(short.getByTestId("settings.models.score-short")).toHaveAttribute("data-tip", "Without Pages");
   await expect(short).toHaveAttribute("aria-label", /, Without Pages/);
-  const rows = page.locator(".mp-card");
+  const rows = page.getByTestId("models.list.installed");
   // before: the same two scores as the row showed them, bare numbers with nothing to tell them apart
-  const marks = await page.addStyleTag({ content: '[data-testid="settings.models.score-short"],[data-testid="settings.models.score-think"]{display:none!important}' });
+  const marks = await page.addStyleTag({ content: '[data-testid="settings.models.score-short"]{display:none!important}' });
   await rows.screenshot({ path: info.outputPath("scores-before.png"), animations: "disabled" });
   await marks.evaluate((el) => (el as HTMLStyleElement).remove());
   await short.getByTestId("settings.models.score-short").hover();

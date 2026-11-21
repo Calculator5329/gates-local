@@ -47,16 +47,18 @@ it.each([["the row's cells", MeasureCells], ["the phone's line", MeasureMeta]] a
 
 it("the Measure button says the pages wait at the last step, and why it is off while another model measures; the menu offers nothing while a run goes", () => {
   h.state = at(undefined, "a", { [name]: run(name, 5) });
-  expect(row(MeasureCells)).toContain("Measuring 5 of 22");
+  expect(row(MeasureCells)).toContain("5 / 22");
+  h.state = at(undefined, "a", { [name]: run(name, 0) });
+  expect(row(MeasureCells)).toContain("Loading model");
   h.state = at(undefined, "a", { [name]: run(name, 21) });
-  expect(row(MeasureCells)).toContain("Pages wait for the window");
+  expect(row(MeasureCells)).toContain("Grading pages");
   h.state = at(undefined, "a", { other: run("other", 5) });
   const off = row(MeasureCells);
   expect(off).toContain('data-tip="One model at a time"');
   expect(off).toContain('disabled=""');
   expect(useMeasureItem(name)).toBeUndefined();
   h.state = at(undefined, "a");
-  expect(row(MeasureCells)).not.toContain("data-tip");
+  expect(row(MeasureCells)).toContain('data-tip="Measure"');
   expect(useMeasureItem(name)?.text).toBe("Measure");
 });
 

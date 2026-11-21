@@ -20,7 +20,8 @@ export function markFill(verdict: FitReport["verdict"], need: number, whole: num
 
 const KIND: Record<FitReport["verdict"], string> = { fits: "gpu", spills: "spill", refuse: "no" };
 
-export function MemoryMark({ report, words }: { report: FitReport; words: string }) {
+// why: `bare` drops "/ 16 GB" where every row of a list would repeat the card's size
+export function MemoryMark({ report, words, bare = false }: { report: FitReport; words: string; bare?: boolean }) {
   const whole = useStore(markWhole);
   const need = report.needVramBytes;
   const measured = report.source === "measured";
@@ -34,7 +35,7 @@ export function MemoryMark({ report, words }: { report: FitReport; words: string
       data-testid="models.fit.memory-mark"
     >
       <span className="mm-bar" aria-hidden="true"><i style={{ width: `${(fill * 100).toFixed(1)}%` }} /></span>
-      <span className="mm-n" aria-hidden="true">{roughly(measured)}{text}</span>
+      <span className="mm-n" aria-hidden="true">{roughly(measured)}{bare ? `${amount(need)} GB` : text}</span>
     </span>
   );
 }

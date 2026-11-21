@@ -5,7 +5,7 @@
 // Global keys follow the design's Escape order: popover, drawer, the
 // runtime confirm, the download page, then Settings itself.
 import type { Message } from "@gates-local/contracts";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Banner } from "../runtime/Banner.tsx";
 import { PORT_TAKEN_SHORT, type Rt, failWords, installStep, rtOf } from "../runtime/words.tsx";
 import { Composer, CountMenu, OptsMenu, PlusMenu } from "../composer/Composer.tsx";
@@ -13,7 +13,7 @@ import { ImageUnset } from "../image/ImageUnset.tsx";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
 import { FirstRunLoading, NoServer } from "../first-run/FirstRunShell.tsx";
 import { describeModel } from "../lib/words/format.ts";
-import { Icon, type IconId, Sprite } from "../lib/ui/icons.tsx";
+import { Icon, Sprite } from "../lib/ui/icons.tsx";
 import { imageMode } from "../image/image-choice.ts";
 import { ScreenError, firstRunScreen, imagePickerScreen, pickerScreen, settingsScreen, threadScreen, useScreen } from "./screens.tsx";
 import { SECTIONS, SettingsNav, Sidebar, closeDrawer, goNew, onDrawerPop, openDrawer, openSearch } from "../sidebar/Sidebar.tsx";
@@ -33,43 +33,6 @@ import { usePopover } from "../lib/ui/kit/popover.ts";
 import { useDocumentEvent } from "../lib/ui/kit/events.ts";
 import { watch } from "../lib/ui/kit/watch.ts";
 
-interface Unset { readonly lib: boolean; readonly img: boolean }
-
-const SHAPE_KEY = "gates-local:card-shape";
-const NEW_UNSET: Unset = { lib: true, img: true };
-
-function savedUnset(): Unset {
-  try {
-    const v = JSON.parse(localStorage.getItem(SHAPE_KEY) ?? "null") as { libLink?: unknown; imgLink?: unknown } | null;
-    if (v === null || typeof v !== "object") return NEW_UNSET;
-    return { lib: typeof v.libLink === "boolean" ? v.libLink : true, img: typeof v.imgLink === "boolean" ? v.imgLink : true };
-  } catch {
-    return NEW_UNSET;
-  }
-}
-
-function unsetNow(s: State, saved: Unset): Unset & { readonly known: boolean } {
-  return {
-    lib: s.sources === undefined ? saved.lib : Array.isArray(s.sources) && s.sources.length === 0,
-    img: s.settings === undefined ? saved.img : s.settings !== NA && !s.settings.imageGen,
-    known: s.sources !== undefined && s.settings !== undefined,
-  };
-}
-
-const shapeNow = (s: State): string | null => {
-  const now = unsetNow(s, NEW_UNSET);
-  return now.known ? JSON.stringify({ libLink: now.lib, imgLink: now.img }) : null;
-};
-
-function keepShape(shape: string | null): void {
-  if (shape === null) return;
-  try {
-    localStorage.setItem(SHAPE_KEY, shape);
-  } catch {
-    // external: a browser's private window may refuse storage
-  }
-}
-
 const titleNow = (s: State): string | null => (s.view === "new" || s.threadId === null ? null : s.threads.find((t) => t.id === s.threadId)?.title ?? "");
 
 function forgetSectionList(view: State["view"]): void {
@@ -78,7 +41,7 @@ function forgetSectionList(view: State["view"]): void {
 
 // why: started once by the entry, so a change from any path in lib/session is heard
 export function watchApp(): () => void {
-  const stops = [watch(shapeNow, keepShape), watch(titleNow, syncWindowTitle), watch((s) => s.view, forgetSectionList)];
+  const stops = [watch(titleNow, syncWindowTitle), watch((s) => s.view, forgetSectionList)];
   return () => {
     for (const stop of stops) stop();
   };
@@ -88,25 +51,6 @@ export function watchApp(): () => void {
 const selectOnDraw = (el: HTMLInputElement | null): void => {
   el?.select();
 };
-
-function SetupIcons() {
-  const [saved] = useState(savedUnset);
-  const lib = useStore((s) => unsetNow(s, saved).lib);
-  const img = useStore((s) => unsetNow(s, saved).img);
-  const icons: [Section, IconId, string][] = [];
-  if (lib) icons.push(["library", "book", "Library search"]);
-  if (img) icons.push(["images", "image", "Image generation"]);
-  return (
-    <div className="setup-row">
-      {icons.map(([go, icon, name]) => (
-        <button key={go} type="button" className="setup-ic" data-go={go} data-testid={`chat.setup.open-${go}`} data-tip={name} aria-label={`Set up ${name.toLowerCase()}`} onClick={() => openSettings(go)}>
-          <Icon id={icon} />
-          <span className="unset" />
-        </button>
-      ))}
-    </div>
-  );
-}
 
 function Draft({ under }: { under: boolean }) {
   return (
@@ -124,7 +68,6 @@ function Draft({ under }: { under: boolean }) {
         <div id="draftComposerSlot">
           <Composer />
         </div>
-        <SetupIcons />
       </div>
     </div>
   );

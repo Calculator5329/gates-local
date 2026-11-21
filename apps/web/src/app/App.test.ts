@@ -34,7 +34,6 @@ vi.mock("../lib/session/index.ts", async (original) => ({
 
 const SETTINGS: Settings = methodSamples["settings.get"].result;
 const SOURCE: Source = methodSamples["sources.list"].result[0]!;
-const KEY = "gates-local:card-shape";
 const media = { phone: false, touch: false };
 let doc: FakeDocument;
 let root: Root;
@@ -97,7 +96,6 @@ async function mount(state: Partial<State> = {}) {
 const set = async (state: Partial<State>) => { await act(async () => { store.setState(state); }); await settle(); };
 const all = (selector: string) => doc.querySelectorAll(selector);
 const one = (selector: string) => doc.querySelector(selector);
-const icons = () => all(".setup-ic").map((el) => el.getAttribute("data-go"));
 const inert = (selector: string) => one(selector)?.getAttribute("inert") ?? null;
 const props = (el: FakeElement | null): Record<string, unknown> => {
   if (el === null) throw new Error("no such element");
@@ -126,41 +124,6 @@ async function swipe(target: FakeElement | null, from: number, to: number) {
   await fire("touchstart", { target, touches: [{ clientY: from }] });
   await fire("touchend", { changedTouches: [{ clientY: to }] });
 }
-
-it("before the reads land, the setup icons are the ones this browser last saw, kept under the old starter cards' key", async () => {
-  localStorage.setItem(KEY, JSON.stringify({ libLink: false, imgLink: true }));
-  await mount({ view: "new" });
-  expect(icons()).toEqual(["images"]);
-});
-
-it("with nothing saved, or storage that refuses a read, a first frame shows both setup icons", async () => {
-  await mount({ view: "new" });
-  expect(icons()).toEqual(["library", "images"]);
-  act(() => root.render(null));
-  vi.stubGlobal("localStorage", { getItem: () => { throw new Error("refused"); }, setItem: () => undefined });
-  await mount({ view: "new" });
-  expect(icons()).toEqual(["library", "images"]);
-});
-
-it("a read that has landed decides its setup icon and the saved shape the other; a read that failed shows none", async () => {
-  localStorage.setItem(KEY, JSON.stringify({ libLink: false, imgLink: false }));
-  await mount({ view: "new" });
-  expect(icons()).toEqual([]);
-  await set({ sources: [] });
-  expect(icons()).toEqual(["library"]);
-  await set({ settings: { ...SETTINGS, imageGen: false } });
-  expect(icons()).toEqual(["library", "images"]);
-  await set({ sources: store.NA, settings: store.NA });
-  expect(icons()).toEqual([]);
-});
-
-it("the setup shape is kept for the next start only once both reads have landed", async () => {
-  await mount({ view: "new" });
-  await set({ sources: [SOURCE] });
-  expect(localStorage.getItem(KEY)).toBeNull();
-  await set({ settings: { ...SETTINGS, imageGen: true } });
-  expect(JSON.parse(localStorage.getItem(KEY) ?? "null")).toEqual({ libLink: false, imgLink: false });
-});
 
 it("a phone's Settings Back goes to the section list from any section, the Models download page too, at the top", async () => {
   media.phone = true;

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-21: Models, the picker and the sidebar say each thing once
+
+- A model with no score showed a bordered "Measure" button across two columns, and every row said "tok/s" and "/ 16 GB" again. Now the button is a quiet speed icon where the score will go (its tooltip says Measure, and Measure stays in the row's menu). The header says "tok/s" once and each row shows the number. Installed rows read "~8.6 GB". While a model measures, the same spot reads "Loading model", then "3 / 25", then "Grading pages", as plain text with no fill bar. The bulb beside a score is gone; the score's detail still says Thinking on.
+- Something else: the "Any model from the Ollama library" label is gone (the Browse link says it). On a phone the model-name box takes the whole row, so its example shows, and Download sits under it.
+- Sidebar: with a mouse, a thread title runs up to its time; the row menu takes the time's place on hover. A touch screen keeps its always-shown menu.
+- Model picker, context list: the memory figures are larger, and only a size that does not fit says so; "Fits" no longer repeats on every row.
+- New thread: the two orange-dot set-up icons under the bar are gone. The plus menu offers library search and image generation.
+- The plus menu's "Off until you set it up" line, Runtime's "Models" count row and the Advanced panel's "Speed: not measured yet" sentence are gone.
+
 ## 2026-11-21: a release waits on the everyday journeys, not the whole 14-minute check
 
 - A release used to wait on the whole release check, about 13 to 14 minutes on one laptop, and each red cost a full rerun before anything could go out. Now `pnpm release:gate` gates it: types, lint, the build and the journeys in `test/e2e/journeys.txt`, with one report `pnpm release:tag` accepts. The whole check still runs, right after the release, and reports its reds.
