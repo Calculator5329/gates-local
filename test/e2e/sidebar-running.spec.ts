@@ -10,11 +10,12 @@ const FIRST = "Library: Effect Schema books";
 const SECOND = "Fix the backup cron";
 const row = (page: Page, title: string) => page.locator(".sb-row").filter({ hasText: title });
 const mark = (page: Page, title: string) => row(page, title).getByLabel("Reply in progress", { exact: true });
-const select = (page: Page, title: string) => row(page, title).locator(".sb-thread").click();
+// why: with a mouse a hovered row shows its menu where the mark is, so the pointer leaves the row after the click
+const select = async (page: Page, title: string) => {
+  await row(page, title).locator(".sb-thread").click();
+  await page.locator("#ta").hover();
+};
 const stop = (page: Page) => page.getByRole("button", { name: "Stop", exact: true }).click();
-
-const overlap = (a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }) =>
-  a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
 // Guards the owner's ask for parallel threads: a running reply stays marked in the sidebar (unsure: no explicit line on the mark).
 test("a reply stays marked after navigating away and after starting a second reply", async ({ page, open, seededThread }) => {
@@ -32,12 +33,12 @@ test("a reply stays marked after navigating away and after starting a second rep
   await sendMessage(page, "Keep the second chat answering too");
   await expect(mark(page, SECOND)).toBeVisible();
   await expect(mark(page, FIRST)).toBeVisible();
+  // with a mouse the row menu takes the mark's place while the row is hovered, never drawn over
+  // it, and the mark is back once the pointer leaves
   await row(page, FIRST).hover();
-  const [running, actions] = [await mark(page, FIRST).boundingBox(), await row(page, FIRST).locator(".sb-menu").boundingBox()];
-  expect(running).not.toBeNull();
-  expect(actions).not.toBeNull();
-  if (running === null || actions === null) throw new Error("running mark or row actions have no box");
-  expect(overlap(running, actions), "the running mark leaves the row menu clear").toBe(false);
+  await expect(mark(page, FIRST)).toBeHidden();
+  await page.locator("#ta").hover();
+  await expect(mark(page, FIRST)).toBeVisible();
 
   await select(page, FIRST);
   await stop(page);

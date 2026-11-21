@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-21: two journeys follow the picker and sidebar changes
+
+- The release gate went red on two journeys after the picker and sidebar changes landed: one still expected the word "Fits" beside a size that fits, and one measured the row menu against the running mark, which the menu now replaces while a row is hovered. Both tests now check what the app does: a size that fits carries no word (a screen reader still hears Fits), and the running mark is hidden under the pointer and back when it leaves.
+
 ## 2026-11-21: a Measure run is a chat you can watch
 
 - Measure used to be a button that counted up, then a score. You could not see what the model was asked or what it answered until the run was over, and then only as rows in a sheet.

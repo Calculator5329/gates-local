@@ -15,10 +15,11 @@ test("switching model and context updates the fit verdict and the panel", async 
   await expect(picker).toBeVisible();
   const ctx = picker.getByRole("radiogroup", { name: "Context" });
   await expect(ctx.getByRole("radio", { name: "16k" })).toHaveAttribute("aria-checked", "true");
-  // the fit is in the cost cell: its look, its word, and the same in words for a screen reader
+  // the fit is in the cost cell's look and, for a screen reader, in words. A size that fits
+  // carries no word beside its figure; only one that does not fit says so (64k below)
   const fits = ctx.getByRole("radio", { name: "16k" }).locator(".pk-cost.gpu");
   await expect(fits).toHaveCount(1);
-  await expect(fits.locator("small")).toHaveText("Fits");
+  await expect(fits.locator("small")).toHaveText("");
   await expect(fits).toHaveAttribute("aria-label", /GB (measured|estimated); Fits$/);
   // judged against the card's own memory (the owner's ruling, 2026-11-13): what other programs
   // hold right now no longer turns the 27B's row off
