@@ -34,7 +34,8 @@ export default defineConfig({
   retries: 0,
   timeout: 30_000,
   expect: { timeout: 5_000 },
-  reporter: [["list"], ["./budget-reporter.ts"]],
+  // packet/reporter.ts: every failed test leaves a bug packet in its output folder (packet/packet.md).
+  reporter: [["list"], ["./budget-reporter.ts"], ["./packet/reporter.ts"]],
   use: {
     ...browser(),
     baseURL: WEB_ORIGIN,
@@ -42,6 +43,10 @@ export default defineConfig({
     deviceScaleFactor: 1,
     colorScheme: "dark",
     trace: "retain-on-failure",
+    screenshot: "only-on-failure",
+    // GL_E2E_VIDEO=1 (a rerun of the failed tests) records each test; its packet then holds video.webm.
+    // Off by default: Playwright needs its own ffmpeg build for video, and a missing one fails every test.
+    video: process.env["GL_E2E_VIDEO"] === "1" ? "retain-on-failure" : "off",
   },
   projects: [
     // Browser journeys are *.spec.ts; a *.test.ts here (seed.test.ts) is a vitest unit test.

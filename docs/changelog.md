@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-21: a failed browser test leaves a bug packet
+
+- A red browser test used to leave only its error line ("expected 34 to be greater than 60") and a trace to open by hand. Now each failed test also leaves `packet/` in its output folder: `packet.md` (the error and its source lines, the last steps, the page as text, browser console errors and failed requests, the server's log for the test's seconds, and the three verdicts: fixed, the test was wrong, dismissed), `frames.png` (about 12 frames before the failure, each stamped with its time and step), `packet.json` for scripts, `server.log`, and `video.webm` when the run recorded video. A green test writes nothing.
+- Video stays off by default: Playwright's own ffmpeg build is missing on some test machines, and with video on every test there failed at its first page. `GL_E2E_VIDEO=1` turns it on for a rerun of the failed tests.
+
 ## 2026-11-20: threads older than a week fold away in the sidebar
 
 - "Older" is a heading you press: it starts folded and shows how many threads it holds. Press it to see them, press again to fold. The app remembers how you left it.
