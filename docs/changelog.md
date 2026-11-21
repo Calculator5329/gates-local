@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-21: 0.2.7 published, in 5 minutes 20 seconds
+
+- Gates Local 0.2.7 is out (docs/releasing.md). It carries Usage's day bars, Models as one screen, the Older fold in the sidebar, the held-message reason, and the wording work since 0.2.6.
+- It is the first release through the journeys gate. The whole release check took 13 to 14 minutes and went red three times that night on tests that had gone stale or flaky; the gate was green in about 3 minutes, and the release was public 5 minutes 20 seconds after the command started. The Windows installer build waited on the gate's journeys, which is the next thing to take out.
+
 ## 2026-11-21: Models, the picker and the sidebar say each thing once
 
 - A model with no score showed a bordered "Measure" button across two columns, and every row said "tok/s" and "/ 16 GB" again. Now the button is a quiet speed icon where the score will go (its tooltip says Measure, and Measure stays in the row's menu). The header says "tok/s" once and each row shows the number. Installed rows read "~8.6 GB". While a model measures, the same spot reads "Loading model", then "3 / 25", then "Grading pages", as plain text with no fill bar. The bulb beside a score is gone; the score's detail still says Thinking on.

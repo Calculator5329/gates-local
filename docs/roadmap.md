@@ -1095,6 +1095,31 @@ RS-03 remains dropped.
 - [ ] <!-- workspace:id=work:3d565764-5f08-5010-9dd5-4ff0df759b71 --> Replace routine five-second journey warnings with the whole-suite budget; `budget-reporter.ts` still prints both after the suite trim.
       *Accept:* one complete-run report identifies budget overruns and expensive setup without per-journey warning noise.
 
+*2026-11-21, from the 0.2.7 release and the journeys gate:*
+
+- [x] <!-- workspace:id=work:01f1644d-e1fd-5bed-a27d-36b6854aadda --> A release is gated by everyday journeys and speed checks (`test/e2e/journeys.txt`, 33 journeys and four speed checks), with the whole release check after it. *2026-11-21: 0.2.7 went out this way in 5 minutes 20 seconds.*
+- [ ] <!-- workspace:id=work:e7f2f67c-afda-50d8-b3d0-a7109a81fac9 --> The gate's journeys hold the machine that builds the Windows installer, so the installer waits for them (about 3 minutes of the 5 min 20 s). Run the timed specs as their own short piece and the rest on shared slots.
+      *Accept:* a release whose Windows build starts with the gate, and a total under 3 minutes.
+- [ ] <!-- workspace:id=work:47e02115-82ac-5476-99ac-66bee0ed6529 --> A release that fails after main has moved cannot be rerun, because the tag exists. A way to pick it up from assemble.
+- [ ] <!-- workspace:id=work:f25caaf8-25bd-5d14-a0ef-b57efc24f2ab --> The install unit test "clears staging left by an earlier crashed install" fails now and then with "Unpacking Ollama failed (Premature close)"; it failed the 0.2.6 check's first try and a 0.2.7 check.
+      *Accept:* the cause named and the test passing 200 runs in a row.
+- [ ] <!-- workspace:id=work:8c195280-5b57-5d77-b842-d4b03ece5037 --> When the socket drops between a send's answer and its start, the start arrives on the next socket and the chat shows no question until the thread loads again.
+- [ ] <!-- workspace:id=work:5de3a90b-3527-5928-a9c9-f7ec3f8122c6 --> Browser specs with a dated seed (`seedAt: NOW`) that do not pin the page clock can fail once the date is over a week old; `usage.spec.ts` seeds from the real clock and could fail across midnight UTC.
+- [ ] <!-- workspace:id=work:369fc9a3-7a5a-5501-95b6-6cce2d7b8cd8 --> No speed check's limit has been watched failing. Slow each action on purpose once and see the check go red.
+- [ ] <!-- workspace:id=work:04a48f6c-ad00-532f-ac98-f7b240ab8490 --> Speed checks for thread search and for opening Usage.
+- [ ] <!-- workspace:id=work:8f637a6a-425d-50a2-bf46-99ae8feecde1 --> Browser tests for deleting a thread and for exporting a thread as Markdown, on their own.
+- [ ] <!-- workspace:id=work:68b9b85c-9ba7-5d1a-a135-80c97edb2654 --> Bug packets have no video: recording needs Playwright's ffmpeg on every test machine. Install it, measure what recording costs on one machine, then choose video on every run or on a rerun of the failed tests.
+- [ ] <!-- workspace:id=work:17705228-fbc4-5a92-86af-46abe08a61a6 --> A failed browser test is run once more, and its packet says whether it passed the second time (flaky) or not (broken).
+- [ ] <!-- workspace:id=work:80a03837-66ce-58ef-b5bc-a75c5148bc9e --> Models: a download started by typing a name while the list of models on offer is still loading shows twice, each with its own cancel.
+- [ ] <!-- workspace:id=work:ac303d63-b8ce-5e19-b5ce-d712ca1474f6 --> Models with no models installed lost the one-click suggested download; look at how a first-time user is guided.
+- [ ] <!-- workspace:id=work:85086e27-c9da-5f47-a042-9eb757e6dd62 --> Models: a download that failed before this visit shows no error on its row, only Download.
+- [ ] <!-- workspace:id=work:a1e70c2d-5d0b-5d35-979f-5dc14cbec2a0 --> `testid-ratchet.json` still lists the removed `models.tabs.*` and `models.empty.*` ids, and the `.mp-tab` rules are still in `styles.css`.
+- [ ] <!-- workspace:id=work:fc2b097f-5898-5dbf-9db9-1ba7cec38f25 --> Usage on All time: group by week once a day's column is under about 3 px wide.
+- [ ] <!-- workspace:id=work:304f5848-4d3c-5d08-82c6-c06b1251d367 --> Usage at 320 px: the speed track is too short to read.
+- [ ] <!-- workspace:id=work:a0428a6d-17e6-5e4c-a940-5754dfa7b56a --> Usage: a model whose replies have no decode tokens shows its speed as "0–N".
+- [ ] <!-- workspace:id=work:3d7870dd-4fba-5aad-90ac-c8d2e5398baf --> Usage: with many models in one day, the 2 px minimum per bar part can add up to more than the plot's height.
+- [ ] <!-- workspace:id=work:9469f08e-9bbe-5f57-aa0b-042678f6d146 --> Usage: the day readout's width limit differs between the left and right halves of the chart (read from the code, not seen).
+
 ## Later: slices 5 to 7
 
 - [x] <!-- workspace:id=work:c0cb50be-fb59-52f0-b9e6-bb7c914b700e --> Models and Usage open as pop-up panels over the chat; Settings stays its own screen (owner, 2026-11-11). Usage is built that way first; Models moves out of Settings into the same panel after.

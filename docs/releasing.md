@@ -22,6 +22,32 @@ After the release, the whole `release:check` (unit tests and every browser
 test) runs on the released commit and reports its reds. It never holds a
 release.
 
+## Published 0.2.7, 2026-11-21
+
+[Release 0.2.7](https://github.com/Calculator5329/gates-local/releases/tag/v0.2.7)
+contains the Windows x64 installer, Linux x64 AppImage, `release.json` and
+its Ed25519 signature, all from `a008715cddf82e45ca7aaf0df16aea6107a6de25`,
+plus the signed model list (`models.json`). It is the
+first release through the journeys gate: types, lint, the build and the 37
+tests in `test/e2e/journeys.txt` passed before anything was pushed, and the
+whole release check was started on the commit afterwards, off the release
+path. From the release command
+starting to the release being public and verified took 5 minutes 20 seconds
+(0.2.6: 17 minutes 16 seconds). The gate was green at 3 minutes 6 seconds;
+the Windows installer build then set the total, because it waited for the
+gate's journeys, which ran one after another on the machine that also builds
+the installer. Native Linux packaging, the packaged smoke and the plain
+update check passed. The Windows installer was built natively; it was not
+installed or opened before release. Signature verification and both installer
+hashes were checked before publication, and the public latest-release feed
+matches the signed files.
+
+Three tries at the whole release check earlier the same night each went red
+on a test, not on the app: a browser test whose seed date had aged past a
+week (fixed), a unit test of a reply finishing during a reconnect, and an
+install unit test that fails now and then with "Premature close". The last
+two fail now and then and are on the roadmap.
+
 ## Published 0.2.6, 2026-11-17
 
 [Release 0.2.6](https://github.com/Calculator5329/gates-local/releases/tag/v0.2.6)
