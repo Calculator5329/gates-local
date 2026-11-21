@@ -24,8 +24,6 @@ test("background life: return mid-reply, finish away, and keep exact ordered wor
   await release("alpha");
   await expect.poll(async () => (await state()).turns.find((t) => t.prompt === "alpha")?.tokens).toBeGreaterThanOrEqual(50);
   await page.locator(".sb-row", { hasText: "alpha" }).click();
-  // why: with a mouse a hovered row shows its menu where the mark is, and rows reorder under a resting pointer
-  await page.locator("#ta").hover();
   expect(page.url()).toBe(alpha);
   await expect.poll(() => page.locator(".turn.a:not(.done) .md p").count()).toBeGreaterThanOrEqual(4);
   await expect(page.locator(".turn.a .md")).not.toContainText("beta");

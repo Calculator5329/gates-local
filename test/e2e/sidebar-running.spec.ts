@@ -10,11 +10,7 @@ const FIRST = "Library: Effect Schema books";
 const SECOND = "Fix the backup cron";
 const row = (page: Page, title: string) => page.locator(".sb-row").filter({ hasText: title });
 const mark = (page: Page, title: string) => row(page, title).getByLabel("Reply in progress", { exact: true });
-// why: with a mouse a hovered row shows its menu where the mark is, so the pointer leaves the row after the click
-const select = async (page: Page, title: string) => {
-  await row(page, title).locator(".sb-thread").click();
-  await page.locator("#ta").hover();
-};
+const select = (page: Page, title: string) => row(page, title).locator(".sb-thread").click();
 const stop = (page: Page) => page.getByRole("button", { name: "Stop", exact: true }).click();
 
 // Guards the owner's ask for parallel threads: a running reply stays marked in the sidebar (unsure: no explicit line on the mark).
@@ -33,12 +29,13 @@ test("a reply stays marked after navigating away and after starting a second rep
   await sendMessage(page, "Keep the second chat answering too");
   await expect(mark(page, SECOND)).toBeVisible();
   await expect(mark(page, FIRST)).toBeVisible();
-  // with a mouse the row menu takes the mark's place while the row is hovered, never drawn over
-  // it, and the mark is back once the pointer leaves
+  // with a mouse a replying row under the pointer keeps its mark, and the row menu sits beside it, never over it
   await row(page, FIRST).hover();
-  await expect(mark(page, FIRST)).toBeHidden();
-  await page.locator("#ta").hover();
+  const menu = row(page, FIRST).getByTestId("sidebar.thread.menu");
+  await expect(menu).toBeVisible();
   await expect(mark(page, FIRST)).toBeVisible();
+  const [m, d] = [await menu.boundingBox(), await mark(page, FIRST).boundingBox()];
+  expect(m!.x + m!.width).toBeLessThanOrEqual(d!.x);
 
   await select(page, FIRST);
   await stop(page);

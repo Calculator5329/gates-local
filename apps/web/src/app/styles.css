@@ -212,11 +212,13 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .sb-row .sb-menu{width:24px;height:24px;flex:none;opacity:0;pointer-events:none}
 .sb-row:hover .sb-menu,.sb-row:focus-within .sb-menu,.sb-row.menu-open .sb-menu{opacity:1;pointer-events:auto}
 @media (hover:none){.sb-row .sb-menu{width:44px;height:44px;opacity:1;pointer-events:auto}}
-/* with a mouse the menu holds no slot of its own: on hover, focus or an open menu it takes the time's place */
+/* with a mouse the menu holds no slot of its own: on hover, focus or an open menu it takes the time's place.
+   A replying row keeps its dot where it is and the menu sits to the dot's left. */
 @media (hover:hover){
   .sb-row{position:relative;padding-right:10px}
   .sb-row .sb-menu{position:absolute;right:6px;top:50%;margin-top:-12px}
-  .sb-row:hover .sb-status,.sb-row:focus-within .sb-status,.sb-row.menu-open .sb-status{visibility:hidden}
+  .sb-row:hover .ago,.sb-row:focus-within .ago,.sb-row.menu-open .ago{visibility:hidden}
+  .sb-row.live-row .sb-menu{right:25px}
 }
 .sb-status{width:56px;flex:none;display:flex;align-items:center;justify-content:flex-end}
 .sb-row .ago{font-size:12px;font-weight:400;color:var(--muted-foreground);font-variant-numeric:tabular-nums;flex:none}

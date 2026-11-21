@@ -263,7 +263,7 @@ function ThreadList() {
           <Fragment key={t.id}>
             {dateGroup}
             <div
-              className={`sb-row${on === t.id ? " on" : ""}${menuFor === t.id ? " menu-open" : ""}`}
+              className={`sb-row${on === t.id ? " on" : ""}${menuFor === t.id ? " menu-open" : ""}${running.has(t.id) ? " live-row" : ""}`}
               data-thread={t.id}
               data-tipt={t.title}
               onPointerEnter={e => {

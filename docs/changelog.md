@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-21: a replying thread keeps its dot under the pointer
+
+- Sidebar, with a mouse: since 0.2.8 the row menu took the place of a thread's reply-in-progress dot while the pointer rested on the row, so a thread that was still answering looked idle. The dot now stays where it is and the menu sits to its left. Rows that show a time are unchanged: the menu takes the time's place.
+
 ## 2026-11-21: a score's hover box hugs its number
 
 - In the Models table the box that lights up behind a score on hover still filled its whole column in 0.2.8, so it touched the speed beside it. It is now as wide as the score, with about 17px of air before the speed. Seen in a screenshot of the built page, before and after.
