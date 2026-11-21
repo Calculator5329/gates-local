@@ -1028,7 +1028,7 @@ RS-03 remains dropped.
 
 - [ ] The release check's browser shards all run on one machine. Spread them across the test machines, so a release does not wait on the busiest one.
       *Accept:* one release check runs its shards on at least two machines and sums one report.
-- [ ] `session.test` failed three times on the second test machine (seeds 1794900758983, 1794901863240). On 2026-11-20 it failed once on the development machine in a full `pnpm verify` (seed 1795234684278, "a reply that finishes while the reconnect's thread load waits survives the older snapshot": `m1` missing at line 579), then passed three times alone and in the next full run.
+- [x] `session.test` failed three times on the second test machine (seeds 1794900758983, 1794901863240). On 2026-11-20 it failed once on the development machine in a full `pnpm verify` (seed 1795234684278, "a reply that finishes while the reconnect's thread load waits survives the older snapshot": `m1` missing at line 579), then passed three times alone and in the next full run. *Done 2026-11-20:* it also failed the 0.2.7 release check. Cause: the test helper went on as soon as the send was answered, and the start that carries the saved question is pushed a task later; a test that dropped the socket in that gap got the start on the next socket, mid-reconnect, and read the chat without its question. Delaying the start by 2 to 15 ms fails it every time. The helper now waits for the saved question.
       *Accept:* those seeds replayed, the race named and fixed. It is not only the test machine.
 - [ ] The voice dictation check has a fixed 50 ms limit that a busy machine misses.
       *Accept:* the limit moves to the timing project, or the check measures against its own idle baseline.

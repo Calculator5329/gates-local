@@ -174,10 +174,16 @@ it.each([
   expect(store.getState().voiceConnectionVersion).toBe(afterReceipt);
 });
 
-/** Send "hi" from a new thread and wait until reply.send answered turn-1. */
+/** Send "hi" from a new thread and wait until reply.send answered turn-1 and its start brought the saved question. */
 async function startFirstTurn(): Promise<void> {
   void session.send("hi");
-  await until(() => openTurn(store.getState())?.turnId === b.server.replyOf("turn-1"), 2000, "turn-1");
+  // why: the start is pushed a task after the answer. A test that dropped the socket in between got
+  // the start on the next socket, mid-reconnect, and read a chat without its question ("m1" missing).
+  await until(() => {
+    const s = store.getState();
+    const turn = openTurn(s);
+    return turn?.turnId === b.server.replyOf("turn-1") && (s.messages[turn.threadId]?.some((m) => m.id === turn.userMessageId) ?? false);
+  }, 2000, "turn-1 and its saved question");
 }
 
 /** Drop the socket and wait until the client has hydrated again on a new one. */
