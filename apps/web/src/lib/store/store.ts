@@ -19,7 +19,9 @@ import type {
   ModelLoad,
   ModelSpeed,
   ModelMeasure,
+  MeasureChat,
   MeasureRun,
+  MeasureTurn,
   PullProgress,
   RuntimeStatus,
   Settings,
@@ -166,6 +168,11 @@ export interface State {
   readonly speeds: Maybe<Readonly<Record<string, ModelSpeed>>>;
   readonly measures: Maybe<Readonly<Record<string, ModelMeasure>>>;
   readonly measuring: Readonly<Record<string, MeasureRun>>;
+  // why: `ended` holds why a run stopped short, so its turns stay on screen with the reason
+  readonly measureLive: { readonly model: string; readonly at: number; readonly turns: readonly MeasureTurn[]; readonly ended?: string } | undefined;
+  readonly measureChats: Readonly<Record<string, MeasureChat>>;
+  // why: an overlay on the chat pane, not a view, so the thread under it stays as it was
+  readonly measureShown: string | null;
   readonly pulls: Readonly<Record<string, PullProgress>>;
   readonly sources: Maybe<readonly Source[]>;
   readonly sourceImports: Maybe<SourceImports>;
@@ -243,6 +250,9 @@ const initial: State = {
   speeds: undefined,
   measures: undefined,
   measuring: {},
+  measureLive: undefined,
+  measureChats: {},
+  measureShown: null,
   pulls: {},
   sources: undefined,
   sourceImports: undefined,

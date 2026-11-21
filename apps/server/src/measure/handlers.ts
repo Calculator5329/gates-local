@@ -1,4 +1,4 @@
-import type { FitReport, MeasureList, MeasureRun, ModelInfo, ModelMeasure, PageSeen, ShellStatus } from "@gates-local/contracts";
+import type { FitReport, MeasureChat, MeasureList, MeasureRun, ModelInfo, ModelMeasure, PageSeen, ShellStatus } from "@gates-local/contracts";
 import type { GpuLease } from "../gpu/lease.ts";
 import type { MemoryOwner, Want } from "../gpu/memory.ts";
 import type { Push } from "../app/push.ts";
@@ -9,6 +9,8 @@ import { ensureFixtures } from "./cases.ts";
 import { STEPS, measureModel } from "./suite.ts";
 import { gradePages, pendingPages, skipPages } from "./score.ts";
 import { measureStore } from "./store.ts";
+import { chatOf, chatStore } from "./chat.ts";
+import { liveChat, type LiveChat } from "./live.ts";
 
 const DEFAULT_CTX = 16384;
 export const PAGE_WAIT_MS = 30_000;
@@ -42,6 +44,7 @@ export interface MeasureDeps {
   readonly fetch?: typeof fetch;
   readonly pageWaitMs?: number;
   readonly pageHeldMs?: number;
+  readonly pushMs?: number;
 }
 
 export interface Caller {
@@ -51,8 +54,12 @@ export interface Caller {
 
 export function createMeasure(deps: MeasureDeps) {
   const store = measureStore(deps.dataDir);
+  const chats = chatStore(deps.dataDir);
   const stop = new AbortController();
   let running: string | undefined;
+  // why: Stop works until the measure is saved; past that only the pages are left to wait on.
+  let halt: AbortController | undefined;
+  let live: LiveChat | undefined;
   let last: MeasureRun | undefined;
   let waiting: { model: string; at: number; resolve: () => void; held: (on: boolean) => void } | undefined;
   let starter: Caller | undefined;
@@ -77,8 +84,15 @@ export function createMeasure(deps: MeasureDeps) {
       if (baseUrl === undefined) throw new MeasureError("runtime-not-ready", "Ollama is not running.");
       const hold = deps.loader?.reserve(model);
       const first: MeasureRun = { model, state: "waiting", done: 0, total };
+      const at = Date.now();
+      halt = new AbortController();
+      live = liveChat(model, at, (index, turn) => deps.push("models.measureTurn", { model, at, index, turn }), deps.pushMs);
       step(first);
-      void run(info, baseUrl, hold).catch(() => undefined).finally(() => { running = undefined; });
+      void run(info, baseUrl, hold, halt.signal, live).catch(() => undefined).finally(() => {
+        running = undefined;
+        halt = undefined;
+        live = undefined;
+      });
       return first;
     } catch (e) {
       running = undefined;
@@ -86,9 +100,9 @@ export function createMeasure(deps: MeasureDeps) {
     }
   };
 
-  const run = async (info: ModelInfo, baseUrl: string, hold: ReturnType<ModelLoader["reserve"]> | undefined): Promise<ModelMeasure> => {
+  const run = async (info: ModelInfo, baseUrl: string, hold: ReturnType<ModelLoader["reserve"]> | undefined, halted: AbortSignal, chat: LiveChat): Promise<ModelMeasure> => {
     const { name: model, digest } = info;
-    const signal = hold ? AbortSignal.any([stop.signal, hold.signal]) : stop.signal;
+    const signal = AbortSignal.any([stop.signal, halted, ...(hold ? [hold.signal] : [])]);
     const settings = deps.settings?.get();
     // why: the window a chat with this model gets.
     const numCtx = Math.min(settings?.defaultNumCtx ?? DEFAULT_CTX, info.maxContext ?? Infinity);
@@ -126,14 +140,19 @@ export function createMeasure(deps: MeasureDeps) {
               baseUrl, model, signal, numCtx, sources: ensureFixtures(deps.dataDir), ...(keepAlive === undefined ? {} : { keepAlive }),
               ...(settings?.thinking === undefined ? {} : { think: settings.thinking }),
               ...(shell ? { shell } : {}), ...(deps.platform ? { platform: deps.platform } : {}), ...(deps.fetch ? { fetch: deps.fetch } : {}),
-              onStep: (done) => step({ model, state: "running", done, total }),
+              onStep: (done, _steps, tokensPerSecond) => step({ model, state: "running", done, total, ...(tokensPerSecond > 0 ? { tokensPerSecond } : {}) }),
+              onTurn: chat.turn,
             });
           } catch (e) {
             memory?.ended();
             throw e;
           }
           memory?.settled(want);
+          halt = undefined;
+          chat.end();
           saved = { model, digest, ...result };
+          // why: kept before the measure is sent, so a window that opens the new score finds its chat.
+          chats.put({ model, at: saved.at, turns: chat.chat().turns });
           // why: set before the push below, or `settled` would send its pages out as skipped.
           if (pendingPages(saved) > 0) waiting = { model, at: saved.at, resolve: () => undefined, held: () => undefined };
           deps.push("models.measures", store.put(saved).map(settled));
@@ -174,6 +193,11 @@ export function createMeasure(deps: MeasureDeps) {
       return saved;
     } catch (e) {
       waiting = undefined;
+      chat.end();
+      if (halted.aborted && !stop.signal.aborted) {
+        step({ model, state: "stopped", done: 0, total });
+        throw e;
+      }
       const message = stop.signal.aborted ? "The app is closing." : hold?.signal.aborted ? RUNTIME_CHANGED_MEASURE : (e as Error).message;
       step({ model, state: "error", done: 0, total, message });
       throw e;
@@ -207,17 +231,42 @@ export function createMeasure(deps: MeasureDeps) {
     if (!waitsFor(model, at)) throw new MeasureError("not-waiting", "Measure stopped waiting for these pages, so they were left out of the score.");
     if (holder !== undefined && holder.clientId !== (caller?.clientId ?? -1)) throw new MeasureError("not-claimed", "Another window is running these pages.");
     const graded = gradePages(measure, pages);
+    if (live !== undefined && running === model) {
+      const turns = live.chat().turns;
+      for (const check of graded.checks) {
+        const index = turns.findIndex((t) => t.id === check.id);
+        const turn = turns[index];
+        if (turn?.part === "pages") live.turn(index, { ...turn, check });
+      }
+    }
     deps.push("models.measures", store.put(graded).map(settled));
     if (pendingPages(graded) === 0) waiting?.resolve();
     return graded;
   };
 
-  const list = (): MeasureList => ({ measures: store.list().map(settled), ...(last === undefined || last.state === "done" ? {} : { run: last }) });
+  const list = (): MeasureList => ({
+    measures: store.list().map(settled),
+    ...(last === undefined || last.state === "done" || last.state === "stopped" ? {} : { run: last }),
+    ...(live === undefined ? {} : { live: live.chat() }),
+  });
+
+  const stopRun = ({ name }: { name: string }): { stopped: boolean } => {
+    if (running !== name || halt === undefined || halt.signal.aborted) return { stopped: false };
+    halt.abort(new Error("Stopped."));
+    return { stopped: true };
+  };
+
+  const chatFor = ({ model }: { model: string }): MeasureChat | null => {
+    const m = store.list().find((x) => x.model === model);
+    return m === undefined ? null : chatOf(settled(m), chats.get(model));
+  };
 
   return {
     handlers: {
       "models.measures": list,
       "models.measure": ({ name }: { name: string }, caller?: Caller) => start(name, caller),
+      "models.measureStop": stopRun,
+      "models.measureChat": chatFor,
       "models.measurePages": pagesSeen,
       "models.measurePagesClaim": claim,
     },

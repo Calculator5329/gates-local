@@ -30,7 +30,7 @@ import { createSettingsReads } from "../../settings/settings-reads.ts";
 import { createNavigation, enterScreen, exitScreen, onScreenEntry } from "../../app/navigation.ts";
 import { createUpdates } from "../../updates/updates.ts";
 import { speedsChanged, speedsRead } from "../../models/speed.ts";
-import { measureRefused, measureStarted, measuresChanged, measuresRead, measuringChanged } from "../../measure/measures.ts";
+import { measureOf, measureRefused, measureStarted, measureTurned, measuresChanged, measuresRead, measuringChanged, runOf } from "../../measure/measures.ts";
 import { setPageReads } from "../../pages/pages.ts";
 import { createUsage } from "../../usage/usage.ts";
 import { createPictures } from "../../pictures/pictures.ts";
@@ -167,8 +167,14 @@ async function hydrate(c: Client): Promise<void> {
   numbered("models.measures", (list) => {
     applyServerEvent(measuresChanged(list));
     runMeasurePages(list);
+    const shown = getState().measureShown;
+    if (shown !== null) void loadMeasureChat(shown);
   });
-  numbered("models.measuring", (run) => applyServerEvent((s) => measuringChanged(s, run)));
+  numbered("models.measuring", (run) => {
+    applyServerEvent((s) => measuringChanged(s, run));
+    if (run.state === "done" && getState().measureShown === run.model) void loadMeasureChat(run.model);
+  });
+  numbered("models.measureTurn", (change) => applyServerEvent((s) => measureTurned(s, change)));
   c.subscribe("settings.changed", (payload, metadata) => applyServerEvent(() => settingsSession.receiveSettings(payload, metadata)));
   numbered("image.status", (imageStatus) => applyServerEvent({ imageStatus }));
   numbered("image.presets", (imagePresets) => applyServerEvent({ imagePresets }));
@@ -472,6 +478,26 @@ function runMeasurePages(list: readonly ModelMeasure[]): void {
 export async function measureModel(name: string): Promise<void> {
   const r = await act("models.measure", { name }, `measure ${name}`);
   applyServerEvent((s) => (r.ok ? measureStarted(s, r.value) : measureRefused(s, name, r.message)));
+  if (r.ok) openMeasure(name);
+}
+
+export function openMeasure(model: string): void {
+  // why: a run that ended short shows until it is left; opened again, the last score shows
+  setState((s) => ({ measureShown: model, ...(s.measureLive?.ended === undefined ? {} : { measureLive: undefined }) }));
+  if (overChat(getState().view)) leaveSettings();
+  void loadMeasureChat(model);
+}
+
+async function loadMeasureChat(model: string): Promise<void> {
+  const s = getState();
+  const m = measureOf(s, model);
+  if (m === undefined || runOf(s, model) !== undefined || s.measureChats[model]?.at === m.at || s.unavailable["models.measureChat"] === true) return;
+  const kept = await call("models.measureChat", { model }).catch(() => null);
+  if (kept !== null) applyServerEvent((now) => ({ measureChats: { ...now.measureChats, [model]: kept } }));
+}
+
+export async function stopMeasure(name: string): Promise<void> {
+  await act("models.measureStop", { name }, `stop measuring ${name}`);
 }
 
 export async function removeSource(id: string): Promise<ActionResult> {

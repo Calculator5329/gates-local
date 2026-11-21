@@ -19,7 +19,8 @@ import { ScreenError, firstRunScreen, imagePickerScreen, pickerScreen, settingsS
 import { SECTIONS, SettingsNav, Sidebar, closeDrawer, goNew, onDrawerPop, openDrawer, openSearch } from "../sidebar/Sidebar.tsx";
 import { UpdateNote } from "../updates/UpdateNote.tsx";
 import { Dialog, DialogHead } from "../lib/ui/Panel.tsx";
-import { picturesScreen, usageScreen } from "./screen-loaders.ts";
+import { measureScreen, picturesScreen, usageScreen } from "./screen-loaders.ts";
+import { MeasureTitle } from "../measure/MeasureLive.tsx";
 import { call, cancelPendingSettings, closeUsage, deleteThread, leavePictures, leaveSettings, pictures, togglePictures, newThread, onScreenPop, openSettings, openThread, preloadThread, renameThread, threadFromHash, threadMarkdown, waitForThreadDeletion } from "../lib/session/index.ts";
 import { NA, type Section, type State, getState, overChat, setState, useStore } from "../lib/store/store.ts";
 import { useDraft } from "../lib/store/drafts.ts";
@@ -178,6 +179,7 @@ function Header({ isNew }: { isNew: boolean }) {
   const emptyDraft = useDraft(d => d.text === "");
   const title = useStore((s) => s.threads.find((t) => t.id === s.threadId)?.title ?? "");
   const renaming = useStore((s) => s.renaming);
+  const measure = useStore((s) => s.measureShown);
   const done = (save: boolean, field: HTMLInputElement) => {
     const value = field.value.trim();
     if (save && threadId !== null && value !== "" && value !== title) void renameThread(threadId, value);
@@ -186,7 +188,7 @@ function Header({ isNew }: { isNew: boolean }) {
   return (
     <header className="hdr">
       <MenuButton />
-      {renaming && !isNew ? (
+      {measure !== null ? <MeasureTitle model={measure} /> : renaming && !isNew ? (
         <input
           ref={selectOnDraw}
           className="inp hdr-in"
@@ -205,7 +207,7 @@ function Header({ isNew }: { isNew: boolean }) {
       ) : (
         <h2 className={isNew ? "muted" : undefined}>{isNew ? "New thread" : title}</h2>
       )}
-      <button type="button" className="ibtn hb nb" data-testid="chat.header.new-thread" aria-label="New thread" disabled={isNew && emptyDraft} onClick={goNew}>
+      <button type="button" className="ibtn hb nb" data-testid="chat.header.new-thread" aria-label="New thread" disabled={isNew && emptyDraft && measure === null} onClick={goNew}>
         <Icon id="pen" cls="s18" />
       </button>
     </header>
@@ -419,6 +421,8 @@ export function App() {
   const popOpen = popId !== null && (popId !== "picker" || picker.kind === "error" || !pickerPending);
   const thread = useScreen(threadScreen, view === "thread" || (overChat(view) && threadId !== null));
   const pics = useScreen(picturesScreen, view === "pictures");
+  const measure = useStore((s) => s.measureShown);
+  const measureChat = useScreen(measureScreen, measure !== null);
   const panel = useStore((s) => s.panel);
   const usage = useScreen(usageScreen, panel === "usage");
   const phone = useMedia(PHONE);
@@ -456,7 +460,15 @@ export function App() {
           {isSet ? <SettingsBar /> : isPics ? null : <Header isNew={isNew} />}
           <div className="work">
             <div className={`stage${under ? " under" : ""}`} inert={under}>
-                {isNew || threadId === null ? (
+                {measure !== null ? (
+                  <ErrorBoundary key={measure} scope="thread">
+                    {measureChat.kind === "ready" ? <measureChat.value.MeasureChat model={measure} /> : (
+                      <div className="tl" aria-busy={measureChat.kind === "pending" || undefined}>
+                        {measureChat.kind === "error" ? <ScreenError /> : <div className="col"><TurnSkel /></div>}
+                      </div>
+                    )}
+                  </ErrorBoundary>
+                ) : isNew || threadId === null ? (
                   <Draft under={under || view === "settings"} />
                 ) : (
                   <>
@@ -489,7 +501,7 @@ export function App() {
             {isPics ? pics.kind === "ready" ? <pics.value.Pictures /> : <div className="pics"><ScreenError /></div> : null}
           </div>
         </main>
-        {!isNew && !under && threadId !== null && thread.kind === "ready" ? (
+        {!isNew && !under && measure === null && threadId !== null && thread.kind === "ready" ? (
           <div style={{ display: "contents" }} inert={covered || drawer}>
             <thread.value.PagePanel threadId={threadId} />
           </div>

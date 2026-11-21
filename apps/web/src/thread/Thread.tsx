@@ -249,7 +249,7 @@ function ToggleLine({ open, onToggle, body, step, live, tools }: { open: boolean
   );
 }
 
-function ThoughtRound({ text, live, secs, open, onToggle }: { text: string; live: boolean; secs: number | undefined; open: boolean; onToggle: (open: boolean) => void }) {
+export function ThoughtRound({ text, live, secs, open, onToggle }: { text: string; live: boolean; secs: number | undefined; open: boolean; onToggle: (open: boolean) => void }) {
   const id = useId();
   return (
     <>
@@ -287,7 +287,7 @@ function callLine(line: string): { cmd: string; shell: boolean } {
   return { cmd: line, shell: true };
 }
 
-function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
+export function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
   const [open, setOpen] = useState(false);
   const cut = cutByStop(step) || (stopped === true && step.state === "running");
   const st = cut ? "cut" : step.state === "running" ? "run" : step.state === "error" ? "rej" : "done";

@@ -2,19 +2,21 @@ import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import * as S from "effect/Schema";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { probeSandbox } from "@gates-local/harness/sandbox";
 import { runSnapshotQuery } from "@gates-local/harness/sql";
 import { BUDGET, CASES, WEIGHTS, ensureFixtures, numbersIn, pageIn, toolCallOf, type MeasureCase } from "./cases.ts";
 import { CEILING, CUT_THINKING, RUN_BUDGET, SEED, STEPS, THINK_BUDGET, measureModel, type MeasureInput } from "./suite.ts";
 import { gradePages, partsOf, scoreOf } from "./score.ts";
 import { measureStore } from "./store.ts";
+import { turnOf } from "./chat.ts";
+import { liveChat } from "./live.ts";
 import { PAGES_HIDDEN, PAGES_UNRUN, createMeasure, type MeasureDeps } from "./handlers.ts";
 import { contextWords } from "../chat/window.ts";
 import { createMemoryOwner } from "../gpu/memory.ts";
 import { ModelActionError, type TurnReservation } from "../runtime/load.ts";
 import type { LoadedModel } from "../runtime/types.ts";
-import { MEASURE_VERSION, type FitReport, type MeasureRun, type ModelInfo, type ModelMeasure } from "@gates-local/contracts";
+import { MEASURE_VERSION, type FitReport, type MeasureChat, type MeasureRun, type MeasureTurn, type ModelInfo, type ModelMeasure } from "@gates-local/contracts";
 import type { Push } from "../app/push.ts";
 
 const dir = () => mkdtempSync(path.join(tmpdir(), "measure-"));
@@ -102,6 +104,8 @@ const NARROW = 640;
 const TIGHT = 4096;
 /** A check a model that gets it right does with the Library's tools. */
 const needsTools = (c: MeasureCase) => c.kind === "answer" && c.reference.calls.length > 0;
+// why: a run whose tools checks decode faster than the rest, so the speed is a sum, not a mean
+const play = (c: MeasureCase | undefined, round: number): Answer => ({ ...reference(true)(c, round), evalCount: c?.part === "tools" ? 100 : 10, evalNs: 2e9 });
 
 describe("Measure's fixtures", () => {
   it("hold the facts the checks ask about", async () => {
@@ -465,11 +469,33 @@ describe("measureModel", () => {
       speeds.push(timed.evalCount / (timed.evalNs / 1e9));
       return { ...answer, ...timed };
     });
-    const m = await run(rt);
+    const live: number[] = [];
+    const m = await run(rt, { onStep: (_done, _total, speed) => live.push(speed) });
     const average = Math.round((speeds.reduce((a, b) => a + b, 0) / speeds.length) * 10) / 10;
     expect(m.tokensPerSecond).toBe(Math.round((tokens / (ns / 1e9)) * 10) / 10);
+    // why: the strip's speed while running is the same sum, so its last figure is the score's.
+    expect(live[0]).toBe(0);
+    expect(live.at(-1)).toBe(m.tokensPerSecond);
     expect(m.tokensPerSecond).not.toBe(average);
     expect(m.tokensPerSecond).not.toBe(speeds.at(-1));
+  });
+
+  it("streams each check's turn to a watcher, graded only after its answer, and the measure is the one an unwatched run makes", async () => {
+    const plain = await run(fakeRuntime(["completion", "tools"], play), { now: () => 0 });
+    const seen: MeasureTurn[][] = [];
+    const watched = await run(fakeRuntime(["completion", "tools"], play), { now: () => 0, onTurn: (i, t) => { (seen[i] ??= []).push(t); } });
+    // the speed is the run's tokens over its decode time either way, not anything the watcher counted
+    expect(watched).toEqual(plain);
+    expect(seen).toHaveLength(CASES.length);
+    const recover = seen[CASES.findIndex((c) => c.id === "tools-recover")]!;
+    expect(recover[0]).toEqual(turnOf(CASES.find((c) => c.id === "tools-recover")!));
+    // a step shows running and then done before the answer; the grade comes last, after the words
+    expect(recover.some((t) => t.steps[0]?.state === "running" && t.answer === "")).toBe(true);
+    expect(recover.filter((t) => t.check !== undefined)).toEqual([recover.at(-1)]);
+    expect(recover.at(-2)?.answer).toBe(recover.at(-1)?.answer);
+    expect(recover.at(-1)).toMatchObject({ answer: "The file is called to-do.md; its first item is: renew the boat insurance before Friday.", check: check(watched, "tools-recover") });
+    // the first file it reads is missing, so that read is the step in error
+    expect(recover.at(-1)?.steps.map((s) => s.state)).toEqual(["error", "done", "done"]);
   });
 
   it("dates a measure in milliseconds since 1970, by the clock when it was made", async () => {
@@ -606,6 +632,30 @@ const pending = async () => run(fakeRuntime(["completion", "tools"], reference(t
 const endings = (pushes: [string, unknown][], n: number) => new Promise<void>((resolve) => {
   const tick = () => pushes.filter(([c, p]) => c === "models.measuring" && ["done", "error"].includes((p as MeasureRun).state)).length >= n ? resolve() : setTimeout(tick, 5);
   tick();
+});
+
+describe("liveChat", () => {
+  it("sends each changed turn at most once an interval, as it is then, and what is left when the run ends", () => {
+    vi.useFakeTimers();
+    try {
+      const sent: [number, string][] = [];
+      const chat = liveChat("m", 1, (i, t) => sent.push([i, t.answer]), 250);
+      const first = turnOf(CASES[0]!);
+      for (const words of ["3", "39", "391"]) chat.turn(0, { ...first, answer: words });
+      expect(sent).toEqual([]);
+      vi.advanceTimersByTime(250);
+      expect(sent).toEqual([[0, "391"]]);
+      chat.turn(0, { ...first, answer: "391." });
+      chat.turn(1, turnOf(CASES[1]!));
+      chat.end();
+      expect(sent).toEqual([[0, "391"], [0, "391."], [1, ""]]);
+      vi.advanceTimersByTime(1000);
+      expect(sent).toHaveLength(3);
+      expect(chat.chat()).toMatchObject({ model: "m", at: 1, turns: [{ answer: "391." }, { id: CASES[1]!.id }] });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("page grading", () => {
@@ -819,8 +869,8 @@ describe("models.measure", () => {
     expect(t.measure.handlers["models.measures"]().run).toEqual({ model: "m", state: "waiting", done: 0, total: STEPS + 1 });
     const saved = await t.saved();
     await new Promise((r) => setTimeout(r, 20));
-    // waiting for its pages: the run's last step
-    expect(t.measure.handlers["models.measures"]()).toEqual({ measures: [saved], run: { model: "m", state: "running", done: STEPS, total: STEPS + 1 } });
+    // waiting for its pages: the run's last step, and its chat while it goes
+    expect(t.measure.handlers["models.measures"]()).toEqual({ measures: [saved], run: { model: "m", state: "running", done: STEPS, total: STEPS + 1, tokensPerSecond: saved.tokensPerSecond }, live: expect.objectContaining({ model: "m" }) });
     t.measure.handlers["models.measurePages"]({ model: "m", at: saved.at, pages: [{ id: "page-counter", seen: ["0", "3"] }, { id: "page-filter", seen: [] }, { id: "page-total", seen: [] }] });
     await t.ended();
     expect(t.measure.handlers["models.measures"]().run).toBeUndefined();
@@ -841,6 +891,63 @@ describe("models.measure", () => {
     expect(t.measure.handlers["models.measures"]()).toEqual({ measures: earlier, run: stopped });
     expect(measureStore(t.dataDir).list()).toEqual(earlier);
     expect(t.pushes.filter(([c]) => c === "models.measures")).toHaveLength(2);
+  });
+
+  it("Stop ends the run as stopped, says no error, saves nothing, and the earlier measure and its chat stay", async () => {
+    const t = setup("fits", 10);
+    await t.measure.handlers["models.measure"]({ name: "m" });
+    await endings(t.pushes, 1);
+    const earlier = t.measure.handlers["models.measures"]().measures;
+    const earlierChat = t.measure.handlers["models.measureChat"]({ model: "m" });
+    let asked = 0;
+    let mid: MeasureChat | undefined;
+    t.broken.onCheck = () => {
+      if (++asked !== 3) return;
+      // a window that connects now sees the checks done so far and the one going
+      mid = t.measure.handlers["models.measures"]().live;
+      expect(t.measure.handlers["models.measureStop"]({ name: "m" })).toEqual({ stopped: true });
+    };
+    await t.measure.handlers["models.measure"]({ name: "m" });
+    await new Promise<void>((resolve) => {
+      const tick = () => t.pushes.some(([c, p]) => c === "models.measuring" && (p as MeasureRun).state === "stopped") ? resolve() : setTimeout(tick, 5);
+      tick();
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    // the third request is the second check's second round
+    expect(mid?.turns.map((x) => [x.id, x.check?.ok])).toEqual([[CASES[0]!.id, true], [CASES[1]!.id, undefined]]);
+    expect(mid?.turns[1]?.steps).toHaveLength(1);
+    expect(t.pushes.filter(([c]) => c === "models.measuring").at(-1)?.[1]).toEqual({ model: "m", state: "stopped", done: 0, total: STEPS + 1 });
+    expect(t.measure.handlers["models.measures"]()).toEqual({ measures: earlier });
+    expect(measureStore(t.dataDir).list()).toEqual(earlier);
+    expect(t.measure.handlers["models.measureChat"]({ model: "m" })).toEqual(earlierChat);
+    expect(t.measure.handlers["models.measureStop"]({ name: "m" })).toEqual({ stopped: false });
+  });
+
+  it("keeps the run's chat for the score it made, and rebuilds an older measure's from its checks", async () => {
+    const t = setup("fits", 10);
+    const old = { model: "old", digest: "d", at: 1, numCtx: 4096, tokensPerSecond: 50, score: 50, checks: [
+      { id: "tools-weather", kind: "tools" as const, ok: true, reply: "Sunny." },
+      { id: "db-count", kind: "sql" as const, ok: false, calls: ['sql {"query":"SELECT 1"} → 1'] },
+    ] };
+    measureStore(t.dataDir).put(old);
+    await t.measure.handlers["models.measure"]({ name: "m" });
+    await endings(t.pushes, 1);
+    const saved = t.measure.handlers["models.measures"]().measures.find((m) => m.model === "m")!;
+    const chat = t.measure.handlers["models.measureChat"]({ model: "m" })!;
+    expect(chat.at).toBe(saved.at);
+    expect(chat.turns.map((x) => x.id)).toEqual(CASES.map((c) => c.id));
+    expect(chat.turns.every((x) => x.check === undefined)).toBe(true);
+    const recover = chat.turns.find((x) => x.id === "tools-recover")!;
+    expect(recover.steps.map((s) => s.name)).toEqual(["read", "read", "read"]);
+    expect(recover.steps.some((s) => s.summary.includes("{"))).toBe(false);
+    expect(t.pushes.some(([c, p]) => c === "models.measureTurn" && (p as { model: string }).model === "m")).toBe(true);
+    expect(t.measure.handlers["models.measureChat"]({ model: "old" })).toEqual({ model: "old", at: 1, turns: [
+      { id: "tools-weather", part: "tools", n: 1, of: 1, thinking: "", answer: "Sunny.", steps: [] },
+      { id: "db-count", part: "database", n: 1, of: 1, prompt: CASES.find((c) => c.id === "db-count")!.prompt, thinking: "", answer: "", steps: [
+        { callId: "db-count-0", name: "sql", state: "done", summary: 'sql {"query":"SELECT 1"}', detail: '{"name":"sql","input":{"query":"SELECT 1"}}\n1' },
+      ] },
+    ] });
+    expect(t.measure.handlers["models.measureChat"]({ model: "none" })).toBeNull();
   });
 
   it("a runtime switch stops a running measure the way it ends a chat turn, and waits for its end", async () => {

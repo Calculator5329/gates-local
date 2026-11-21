@@ -1,21 +1,15 @@
-import { useState } from "react";
 import type { ModelMeasure } from "@gates-local/contracts";
 import { handleKey } from "../lib/ui/handles.ts";
-import { EARLIER_WORDS, MeasureDetail, SLOW_WORDS, isEarlier, isOlder, shortWords } from "./MeasureDetail.tsx";
+import { EARLIER_WORDS, SLOW_WORDS, isEarlier, isOlder, shortWords } from "./MeasureScore.tsx";
 import { Icon } from "../lib/ui/icons.tsx";
 import { speedNumber, tpsText } from "../models/model-speed.tsx";
-import { measureModel } from "../lib/session/index.ts";
-import { measureOf, measuringNow } from "./measures.ts";
+import { measureModel, openMeasure } from "../lib/session/index.ts";
+import { measureOf, measuringNow, runOf } from "./measures.ts";
 import { Fail } from "../lib/ui/settings-ui.tsx";
 import { NA, type State, useStore } from "../lib/store/store.ts";
 import { esc } from "../lib/ui/ui.tsx";
 
 export const canMeasure = (s: State): boolean => s.measures !== NA && s.unavailable["models.measure"] !== true;
-
-const running = (s: State, name: string) => {
-  const run = s.measuring[name];
-  return run !== undefined && (run.state === "waiting" || run.state === "running") ? run : undefined;
-};
 
 const scoreText = (m: ModelMeasure) => (isOlder(m) ? `${m.checks.filter((c) => c.ok).length}/${m.checks.length}` : String(m.score));
 const scoreWords = (m: ModelMeasure) => {
@@ -35,18 +29,13 @@ export function ScoreMarks({ m }: { m: ModelMeasure }) {
 
 export function MeasureMeta({ name, label }: { name: string; label: string }) {
   const m = useStore((s) => measureOf(s, name));
-  const [open, setOpen] = useState(false);
-  if (m === undefined && open) setOpen(false);
   if (m === undefined) return null;
   return (
-    <>
-      <button type="button" className="mp-mline" data-testid={`settings.models.measure-line-${handleKey(name)}`} aria-label={`${scoreWords(m)}, ${label}: details`} onClick={() => setOpen(true)}>
-        {tpsText(m.tokensPerSecond) ?? "–"} · score {scoreText(m)}
-        <ScoreMarks m={m} />
-        {m.slow ? <Icon id="snail" cls="s14 mp-slow" /> : null}
-      </button>
-      {open ? <MeasureDetail name={name} label={label} onClose={() => setOpen(false)} /> : null}
-    </>
+    <button type="button" className="mp-mline" data-testid={`settings.models.measure-line-${handleKey(name)}`} aria-label={`${scoreWords(m)}, ${label}: details`} onClick={() => openMeasure(name)}>
+      {tpsText(m.tokensPerSecond) ?? "–"} · score {scoreText(m)}
+      <ScoreMarks m={m} />
+      {m.slow ? <Icon id="snail" cls="s14 mp-slow" /> : null}
+    </button>
   );
 }
 
@@ -57,13 +46,11 @@ export function MeasureFail({ name }: { name: string }) {
 
 export function MeasureCells({ name, label }: { name: string; label: string }) {
   const m = useStore((s) => measureOf(s, name));
-  const run = useStore((s) => running(s, name));
+  const run = useStore((s) => runOf(s, name));
   const other = useStore((s) => {
     const now = measuringNow(s);
     return now !== undefined && now !== name;
   });
-  const [open, setOpen] = useState(false);
-  if (m === undefined && open) setOpen(false);
   if (m !== undefined && run === undefined) {
     return (
       <>
@@ -73,23 +60,22 @@ export function MeasureCells({ name, label }: { name: string; label: string }) {
           className={`mp-score${isOlder(m) || isEarlier(m) ? " old" : ""}`}
           data-testid={`settings.models.score-${handleKey(name)}`}
           aria-label={`${scoreWords(m)}, ${label}: details`}
-          aria-haspopup="dialog"
-          onClick={() => setOpen(true)}
+          onClick={() => openMeasure(name)}
         >
           {m.slow ? <Icon id="snail" cls="s14 mp-slow" /> : null}
           <ScoreMarks m={m} />
           {scoreText(m)}
         </button>
-        {open ? <MeasureDetail name={name} label={label} onClose={() => setOpen(false)} /> : null}
       </>
     );
   }
   return <MeasureButton name={name} label={label} run={run} other={other} />;
 }
 
-function MeasureButton({ name, label, run, other }: { name: string; label: string; run: ReturnType<typeof running>; other: boolean }) {
+// why: pressed while its own run goes, the button opens that run's chat rather than starting one
+function MeasureButton({ name, label, run, other }: { name: string; label: string; run: ReturnType<typeof runOf>; other: boolean }) {
   // why: idle is an icon whose tip says Measure; running words must fit the two 64px cells
-  const text = run === undefined ? "" : run.state !== "running" ? "Starting" : run.done === 0 ? "Loading model" : run.done === run.total - 1 ? "Grading pages" : `${run.done} / ${run.total}`;
+  const text = run === undefined ? "" : run.state !== "running" || run.done === 0 ? "Loading model" : run.done === run.total - 1 ? "Grading pages" : `${run.done} / ${run.total}`;
   return (
     <span className="mp-meas">
       <button
@@ -97,11 +83,11 @@ function MeasureButton({ name, label, run, other }: { name: string; label: strin
         className={`btn outline fill-btn mp-mbtn${run ? " running" : ""}`}
         data-testid={`settings.models.measure-${handleKey(name)}`}
         style={{ "--f": run && run.total > 0 ? run.done / run.total : 0 } as React.CSSProperties}
-        disabled={run !== undefined || other}
+        disabled={other}
         aria-busy={run !== undefined || undefined}
-        aria-label={run ? `Measuring ${label}: ${text.replace(" / ", " of ")}` : `Measure ${label}`}
+        aria-label={run ? `Measuring ${label}: ${text.replace(" / ", " of ")}, open` : `Measure ${label}`}
         data-tip={run === undefined ? (other ? "One model at a time" : "Measure") : undefined}
-        onClick={() => void measureModel(name)}
+        onClick={() => (run === undefined ? void measureModel(name) : openMeasure(name))}
       >
         <span className="fill" aria-hidden="true" />
         {run ? null : <Icon id="speed" cls="s14" />}

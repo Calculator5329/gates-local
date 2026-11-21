@@ -166,6 +166,11 @@ const measured = {
   checks: [{ id: "tools-weather", kind: "tools" as const, ok: true }, { id: "sql-count", kind: "sql" as const, ok: false }],
 };
 
+const measureTurn = {
+  id: "tools-weather", part: "tools" as const, n: 1, of: 5, prompt: "What is the weather in Oslo?", thinking: "", answer: "It is 4 °C and raining in Oslo.",
+  steps: [toolStep], check: { id: "tools-weather", kind: "tools" as const, ok: true, needs: "Calls the weather tool for Oslo" },
+};
+
 const imageReady: ImageStatus ={ state: "ready", owner: "external", baseUrl: "http://127.0.0.1:8188" };
 
 const runtime: RuntimeStatus = { state: "ready", owner: "external", baseUrl: "http://127.0.0.1:11434", version: "0.40.4" };
@@ -252,6 +257,8 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "models.measure": { params: { name: "qwen3.5:9b" }, result: { model: "qwen3.5:9b", state: "waiting", done: 0, total: 9 } },
   "models.measurePages": { params: { model: "qwen3.5:9b", at: measured.at, pages: [{ id: "page-counter", seen: ["0", "3"] }] }, result: measured },
   "models.measurePagesClaim": { params: { model: "qwen3.5:9b", at: measured.at }, result: { claimed: true } },
+  "models.measureStop": { params: { name: "qwen3.5:9b" }, result: { stopped: true } },
+  "models.measureChat": { params: { model: "qwen3.5:9b" }, result: { model: "qwen3.5:9b", at: measured.at, turns: [measureTurn] } },
   "sources.list": { params: {}, result: [source] },
   "sources.add": { params: { kind: "sqlite", path: "/home/me/library.db" }, result: source },
   "sources.remove": { params: { id: "s1" }, result: { id: "s1" } },
@@ -384,6 +391,7 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
   "models.speed": [[{ model: "qwen3.5:9b", tokensPerSecond: 101.6, replies: 8 }, { model: "gemma3:4b", tokensPerSecond: 8.4, replies: 1 }], []],
   "models.measures": [[measured], []],
   "models.measuring": [{ model: "qwen3.5:9b", state: "running", done: 3, total: 9 }, { model: "qwen3.5:9b", state: "error", done: 0, total: 9, message: "Ollama is not running." }],
+  "models.measureTurn": [{ model: "qwen3.5:9b", at: measured.at, index: 0, turn: measureTurn }],
   "sources.changed": [[source], []],
   "sources.imports": [{ samples: [], jobs: [] }],
   "image.status": [imageReady, { state: "off", owner: "none" }],

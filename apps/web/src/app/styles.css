@@ -1290,35 +1290,46 @@ a.btn{text-decoration:none}
 .mp-dlg p{margin:0 0 8px;color:var(--muted-foreground);text-wrap:pretty}
 .mp-dlg p b{color:var(--foreground);font-weight:600}
 .mp-r2{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}
-/* Measure's detail (row 29): facts, the five parts, then each check; it scrolls inside the screen */
-.mp-dlg.md{width:560px;max-height:calc(100dvh - 32px);display:flex;flex-direction:column;padding:20px 20px 16px}
-.md-head{display:flex;align-items:baseline;gap:12px}
-.md-head h3{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* A Measure run as a chat in the chat pane: a finished one's score on top, each check's question,
+   answer and grade line, and while it runs a strip with the progress and Stop under it. The grade
+   line's room is kept from the start, so the answer above it never shifts when its grade lands. */
+.mc{display:contents}
+.mc-top{margin:0 0 var(--turn-gap)}
+.md-head{display:flex;align-items:baseline;gap:12px;margin-bottom:6px}
 .md-score{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
 .md-facts{display:flex;flex-wrap:wrap;gap:4px 16px;margin:0 0 10px;color:var(--muted-foreground);font-size:13px;font-variant-numeric:tabular-nums}
 .md-facts span{display:inline-flex;align-items:center;gap:5px}
-.mp-dlg p.md-slow{display:flex;align-items:center;gap:6px;color:var(--amber-fg)}
-.mp-dlg p.md-old{font-size:13px}
+.mc-top .md-old,.mc-top .md-slow{margin:0 0 8px;color:var(--muted-foreground);font-size:13px;text-wrap:pretty}
+.mc-top .md-slow{display:flex;align-items:center;gap:6px;color:var(--amber-fg)}
 .md-parts{display:grid;grid-template-columns:minmax(0,1fr) 64px 56px;margin:2px 0 12px;font-size:13px;font-variant-numeric:tabular-nums}
 .md-prow{display:contents}
 .md-prow>span{padding:5px 0;border-bottom:1px solid var(--border)}
 .md-prow>span:not(:first-child){text-align:right}
 .md-ph>span{color:var(--muted-foreground);font-size:12px}
 .md-prow.none>span{color:var(--muted-foreground)}
-.md-checks{min-height:0;overflow:auto;margin:0 -8px;padding:0 8px}
-.md-checks h4{margin:10px 0 2px;font-size:12px;font-weight:600;color:var(--muted-foreground)}
-.md-check{font-size:13px}
-.md-cl{display:flex;align-items:center;gap:8px;width:100%;min-height:30px;padding:4px 6px;margin:0 -6px;border:0;border-radius:var(--r-sm);background:none;color:var(--foreground);font:inherit;text-align:left;cursor:pointer}
-.md-cl:hover:not(:disabled){background:var(--hover)}
-.md-cl:disabled{cursor:default;opacity:1}
-.md-mk{display:inline-flex;flex:none;color:var(--muted-foreground)}
-.md-check.ok .md-mk{color:var(--green-fg)}
-.md-check.no .md-mk{color:var(--red-fg)}
-.md-needs{flex:1;min-width:0}
 .md-n{font-variant-numeric:tabular-nums;color:var(--muted-foreground);white-space:nowrap}
-.md-why{padding:0 0 4px 22px;color:var(--muted-foreground)}
-.md-ev{display:flex;flex-direction:column;gap:6px;padding:2px 0 8px 22px}
-.md-ev pre{margin:0;padding:6px 8px;max-height:180px;overflow:auto;border-radius:var(--r-sm);background:var(--code-bg);font:12px/1.45 var(--font-mono);white-space:pre-wrap;overflow-wrap:anywhere}
+.mc-at{flex:none;margin-right:4px;color:var(--muted-foreground);font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.mc-steps{display:flex;flex-direction:column;margin-bottom:4px}
+.mc-plain{white-space:pre-wrap}
+.mc-grade{display:flex;align-items:center;gap:8px;min-height:28px;margin-top:8px;font-size:13px}
+.mc-mk{display:inline-flex;flex:none;color:var(--muted-foreground)}
+.mc-grade.ok .mc-mk,.mc-mk.ok{color:var(--green-fg)}
+.mc-grade.no .mc-mk,.mc-mk.no{color:var(--red-fg)}
+.mc-needs{flex:1;min-width:0}
+.mc-cost{flex:none;color:var(--muted-foreground);font-variant-numeric:tabular-nums;white-space:nowrap}
+.mc-why{padding-left:22px;font-size:13px;color:var(--muted-foreground)}
+.mc-page{cursor:default}
+.mc-strip{max-width:var(--composer-w);height:52px;margin:0 auto;display:flex;align-items:center;gap:12px;padding:0 8px 0 16px;border-radius:var(--r-composer);background:var(--composer-surface);box-shadow:inset 0 0 0 1px var(--composer-outline);font-size:13px;font-variant-numeric:tabular-nums}
+.mc-n{flex:none;min-width:88px}
+.mc-bar{flex:1;min-width:24px;height:4px;background:var(--border);overflow:hidden}
+.mc-bar>span{display:block;height:100%;background:var(--foreground);transition:width .25s}
+.mc-tps{flex:none;min-width:64px;text-align:right;color:var(--muted-foreground)}
+.mc-stop{flex:none;gap:6px}
+.mc-stop .sqr{width:9px;height:9px;background:currentColor;display:block}
+.mc-strip.ended{gap:8px;color:var(--muted-foreground)}
+.mc-end{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sb-row.mc-pin{margin-top:8px}
+@media (prefers-reduced-motion:reduce){.mc-bar>span{transition:none}}
 .btn.mp-danger{background:var(--red);color:#fff;font-weight:600}
 .btn.mp-danger:hover{background:color-mix(in srgb,var(--red) 88%,var(--foreground))}
 .btn.mp-danger:disabled{opacity:.6;cursor:default}

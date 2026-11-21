@@ -21,7 +21,8 @@
 //   image-text-call   streams IMAGE_TEXT_CALL, an image call written as reply text, with no tool_calls
 //   image-batch       "N images of X": one image call with N distinct prompts when the tool is
 //                     offered; without it, the reply says what the system prompt's image line says
-//   measure           Measure's checks played from their references, two of them wrong (measure-reply.ts)
+//   measure           Measure's checks played from their references, two of them wrong (measure-reply.ts);
+//                     measureHold > 0 pauses the first answer of more than a word until /__fake/release
 // A prompt with the word "tool" makes any scenario call the first offered tool
 // once (repeatToolCalls: every round; toolCalls: N, the first N rounds);
 // quietToolRounds ends such a round at the call, with no reply text. When that prompt also names
@@ -103,6 +104,8 @@ export interface FakeOptions {
   vramCapBytes: number;
   /** measure: when nonzero, the counter check's page shows the address it was loaded at instead of counting (measure-reply.ts). */
   measureProbe: number;
+  /** measure: when nonzero, the first check answer of more than one word pauses after its first word until /__fake/release. */
+  measureHold: number;
 }
 
 const LOAD_STEPS = 6;
@@ -129,6 +132,7 @@ const DEFAULTS: FakeOptions = {
   capacityBytes: 12 * 1024 ** 3,
   vramCapBytes: 0,
   measureProbe: 0,
+  measureHold: 0,
 };
 
 /** The slow-drip reply: one of each block kind the reply renderer draws. */
@@ -319,6 +323,8 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
   const releases = new Map<number, () => void>();
   const released = new Set<number>();
   const thinkHolds = new Map<number, () => void>();
+  /** measure: the run's one held answer has been held (measureHold). */
+  let measureHeld = false;
   const scheduler = createScheduler(() => [...loaded, ...filling], (names) => {
     loaded = loaded.filter((l) => !names.includes(l.name));
     writeGpu();
@@ -348,6 +354,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
     turns.length = 0;
     loads.length = 0;
     released.clear();
+    measureHeld = false;
     otherMib = 0; totalMib = 0; absent = false;
     writeGpu();
   };
@@ -458,11 +465,24 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
         const all = Array.isArray(messages) ? messages : [];
         const system = all.filter(x => field(x, "role") === "system").map(x => String(field(x, "content"))).join("\n");
         const named = Array.isArray(tools) ? tools.map(t => str(field(t, "function"), "name")).filter((n): n is string => n !== undefined) : [...system.matchAll(/"name":\s*"(\w+)"/g)].map(x => x[1]!);
-        const play = measureReply(messages, named, options.measureProbe > 0) ?? { content: "Ready." };
+        const check = measureReply(messages, named, options.measureProbe > 0);
+        const play = check ?? { content: "Ready." };
         const message = "call" in play
           ? (Array.isArray(tools) ? { role: "assistant", content: "", tool_calls: [{ function: play.call }] } : { role: "assistant", content: `<tool_call>${JSON.stringify(play.call)}</tool_call>` })
           : { role: "assistant", content: play.content };
-        line({ ...base(), message, done: false });
+        const words = "content" in play ? play.content.match(/\s*\S+/g) ?? [] : [];
+        if (check !== undefined && options.measureHold > 0 && !measureHeld && words.length > 1) {
+          // The run's first answer of more than a word stops after that word until /__fake/release.
+          measureHeld = true;
+          line({ ...base(), message: { role: "assistant", content: words[0] }, done: false });
+          await new Promise<void>((resolve) => {
+            const done = () => { releases.delete(turn.id); abort.signal.removeEventListener("abort", done); resolve(); };
+            releases.set(turn.id, done);
+            abort.signal.addEventListener("abort", done, { once: true });
+          });
+          if (abort.signal.aborted) return;
+          line({ ...base(), message: { role: "assistant", content: words.slice(1).join("") }, done: false });
+        } else line({ ...base(), message, done: false });
         // About 40 tokens a second: a token is about four characters of what it wrote.
         const sent = Math.max(1, Math.ceil(JSON.stringify(message).length / 4));
         line({ ...base(), message: { role: "assistant", content: "" }, done: true, done_reason: "stop", prompt_eval_count: 24 + prompt.length, eval_count: sent, eval_duration: sent * 25_000_000 });

@@ -20,7 +20,7 @@ vi.mock("../lib/ui/ui.tsx", async (original) => ({ ...await original<typeof impo
 vi.mock("./screen-loaders.ts", () => {
   const error = { kind: "error" };
   const failed = () => ({ get: () => error, subscribe: () => () => undefined, need: () => () => undefined, load: () => Promise.resolve() });
-  return { settingsScreen: failed(), firstRunScreen: failed(), pickerScreen: failed(), imagePickerScreen: failed(), threadScreen: failed(), usageScreen: failed(), picturesScreen: failed() };
+  return { settingsScreen: failed(), firstRunScreen: failed(), pickerScreen: failed(), imagePickerScreen: failed(), threadScreen: failed(), usageScreen: failed(), picturesScreen: failed(), measureScreen: failed() };
 });
 vi.mock("./sheet-focus.ts", () => ({ keepSheetFocus: (sheet: HTMLElement) => { fakes.kept.push(sheet.id); return () => { fakes.kept.push(`-${sheet.id}`); }; } }));
 vi.mock("../lib/ui/kit/async.ts", async (original) => ({

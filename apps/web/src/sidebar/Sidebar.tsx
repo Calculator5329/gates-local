@@ -15,6 +15,10 @@ import { NA, type Section, getState, overChat, runningThreads, setState, useStor
 import { drawsPicture } from "../thread/turn.ts";
 import { PHONE, closePop, closeTip, isTouch, useMedia } from "../lib/ui/ui.tsx";
 import { FootButton, SidebarUpdate } from "../updates/Updates.tsx";
+import { MeasurePinned } from "../measure/MeasureLive.tsx";
+import { openMeasure } from "../lib/session/index.ts";
+
+const openPinned = (model: string) => closeDrawer(() => openMeasure(model), true);
 
 export const SECTIONS: readonly (readonly [Section, string, IconId])[] = [
   ["general", "General", "gear"],
@@ -226,7 +230,7 @@ function ThreadList() {
     );
   }
   if (shown.length === 0) {
-    return <nav className="sb-list" ref={ref}>{threads.length > 0 ? <div className="sb-empty">No thread matches.</div> : null}</nav>;
+    return <nav className="sb-list" ref={ref}><MeasurePinned open={openPinned} />{threads.length > 0 ? <div className="sb-empty">No thread matches.</div> : null}</nav>;
   }
   let last = "";
   const older = searching ? 0 : shown.filter((t) => when(t.updatedAt, now).group === "Older").length;
@@ -246,7 +250,8 @@ function ThreadList() {
   );
   return (
     <nav className="sb-list" ref={ref}>
-      {searching ? <div className="sb-group">{shown.length} {shown.length === 1 ? "thread" : "threads"}</div> : null}
+      <MeasurePinned open={openPinned} />
+      {searching ?<div className="sb-group">{shown.length} {shown.length === 1 ? "thread" : "threads"}</div> : null}
       {shown.map((t) => {
         const w = when(t.updatedAt, now);
         const dateGroup = searching || w.group === last ? null : w.group === "Older" ? fold : <div className="sb-group">{w.group}</div>;

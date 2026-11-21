@@ -82,7 +82,7 @@ export function createNavigation({ editEnded, catchUp, chooseModel, newChatModel
     if (overChat(getState().view)) caretBack();
     setState((s) => {
       const model = s.threadModels[threadId] ?? s.model;
-      return { view: "thread", threadId, addPage: false, ownerConfirm: false, panel: null, ...leavingChat(s), ...(model === undefined ? {} : { model }) };
+      return { view: "thread", threadId, addPage: false, ownerConfirm: false, panel: null, measureShown: null, ...leavingChat(s), ...(model === undefined ? {} : { model }) };
     });
     catchUp(threadId);
     chooseModel();
@@ -95,7 +95,7 @@ export function createNavigation({ editEnded, catchUp, chooseModel, newChatModel
     dropPendingPanel();
     wakeAfterEdit();
     if (overChat(getState().view)) caretBack();
-    setState((s) => ({ view: "new", threadId: null, panel: null, ...leavingChat(s), ...newChatModel(s) }));
+    setState((s) => ({ view: "new", threadId: null, panel: null, measureShown: null, ...leavingChat(s), ...newChatModel(s) }));
     renewDraft(null);
     setHash(null);
   }

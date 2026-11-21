@@ -1,12 +1,12 @@
-// Measure's detail: the line that says which parts the score leaves out shows exactly when it left
-// them out, and a part whose checks were all skipped for one reason says that reason once.
+// A finished measure's score: the line that says which parts the score leaves out shows exactly
+// when it left them out, and checks skipped for one reason say that reason once in the chat.
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { MEASURE_VERSION, type MeasureCheck, type ModelMeasure } from "@gates-local/contracts";
 
-vi.mock("../lib/session/index.ts", () => ({ measureModel: () => undefined }));
-const { MeasureChecks, MeasureNotes, earlierWords, isEarlier, samplingText, shortWords } = await import("./MeasureDetail.tsx");
+vi.mock("../lib/session/index.ts", () => ({ measureModel: () => undefined, openMeasure: () => undefined }));
+const { MeasureNotes, earlierWords, isEarlier, samplingText, shortWords, whyShown } = await import("./MeasureScore.tsx");
 const { ScoreMarks } = await import("./ModelMeasure.tsx");
 const marks = (m: ModelMeasure) => renderToStaticMarkup(createElement(ScoreMarks, { m }));
 const { SANDBOX_OFF_SKIP } = await import("./measure-pages.ts");
@@ -20,7 +20,8 @@ const db = (id: string, extra: Partial<MeasureCheck> = {}): MeasureCheck => ({ i
 const tool = (id: string, extra: Partial<MeasureCheck> = {}): MeasureCheck => ({ id, kind: "tools", ok: true, needs: id, ...extra });
 const toolsOnly = [{ part: "tools" as const, passed: 1, total: 1, weight: 20 }];
 const notes = (m: ModelMeasure) => renderToStaticMarkup(createElement(MeasureNotes, { m }));
-const checks = (m: ModelMeasure) => renderToStaticMarkup(createElement(MeasureChecks, { m }));
+// why: the reasons the chat's grade lines say, in order, under the score's notes
+const checks = (m: ModelMeasure) => m.checks.filter((c) => whyShown(m.checks, true).has(c.id)).map((c) => c.why).join("\n");
 const LEFT = "The score leaves Pages out.";
 
 describe("the detail's notes on the score", () => {
@@ -41,7 +42,7 @@ describe("the detail's notes on the score", () => {
 
   it("gives the reason pages were not run once, not under each page", () => {
     const m = measure(["page-counter", "page-filter", "page-total"].map((id) => page(id, { state: "skipped", why: SANDBOX_OFF_SKIP })), toolsOnly);
-    expect(checks(m).split("Chromium&#x27;s sandbox is off in this copy")).toHaveLength(2);
+    expect(checks(m).split("Chromium's sandbox is off in this copy")).toHaveLength(2);
     // a failed page still says its own reason
     const failed = measure([page("page-counter", { why: "It did not count." }), page("page-total", { why: "It did not add." })], toolsOnly);
     expect(checks(failed)).toContain("It did not count.");
@@ -52,8 +53,7 @@ describe("the detail's notes on the score", () => {
     const why = "This model's 2k context is too small for its tools, so it answered without tools.";
     const skip = (id: string, kind: MeasureCheck["kind"]): MeasureCheck => ({ id, kind, ok: false, needs: id, state: "skipped", why });
     const m = measure([skip("tools-chain", "tools"), skip("files-sum", "files"), skip("files-needle", "files"), skip("db-count", "database"), { id: "instr-caps", kind: "instructions", ok: true }], toolsOnly);
-    const all = notes(m) + checks(m);
-    expect(all.split("too small for its tools")).toHaveLength(2);
+    expect((notes(m) + checks(m)).split("too small for its tools")).toHaveLength(2);
     expect(notes(m)).toContain("Skipped: This model&#x27;s 2k context is too small");
     // a reason one check alone has stays on it
     const one = measure([page("page-counter", { state: "skipped", why: "The page could not load." }), page("page-total", { ok: true })], toolsOnly);

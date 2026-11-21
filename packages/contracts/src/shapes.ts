@@ -281,22 +281,59 @@ export type PageSeen = typeof PageSeen.Type;
 export const ThreadPage = S.Struct({ messageId: S.String, code: S.String });
 export type ThreadPage = typeof ThreadPage.Type;
 
-/** A Measure run while it goes: waiting for the GPU, then each step; ends done or error. */
+/**
+ * A Measure run while it goes: waiting for the GPU, then each step; ends done, error, or stopped
+ * (the person pressed Stop: nothing was saved and the earlier measure stays).
+ */
 export const MeasureRun = S.Struct({
   model: S.String,
-  state: S.Literals(["waiting", "running", "done", "error"]),
+  state: S.Literals(["waiting", "running", "done", "error", "stopped"]),
   done: S.Int,
   total: S.Int,
   message: S.optional(S.String),
+  // why: while running, the speed so far, from the same sum the measure keeps
+  tokensPerSecond: S.optional(S.Finite),
 });
 export type MeasureRun = typeof MeasureRun.Type;
 
 /**
- * models.measures' answer: every saved measure, and the server's own record of the run, its last
- * step, while it waits or runs and after it stopped on an error (none once a run is done). A
- * window that connects mid-run, or missed a run's last push, shows this.
+ * One check of a Measure run as a chat turn: the question (after any earlier turns the check
+ * gives), the model's thinking, tool steps and answer as they streamed, and the check's grade once
+ * it has one. `n` of `of`: its place among its part's checks. A turn rebuilt from an older measure
+ * has the clipped reply as its answer, and no prompt when this build has no check with its id.
  */
-export const MeasureList = S.Struct({ measures: S.Array(ModelMeasure), run: S.optional(MeasureRun) });
+export const MeasureTurn = S.Struct({
+  id: S.String,
+  part: MeasurePart,
+  n: S.Int,
+  of: S.Int,
+  prompt: S.optional(S.String),
+  history: S.optional(S.Array(S.Struct({ role: S.Literals(["user", "assistant"]), content: S.String }))),
+  thinking: S.String,
+  answer: S.String,
+  steps: S.Array(ToolStep),
+  check: S.optional(MeasureCheck),
+});
+export type MeasureTurn = typeof MeasureTurn.Type;
+
+/**
+ * A Measure run's chat. `at` names the run: its start while it goes, the saved measure's `at` once
+ * kept. A kept chat's turns carry no check; the measure's own checks grade them.
+ */
+export const MeasureChat = S.Struct({ model: S.String, at: S.Finite, turns: S.Array(MeasureTurn) });
+export type MeasureChat = typeof MeasureChat.Type;
+
+/** models.measureTurn's payload: turn `index` of the run named by model and `at`, as it is now. */
+export const MeasureTurnChange = S.Struct({ model: S.String, at: S.Finite, index: S.Int, turn: MeasureTurn });
+export type MeasureTurnChange = typeof MeasureTurnChange.Type;
+
+/**
+ * models.measures' answer: every saved measure, and the server's own record of the run, its last
+ * step, while it waits or runs and after it stopped on an error (none once a run is done or
+ * stopped). `live`: the run's chat so far, while it goes. A window that connects mid-run, or
+ * missed a run's last push, shows this.
+ */
+export const MeasureList = S.Struct({ measures: S.Array(ModelMeasure), run: S.optional(MeasureRun), live: S.optional(MeasureChat) });
 export type MeasureList = typeof MeasureList.Type;
 
 export const RuntimeState = S.Literals([

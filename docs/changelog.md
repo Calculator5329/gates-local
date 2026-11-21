@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-21: a Measure run is a chat you can watch
+
+- Measure used to be a button that counted up, then a score. You could not see what the model was asked or what it answered until the run was over, and then only as rows in a sheet.
+- Pressing Measure now closes Settings onto the run, in the chat pane. Each check is a question, and its answer streams in like a reply, with the tool calls as the chat's tool rows and thinking folded. The answer is plain text while it streams and is drawn as markdown once it is whole. A grade line follows each answer: passed or failed, what the check needs, its tokens and time, and why it failed.
+- The header says "Measuring <model>" and the part and check it is on. A strip in place of the composer shows checks done, a bar, tok/s so far and Stop. While the model loads, the strip and the Measure button say "Loading model".
+- Stop ends the run and keeps no score; a score the model had stays.
+- While a run goes, a row at the top of the sidebar says "Measuring <model>" and how many checks are done. It opens the run, as does the Measure button. Leaving the view does not stop the run, and any window can watch it.
+- Pressing a score opens the run's chat, finished, with the parts table, speed and score on top. The details sheet is gone. A measure made before this opens the same way, rebuilt from what it kept.
+
 ## 2026-11-21: 0.2.7 published, in 5 minutes 20 seconds
 
 - Gates Local 0.2.7 is out (docs/releasing.md). It carries Usage's day bars, Models as one screen, the Older fold in the sidebar, the held-message reason, and the wording work since 0.2.6.

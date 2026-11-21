@@ -16,14 +16,22 @@ import { FAKE_URL, SERVER_PORT, TOKEN } from "./env.ts";
 /** A run's steps: the speed request, each check, and the pages. */
 const RUN_STEPS = CASES.length + 2;
 /** The Measure button while a run goes. */
-const BUSY = new RegExp(`^(Starting|Loading model|\\d+ / ${RUN_STEPS}|Grading pages)$`);
+const BUSY = new RegExp(`^(Loading model|\\d+ / ${RUN_STEPS}|Grading pages)$`);
+/** A check's answer in the run's chat. */
+const turnOf = (page: Page, id: string) => page.locator(`[data-testid="measure.chat.turn"][data-check="${id}"]`);
+/** Press qwen's Measure: Settings closes onto the run's chat, then Models opens again over it. */
+async function measureQwen(page: Page): Promise<void> {
+  await page.getByTestId("settings.models.measure-qwen3-5-9b").click();
+  await expect(page.getByTestId("measure.chat")).toBeVisible();
+  await openModels(page);
+}
 
 const chatRequests = async (model: string) => {
   const state = (await (await fetch(`${FAKE_URL}/__fake/state`)).json()) as { requests: { path: string; body: { model?: string } }[] };
   return state.requests.filter((r) => r.path === "/api/chat" && r.body.model === model).length;
 };
 
-test("Measure runs only on a click, grades pages in this window, and the score opens its parts and checks", async ({ page, open }, info) => {
+test("Measure runs only on a click, grades pages in this window, and the score opens its parts and its run's chat", async ({ page, open }, info) => {
   await stack.scenario("measure", { installed: ["qwen3.5:9b", "gemma4:12b"] });
   await open();
   await waitReady(page);
@@ -35,9 +43,9 @@ test("Measure runs only on a click, grades pages in this window, and the score o
   expect(await chatRequests("qwen3.5:9b")).toBe(0);
   await page.screenshot({ path: info.outputPath("measure-before.png"), animations: "disabled" });
 
-  await button.click();
-  // a warm-up, twenty checks and the pages: the button is the progress, one model at a time
-  await expect(button).toHaveText(new RegExp(`^\\d+ / ${RUN_STEPS}$`));
+  // Settings closes onto the run's chat; back in Models the button is the progress, one model at a time
+  await measureQwen(page);
+  await expect(button).toHaveText(BUSY);
   await expect(page.getByTestId("settings.models.measure-gemma4-12b")).toBeDisabled();
 
   const speed = row.locator(".mp-spd");
@@ -53,10 +61,12 @@ test("Measure runs only on a click, grades pages in this window, and the score o
   const sent = await chatRequests("qwen3.5:9b");
   expect(sent).toBeGreaterThan(20);
   await page.screenshot({ path: info.outputPath("measure-after.png"), animations: "disabled" });
+  // why: read before the score is pressed, since Settings then closes onto the chat
+  const kept = await speed.textContent();
 
-  // the score opens the detail: five parts with their weights, and every check with what it needs
+  // the score opens the run's chat: five parts with their weights on top, then every check as asked
   await score.click();
-  const detail = page.getByTestId("models.measure.detail");
+  const detail = page.getByTestId("measure.chat.score");
   await expect(detail).toBeVisible();
   await expect(detail.getByTestId("models.measure.part-tools")).toContainText("5/5");
   await expect(detail.getByTestId("models.measure.part-files")).toContainText("5/5");
@@ -64,29 +74,26 @@ test("Measure runs only on a click, grades pages in this window, and the score o
   await expect(detail.getByTestId("models.measure.part-instructions")).toContainText("4/5");
   await expect(detail.getByTestId("models.measure.part-pages")).toContainText("2/3");
   await expect(detail.getByTestId("models.measure.pending")).toHaveCount(0);
-  await expect(detail.locator(".md-check")).toHaveCount(CASES.length);
+  await expect(page.getByTestId("measure.chat.turn")).toHaveCount(CASES.length);
+  await expect(page.getByTestId("measure.chat.strip")).toHaveCount(0);
   // the three newer kinds, played right: the fact the files lack, the follow-up, the exact fix
-  for (const id of ["files-absent", "tools-followup", "instr-fix"]) await expect(detail.getByTestId(`models.measure.check-${id}`)).toHaveClass(/\bok\b/);
-  const caps = detail.getByTestId("models.measure.check-instr-caps");
-  await expect(caps).toHaveClass(/\bno\b/);
-  await expect(caps.locator(".md-why")).toBeVisible();
+  for (const id of ["files-absent", "tools-followup", "instr-fix"]) await expect(turnOf(page, id).getByTestId("measure.chat.grade")).toHaveClass(/\bok\b/);
+  const caps = turnOf(page, "instr-caps");
+  await expect(caps.getByTestId("measure.chat.grade")).toHaveClass(/\bno\b/);
+  await expect(caps.getByTestId("measure.chat.why")).toBeVisible();
   // the page that shows 37.5 fails on what this window saw it show
-  const total = detail.getByTestId("models.measure.check-page-total");
-  await expect(total.locator(".md-why")).toHaveText("12.5 times 3 did not show 37.50.");
-  await total.locator(".md-cl").click();
-  await expect(total.locator(".md-call").last()).toHaveText("37.5 · 50");
-  await expect(detail.getByTestId("models.measure.check-page-counter")).toHaveClass(/\bok\b/);
+  const total = turnOf(page, "page-total");
+  await expect(total.getByTestId("measure.chat.why")).toHaveText("12.5 times 3 did not show 37.50.");
+  await expect(total.getByTestId("measure.chat.page").getByRole("img", { name: "Failed" })).toBeVisible();
+  await expect(turnOf(page, "page-counter").getByTestId("measure.chat.grade")).toHaveClass(/\bok\b/);
   // a check's evidence: the database call it made through the chat's shell, and its reply
-  const top = detail.getByTestId("models.measure.check-db-top");
-  await top.locator(".md-cl").click();
-  await expect(top.locator(".md-call").first()).toContainText("sqlite3 /data/measure-shop.db");
-  await expect(top.locator(".md-reply")).toContainText("Ben Okafor");
+  const top = turnOf(page, "db-top");
+  await top.getByTestId("chat.tool-call.toggle").first().click();
+  await expect(top.getByTestId("chat.tool-call.body").first()).toContainText("sqlite3 /data/measure-shop.db");
+  await expect(top).toContainText("Ben Okafor");
   await page.screenshot({ path: info.outputPath("measure-detail.png"), animations: "disabled" });
-  await page.keyboard.press("Escape");
-  await expect(detail).toBeHidden();
 
   // the numbers are kept: a reload shows them without measuring again or running a page
-  const kept = await speed.textContent();
   await page.reload();
   await waitReady(page);
   await openModels(page);
@@ -95,13 +102,14 @@ test("Measure runs only on a click, grades pages in this window, and the score o
   await expect(page.locator("iframe[data-measure-page]")).toHaveCount(0);
   expect(await chatRequests("qwen3.5:9b")).toBe(sent);
 
-  // on a phone the numbers are a grey line in the row, and the line opens the same detail
+  // on a phone the numbers are a grey line in the row, and the line opens the same chat
   await page.setViewportSize({ width: 390, height: 844 });
   const line = page.getByTestId("settings.models.measure-line-qwen3-5-9b");
   await expect(line).toBeVisible();
   await expect(line).toHaveText(`${kept} tok/s · score 90`);
   await line.click();
   await expect(detail).toBeVisible();
+  await expect(page.getByTestId("measure.chat.turn")).toHaveCount(CASES.length);
   await expect(detail.getByTestId("models.measure.part-pages")).toContainText("2/3");
   await page.screenshot({ path: info.outputPath("measure-phone.png"), animations: "disabled" });
 });
@@ -116,12 +124,15 @@ test("a Measure the runtime broke keeps the earlier score, and the row says it s
   await openModels(page);
   const row = page.locator('.mp-card .mp-row[data-dm="qwen3.5:9b"]');
   const score = page.getByTestId("settings.models.score-qwen3-5-9b");
-  await page.getByTestId("settings.models.measure-qwen3-5-9b").click();
+  await measureQwen(page);
   await expect(score).toHaveText("90", { timeout: 60_000 });
   // from here every reply breaks with the runtime's error
   await stack.scenario("mid-stream-error", { installed });
-  await score.click();
-  await page.getByTestId("models.measure.again").click();
+  await row.getByTestId("models.row-menu.open").click();
+  await row.getByRole("menu").getByTestId("models.row-menu.measure").click();
+  // the chat's strip says why the run ended
+  await expect(page.getByTestId("measure.chat.strip")).toContainText("unexpected EOF", { timeout: 60_000 });
+  await openModels(page);
   // the run's end: the row says why it stopped, or (the bug) a new score took the old one's place
   await expect(row.locator(".act-err").or(score.filter({ hasNotText: /^90$/ }))).toBeVisible({ timeout: 60_000 });
   await row.screenshot({ path: info.outputPath("measure-stopped-row.png"), animations: "disabled" });
@@ -137,7 +148,7 @@ test("a window opened during a Measure sees the run, and only the window that st
   await open();
   await waitReady(page);
   await openModels(page);
-  await page.getByTestId("settings.models.measure-qwen3-5-9b").click();
+  await measureQwen(page);
   await expect(page.getByTestId("settings.models.measure-qwen3-5-9b")).toHaveText(BUSY);
   const second = await page.context().newPage();
   let frames = 0;
@@ -170,14 +181,15 @@ test("a reload during a Measure still shows it measuring, and one of two open wi
   await waitReady(page);
   await openModels(page);
   const button = page.getByTestId("settings.models.measure-qwen3-5-9b");
-  await button.click();
+  await measureQwen(page);
   await expect(button).toHaveText(BUSY);
   const sent = pagesSent(page);
   await page.reload();
   await waitReady(page);
   await openModels(page);
   await expect(button).toHaveText(BUSY);
-  await expect(button).toBeDisabled();
+  // pressed while its own run goes, it opens that run rather than starting one
+  await expect(button).toHaveAttribute("aria-busy", "true");
   await page.getByTestId("models.list.installed").screenshot({ path: info.outputPath("measure-after-reload.png"), animations: "disabled" });
   const second = await page.context().newPage();
   const sentSecond = pagesSent(second);
@@ -190,12 +202,12 @@ test("a reload during a Measure still shows it measuring, and one of two open wi
   await expect(score).toHaveText(/^\d+$/, { timeout: 90_000 });
   await expect(second.getByTestId("settings.models.score-qwen3-5-9b")).toHaveText(/^\d+$/);
   await second.close();
+  await expect(score).toHaveText("90");
   await score.click();
-  await page.getByTestId("models.measure.detail").screenshot({ path: info.outputPath("measure-reload-detail.png"), animations: "disabled" });
+  await page.getByTestId("measure.chat.score").screenshot({ path: info.outputPath("measure-reload-detail.png"), animations: "disabled" });
   // the pages were run and graded, so the score covers all five parts
   await expect(page.getByTestId("models.measure.left-out")).toHaveCount(0);
   await expect(page.getByTestId("models.measure.part-pages")).toContainText("2/3");
-  await expect(score).toHaveText("90");
   // of the two windows open when they came due, one ran them, once
   expect(sent.length + sentSecond.length).toBe(1);
   await expect(page.locator("iframe[data-measure-page]")).toHaveCount(0);
@@ -221,7 +233,7 @@ test("a score that left a part out is marked beside its number, and a full one i
   await open();
   await waitReady(page);
   await openModels(page);
-  await page.getByTestId("settings.models.measure-qwen3-5-9b").click();
+  await measureQwen(page);
   const full = page.getByTestId("settings.models.score-qwen3-5-9b");
   const short = page.getByTestId("settings.models.score-gemma4-12b");
   await expect(full).toHaveText("90", { timeout: 60_000 });
@@ -236,12 +248,12 @@ test("a score that left a part out is marked beside its number, and a full one i
   await short.getByTestId("settings.models.score-short").hover();
   await expect(page.locator("#tip")).toHaveText("Without Pages");
   await page.screenshot({ path: info.outputPath("scores-after.png"), animations: "disabled" });
-  // the detail says what was left out once, and the parts table has no Pages
+  // the chat's top says what was left out once, and each page's grade says it was skipped
   await short.click();
-  const detail = page.getByTestId("models.measure.detail");
+  const detail = page.getByTestId("measure.chat.score");
   await expect(detail.getByTestId("models.measure.left-out")).toHaveText("The score leaves Pages out.");
-  await expect(detail.getByTestId("models.measure.skipped-pages")).toHaveCount(1);
-  await detail.screenshot({ path: info.outputPath("scores-short-detail.png"), animations: "disabled" });
+  await expect(page.locator('[data-testid="measure.chat.turn"][data-check^="page-"] [data-testid="measure.chat.grade"]').getByRole("img", { name: "Skipped" })).toHaveCount(3);
+  await page.screenshot({ path: info.outputPath("scores-short-detail.png"), animations: "disabled" });
 });
 
 // On a phone the row's menu is the way in to Measure; the destructive item comes last.
@@ -355,7 +367,7 @@ async function startMeasure(page: Page, open: () => Promise<void>): Promise<void
   await open();
   await waitReady(page);
   await openModels(page);
-  await page.getByTestId("settings.models.measure-qwen3-5-9b").click();
+  await measureQwen(page);
 }
 /** A served page's address: the server's page route under a one-time id. */
 const PAGE_ADDRESS = new RegExp(`^http://127\\.0\\.0\\.1:${SERVER_PORT}/pages/[0-9a-f]{32}$`);

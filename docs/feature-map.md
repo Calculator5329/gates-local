@@ -76,7 +76,7 @@ has a path.
 | **Models › download**<br>also: catalog, pull | Models to download, grouped by whether they fit this card, plus any model by its ollama.com name. Under the installed models in Models, or Download models in the picker. | web: `models/ModelDownloads.tsx`, `models/models-actions.ts`<br>server: `runtime/catalog.ts`, `runtime/pull.ts`, `runtime/tiers.ts`, `runtime/recommended.ts`, `runtime/registry-size.ts` | `models`, `model-tiers`, `download-reload`, `no-models`, `download-queue`, `picker-layout` |
 | **Speed**<br>also: TPS, tok/s | A model's tokens per second from its own replies, in the picker and in Models. Model rows, once a model has replied. | web: `models/model-speed.tsx`, `models/speed.ts`<br>server: `app/handlers.ts` | `model-speed`, `model-words` |
 | **Memory mark** | What is in memory now, against the card, with other programs said once. Models and the Download tab; the model button. | web: `models/MemoryMark.tsx`<br>server: `runtime/load.ts`, `gpu/memory.ts` | `memory-mark`, `mem-show` |
-| **Measure** | Grades a model on this computer, on a click, and keeps its score with the parts and checks behind it. A model row in Models, or its row menu on a phone. | web: `measure`<br>server: `measure` | `measure` |
+| **Measure** | Grades a model on this computer, on a click, as a chat you can watch, and keeps its score with the parts and the run's chat behind it. A model row in Models, or its row menu on a phone; while a run goes, the pinned row at the top of the sidebar. | web: `measure`<br>server: `measure` | `measure`, `measure-chat` |
 
 ## Usage
 

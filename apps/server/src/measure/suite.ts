@@ -1,9 +1,10 @@
-import { MEASURE_VERSION, type MeasureCheck, type ModelMeasure, type ShellStatus, type ToolStep } from "@gates-local/contracts";
+import { MEASURE_VERSION, type MeasureCheck, type MeasureTurn, type ModelMeasure, type ShellStatus, type ToolStep } from "@gates-local/contracts";
 import { CALL_CLOSE, CALL_OPEN, createTools, type LibraryEntry, type ToolCall, type ToolResult } from "@gates-local/harness";
 import { streamToolTurn, windowFullWords, type ToolTurnInput } from "../chat/tools.ts";
 import type { TurnMessage } from "../chat/types.ts";
 import { BUDGET, CASES, SHOP_ID, pageIn, toolCallOf, type AnswerCase, type MeasureCase, type Turn } from "./cases.ts";
 import { partsOf, scoreOf } from "./score.ts";
+import { turnOf } from "./chat.ts";
 
 // why: slower than a person reads; 250 words a minute is 5.5 tokens a second, and this is twice it.
 export const SLOW_TOKENS_PER_SECOND = 10;
@@ -34,8 +35,23 @@ export interface MeasureInput {
   shell?: ShellStatus;
   platform?: NodeJS.Platform;
   fetch?: typeof fetch;
-  onStep?: (done: number, total: number) => void;
+  onStep?: (done: number, total: number, tokensPerSecond: number) => void;
+  // why: called on every streamed piece from inside the turn loop, so it must never wait
+  onTurn?: (index: number, turn: MeasureTurn) => void;
   now?: () => number;
+}
+
+// why: the strip's speed while running and the score's are one sum of the runtime's own counts
+export const speedOf = (evalCount: number, evalNs: number): number => (evalNs > 0 ? Math.round((evalCount / (evalNs / 1e9)) * 10) / 10 : 0);
+
+type TurnEvent = ReturnType<typeof streamToolTurn> extends AsyncIterable<infer E> ? E : never;
+
+function turnWith(turn: MeasureTurn, event: TurnEvent): MeasureTurn {
+  if (event.type === "delta") return { ...turn, answer: turn.answer + event.text };
+  if (event.type === "thinking") return { ...turn, thinking: turn.thinking + event.text };
+  if (event.type !== "tool") return turn;
+  const at = turn.steps.findIndex((s) => s.callId === event.step.callId);
+  return { ...turn, steps: at < 0 ? [...turn.steps, event.step] : turn.steps.with(at, event.step) };
 }
 
 // why: one step for loading the model, then one per check.
@@ -64,23 +80,29 @@ export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasu
   const system = typeof details.system === "string" && details.system.trim() ? details.system : undefined;
 
   let done = 0;
-  const step = () => input.onStep?.(++done, STEPS);
+  let evalCount = 0;
+  let evalNs = 0;
+  const step = () => input.onStep?.(++done, STEPS, speedOf(evalCount, evalNs));
   await warmUp(input, fetcher, think);
   step();
 
-  let evalCount = 0;
-  let evalNs = 0;
   const firstWords: number[] = [];
   const checks: MeasureCheck[] = [];
   const runs = (c: MeasureCase) => !(c.db && noDatabase);
   let owed = CASES.filter(runs).reduce((sum, c) => sum + BUDGET[c.part], 0);
   let runLeft = owed;
-  for (const c of CASES) {
-    if (!runs(c)) {
-      checks.push({ id: c.id, kind: c.part, ok: false, state: "skipped", needs: c.needs, why: "Run commands is off on this machine, so the database can't be read." });
+  for (const [index, c] of CASES.entries()) {
+    let live = turnOf(c);
+    const graded = (check: MeasureCheck) => {
+      checks.push(check);
+      input.onTurn?.(index, { ...live, check });
       step();
+    };
+    if (!runs(c)) {
+      graded({ id: c.id, kind: c.part, ok: false, state: "skipped", needs: c.needs, why: "Run commands is off on this machine, so the database can't be read." });
       continue;
     }
+    input.onTurn?.(index, live);
     owed -= BUDGET[c.part];
     const cap = Math.max(0, Math.min(CEILING * BUDGET[c.part], runLeft - owed));
     const meter: Meter = { cap, think: think === true ? THINK_BUDGET : 0, used: 0, thought: 0, start: now(), cut: false, cutThinking: false };
@@ -104,16 +126,21 @@ export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasu
       sources, ...(input.platform ? { platform: input.platform } : {}), ...(input.shell ? { shell: input.shell } : {}),
       ...(think === undefined ? {} : { think }), settings: { temperature: SAMPLING.temperature, ...(input.keepAlive === undefined ? {} : { keep_alive: input.keepAlive }) },
     };
-    const end = await turnEnd(streamToolTurn({ ...turn, fetch: metered, execute }));
+    const onTurn = input.onTurn;
+    const watch = onTurn === undefined ? undefined : (event: TurnEvent) => {
+      live = turnWith(live, event);
+      onTurn(index, live);
+    };
+    const end = await turnEnd(streamToolTurn({ ...turn, fetch: metered, execute }), watch);
     input.signal.throwIfAborted();
     if (end.type === "error" && end.code === "context-too-small") {
-      checks.push({ id: c.id, kind: c.part, ok: false, state: "skipped", needs: c.needs, why: end.message });
-      step();
+      graded({ id: c.id, kind: c.part, ok: false, state: "skipped", needs: c.needs, why: end.message });
       continue;
     }
     // why: a turn that failed on the runtime says nothing about the model, so the run stops.
     if (end.type === "error") throw new Error(`Measure stopped at check ${checks.length + 1} of ${CASES.length}: ${end.message}`);
     const { answer, steps } = end;
+    live = { ...live, answer, steps };
     if (meter.firstMs !== undefined) firstWords.push(meter.firstMs);
     runLeft -= answered(meter);
     const evidence: Evidence = {
@@ -124,13 +151,12 @@ export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasu
     };
     const noTools = needsTools(c) ? toolsLeftOut(steps) ?? await windowTooSmall(c, answer, turn, details, windows) : undefined;
     input.signal.throwIfAborted();
-    checks.push(noTools !== undefined
+    graded(noTools !== undefined
       ? { id: c.id, kind: c.part, ok: false, state: "skipped", needs: c.needs, why: noTools, ...evidence }
       : grade(c, { answer, steps: steps.filter((s) => s.name !== "note") }, evidence));
-    step();
   }
 
-  const tokensPerSecond = evalNs > 0 ? Math.round((evalCount / (evalNs / 1e9)) * 10) / 10 : 0;
+  const tokensPerSecond = speedOf(evalCount, evalNs);
   const firstTokenMs = median(firstWords);
   const slow = tokensPerSecond > 0 && tokensPerSecond < SLOW_TOKENS_PER_SECOND ? "decode" as const
     : firstTokenMs !== undefined && firstTokenMs > SLOW_FIRST_WORD_MS ? "first-token" as const : undefined;
@@ -186,8 +212,9 @@ function grade(c: MeasureCase, turn: Turn, evidence: Evidence): MeasureCheck {
   return { ...base, ok: false, state: "pending", page: clip(page, PAGE_KEPT), script: [...c.script] };
 }
 
-async function turnEnd(events: ReturnType<typeof streamToolTurn>) {
+async function turnEnd(events: ReturnType<typeof streamToolTurn>, watch?: (event: TurnEvent) => void) {
   for await (const event of events) {
+    watch?.(event);
     if (event.type === "done") return { type: "done" as const, answer: event.message.content, steps: event.message.tools ?? [] };
     if (event.type === "error") return { type: "error" as const, code: event.code, message: event.message };
   }

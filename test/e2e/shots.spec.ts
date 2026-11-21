@@ -234,6 +234,49 @@ test.describe("models page", () => {
   }
 });
 
+// A Measure run as a chat (measure-chat.spec.ts): the run held on its first long answer, and the
+// finished chat a score opens. <SHOTS_DIR>/measure/MC-NN-<state>.png
+const MEASURE_SHOTS: readonly { name: string; theme: "dark" | "light"; viewport?: { width: number; height: number }; finished: boolean }[] = [
+  { name: "MC-01-running-dark", theme: "dark", finished: false },
+  { name: "MC-02-finished-dark", theme: "dark", finished: true },
+  { name: "MC-03-finished-light", theme: "light", finished: true },
+  { name: "MC-04-phone-running-dark", theme: "dark", viewport: PHONE, finished: false },
+];
+
+test.describe("measure chat", () => {
+  for (const shot of MEASURE_SHOTS) {
+    test.describe(shot.name, () => {
+      test.use({ colorScheme: shot.theme, ...(shot.viewport ? { viewport: shot.viewport } : {}) });
+      // Not a regression test: a screenshot tool, run on its own.
+      test("shot", async ({ page, open, seededThread }) => {
+        test.setTimeout(90_000);
+        await stack.scenario("measure", { installed: ["qwen3.5:9b", "gemma4:12b"], ...(shot.finished ? {} : { measureHold: 1 }) });
+        await open(`#thread=${seededThread ?? ""}`);
+        await waitReady(page);
+        // why: the app keeps its own theme setting, so colorScheme alone leaves it dark
+        if (shot.theme === "light") await goLight(page, true);
+        await models(page);
+        // a phone row hides the Measure cell, so its menu starts the run
+        if (shot.viewport === PHONE) {
+          const row = page.locator('.mp-card .mp-row[data-dm="qwen3.5:9b"]');
+          await row.getByTestId("models.row-menu.open").click();
+          await row.getByRole("menu").getByTestId("models.row-menu.measure").click();
+        } else await page.getByTestId("settings.models.measure-qwen3-5-9b").click();
+        await expect(page.getByTestId("measure.chat")).toBeVisible();
+        if (shot.finished) {
+          await expect(page.getByTestId("measure.chat.score")).toBeVisible({ timeout: 60_000 });
+        } else {
+          await expect(page.getByTestId("measure.chat.plain")).toBeVisible({ timeout: 30_000 });
+          await expect(page.getByTestId("measure.chat.at")).toBeVisible();
+        }
+        await settled(page);
+        mkdirSync(path.join(SHOTS_DIR, "measure"), { recursive: true });
+        await page.screenshot({ path: path.join(SHOTS_DIR, "measure", `${shot.name}.png`), animations: "disabled", caret: "hide" });
+      });
+    });
+  }
+});
+
 /** Every Settings section at desktop and phone width, dark, named by section. */
 const SETTINGS_PAGES: readonly (readonly [string, string, ((page: Page) => Promise<void>)?])[] = [
   ["general", "General"],

@@ -8,5 +8,6 @@ export const threadScreen = deferred(async () => {
   const [thread, pages] = await Promise.all([import("../thread/Thread.tsx"), import("../pages/PagePanel.tsx")]);
   return { ...thread, PagePanel: pages.PagePanel };
 });
-export const usageScreen = deferred(() => import("../usage/Usage.tsx"));
+export const measureScreen = deferred(() => import("../measure/MeasureChat.tsx"));
+export const usageScreen =deferred(() => import("../usage/Usage.tsx"));
 export const picturesScreen = deferred(() => import("../pictures/Pictures.tsx"));
