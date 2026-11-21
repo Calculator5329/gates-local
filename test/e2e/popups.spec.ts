@@ -110,7 +110,6 @@ test.describe("Usage", () => {
     await expectOneRow(
       usage.getByRole("heading", { name: "Usage", exact: true }),
       usage.getByRole("group", { name: "Range" }),
-      usage.locator(".us-ctl").getByRole("group", { name: "Chart" }),
       usage.getByTestId("ui.dialog.close"),
     );
     await expectBackdrop(page);
@@ -206,7 +205,7 @@ test.describe("one shell for Models, Usage and Settings", () => {
   });
 
   test("a long Usage list scrolls inside the box, which stays in the window", async ({ page, open, seededThread }) => {
-    await page.setViewportSize({ width: 1280, height: 560 });
+    await page.setViewportSize({ width: 1280, height: 480 });
     await open(`#thread=${seededThread ?? ""}`);
     await waitReady(page);
     await page.locator(".sb-foot .usage").click();

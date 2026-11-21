@@ -19,7 +19,7 @@ it("a figure has no tip (decision 19), and the cut-name tip has the .t it measur
   const html = renderToStaticMarkup(createElement(Usage));
   // the only plain tip left is the close button's name
   expect([...html.matchAll(/<(\w+)[^>]*\sdata-tip="([^"]*)"/g)].map(m => `${m[1]} ${m[2]}`)).toEqual(["button Close · Esc"]);
-  expect(html).toContain('<div class="us-num"><b>19.1k</b>');
+  expect(html).toContain('<div class="us-num"><b>12.3k</b><span>in</span>');
   expect(html).toContain('<div class="us-num"><b>3</b><span>replies</span>');
   // decision 17: Usage sits in the same centred column as Models (panel.css .dlg-body>.us)
   expect(html).toMatch(/<div class="dlg-body"><div class="us">/);

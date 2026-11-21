@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { colourSlots, compact, duration, rangeStart, readPrefs, usageView, writePrefs, type UsageRead } from "./usage-data.ts";
+import { colourSlots, compact, duration, rangeStart, readPrefs, speedText, usageView, writePrefs, type UsageRead } from "./usage-data.ts";
 
 const HOUR = 3_600_000;
 const zone = process.env["TZ"];
@@ -89,7 +89,7 @@ describe("ranges", () => {
     const view = usageView({ rows: [], models: [] }, "7d", Date.UTC(2026, 10, 7, 14));
     expect(view.periods).toHaveLength(7);
     expect(view.lines).toEqual([]);
-    expect(view.totals).toEqual({ promptTokens: 0, completionTokens: 0, replies: 0, decodeMs: 0 });
+    expect(view.totals).toEqual({ promptTokens: 0, completionTokens: 0, replies: 0, wallMs: 0 });
   });
 });
 
@@ -151,9 +151,16 @@ describe("speed", () => {
     const line = view.lines[0]!;
     expect(line.speedTotal).toBeCloseTo(1010 / 11, 6);
     expect(line.readSpeedTotal).toBeCloseTo(2050 / 2, 6);
-    expect(line.speed.at(-1)).toBeCloseTo(1010 / 11, 6);
-    expect(view.totals.decodeMs).toBe(11_000);
     expect(view.totals.replies).toBe(2);
+  });
+
+  it("waiting sums every reply's whole time, timed for speed or not", () => {
+    process.env["TZ"] = "UTC";
+    const view = usageView({ models: ["a:1", "b:1"], rows: [
+      row(day(7, 9), "a:1", 100, 500, 1, { decodeTokens: 500, decodeMs: 5000, wallMs: 7000 }),
+      row(day(7, 10), "b:1", 100, 900, 2, { wallMs: 40_000 }), // stored before replies were timed
+    ] }, "7d", now);
+    expect(view.totals.wallMs).toBe(47_000);
   });
 
   it("leaves a request without decode time out of the speed but counts its tokens", () => {
@@ -166,50 +173,85 @@ describe("speed", () => {
     expect(view.lines[0]!.completionTotal).toBe(9500);
   });
 
-  it("a period with no decode time is a gap, never a zero; a model with none has no speed", () => {
+  it("two timed hours far apart read as slowest–fastest, from the hours, not the day sums", () => {
+    process.env["TZ"] = "UTC";
+    // The owner's case: one hour at 102 tok/s, one at 3.9, the same day; the sum says 14.
+    const view = usageView({ models: ["a:1"], rows: [
+      row(day(7, 9), "a:1", 10, 1020, 1, { decodeTokens: 1020, decodeMs: 10_000 }),
+      row(day(7, 10), "a:1", 10, 390, 1, { decodeTokens: 390, decodeMs: 100_000 }),
+      row(day(7, 11), "a:1", 10, 900, 1), // no times: no part in the range
+    ] }, "7d", now);
+    const a = view.lines[0]!;
+    expect(a.speedLow).toBeCloseTo(3.9, 6);
+    expect(a.speedHigh).toBeCloseTo(102, 6);
+    expect(a.speedTotal).toBeCloseTo(1410 / 110, 6);
+    expect(speedText(a)).toBe("4–102");
+  });
+
+  it("hours close together read as the range's one figure", () => {
+    process.env["TZ"] = "UTC";
+    const view = usageView({ models: ["a:1"], rows: [
+      row(day(6, 9), "a:1", 10, 500, 1, { decodeTokens: 500, decodeMs: 10_000 }),
+      row(day(7, 9), "a:1", 10, 700, 1, { decodeTokens: 700, decodeMs: 10_000 }),
+    ] }, "7d", now);
+    const a = view.lines[0]!;
+    expect([a.speedLow, a.speedHigh]).toEqual([50, 70]);
+    expect(speedText(a)).toBe("60");
+  });
+
+  it("an hour outside the range is not part of the speed range", () => {
+    process.env["TZ"] = "UTC";
+    const view = usageView({ models: ["a:1"], rows: [
+      row(day(7, 9), "a:1", 10, 500, 1, { decodeTokens: 500, decodeMs: 10_000 }),
+      row(Date.UTC(2026, 9, 30, 9), "a:1", 10, 10, 1, { decodeTokens: 10, decodeMs: 10_000 }), // Oct 30, before the week
+    ] }, "7d", now);
+    expect([view.lines[0]!.speedLow, view.lines[0]!.speedHigh]).toEqual([50, 50]);
+  });
+
+  it("a model never timed has no speed and says –", () => {
     process.env["TZ"] = "UTC";
     const view = usageView({ models: ["a:1", "b:1"], rows: [
-      row(day(5), "a:1", 10, 100, 1, { decodeTokens: 100, decodeMs: 2000 }),
-      row(day(6), "a:1", 10, 100, 1), // tokens but no time: still a gap
       row(day(7), "a:1", 10, 300, 1, { decodeTokens: 300, decodeMs: 3000 }),
       row(day(7), "b:1", 10, 10, 1),
     ] }, "7d", now);
-    const a = view.lines.find((l) => l.model === "a:1")!;
-    expect(a.speed).toEqual([null, null, null, null, 50, null, 100]);
     const b = view.lines.find((l) => l.model === "b:1")!;
-    expect(b.speedTotal).toBeNull();
-    expect(b.speed.every((v) => v === null)).toBe(true);
+    expect([b.speedTotal, b.speedLow, b.speedHigh]).toEqual([null, null, null]);
+    expect(speedText(b)).toBe("–");
   });
 
-  it("Other has no speed line", () => {
+  it("Other has no speed", () => {
     process.env["TZ"] = "UTC";
     const models = ["a:1", "b:1", "c:1", "d:1", "e:1", "f:1", "g:1"];
     const view = usageView({ models, rows: models.map((m, i) => row(day(7), m, 1, 100 - i, 1, { decodeTokens: 100 - i, decodeMs: 1000 })) }, "7d", now);
     const other = view.lines.at(-1)!;
     expect(other.model).toBeNull();
-    expect(other.speedTotal).toBeNull();
-    expect(other.speed.every((v) => v === null)).toBe(true);
+    expect([other.speedTotal, other.speedLow, other.speedHigh]).toEqual([null, null, null]);
+    expect(speedText(other)).toBe("–");
   });
 });
 
 describe("remembered choices", () => {
 
-  it("the range and the Tokens / Speed switch come back as they were left", () => {
+  it("the range comes back as it was left", () => {
     const store = memory();
-    expect(readPrefs(store)).toEqual({ range: "7d", metric: "tokens" });
-    writePrefs(store, { range: "30d", metric: "speed" });
-    expect(readPrefs(store)).toEqual({ range: "30d", metric: "speed" });
+    expect(readPrefs(store)).toEqual({ range: "7d" });
+    writePrefs(store, { range: "30d" });
+    expect(readPrefs(store)).toEqual({ range: "30d" });
+  });
+
+  it("a choice stored with the old Tokens / Speed switch keeps its range", () => {
+    expect(readPrefs({ getItem: () => '{"range":"30d","metric":"speed"}', setItem: () => {} })).toEqual({ range: "30d" });
   });
 
   it("storage that refuses or holds junk gives the defaults", () => {
-    expect(readPrefs({ getItem: () => { throw new Error("denied"); }, setItem: () => { throw new Error("denied"); } })).toEqual({ range: "7d", metric: "tokens" });
-    expect(() => writePrefs({ getItem: () => null, setItem: () => { throw new Error("full"); } }, { range: "all", metric: "speed" })).not.toThrow();
-    expect(readPrefs({ getItem: () => '{"range":"1y","metric":7}', setItem: () => {} })).toEqual({ range: "7d", metric: "tokens" });
+    expect(readPrefs({ getItem: () => { throw new Error("denied"); }, setItem: () => { throw new Error("denied"); } })).toEqual({ range: "7d" });
+    expect(() => writePrefs({ getItem: () => null, setItem: () => { throw new Error("full"); } }, { range: "all" })).not.toThrow();
+    expect(readPrefs({ getItem: () => '{"range":"1y","metric":7}', setItem: () => {} })).toEqual({ range: "7d" });
   });
 });
 
 describe("durations", () => {
-  it("time generating reads as minutes and hours", () => {
+  it("time waiting reads as minutes and hours", () => {
     expect([0, 45_000, 48 * 60_000, 3 * 3_600_000, 3 * 3_600_000 + 12 * 60_000 + 40_000].map(duration)).toEqual(["0 min", "45 s", "48 min", "3 h", "3 h 12 min"]);
   });
 });

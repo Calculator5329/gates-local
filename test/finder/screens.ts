@@ -313,9 +313,8 @@ export const SCREENS: readonly Screen[] = [
     paths: [`${WEB}/usage/Usage.tsx`, `${WEB}/usage/usage-data.ts`, `${WEB}/usage/usage.css`, `${WEB}/usage/usage.ts`, `${WEB}/lib/ui/Panel.tsx`, `${WEB}/lib/ui/panel.css`],
     seed: "usage",
     steps: [
-      { name: "open Usage", root: '[role=dialog][aria-label="Usage"]', opens: { selector: ".us-chart svg" }, act: click(".sb-foot .usage") },
+      { name: "open Usage", root: '[role=dialog][aria-label="Usage"]', opens: { selector: ".us-chart .us-bars" }, act: click(".sb-foot .usage") },
       { name: "another range", root: "[role=dialog]", act: (c) => c.page.getByRole("group", { name: "Range" }).getByRole("button").last().click() },
-      { name: "Speed chart", root: "[role=dialog]", act: (c) => c.page.getByRole("group", { name: "Chart" }).getByRole("button").last().click() },
     ],
   },
   {

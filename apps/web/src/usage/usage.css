@@ -1,55 +1,80 @@
-/* The Usage panel. Line colours are flat, one per drawn model, kept by first
+/* The Usage panel. Bar colours are flat, one per drawn model, kept by first
    use; each passes 3:1 on its theme's chat and sidebar background
    (usage-data.test.ts reads the two blocks marked light and dark). */
 :root{
   /* light */
-  --u0:#2f5fd0; --u1:#3f7d20; --u2:#a76100; --u3:#c8334d; --u4:#7c4dcc; --u5:#0f7fa8; --u6:#c4561b; --u7:#565f89;
+  --u0:#2a78d6; --u1:#d95926; --u2:#158a61; --u3:#b07400; --u4:#d55181; --u5:#008300; --u6:#6250d6; --u7:#e34948;
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
     /* dark */
-    --u0:#7aa2f7; --u1:#9ece6a; --u2:#e0af68; --u3:#f7768e; --u4:#bb9af7; --u5:#7dcfff; --u6:#ff9e64; --u7:#c0caf5;
+    --u0:#3987e5; --u1:#d95926; --u2:#199e70; --u3:#c98500; --u4:#d55181; --u5:#0ca30c; --u6:#9085e9; --u7:#e66767;
   }
 }
 :root[data-theme="dark"]{
-  --u0:#7aa2f7; --u1:#9ece6a; --u2:#e0af68; --u3:#f7768e; --u4:#bb9af7; --u5:#7dcfff; --u6:#ff9e64; --u7:#c0caf5;
+  --u0:#3987e5; --u1:#d95926; --u2:#199e70; --u3:#c98500; --u4:#d55181; --u5:#0ca30c; --u6:#9085e9; --u7:#e66767;
 }
 
-/* Every box has a fixed height, so a read landing or a turn ending changes figures, never the layout. */
+/* Every box has a fixed height, so a read landing or a turn ending changes figures, never the layout.
+   The readout floats over the chart, so hovering moves nothing either. */
 .us{display:flex;flex-direction:column;gap:16px;min-width:0}
 .us .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .us-ctl{display:flex;flex-wrap:wrap;gap:8px}
-.us-nums{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.us-nums{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
 .us-num{min-width:0}
 .us-num b{display:block;font-size:20px;line-height:26px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
 .us-num span{display:block;font-size:12px;line-height:16px;color:var(--muted-foreground)}
 .us-ph{display:inline-block;width:3.2em;height:.8em;border-radius:3px;background:var(--hover);vertical-align:middle}
-.us-chart{position:relative;border-radius:var(--r-sm);outline:none}
+
+/* The chart: a 40 px gutter for the grid figures, the plot, then the dates. */
+.us-chart{position:relative;padding-top:8px;border-radius:var(--r-sm);outline:none}
 .us-chart:focus-visible{box-shadow:0 0 0 2px var(--border-strong)}
-.us-top{display:block;font-size:11px;line-height:16px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
-.us-chart svg{display:block;width:100%;height:160px;overflow:visible}
-.us-chart path{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
-.us-chart .us-dot{stroke-width:5}
-.us-chart .us-base,.us-chart .us-mark{stroke:var(--border-strong);stroke-width:1}
-.us-chart .us-grid{stroke:var(--border);stroke-width:1}
-.us-at{margin:0 0 -8px;font-size:13px;font-weight:600;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.us-plot{position:relative;margin-left:40px;border-bottom:1px solid var(--border-strong)}
+.us-gl{position:absolute;left:0;right:0;border-top:1px solid var(--border)}
+.us-gl i{position:absolute;right:calc(100% + 6px);top:-8px;font-style:normal;font-size:11px;line-height:16px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;white-space:nowrap}
+.us-bars{position:absolute;inset:0;display:flex;align-items:flex-end;column-gap:min(2px,calc(25% / var(--n)))}
+.us-col{position:relative;flex:1 1 0;min-width:0;height:100%;display:flex;flex-direction:column-reverse;gap:2px}
+.us-col.on::before{content:"";position:absolute;inset:0 -1px;background:var(--hover)}
+.us-col i{position:relative;display:block;flex:none}
+.us-col i:last-child{border-radius:3px 3px 0 0}
+.us-fail{position:absolute;inset:0;margin:0;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--muted-foreground)}
+.us-read{position:absolute;top:0;z-index:2;display:flex;flex-direction:column;min-width:0;padding:6px 10px;background:var(--popover);border:1px solid var(--popover-border);border-radius:var(--r-sm);box-shadow:var(--popover-shadow);font-size:12px;line-height:18px;white-space:nowrap;pointer-events:none}
+.us-read b{font-weight:600;margin-bottom:2px}
+.us-none{color:var(--muted-foreground)}
+.us-rl{display:flex;align-items:center;gap:8px;min-width:0}
+.us-rl em{margin-left:auto;padding-left:12px;font-style:normal;font-weight:500;font-variant-numeric:tabular-nums}
+.us-rl .us-key{width:8px;height:8px;border-radius:2px}
+.us-xs{position:relative;height:16px;margin:4px 0 0 40px;font-size:11px;line-height:16px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.us-x{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap}
+.us-x-first,.us-x-last{transform:none}
+
 .us-rows{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px;font-variant-numeric:tabular-nums}
 .us-rows th,.us-rows td{padding:7px 0 7px 8px;text-align:right;font-weight:400;white-space:nowrap}
 .us-rows thead th{width:72px;font-size:12px;font-weight:500;color:var(--muted-foreground);padding-top:0}
 .us-rows thead th:first-child{width:auto}
+.us-rows thead th.us-sp{width:34%}
 .us-rows th[scope="row"],.us-rows thead th:first-child{text-align:left;padding-left:0}
 .us-rows tbody tr{border-top:1px solid var(--border)}
 .us-name{display:flex;align-items:center;gap:8px;min-width:0}
 .us-key{flex:none;width:12px;height:3px;border-radius:1px}
 .us-label{min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+/* Speed: a muted bar from the slowest timed hour to the fastest, a dot at the range's figure, one scale for every row. */
+.us-spd{display:flex;align-items:center;gap:8px}
+.us-spd em{flex:none;width:56px;font-style:normal;text-align:right}
+.us-trk{position:relative;flex:1;height:12px;min-width:40px}
+.us-trk::before{content:"";position:absolute;left:0;right:0;top:5.5px;border-top:1px solid var(--border)}
+.us-trk u{position:absolute;top:4px;height:4px;border-radius:2px;background:var(--faint)}
+.us-trk s{position:absolute;top:2px;width:8px;height:8px;margin-left:-4px;border-radius:50%;background:var(--foreground);box-shadow:0 0 0 2px var(--popover)}
 
-/* 320 px: the controls take a second line under the title and Close,
-   the numbers go three and two, and the model column gives way to the figures. */
+/* 320 px: the controls take a second line under the title and Close, the numbers
+   go two and two, three dates stay, and the speed keeps its figure without the track. */
 @media (max-width:640px){
   .us-ctl{order:1;flex-basis:100%}
-  .us-nums{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 8px}
-  .us-num:last-child{grid-column:span 2}
+  .us-nums{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 8px}
   .us-num b{font-size:18px}
+  .us-x-odd{display:none}
   .us-rows th,.us-rows td{padding-left:6px}
   .us-rows thead th{width:48px}
+  .us-rows thead th.us-sp{width:64px}
+  .us-trk{display:none}
 }

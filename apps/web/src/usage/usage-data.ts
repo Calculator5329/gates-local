@@ -1,7 +1,5 @@
 export type UsageRange = "24h" | "7d" | "30d" | "all";
-export type UsageMetric = "tokens" | "speed";
 export const RANGES: readonly (readonly [UsageRange, string])[] = [["24h", "24 h"], ["7d", "7 d"], ["30d", "30 d"], ["all", "All"]];
-export const METRICS: readonly (readonly [UsageMetric, string])[] = [["tokens", "Tokens"], ["speed", "Speed"]];
 
 export interface UsageRow {
   readonly hour: number;
@@ -30,11 +28,13 @@ export interface UsageLine {
   readonly decodeTokens: number[];
   readonly readMs: number[];
   readonly readTokens: number[];
-  readonly speed: (number | null)[];
+  readonly wallMs: number[];
   readonly promptTotal: number;
   readonly completionTotal: number;
   readonly repliesTotal: number;
   readonly speedTotal: number | null;
+  readonly speedLow: number | null;
+  readonly speedHigh: number | null;
   readonly readSpeedTotal: number | null;
 }
 
@@ -42,7 +42,7 @@ export interface UsageView {
   readonly hourly: boolean;
   readonly periods: { readonly start: number }[];
   readonly lines: UsageLine[];
-  readonly totals: { promptTokens: number; completionTokens: number; replies: number; decodeMs: number };
+  readonly totals: { promptTokens: number; completionTokens: number; replies: number; wallMs: number };
 }
 
 const HOUR = 3_600_000;
@@ -96,20 +96,23 @@ export function colourSlots(order: readonly string[], drawn: readonly string[]):
   return slots;
 }
 
-type Sums = Omit<UsageLine, "model" | "colour" | "speed" | "promptTotal" | "completionTotal" | "repliesTotal" | "speedTotal" | "readSpeedTotal">;
-const FIELDS = ["prompt", "completion", "replies", "decodeMs", "decodeTokens", "readMs", "readTokens"] as const;
+type Sums = Pick<UsageLine, (typeof FIELDS)[number]>;
+const FIELDS = ["prompt", "completion", "replies", "decodeMs", "decodeTokens", "readMs", "readTokens", "wallMs"] as const;
 const emptySums = (n: number): Sums => Object.fromEntries(FIELDS.map((f) => [f, Array.from({ length: n }, () => 0)])) as unknown as Sums;
 const sum = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0);
 
-function line(model: string | null, colour: number | "other", s: Sums): UsageLine {
+interface Spread { low: number; high: number }
+
+function line(model: string | null, colour: number | "other", s: Sums, spread: Spread | undefined): UsageLine {
   const speedless = model === null;
   return {
     model, colour, ...s,
-    speed: s.decodeTokens.map((t, i) => (speedless ? null : ratio(t, s.decodeMs[i]!))),
     promptTotal: sum(s.prompt),
     completionTotal: sum(s.completion),
     repliesTotal: sum(s.replies),
     speedTotal: speedless ? null : ratio(sum(s.decodeTokens), sum(s.decodeMs)),
+    speedLow: speedless ? null : spread?.low ?? null,
+    speedHigh: speedless ? null : spread?.high ?? null,
     readSpeedTotal: speedless ? null : ratio(sum(s.readTokens), sum(s.readMs)),
   };
 }
@@ -119,6 +122,7 @@ export function usageView(read: UsageRead, range: UsageRange, now: number): Usag
   const hourly = range === "24h";
   const index = new Map(periods.map((start, i) => [hourly ? String(start) : dayKey(start), i]));
   const byModel = new Map<string, Sums>();
+  const spreads = new Map<string, Spread>();
   for (const r of read.rows) {
     const i = index.get(hourly ? String(r.hour) : dayKey(r.hour));
     if (i === undefined) continue;
@@ -131,6 +135,11 @@ export function usageView(read: UsageRead, range: UsageRange, now: number): Usag
     s.decodeTokens[i]! += r.decodeTokens;
     s.readMs[i]! += r.readMs;
     s.readTokens[i]! += r.readTokens;
+    s.wallMs[i]! += r.wallMs;
+    const speed = ratio(r.decodeTokens, r.decodeMs);
+    if (speed === null) continue;
+    const seen = spreads.get(r.model);
+    spreads.set(r.model, seen === undefined ? { low: speed, high: speed } : { low: Math.min(seen.low, speed), high: Math.max(seen.high, speed) });
   }
   const order = (m: string) => {
     const i = read.models.indexOf(m);
@@ -141,11 +150,11 @@ export function usageView(read: UsageRead, range: UsageRange, now: number): Usag
   const drawn = ranked.length > DRAWN ? ranked.slice(0, DRAWN) : ranked;
   const rest = ranked.slice(drawn.length);
   const slots = colourSlots(read.models, drawn.map(([m]) => m));
-  const lines = drawn.map(([m, s]) => line(m, slots.get(m)!, s));
+  const lines = drawn.map(([m, s]) => line(m, slots.get(m)!, s, spreads.get(m)));
   if (rest.length > 0) {
     const other = emptySums(periods.length);
     for (const [, s] of rest) for (const f of FIELDS) s[f].forEach((v, i) => (other[f][i]! += v));
-    lines.push(line(null, "other", other));
+    lines.push(line(null, "other", other, undefined));
   }
   return {
     hourly,
@@ -155,21 +164,15 @@ export function usageView(read: UsageRead, range: UsageRange, now: number): Usag
       promptTokens: sum(lines.map((l) => l.promptTotal)),
       completionTokens: sum(lines.map((l) => l.completionTotal)),
       replies: sum(lines.map((l) => l.repliesTotal)),
-      decodeMs: sum(lines.map((l) => sum(l.decodeMs))),
+      wallMs: sum(lines.map((l) => sum(l.wallMs))),
     },
   };
 }
 
-export function figuresAt(l: UsageLine, at: number | null) {
-  if (at === null) return { prompt: l.promptTotal, completion: l.completionTotal, replies: l.repliesTotal, speed: l.speedTotal, readSpeed: l.readSpeedTotal };
-  const speedless = l.model === null;
-  return {
-    prompt: l.prompt[at] ?? 0,
-    completion: l.completion[at] ?? 0,
-    replies: l.replies[at] ?? 0,
-    speed: l.speed[at] ?? null,
-    readSpeed: speedless ? null : ratio(l.readTokens[at] ?? 0, l.readMs[at] ?? 0),
-  };
+// why: one figure hides hours far apart (102 and 3.9 read as 14), so those show slowest–fastest
+export function speedText(l: Pick<UsageLine, "speedTotal" | "speedLow" | "speedHigh">): string {
+  if (l.speedLow !== null && l.speedHigh !== null && l.speedHigh / l.speedLow > 1.5) return `${Math.round(l.speedLow)}–${Math.round(l.speedHigh)}`;
+  return l.speedTotal === null ? "–" : String(Math.round(l.speedTotal));
 }
 
 export function compact(n: number): string {
@@ -196,19 +199,19 @@ export function duration(ms: number): string {
 
 export interface UsagePrefs {
   readonly range: UsageRange;
-  readonly metric: UsageMetric;
 }
 const PREFS_KEY = "gates-local.usage";
-const DEFAULTS: UsagePrefs = { range: "7d", metric: "tokens" };
+const DEFAULTS: UsagePrefs = { range: "7d" };
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem">;
 
 export function readPrefs(storage: Storage): UsagePrefs {
   try {
     const value: unknown = JSON.parse(storage.getItem(PREFS_KEY) ?? "null");
     if (typeof value !== "object" || value === null) return DEFAULTS;
-    const { range, metric } = value as Record<string, unknown>;
-    if (!RANGES.some(([r]) => r === range) || !METRICS.some(([m]) => m === metric)) return DEFAULTS;
-    return { range: range as UsageRange, metric: metric as UsageMetric };
+    // why: a value stored before the Tokens / Speed switch went also holds `metric`, read past it
+    const { range } = value as Record<string, unknown>;
+    if (!RANGES.some(([r]) => r === range)) return DEFAULTS;
+    return { range: range as UsageRange };
   } catch {
     return DEFAULTS;
   }

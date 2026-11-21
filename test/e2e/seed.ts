@@ -288,18 +288,22 @@ export function seedWorkFold(dbPath: string, now: number): string {
 
 const DAY = 24 * HOUR;
 
-/** Three models over the last seven days, as the usage store records them: [model, days ago used, decode tok/s, prompt size]. */
-const USAGE_MODELS: readonly (readonly [string, readonly number[], number, number])[] = [
-  ["qwen3.5:9b", [0, 1, 2, 3, 4, 5, 6], 52, 1800],
-  ["gemma4:12b", [1, 2, 4, 5], 34, 1200],
-  ["qwen3-vl:8b", [0, 2, 3], 41, 900],
+/**
+ * Three models over the last seven days, as the usage store records them:
+ * [model, days ago used, decode tok/s, prompt size, days ago it ran at a tenth of that].
+ * qwen3-vl's slow day makes its hours far apart, so its speed reads as a range.
+ */
+const USAGE_MODELS: readonly (readonly [string, readonly number[], number, number, readonly number[]])[] = [
+  ["qwen3.5:9b", [0, 1, 2, 3, 4, 5, 6], 52, 1800, []],
+  ["gemma4:12b", [1, 2, 4, 5], 34, 1200, []],
+  ["qwen3-vl:8b", [0, 2, 3], 41, 900, [3]],
 ];
 
 /**
  * The design's sidebar and, for the Usage pop-up (test/e2e/usage.spec.ts),
  * three models across seven days, three replies a day each, with decode and
  * prompt-reading times, through the server's own usage store with its clock
- * pinned. A model's missing days are gaps in its speed line. Days are UTC
+ * pinned. A model's missing days are empty in its bars. Days are UTC
  * calendar days, so a spec reading them sets timezoneId "UTC"; today's
  * replies fall in the part of today already gone. The server's one-time fill
  * from stored replies adds the threads' own replies on start.
@@ -311,8 +315,9 @@ export function seedUsage(dbPath: string, file: string, now: number): string {
   const store = openUsageStore(file, { now: () => clock.now });
   const today = now - (now % DAY);
   try {
-    for (const [model, days, rate, size] of USAGE_MODELS) {
+    for (const [model, days, fast, size, slow] of USAGE_MODELS) {
       for (const d of days) {
+        const rate = slow.includes(d) ? fast / 10 : fast;
         const span = d === 0 ? now - today : DAY;
         for (const i of [0, 1, 2]) {
           clock.now = today - d * DAY + Math.floor((span * (i + 1)) / 4);

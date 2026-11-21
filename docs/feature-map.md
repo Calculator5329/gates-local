@@ -82,7 +82,7 @@ has a path.
 
 | Feature | What it is, and where | Code | Tests |
 | --- | --- | --- | --- |
-| **Usage** | Tokens in and out, replies and time generating, by range and model, as a chart. The Usage icon in the sidebar footer. | web: `usage`<br>server: `usage` | `usage` |
+| **Usage** | Tokens in and out, replies and time waiting, by range and model: a bar a day, and each model's speed as a range. The Usage icon in the sidebar footer. | web: `usage`<br>server: `usage` | `usage` |
 
 ## Pictures
 

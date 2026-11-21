@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-20: Usage shows a bar a day, with dates, and each model's speed as a range
+
+- The chart is one bar a day (an hour on 24 h), each model a stacked part in its own colour, largest at the bottom. A day you used the app is a bar, not a lone dot.
+- Dates run under the chart and token figures sit beside it at round values.
+- Hovering a bar, or Left and Right with the chart focused, shows that day beside the bar: each model's tokens, or "No replies". The table no longer changes; it always shows the whole range.
+- The Tokens / Speed switch is gone. The tok/s column shows each model's slowest to fastest hour ("4–102") when they are far apart, else one figure, with a small track and a dot on one scale for every row.
+- Four numbers instead of five: in, out, replies and waiting. "Waiting" is the whole time replies took, including loading and reading the prompt, and counts every reply; "generating" left out replies stored without timings.
+- New chart colours that stay apart for colour-blind eyes.
+
 ## 2026-11-20: no notice when an old saved queue moves to the server
 
 - The line "Your queued messages were restored on hold. Use Send now when you are ready." is gone. Messages a page saved before the server kept the queue still move over on hold; their rows already say On hold and carry Send now.

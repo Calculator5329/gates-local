@@ -1,5 +1,15 @@
 # Decisions
 
+## 2026-11-20 · Usage is day bars, speed a range in the table
+
+**Owner's words:** "how can we make the usage screen better", then "A" from three layouts.
+
+**Decided:** the Usage pop-up shows one stacked bar a day (an hour on 24 h), dates under
+the chart and token figures beside it, the hovered or arrowed day in a readout beside its
+column, and a table that always holds the range's figures. The Tokens / Speed switch is
+gone; each model's speed is a range in the table, from its slowest timed hour to its
+fastest, with a dot at the range's figure.
+
 ## 2026-11-17 · Other programs' memory is freed only with a click
 
 **Amends:** "2026-11-13 · One thing in GPU memory, one owner of it", where every idle

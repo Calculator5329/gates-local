@@ -588,7 +588,7 @@ export const FEATURES: readonly Feature[] = [
     id: "usage",
     name: "Usage",
     group: "Usage",
-    what: "Tokens in and out, replies and time generating, by range and model, as a chart.",
+    what: "Tokens in and out, replies and time waiting, by range and model: a bar a day, and each model's speed as a range.",
     where: "The Usage icon in the sidebar footer.",
     window: ["usage"],
     server: ["usage"],
