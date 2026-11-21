@@ -435,6 +435,10 @@ async function restingList(page: Page) {
 }
 
 test.describe("a short window", () => {
+  // why: the list's height depends on how many day headings the seed falls under, and the seed is
+  // dated NOW. With the real date, the test went red once NOW was over a week old (one "Older" heading).
+  test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(NOW); });
+
   // Guards the owner's ruling: the sidebar top as T3 Code has it.
   test("Search rests with no box in line with the threads, New thread alone at the right, and the list fades instead of showing a bar", async ({ page, open }) => {
     await page.setViewportSize(SHORT);

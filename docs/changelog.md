@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-20: the short-window sidebar test no longer expires with the calendar
+
+- The browser test for the thread list in a short window failed the 0.2.7 release check with nothing wrong in the app. Its threads are dated 12 November and the page read the real date, so once that day was more than a week back every thread fell under one "Older" heading and the list was one heading shorter than the test expects. The test now pins the page's clock to the day its threads are dated.
+
 ## 2026-11-20: a message held because GPU memory can't be read says so
 
 - A queued message the app held because it could not read GPU memory now says "On hold: can't read GPU memory" on its row, with the reason and what fixes it in the row's tooltip. It used to say only "On hold".
