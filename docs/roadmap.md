@@ -1028,8 +1028,8 @@ RS-03 remains dropped.
 
 - [ ] The release check's browser shards all run on one machine. Spread them across the test machines, so a release does not wait on the busiest one.
       *Accept:* one release check runs its shards on at least two machines and sums one report.
-- [ ] `session.test` failed three times on the second test machine (seeds 1794900758983, 1794901863240), and never reproduced locally.
-      *Accept:* those seeds replayed on that machine, the race named and fixed, or shown to be the machine.
+- [ ] `session.test` failed three times on the second test machine (seeds 1794900758983, 1794901863240). On 2026-11-20 it failed once on the development machine in a full `pnpm verify` (seed 1795234684278, "a reply that finishes while the reconnect's thread load waits survives the older snapshot": `m1` missing at line 579), then passed three times alone and in the next full run.
+      *Accept:* those seeds replayed, the race named and fixed. It is not only the test machine.
 - [ ] The voice dictation check has a fixed 50 ms limit that a busy machine misses.
       *Accept:* the limit moves to the timing project, or the check measures against its own idle baseline.
 - [ ] The image-stopping control test polls for 2 s.
