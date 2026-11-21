@@ -44,6 +44,14 @@ async function holdFits(page: Page) {
   };
 }
 /** A Download tab group by the start of its title. */
+/** A model's row in whichever state it is: on offer, downloading or installed. */
+const anyRow = (tag: string) => `.mp-row[data-cat="${tag}"], .mp-row[data-pull="${tag}"], .mp-row[data-dm="${tag}"]`;
+/** Leaves Models and comes back, which is a new visit: the rows are placed and grouped again. */
+async function visitAgain(page: Page) {
+  await section(page, "General");
+  await section(page, "Models");
+}
+
 const dlGroup = (page: Page, title: string) => page.locator(".mp .grp").filter({ has: page.locator(".grp-t", { hasText: new RegExp(`^${title}`) }) });
 
 async function libraryBoxes(page: Page) {
@@ -112,8 +120,8 @@ for (const width of [1440, 360]) {
 
     // The GPU memory size-pick test left with the Default context control (decision 13).
 
-    // Guards a shipped bug fix: a late fit table moved the Download rows.
-    test("Download groups after a second without a fit table, and a late table moves nothing until the next visit", async ({ page, open }) => {
+    // Guards a shipped bug fix: a late fit table moved the rows on offer.
+    test("the models on offer group after a second without a fit table, and a late table moves nothing until the next visit", async ({ page, open }) => {
       // one of the 16 GB card's recommended picks (chat-models.json), left uninstalled here
       const tag = "gemma4:12b";
       await stack.scenario("models", { installed: ["qwen3.5:9b", "qwen3.8-abliterated:27b"] });
@@ -121,8 +129,7 @@ for (const width of [1440, 360]) {
       await open();
       await waitReady(page);
       await section(page, "Models", true);
-      await page.getByTestId("models.tabs.download").click();
-      const row = page.locator(`.dlrow[data-cat="${tag}"]`);
+      const row = page.locator(`.mp-row[data-cat="${tag}"]`);
       await expect.poll(fits.held).toBeGreaterThan(0);
       // the top of "Something else", and whether the groups' placeholder is up, read in one frame
       const below = () => page.evaluate(() => {
@@ -132,7 +139,7 @@ for (const width of [1440, 360]) {
       let before: { held: boolean; top: number | undefined } = { held: false, top: undefined };
       await expect.poll(async () => { before = await below(); return before.held && before.top !== undefined; }, "read on the placeholder").toBe(true);
       // at the bound a row with no answer is not recommended
-      await expect(dlGroup(page, "Also available").locator(`.dlrow[data-cat="${tag}"]`)).toBeVisible();
+      await expect(dlGroup(page, "Also available").locator(`.mp-row[data-cat="${tag}"]`)).toBeVisible();
       const after = await below();
       expect(after.held).toBe(false);
       // within a pixel: sub-pixel line boxes round differently between a placeholder bar and a word
@@ -141,15 +148,14 @@ for (const width of [1440, 360]) {
       const box = await row.boundingBox();
       fits.release();
       await expect(row).toHaveAttribute("data-verdict", "fits");
-      await expect(dlGroup(page, "Also available").locator(`.dlrow[data-cat="${tag}"]`), "a late table that fits does not move the row").toBeVisible();
+      await expect(dlGroup(page, "Also available").locator(`.mp-row[data-cat="${tag}"]`), "a late table that fits does not move the row").toBeVisible();
       expect(await row.boundingBox(), "the row stays where it is").toEqual(box);
-      await page.getByTestId("models.tabs.installed").click();
-      await page.getByTestId("models.tabs.download").click();
-      await expect(dlGroup(page, "Recommended").locator(`.dlrow[data-cat="${tag}"]`), "a new visit groups by the answers in hand").toBeVisible();
+      await visitAgain(page);
+      await expect(dlGroup(page, "Recommended").locator(`.mp-row[data-cat="${tag}"]`), "a new visit groups by the answers in hand").toBeVisible();
     });
 
     // Guards a shipped bug fix: a download row moved away from where it was clicked.
-    test("download progress replaces an equal-sized model row", async ({ page, open }) => {
+    test("download progress takes the offered row's place at the same size, and Cancel gives the row back", async ({ page, open }) => {
       // Hold catalog hydration so a probe started before the row exists
       // reliably distinguishes initial loading from a download-state gap.
       const heldCatalog: Array<() => void> = [];
@@ -177,9 +183,8 @@ for (const width of [1440, 360]) {
       // the catalog is held, so the first reads have not landed: act on the composer's readiness alone
       await waitComposer(page);
       await section(page, "Models", true);
-      await page.getByTestId("models.tabs.download").click();
       await stack.scenario("models", { pullTickMs: 250, pullChunkBytes: 256 * 1024 * 1024 });
-      const row = page.locator('.dlrow[data-cat="qwen3.5:4b"]');
+      const row = page.locator(anyRow("qwen3.5:4b"));
       await expect.poll(() => heldCatalog.length).toBeGreaterThan(0);
       await expect(row).toHaveCount(0);
       // A bounded hydration delay, deliberately included before measurement.
@@ -191,59 +196,48 @@ for (const width of [1440, 360]) {
       await expect(row).toBeVisible();
       await expect.poll(() => heldFits.length).toBeGreaterThan(0);
       await row.scrollIntoViewIfNeeded();
-      const original = await row.elementHandle();
-      if (!original) throw new Error("The download row must exist before starting");
-      const frames = await burst(page, `r2-${width}/download-start`, '.dlrow[data-cat="qwen3.5:4b"]', async () => {
-        await row.getByRole("button", { name: /^Download \d/ }).click();
-        await expect(row.getByTestId("models.download.cancel")).toBeVisible();
+      const frames = await burst(page, `r2-${width}/download-start`, anyRow("qwen3.5:4b"), async () => {
+        await row.getByTestId("models.offered.download").click();
+        await expect(row.getByTestId("models.downloading.cancel")).toBeVisible();
         holdingFits = false;
         for (const deliver of heldFits.splice(0)) deliver();
-        await expect(row).toHaveAttribute("data-verdict", /.+/);
+        await expect(page.locator(".mp-row[data-cat][data-verdict]").first()).toBeVisible();
       });
       stableSize(frames, "surface", `download-start-${width}`);
       expect.soft(sizeChange(frames, "surface").positionPx, "starting and progressing must keep the clicked row in place").toBeLessThanOrEqual(0.5);
-      expect.soft(await original.evaluate(node => node === document.querySelector('.dlrow[data-cat="qwen3.5:4b"]')), "a fit table must not remount the download row").toBe(true);
-      const cancelled = await burst(page, `r2-${width}/download-cancel`, '.dlrow[data-cat="qwen3.5:4b"]', () => row.getByTestId("models.download.cancel").click());
+      const cancelled = await burst(page, `r2-${width}/download-cancel`, anyRow("qwen3.5:4b"), async () => {
+        await row.getByTestId("models.downloading.cancel").click();
+        await expect(row.getByTestId("models.offered.download")).toBeVisible();
+      });
       stableSize(cancelled, "surface", `download-cancel-${width}`);
       expect(sizeChange(cancelled, "surface").positionPx, "cancelling must keep the row in place").toBeLessThanOrEqual(0.5);
-      expect(await original.evaluate(node => node === document.querySelector('.dlrow[data-cat="qwen3.5:4b"]')), "cancelling must preserve the row").toBe(true);
-      await page.getByTestId("models.tabs.installed").click();
-      await page.getByTestId("models.tabs.download").click();
+      await expect(row, "the row is on offer again, with its verdict").toHaveAttribute("data-verdict", /.+/);
+      await visitAgain(page);
       // the 4B runs on a 16 GB card but is not one of its picks (tiers.ts)
-      await expect(dlGroup(page, "Also available").locator('.dlrow[data-cat="qwen3.5:4b"]'), "a new visit uses the current fit grouping").toBeVisible();
+      await expect(dlGroup(page, "Also available").locator('.mp-row[data-cat="qwen3.5:4b"]'), "a new visit uses the current fit grouping").toBeVisible();
     });
 
     // Guards a shipped bug fix: a finished download made the list jump during its fit recheck.
-    test("Download finishes in place without briefly offering Download again", async ({ page, open }) => {
+    test("a download finishes in its row's place without briefly offering Download again", async ({ page, open }) => {
       await open();
       await waitReady(page);
       await section(page, "Models", true);
-      await page.getByTestId("models.tabs.download").click();
       await stack.scenario("models", { pullTickMs: 250, pullChunkBytes: 256 * 1024 * 1024 });
-      const selector = '.dlrow[data-cat="qwen3.5:4b"]';
+      const selector = anyRow("qwen3.5:4b");
       const row = page.locator(selector);
       await expect(row).toBeVisible();
-      const count = await page.locator(".dlrow").count();
-      await expect(page.locator(".dlrow[data-verdict]")).toHaveCount(count);
-      await row.getByRole("button", { name: /^Download \d/ }).click();
-      await expect(row.getByTestId("models.download.cancel")).toBeVisible();
+      const count = await page.locator(".mp-row[data-cat]").count();
+      await expect(page.locator(".mp-row[data-cat][data-verdict]")).toHaveCount(count);
+      await row.getByTestId("models.offered.download").click();
+      await expect(row.getByTestId("models.downloading.cancel")).toBeVisible();
       await row.scrollIntoViewIfNeeded();
-      // the button and its × hold the row's action through the download (row 18)
-      await mark(row.locator(".dl-a"), "download-verdict");
-      const original = await row.elementHandle();
-      if (!original) throw new Error("The download row must exist before completion");
       const frames = await burst(page, `r2-${width}/download-complete`, selector, async () => {
-        await expect(row.locator(".dl-done")).toHaveText("Installed", { timeout: 15_000 });
-        await expect(page.locator(".dlrow[data-verdict]")).toHaveCount(count);
+        await expect(row).toHaveAttribute("data-dm", "qwen3.5:4b", { timeout: 15_000 });
+        await expect(page.locator(".mp-row[data-cat][data-verdict]")).toHaveCount(count - 1);
       });
       stableSize(frames, "surface", `download-complete-${width}`);
-      const heights = frames.map(frame => frame.boxes["download-verdict"]?.[3]).filter((height): height is number => height !== undefined);
-      expect(heights, "every frame must include the verdict block").toHaveLength(frames.length);
-      expect.soft(Math.max(...heights) - Math.min(...heights), "a new table must preserve the verdict block height").toBeLessThanOrEqual(0.5);
       expect(frames.filter((f) => f.checking), "an installed model keeps its verdicts while the table is rebuilt").toHaveLength(0);
       expect(sizeChange(frames, "surface").positionPx, "completion must keep the row in place").toBeLessThanOrEqual(0.5);
-      expect(await original.evaluate(node => node === document.querySelector('.dlrow[data-cat="qwen3.5:4b"]')), "completion must preserve the row").toBe(true);
-      // the idle button's name is "Download" and its size (row 18)
       expect(frames.filter((f) => f.elements.some((e) => e.startsWith("BUTTON:Download"))), "completion must not return to the idle action while the list catches up").toHaveLength(0);
     });
   });

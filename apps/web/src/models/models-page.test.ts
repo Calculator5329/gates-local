@@ -117,14 +117,12 @@ it("a row's menu, as it opens, puts the focus on its first item", async () => {
   expect(doc.activeElement).toBe(first);
 });
 
-it("wider than a phone, the tabs sit in the pop-up's header and only the list below it scrolls", async () => {
+it("wider than a phone, the page is one list under the pop-up's header, with no tabs, and only the list scrolls", async () => {
   await mount();
-  const head = byClass("dlg-head")[0]!;
   const body = byClass("dlg-body")[0]!;
-  expect(all((el) => el.getAttribute("role") === "tablist")).toHaveLength(1);
-  expect(byTestId("models.tabs.list", head)).not.toBeNull();
-  expect(byTestId("models.tabs.list", body)).toBeNull();
-  expect(byClass("mp-card", body)).toHaveLength(1);
+  expect(byClass("dlg-head")[0]!.textContent).toBe("Models");
+  expect(all((el) => el.getAttribute("role") === "tablist" || el.getAttribute("role") === "tab")).toHaveLength(0);
+  expect(byTestId("models.list.installed", body)).not.toBeNull();
   const css = readFileSync(new URL("../lib/ui/panel.css", import.meta.url), "utf8");
   expect(css).toMatch(/\n\.dlg-head\{flex:none;/);
   expect(css).toMatch(/\n\.dlg-body\{[^}]*min-height:0;overflow-y:auto/);
@@ -298,10 +296,84 @@ it("the remove dialog names the model that becomes the default, or says new chat
   expect(alone!.textContent).not.toContain("becomes the default");
 });
 
-it("the size column says it is the size on disk, so it is not read as the GPU need beside it", async () => {
+/** Every model row on the page, top to bottom: i for installed, d for downloading, o for offered. */
+const order = () => all((el) => el.classList.includes("mp-row")).map((el) => {
+  const dm = el.getAttribute("data-dm") ?? el.getAttribute("data-em"), pull = el.getAttribute("data-pull");
+  return dm !== null ? `i ${dm}` : pull !== null ? `d ${pull}` : `o ${el.getAttribute("data-cat") ?? "?"}`;
+});
+const fits = table(report("alpha:1b", "fits"), report("beta:2b", "fits"), report("gamma:3b", "fits"));
+const downloading = (name: string) => ({ name, state: "downloading" as const, completedBytes: GIB, totalBytes: 5 * GIB });
+const change = async (over: Partial<import("../lib/store/store.ts").State>) => { await act(async () => { store.setState(over); }); await settle(); };
+
+it("a model that is offered keeps its row from Download through progress to installed, and no other row moves", async () => {
+  await mount({ models: [installed("alpha:1b")] as never, fitTable: fits as never });
+  expect(order()).toEqual(["i alpha:1b", "o beta:2b", "o gamma:3b"]);
+  expect(props(byTestId("models.offered.download", all((el) => el.getAttribute("data-cat") === "beta:2b")[0]))["aria-label"]).toBe("Download Beta, 5.0 GB");
+  await change({ pulls: { "beta:2b": downloading("beta:2b") } });
+  expect(order()).toEqual(["i alpha:1b", "d beta:2b", "o gamma:3b"]);
+  expect(all((el) => el.getAttribute("role") === "progressbar")).toHaveLength(1);
+  await change({ pulls: { "beta:2b": { ...downloading("beta:2b"), state: "done" as const } }, models: [installed("alpha:1b"), installed("beta:2b")] as never });
+  expect(order()).toEqual(["i alpha:1b", "i beta:2b", "o gamma:3b"]);
+  // it has an installed row's controls where it stands
+  expect(byTestId("models.row-menu.open", rowOf("beta:2b"))).not.toBeNull();
+  // removed again, the list offers it where it was
+  await change({ pulls: {}, models: [installed("alpha:1b")] as never });
+  expect(order()).toEqual(["i alpha:1b", "o beta:2b", "o gamma:3b"]);
+});
+
+it("with no models, the page says so in one line over the offered list, and a first download is a row of that list", async () => {
+  await mount({ models: [] as never, model: null as never, settings: {} as never, fitTable: fits as never });
+  expect(byTestId("models.empty")?.textContent).toBe("No models yet. Download one to start chatting.");
+  expect(byTestId("models.list.installed")).toBeNull();
+  expect(order()).toEqual(["o alpha:1b", "o beta:2b", "o gamma:3b"]);
+  expect(byClass("mp-th"), "the offered list carries the column heads").toHaveLength(1);
+  await change({ pulls: { "beta:2b": downloading("beta:2b") } });
+  expect(order()).toEqual(["o alpha:1b", "d beta:2b", "o gamma:3b"]);
+  await change({ pulls: {}, models: [installed("beta:2b")] as never });
+  expect(order()).toEqual(["o alpha:1b", "i beta:2b", "o gamma:3b"]);
+  expect(byTestId("models.empty"), "it no longer says there are none").toBeNull();
+});
+
+it("a download started by a typed name gets a row under the box it was typed in, and stays there when installed", async () => {
+  await mount({ models: [installed("alpha:1b")] as never, fitTable: fits as never });
+  expect(byTestId("models.list.typed")).toBeNull();
+  await change({ pulls: { "zeta:9b": downloading("zeta:9b") } });
+  const typed = byTestId("models.list.typed");
+  expect(all((el) => el.getAttribute("data-pull") === "zeta:9b", typed!)).toHaveLength(1);
+  expect(order()).toEqual(["i alpha:1b", "o beta:2b", "o gamma:3b", "d zeta:9b"]);
+  await change({ pulls: {}, models: [installed("alpha:1b"), installed("zeta:9b")] as never });
+  expect(order()).toEqual(["i alpha:1b", "o beta:2b", "o gamma:3b", "i zeta:9b"]);
+  // a model put there by another program, with no download here, joins the installed ones
+  await change({ models: [installed("alpha:1b"), installed("zeta:9b"), installed("omega:1b")] as never });
+  expect(order()).toEqual(["i alpha:1b", "i omega:1b", "o beta:2b", "o gamma:3b", "i zeta:9b"]);
+});
+
+it("a download already running when the page opens is among the installed models, and the list below does not offer it", async () => {
+  await mount({ models: [installed("alpha:1b")] as never, fitTable: fits as never, pulls: { "gamma:3b": downloading("gamma:3b") } });
+  expect(order()).toEqual(["i alpha:1b", "d gamma:3b", "o beta:2b"]);
+  const top = byTestId("models.list.installed")!;
+  expect(all((el) => el.getAttribute("data-pull") === "gamma:3b", top)).toHaveLength(1);
+});
+
+it("opened to add a model, the offered list is brought into view once", async () => {
+  const seen: FakeElement[] = [];
+  Object.assign(FakeElement.prototype, { scrollIntoView(this: FakeElement) { seen.push(this); } });
+  await mount({ fitTable: fits as never, addPage: true, models: [installed("alpha:1b")] as never });
+  expect(seen).toHaveLength(1);
+  expect(all((el) => el.getAttribute("data-cat") === "beta:2b", seen[0])).toHaveLength(1);
+  expect(byTestId("models.list.installed", seen[0])).toBeNull();
+  expect(store.getState().addPage).toBe(false);
+  await change({ pulls: {} });
+  expect(seen, "a later render does not scroll").toHaveLength(1);
+  seen.length = 0;
+  await mount({ fitTable: fits as never, models: [installed("alpha:1b")] as never });
+  expect(seen, "opened from the sidebar, the page stays at its top").toHaveLength(0);
+});
+
+it("the size column is the file's size, in its own column beside what the model needs on this computer", async () => {
   await mount();
   const head = byClass("mp-th")[0]!;
-  expect(byClass("mp-sz", head).map((el) => el.textContent)).toEqual(["On disk"]);
+  expect(byClass("mp-sz", head).map((el) => el.textContent)).toEqual(["Size"]);
   expect(byClass("mp-fitc", head).map((el) => el.textContent)).toEqual(["On this computer"]);
 });
 

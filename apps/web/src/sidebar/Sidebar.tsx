@@ -391,7 +391,6 @@ function SettingsButton() {
 
 // why: a WeakSet, as a new attempt's failure is a new store object and so shows again.
 const seenFailures = new WeakSet<PullProgress>();
-const running = (p: PullProgress) => p.state === "queued" || p.state === "downloading" || p.state === "verifying";
 
 function ModelsButton() {
   const pulls = useStore((s) => s.pulls);
@@ -412,7 +411,7 @@ function ModelsButton() {
       {...(m.state === "failed" ? { tone: "red" as const } : m.state === "downloading" ? { tone: "fg" as const, ring: m.progress } : {})}
       pressed={inModels}
       dot={m.failed ? "red" : null}
-      onClick={() => closeDrawer(() => toggleModels(all.some(running)), true)}
+      onClick={() => closeDrawer(() => toggleModels(), true)}
     />
   );
 }

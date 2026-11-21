@@ -44,6 +44,8 @@ export const awaitingInstall = (p: { readonly state: string }): boolean => p.sta
 
 export const modelNameKey = (name: string): string => name.replace(/:latest$/, "");
 
+export const modelKey = (name: string): string => modelNameKey(name.trim().toLowerCase());
+
 export const pendingDownload = (p: { readonly name: string; readonly state: string }, models: readonly Pick<ModelInfo, "name">[] | undefined): boolean =>
   awaitingInstall(p) && !(models ?? []).some(m => m.name === p.name || (p.state === "done" && modelNameKey(m.name) === modelNameKey(p.name)));
 

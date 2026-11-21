@@ -7,11 +7,11 @@ import { MakerMark } from "./MakerMark.tsx";
 import { MemoryMark } from "./MemoryMark.tsx";
 import { answers, rowOf } from "../fit/fit-table.ts";
 import { labelOf, nameOf, pullName, shortTag, sizeText, splitTail } from "./models-rules.ts";
-import { awaitingInstall, modelNameKey, pendingDownload } from "./pick.ts";
+import { modelKey as downloadKey, pendingDownload } from "./pick.ts";
 import { type ActionResult, cancelPull, estimateModel, pull } from "../lib/session/index.ts";
 import { PathText } from "../lib/ui/settings-controls.tsx";
 import { Grp, Row, useAct, useOutside, walk } from "../lib/ui/settings-ui.tsx";
-import { NA, type State, getState, useStore } from "../lib/store/store.ts";
+import { NA, type State, getState, setState, useStore } from "../lib/store/store.ts";
 import { Skel, closeTip } from "../lib/ui/ui.tsx";
 import { useAfter } from "../lib/ui/kit/flash.ts";
 import { requestFocus } from "../lib/ui/kit/focus.ts";
@@ -34,10 +34,6 @@ export function usePendingDownloads() {
   const pulls = useStore((s) => s.pulls);
   const models = useStore((s) => s.models);
   return Object.values(pulls).filter((p) => pendingDownload(p, models));
-}
-
-export function DownloadingRows() {
-  return usePendingDownloads().map((p) => <DownloadingRow key={p.name} p={p} />);
 }
 
 export function DownloadingRow({ p }: { p: PullProgress }) {
@@ -87,10 +83,8 @@ export function DownloadingRow({ p }: { p: PullProgress }) {
   );
 }
 
-const downloadKey = (name: string) => modelNameKey(name.trim().toLowerCase());
 interface DownloadActions {
   start(name: string): Promise<boolean>;
-  cancel(name: string): void;
   error(name: string): ActionResult;
 }
 
@@ -147,52 +141,59 @@ export function DlButton({ size, label, p, installed = false, disabled = false, 
   );
 }
 
-function DlRow({ c, report, actions }: { c: CatalogEntry; report: FitReport | undefined; actions: DownloadActions }) {
-  const p = useStore(s => Object.values(s.pulls).findLast(progress => downloadKey(progress.name) === downloadKey(c.name) && awaitingInstall(progress)));
-  const installed = useStore((s) => c.installed || (s.models ?? []).some((m) => downloadKey(m.name) === downloadKey(c.name)));
-  const canCancel = useStore(canCancelPull);
+// why: an installed row's grid, so the row keeps its height when it downloads and installs
+function OfferedRow({ c, report, actions }: { c: CatalogEntry; report: FitReport | undefined; actions: DownloadActions }) {
   const v = report ? verdictOf(report) : undefined;
-  const dling = p !== undefined && awaitingInstall(p) && !installed;
-  const err = installed ? null : actions.error(c.name);
+  const err = actions.error(c.name);
   const name = labelOf(c);
+  const size = sizeText(c.downloadBytes);
+  const fit = report && v ? <span className="mp-fit"><MemoryMark report={report} words={v.mark} /></span> : <span className="mp-fit none" aria-hidden="true" />;
   return (
-    <div className="dlrow" data-cat={c.name} data-verdict={report?.verdict}>
-      <MakerMark tag={c.name} />
-      <div className="sl">
-        <b>{name}</b>
-        <span className="d dl-status">
-          {err ? (
-            <span role="alert" className="dl-error">{err}</span>
-          ) : dling ? (
-            etaText(p, { speed: false })
-          ) : (
-            c.purpose
-          )}
-        </span>
+    <div className="mp-row" data-cat={c.name} data-verdict={report?.verdict} aria-label={name}>
+      <div className="mp-nm">
+        <div className="mp-l1">
+          <MakerMark tag={c.name} />
+          <span className="mp-nmn">{name}</span>
+        </div>
+        <div className="mp-p dl-status">{err ? <span role="alert" className="dl-error">{err}</span> : c.purpose}</div>
+        <div className="mp-meta">
+          <span>{size}</span>
+          <span aria-hidden="true">·</span>
+          {fit}
+        </div>
       </div>
-      {report && v ? <MemoryMark report={report} words={v.mark} lead="Needs" /> : <span className="mm lead" aria-hidden="true" />}
-      <DlButton
-        size={gb(c.downloadBytes)}
-        label={name}
-        p={dling ? p : undefined}
-        installed={installed}
-        onStart={() => void actions.start(c.name)}
-        onCancel={dling && canCancel ? () => actions.cancel(p.name) : undefined}
-      />
+      <span className="mp-sz">{size}</span>
+      <span className="mp-fitc">{fit}</span>
+      <span className="mp-get-a">
+        <button type="button" className="btn outline mp-mbtn" data-testid="models.offered.download" aria-label={`Download ${name}, ${size}`} onClick={() => void actions.start(c.name)}>
+          <Icon id="download" cls="s14" />
+          <span className="mp-get-w">Download</span>
+        </button>
+      </span>
     </div>
   );
 }
 
 function BigRow({ c, report }: { c: CatalogEntry; report: FitReport }) {
   const name = labelOf(c);
+  const size = sizeText(c.downloadBytes);
+  const fit = <span className="mp-fit"><MemoryMark report={report} words={verdictOf(report).mark} /></span>;
   return (
-    <div className="dlrow dl-big" data-cat={c.name} data-verdict={report.verdict}>
-      <MakerMark tag={c.name} />
-      <div className="sl">
-        <b>{name}</b>
-        <span className="d">{c.purpose}</span>
+    <div className="mp-row mp-toobig" data-cat={c.name} data-verdict={report.verdict} aria-label={name}>
+      <div className="mp-nm">
+        <div className="mp-l1">
+          <MakerMark tag={c.name} />
+          <span className="mp-nmn">{name}</span>
+        </div>
+        <div className="mp-p">{c.purpose}</div>
+        <div className="mp-meta">
+          <span>{size}</span>
+          <span aria-hidden="true">·</span>
+          {fit}
+        </div>
       </div>
-      <MemoryMark report={report} words={verdictOf(report).mark} lead="Needs" />
+      <span className="mp-sz">{size}</span>
+      <span className="mp-fitc">{fit}</span>
     </div>
   );
 }
@@ -286,7 +287,7 @@ export function CustomPull({ actions, numCtx }: { actions: DownloadActions; numC
 const installation = (s: State, key: string) => (s.models ?? []).find(m => downloadKey(m.name) === key) ??
   (s.catalog !== NA && s.catalog?.some(c => c.installed && downloadKey(c.name) === key) ? true : undefined);
 
-function GroupsPlaceholder({ rows, first }: { rows: number; first: number }) {
+function GroupsPlaceholder({ rows, first, head }: { rows: number; first: number; head: ReactNode }) {
   const sizes = [first, rows - first].filter(n => n > 0);
   return (
     <div className="grp-skel" aria-busy="true">
@@ -294,12 +295,18 @@ function GroupsPlaceholder({ rows, first }: { rows: number; first: number }) {
         {sizes.map((n, g) => (
           <div className="grp" key={g}>
             <div className="grp-h"><div><div className="grp-t"><Skel w={g === 0 ? "7em" : "8em"} /></div></div></div>
-            <div className="box">
+            <div className="mp-card">
+              {g === 0 ? head : null}
               {Array.from({ length: n }, (_, i) => (
-                <div className="dlrow" key={i}>
-                  <span className="maker-mark" />
-                  <div className="sl"><b><Skel w="8em" /></b><span className="d"><Skel w="12em" /></span></div>
-                  <div className="dl-a"><span className="dl-btn dl-skel"><Skel w="64px" /></span><span className="dl-x off" /></div>
+                <div className="mp-row" key={i}>
+                  <div className="mp-nm">
+                    <div className="mp-l1"><span className="maker-mark" /><Skel w="8em" /></div>
+                    <div className="mp-p"><Skel w="12em" /></div>
+                    <div className="mp-meta"><Skel w="9em" /></div>
+                  </div>
+                  <span className="mp-sz" />
+                  <span className="mp-fitc" />
+                  <span className="mp-get-a"><span className="btn outline mp-mbtn" /></span>
                 </div>
               ))}
             </div>
@@ -318,7 +325,23 @@ export function othersLine(others: { programs: readonly string[]; bytes: number 
   return `${who} ${others.programs.length === 1 ? "is" : "are"} using ${gb(others.bytes)} of GPU memory right now.`;
 }
 
-export function DownloadTab() {
+// why: a ref callback, so a page opened to add a model shows this list once
+const broughtIntoView = (el: HTMLDivElement | null) => {
+  if (el === null || !getState().addPage) return;
+  el.scrollIntoView({ block: "start" });
+  setState({ addPage: false });
+};
+
+export function Catalog({ hidden, live, head, others: sayOthers, filter, typed, shownAbove }: {
+  hidden: readonly string[];
+  live: (name: string) => ReactNode | undefined;
+  head: boolean;
+  others: boolean;
+  filter: string;
+  typed: ReactNode;
+  shownAbove: number;
+}) {
+  const measureShown = useStore((s) => s.measures !== NA && s.unavailable["models.measure"] !== true);
   const [attempts, setAttempts] = useState<Record<string, { error: ActionResult | undefined; pulls: State["pulls"]; installed: ReturnType<typeof installation>; start: boolean }>>({});
   const run = async (name: string, action: Promise<ActionResult>, start = false) => {
     const key = downloadKey(name), snapshot = getState();
@@ -332,7 +355,8 @@ export function DownloadTab() {
   const models = useStore(s => s.models), pulls = useStore(s => s.pulls);
   const numCtx = useStore((s) => s.numCtx);
   const table = useStore((s) => s.fitTable);
-  const list =catalog === NA || catalog === undefined ? [] : catalog;
+  const above = new Set(hidden);
+  const list = (catalog === NA || catalog === undefined ? [] : catalog).filter(c => !above.has(downloadKey(c.name)));
   const retired = (key: string, attempt: (typeof attempts)[string]) => {
     if (attempt.error === undefined) return false;
     const s = getState(), now = installation(s, key), before = attempt.installed;
@@ -352,9 +376,6 @@ export function DownloadTab() {
     start: name => {
       const tag = list.find(c => downloadKey(c.name) === downloadKey(name))?.name ?? name.trim();
       return run(tag, pull(tag), true);
-    },
-    cancel: name => {
-      void run(name, cancelPull(name));
     },
     error: name => {
       const key = downloadKey(name), attempt = attempts[key];
@@ -394,45 +415,67 @@ export function DownloadTab() {
   const keep = !holding && rec.length === 0 && slot === numCtx;
   const more = [...rows(groups.other), ...list.filter(c => !known.has(c.name) && !refuses(c))];
   const big = holding ? [] : list.filter(refuses);
-  const others = table?.memory.kind === "gpu" ? table.memory.others : undefined;
+  const others = sayOthers && table?.memory.kind === "gpu" ? table.memory.others : undefined;
+  const q = filter.toLowerCase();
+  const matches = (c: CatalogEntry) => q === "" || labelOf(c).toLowerCase().includes(q) || c.name.toLowerCase().includes(q);
+  const recShown = rec.filter(matches), moreShown = more.filter(matches), bigShown = big.filter(matches);
+  const card = measureShown ? "mp-card ms" : "mp-card";
+  const th = head ? <TableHeadRow measureShown={measureShown} /> : null;
+  const row = (c: CatalogEntry) => live(c.name) ?? <OfferedRow key={c.name} c={c} report={report(c)} actions={actions} />;
+  const section = (title: string, shown: CatalogEntry[], first: boolean) => (
+    <div className="grp">
+      <div className="grp-h"><div><div className="grp-t">{title}</div></div></div>
+      <div className={card}>
+        {first ? th : null}
+        {shown.map(row)}
+      </div>
+    </div>
+  );
   return (
-    <>
+    <div ref={broughtIntoView}>
       {catalog === NA ? (
         <p className="na">The model list is not available in this build. You can still type a model name below.</p>
       ) : null}
-      {holding ? <GroupsPlaceholder rows={list.length} first={list.filter(c => c.recommended).length} /> : null}
-      {keep ? (
-        <div className="grp grp-keep" aria-hidden="true"><div className="grp-h"><div><div className="grp-t">{" "}</div></div></div></div>
+      {holding ? <GroupsPlaceholder rows={list.length} first={list.filter(c => c.recommended).length} head={th} /> : null}
+      {keep && q === "" ? (
+        <div className="grp grp-keep" aria-hidden="true"><div className="grp-h"><div><div className="grp-t">{" "}</div></div></div></div>
       ) : null}
-      {!holding && rec.length > 0 ? (
-        <Grp title="Recommended">
-          {rec.map((c) => (
-            <DlRow key={c.name} c={c} report={report(c)} actions={actions} />
-          ))}
-        </Grp>
-      ) : null}
-      {!holding && more.length > 0 ? (
-        <Grp title="Also available">
-          {more.map((c) => (
-            <DlRow key={c.name} c={c} report={report(c)} actions={actions} />
-          ))}
-        </Grp>
-      ) : null}
+      {!holding && recShown.length > 0 ? section("Recommended", recShown, true) : null}
+      {!holding && moreShown.length > 0 ? section("Also available", moreShown, recShown.length === 0) : null}
+      {q !== "" && !holding && shownAbove + recShown.length + moreShown.length + bigShown.length === 0 ? <p className="mp-quiet">No model matches “{filter}”.</p> : null}
       {others && list.length > 0 ? <p className="na dl-others">{othersLine(others)}</p> : null}
       <Grp title="Something else"><CustomPull actions={actions} numCtx={numCtx} /></Grp>
-      {big.length > 0 ? (
+      {typed}
+      {bigShown.length > 0 ? (
         <details className="grp dl-bigs">
           <summary className="grp-h" data-testid="models.download.too-big">
-            <div><div className="grp-t">Too big for this computer<span className="grp-n">{big.length}</span><Icon id="down" cls="dl-chev" /></div></div>
+            <div><div className="grp-t">Too big for this computer<span className="grp-n">{bigShown.length}</span><Icon id="down" cls="dl-chev" /></div></div>
           </summary>
-          <div className="box">
-            {big.map((c) => {
+          <div className="mp-card">
+            {bigShown.map((c) => {
               const r = report(c);
               return r ? <BigRow key={c.name} c={c} report={r} /> : null;
             })}
           </div>
         </details>
       ) : null}
-    </>
+    </div>
+  );
+}
+
+export function TableHeadRow({ measureShown }: { measureShown: boolean }) {
+  return (
+    <div className="mp-th" aria-hidden="true">
+      <span className="mp-thn">Model</span>
+      <span className="mp-sz">Size</span>
+      <span className="mp-fitc">On this computer</span>
+      {measureShown ? (
+        <>
+          <span className="mp-spd">Speed</span>
+          <span className="mp-score">Score</span>
+        </>
+      ) : null}
+      <span />
+    </div>
   );
 }

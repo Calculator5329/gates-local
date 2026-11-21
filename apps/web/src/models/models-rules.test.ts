@@ -13,6 +13,7 @@ import {
   nameOf,
   nextDefault,
   noteSettled,
+  place,
   pullName,
   shortTag,
   sizeText,
@@ -160,5 +161,30 @@ describe("the note that the next default could not be saved", () => {
     expect(noteSettled("alpha", undefined)).toBe(false);
     expect(noteSettled("alpha", "alpha")).toBe(false);
     expect(noteSettled("alpha", "beta")).toBe(true);
+  });
+});
+
+describe("where a model's row sits for a visit", () => {
+  const none = { installed: [], pending: [], offered: [] };
+  it("puts what is installed or downloading when the page opens at the top", () => {
+    expect(place(undefined, { ...none, installed: ["a"], pending: ["b"], offered: ["b", "c"] })).toEqual({ top: ["a", "b"], typed: [] });
+  });
+  it("leaves an offered model in its offered place when it downloads and installs", () => {
+    const open = place(undefined, { ...none, installed: ["a"], offered: ["c"] });
+    const running = place(open, { ...none, installed: ["a"], pending: ["c"], offered: ["c"] });
+    expect(running).toBe(open);
+    expect(place(running, { ...none, installed: ["a", "c"], offered: ["c"] })).toBe(open);
+  });
+  it("puts a typed name's download in its own place and keeps it there once installed", () => {
+    const open = place(undefined, { ...none, installed: ["a"] });
+    const running = place(open, { ...none, installed: ["a"], pending: ["x"] });
+    expect(running).toEqual({ top: ["a"], typed: ["x"] });
+    expect(place(running, { ...none, installed: ["a", "x"] })).toBe(running);
+  });
+  it("drops a removed model and a cancelled download, and adds one installed from outside the page at the top", () => {
+    const open = place(undefined, { ...none, installed: ["a", "b"] });
+    const typed = place(open, { ...none, installed: ["a", "b"], pending: ["x"] });
+    expect(place(typed, { ...none, installed: ["b"] })).toEqual({ top: ["b"], typed: [] });
+    expect(place(open, { ...none, installed: ["a", "b", "z"] })).toEqual({ top: ["a", "b", "z"], typed: [] });
   });
 });

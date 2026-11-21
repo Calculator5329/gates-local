@@ -703,9 +703,9 @@ div.think.fold:hover{color:var(--muted-foreground);background:none}
 .set-h h1{font-size:22px;font-weight:600;letter-spacing:-.01em;margin:0}
 .set-h p{font-size:14px;color:var(--muted-foreground);margin:6px 0 0}
 .grp+.grp,.grp-skel+.grp{margin-top:24px}
-/* an emptied Recommended's header, hidden; its rows joined the next box, which adds one 1px row border.
-   flow-root keeps the header's own 8px margin inside, where a group's box would have held it */
-.grp-keep{visibility:hidden;display:flow-root;margin-bottom:-1px}
+/* an emptied Recommended's header, hidden; its rows joined the next box: one box's 2px of border gone, one 1px
+   row border added. flow-root keeps the header's own 8px margin inside, where a group's box would have held it */
+.grp-keep{visibility:hidden;display:flow-root;margin-bottom:1px}
 /* its title is one line tall by rule, not by whatever line a blank character gets */
 .grp-keep .grp-t{height:1lh}
 .grp-h{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:8px 12px;margin:0 0 8px}
@@ -1157,17 +1157,13 @@ a.btn{text-decoration:none}
 /* ---------------------------------------------------------------- Settings › Models (Models.tsx; the models-a4 design plus the M3 rows) */
 .set-in:has(.mp){max-width:936px;padding-top:0}
 .mp{container:mp/inline-size;--mp-cols:minmax(0,1fr) 80px 200px 132px}
-/* title and tabs stay put while the list scrolls (M3 row 11) */
+/* the title stays put while the list scrolls (M3 row 11) */
 .mp-head{position:sticky;top:0;z-index:5;background:var(--background);padding-top:16px}
 .mp-head h1{font-size:22px;font-weight:600;margin:0 0 16px;letter-spacing:-.01em}
 .mp-tabs{display:flex;align-items:stretch;gap:24px;height:44px;border-bottom:1px solid var(--border);margin:0 0 16px}
 .mp-tab{display:flex;align-items:flex-end;gap:7px;padding:0 0 9px;margin-bottom:-1px;border-bottom:2px solid transparent;color:var(--muted-foreground);font-size:14.5px;white-space:nowrap;transition:color .12s}
 .mp-tab:hover{color:var(--foreground)}
 .mp-tab.on{color:var(--foreground);border-bottom-color:var(--foreground)}
-.mp-lbl{display:inline-flex;flex-direction:column}
-.mp-lbl::after{content:attr(data-l) / "";font-weight:600;height:0;visibility:hidden;overflow:hidden}   /* no width jump when bold */
-.mp-tab.on .mp-lbl{font-weight:600}
-.mp-n{color:var(--muted-foreground);font-size:13px;font-variant-numeric:tabular-nums}
 .mp-quiet{color:var(--muted-foreground);font-size:13.5px;margin:0 0 16px}
 .mp-note{margin:8px 0 12px}
 .mp-note .act-err{margin:0}
@@ -1203,7 +1199,7 @@ a.btn{text-decoration:none}
 .mp-x,.mp-kebab{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border-radius:var(--r-sm);color:var(--muted-foreground);flex:none}
 .mp-x:hover{background:var(--hover);color:var(--foreground)}
 
-/* one table for both tabs: Model takes the rest, Size and fit fixed (M3 row 6) */
+/* one table for every model, installed or offered: Model takes the rest, Size and fit fixed (M3 row 6) */
 .mp-card{border:1px solid var(--border);border-radius:var(--r-lg);background:var(--card)}
 .mp-th,.mp-row{display:grid;grid-template-columns:var(--mp-cols);align-items:center;padding:0 8px 0 14px}
 .mp-th{height:34px;font-size:12.5px;color:var(--muted-foreground);border-bottom:1px solid var(--border)}
@@ -1221,8 +1217,6 @@ a.btn{text-decoration:none}
 .mm.gpu .mm-bar i{background:var(--green)}.mm.spill .mm-bar i{background:var(--amber)}.mm.no .mm-bar i{background:var(--faint)}
 .mm-n{flex:none;width:78px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .mm.no .mm-n{color:var(--muted-foreground)}
-/* the Download tab's mark carries "Needs", so its figure gets a wider fixed box */
-.mm.lead{width:234px}.mm.lead .mm-n{width:136px}
 /* the card holds it, right now it is slower: who is in the way, one quiet line; the sizes are its tip */
 .mm-why{display:flex;align-items:center;gap:4px;margin-top:2px;width:max-content;max-width:100%;font-size:12.5px;line-height:16px;color:var(--amber-fg);cursor:default}
 .mm-why>span:not(.vh){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1324,12 +1318,15 @@ a.btn{text-decoration:none}
 .btn.mp-danger:hover{background:color-mix(in srgb,var(--red) 88%,var(--foreground))}
 .btn.mp-danger:disabled{opacity:.6;cursor:default}
 
-/* Progress runs inside the row's existing inset, beside a persistent detail line. */
-.dlrow{position:relative;display:flex;align-items:center;gap:16px;padding:12px 16px;min-height:64px}
-.dlrow+.dlrow{border-top:1px solid var(--border)}
-/* the maker mark sits 8 px before the name, as in the picker */
-.dlrow>.maker-mark{margin-right:-8px}
-/* Row 18, layout A: the size is the button, a running download fills that same box, and the ×
+/* A model the list offers: Download sits where Measure sits on an installed row, so the row keeps its
+   lines and its height when the download starts and when the model is installed. */
+.mp-get-a{grid-column:4;display:flex;justify-content:flex-end;min-width:0;padding-left:12px}
+.mp-card.ms .mp-get-a{grid-column:4 / span 2}
+.mp-toobig .mp-nm{opacity:.6}
+/* downloads started from the typed name, under it */
+.mp-typed{margin-top:8px}
+.mp-typed+.grp{margin-top:24px}
+/* First run and the typed name: the size is the button, a running download fills that same box, and the ×
    beside it keeps its box in every state, so nothing on the row moves. */
 .dl-a{flex:none;display:flex;justify-content:flex-end;align-items:center;gap:8px}
 .dl-btn{position:relative;box-sizing:border-box;width:140px;height:32px;padding:0 10px;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:none;overflow:hidden;border-radius:var(--r-ctl);box-shadow:inset 0 0 0 1px var(--border-strong);font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--foreground)}
@@ -1340,6 +1337,8 @@ button.dl-btn:disabled,button.dl-btn:disabled:hover{opacity:.45;cursor:not-allow
 .dl-run span{position:relative}
 .dl-done{color:var(--muted-foreground)}
 .dl-skel{box-shadow:none}
+/* holds the Download button's box, so the rows that arrive are the same height */
+.grp-skel .mp-mbtn{visibility:hidden}
 .dl-x{box-sizing:border-box;width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;flex:none;border-radius:var(--r-ctl);box-shadow:inset 0 0 0 1px var(--border-strong);color:var(--muted-foreground)}
 .dl-x:hover,.dl-x.on{background:var(--hover);color:var(--foreground)}
 .dl-x:disabled{opacity:.45;cursor:default}
@@ -1355,26 +1354,12 @@ button.dl-btn:disabled,button.dl-btn:disabled:hover{opacity:.45;cursor:not-allow
 .dl-chev{width:14px;height:14px;color:var(--muted-foreground);transform:rotate(-90deg);transition:transform .12s}
 .dl-bigs[open] .dl-chev{transform:none}
 .grp-n{font-size:12.5px;font-weight:500;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
-.dl-big .sl{opacity:.6}
-.dlrow>.mm{font-size:13px}
-/* no button on a too-big row: its mark keeps the column the other marks are in (the button and × beside it) */
-.dl-big>.mm{margin-right:196px}
 /* the typed name: its verdict under the field, and the menu that holds Download anyway */
 .dl-typed-a{position:relative;display:flex}
 .dl-typed{font-size:13px;color:var(--muted-foreground)}.dl-typed.no{color:var(--red-fg)}
 /* as wide as its words: "Download anyway" and the whole size, never cut */
 .dl-menu{width:max-content;min-width:240px}
-.dlrow>.prog,.mp-dling>.prog{position:absolute;left:16px;right:16px;bottom:4px;height:4px;margin:0}
-
-/* zero models */
-.mp-empty{padding:40px 32px;text-align:center;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--card)}
-.mp-big{width:28px;height:28px;color:var(--muted-foreground)}
-.mp-empty h2,.mp-first h2{margin:10px 0 6px;font-size:16px;font-weight:600}
-.mp-empty p{max-width:440px;margin:0 auto 18px;color:var(--muted-foreground);text-wrap:balance}
-.mp-empty p b{color:var(--foreground);font-weight:600;white-space:nowrap}
-.mp-empty .mp-r2{justify-content:center;margin:0}
-.mp-first h2{margin-top:0}
-.mp-first p{margin:0 0 14px;color:var(--muted-foreground)}   /* no outer border while the first model downloads (M3 row 7) */
+.mp-dling>.prog{position:absolute;left:16px;right:16px;bottom:4px;height:4px;margin:0}
 
 /* phone: one column, a meta line per row, 44 px hit regions (M3 row 4) */
 @media (max-width:640px){
@@ -1397,7 +1382,7 @@ button.dl-btn:disabled,button.dl-btn:disabled:hover{opacity:.45;cursor:not-allow
   .mp-head{padding-top:12px}
   .mp-head h1{display:none}
   .mp-mi,.mp-opt{min-height:44px}
-  .mp-p,.mp-n,.mp-foot,.mp-quiet,.mp-k,.mp-osz,.mp-cap,.mp-opt .mp-fit,.src-none{font-size:14px}
+  .mp-p,.mp-foot,.mp-quiet,.mp-k,.mp-osz,.mp-cap,.mp-opt .mp-fit,.src-none{font-size:14px}
   .db-open{gap:8px}
   .db-open .src-ic{display:none}
   .db-more{padding-left:0}
@@ -1431,20 +1416,13 @@ button.dl-btn:disabled,button.dl-btn:disabled:hover{opacity:.45;cursor:not-allow
   .mp-menu{position:fixed;inset:auto 0 0;width:auto;max-height:70dvh;overflow-y:auto;z-index:50;border:0;border-top:1px solid var(--popover-border);border-radius:var(--r-lg) var(--r-lg) 0 0;box-shadow:none;padding:0 4px max(8px,env(safe-area-inset-bottom))}
   .mp-menu .mp-mi{min-height:48px}
   .mp-tabs .mp-tab{min-height:44px}
-  /* the download rows and the typed name, stacked to fit: layout only */
-  .mp .dlrow{flex-wrap:wrap;gap:8px 16px}
-  .mp .dlrow .sl{flex:1 1 calc(100% - 24px)}
-  /* the memory mark takes what the button's line leaves (its bar gives first), so a row stays two lines */
-  .mp .dlrow>.mm{flex:1 1 0;width:auto;min-width:0;gap:8px;margin-right:0}
-  .mp .dlrow>.mm .mm-bar{flex:0 1 88px;min-width:16px;width:auto}
-  .mp .dlrow>.mm .mm-n{width:auto}
-  /* "Needs ..." leaves no room beside it for the bar: the figure sits over a bar as wide as it */
-  .mp .dlrow>.mm.lead{flex-direction:column-reverse;align-items:stretch;justify-content:center;gap:6px}
-  .mp .dlrow>.mm.lead .mm-bar{flex:none;width:100%}
-  .mp .dlrow>.mm.lead .mm-n{text-align:left}
+  /* an offered row's Download is its icon, where an installed row has its ⋯ */
+  .mp-row>.mp-get-a,.mp-card.ms .mp-row>.mp-get-a{grid-column:auto;padding:0 8px 0 4px}
+  .mp-get-a .mp-mbtn{width:44px;height:44px;padding:0}
+  .mp-get-w{display:none}
   .mp .dl-a{min-height:44px}
   .mp .dl-btn,.mp .dl-x{height:44px}.mp .dl-x{width:44px}
-  .mp .dlrow .qa,.mp .srow .qa{min-height:44px}
+  .mp .srow .qa{min-height:44px}
   .mp .srow{flex-wrap:wrap}
   .mp .srow .sl{flex:1 1 100%}
   .mp .srow .sv{flex:1 1 100%;min-width:0;justify-content:flex-start}

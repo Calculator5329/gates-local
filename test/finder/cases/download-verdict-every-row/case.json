@@ -4,6 +4,6 @@
   "fix": "07796264",
   "undo": "by hand: every row says its verdict again, not only the rows that are an exception to the line over the list",
   "screens": ["models"],
-  "shows": "Models: open the Download tab; the same verdict is on every row",
-  "catch": [{ "screen": "models", "step": "Download tab", "kind": "twice" }]
+  "shows": "Models: the same verdict is on every row of the models on offer",
+  "catch": [{ "screen": "models", "step": "open Models", "kind": "twice" }]
 }

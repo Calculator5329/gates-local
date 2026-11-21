@@ -71,3 +71,25 @@ export function nextDefault(sorted: readonly Row[], removed: string, def: string
 }
 
 export const pullName = (typed: string): string => typed.trim().replace(/^ollama\s+(?:run|pull)\s+/i, "").trim();
+
+export interface Places {
+  readonly top: readonly string[];
+  readonly typed: readonly string[];
+}
+
+const same = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((k, i) => k === b[i]);
+
+export function place(
+  before: Places | undefined,
+  now: { readonly installed: readonly string[]; readonly pending: readonly string[]; readonly offered: readonly string[] },
+): Places {
+  const here = new Set([...now.installed, ...now.pending]);
+  if (before === undefined) return { top: [...here], typed: [] };
+  const offered = new Set(now.offered);
+  const top = before.top.filter((k) => here.has(k));
+  const typed = before.typed.filter((k) => here.has(k));
+  const placed = (k: string) => top.includes(k) || typed.includes(k) || offered.has(k);
+  for (const k of now.pending) if (!placed(k)) typed.push(k);
+  for (const k of now.installed) if (!placed(k)) top.push(k);
+  return same(top, before.top) && same(typed, before.typed) ? before : { top, typed };
+}

@@ -28,8 +28,13 @@ word in a slot of fixed size. The rule is about shape and movement, not
 about replacing every "Checking…" with a grey bar.
 
 When nothing moving and only showing what is true pull apart, true wins: a
-value may change once to stop a false statement. The Models page's Download
-tab groups its rows once per visit, after every row has a fit answer at the
+value may change once to stop a false statement. The Models page is one
+screen: the installed models, then the models on offer. A row has one place
+for the visit. A model on offer keeps its place while it downloads and once
+it is installed; only what was installed or already downloading when the page
+opened is in the list on top; a download of a typed name has its own card
+under "Something else". The next visit sorts them again. The page groups the
+models on offer once per visit, after every row has a fit answer at the
 current context or a second has passed (a row with none is then not
 Recommended). The one move after that: a row whose verdict becomes "does not
 fit" leaves Recommended, and does not come back during the visit. A

@@ -149,21 +149,23 @@ const kebab = (tag: string) => async (p: Page) => {
   await models(p);
   await p.locator(`.mp-row[data-dm="${tag}"]`).getByTestId("models.row-menu.open").click();
 };
-/** Slow the fake's pulls so a download is still running when the shot is taken. */
-const slowPulls = () => stack.scenario("models", { pullTickMs: 1000, pullChunkBytes: 400 * 1024 ** 2 });
-const downloadTab = async (p: Page) => {
+const TAG = "qwen3.5:4b";
+/** Press Download on an offered row, with pulls slowed so the row is still downloading in the shot. */
+const runningDownload = (scenario: "models" | "no-models" = "models") => async (p: Page) => {
+  await stack.scenario(scenario, { pullTickMs: 1000, pullChunkBytes: 400 * 1024 ** 2 });
   await models(p);
-  await p.getByTestId("models.tabs.download").click();
-};
-const runningDownload = async (p: Page) => {
-  await slowPulls();
-  await downloadTab(p);
-  await p.locator('.dlrow[data-cat="qwen3.5:4b"]').getByRole("button", { name: /^Download \d/ }).click();
-  const bar = p.locator('.dlrow[data-cat="qwen3.5:4b"]').getByRole("progressbar");
+  await p.locator(`.mp-row[data-cat="${TAG}"]`).getByTestId("models.offered.download").click();
+  const bar = p.locator(`.mp-row[data-pull="${TAG}"]`).getByRole("progressbar");
   await expect(bar).toBeVisible();
   await p.mouse.move(0, 0); // no tooltip left over from the click
   await expect(bar, "the download has moved").toHaveAttribute("aria-valuenow", /^[1-9]\d*$/);
   await expect(p.locator("#tip.open")).toHaveCount(0);
+};
+const finishedDownload = async (p: Page) => {
+  await models(p);
+  await p.locator(`.mp-row[data-cat="${TAG}"]`).getByTestId("models.offered.download").click();
+  await expect(p.locator(`.mp-row[data-dm="${TAG}"]`)).toBeVisible({ timeout: 30_000 });
+  await p.mouse.move(0, 0);
 };
 const PHONE = { width: 412, height: 915 };
 
@@ -192,14 +194,18 @@ const MODELS_SHOTS: readonly ModelsShot[] = [
       await expect(p.getByTestId("models.remove.dialog")).toBeVisible();
     },
   },
-  // a4-05, a4-12
-  { name: "M-05-download-running-dark", theme: "dark", act: runningDownload },
-  { name: "M-06-download-running-light", theme: "light", act: runningDownload },
+  // a4-05, a4-12: the row Download was pressed on, downloading where it was
+  { name: "M-05-download-running-dark", theme: "dark", act: runningDownload() },
+  { name: "M-06-download-running-light", theme: "light", act: runningDownload() },
+  { name: "M-07-download-finished-dark", theme: "dark", act: finishedDownload },
   // a4-09
   { name: "M-10-zero-models-dark", theme: "dark", scenario: "no-models", act: models },
+  { name: "M-08-zero-models-download-running-dark", theme: "dark", scenario: "no-models", act: runningDownload("no-models") },
+  { name: "M-09-zero-models-download-finished-dark", theme: "dark", scenario: "no-models", act: finishedDownload },
   // a4-15, a4-16
   { name: "M-11-phone-installed-dark", theme: "dark", viewport: PHONE, act: models },
-  { name: "M-12-phone-download-dark", theme: "dark", viewport: PHONE, act: runningDownload },
+  { name: "M-12-phone-download-dark", theme: "dark", viewport: PHONE, act: runningDownload() },
+  { name: "M-13-phone-zero-models-dark", theme: "dark", viewport: PHONE, scenario: "no-models", act: models },
   // every row's actions control inside its row, at the two widths the e2e pins
   { name: "M-14-installed-1280-dark", theme: "dark", viewport: { width: 1280, height: 800 }, act: models },
   { name: "M-15-installed-360-dark", theme: "dark", viewport: { width: 360, height: 800 }, act: models },

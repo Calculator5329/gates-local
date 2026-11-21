@@ -1,4 +1,4 @@
-// Real DownloadTab ownership and session actions over the in-memory wire.
+// Real Catalog ownership and session actions over the in-memory wire.
 import { isValidElement, type ReactElement } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { methodSamples } from "@gates-local/contracts/testing";
@@ -21,7 +21,8 @@ vi.mock("../lib/store/store.ts", async original => {
 
 let browser: Browser;
 let store: typeof import("../lib/store/store.ts");
-let DownloadTab: typeof import("./ModelDownloads.tsx")["DownloadTab"];
+let Catalog: typeof import("./ModelDownloads.tsx")["Catalog"];
+let cancel: (name: string) => Promise<string | null>;
 let disconnect: (() => void) | undefined;
 const name = "qwen3.5:latest";
 const model = { ...methodSamples["models.list"].result.models[0]!, name };
@@ -29,7 +30,8 @@ beforeEach(async () => {
   browser = installBrowser(); vi.resetModules(); hooks.states = []; hooks.effects = [];
   const session = await import("../lib/session/index.ts");
   store = await import("../lib/store/store.ts");
-  DownloadTab = (await import("./ModelDownloads.tsx")).DownloadTab;
+  Catalog = (await import("./ModelDownloads.tsx")).Catalog;
+  cancel = session.cancelPull;
   disconnect = session.connect();
   await until(() => store.getState().hydrationSettled);
   store.setState({ models: [], pulls: {}, catalog: [{ name, label: "Review", purpose: "Review", downloadBytes: 100, recommended: false, installed: false }] });
@@ -48,15 +50,14 @@ function nodes(node: unknown): ReactElement<Record<string, unknown>>[] {
 }
 interface Actions {
   start(name: string): Promise<boolean>;
-  cancel(name: string): void;
   error(name: string): string | null;
 }
 function isActions(a: unknown): a is Actions {
-  return typeof a === "object" && a !== null && "start" in a && typeof a.start === "function" && "cancel" in a && typeof a.cancel === "function" && "error" in a && typeof a.error === "function";
+  return typeof a === "object" && a !== null && "start" in a && typeof a.start === "function" && "error" in a && typeof a.error === "function";
 }
 function actions(): Actions {
   hooks.cursor = 0; hooks.effects = [];
-  const tree = DownloadTab();
+  const tree = Catalog({ hidden: [], live: () => undefined, head: true, others: true, filter: "", typed: null, shownAbove: 0 });
   for (const effect of hooks.effects) effect();
   const a = nodes(tree).find(n => n.props.actions)?.props.actions;
   if (!isActions(a)) throw new Error("Missing download actions");
@@ -84,7 +85,7 @@ it("FR-04 keeps a disconnected custom failure for an already installed alias", a
 for (const state of ["cancelled", "error", "queued"] as const) {
   it(`FR-05 keeps a restart failure after a late ${state} push`, async () => {
     expect(await actions().start(name)).toBe(true);
-    actions().cancel(name); await tick();
+    await cancel(name); await tick();
     await refuse("Restart refused");
     expect(actions().error(name)).toContain("Restart refused");
     browser.server.push("models.pull", { name, state, completedBytes: 0 });
@@ -98,7 +99,7 @@ for (const state of ["cancelled", "error", "queued"] as const) {
 
 it("FR-08 keeps a refused pending retry after old progress, then clears it on a real successful retry", async () => {
   expect(await actions().start(name)).toBe(true);
-  actions().cancel(name); await tick();
+  await cancel(name); await tick();
   const held = browser.server.hold("models.pull");
   const retry = actions().start(name);
   const request = await held;

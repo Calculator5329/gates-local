@@ -1,6 +1,6 @@
 // Settings › Models rendered to static markup over a stubbed store, on a
 // computer with no supported GPU: every model is planned in system memory, so
-// nothing on either tab, tooltips included, may promise a GPU.
+// nothing on the page, tooltips included, may promise a GPU.
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -75,18 +75,18 @@ describe("Models on a computer with no supported GPU", () => {
     // Before the table the groups' placeholder stands where both groups will be (docs/design.md);
     // the catalog's estimate says "spills" and must not leak through as a verdict.
     const offered = entry("qwen3.5:4b", "Qwen 3.5 4B", "spills", 6);
-    const pending = render(noGpuComputer({ models: [], addPage: true, fitTable: undefined, catalog: [offered] }));
+    const pending = render(noGpuComputer({ models: [], fitTable: undefined, catalog: [offered] }));
     expect(pending).toContain('aria-busy="true"');
     expect(pending).toContain("data-skel");
     expect(pending).not.toContain('class="vl spill"');
     expect(pending).not.toMatch(RECOMMENDED);
     expect(pending).not.toContain("Also available · uses system memory");
-    const refused = render(noGpuComputer({ models: [], addPage: true, catalog: [entry("huge:1t", "Huge", "refuse", 900)] }));
+    const refused = render(noGpuComputer({ models: [], catalog: [entry("huge:1t", "Huge", "refuse", 900)] }));
     expect(refused).not.toMatch(RECOMMENDED);
-    const checked = render(noGpuComputer({ models: [], addPage: true, catalog: [offered] }));
+    const checked = render(noGpuComputer({ models: [], catalog: [offered] }));
     // decision 11: the mark's colour and number say it; no line above the list, no words on the row
     expect(checked).not.toContain("No supported GPU, so these run");
-    expect(checked).toContain('class="mm spill lead"');
+    expect(checked).toContain('class="mm spill"');
     expect(checked).not.toContain('class="vl spill"');
     expect(checked).toMatch(RECOMMENDED);
     expect(checked).not.toContain("data-skel");
@@ -101,11 +101,39 @@ describe("Models on a computer with no supported GPU", () => {
     expect(none).not.toContain("data-skel");
   });
 
-  it("with nothing installed, the suggested download is the one the table says runs here, not the catalog's own estimate", () => {
+  it("with nothing installed, the recommended download is the one the table says runs here, not the catalog's own estimate", () => {
     // the catalog estimated Qwen spills and Huge refuses; the table's reading says the opposite
     const html = render(noGpuComputer({ models: [], fitTable: tableOf(fit("qwen3.5:4b", "refuse", 6), fit("huge:1t", "spills", 9)) }));
-    expect(html).toContain("We suggest <b>Huge</b>");
-    expect(html).not.toContain("We suggest <b>Qwen 3.5 4B</b>");
+    expect(html).toContain("No models yet. Download one to start chatting.");
+    const [recommended, tooBig] = html.split(RECOMMENDED)[1]!.split("Too big for this computer");
+    expect(recommended).toContain('data-cat="huge:1t"');
+    expect(recommended).toContain('aria-label="Download Huge, 5.0 GB"');
+    expect(recommended).not.toContain('data-cat="qwen3.5:4b"');
+    expect(tooBig).toContain('data-cat="qwen3.5:4b"');
+  });
+
+  it("an installed model is in the list once: the models offered below leave it out", () => {
+    const html = render(noGpuComputer({ models: [installed("qwen3.5:4b")], fitTable: tableOf(fit("qwen3.5:4b", "spills", 6), fit("huge:1t", "spills", 9)) }));
+    expect(html.match(/aria-label="Qwen 3\.5 4B"/g)).toHaveLength(1);
+    expect(html).toContain('data-dm="qwen3.5:4b"');
+    expect(html).not.toContain('data-cat="qwen3.5:4b"');
+    expect(html).toContain('data-cat="huge:1t"');
+    // one page: no tabs, no count beside a tab
+    expect(html).not.toContain('role="tab"');
+    expect(html.match(/class="mp-th"/g), "the column heads once, over the first card").toHaveLength(1);
+  });
+
+  it("a download that is running when the page opens is a row among the installed models, with its progress", () => {
+    const pulls = { "huge:1t": { name: "huge:1t", state: "downloading", completedBytes: GIB, totalBytes: 5 * GIB } };
+    const html = render(noGpuComputer({ models: [installed("qwen3.5:4b")], pulls }));
+    const top = html.split('data-testid="models.list.installed"')[1]!.split('class="mp-foot"')[0]!;
+    expect(top).toContain('data-dm="qwen3.5:4b"');
+    expect(top).toMatch(/data-pull="huge:1t"[\s\S]*role="progressbar"/);
+    expect(html).not.toContain('data-cat="huge:1t"');
+    // with nothing installed it is the page's first row, and the page does not say there are no models to download
+    const first = render(noGpuComputer({ models: [], pulls }));
+    expect(first).toMatch(/data-testid="models\.list\.installed"[\s\S]*data-pull="huge:1t"/);
+    expect(first).not.toContain("No models yet");
   });
 
   it("PL-01: embedding models have no chat-fit advice, not even a skeleton", () => {
@@ -125,12 +153,12 @@ describe("Models on a computer with no supported GPU", () => {
   it("PK-02: a loaded current-context report gives the row its measured need", () => {
     const name = "qwen3:14b";
     const measured = { ...fit(name, "spills", 9), source: "measured", numCtx: 65536 };
-    const html = render(noGpuComputer({ addPage: true, numCtx: 65536,
+    const html = render(noGpuComputer({ numCtx: 65536,
       catalog: [entry(name, "Qwen 3 14B", "spills", 10)], fitTable: tableOf(measured) }));
     // the mark says the table's 9 GB, not the catalog's 10 (a row has no tooltip, decision 19)
     // measured: plain on screen, "measured" in its name (the picker's rule)
     expect(html).toContain('aria-label="Runs in system memory, slower: 9.0 GB, measured"');
-    expect(html).toContain('<span class="mm-n" aria-hidden="true">Needs 9.0 GB</span>');
+    expect(html).toContain('<span class="mm-n" aria-hidden="true">9.0 GB</span>');
     expect(html).not.toMatch(/Measured 9\.0(?:&#160;| | )GB of memory with 64k of context/);
     expect(html).not.toContain("Measured after the first load");
   });
@@ -138,30 +166,28 @@ describe("Models on a computer with no supported GPU", () => {
     const name = "qwen3:14b";
     const at16 = { ...fit(name, "spills", 10), verdict: "fits", freeVramBytes: 12 * GIB, spillRamBytes: 0 };
     const at64 = { ...fit(name, "spills", 15), numCtx: 65536, freeVramBytes: 12 * GIB, spillRamBytes: 3 * GIB };
-    const html = render(noGpuComputer({ addPage: true, gpu: { vendor: "nvidia", name: "Test GPU" }, numCtx: 65536,
+    const html = render(noGpuComputer({ gpu: { vendor: "nvidia", name: "Test GPU" }, numCtx: 65536,
       catalog: [{ ...entry(name, "Qwen 3 14B", "spills", 10), fit: at16 }],
       fitTable: tableOn(false, at64) }));
     // the only row spills: its mark says so in amber with the 64k need (decision 11), nothing above the list
     // an estimate: "~" on screen, "estimated" in its name
     expect(html).toContain('aria-label="Partly in system memory, slower: 15 GB, estimated"');
-    expect(html).toContain('<span class="mm-n" aria-hidden="true">Needs ~15 GB</span>');
+    expect(html).toContain('<span class="mm-n" aria-hidden="true">~15 GB</span>');
     expect(html).not.toContain("These are bigger than your GPU");
     expect(html).not.toMatch(/Estimated 15\.0(?:&#160;| | )GB of memory with 64k of context/);
     expect(html).not.toContain("Runs on GPU");
   });
-  it("promises no GPU on either tab or with no models, and says system memory instead", () => {
+  it("promises no GPU with models or with none, and says system memory instead", () => {
     const list = render(noGpuComputer({}));
-    const download = render(noGpuComputer({ addPage: true }));
     const empty = render(noGpuComputer({ models: [] }));
-    expect([...gpuPromises(list), ...gpuPromises(download), ...gpuPromises(empty)]).toEqual([]);
+    expect([...gpuPromises(list), ...gpuPromises(empty)]).toEqual([]);
     // decision 10: no Default card; the chip marks the default
     expect(list).not.toContain("New chats start on this model");
     expect(list).toContain("Should run in system memory");
     expect(list).not.toContain("run slower");
-    // the Download rows say it by their marks' names alone (decisions 11 and 19)
-    expect(download).toContain('aria-label="Runs in system memory, slower: ');
-    expect(empty).toContain("should run in system memory on this computer");
-    expect(empty).toContain("Download Qwen 3.5 4B");
+    // an offered row says it by its mark's name alone (decisions 11 and 19)
+    expect(empty).toContain('aria-label="Runs in system memory, slower: ');
+    expect(empty).toContain('aria-label="Download Qwen 3.5 4B, 5.0 GB"');
   });
 });
 

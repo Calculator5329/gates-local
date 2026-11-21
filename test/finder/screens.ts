@@ -302,8 +302,6 @@ export const SCREENS: readonly Screen[] = [
     seed: "design",
     steps: [
       { name: "open Models", root: ".dlg", opens: { selector: ".dlg-head h2", text: "Models" }, act: (c) => c.page.locator(".sb-foot").getByRole("button", { name: /^Models/ }).click() },
-      { name: "Download tab", root: ".dlg", opens: { selector: ".mp-tab[aria-selected=true] .mp-lbl", text: "Download" }, act: (c) => c.page.getByRole("tab", { name: /Download/ }).click() },
-      { name: "back to Installed", root: ".dlg", opens: { selector: ".mp-tab[aria-selected=true] .mp-lbl", text: "Installed" }, act: (c) => c.page.getByRole("tab", { name: /Installed/ }).click() },
       { name: "close Models", root: ".main", act: press("Escape") },
     ],
   },

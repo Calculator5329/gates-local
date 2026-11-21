@@ -93,7 +93,7 @@ test("a phone loads the client through Serve's stand-in, sends a message and see
  * The controls each section must at least offer on a phone; a section at 0 shows only read-only rows there.
  * Tools has the two Library rows' links: its switches change settings, which a phone cannot, so they are words there.
  */
-const SETTINGS_SECTIONS = [["General", 0], ["Models", 4], ["Instructions", 2], ["Library", 0], ["Tools", 2], ["Image generation", 0], ["Runtime", 1], ["Advanced", 0], ["Shortcuts", 0]] as const;
+const SETTINGS_SECTIONS = [["General", 0], ["Models", 3], ["Instructions", 2], ["Library", 0], ["Tools", 2], ["Image generation", 0], ["Runtime", 1], ["Advanced", 0], ["Shortcuts", 0]] as const;
 
 /** Which requests are still unanswered, and which the server refused as computer-only. */
 function watchRequests(page: Page): { open: Map<string, string>; refused: string[] } {
@@ -188,8 +188,9 @@ test("the phone reads, sends, stops and switches models, and nothing it offers i
   await expect(page.locator(".set-list")).toBeVisible();
 
   await showSection(page, "Models");
-  await expect(page.getByRole("tab", { name: "Installed" })).toBeVisible();
-  await expect(page.getByTestId("models.tabs.download")).toHaveCount(0);
+  await expect(page.getByTestId("models.list.installed")).toBeVisible();
+  await expect(page.getByTestId("models.offered.download")).toHaveCount(0);
+  await expect(page.getByTestId("models.custom.name")).toHaveCount(0);
   await page.getByTestId("models.row-menu.open").first().click();
   await expect(page.getByTestId("models.row-menu.copy-name")).toBeVisible();
   await expect(page.getByRole("menuitem", { name: /Use as default|Remove/ })).toHaveCount(0);

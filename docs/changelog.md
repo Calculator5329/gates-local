@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-20: Models is one screen, and a download shows in the row you pressed
+
+- Models has no Installed and Download tabs. The installed models are on top and the models to download are under them, on one screen. The count beside "Installed" is gone.
+- Pressing Download turns that row into the download: its progress, speed and time left, with × to cancel. When it finishes the same row is the installed model, with its menu. Nothing jumps to another list while you watch; the next time Models opens, the installed model is in the list on top.
+- With no models yet, the page says "No models yet. Download one to start chatting." and the list to download from is right under it, in place of an empty Installed tab showing 0.
+- A model on offer shows its download size in the Size column and what it needs under "On this computer", the same columns as an installed model. An installed model is not offered again.
+- A download started by typing a name shows in its own card under "Something else".
+- "Download models" in the model picker opens Models scrolled to the models on offer.
+
 ## 2026-11-20: the short-window sidebar test no longer expires with the calendar
 
 - The browser test for the thread list in a short window failed the 0.2.7 release check with nothing wrong in the app. Its threads are dated 12 November and the page read the real date, so once that day was more than a week back every thread fell under one "Older" heading and the list was one heading shorter than the test expects. The test now pins the page's clock to the day its threads are dated.

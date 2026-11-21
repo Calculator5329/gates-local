@@ -227,6 +227,9 @@ export async function waitReady(page: Page): Promise<void> {
   });
 }
 
+/** A model's row on the Models page in whichever state it is: on offer, downloading or installed. */
+export const modelRow = (page: Page, tag: string) => page.locator(`.mp-row[data-cat="${tag}"], .mp-row[data-pull="${tag}"], .mp-row[data-dm="${tag}"]`);
+
 /**
  * Models: on a desktop width the footer bot's own pop-up (settings row 6); on a phone,
  * a section of Settings, reached from its list.

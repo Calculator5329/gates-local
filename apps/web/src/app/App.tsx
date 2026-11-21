@@ -409,7 +409,6 @@ export function onKey(e: Pick<KeyboardEvent, "key" | "shiftKey" | "ctrlKey" | "m
       return closeUsage();
     }
     if (s.view === "settings" && s.ownerConfirm) return setState({ ownerConfirm: false });
-    if (s.view === "settings" && s.addPage) return setState({ addPage: false });
     if (s.view === "settings") return leaveSettings();
     if (s.view === "pictures") {
       e.preventDefault();

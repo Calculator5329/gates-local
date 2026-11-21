@@ -1,5 +1,5 @@
 // Settings row 10, the owner 2026-11-13: another program holding 9.7 GB of GPU memory made every
-// model in the Download tab look worse, and he called that inaccurate. His ruling: "the measure for
+// model on offer in Models look worse, and he called that inaccurate. His ruling: "the measure for
 // a model is not what is available now its based on the ram in the card". The list judges each
 // model against the card, and one line above it names the program using memory right now. A send
 // still judges right now (unit: fit/table.test.ts).
@@ -11,7 +11,7 @@ const BLENDER_MIB = Math.round(9.7 * 1024);
 /** Each download row's verdict and need (its memory mark's name), by model, installed rows too. */
 const verdicts = (page: Page) =>
   page.locator(".dlg").evaluate((dlg) => ({
-    rows: Object.fromEntries([...dlg.querySelectorAll(".dlrow[data-cat]")].map((r) => [r.getAttribute("data-cat"), `${r.getAttribute("data-verdict") ?? ""} | ${r.querySelector(".mm")?.getAttribute("aria-label") ?? ""}`])),
+    rows: Object.fromEntries([...dlg.querySelectorAll(".mp-row[data-cat]")].map((r) => [r.getAttribute("data-cat"), `${r.getAttribute("data-verdict") ?? ""} | ${r.querySelector(".mm")?.getAttribute("aria-label") ?? ""}`])),
   }));
 
 test("another program's GPU memory leaves the download verdicts as they were, and one line names it", async ({ page, open }, info) => {
@@ -19,7 +19,7 @@ test("another program's GPU memory leaves the download verdicts as they were, an
   await waitReady(page);
   await page.locator("#modelBtn").click();
   await page.getByTestId("models.picker.download-models").click();
-  await expect(page.locator('.dlrow[data-cat="qwen3.5:4b"]')).toHaveAttribute("data-verdict", "fits");
+  await expect(page.locator('.mp-row[data-cat="qwen3.5:4b"]')).toHaveAttribute("data-verdict", "fits");
   const idle = await verdicts(page);
 
   await stack.gpu(BLENDER_MIB);
@@ -27,7 +27,7 @@ test("another program's GPU memory leaves the download verdicts as they were, an
   // The new reading has reached the tab: the line came, or a row's verdict moved.
   await expect.poll(async () => (await line.count()) > 0 || JSON.stringify(await verdicts(page)) !== JSON.stringify(idle), { timeout: 15_000 }).toBe(true);
   await page.evaluate(() => {
-    for (const el of document.querySelectorAll<HTMLElement>(".dl-others")) el.style.setProperty("outline", "2px solid #f5a524");
+    for (const el of document.querySelectorAll<HTMLElement>(".mp-others, .dl-others")) el.style.setProperty("outline", "2px solid #f5a524");
   });
   await page.screenshot({ path: info.outputPath("fit-card-heavy.png"), animations: "disabled" });
 

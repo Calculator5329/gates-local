@@ -1,35 +1,36 @@
 import { type KeyboardEvent, type TouchEvent, useRef, useState } from "react";
 import type { ModelInfo, PullProgress } from "@gates-local/contracts";
 import { copyText } from "../lib/ui/copy.ts";
-import { noGpu, verdictOf } from "../lib/words/format.ts";
+import { verdictOf } from "../lib/words/format.ts";
 import { Icon } from "../lib/ui/icons.tsx";
 import { type TableFit, rowOf } from "../fit/fit-table.ts";
-import { DownloadTab, DownloadingRow, DownloadingRows, othersLine, othersOf, usePendingDownloads } from "./ModelDownloads.tsx";
+import { Catalog, DownloadingRow, TableHeadRow, othersLine, othersOf, usePendingDownloads } from "./ModelDownloads.tsx";
 import { cardDefault, makeDefault, removeModelAndMoveDefault, savedDefault } from "./models-actions.ts";
 import {
   type ModelName,
+  type Places,
   type Row,
-  about,
   canBeDefault,
   filterShows,
   noteSettled,
   nameOf,
   nextDefault,
+  place,
   shortTag,
   sizeText,
   sortRows,
   splitTail,
 } from "./models-rules.ts";
-import { awaitingInstall, canChat, notForChat, pickedModel } from "./pick.ts";
+import { canChat, modelKey, notForChat, pickedModel } from "./pick.ts";
 import { MakerMark } from "./MakerMark.tsx";
 import { MemoryMark, SlowLine } from "./MemoryMark.tsx";
 import { ModelSpeed } from "./model-speed.tsx";
 import { MeasureCells, MeasureFail, MeasureMeta, canMeasure, useMeasureItem } from "../measure/ModelMeasure.tsx";
 import { measureOf } from "../measure/measures.ts";
 import { DialogHead } from "../lib/ui/Panel.tsx";
-import { leaveSettings, pull } from "../lib/session/index.ts";
+import { leaveSettings } from "../lib/session/index.ts";
 import { COMPUTER_ONLY, Fail, useAct, useOutside, walk } from "../lib/ui/settings-ui.tsx";
-import { NA, type State, setState, useStore } from "../lib/store/store.ts";
+import { NA, type State, useStore } from "../lib/store/store.ts";
 import { FitSkel, PHONE, SheetHead, closeTip, useMedia } from "../lib/ui/ui.tsx";
 import { focusFirstOf, requestFocus } from "../lib/ui/kit/focus.ts";
 
@@ -83,73 +84,13 @@ function useInstalledRows(): { rows: InstalledRow[]; def: string | undefined } {
 }
 
 export function ModelsPage() {
-  const canDownload = useStore((s) => s.unavailable["models.pull"] !== true);
-  const addPage = useStore((s) => s.addPage) && canDownload;
-  const count = useStore((s) => s.models?.length);
-  const tab = addPage ? "download" : "installed";
   const phone = useMedia(PHONE);
-  const tabs = [useRef<HTMLButtonElement>(null), useRef<HTMLButtonElement>(null)] as const;
-  const go = (download: boolean, focus = false) => {
-    closeTip();
-    setState({ addPage: download });
-    if (focus) tabs[download ? 1 : 0].current?.focus();
-  };
-  const onKey = (e: KeyboardEvent) => {
-    if (canDownload && (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "Home" || e.key === "End")) {
-      e.preventDefault();
-      go(e.key === "End" || (e.key !== "Home" && !addPage), true);
-    }
-  };
-  const tablist = (
-        <div className="mp-tabs" role="tablist" aria-label="Models" data-testid="models.tabs.list" onKeyDown={onKey}>
-          <button
-            ref={tabs[0]}
-            type="button"
-            role="tab"
-            id="mp-tab-installed"
-            data-testid="models.tabs.installed"
-            aria-selected={tab === "installed"}
-            aria-controls="mp-panel"
-            tabIndex={tab === "installed" ? 0 : -1}
-            className={`mp-tab${tab === "installed" ? " on" : ""}`}
-            onClick={() => go(false)}
-          >
-            <span className="mp-lbl" data-l="Installed">
-              Installed
-            </span>
-            {count === undefined ? null : <span className="mp-n">{count}</span>}
-          </button>
-          {canDownload ? (
-            <button
-              ref={tabs[1]}
-              type="button"
-              role="tab"
-              id="mp-tab-download"
-              data-testid="models.tabs.download"
-              aria-selected={tab === "download"}
-              aria-controls="mp-panel"
-              tabIndex={tab === "download" ? 0 : -1}
-              className={`mp-tab${tab === "download" ? " on" : ""}`}
-              onClick={() => go(true)}
-            >
-              <span className="mp-lbl" data-l="Download">
-                Download
-              </span>
-            </button>
-          ) : null}
-        </div>
-  );
-  const panel = (
-    <div role="tabpanel" id="mp-panel" aria-labelledby={tab === "installed" ? "mp-tab-installed" : "mp-tab-download"}>
-      {tab === "installed" ? <Installed /> : <DownloadTab />}
-    </div>
-  );
   if (!phone) {
     return (
       <>
-        <DialogHead title="Models" onClose={leaveSettings}>{tablist}</DialogHead>
+        <DialogHead title="Models" onClose={leaveSettings} />
         <div className="dlg-body set">
-          <div className="mp">{panel}</div>
+          <div className="mp"><ModelsList /></div>
         </div>
       </>
     );
@@ -158,16 +99,17 @@ export function ModelsPage() {
     <div className="mp">
       <div className="mp-head">
         <h1>Models</h1>
-        {tablist}
       </div>
-      {panel}
+      <ModelsList />
     </div>
   );
 }
 
-function Installed() {
+// why: a row keeps its place for the visit, so pressing Download moves nothing
+function ModelsList() {
   const models = useStore((s) => s.models);
   const catalog = useStore(catalogOf);
+  const canDownload = useStore((s) => s.unavailable["models.pull"] !== true);
   const downloads = usePendingDownloads();
   const { rows, def } = useInstalledRows();
   const [filter, setFilter] = useState("");
@@ -175,57 +117,68 @@ function Installed() {
   const settingsNA = useStore(cannotSaveDefault);
   const saved = useStore(savedDefault);
   const others = useStore(othersOf);
+  const measureShown = useStore(canMeasure);
   const [note, setNote] = useState<{ removed: string; text: string } | null>(null);
+  const [places, setPlaces] = useState<Places>();
   if (note !== null && noteSettled(note.removed, saved)) setNote(null);
+  const placed = models === undefined ? places : place(places, {
+    installed: models.map((m) => modelKey(m.name)),
+    pending: downloads.map((d) => modelKey(d.name)),
+    offered: (catalog ?? []).map((c) => modelKey(c.name)),
+  });
+  if (placed !== places) setPlaces(placed);
   const notice =
     note !== null && saved === undefined ? (
       <div className="mp-note">
         <Fail err={note.text} />
       </div>
     ) : null;
-  if (models === undefined) return <p className="mp-quiet">Checking which models are installed…</p>;
-  if (models.length === 0) {
-    return (
-      <>
-        {notice}
-        <NoModels />
-      </>
-    );
-  }
-  const q = filter.trim().toLowerCase();
-  type ListedRow = InstalledRow | (Row & { readonly progress: PullProgress });
-  const listed = sortRows<ListedRow>([...rows, ...downloads.map((progress) => ({ name: progress.name, display: nameOf(progress.name, catalog).text, chat: true, verdict: undefined, progress }))], def);
-  const shown = q === "" ? listed : listed.filter((r) => r.display.toLowerCase().includes(q) || r.name.toLowerCase().includes(q));
-  const total = models.reduce((sum, m) => sum + m.sizeBytes, 0);
+  if (models === undefined || placed === undefined) return <p className="mp-quiet">Checking which models are installed…</p>;
   const shownDef = settingsNA ? undefined : def;
-  const measureShown = useStore(canMeasure);
+  const q = filter.trim().toLowerCase();
+  const matches = (r: Row) => q === "" || r.display.toLowerCase().includes(q) || r.name.toLowerCase().includes(q);
+  type ListedRow = InstalledRow | (Row & { readonly progress: PullProgress });
+  const all: ListedRow[] = [...rows, ...downloads.map((progress) => ({ name: progress.name, display: nameOf(progress.name, catalog).text, chat: true, verdict: undefined, progress }))];
+  const view = (r: ListedRow) => "progress" in r
+    ? <DownloadingRow key={r.name} p={r.progress} />
+    : <ModelRowView key={r.name} r={r} def={shownDef} saved={saved} onRemove={(back) => setRemoving({ row: r, back })} />;
+  const among = (keys: readonly string[]) => all.filter((r) => keys.includes(modelKey(r.name)));
+  const top = sortRows(among(placed.top), def);
+  const topShown = top.filter(matches);
+  const typed = among(placed.typed).filter(matches);
+  const live = (name: string) => {
+    const r = all.find((x) => modelKey(x.name) === modelKey(name));
+    return r === undefined ? undefined : view(r);
+  };
+  const card = measureShown ? "mp-card ms" : "mp-card";
+  const total = models.reduce((sum, m) => sum + m.sizeBytes, 0);
   return (
     <>
       <Fallback rows={rows} />
       {notice}
-      {filterShows(listed.length, filter) ? (
-        <Field value={filter} onChange={setFilter} placeholder="Filter installed models" label="Filter installed models" cls="mp-filter" />
+      {filterShows(top.length + placed.typed.length, filter) ? (
+        <Field value={filter} onChange={setFilter} placeholder="Filter models" label="Filter models" cls="mp-filter" />
       ) : null}
-      <div className={measureShown ? "mp-card ms" : "mp-card"}>
-        <div className="mp-th" aria-hidden="true">
-          <span className="mp-thn">Model</span>
-          <span className="mp-sz">On disk</span>
-          <span className="mp-fitc">On this computer</span>
-          {measureShown ? (
-            <>
-              <span className="mp-spd">Speed</span>
-              <span className="mp-score">Score</span>
-            </>
-          ) : null}
-          <span />
+      {top.length === 0 ? models.length === 0 ? <NoModels /> : <p className="mp-quiet">{sizeText(total)} on disk</p> : null}
+      {topShown.length > 0 ? (
+        <div className={card} data-testid="models.list.installed">
+          <TableHeadRow measureShown={measureShown} />
+          {topShown.map(view)}
         </div>
-        {shown.map((r) => "progress" in r ? (
-          <DownloadingRow key={r.name} p={r.progress} />
-        ) : <ModelRowView key={r.name} r={r} def={shownDef} saved={saved} onRemove={(back) => setRemoving({ row: r, back })} />)}
-        {shown.length === 0 ? <div className="mp-none">No installed model matches “{filter.trim()}”.</div> : null}
-      </div>
-      {others ? <p className="mp-others">{othersLine(others)}</p> : null}
-      <div className="mp-foot">{sizeText(total)} on disk</div>
+      ) : null}
+      {top.length > 0 && others ? <p className="mp-others">{othersLine(others)}</p> : null}
+      {top.length > 0 ? <div className="mp-foot">{sizeText(total)} on disk</div> : null}
+      {canDownload ? (
+        <Catalog
+          hidden={placed.top}
+          live={live}
+          head={topShown.length === 0}
+          others={top.length === 0}
+          filter={filter.trim()}
+          typed={typed.length > 0 ? <div className={`${card} mp-typed`} data-testid="models.list.typed">{typed.map(view)}</div> : null}
+          shownAbove={topShown.length + typed.length}
+        />
+      ) : q !== "" && topShown.length === 0 ? <p className="mp-quiet">No model matches “{filter.trim()}”.</p> : null}
       {removing ? (
         <RemoveDialog
           row={removing.row}
@@ -482,51 +435,8 @@ function Fallback({ rows }: { rows: readonly InstalledRow[] }) {
 }
 
 function NoModels() {
-  const downloading = useStore((s) => Object.values(s.pulls).some(awaitingInstall));
   const pullNA = useStore((s) => s.unavailable["models.pull"] === true);
-  const cpu = useStore((s) => noGpu(s.gpu));
-  const [err, run] = useAct();
-  const want = cpu ? "spills" : "fits";
-  const pick = useStore(s => catalogOf(s)?.find((c) => c.recommended && rowOf(s, c.name)?.verdict === want));
-  const pickRow = useStore(s => (pick === undefined ? undefined : rowOf(s, pick.name)));
-  if (downloading) {
-    return (
-      <div className="mp-first">
-        <h2>Your first model is downloading</h2>
-        <p>It shows up here when it is ready. You can keep using Settings meanwhile.</p>
-        <DownloadingRows />
-      </div>
-    );
-  }
-  return (
-    <div className="mp-empty">
-      <Icon id="bot" cls="mp-big" />
-      <h2>No models yet</h2>
-      <p>
-        {pullNA ? `Downloading: ${COMPUTER_ONLY.toLowerCase()}` : "Download one to start chatting."}
-        {pick && pickRow && !pullNA ? (
-          <>
-            {" "}
-            We suggest <b>{pick.label}</b>: {about(pick.downloadBytes)}, {verdictOf(pickRow).label.toLowerCase()} on this computer.
-          </>
-        ) : null}
-      </p>
-      {pullNA ? null : (
-        <div className="mp-r2">
-          {pick ? (
-            <button type="button" className="btn primary" data-testid="models.empty.download-suggested" onClick={() => void run(pull(pick.name))}>
-              <Icon id="download" cls="s14" />
-              Download {pick.label}
-            </button>
-          ) : null}
-          <button type="button" className={pick ? "btn outline" : "btn primary"} data-testid="models.empty.browse" onClick={() => setState({ addPage: true })}>
-            Browse models
-          </button>
-        </div>
-      )}
-      <Fail err={err} />
-    </div>
-  );
+  return <p className="mp-quiet" data-testid="models.empty">No models yet. {pullNA ? `Downloading: ${COMPUTER_ONLY.toLowerCase()}` : "Download one to start chatting."}</p>;
 }
 
 function Field({ value, onChange, placeholder, label, cls }: { value: string; onChange: (v: string) => void; placeholder: string; label: string; cls?: string }) {

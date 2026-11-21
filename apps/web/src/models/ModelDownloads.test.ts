@@ -1,5 +1,5 @@
-// The Download tab's groups over one visit: hooks keep their state between
-// renders and effects run after each render, as on a mounted tab. A row is
+// The offered models' groups over one visit: hooks keep their state between
+// renders and effects run after each render, as on a mounted page. A row is
 // never under Recommended while its verdict at this context says it does not
 // fit, and the groups otherwise stay put while answers arrive.
 import { createElement } from "react";
@@ -45,7 +45,7 @@ vi.mock("../lib/store/store.ts", () => ({
 vi.mock("../lib/session/index.ts", () => Object.fromEntries(["pull", "cancelPull", "estimateModel"].map((name) => [name, () => undefined])));
 vi.mock("../fit/FitPanel.tsx", () => ({ shortGpu: (name: string) => name }));
 
-const { DownloadTab } = await import("./ModelDownloads.tsx");
+const { Catalog } = await import("./ModelDownloads.tsx");
 
 const GIB = 1024 ** 3;
 type Verdict = "fits" | "spills" | "refuse";
@@ -60,11 +60,12 @@ let seq = 0;
 /** The server's fit table holding these rows, each one newer than the last. */
 const table = (...rows: ReturnType<typeof fit>[]) => ({ reading: { boot: "b", seq: ++seq, measuredAt: 0 }, memory: { kind: "gpu", freeBytes: 16 * GIB, usableBytes: 15 * GIB }, rows: rows.map(r => ({ ...r, stops: [], words: fitWords(r as FitReport, "card", false) })) });
 
-const render = (state: object) => {
+const ALONE = { hidden: [], live: () => undefined, head: true, others: true, filter: "", typed: null, shownAbove: 0 };
+const render = (state: object, props: Partial<Parameters<typeof Catalog>[0]> = {}) => {
   h.state = state;
   h.slot = 0;
   h.effect = 0;
-  const html = renderToStaticMarkup(createElement(DownloadTab));
+  const html = renderToStaticMarkup(createElement(Catalog, { ...ALONE, ...props }));
   for (const run of h.pending.splice(0)) run();
   return html;
 };
@@ -124,7 +125,7 @@ for (const [what, memory] of [["an empty", { kind: "gpu", freeBytes: 16 * GIB, u
     expect(shown).not.toContain("data-skel");
     expect(groups(shown)).toEqual({ "Also available": ["a:1", "b:1"], "Something else": [] });
     // a row with no reading states no verdict
-    expect(shown).toContain('data-cat="b:1">');
+    expect(shown).toContain('data-cat="b:1" aria-label="B">');
   });
 }
 
@@ -134,9 +135,9 @@ it("F2: a table that has no reading for a row answers it: grouped at once, that 
   const shown = render(base({ catalog: [a, b], numCtx: 65536, fitTable: table(fit("a:1", "fits", 65536)) }));
   expect(shown).not.toContain("data-skel");
   expect(groups(shown)).toEqual({ Recommended: ["a:1"], "Also available": ["b:1"], "Something else": [] });
-  expect(shown).toContain('data-cat="b:1">');
+  expect(shown).toContain('data-cat="b:1" aria-label="B">');
   // the unanswered row keeps an empty mark slot, so its row does not move when the answer lands
-  expect(shown).toMatch(/data-cat="b:1">(?:(?!data-cat)[\s\S])*<span class="mm lead" aria-hidden="true"><\/span>/);
+  expect(shown).toMatch(/data-cat="b:1"(?:(?!data-cat)[\s\S])*<span class="mp-fitc"><span class="mp-fit none" aria-hidden="true"><\/span><\/span>/);
 });
 
 it("F2: once grouped, the groups stay put, except that a row whose verdict becomes does-not-fit leaves Recommended once and never comes back", () => {
@@ -154,35 +155,52 @@ it("F2: once grouped, the groups stay put, except that a row whose verdict becom
   expect(groups(refused)).toEqual({ Recommended: ["a:1"], "Also available": ["c:1"], "Something else": [], "Too big for this computer": ["b:1"] });
   expect(refused).toMatch(/<details class="grp dl-bigs">/);
   // what it needs is its memory mark (row 28)
-  expect(refused).toMatch(/data-cat="b:1" data-verdict="refuse">(?:(?!data-cat)[\s\S])*aria-label="Too big for this computer: 6\.0 (?:of \d+ )?GB, (?:measured|estimated)"/);
+  expect(refused).toMatch(/data-cat="b:1" data-verdict="refuse" aria-label="B">(?:(?!data-cat)[\s\S])*aria-label="Too big for this computer: 6\.0 (?:of \d+ )?GB, (?:measured|estimated)"/);
   expect(refused).not.toMatch(/needs 6\.0 GB of memory/);
-  expect(refused).not.toMatch(/data-cat="b:1" data-verdict="refuse">(?:(?!data-cat)[\s\S])*<button/);
+  expect(refused).not.toMatch(/data-cat="b:1" data-verdict="refuse" aria-label="B">(?:(?!data-cat)[\s\S])*<button/);
   // it runs again: it never goes back to Recommended this visit, it is with the rest
   const back = render({ ...state, fitTable: table(fit("a:1", "fits"), fit("b:1", "fits"), fit("c:1", "spills")) });
   expect(groups(back)).toEqual({ Recommended: ["a:1"], "Also available": ["b:1", "c:1"], "Something else": [] });
 });
 
-it("the download's size is its button, and a running download fills that button with an × beside it (row 18)", () => {
+it("an offered row's button names the model and its size, and a model that is downloading or installed is drawn in that row's place by the list", () => {
   const a = entry("a:1", "A", true, "fits");
-  const idle = render(base({ catalog: [a], fitTable: table(fit("a:1", "fits")) }));
-  expect(idle).toMatch(/<button type="button" class="dl-btn" data-testid="models.download.start" aria-label="Download 5\.0 GB">/);
-  // the × box is there, hidden, before any download
-  expect(idle).toContain('<span class="dl-x off" aria-hidden="true"></span>');
-  const p = { name: "a:1", state: "downloading", completedBytes: 2 * GIB, totalBytes: 5 * GIB, bytesPerSecond: 50e6 };
-  const running = render(base({ catalog: [a], fitTable: table(fit("a:1", "fits")), pulls: { "a:1": p } }));
-  expect(running).toMatch(/class="dl-btn dl-run" role="progressbar"[^>]*aria-valuenow="40"><i style="width:40%"><\/i><span>40%<\/span>/);
-  expect(running).toContain('aria-label="Cancel download"');
-  // bytes and time left on the row's second line; no speed, no full-row bar
-  expect(running).toMatch(/2\.0 of 5\.0 GB · about [^<]+ left/);
-  expect(running).not.toContain("MB/s");
-  expect(running).not.toContain('class="prog"');
+  const b = entry("b:1", "B", true, "fits");
+  const state = base({ catalog: [a, b], fitTable: table(fit("a:1", "fits"), fit("b:1", "fits")) });
+  const idle = render(state);
+  expect(idle).toMatch(/<button type="button" class="btn outline mp-mbtn" data-testid="models.offered.download" aria-label="Download A, 5\.0 GB">/);
+  expect(idle).toContain('<span class="mp-sz">5.0 GB</span>');
+  const taken = render(state, { live: (name) => (name === "a:1" ? createElement("i", { key: name, "data-live": name }) : undefined) });
+  expect(taken, "the list's own row, first under Recommended where the offer was").toMatch(/class="grp-t">Recommended<[\s\S]*?<i data-live="a:1"><\/i><div class="mp-row" data-cat="b:1"/);
+  expect(taken).not.toContain('data-cat="a:1"');
+});
+
+it("a model the list above already holds is not offered, and the column heads are drawn once, by whichever card is first", () => {
+  const a = entry("a:1", "A", true, "fits");
+  const b = entry("b:1", "B", false, "fits");
+  const state = base({ catalog: [a, b], fitTable: table(fit("a:1", "fits"), fit("b:1", "fits")) });
+  const alone = render(state);
+  expect(groups(alone)).toEqual({ Recommended: ["a:1"], "Also available": ["b:1"], "Something else": [] });
+  expect(alone.match(/class="mp-th"/g)?.length).toBe(1);
+  const under = render(state, { hidden: ["a:1"], head: false });
+  expect(groups(under)).toEqual({ "Also available": ["b:1"], "Something else": [] });
+  expect(under).not.toContain('class="mp-th"');
+});
+
+it("the filter narrows the offered rows by name, and says so when nothing on the page matches", () => {
+  const a = entry("a:1", "Alpha", true, "fits");
+  const b = entry("b:1", "Beta", false, "fits");
+  const state = base({ catalog: [a, b], fitTable: table(fit("a:1", "fits"), fit("b:1", "fits")) });
+  expect(groups(render(state, { filter: "bet" }))).toEqual({ "Also available": ["b:1"], "Something else": [] });
+  expect(render(state, { filter: "zzz" })).toContain("No model matches “zzz”.");
+  expect(render(state, { filter: "zzz", shownAbove: 1 }), "a row above matches").not.toContain("No model matches");
 });
 
 const unescape = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&amp;/g, "&");
 /** Each row's tooltips, by its catalog name: the words each one shows, one entry per sentence or line. */
 const rowTips = (html: string) => {
   const out: Record<string, string[][]> = {};
-  for (const part of html.split('class="dlrow').slice(1)) {
+  for (const part of html.split('<div class="mp-row').slice(1)) {
     const cat = /data-cat="([^"]+)"/.exec(part)?.[1] ?? "?";
     out[cat] = [...part.matchAll(/data-tip="([^"]*)"/g)].map((m) =>
       unescape(unescape(m[1]!)).split(/<br>/).map((line) => line.replace(/<[^>]+>/g, "")).flatMap((line) => line.split(/(?<=\.)\s+/)).map((s) => s.trim()).filter((s) => s !== ""));
@@ -199,8 +217,8 @@ it("a row's memory is its mark alone: no tooltip on the row, its name or its mar
   expect(Object.keys(tips).toSorted()).toEqual(["a:1", "b:1", "c:1"]);
   for (const [cat, list] of Object.entries(tips)) expect(list, `${cat}: no tooltip`).toEqual([]);
   // the mark's words are its accessible name, what its colour says
-  expect(html).toMatch(/data-cat="a:1"[\s\S]*?class="mm gpu lead" role="img" aria-label="Runs on the GPU: /);
-  expect(html).toMatch(/data-cat="b:1"[\s\S]*?class="mm spill lead" role="img" aria-label="Partly in system memory, slower: /);
+  expect(html).toMatch(/data-cat="a:1"[\s\S]*?class="mm gpu" role="img" aria-label="Runs on the GPU: /);
+  expect(html).toMatch(/data-cat="b:1"[\s\S]*?class="mm spill" role="img" aria-label="Partly in system memory, slower: /);
 });
 
 it("an empty Recommended keeps its header slot for the visit when the placeholder drew one, so what is below stays put", () => {
@@ -241,5 +259,5 @@ it("a verdict is said by each row's mark alone, with no line above the list, and
     expect(html).not.toMatch(/These (?:run on|are bigger)/);
     expect(html).not.toContain('class="vl ');
   }
-  expect(render(state)).toMatch(/data-cat="b:1"[\s\S]*?class="mm spill lead"/);
+  expect(render(state)).toMatch(/data-cat="b:1"[\s\S]*?class="mm spill"/);
 });

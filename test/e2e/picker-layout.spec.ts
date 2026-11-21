@@ -6,7 +6,7 @@
 import type { Page } from "@playwright/test";
 import { LONG_NAME } from "../fake-ollama/models.ts";
 import { FAKE_URL } from "./env.ts";
-import { expect, openModels, sendMessage, test, waitReady } from "./fixtures.ts";
+import { expect, modelRow, openModels, sendMessage, test, waitReady } from "./fixtures.ts";
 import { holds } from "./waits.ts";
 
 test.use({ viewport: { width: 1137, height: 749 } });
@@ -86,19 +86,15 @@ test("approved picker keeps its columns fixed through hover, filtering and empty
 });
 
 // Guards the owner's ask that models download from Models (unsure: he may not need it to start from the picker).
-test("Download models reaches the real download tab and can start a pull", async ({ page, open }) => {
+test("Download models shows the models to download and can start a pull", async ({ page, open }) => {
   await open(); await waitReady(page);
   await page.locator("#modelBtn").click();
   await page.getByTestId("models.picker.download-models").click();
   await expect(page.locator("#picker")).toBeHidden();
-  await expect(page.getByTestId("models.tabs.download")).toHaveAttribute("aria-selected", "true");
-  const row = page.locator('.dlrow[data-cat="qwen3.5:4b"]');
-  const download = row.getByRole("button", { name: /^Download \d/ });
-  await expect(download).toBeEnabled();
-  await download.click();
-  await expect(row.locator(".dl-done")).toHaveText("Installed", { timeout: 20_000 });
-  await page.getByTestId("models.tabs.installed").click();
-  await expect(page.locator('.mp-row[data-dm="qwen3.5:4b"]')).toBeVisible();
+  await expect(page.locator(".mp-row[data-cat]").first(), "the page opens scrolled to the models on offer").toBeInViewport();
+  const row = modelRow(page, "qwen3.5:4b");
+  await row.getByTestId("models.offered.download").click();
+  await expect(row).toHaveAttribute("data-dm", "qwen3.5:4b", { timeout: 20_000 });
 });
 
 interface Box {

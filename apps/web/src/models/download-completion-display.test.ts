@@ -32,29 +32,33 @@ const { stops: _rowOnly, ...sampleRow } = methodSamples["fit.table"].result.rows
 const fit = { ...sampleRow, measuredAt: 0 };
 const model = methodSamples["models.list"].result.models[0]!;
 const pulls = { [fit.model]: { name: fit.model, state: "done" as const, completedBytes: model.sizeBytes, totalBytes: model.sizeBytes } };
-let DownloadTab: typeof import("./ModelDownloads.tsx")["DownloadTab"];
+let ModelsPage: typeof import("./Models.tsx")["ModelsPage"];
 let Picker: typeof import("../picker/Picker.tsx")["Picker"];
 let pendingDownloads: typeof import("./ModelDownloads.tsx")["usePendingDownloads"];
-let DownloadingRows: typeof import("./ModelDownloads.tsx")["DownloadingRows"];
+let DownloadingRow: typeof import("./ModelDownloads.tsx")["DownloadingRow"];
 beforeAll(async () => {
   vi.stubGlobal("window", {});
-  DownloadTab = (await import("./ModelDownloads.tsx")).DownloadTab;
+  ModelsPage = (await import("./Models.tsx")).ModelsPage;
   pendingDownloads = (await import("./ModelDownloads.tsx")).usePendingDownloads;
-  DownloadingRows = (await import("./ModelDownloads.tsx")).DownloadingRows;
+  DownloadingRow = (await import("./ModelDownloads.tsx")).DownloadingRow;
   Picker = (await import("../picker/Picker.tsx")).Picker;
 });
 beforeEach(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
-  // the table is in, so the Download tab's groups stand from the first render
+  // the table is in, so the offered groups stand from the first render
   setState({ model: fit.model, models: [], pulls, fitTable: { ...methodSamples["fit.table"].result, rows: [{ ...sampleRow, numCtx: 32768, stops: [] }] }, numCtx: 32768, pop: { id: "picker", kb: false, ready: true }, catalog: [{ name: fit.model, label: "Fixture model", purpose: "Fixture chat model", downloadBytes: model.sizeBytes, installed: false, recommended: false, fit }] });
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it("Download keeps its progress instead of offering Download again", () => {
-  const html = renderToStaticMarkup(createElement(DownloadTab));
+const page = () => renderToStaticMarkup(createElement(ModelsPage));
+
+it("a finished transfer keeps its progress row instead of offering Download again", () => {
+  const html = page();
+  expect(html).toContain(`data-pull="${fit.model}"`);
   expect(html).toContain('role="progressbar"');
-  expect(html).not.toMatch(/<button(?![^>]*disabled)[^>]*>Download<\/button>/);
+  expect(html).not.toContain(`data-cat="${fit.model}"`);
+  expect(html).not.toContain('data-testid="models.offered.download"');
 });
 
 it("the picker keeps the completed pending row until it can become installed", () => {
@@ -71,7 +75,10 @@ it("the first-model composer keeps waiting through the same handoff", () => {
 
 it("an installed list ends the pending state", () => {
   setState({ models: [model] });
-  expect(renderToStaticMarkup(createElement(DownloadTab))).toContain("Installed</span>");
+  const html = page();
+  expect(html).toContain(`data-dm="${fit.model}"`);
+  expect(html).not.toContain("data-pull=");
+  expect(html).not.toContain(`data-cat="${fit.model}"`);
   const picker = renderToStaticMarkup(createElement(Picker));
   expect(picker).toContain(`data-m="${fit.model}"`);
   expect(picker).not.toMatch(/class="pk-v[^"]*">100%/);
@@ -100,11 +107,13 @@ it("an active untagged pull stays visible and cancellable beside its installed l
   const progress = { name: "llama3", state: "downloading" as const, completedBytes: 5, totalBytes: 10 };
   setState({ models: [{ ...model, name: "llama3:latest" }], pulls: { llama3: progress } });
   expect.soft(pendingDownloads()).toEqual([progress]);
-  const rows = renderToStaticMarkup(createElement(DownloadingRows));
+  const rows = page();
   expect.soft(rows).toContain('data-pull="llama3"');
-  expect.soft(rows).toContain('aria-label="Cancel download"');
-  expect.soft(rows).not.toContain('disabled=""');
-  const cancel = nodes(createElement(DownloadingRows)).find(n => n.props["aria-label"] === "Cancel download");
+  expect.soft(rows).toContain('data-dm="llama3:latest"');
+  const button = /<button[^>]*aria-label="Cancel download"[^>]*>/.exec(rows)?.[0];
+  expect.soft(button).toBeDefined();
+  expect.soft(button).not.toContain("disabled");
+  const cancel = nodes(createElement(DownloadingRow, { p: progress })).find(n => n.props["aria-label"] === "Cancel download");
   (cancel?.props["onClick"] as (() => void) | undefined)?.();
   expect.soft(sent.cancelPull.mock.calls).toEqual([["llama3"]]);
   const picker = renderToStaticMarkup(createElement(Picker));

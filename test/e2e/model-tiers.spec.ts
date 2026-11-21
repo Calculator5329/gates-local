@@ -1,10 +1,11 @@
 // Settings rows 18 and 21, the owner 2026-11-13 after a fresh Windows install. Row 21: recommend by
 // the computer's memory, a tier per GPU size and per system memory size without a GPU (the picks
-// are in packages/contracts/src/chat-models.json). Row 18, the layout he picked (A): the size is the
-// download button's label, and models that cannot run sit in a closed last group, "Too big for this
-// computer", with what they need. Decision 11: the memory mark alone says slower; no line above the list.
+// are in packages/contracts/src/chat-models.json). Row 18: models that cannot run sit in a closed last
+// group, "Too big for this computer", with what they need. Decision 11: the memory mark alone says
+// slower; no line above the list. Since 2026-11-20 the list is on the one Models screen, an installed
+// model is not offered again, and a row's download size is its Size column.
 import type { Page } from "@playwright/test";
-import { expect, openModels, stack, test, waitReady } from "./fixtures.ts";
+import { expect, modelRow, openModels, stack, test, waitReady } from "./fixtures.ts";
 import { settled } from "./waits.ts";
 
 interface Profile {
@@ -52,25 +53,25 @@ const PROFILES: readonly Profile[] = [
 ];
 
 const group = (page: Page, title: RegExp) => page.locator(".mp .grp").filter({ has: page.locator(".grp-t", { hasText: title }) });
-const tags = (rows: ReturnType<Page["locator"]>) => rows.evaluateAll((els) => els.map((e) => e.getAttribute("data-cat") ?? ""));
+const tags = (rows: ReturnType<Page["locator"]>) => rows.evaluateAll((els) => els.map((e) => e.getAttribute("data-cat") ?? e.getAttribute("data-pull") ?? ""));
 
 // Guards the owner's rows 18 (layout A) and 21 (recommend by memory tier).
 for (const profile of PROFILES) {
-  test(`Download on ${profile.name}: the tier's picks, the marks alone saying slower, the size on each button`, async ({ page, open }, info) => {
+  test(`Models on ${profile.name}: the tier's picks on offer, the marks alone saying slower, each row's download size`, async ({ page, open }, info) => {
     // two models installed, so every verdict above comes from the curated list; a scenario resets the GPU, so it goes first
     // with one downloading, Gemma 4 12B stays out so an idle row still shows its size on the button
-    await stack.scenario("models", { installed: profile.download === undefined ? INSTALLED : ["qwen3.5:9b"], ...profile.download === undefined ? {} : { pullTickMs: 1000, pullChunkBytes: 100 * 1024 ** 2 } });
+    const installed = profile.download === undefined ? INSTALLED : ["qwen3.5:9b"];
+    await stack.scenario("models", { installed, ...profile.download === undefined ? {} : { pullTickMs: 1000, pullChunkBytes: 100 * 1024 ** 2 } });
     await profile.computer?.();
     await open();
     await waitReady(page);
     await openModels(page);
-    await page.getByTestId("models.tabs.download").click();
     const list = page.locator(".mp");
-    await expect(list.locator('.dlrow[data-cat="qwen3.5:4b"]')).toBeVisible();
+    await expect(list.locator('.mp-row[data-cat="qwen3.5:4b"]')).toBeVisible();
     await expect(list.locator("[aria-busy=true]")).toHaveCount(0);
     if (profile.download !== undefined) {
-      await list.locator(`.dlrow[data-cat="${profile.download}"]`).getByTestId("models.download.start").click();
-      const bar = list.locator(`.dlrow[data-cat="${profile.download}"]`).getByRole("progressbar");
+      await modelRow(page, profile.download).getByTestId("models.offered.download").click();
+      const bar = modelRow(page, profile.download).getByRole("progressbar");
       await expect(bar).toBeVisible();
       await page.mouse.move(0, 0);
       // the shot shows a download under way: its bar off zero and no tooltip left from the click
@@ -80,25 +81,28 @@ for (const profile of PROFILES) {
     }
     await page.screenshot({ path: info.outputPath(profile.shot), animations: "disabled" });
 
-    expect(await tags(group(page, /^Recommended/).locator(".dlrow[data-cat]")), "the tier's picks, first pick first").toEqual(profile.picks);
+    // an installed pick is in the list above, not offered again
+    expect(await tags(group(page, /^Recommended/).locator(".mp-row")), "the tier's picks not installed yet, first pick first").toEqual(profile.picks.filter((p) => !installed.includes(p)));
+    for (const tag of installed) await expect(page.getByTestId("models.list.installed").locator(`.mp-row[data-dm="${tag}"]`)).toBeVisible();
     // decision 11: no line above the list and no verdict words on a row; the orange mark alone says slower
     await expect(list.locator(".dl-once")).toHaveCount(0);
-    await expect(list.locator(".dlrow .vl")).toHaveCount(0);
-    if (profile.runs === "split") await expect(list.locator(".dlrow .mm.spill").first()).toBeVisible();
-    if (profile.runs === "gpu") await expect(list.locator(".dlrow .mm.spill")).toHaveCount(0);
-    // the button says what it does and the size (council climb-025 Q12)
-    const idle = profile.download === "qwen3.5:4b" ? "gemma4:12b" : "qwen3.5:4b";
-    await expect(list.locator(`.dlrow[data-cat="${idle}"]`).getByRole("button", { name: /^Download \d+\.\d\sGB$/ })).toHaveText(/^Download \d+\.\d\sGB$/);
+    await expect(list.locator(".mp-row .vl")).toHaveCount(0);
+    if (profile.runs === "split") await expect(list.locator(".mp-row .mp-fitc .mm.spill").first()).toBeVisible();
+    if (profile.runs === "gpu") await expect(list.locator(".mp-row .mm.spill")).toHaveCount(0);
+    // the size is the row's Size column, and the button's name says the model and the size
+    const idle = list.locator(`.mp-row[data-cat="${profile.download === "qwen3.5:4b" ? "gemma4:12b" : "qwen3.5:4b"}"]`);
+    await expect(idle.locator(".mp-sz")).toHaveText(/^\d+\.\d\sGB$/);
+    await expect(idle.getByRole("button", { name: /^Download .+, \d+\.\d\sGB$/ })).toHaveText("Download");
 
     const big = list.locator("details.dl-bigs");
     if (profile.tooBig.length === 0) await expect(big).toHaveCount(0);
     else {
       await expect(big, "the Too big group starts closed").not.toHaveAttribute("open", /.*/);
       await big.locator("summary").click();
-      expect((await tags(big.locator(".dlrow[data-cat]"))).toSorted()).toEqual([...profile.tooBig].toSorted());
-      for (const row of await big.locator(".dlrow").all()) {
+      expect((await tags(big.locator(".mp-row[data-cat]"))).toSorted()).toEqual([...profile.tooBig].toSorted());
+      for (const row of await big.locator(".mp-row").all()) {
         // what it needs, as the memory mark over the computer's whole (row 28)
-        await expect(row.locator(".mm")).toHaveAttribute("aria-label", /^Too big for this computer: (\d\.\d|\d{2,}) of \d+ GB, estimated$/);
+        await expect(row.locator(".mp-fitc .mm")).toHaveAttribute("aria-label", /^Too big for this computer: (\d\.\d|\d{2,}) of \d+ GB, estimated$/);
         await expect(row.getByRole("button")).toHaveCount(0);
       }
     }
@@ -116,7 +120,6 @@ test("a typed model name: its size and verdict, too big with Download anyway in 
   await open();
   await waitReady(page);
   await openModels(page);
-  await page.getByTestId("models.tabs.download").click();
   const field = page.getByTestId("models.custom.name");
   const row = field.locator("xpath=ancestor::*[contains(@class,'srow')][1]");
   const said = row.locator(".dl-typed");

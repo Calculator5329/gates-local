@@ -8,7 +8,7 @@ import { holds } from "./waits.ts";
 
 const BLENDER_MIB = Math.round(9.7 * 1024);
 /** One decimal under 10 GB, whole from 10 up, as the picture reads ("6.6 / 16 GB", "17 / 16 GB"); "~" before an estimate, as the picker writes it. */
-const MARK = /^(?:Needs )?~?(\d\.\d|\d{2,}) \/ (\d+) GB$/;
+const MARK = /^~?(\d\.\d|\d{2,}) \/ (\d+) GB$/;
 
 /** The mark's number, and its fill as a share of its bar. */
 async function readMark(mark: Locator) {
@@ -42,38 +42,38 @@ async function saidOnceUnder(page: Page, line: Locator, list: Locator) {
   expect(l && b && l.y >= b.y + b.height - 1, "the line sits under the list").toBe(true);
 }
 
-test("one memory mark in Models and Download, against the card, with other programs said once under the list", async ({ page, open }, info) => {
+test("one memory mark on installed and offered rows, against the card, with other programs said once under the installed list", async ({ page, open }, info) => {
   await stack.scenario("models", { installed: ["qwen3.5:9b", "gemma4:12b"] });
   await open();
   await waitReady(page);
   await openModels(page);
-  const installed = page.locator(".mp-card .mp-row[data-dm]");
+  const installed = page.getByTestId("models.list.installed").locator(".mp-row[data-dm]");
   await expect(installed.first().locator(".mm:visible")).toHaveCount(1);
   // another program takes GPU memory once the app has seen the card at rest (fit-card.spec.ts)
   await stack.gpu(BLENDER_MIB);
   await expectMarks(installed, 16);
-  await saidOnceUnder(page, page.locator(".mp-others"), page.locator(".mp-card"));
+  await saidOnceUnder(page, page.locator(".mp-others"), page.getByTestId("models.list.installed"));
   await page.screenshot({ path: info.outputPath("mark-models.png"), animations: "disabled" });
 
-  await page.getByRole("tab", { name: /^Download/ }).click();
   const list = page.locator(".mp");
   await expect(list.locator("[aria-busy=true]")).toHaveCount(0);
-  await expectMarks(list.locator(".dlrow[data-cat]"), 16);
-  await saidOnceUnder(page, list.locator(".dl-others"), list.locator(".grp:not(.dl-bigs) .dlrow[data-cat]").last());
+  await expectMarks(list.locator(".mp-row[data-cat]"), 16);
+  await expect(list.locator(".dl-others"), "the line is not said again under the models on offer").toHaveCount(0);
+  await list.locator(".mp-row[data-cat]").first().scrollIntoViewIfNeeded();
   await page.screenshot({ path: info.outputPath("mark-download.png"), animations: "disabled" });
   // a value has no tooltip (decision 19, 2026-11-14): the name and the mark show none on hover,
   // and the mark's verdict lives in its accessible name
-  const row = list.locator(".dlrow[data-cat]").first();
+  const row = list.locator(".mp-row[data-cat]").first();
   const tip = page.locator("#tip");
-  await row.locator(".sl").hover();
-  await row.locator(".mm").hover();
+  await row.locator(".mp-nm").hover();
+  await row.locator(".mm:visible").hover();
   // longer than the tooltip's delay, and no tip shows at any point of it
   await holds(page, 1000, () => tip.isVisible(), false, { message: "a tooltip over the mark" });
   await page.screenshot({ path: info.outputPath("mark-download-hover.png"), animations: "disabled" });
   await expect(tip).toBeHidden();
   // a model not downloaded yet is an estimate: "~" on screen, said in words to a screen reader
-  await expect(row.locator(".mm-n")).toHaveText(/^Needs ~/);
-  await expect(row.locator(".mm")).toHaveAttribute("aria-label", /^Runs on the GPU: (\d\.\d|\d{2,}) of 16 GB, estimated$/);
+  await expect(row.locator(".mm:visible .mm-n")).toHaveText(/^~/);
+  await expect(row.locator(".mm:visible")).toHaveAttribute("aria-label", /^Runs on the GPU: (\d\.\d|\d{2,}) of 16 GB, estimated$/);
 });
 
 // The computer keeps some of its memory for itself, so a model can be too big while needing less than the whole.
@@ -83,11 +83,10 @@ test("with no GPU the mark is the computer's memory, and a model too big for it 
   await open();
   await waitReady(page);
   await openModels(page);
-  await page.getByRole("tab", { name: /^Download/ }).click();
   const big = page.locator("details.dl-bigs");
   await big.locator("summary").click();
-  for (const row of await big.locator(".dlrow[data-cat]").all()) {
-    const mark = row.locator(".mm");
+  for (const row of await big.locator(".mp-row[data-cat]").all()) {
+    const mark = row.locator(".mm:visible");
     const m = await readMark(mark);
     expect(m.text).toMatch(MARK);
     expect(m.whole, "the computer's own memory").toBe(16);

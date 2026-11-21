@@ -8,7 +8,7 @@
     "wrong": "The image picker says the pointed-at model's name twice: on its row and again as the heading of the sizes beside it."
   },
   {
-    "screen": "models", "step": "Download tab", "kind": "twice", "element": "uses system memory slower", "real": false, "area": "finder",
+    "screen": "models", "step": "open Models", "kind": "twice", "element": "uses system memory slower", "real": false, "area": "finder",
     "wrong": "Not a bug: two rows each carry their own exception, which the line over the list points at (settings row 18, the owner's pick A)."
   },
   {

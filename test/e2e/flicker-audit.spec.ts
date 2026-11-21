@@ -59,10 +59,6 @@ test("every Settings section is whole on its first frame", async ({ page, open }
   await expect(page.locator(".dlg")).toHaveCount(0);
   await settled(delay, 3000);
   r.check("open Models", await watchWhole(page, { root: ".dlg", arrive: { selector: ".dlg-head h2", text: "Models" } }, () => page.getByTestId("sidebar.foot.models").click(), delay));
-  await settled(delay, 3000);
-  r.check("Models, Download tab", await watchWhole(page, { root: ".dlg", arrive: { selector: ".mp-tab[aria-selected=true] .mp-lbl", text: "Download" } }, () => page.getByTestId("models.tabs.download").click(), delay));
-  await settled(delay, 3000);
-  r.check("Models, back to Installed", await watchWhole(page, { root: ".dlg", arrive: { selector: ".mp-tab[aria-selected=true] .mp-lbl", text: "Installed" } }, () => page.getByTestId("models.tabs.installed").click(), delay));
   expect(r.all, "Settings: what arrived late, moved or changed its words").toEqual([]);
 });
 

@@ -64,20 +64,14 @@ test("Models is its own pop-up over the chat: the shell's box, tabs and Close in
   await expect(models.locator(".mp-row[data-dm]").first()).toBeVisible();
   await expectShape(page, models);
   const close = models.getByTestId("ui.dialog.close");
-  await expectOneRow(models.getByRole("heading", { name: "Models" }), models.getByTestId("models.tabs.installed"), close);
-  const b = await box(models);
+  await expectOneRow(models.getByRole("heading", { name: "Models" }), close);
+  await expect(models.getByRole("tab"), "one screen: no tabs in the header").toHaveCount(0);
   await expectBackdrop(page);
   await expect(page.locator(".sb #searchIn"), "the sidebar keeps its threads").toBeVisible();
   await expect(page.locator("#ta"), "the chat stays in view under the dim").toBeVisible();
   await expect(bot, "the bot is lit, not the gear").toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".sb-foot .ibtn").first()).toHaveAttribute("aria-pressed", "false");
 
-  // Download and back: the header stays put
-  await models.getByTestId("models.tabs.download").click();
-  await expect(models.getByTestId("models.tabs.download")).toHaveAttribute("aria-selected", "true");
-  expect(await box(models)).toEqual(b);
-  await page.keyboard.press("Escape");
-  await expect(models.getByTestId("models.tabs.installed")).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("Escape");
   await expect(models).toHaveCount(0);
   await expect(page.locator("#ta"), "the caret back in the message box").toBeFocused();

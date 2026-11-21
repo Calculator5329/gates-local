@@ -89,8 +89,6 @@ test("every Settings section is whole on its first frame", async ({ seededThread
     await page.locator(".dlg").waitFor({ state: "detached" });
     if (delay) await settled(delay, 3000);
     report("open Models", await watchWhole(page, { root: ".dlg", arrive: { selector: ".dlg-head h2", text: "Models" } }, () => page.getByTestId("sidebar.foot.models").click(), delay));
-    if (delay) await settled(delay, 3000);
-    report("Models, Download tab", await watchWhole(page, { root: ".dlg", arrive: { selector: ".mp-tab[aria-selected=true] .mp-lbl", text: "Download" } }, () => page.getByTestId("models.tabs.download").click(), delay));
   } finally { await app.close(); }
   // Findings can carry a test-owned temporary path; they stay in the run's output, not in a file here.
   expect(all, "what arrived late, moved or changed its words").toEqual([]);

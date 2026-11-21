@@ -94,9 +94,10 @@ const tableOf = (rows: ReturnType<typeof fitOf>[], others?: { programs: string[]
 const entry = (name: string, recommended: boolean, rank?: number): CatalogEntry => ({ name, label: name.toUpperCase(), purpose: "General chat", downloadBytes: 5 * GIB, installed: false, recommended, ...(rank === undefined ? {} : { rank }) });
 const downloading = (name: string, completedBytes: number): PullProgress => ({ name, state: "downloading", completedBytes, totalBytes: 5 * GIB });
 
+const ALONE = { hidden: [], live: () => undefined, head: true, others: true, filter: "", typed: null, shownAbove: 0 };
 async function mountTab(over: Partial<import("../lib/store/store.ts").State>) {
   store.setState(over);
-  act(() => root.render(createElement(view.DownloadTab)));
+  act(() => root.render(createElement(view.Catalog, ALONE)));
   await settle();
 }
 /** Each group in order: its title and the catalog names under it; a kept, hidden header is not a group. */
@@ -106,18 +107,14 @@ const groups = () => all((el) => el.classList.includes("grp") && !el.classList.i
 });
 const errorOf = (name: string) => all((el) => el.classList.includes("dl-error"), rowOf(name) ?? doc.body)[0]?.textContent ?? null;
 
-it("on the phone a running download shows its progress and no ×, here and among the downloading rows", async () => {
+it("on the phone a running download shows its progress and no ×", async () => {
   const p = downloading("a:1", GIB);
-  await mountTab({ catalog: [entry("a:1", false)], fitTable: tableOf([fitOf("a:1", "fits")]), pulls: { "a:1": p }, unavailable: { "models.cancelPull": true } });
-  expect(all((el) => el.classList.includes("dl-run"), rowOf("a:1")!)).toHaveLength(1);
-  expect(byTestId("models.download.cancel")).toBeNull();
+  store.setState({ catalog: [entry("a:1", false)], pulls: { "a:1": p }, unavailable: { "models.cancelPull": true } });
   act(() => root.render(createElement(view.DownloadingRow, { p })));
+  expect(all((el) => el.getAttribute("role") === "progressbar").map((el) => el.getAttribute("aria-valuenow"))).toEqual(["20"]);
   expect(byTestId("models.downloading.cancel")).toBeNull();
   await update({ unavailable: {} });
   expect(byTestId("models.downloading.cancel")).not.toBeNull();
-  act(() => root.render(createElement(view.DownloadTab)));
-  await settle();
-  expect(byTestId("models.download.cancel")).not.toBeNull();
 });
 
 const button = (p: PullProgress | undefined, size: string | undefined = "5.0 GB") => renderToStaticMarkup(createElement(view.DlButton, { size, label: "A", p, onCancel: () => undefined }));
@@ -171,11 +168,14 @@ it("the size button and the × box are the same two fixed-width boxes in every s
 });
 
 // council climb-025 Q12: "~6.0 / 16 GB" and "5.0 GB" sat side by side as two bare sizes
-it("on the Download tab the memory figure says it is the need and the button says it downloads that size", async () => {
+it("a model on offer shows its memory need under On this computer and its download under Size, and its button names both", async () => {
   await mountTab({ catalog: [entry("a:1", false)], fitTable: tableOf([fitOf("a:1", "fits")]) });
   const row = rowOf("a:1")!;
-  expect(all((el) => el.classList.includes("mm-n"), row)[0]?.textContent).toMatch(/^Needs ~6\.0 \/ 16\sGB$/);
-  expect(byTestId("models.download.start", row)?.textContent).toMatch(/^Download 5\.0\sGB$/);
+  const cell = (cls: string) => all((el) => el.classList.includes(cls), row)[0]!;
+  expect(all((el) => el.classList.includes("mm-n"), cell("mp-fitc"))[0]?.textContent).toMatch(/^~6\.0 \/ 16\sGB$/);
+  expect(cell("mp-sz").textContent).toMatch(/^5\.0\sGB$/);
+  expect(byTestId("models.offered.download", row)?.getAttribute("aria-label")).toMatch(/^Download A:1, 5\.0\sGB$/);
+  expect(byTestId("models.offered.download", row)?.textContent).toBe("Download");
 });
 
 it("while the download's size is unknown its button says plain Download, with no size", () => {
@@ -190,7 +190,6 @@ const started: string[] = [];
 let startAnswer: () => Promise<boolean> = () => Promise.resolve(true);
 const actions = {
   start: (name: string) => { started.push(name); return startAnswer(); },
-  cancel: () => undefined,
   error: () => null,
 };
 async function mountCustom(numCtx: number = 16384) {
@@ -326,36 +325,32 @@ it("the line about other programs names one, two, the first and how many more, o
   expect(said([])).toBe("Other programs are using 2.0 GB of GPU memory right now.");
 });
 
-it("only a model's newest download attempt says how it went: a Cancel's answer stands over an older pull's, and an older success does not clear a newer error", async () => {
+const offered = () => byTestId("models.offered.download");
+it("only a model's newest download attempt says how it went: an older success does not clear a newer error", async () => {
   await mountTab({ catalog: [entry("a:1", false)], fitTable: tableOf([fitOf("a:1", "fits")]) });
-  const first = held();
-  calls.pull.fn = () => first.promise;
-  await fire(startButton(), "onClick");
-  await update({ pulls: { "a:1": downloading("a:1", GIB) } });
-  await fire(byTestId("models.download.cancel"), "onClick");
-  await first.answer("The first pull was refused.");
-  expect(errorOf("a:1")).toBeNull();
-  await update({ pulls: {} });
   const older = held(), newer = held();
   calls.pull.fn = () => older.promise;
-  await fire(startButton(), "onClick");
+  await fire(offered(), "onClick");
   calls.pull.fn = () => newer.promise;
-  await fire(startButton(), "onClick");
+  await fire(offered(), "onClick");
   await newer.answer("The second pull was refused.");
   expect(errorOf("a:1")).toBe("The second pull was refused.");
   await older.answer(null);
   expect(errorOf("a:1")).toBe("The second pull was refused.");
 });
 
+const runningRow = (bytes: number) => { act(() => root.render(createElement(view.DownloadingRow, { p: downloading("a:1", bytes) }))); };
+const cancelErrors = () => new Set(all((el) => el.classList.includes("dl-error")).map((el) => el.textContent));
 it("a cancel that failed keeps its error while that download goes on", async () => {
-  await mountTab({ catalog: [entry("a:1", false)], fitTable: tableOf([fitOf("a:1", "fits")]), pulls: { "a:1": downloading("a:1", GIB) } });
+  store.setState({ catalog: [entry("a:1", false)] });
+  runningRow(GIB);
+  expect(cancelErrors()).toEqual(new Set());
   calls.cancel.fn = () => Promise.resolve("Couldn't cancel the download.");
-  await fire(byTestId("models.download.cancel"), "onClick");
-  expect(errorOf("a:1")).toBe("Couldn't cancel the download.");
-  await update({ pulls: { "a:1": downloading("a:1", 2 * GIB) } });
-  expect(errorOf("a:1")).toBe("Couldn't cancel the download.");
-  await update({ pulls: { "a:1": downloading("a:1", 3 * GIB) } });
-  expect(errorOf("a:1")).toBe("Couldn't cancel the download.");
+  await fire(byTestId("models.downloading.cancel"), "onClick");
+  expect(cancelErrors()).toEqual(new Set(["Couldn't cancel the download."]));
+  runningRow(2 * GIB);
+  runningRow(3 * GIB);
+  expect(cancelErrors()).toEqual(new Set(["Couldn't cancel the download."]));
 });
 
 it("changing the context size within a visit groups the rows again at the new size", async () => {
@@ -382,7 +377,7 @@ it("a Recommended group that showed and then emptied keeps its header's place fo
   const kept = all((el) => el.classList.includes("grp-keep"));
   expect(kept).toHaveLength(1);
   expect(kept[0]?.getAttribute("aria-hidden")).toBe("true");
-  expect(doc.body.childNodes[0]?.childNodes[0]).toBe(kept[0]);
+  expect(doc.body.childNodes[0]?.childNodes[0]?.childNodes[0] === kept[0]).toBe(true);
 });
 
 it("a model that joins the catalog after the rows are grouped comes at the end, and no row already there moves", async () => {
