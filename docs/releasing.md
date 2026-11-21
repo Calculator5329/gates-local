@@ -22,6 +22,39 @@ After the release, the whole `release:check` (unit tests and every browser
 test) runs on the released commit and reports its reds. It never holds a
 release.
 
+## Published 0.2.8, 2026-11-21
+
+[Release 0.2.8](https://github.com/Calculator5329/gates-local/releases/tag/v0.2.8)
+contains the Windows x64 installer, Linux x64 AppImage, `release.json` and
+its Ed25519 signature, all from `14a457bcf985f0708d00374f8d38d1f09809f82f`,
+plus the signed model list (`models.json`). It carries the Measure chat and
+the round of picker, Models and sidebar wording fixes. Types, lint, the build
+and the 37 tests in `test/e2e/journeys.txt` passed before anything was
+pushed; the whole release check was started on the commit afterwards. From
+the release command starting to the release being public and verified took
+4 minutes 38 seconds (0.2.7: 5 minutes 20 seconds).
+
+The gate was cut by kind this time: the ordinary journeys ran as five jobs on
+shared slots and were done 63 seconds in, the clipboard journeys ran as their
+own job, and the timed specs ran alone on the one quiet machine that also
+builds the Windows installer. That timed job took 37 seconds but waited 98
+seconds for its machine, because the Linux packaging round had taken it; the
+Windows build starts once the timed job has its machine, so it began at 102
+seconds and ended at 253. A rehearsal twenty minutes earlier, where the Linux
+round went to another machine, had the gate done at 92 seconds and the
+installer at 161.
+
+Before the release the gate went red on the commit that first held the wording
+fixes: two journeys still described the old picker and sidebar (the word
+"Fits" beside a size that fits; the row menu measured against the running mark
+it now replaces under the pointer). Both tests were changed to what the app
+does, watched red and then green, and the release was cut from the commit
+after. A second reader read the Measure chat change for anything that could
+hurt someone updating from 0.2.7 and found nothing to hold for. The Measure
+chat's own browser tests did not run before release. Native Linux packaging,
+the packaged smoke and the plain update check passed. The Windows installer
+was built natively; it was not installed or opened before release.
+
 ## Published 0.2.7, 2026-11-21
 
 [Release 0.2.7](https://github.com/Calculator5329/gates-local/releases/tag/v0.2.7)
@@ -47,6 +80,12 @@ on a test, not on the app: a browser test whose seed date had aged past a
 week (fixed), a unit test of a reply finishing during a reconnect, and an
 install unit test that fails now and then with "Premature close". The last
 two fail now and then and are on the roadmap.
+
+The whole release check on the 0.2.7 commit, run after the release, ended red:
+three Measure browser tests (the spec was rewritten with the Measure chat in
+0.2.8) and one unit test of the fit table that fails now and then. Its reds
+came back without bug packets, because the job that runs the whole check
+returns no test results folder; that is on the roadmap.
 
 ## Published 0.2.6, 2026-11-17
 

@@ -1098,7 +1098,7 @@ RS-03 remains dropped.
 *2026-11-21, from the 0.2.7 release and the journeys gate:*
 
 - [x] <!-- workspace:id=work:01f1644d-e1fd-5bed-a27d-36b6854aadda --> A release is gated by everyday journeys and speed checks (`test/e2e/journeys.txt`, 33 journeys and four speed checks), with the whole release check after it. *2026-11-21: 0.2.7 went out this way in 5 minutes 20 seconds.*
-- [ ] <!-- workspace:id=work:e7f2f67c-afda-50d8-b3d0-a7109a81fac9 --> The gate's journeys hold the machine that builds the Windows installer, so the installer waits for them (about 3 minutes of the 5 min 20 s). Run the timed specs as their own short piece and the rest on shared slots.
+- [ ] <!-- workspace:id=work:e7f2f67c-afda-50d8-b3d0-a7109a81fac9 --> A release still depends on which machine the Linux packaging round gets: when it takes the one quiet timing machine, the timed journeys wait for it and the Windows build waits for them (98 s of 0.2.8's 4 min 38 s). *2026-11-21: 0.2.8 cut the journeys by kind, so only the timed specs hold that machine, for about 40 s.*
       *Accept:* a release whose Windows build starts with the gate, and a total under 3 minutes.
 - [ ] <!-- workspace:id=work:47e02115-82ac-5476-99ac-66bee0ed6529 --> A release that fails after main has moved cannot be rerun, because the tag exists. A way to pick it up from assemble.
 - [ ] <!-- workspace:id=work:f25caaf8-25bd-5d14-a0ef-b57efc24f2ab --> The install unit test "clears staging left by an earlier crashed install" fails now and then with "Unpacking Ollama failed (Premature close)"; it failed the 0.2.6 check's first try and a 0.2.7 check.
@@ -1119,6 +1119,17 @@ RS-03 remains dropped.
 - [ ] <!-- workspace:id=work:a0428a6d-17e6-5e4c-a940-5754dfa7b56a --> Usage: a model whose replies have no decode tokens shows its speed as "0–N".
 - [ ] <!-- workspace:id=work:3d7870dd-4fba-5aad-90ac-c8d2e5398baf --> Usage: with many models in one day, the 2 px minimum per bar part can add up to more than the plot's height.
 - [ ] <!-- workspace:id=work:9469f08e-9bbe-5f57-aa0b-042678f6d146 --> Usage: the day readout's width limit differs between the left and right halves of the chart (read from the code, not seen).
+
+*2026-11-21, from the 0.2.8 release:*
+
+- [ ] <!-- workspace:id=work:08a8ca95-1d82-5c89-baf9-cc4a07c8cef6 --> The whole release check that runs after a release returns no bug packets: the job brings back no test results folder, so its reds arrive as names only.
+      *Accept:* a red in the after-release check has a packet in the inbox.
+- [ ] <!-- workspace:id=work:95c67d8b-fd0c-5300-a6d5-82ac2fd9875d --> The unit test "triggers during a build: one plain trigger among a send's makes the next build read again" (`apps/server/src/fit/table.test.ts`) fails now and then; it failed the 0.2.7 after-release check.
+- [ ] <!-- workspace:id=work:f8bf3bb8-dec6-51d7-98dd-bf9164177321 --> Sidebar, with a mouse: while the pointer rests on a row, the row menu shows in place of the reply-in-progress dot, so a running thread under the pointer looks idle. Keep it, or keep the dot and give the menu its own place on running rows.
+- [ ] <!-- workspace:id=work:beb6ae93-cee0-597d-b171-11907a3e83d8 --> A release carries everything landed since the last one; 0.2.8 was asked for as wording fixes and a 1,200-line feature landed four minutes before the cut. The release command prints the commits a cut carries and their size before it starts.
+- [ ] <!-- workspace:id=work:96dc4cb0-72bf-56d5-b006-ef60a6052974 --> A change to the web app lands on types, lint and unit tests only, so a journey it makes stale is first seen at the next release. Run the journey list right after such a landing and forward its reds as bug packets, without holding the landing.
+- [ ] <!-- workspace:id=work:0e0006d1-fa3d-5cfe-a1b1-ff66a4c08bc2 --> The journey plan (one Playwright listing per list line) takes 5 to 8 s at the start of every release; keep it by the list's and the specs' hash.
+- [ ] <!-- workspace:id=work:b9371253-384f-5f9f-a513-4c1f0ac15839 --> The unit test "persists a reply.send tool step through app.ts with fake fetch and no listeners" (`apps/server/src/chat/tools.test.ts`) fails now and then (expected 1 to be 0); it refused a docs-only landing on 2026-11-21 while the computer was busy.
 
 ## Later: slices 5 to 7
 

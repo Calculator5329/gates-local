@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-21: 0.2.8 published, in 4 minutes 38 seconds
+
+- Gates Local 0.2.8 is out (docs/releasing.md) with the Measure chat and the picker, Models and sidebar wording fixes.
+- The 0.2.7 release took 5 minutes 20 seconds because the gate's journeys ran one after another on the machine that builds the Windows installer. The release now cuts the journeys by kind: ordinary ones on shared slots, the timed specs alone on a quiet machine. This release took 4 minutes 38 seconds; the timed job still waited 98 seconds behind the Linux packaging round, which is the next thing to take out.
+- The gate stopped a release once on the way: two journeys had gone stale under the wording fixes, and each red came with a bug packet that showed the cause.
+
 ## 2026-11-21: two journeys follow the picker and sidebar changes
 
 - The release gate went red on two journeys after the picker and sidebar changes landed: one still expected the word "Fits" beside a size that fits, and one measured the row menu against the running mark, which the menu now replaces while a row is hovered. Both tests now check what the app does: a size that fits carries no word (a screen reader still hears Fits), and the running mark is hidden under the pointer and back when it leaves.
