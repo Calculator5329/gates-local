@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-21: the three-thread test moves the pointer off the sidebar
+
+- The whole check after 0.2.8 had one red browser test: with three threads replying, the test clicked a row and left the pointer there, the list reordered, and the row that slid under the pointer showed its menu in place of its reply-in-progress mark. The test now moves the pointer to the composer after the click, as a person reading the reply would. The app is unchanged; whether a running row should keep its mark under the pointer is an open line on the roadmap.
+
 ## 2026-11-21: 0.2.8 published, in 4 minutes 38 seconds
 
 - Gates Local 0.2.8 is out (docs/releasing.md) with the Measure chat and the picker, Models and sidebar wording fixes.
