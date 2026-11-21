@@ -57,7 +57,6 @@ const CLOSING = "Gates Local is closing. The reply written so far was saved.";
 const tooLate = (a: Extract<ReplyOutcome, { answer: "gone" | "sending" }>): string => (a.answer === "sending" ? ON_ITS_WAY : a.why === "sent" ? ALREADY_SENT : REMOVED);
 
 const CHAT_GONE = "The chat this message was waiting in is gone, so it was not sent.";
-const RESTORED_NOTICE = "Your queued messages were restored on hold. Use Send now when you are ready.";
 const QUEUE_MOVED_KEY = "gates-local.queue-on-server";
 
 export interface SavedQueued {
@@ -338,10 +337,9 @@ function endOf(r: Extract<Reply, { readonly stage: "stopped" | "failed" }>, at: 
   }
 }
 
-function handedOver(id: string, restored: boolean): void {
+function handedOver(id: string): void {
   oldQueue = (oldQueue ?? []).filter((q) => q.id !== id);
   queueMoved();
-  if (restored) setState({ notice: RESTORED_NOTICE });
   oldQueueChanged?.();
 }
 
@@ -356,7 +354,7 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
   function recordChanged(change: ReplyChange, listed = false): void {
     const id = change.kind === "is" ? change.reply.id : change.id;
     if (!records.takes(getState().replies.get(id), change)) return;
-    if (oldQueue?.some((q) => q.id === id) === true) handedOver(id, false);
+    if (oldQueue?.some((q) => q.id === id) === true) handedOver(id);
     pickTaken(change);
     if (change.kind === "left") return recordLeft(change.id, change.why);
     const r = change.reply;
@@ -587,22 +585,21 @@ export function createChat({ applyServerEvent, reply: askOne, codeOf, createThre
     for (const q of oldQueue) {
       if (handing.has(q.id)) continue;
       if (s.replies.has(q.id)) {
-        handedOver(q.id, false);
+        handedOver(q.id);
         continue;
       }
       handing.add(q.id);
       const { at: _typed, ...said } = q;
       void askOne("reply.send", { ...said, messageId: q.messageId ?? queueId(), held: true, numCtx: s.numCtx, think: s.think }).then((a) => {
-        if (a.answer === "not-reached") return undefined;
-        if (a.answer !== "gone") return true;
-        if (a.why === "chat-deleted") setState({ notice: CHAT_GONE });
-        return false;
+        if (a.answer === "not-reached") return false;
+        if (a.answer === "gone" && a.why === "chat-deleted") setState({ notice: CHAT_GONE });
+        return true;
       }, () => {
         setState({ notice: CHAT_GONE });
-        return false;
-      }).then((restored) => {
+        return true;
+      }).then((answered) => {
         handing.delete(q.id);
-        if (restored !== undefined) handedOver(q.id, restored);
+        if (answered) handedOver(q.id);
       });
     }
   }

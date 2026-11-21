@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-20: no notice when an old saved queue moves to the server
+
+- The line "Your queued messages were restored on hold. Use Send now when you are ready." is gone. Messages a page saved before the server kept the queue still move over on hold; their rows already say On hold and carry Send now.
+
 ## 2026-11-17: phone code starts wrapped; failures end with a next step; one name for a taken port; memory figures say what they are
 
 - Under 420 px a reply's code block starts wrapped. Wrap still unwraps it.

@@ -352,14 +352,14 @@ it("taking the offer for a held message sends it once the server says it has the
   expect(methods()).toEqual(["reply.change"]);
 });
 
-it("an old saved message the server takes from this browser puts up the restored-on-hold words, and one it already had puts up nothing", async () => {
+it("an old saved message the server takes from this browser puts up no notice, and neither does one it already had", async () => {
   answers.set("reply.send", (p) => Promise.resolve({ answer: "done", reply: held(p.id) }));
   oldQueueRead([saved("o2")], false);
   chat.connected();
   chat.replyListed([]);
   await settle();
-  expect(getState().notice).toBe("Your queued messages were restored on hold. Use Send now when you are ready.");
-  setState({ notice: null });
+  expect(sends().map((p) => p.id)).toEqual(["o2"]);
+  expect(getState().notice).toBeNull();
   chat.connected();
   oldQueueRead([saved("o3")], true);
   chat.replyListed([{ reply: held("o3", "t1", 4) }]);
