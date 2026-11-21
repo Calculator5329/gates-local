@@ -1,5 +1,27 @@
 # Releasing
 
+## What gates a release (since 2026-11-21)
+
+A release waits only on `pnpm release:gate`: types, lint, the build, and the
+everyday journeys listed in `test/e2e/journeys.txt`
+(`pnpm e2e:journeys` runs the same list). It writes one report in
+`release:check`'s shape with `"part": "gate"`, and `pnpm release:tag` accepts
+a passing gate report with the same refusals as before: a report that did not
+pass, one older than 24 hours, or one for another commit. A line in the list
+that no longer names a test fails the gate; the list never shrinks in silence.
+
+The gate can run as parallel pieces on exported source (no `.git`):
+`--part checks` for types, lint and build, and `--part journeys --shard I/N`
+for the journeys, each with `--commit` and `--remote`. `release:gate --merge`
+joins them into one gate report, red if a shard is missing, repeated, red, or
+ran fewer journeys than the list holds. The Windows and Linux installers build
+beside the gate from `git archive` of the commit: they need only the version
+and the commit (`release:artifact --version --commit`), not the tag.
+
+After the release, the whole `release:check` (unit tests and every browser
+test) runs on the released commit and reports its reds. It never holds a
+release.
+
 ## Published 0.2.6, 2026-11-17
 
 [Release 0.2.6](https://github.com/Calculator5329/gates-local/releases/tag/v0.2.6)

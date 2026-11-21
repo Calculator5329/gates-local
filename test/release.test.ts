@@ -128,6 +128,20 @@ describe("release tag decisions against a local bare remote", () => {
     expect(remote).toContain(`${f.sha}\trefs/tags/v1.0.0^{}`);
     expect(remote).not.toContain(unchecked);
   });
+  test("a passing gate report tags and keeps the refusals; its parallel pieces never tag", async () => {
+    const f = fixture();
+    const gate: ReleaseReport = { ...f.report, part: "gate", tests: { unit: { passed: 0, failed: 0, skipped: 0 }, e2e: { passed: 5, failed: 0, skipped: 0 } },
+      steps: ["typecheck", "lint", "build", "journeys-list", "e2e"].map((name) => ({ name, blocking: true, status: "passed" as const, exitCode: 0, durationMs: 1 })) };
+    delete gate.scratchRemoved;
+    await expect(checkTag(f.cwd, "v1.0.0", gate)).resolves.toMatchObject({ commit: f.sha, message: expect.stringContaining("whole release:check runs after") });
+    await expect(checkTag(f.cwd, "v1.0.0", { ...gate, status: "failed" })).rejects.toThrow(/failed/);
+    await expect(checkTag(f.cwd, "v1.0.0", { ...gate, finishedAt: new Date(0).toISOString() })).rejects.toThrow(/24 hours/);
+    await expect(checkTag(f.cwd, "v1.0.0", { ...gate, commit: "0".repeat(40) })).rejects.toThrow(/sha|commit/i);
+    await expect(checkTag(f.cwd, "v1.0.0", { ...gate, steps: gate.steps.filter((s) => s.name !== "journeys-list") })).rejects.toThrow(/journeys-list/);
+    await expect(checkTag(f.cwd, "v1.0.0", { ...gate, part: "journeys" })).rejects.toThrow(/one piece of the gate/);
+    // A check report still needs its unit tests; only the gate defers them.
+    await expect(checkTag(f.cwd, "v1.0.0", { ...f.report, tests: gate.tests })).rejects.toThrow();
+  });
   test("a passing report permits dry run and explicit fixture push, ignoring timing information", async () => {
     const f = fixture();
     const result = await checkTag(f.cwd, "v1.0.0", f.report);

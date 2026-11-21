@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-21: a release waits on the everyday journeys, not the whole 14-minute check
+
+- A release used to wait on the whole release check, about 13 to 14 minutes on one laptop, and each red cost a full rerun before anything could go out. Now `pnpm release:gate` gates it: types, lint, the build and the journeys in `test/e2e/journeys.txt`, with one report `pnpm release:tag` accepts. The whole check still runs, right after the release, and reports its reds.
+- A journey line that no longer names a test fails the gate, because Playwright's `--test-list` alone would skip it and let the gate shrink unnoticed.
+- The gate runs as parallel pieces (types, lint and build; the journeys in shards) that `release:gate --merge` joins; a missing or red piece makes the gate red.
+- `pnpm e2e:journeys` runs the journey list on its own.
+
 ## 2026-11-21: a release is gated by everyday journeys, not all 373 browser tests
 
 - A release waited on the whole browser suite, close to ten minutes of it, and two stale tests turned two release checks red tonight. The gate's browser half is now `test/e2e/journeys.txt`: 33 everyday journeys (open the app, chat, stop and regenerate, paste and attach, switch, search and rename threads, pick and download a model, change a setting, Usage, make a picture, the update prompt, the phone) and four speed checks, about 150 s of test time. The other browser tests still run after a release and report.

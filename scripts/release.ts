@@ -46,9 +46,15 @@ export interface ReleaseReport {
   scratchRemoved?: boolean;
   limits?: string[];
   /** Absent: the whole check. correctness: unit tests and the blocking browser project only.
-   *  timing: the timing project and the speed comparison only (never tag-eligible: no tests ran). */
-  part?: "correctness" | "timing";
+   *  timing: the timing project and the speed comparison only (never tag-eligible: no tests ran).
+   *  gate: release:gate's types, lint, build and journey list (scripts/release-gate.ts); checks and
+   *  journeys are its pieces from parallel pool jobs, tag-eligible only once merged into a gate. */
+  part?: ReportPart;
 }
+export const REPORT_PARTS = ["correctness", "timing", "gate", "checks", "journeys"] as const;
+export type ReportPart = typeof REPORT_PARTS[number];
+/** The steps a gate report must hold, each passed once. */
+export const GATE_STEPS = ["typecheck", "lint", "build", "journeys-list", "e2e"] as const;
 export interface CheckOptions { cwd: string; remote?: string; commit?: string; reportPath: string; storeDir?: string; browserPath?: string; signal?: AbortSignal; timingTimeoutMs?: number; performanceBase?: string; performanceTimeoutMs?: number;
   part?: "correctness" | "timing";
   /** Browser shards that run at once (default: half the cores, at most eight). */
@@ -88,7 +94,8 @@ function isReport(v: unknown): v is ReleaseReport {
     || !record(v["tests"]) || !totals(v["tests"]["unit"]) || !totals(v["tests"]["e2e"])
     || !Array.isArray(v["failures"]) || !v["failures"].every((f: unknown) => record(f) && typeof f["step"] === "string" && typeof f["test"] === "string" && typeof f["message"] === "string")
     || (v["limits"] !== undefined && (!Array.isArray(v["limits"]) || !v["limits"].every((s: unknown) => typeof s === "string")))
-    || (v["scratchRemoved"] !== undefined && typeof v["scratchRemoved"] !== "boolean")) return false;
+    || (v["scratchRemoved"] !== undefined && typeof v["scratchRemoved"] !== "boolean")
+    || (v["part"] !== undefined && !REPORT_PARTS.some((part) => part === v["part"]))) return false;
   return true;
 }
 export function parseReport(v: unknown): ReleaseReport {
@@ -102,13 +109,16 @@ export async function checkTag(cwd: string, version: string, input: ReleaseRepor
   if (!parsed || !Object.values(parsed).every(Number.isSafeInteger)) throw new Error("Version must be vX.Y.Z (nonnegative safe integers, no leading zeroes)");
   if (report.status !== "passed" || report.interrupted) throw new Error("Report failed: run release:check and fix its blocking failures before tagging");
   if (report.part === "timing") throw new Error("A timing-only report ran no tests: tag from the correctness report");
-  for (const name of BLOCKING) {
+  if (report.part === "checks" || report.part === "journeys") throw new Error("This report is one piece of the gate: merge the pieces with release:gate --merge and tag from that");
+  // A gate runs no unit tests and no clean clone: the whole check runs after the release instead.
+  const gate = report.part === "gate";
+  for (const name of gate ? GATE_STEPS : BLOCKING) {
     const found = report.steps.filter((s) => s.name === name);
-    if (found.length !== 1 || !found[0]?.blocking || found[0].status !== "passed" || found[0].exitCode !== 0) throw new Error(`Report ${name} step is missing or failed: run release:check again`);
+    if (found.length !== 1 || !found[0]?.blocking || found[0].status !== "passed" || found[0].exitCode !== 0) throw new Error(`Report ${name} step is missing or failed: run ${gate ? "release:gate" : "release:check"} again`);
   }
-  if (report.scratchRemoved !== true) throw new Error("Report does not confirm temporary clone cleanup: run release:check again");
+  if (!gate && report.scratchRemoved !== true) throw new Error("Report does not confirm temporary clone cleanup: run release:check again");
   if (["node", "git", "pnpm", "playwright"].some((name) => !report.tools[name])) throw new Error("Report is missing tool versions: run release:check again");
-  if (report.tests.unit.failed || report.tests.e2e.failed || report.tests.unit.passed === 0 || report.tests.e2e.passed === 0) throw new Error("Report contains blocking failures or no executed tests: run release:check again");
+  if (report.tests.unit.failed || report.tests.e2e.failed || (!gate && report.tests.unit.passed === 0) || report.tests.e2e.passed === 0) throw new Error("Report contains blocking failures or no executed tests: run release:check again");
   const finished = Date.parse(report.finishedAt);
   const started = Date.parse(report.startedAt);
   if (!Number.isFinite(finished) || !Number.isFinite(started) || started > finished || Date.now() - finished > MAX_AGE_MS) throw new Error("Report must be from the last 24 hours: run release:check again");
@@ -125,7 +135,10 @@ export async function checkTag(cwd: string, version: string, input: ReleaseRepor
   const newest = newestRelease([...local, ...remote]);
   const newestParsed = newest ? parseRelease(newest) : null;
   if (newestParsed && compare(parsed, newestParsed) <= 0) throw new Error(`Version must be greater than newest tag ${newest}: choose a newer vX.Y.Z`);
-  const message = [`Release ${version}`, `Commit: ${main}`, `Checked: ${report.finishedAt}`, summary("Unit", report.tests.unit), summary("E2E (blocking)", report.tests.e2e), ...(report.limits ?? []).map((limit) => `Limit: ${limit}`)].join("\n");
+  const checked = gate
+    ? ["Gate: types, lint, build and the journey list", summary("E2E (journeys)", report.tests.e2e), "Unit and the other browser tests: the whole release:check runs after this release"]
+    : [summary("Unit", report.tests.unit), summary("E2E (blocking)", report.tests.e2e)];
+  const message = [`Release ${version}`, `Commit: ${main}`, `Checked: ${report.finishedAt}`, ...checked, ...(report.limits ?? []).map((limit) => `Limit: ${limit}`)].join("\n");
   return { commit: main, message };
 }
 
@@ -208,7 +221,7 @@ export function validateBrowserToolchain(checkout: string, env: NodeJS.ProcessEn
 }
 
 /** Spawn the installed Node CLI itself: pnpm exec can turn a child signal into exit 1. */
-function playwrightCommand(clone: string): string[] {
+export function playwrightCommand(clone: string): string[] {
   const local = createRequire(path.join(clone, "package.json"));
   try { return [process.execPath, local.resolve("@playwright/test/cli")]; }
   catch (error) { if (!record(error) || error["code"] !== "MODULE_NOT_FOUND") throw error; }
