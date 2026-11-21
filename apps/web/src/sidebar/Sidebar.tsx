@@ -1,6 +1,6 @@
 // Layout adapts T3 Code (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt.
 import type { PullProgress } from "@gates-local/contracts";
-import { Fragment, type KeyboardEvent, type MouseEvent, type ReactNode, isValidElement, useRef } from "react";
+import { Fragment, type KeyboardEvent, type MouseEvent, type ReactNode, isValidElement, useRef, useState } from "react";
 import { debounce } from "../lib/ui/kit/async.ts";
 import { observeBox } from "../lib/ui/kit/events.ts";
 import { requestFocus } from "../lib/ui/kit/focus.ts";
@@ -171,6 +171,22 @@ export function listOrder<T extends { id: string }>(threads: readonly T[], runni
   return out;
 }
 
+const OLDER_KEY = "gates-local.sidebar-older-open";
+function olderWasOpen(): boolean {
+  try {
+    return localStorage.getItem(OLDER_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function keepOlder(open: boolean): void {
+  try {
+    localStorage.setItem(OLDER_KEY, open ? "1" : "0");
+  } catch {
+    // external: a browser's private window may refuse storage; the choice holds until reload
+  }
+}
+
 function measureFade(el: HTMLElement): void {
   const end = Math.max(0, el.scrollHeight - el.clientHeight - el.scrollTop);
   el.style.setProperty("--fade-top", `${Math.max(0, el.scrollTop)}px`);
@@ -194,6 +210,7 @@ function ThreadList() {
   const drawerWidth = useMedia("(max-width: 1023px)");
   const boot = useStore(booting);
   const waiting = useStore(notStarted);
+  const [olderOpen, setOlderOpen] = useState(olderWasOpen);
   const ordered = listOrder(threads, running, waitingSince(waiting));
   const shown = searching ? ordered.filter((t) => t.title.toLowerCase().includes(q)) : ordered;
   // why: row-shaped placeholders until the first read lands, so the list keeps its shape.
@@ -212,13 +229,30 @@ function ThreadList() {
     return <nav className="sb-list" ref={ref}>{threads.length > 0 ? <div className="sb-empty">No thread matches.</div> : null}</nav>;
   }
   let last = "";
+  const older = searching ? 0 : shown.filter((t) => when(t.updatedAt, now).group === "Older").length;
+  const fold = (
+    <button
+      type="button"
+      className="sb-group sb-fold"
+      data-testid="sidebar.older.toggle"
+      aria-expanded={olderOpen}
+      aria-label={`Older, ${older} ${older === 1 ? "thread" : "threads"}`}
+      onClick={() => { keepOlder(!olderOpen); setOlderOpen(!olderOpen); }}
+    >
+      Older
+      <span className="sb-fold-n">{older}</span>
+      <Icon id={olderOpen ? "down" : "right"} cls="s12" />
+    </button>
+  );
   return (
     <nav className="sb-list" ref={ref}>
       {searching ? <div className="sb-group">{shown.length} {shown.length === 1 ? "thread" : "threads"}</div> : null}
       {shown.map((t) => {
         const w = when(t.updatedAt, now);
-        const dateGroup = !searching && w.group !== last ? <div className="sb-group">{w.group}</div> : null;
+        const dateGroup = searching || w.group === last ? null : w.group === "Older" ? fold : <div className="sb-group">{w.group}</div>;
         last = w.group;
+        // why: a folded Older keeps the open thread's row and any row with a reply under way
+        if (!searching && w.group === "Older" && !olderOpen && on !== t.id && !running.has(t.id)) return dateGroup === null ? null : <Fragment key={t.id}>{dateGroup}</Fragment>;
         // why: a Fragment, as a wrapper would make .sb-group:first-child match every heading.
         return (
           <Fragment key={t.id}>

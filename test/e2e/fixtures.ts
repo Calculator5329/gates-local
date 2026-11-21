@@ -126,6 +126,8 @@ interface Fixtures {
   allowedErrors: RegExp[];
   /** Mark first run done before load, so the app opens on a new thread. */
   skipFirstRun: boolean;
+  /** Open the sidebar's Older group before load: for a seed dated in the past, whose threads would all sit folded. */
+  olderOpen: boolean;
   /** The seeded thread's id, or null. */
   seededThread: string | null;
   /** Open the app; resolves once the page has loaded. */
@@ -143,6 +145,7 @@ export const test = base.extend<Fixtures>({
   sandbox: ["ready", { option: true }],
   allowedErrors: [[], { option: true }],
   skipFirstRun: [true, { option: true }],
+  olderOpen: [false, { option: true }],
   seededThread: async ({ scenario, seed, seedAt, runtimeMode, installed, comfyUrl, controlledRuntimePorts, sandbox }, use) => {
     await use(await test.step("reset backend", () => stack.reset(scenario, seed, seedAt, runtimeMode, installed, comfyUrl, controlledRuntimePorts, sandbox)));
   },
@@ -150,7 +153,7 @@ export const test = base.extend<Fixtures>({
     void seededThread;
     await use(await stack.runtimePorts());
   },
-  open: async ({ page, allowedErrors, skipFirstRun, seededThread }, use) => {
+  open: async ({ page, allowedErrors, skipFirstRun, olderOpen, seededThread }, use) => {
     void seededThread; // the stack resets before the page opens
     const logged: { text: string; url: string }[] = [];
     // resources of a page load that the host's network change cut short and that was loaded again:
@@ -162,6 +165,7 @@ export const test = base.extend<Fixtures>({
     page.on("pageerror", (e) => logged.push({ text: `pageerror: ${e.message}`, url: "" }));
     // An init script runs in every frame; a sandboxed one (Measure's pages) has no storage to write.
     if (skipFirstRun) await page.addInitScript(() => { if (window.top === window) localStorage.setItem("gates-local.first-run-done", "1"); });
+    if (olderOpen) await page.addInitScript(() => { if (window.top === window) localStorage.setItem("gates-local.sidebar-older-open", "1"); });
     await use(async (hash = "") => {
       await test.step("page load", async () => {
         const target = appUrl(hash);

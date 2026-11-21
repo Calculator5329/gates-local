@@ -17,7 +17,7 @@ const NOW = Date.UTC(2026, 10, 12, 20, 0);
 const PHONE = { viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true };
 const TABLET = { viewport: { width: 800, height: 1000 }, isMobile: true, hasTouch: true };
 
-test.use({ seed: "design", seedAt: NOW, timezoneId: "America/Chicago", locale: "en-US" });
+test.use({ seed: "design", seedAt: NOW, olderOpen: true, timezoneId: "America/Chicago", locale: "en-US" });
 
 type Row = { top: number; height: number; icon: number; text: number };
 

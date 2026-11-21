@@ -16,6 +16,7 @@ test.use({
   hasTouch: true,
   seed: "design",
   seedAt: NOW,
+  olderOpen: true,
   timezoneId: "America/Chicago",
   locale: "en-US",
 });

@@ -13,7 +13,9 @@ type Store = typeof import("../lib/store/store.ts");
 type Selector = (s: State) => unknown;
 const IDS = ["A", "B", "C"];
 const MODEL = "gemma3:4b";
-const thread = (id: string) => ({ id, title: `Chat ${id}`, createdAt: 1, updatedAt: 1 });
+// today's threads: a folded Older would leave an idle row out of the list
+const TODAY = Date.now();
+const thread = (id: string) => ({ id, title: `Chat ${id}`, createdAt: 1, updatedAt: TODAY });
 const user = (id: string, threadId: string): Message => ({ id, threadId, role: "user", content: "hello", createdAt: 1 });
 const reply = (threadId: string): Message => ({ id: `reply-${threadId}`, threadId, role: "assistant", content: "finished", model: MODEL, createdAt: 2 });
 

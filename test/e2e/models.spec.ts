@@ -76,7 +76,7 @@ test("the model name field has one focus ring and takes a pasted ollama command"
 
 test.describe("the desktop's model rows", () => {
   // Thu 2026-11-12 14:00 in Chicago, as in the screenshot rig
-  test.use({ seed: "design", seedAt: Date.UTC(2026, 10, 12, 20, 0), timezoneId: "America/Chicago", locale: "en-US", viewport: { width: 1440, height: 900 } });
+  test.use({ seed: "design", seedAt: Date.UTC(2026, 10, 12, 20, 0), olderOpen: true, timezoneId: "America/Chicago", locale: "en-US", viewport: { width: 1440, height: 900 } });
   // Guards the owner's ruling: Remove lives in a model row's ⋯ menu.
   test("Remove is in the row's ⋯ menu and nowhere under the row", async ({ page, open }) => {
     await open();

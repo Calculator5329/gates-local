@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-20: threads older than a week fold away in the sidebar
+
+- "Older" is a heading you press: it starts folded and shows how many threads it holds. Press it to see them, press again to fold. The app remembers how you left it.
+- A folded Older still shows the thread you have open and any thread with a reply under way.
+- Search looks through folded threads too.
+
 ## 2026-11-20: the session unit test that failed now and then waits for its question
 
 - `session.test` failed about once in many full runs, on three machines, and failed the 0.2.7 release check. Its helper sent a message and went on as soon as the send was answered; the start that carries the saved question arrives a moment later. A test that dropped the connection in that moment read a chat without its question. With that moment stretched to 2 to 15 ms the test failed every time; the helper now waits until the question is saved, and the test passes at every delay tried (0, 3, 8 and 30 ms).

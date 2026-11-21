@@ -201,6 +201,10 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .sb-list::-webkit-scrollbar{display:none}
 .sb-group{padding:16px 10px 4px;font-size:13px;font-weight:500;color:var(--muted-foreground)}   /* one section-label style: 13 px, 500, muted (sweep) */
 .sb-group:first-child{padding-top:8px}
+.sb-fold{display:flex;align-items:center;gap:4px;width:100%;border:0;background:none;font-family:inherit;text-align:left;cursor:pointer;border-radius:var(--r-sm)}
+.sb-fold:hover{color:var(--foreground)}
+.sb-fold-n{margin-left:auto;font-size:12px;font-weight:400;font-variant-numeric:tabular-nums}
+.sb-fold .ic{margin-left:6px}   /* the count ends where a row's date ends, the chevron sits in the row menu's column */
 .sb-row{width:100%;height:var(--row-h);display:flex;align-items:center;gap:4px;padding:0 4px 0 10px;border-radius:var(--r-ctl);font-size:13.5px;color:color-mix(in srgb,var(--foreground) 78%,transparent);text-align:left;transition:background-color .12s,color .12s}
 .sb-row:hover,.sb-row:focus-within,.sb-row.menu-open{background:var(--hover);color:var(--foreground)}
 .sb-row.on{background:var(--sb-selected);color:var(--foreground);font-weight:500}
@@ -1130,7 +1134,7 @@ a.btn{text-decoration:none}
 .fr-m .v{flex:none;align-self:stretch;justify-content:flex-start}
 /* one secondary grey, nothing under 14 px */
 .af-t b,.af-t small{font-size:14px}
-.sb-group,.sb-empty,.sb-row .ago,.u-act .tm,.a-act .meta,.stop-mark,.wr-m,.think,.qa,.mi small,.fp-n,.fp-mt,.axis,.lg-r .nm small,.meas span,.grp-t,.sl .d,.dl-v small,.badge,.fr-st,.fr-sub,.fr-note,.na,.btn.ghost,.upd-res,.prog-l,.kl td.k,.mini-seg button,.seg2 button{font-size:14px}
+.sb-group,.sb-empty,.sb-row .ago,.sb-fold-n,.u-act .tm,.a-act .meta,.stop-mark,.wr-m,.think,.qa,.mi small,.fp-n,.fp-mt,.axis,.lg-r .nm small,.meas span,.grp-t,.sl .d,.dl-v small,.badge,.fr-st,.fr-sub,.fr-note,.na,.btn.ghost,.upd-res,.prog-l,.kl td.k,.mini-seg button,.seg2 button{font-size:14px}
 .ta::placeholder,.sb-search input::placeholder,.inp::placeholder{color:var(--muted-foreground)}
 }
 /* touch: hover-only things get a tap path and every target is at least 44 by 40 */
