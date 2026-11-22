@@ -90,9 +90,11 @@ describe("handoff", () => {
     const leader = spawn("sh", ["-c", "sleep 30 & echo $!; exit 0"], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
     pids.push(leader.pid!);
     const leaderRecord = processRecord(leader.pid!);
+    // why: the leader exits right after it prints, so an exit wait attached after reading its output can miss the exit (HO-03 hung under load, 2026-11-17 and 2026-11-22)
+    const left = new Promise(resolve => leader.once("exit", resolve));
     const helper = Number((await new Promise<string>(resolve => leader.stdout!.once("data", d => resolve(String(d))))).trim());
     pids.push(helper);
-    await new Promise(resolve => leader.once("exit", resolve));
+    await left;
     expect(processGone(leaderRecord)).toBe(false);
     process.kill(helper, "SIGKILL");
     expect(await until(() => processGone(leaderRecord))).toBe(true);

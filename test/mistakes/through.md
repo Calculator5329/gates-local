@@ -1,82 +1,47 @@
-# What would stop the mistakes that got through
+# What would stop the mistakes that still get through
 
-From the reading of 2026-11-22 (`reading.json`, head f26ab416): 19 of 47 judged
-mistakes got through typecheck, lint and the whole unit suite, and one (B071)
-was caught only some of the time. Each line names the cheapest change that would
-stop it, looking first for an architecture change, then a type, then a lint rule,
-then a test. A change that would stop several is listed once with all of them.
+From the reading of 2026-11-22 (`reading.json`, head efbb1f98): 8 of 47 judged
+mistakes get through typecheck, lint, the models and the whole unit suite. The
+first reading, at f26ab416, had 19 of 47. Each line names the cheapest change
+that would stop it, looking first for an architecture change, then a type, then
+a lint rule, then a test.
 
-## Architecture: one owner for a state that is cleared by hand today
-
-Each of these keeps a flag, timer or message beside the real state and clears it
-by hand on some paths. The planted mistake drops one clear. Holding the state in
-one value that every path replaces makes the dropped clear impossible to write.
-
-- m02: Updates keeps the last click's error next to the check. One
-  `click: { kind, phase: "asking" | "failed", message }` value, which starting a
-  click replaces, leaves no old error to forget.
-- n23: `pendingSettings` is a module variable cleared inside `show()`. Comparing
-  the navigation id it already has (`nav !== navGen`) is enough to say "pending";
-  without the variable there is nothing to clear.
-- m38: the supervisor clears `readyTimer` by hand on three exit paths. One
-  `settle(launch, outcome)` that every exit calls, and that owns the timer, stops
-  a path from leaving it running.
-- t40: each measure handler checks `stop.signal.aborted` itself. Admission in
-  one place, as chat sends have in `admit.ts`, means a new handler cannot skip it.
-- t13: Stop beating an attach or image error is decided by a `stopFirst` wrapper
-  around each save. Deciding a turn's end in one resolver that knows Stop came
-  first keeps the order rule in one line instead of at every await.
-- n38: after the updater starts, `main.ts` quits the app with its own
-  `setTimeout`. The handoff that starts the updater should end the app itself, so
-  no caller can start the updater and stay open.
-- t03: `clone.ts` has its own output cap. One bounded-output collector for every
-  child process the server spawns puts the cap where a new spawn gets it free.
-
-## Type: make the wrong value unrepresentable
-
-- n41: a source's `detail` travels with any state, so `{ state: "ready", detail:
-  "The last refresh did not finish…" }` type-checks. With `detail` only on the
-  `error` variant of a union, the planted line fails typecheck.
-- B041: "running" is worked out in a filter on `t.end`. One exported
-  `running(turn)` with an exhaustive `switch` on `end.kind` (ending in a
-  `satisfies never`) makes every new end kind a type error until someone decides
-  whether it is running. B010, the same store's earlier mistake, was caught by a
-  test; this one was not.
-- m49: `linux-install.ts` checks `path.isAbsolute` itself. A branded
-  `AbsolutePath`, made only where the environment is read, would make the check
-  impossible to drop: the function could not be called with a plain string.
-
-## Lint: ban the call that is always wrong here
-
-- B071 (caught only some of the time): the query child reading `process.ppid`
-  after start is the whole mistake. A lint rule refusing `process.ppid` in
-  `packages/harness/src` stops it every time. The test that targets it in
-  `tools.test.ts` was red in one run and green in another with the mistake in.
-
-## Words: move the choice of words out of JSX into a words function
+## Words chosen inline in a component (6)
 
 m15 and m48 were caught because their words live in a pure function with a table
-test (`window-words.test.ts`, `download-rows.test.ts`). These seven pick words
-or icons inline in a component, where no unit test looks:
+test (`window-words.test.ts`, `download-rows.test.ts`). These six pick words or
+icons inline, where no unit test looks. A words function per place would stop
+them; whether that is worth the code is an open product call, since a glance at
+the screen catches each one.
 
 - m32, t42: the Copy Ollama name button's label (`Models.tsx`). One `copyLabel(state)`
   shared by both copy buttons.
 - t39: the mic button's words while transcribing (`Voice.tsx`).
 - t47: the slow mark in a measure row (`ModelMeasure.tsx`).
-- B095: the Reset confirm lists settings by hand. Built from the same defaults
-  table Reset uses, a removed setting leaves the list on its own (architecture, not
-  only words).
 - n32: `update.log`'s result line is a template in `handoff.ts`. A
   `resultLine(result)` taking the result object, with a table test.
-- n07: the malformed-line error in `stream.ts` cuts the line itself. A words
-  function with a table test.
+- n07: the malformed-line error in `stream.ts` cuts the line itself.
 
-## Test: what is left
+## Possibly not mistakes (2)
 
-- n27: `linux-lock.ts` holds 2,318 lines of pinned hashes by hand. A check that
-  every `--hash=sha256:` is 64 hex characters stops this planted typo; only
-  regenerating the file from its lock source and comparing would stop a wrong
-  hash that is still well formed.
-- n01: the drop overlay's leave path runs for drags that carry no files
-  (`file-drop.tsx`). A test that drags text out of the window, in a DOM test or
-  the browser suite.
+- n23: the one line in `arrive()` that ends the pending mark for Settings or
+  Pictures. Read twice, no visible effect of dropping it was found below a
+  browser. A browser journey (open Settings, then a thread, land on the thread)
+  would say whether it is a mistake or a line that can go.
+- t40: each measure handler checks `stop.signal.aborted` itself. Only Start
+  begins work and it already refuses while the app closes, so the planted line
+  changes nothing a person sees today. One admission for Measure would matter if
+  Measure should also pause while an update installs, which is undecided.
+
+## What stopped the other eleven
+
+| row | stopped by |
+|---|---|
+| n41, B095, m49 | typecheck: a union, a table keyed by the defaults, a branded path |
+| B071 | lint: `parent-pid-is-passed` (the flaky test no longer carries it) |
+| B041, m02, m38, n38, t13, t03, n27 | one behaviour test each, watched failing with the row's patch |
+| n01 | nothing to stop: the guard it removed was dead and is gone (`no-place-left.tsv`) |
+
+For m02, n23, m38, n38, t13 and t03 the state got one owner first. That cut the
+places to one each and did not stop the mistake: a dropped line is a right-typed
+wrong answer, and only a test of what a person sees refuses it.

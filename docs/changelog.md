@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-22: 8 of 47 past mistakes still get through, down from 19
+
+- Tests: the first replay of past mistakes had 19 of 47 passing every check. After the type, lint, one-owner and behaviour-test changes of the same day, `node scripts/mistakes.ts` on the whole set reads 8 of 47 (`test/mistakes/reading.json`, head efbb1f98): typecheck stops 3 (it stopped none), lint 3, unit tests 33, and no row from the census of real fixed bugs gets through. Six of the eight left are words picked inline in a component; the other two may not be mistakes at all. `test/mistakes/through.md` lists them and what stopped the other eleven.
+- Tests: the desktop handoff test "a recorded process is gone only when it and its group have ended" hung at its 30 second limit in two landings, on a busy machine. Its child exits right after it prints, and the test began waiting for that exit only after reading the output, so the exit could come first. It now waits from the start. Listening 300 ms late hung the old order every time; the new order passes with the same delay.
+
 ## 2026-11-22: six of the mistakes that still got through now fail a test
 
 - Tests: five rows in `test/mistakes/` (m02, m38, n38, t13, t03) and the planted lock typo (n27) could be made by dropping one line and still pass every check. Each now has one test, extended beside its neighbour, that checks what a person would see and was watched failing with the mistake put back. The app is unchanged. 92 test lines added, 6 replaced.
