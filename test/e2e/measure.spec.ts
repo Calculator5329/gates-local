@@ -1,9 +1,9 @@
 // Settings row 29, the owner 2026-11-13 (proposal 06, he picked A): "how good is this model, whats
 // it for, how will it run on my hardware". A Measure button on a model's row; one click runs the
-// checks through the chat's own tool loop (Tools, Files, Database, Instructions, Pages) and the
+// checks through the chat's own tool loop (Tools, Files, Database, Instructions, Images, Pages) and the
 // row keeps the speed and a score out of 100. Pages run in this window, in a sandboxed frame.
 // The fake's "measure" scenario passes every check but two (test/fake-ollama/measure-reply.ts):
-// Instructions 4 of 5 and Pages 2 of 3, so the score is 90.
+// Instructions 4 of 5 and Pages 2 of 3, so the score is 92 (each part weighs as in WEIGHTS, apps/server/src/measure/cases.ts).
 import type { Page } from "@playwright/test";
 import { createClient, type PageAction, type PageSeen } from "@gates-local/contracts";
 import { CASES, pageIn, type PageCase } from "../../apps/server/src/measure/cases.ts";
@@ -52,9 +52,9 @@ test("Measure runs only on a click, grades pages in this window, and the score o
   const score = page.getByTestId("settings.models.score-qwen3-5-9b");
   // the header says tok/s once; the row shows the number alone
   await expect(speed).toHaveText(/^\d+(\.\d)?$/, { timeout: 60_000 });
-  // the pages were graded here, so the score covers all five parts
-  await expect(score).toHaveText("90");
-  await expect(score).toHaveAttribute("aria-label", /^Score 90 of 100, /);
+  // the pages were graded here, so the score covers all six parts
+  await expect(score).toHaveText("92");
+  await expect(score).toHaveAttribute("aria-label", /^Score 92 of 100, /);
   await expect(row.locator(".mp-slow")).toHaveCount(0);
   await expect(page.locator("iframe[data-measure-page]")).toHaveCount(0);
   expect(await chatRequests("gemma4:12b")).toBe(0);
@@ -64,14 +64,15 @@ test("Measure runs only on a click, grades pages in this window, and the score o
   // why: read before the score is pressed, since Settings then closes onto the chat
   const kept = await speed.textContent();
 
-  // the score opens the run's chat: five parts with their weights on top, then every check as asked
+  // the score opens the run's chat: six parts with their weights on top, then every check as asked
   await score.click();
   const detail = page.getByTestId("measure.chat.score");
   await expect(detail).toBeVisible();
   await expect(detail.getByTestId("models.measure.part-tools")).toContainText("5/5");
   await expect(detail.getByTestId("models.measure.part-files")).toContainText("5/5");
-  await expect(detail.getByTestId("models.measure.part-database")).toContainText("5/5");
+  await expect(detail.getByTestId("models.measure.part-database")).toContainText("6/6");
   await expect(detail.getByTestId("models.measure.part-instructions")).toContainText("4/5");
+  await expect(detail.getByTestId("models.measure.part-images")).toContainText("3/3");
   await expect(detail.getByTestId("models.measure.part-pages")).toContainText("2/3");
   await expect(detail.getByTestId("models.measure.pending")).toHaveCount(0);
   await expect(page.getByTestId("measure.chat.turn")).toHaveCount(CASES.length);
@@ -98,7 +99,7 @@ test("Measure runs only on a click, grades pages in this window, and the score o
   await waitReady(page);
   await openModels(page);
   await expect(speed).toHaveText(kept!);
-  await expect(score).toHaveText("90");
+  await expect(score).toHaveText("92");
   await expect(page.locator("iframe[data-measure-page]")).toHaveCount(0);
   expect(await chatRequests("qwen3.5:9b")).toBe(sent);
 
@@ -106,7 +107,7 @@ test("Measure runs only on a click, grades pages in this window, and the score o
   await page.setViewportSize({ width: 390, height: 844 });
   const line = page.getByTestId("settings.models.measure-line-qwen3-5-9b");
   await expect(line).toBeVisible();
-  await expect(line).toHaveText(`${kept} tok/s · score 90`);
+  await expect(line).toHaveText(`${kept} tok/s · score 92`);
   await line.click();
   await expect(detail).toBeVisible();
   await expect(page.getByTestId("measure.chat.turn")).toHaveCount(CASES.length);
@@ -125,7 +126,7 @@ test("a Measure the runtime broke keeps the earlier score, and the row says it s
   const row = page.locator('.mp-card .mp-row[data-dm="qwen3.5:9b"]');
   const score = page.getByTestId("settings.models.score-qwen3-5-9b");
   await measureQwen(page);
-  await expect(score).toHaveText("90", { timeout: 60_000 });
+  await expect(score).toHaveText("92", { timeout: 60_000 });
   // from here every reply breaks with the runtime's error
   await stack.scenario("mid-stream-error", { installed });
   await row.getByTestId("models.row-menu.open").click();
@@ -134,10 +135,10 @@ test("a Measure the runtime broke keeps the earlier score, and the row says it s
   await expect(page.getByTestId("measure.chat.strip")).toContainText("unexpected EOF", { timeout: 60_000 });
   await openModels(page);
   // the run's end: the row says why it stopped, or (the bug) a new score took the old one's place
-  await expect(row.locator(".act-err").or(score.filter({ hasNotText: /^90$/ }))).toBeVisible({ timeout: 60_000 });
+  await expect(row.locator(".act-err").or(score.filter({ hasNotText: /^92$/ }))).toBeVisible({ timeout: 60_000 });
   await row.screenshot({ path: info.outputPath("measure-stopped-row.png"), animations: "disabled" });
   await expect(row.locator(".act-err")).toHaveText(new RegExp(`^Measure stopped at check 1 of ${CASES.length}: .*unexpected EOF`));
-  await expect(score).toHaveText("90");
+  await expect(score).toHaveText("92");
 });
 
 // The run is the server's: a window opened while it goes sees it, and the pages run only in the
@@ -160,8 +161,8 @@ test("a window opened during a Measure sees the run, and only the window that st
   await second.getByTestId("models.list.installed").screenshot({ path: info.outputPath("measure-second-window.png"), animations: "disabled" });
   await expect(second.getByTestId("settings.models.measure-qwen3-5-9b")).toHaveText(BUSY);
   await expect(second.getByTestId("settings.models.measure-gemma4-12b")).toBeDisabled();
-  await expect(page.getByTestId("settings.models.score-qwen3-5-9b")).toHaveText("90", { timeout: 60_000 });
-  await expect(second.getByTestId("settings.models.score-qwen3-5-9b")).toHaveText("90");
+  await expect(page.getByTestId("settings.models.score-qwen3-5-9b")).toHaveText("92", { timeout: 60_000 });
+  await expect(second.getByTestId("settings.models.score-qwen3-5-9b")).toHaveText("92");
   expect(frames).toBe(0);
   await second.close();
 });
@@ -202,10 +203,10 @@ test("a reload during a Measure still shows it measuring, and one of two open wi
   await expect(score).toHaveText(/^\d+$/, { timeout: 90_000 });
   await expect(second.getByTestId("settings.models.score-qwen3-5-9b")).toHaveText(/^\d+$/);
   await second.close();
-  await expect(score).toHaveText("90");
+  await expect(score).toHaveText("92");
   await score.click();
   await page.getByTestId("measure.chat.score").screenshot({ path: info.outputPath("measure-reload-detail.png"), animations: "disabled" });
-  // the pages were run and graded, so the score covers all five parts
+  // the pages were run and graded, so the score covers all six parts
   await expect(page.getByTestId("models.measure.left-out")).toHaveCount(0);
   await expect(page.getByTestId("models.measure.part-pages")).toContainText("2/3");
   // of the two windows open when they came due, one ran them, once
@@ -236,7 +237,7 @@ test("a score that left a part out is marked beside its number, and a full one i
   await measureQwen(page);
   const full = page.getByTestId("settings.models.score-qwen3-5-9b");
   const short = page.getByTestId("settings.models.score-gemma4-12b");
-  await expect(full).toHaveText("90", { timeout: 60_000 });
+  await expect(full).toHaveText("92", { timeout: 60_000 });
   await expect(full.getByTestId("settings.models.score-short")).toHaveCount(0);
   await expect(short.getByTestId("settings.models.score-short")).toHaveAttribute("data-tip", "Without Pages");
   await expect(short).toHaveAttribute("aria-label", /, Without Pages/);

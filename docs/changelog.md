@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-22: the Measure browser tests expect Measure 6's score
+
+- Tests: dev's browser suite had six Measure tests red in every run since Measure 6 landed (ae48081e). The new weights move the test model's score from 90 to 92 (Instructions 4 of 5 now costs 3 points, Pages 2 of 3 costs 5), and the tests still expected 90 and the old five-part breakdown. They now expect 92, Database 6/6 and an Images row at 3/3. The app is unchanged.
+
 ## 2026-11-22: the tier candidates are measured, and qwen3.5:9b scores 100
 
 - Models: the chat model tiers were picked from a memory estimate, never from a score. Measure 6 ran headless on every candidate with the app's harness and a shell-only one, one run each: qwen3.5:9b 100 with both, gemma4:12b 95, gpt-oss:20b 81 (95 shell-only), qwen3.5:4b 86 (95 shell-only), and huihui_ai/gemma-4-abliterated:12b 65. Inkling 2 Mini did not load at 16k. The table, the misses and the card memory each model held are in `docs/research/measure-tiers-2026-11-22.md`.

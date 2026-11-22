@@ -91,7 +91,7 @@ test("a Measure run is a chat you watch, Stop keeps no score, and a score opens 
   await expect(strip).toHaveCount(0);
   await expect(pinned).toHaveCount(0);
   await openModels(page);
-  await expect(score).toHaveText("90");
+  await expect(score).toHaveText("92");
   await score.click();
   await expect(chat).toBeVisible();
   // the chat opens on its score, at the top
@@ -113,7 +113,7 @@ test("a Measure run is a chat you watch, Stop keeps no score, and a score opens 
   await page.getByTestId("measure.chat.stop").click();
   await expect(strip).toContainText("Stopped. No score kept; the last one stays.");
   await openModels(page);
-  await expect(score).toHaveText("90");
+  await expect(score).toHaveText("92");
 
   // 9: an old measure with no chat kept opens in the same layout, its question from today's check
   await page.getByTestId("settings.models.score-gemma4-12b").click();
