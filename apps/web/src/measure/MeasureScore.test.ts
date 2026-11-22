@@ -108,6 +108,8 @@ describe("two scores side by side", () => {
     expect(three).toContain("skipped");
     expect(three).toContain("fails now");
     expect(earlierWords({ ...full, version: 2 })).toContain("fewer tasks");
+    // version 4 refused "<source id>/<file>"; it reads now
+    expect(earlierWords({ ...full, version: 4 })).toContain("named without /library");
     expect(earlierWords(full)).toBe("");
   });
 });

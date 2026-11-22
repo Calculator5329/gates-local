@@ -219,4 +219,20 @@ test.describe("saved", () => {
     expect(short.sh).toBeLessThanOrEqual(short.ch);
     expect(short.ch).toBeLessThan(120);
   });
+
+  // The owner on an opened failed row that showed its path twice (2026-11-21): "duplicate subtitles? unneeded".
+  test("an opened failed call says its path once: the heading is the call and the body holds only the refusal", async ({ page, open, seededThread }) => {
+    await open(`#thread=${seededThread ?? ""}`); await waitReady(page);
+    const reply = page.locator(".turn.a").nth(2);
+    const fold = reply.locator("button.think.fold");
+    if (await fold.count() > 0) { await fold.first().click(); await openedFully(reply.locator(".fold-body").first()); }
+    const row = reply.locator("[data-tool-row]").first();
+    await row.locator(".wr-line").click();
+    await expect(row.locator(".wr-h")).toHaveText("~/notes.md");
+    await expect(row.locator(".wr-body")).toContainText("Path is outside your Library");
+    await expect(row.locator(".wr-body .cmd")).toHaveCount(0);
+    await expect(row).toContainText("~/notes.md", { useInnerText: true });
+    expect((await row.innerText()).split("~/notes.md"), "the path shows once").toHaveLength(2);
+    await shoot(page, "tool-rows-failed-open", row);
+  });
 });

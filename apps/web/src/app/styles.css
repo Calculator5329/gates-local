@@ -375,7 +375,9 @@ div.think.fold:hover{color:var(--muted-foreground);background:none}
 .wr-line{display:flex;align-items:center;gap:8px;font-size:14px;line-height:24px;user-select:none;min-width:0;flex-wrap:wrap;row-gap:0}
 .wr-st{width:20px;height:24px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);flex:none}
 .wr-st[data-st="rej"]{color:var(--red)}
-.wr-h{color:var(--foreground);font-weight:500}
+.wr-h{color:var(--foreground);font-weight:500;min-width:0;overflow-wrap:anywhere}
+/* a failed row's heading is its whole call; opened, it keeps the call's own line breaks */
+.wr[aria-expanded="true"] .wr-h[data-call]{white-space:pre-wrap}
 .wr-m{color:var(--muted-foreground);font-size:13px}
 .wr-x{display:flex;align-items:center;color:var(--muted-foreground)}
 .wr[aria-expanded="true"] .wr-x .ic{transform:rotate(180deg)}

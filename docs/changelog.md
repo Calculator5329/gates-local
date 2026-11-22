@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-21: a file named without /library reads, and a failed call says its path once
+
+- Tools: a model that asked to read `measure-notes/expenses.csv` was refused with "use /library/<source id>", which told it the rule but not the answer, so a small model sent the same call three times and failed the question. A path that starts with a Library source's id now reads as that source's file. A path that is still refused names the exact one to use when a single source fits it (for example "use /library/measure-notes/expenses.csv"). Paths that leave a source are refused as before. The shell already starts in /library, so `cat measure-notes/expenses.csv` worked there all along.
+- Measure: small models can now pass file questions they used to fail this way, so the measure version is 5 and earlier scores are marked as earlier checks, with the reason, until measured again.
+- Chat: an opened failed tool row showed its path twice, once as the heading and again as the first line below it. The heading is the call, so the line below is gone; a long or multi-line call wraps in the heading when the row is open.
+
 ## 2026-11-21: an image asked for in the model's own JSON is made
 
 - Asked to "Generate an image of a dog", Gemma 4 12B answered with `{ "action": "image", "prompts": [ "A cute dog sitting in a lush green field during the golden hour." ] }` and the chat showed that JSON; no picture was queued. The app knew `action` paired with `action_input`, but this reply put the tool's own fields beside `action`. Such a reply now queues the picture and shows no JSON, with native tool calls and with text calls. It counts only when the JSON is the whole reply (or one whole code block), `action` comes first and names a tool the turn offered, and every other key is a field of that tool that fits it, so a reply that quotes JSON in its prose stays an answer.

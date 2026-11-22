@@ -38,9 +38,9 @@ const cmdOf = (row: string) => {
   const m = /<p class="cmd">([\s\S]*?)<\/p>/.exec(row);
   return m === null ? undefined : text(m[1] ?? "");
 };
-const headOf = (row: string) => text(/<span class="wr-h">([\s\S]*?)<\/span>/.exec(row)?.[1] ?? "");
+const headOf = (row: string) => text(/<span class="wr-h"[^>]*>([\s\S]*?)<\/span>/.exec(row)?.[1] ?? "");
 const metaOf = (row: string) => /<span class="wr-m">([\s\S]*?)<\/span><span class="wr-x">/.exec(row)?.[1] ?? "";
-const markOf = (row: string) => /<span class="wr-st" data-st="(\w+)">([\s\S]*?)<\/span><span class="wr-h">/.exec(row);
+const markOf = (row: string) => /<span class="wr-st" data-st="(\w+)">([\s\S]*?)<\/span><span class="wr-h"[^>]*>/.exec(row);
 async function oneRow(msg: Message): Promise<string> {
   const rows = rowsOf(await saved(msg));
   expect(rows).toHaveLength(1);
@@ -140,6 +140,17 @@ describe("a step's label", () => {
     expect(markOf(row)?.[1]).toBe("rej");
     expect(headOf(row)).toBe("cat missing.txt");
     expect(row).not.toContain("Tool could not finish");
+  });
+
+  it("a failed step's opened body does not repeat the call its heading already says (Measure transcript, 2026-11-21)", async () => {
+    const refused = "Path is outside your Library; use /library/<source id>";
+    const row = await oneRow(reply([step("read", "error", "Tool could not finish", { detail: `${call("read", { path: "measure-notes/expenses.csv" })}\n${refused}` })]));
+    expect(headOf(row)).toBe("measure-notes/expenses.csv");
+    expect(cmdOf(row)).toBeUndefined();
+    expect(text(row).split("measure-notes/expenses.csv")).toHaveLength(2);
+    expect(text(row)).toContain(refused);
+    // a row headed by its summary keeps its call line
+    expect(cmdOf(await oneRow(reply([step("read", "done", "Read Notes", { detail: call("read", { path: "/library/measure-notes/expenses.csv" }) })])))).toBe("/library/measure-notes/expenses.csv");
   });
 });
 

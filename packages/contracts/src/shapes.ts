@@ -236,7 +236,7 @@ export type MeasureCheck = typeof MeasureCheck.Type;
  * checks run changes, so a score from before is marked as earlier and never sits beside a new one
  * as if made alike.
  */
-export const MEASURE_VERSION = 4;
+export const MEASURE_VERSION = 5;
 
 /** A part's count: checks passed of the ones that ran, and its weight in the score. */
 export const MeasurePartCount = S.Struct({ part: MeasurePart, passed: S.Int, total: S.Int, weight: S.Int });
@@ -251,12 +251,14 @@ export type MeasurePartCount = typeof MeasurePartCount.Type;
  * sampling; its score is not alike with a version 3 one. Version 3 has this build's checks, but
  * skipped a check whose turn the model itself ended (tool calls the tools refused, calls up to the
  * turn limit, a window it filled), where this build fails it: its score can be higher.
+ * Version 4 ran with a read tool that refused "<source id>/<file>", which this build reads as
+ * /library/<source id>/<file>: its file scores can be lower.
  */
 export const ModelMeasure = S.Struct({
   model: S.String,
   digest: S.String,
   at: S.Finite,
-  version: S.optional(S.Literals([2, 3, 4])),
+  version: S.optional(S.Literals([2, 3, 4, 5])),
   numCtx: S.Int,
   think: S.optional(S.Boolean),
   sampling: S.optional(S.Struct({ temperature: S.Finite, seed: S.Int })),

@@ -109,17 +109,39 @@ function leavesByText(relative: string, platform: NodeJS.Platform): boolean {
   return relative.split(EITHER_SEPARATOR).some(part => parent.test(part));
 }
 
+// why: a small model told only the convention repeats its call, so name the path when one fits
+function outsideLibrary(requested: string, sources: readonly LibraryEntry[], platform: NodeJS.Platform): Error {
+  const kept = sources.filter(s => s.kind !== "sqlite");
+  const name = (s: LibraryEntry) => (platform === "win32" ? path.win32 : path.posix).basename(s.path);
+  const parts = requested.split(EITHER_SEPARATOR).filter(p => p !== "" && p !== ".");
+  let fix: string | undefined;
+  const fitsPart = (p: string) => kept.filter(s => s.id === p || (s.kind === "folder" && name(s) === p));
+  const at = parts.findIndex(p => fitsPart(p).length > 0);
+  if (at >= 0) {
+    const [only, ...more] = fitsPart(parts[at] ?? "");
+    const rest = parts.slice(at + 1);
+    if (only && more.length === 0 && !rest.some(p => PARENT_ON_WINDOWS.test(p)) && (only.kind === "folder" || rest.length === 0))
+      fix = ["/library", only.id, ...rest].join("/");
+  } else {
+    const [only, ...more] = kept.filter(s => s.kind === "file" && name(s) === parts.at(-1));
+    if (only && more.length === 0) fix = `/library/${only.id}`;
+  }
+  return new Error(`Path is outside your Library; use ${fix ?? "/library/<source id>"}`);
+}
+
 async function readLibrary(sources: readonly LibraryEntry[], input: Record<string, unknown>, signal: AbortSignal, realpath: Realpath, platform: NodeJS.Platform, fs: LibraryFs): Promise<ToolResult> {
   const contains = (parent: string, candidate: string) => containsPath(parent, candidate, platform);
   const requested = text(input, "path");
-  const virtual = requested.match(/^\/?library\/([^/]+)(?:\/(.*))?$/);
+  // why: small models write "<source id>/<file>" and mean that source's file
+  const bare = requested.match(/^([^/\\]+)(?:\/(.*))?$/);
+  const virtual = requested.match(/^\/?library\/([^/]+)(?:\/(.*))?$/) ?? (bare && sources.some(s => s.id === bare[1]) ? bare : null);
   let source: LibraryEntry | undefined;
   let candidate: string;
   if (virtual) {
     source = sources.find(s => s.id === virtual[1] && s.kind !== "sqlite");
     if (!source && sources.some(s => s.id === virtual[1] && s.kind === "sqlite"))
       throw new Error(`${virtual[1]} is a SQLite source; ${platform === "win32" ? `use sql with source "${virtual[1]}"` : `use shell with sqlite3 /data/${virtual[1]}.db`}`);
-    if (!source) throw new Error("Path is outside your Library; use /library/<source id>");
+    if (!source) throw outsideLibrary(requested, sources, platform);
     const relative = virtual[2] ?? "";
     // external: Windows reaches out to a UNC path's host the moment the disk is asked about it.
     const refused = libraryFsError(`/library/${source.id}${relative === "" ? "" : `/${relative}`}`, { code: "ENOENT" });
@@ -129,7 +151,7 @@ async function readLibrary(sources: readonly LibraryEntry[], input: Record<strin
   } else {
     candidate = path.resolve(requested);
     source = sources.find(s => s.kind !== "sqlite" && (s.kind === "folder" ? contains(s.path, candidate) : samePath(s.path, candidate, platform)));
-    if (!source) throw new Error("Path is outside your Library; use /library/<source id>");
+    if (!source) throw outsideLibrary(requested, sources, platform);
   }
   const root = await realpath(source.path).catch((e: unknown) => { throw sourceUnavailable(source, e); });
   if (!samePath(root, source.path, platform)) throw new Error("Library source path changed; reconnect this source before using it");

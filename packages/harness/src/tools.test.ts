@@ -13,6 +13,11 @@ const processCleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of processCleanups.splice(0)) await cleanup(); });
 
 async function queueAnyImage() { return { jobId: "job-1" }; }
+function notes() {
+  const docs = mkdtempSync(path.join(tmpdir(), "gl-bare-"));
+  writeFileSync(path.join(docs, "expenses.csv"), "rent,900");
+  return docs;
+}
 
 function isQueryProcess(cmd: string, timeoutMs: number) {
   return cmd.includes("node:sqlite") && cmd.includes(`\0${timeoutMs}\0`);
@@ -117,6 +122,41 @@ describe("Library tools", () => {
     expect(realpath).not.toHaveBeenCalled();
     await expect(createTools({ platform: "linux", realpath, sources, fs: { stat: (async () => { throw Object.assign(new Error("gone"), { code: "ENOENT" }); }) as LibraryFs["stat"] } }).execute({ name: "read", input: { path: "/library/f/.. /x" } }, signal)).rejects.toThrow(new Error("/library/f/.. /x: no such file"));
     expect(realpath).toHaveBeenCalled();
+  });
+  describe("a path written without /library (a Measure files-sum run, 2026-11-21: three identical refused calls)", () => {
+    const signal = new AbortController().signal;
+    it("reads <source id>/<file> as /library/<source id>/<file>", async () => {
+      const tools = createTools({ platform: "linux", sources: [{ id: "measure-notes", label: "Notes", path: notes(), kind: "folder" }] });
+      expect((await tools.execute({ name: "read", input: { path: "measure-notes/expenses.csv" } }, signal)).output).toBe("rent,900");
+      expect((await tools.execute({ name: "read", input: { path: "measure-notes" } }, signal)).output).toContain("expenses.csv");
+    });
+    it("a SQLite id keeps the SQLite answer", async () => {
+      const tools = createTools({ platform: "linux", sources: [{ id: "books", kind: "sqlite", path: "live", snapshotPath: "snap", label: "books.db" }] });
+      await expect(tools.execute({ name: "read", input: { path: "books/pages" } }, signal)).rejects.toThrow("books is a SQLite source; use shell with sqlite3 /data/books.db");
+    });
+    it("a bare path that leaves the source is still refused, without touching the disk", async () => {
+      const realpath = vi.fn(async (file: string) => file);
+      const tools = createTools({ platform: "linux", realpath, sources: [{ id: "f", label: "Docs", path: "/srv/docs", kind: "folder" }] });
+      await expect(tools.execute({ name: "read", input: { path: "f/../private.txt" } }, signal)).rejects.toThrow(new Error("/library/f/../private.txt: no such file"));
+      expect(realpath).not.toHaveBeenCalled();
+    });
+    it("a refused path names the exact path to use when one source clearly fits, and keeps the old words otherwise", async () => {
+      const tools = createTools({ platform: "linux", sources: [
+        { id: "measure-notes", label: "Notes", path: "/srv/notes", kind: "folder" },
+        { id: "budget", label: "Budget", path: "/srv/files/budget-2026.csv", kind: "file" },
+      ] });
+      const cases: [string, string][] = [
+        ["/measure-notes/expenses.csv", "Path is outside your Library; use /library/measure-notes/expenses.csv"],
+        ["/library/notes/expenses.csv", "Path is outside your Library; use /library/measure-notes/expenses.csv"],
+        ["notes/expenses.csv", "Path is outside your Library; use /library/measure-notes/expenses.csv"],
+        ["/home/someone/budget-2026.csv", "Path is outside your Library; use /library/budget"],
+        ["/measure-notes/../secret.txt", "Path is outside your Library; use /library/<source id>"],
+        ["/etc/passwd", "Path is outside your Library; use /library/<source id>"],
+        ["/library/nope/x", "Path is outside your Library; use /library/<source id>"],
+      ];
+      for (const [requested, message] of cases)
+        expect(await tools.execute({ name: "read", input: { path: requested } }, signal).then(() => "read", (e: unknown) => (e as Error).message), requested).toBe(message);
+    });
   });
   it("a path under a single-file source is refused like a missing file without touching the disk", async () => {
     const realpath = vi.fn(async (file: string) => file);

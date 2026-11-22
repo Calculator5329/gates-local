@@ -301,6 +301,8 @@ export function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }
   const { cmd, shell } = callLine(line);
   const failed = step.state === "error" && !cut;
   const heading = !failed ? step.summary : cmd !== "" ? cmd : label;
+  // why: a failed row's heading is its call, so the opened body does not say it again
+  const callIsHeading = failed && cmd !== "";
   const meta = st === "run" ? (named ? "running" : `${label} · running`) : cut ? (named ? "stopped" : `${label} · stopped`) : failed ? (cmd !== "" ? lead : dur) : dur === "" ? lead : null;
   const out = rest.join("\n").trim();
   const toggle = () => setOpen(!open);
@@ -326,7 +328,7 @@ export function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }
         <span className="wr-st" data-st={st}>
           {st === "run" ? <span className="run-dot" /> : <Icon id={st === "done" ? "checkc" : "xc"} />}
         </span>
-        <span className="wr-h">{heading}</span>
+        <span className="wr-h" data-call={callIsHeading ? "" : undefined}>{heading}</span>
         <span className="wr-m">
           {meta ?? (
             <>
@@ -341,7 +343,7 @@ export function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }
       </div>
       <div className="wr-body" data-testid="chat.tool-call.body" tabIndex={open ? 0 : -1} aria-label={`${heading}: details`}>
         {meta === null ? <p className="wr-who">{lead}</p> : null}
-        {cmd !== "" ? (
+        {cmd !== "" && !callIsHeading ? (
           <p className="cmd">
             {shell ? <span>$ </span> : null}
             {cmd}

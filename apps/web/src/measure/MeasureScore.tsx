@@ -19,7 +19,8 @@ export const isEarlier = (m: ModelMeasure) => m.version !== undefined && m.versi
 export const EARLIER_WORDS = "Earlier checks";
 export const earlierWords = (m: ModelMeasure): string => {
   if (!isEarlier(m)) return "";
-  const what = m.version === 3 ? "a check the model cut short was skipped; it fails now" : "fewer tasks, and some replies graded differently";
+  const what = m.version === 4 ? "a Library file named without /library was refused; it reads now"
+    : m.version === 3 ? "a check the model cut short was skipped; it fails now" : "fewer tasks, and some replies graded differently";
   return `${EARLIER_WORDS}: ${what}. Measure again to set it beside newer scores.`;
 };
 
