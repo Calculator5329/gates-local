@@ -57,15 +57,20 @@ function leavingChat(s: State): Partial<State> {
 
 export function createNavigation({ editEnded, catchUp, chooseModel, newChatModel, loadThread, loading, settingsData = () => null, dropPendingPanel, picturesData = () => Promise.resolve(), sectionShown = () => {} }: NavigationEffects) {
   let navGen = 0;
-  let pendingSettings: number | null = null;
+  // why: pending only while still the current navigation, so a new navigation needs no clear
+  let opening: number | null = null;
 
-  function beginNavigation(): number {
-    pendingSettings = null;
-    return ++navGen;
+  const beginNavigation = (): number => ++navGen;
+
+  // why: the stale-navigation check and the end of pending are one call, so neither is left out
+  function arrive(nav: number): boolean {
+    if (nav !== navGen) return false;
+    opening = null;
+    return true;
   }
 
   function cancelPendingSettings(): boolean {
-    if (pendingSettings !== navGen) return false;
+    if (opening !== navGen) return false;
     beginNavigation();
     return true;
   }
@@ -104,15 +109,14 @@ export function createNavigation({ editEnded, catchUp, chooseModel, newChatModel
     const nav = beginNavigation();
     dropPendingPanel();
     const show = () => {
-      if (nav !== navGen) return;
-      pendingSettings = null;
+      if (!arrive(nav)) return;
       setState((s) => ({ view: "settings", section: section ?? (s.section === "models" ? "general" : s.section), addPage, ownerConfirm, panel: null }));
       enterScreen();
       sectionShown(getState().section);
     };
     const data = settingsData();
     if (settingsScreen.get().kind === "pending" || data !== null) {
-      pendingSettings = nav;
+      opening = nav;
       void Promise.all([settingsScreen.load(), data]).then(show);
     } else show();
   }
@@ -139,10 +143,9 @@ export function createNavigation({ editEnded, catchUp, chooseModel, newChatModel
   function openPictures(): void {
     const nav = beginNavigation();
     dropPendingPanel();
-    pendingSettings = nav;
+    opening = nav;
     void Promise.all([picturesScreen.load(), picturesData()]).then(() => {
-      if (nav !== navGen) return;
-      pendingSettings = null;
+      if (!arrive(nav)) return;
       setState({ view: "pictures", ownerConfirm: false, panel: null });
       enterScreen();
     });
@@ -192,6 +195,6 @@ export function createNavigation({ editEnded, catchUp, chooseModel, newChatModel
     openThread, newThread, openSettings, leaveSettings, closeSettings, toggleSettings, toggleModels, cancelPendingSettings, initialView, finishFirstRun, firstRunDone,
     openPictures, leavePictures, togglePictures,
     get generation() { return navGen; },
-    get pendingSettings() { return pendingSettings; },
+    get pendingSettings() { return opening === navGen ? opening : null; },
   };
 }

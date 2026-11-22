@@ -3,17 +3,17 @@ Class: K14
 Fix: planted
 Browser: no
 Seen: After Update, the old app stays open and the updater waits for it to close.
-Note: planted c at apps/desktop/src/main.ts:378
+Note: the quit inside handOffToUpdater is dropped (the handoff quits the app itself since 2026-11-22; before, the caller did)
 
 diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
-index 9f1dc326..7a51e37e 100644
+index 81e773f2..6a9ce0af 100644
 --- a/apps/desktop/src/main.ts
 +++ b/apps/desktop/src/main.ts
-@@ -375,7 +375,6 @@ function run(start: StartApp = {}): void {
-       const started = await startDetached(plan, approvedHandoffEnv(process.env, askedAt));
-       if (started.ok) {
-         console.error(`[desktop] approved updater started; quitting so it can update ${repoRoot}`);
--        setTimeout(() => app.quit(), 200);
-       }
-       return started;
-     })).catch(() => ({ ok: false, message: "Could not validate the update with the app server. Check for updates again to retry." }));
+@@ -137,7 +137,6 @@ function handOffToUpdater(plan: UpdaterLaunch, env: NodeJS.ProcessEnv): Promise<
+       child.unref();
+       resolve({ ok: true });
+       console.error(`[desktop] approved updater started; quitting so it can update ${repoRoot}`);
+-      setTimeout(() => app.quit(), 200);
+     });
+   });
+ }

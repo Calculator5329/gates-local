@@ -63,7 +63,6 @@ interface Launch {
   readonly stderrTail: string[];
   readonly stdoutTail: string[];
   failure: CrashReason | null;
-  readyTimer: NodeJS.Timeout | null;
   exited: Promise<void>;
 }
 
@@ -124,10 +123,7 @@ export class Supervisor {
     this.#stopping = (async () => {
       this.#setState({ status: "stopping" });
       const launch = this.#current;
-      if (launch !== null) {
-        clearReadyTimer(launch);
-        await this.#terminate(launch);
-      }
+      if (launch !== null) await this.#terminate(launch);
       this.#setState({ status: "stopped" });
     })();
     await this.#stopping;
@@ -208,7 +204,6 @@ export class Supervisor {
       stderrTail: [],
       stdoutTail: [],
       failure: null,
-      readyTimer: null,
       exited: exited.promise,
     };
     this.#current = launch;
@@ -235,7 +230,6 @@ export class Supervisor {
       if (this.#isCurrent(id)) this.#crash(id, null, { kind: "spawn-error", message: error.message }, []);
     });
     child.once("exit", (code, signal) => {
-      clearReadyTimer(launch);
       child.stdin?.destroy();
       if (!this.#isCurrent(id) && launch.failure === null) {
         exited.resolve();
@@ -253,13 +247,13 @@ export class Supervisor {
     });
 
     const readyTimeoutMs = this.#opts.readyTimeoutMs ?? DEFAULTS.readyTimeoutMs;
-    launch.readyTimer = setTimeout(() => {
-      launch.readyTimer = null;
-      if (!this.#isCurrent(id) || this.#state.status === "ready") return;
+    // why: never cleared; every way a launch stops waiting is read when it fires
+    setTimeout(() => {
+      if (!this.#isCurrent(id) || this.#state.status === "ready" || launch.failure !== null || !isRunning(child)) return;
       this.#log(`[supervisor] launch ${id}: no ready line within ${readyTimeoutMs} ms`);
       launch.failure = { kind: "ready-timeout", timeoutMs: readyTimeoutMs };
       void this.#terminate(launch);
-    }, readyTimeoutMs);
+    }, readyTimeoutMs).unref();
 
     return await this.settled();
   }
@@ -274,7 +268,6 @@ export class Supervisor {
       this.#log(`[server:out] ${output}`);
       return;
     }
-    clearReadyTimer(launch);
     if (!Number.isInteger(ready.port) || ready.port < 1 || ready.port > 65535 || (launch.port !== 0 && ready.port !== launch.port)) {
       launch.failure = { kind: "bad-ready", line: output };
       void this.#terminate(launch);
@@ -338,11 +331,6 @@ function noop(): void {}
 
 function isRunning(child: ChildProcess): boolean {
   return child.pid !== undefined && child.exitCode === null && child.signalCode === null;
-}
-
-function clearReadyTimer(launch: Launch): void {
-  if (launch.readyTimer !== null) clearTimeout(launch.readyTimer);
-  launch.readyTimer = null;
 }
 
 export function parseReady(line: string): { port: number } | null {

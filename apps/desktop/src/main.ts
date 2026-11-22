@@ -127,7 +127,7 @@ if (installedCopy !== null) {
 }
 
 // external: Node's detached spawn leads its own process group, so the updater outlives the quit.
-function startDetached(plan: UpdaterLaunch, env: NodeJS.ProcessEnv): Promise<UpdateAndRestartResult> {
+function handOffToUpdater(plan: UpdaterLaunch, env: NodeJS.ProcessEnv): Promise<UpdateAndRestartResult> {
   return new Promise((resolve) => {
     const child = spawn(plan.command, [...plan.args], { cwd: plan.cwd, env, detached: true, stdio: "ignore", windowsHide: true });
     child.once("error", (e) =>
@@ -136,6 +136,8 @@ function startDetached(plan: UpdaterLaunch, env: NodeJS.ProcessEnv): Promise<Upd
     child.once("spawn", () => {
       child.unref();
       resolve({ ok: true });
+      console.error(`[desktop] approved updater started; quitting so it can update ${repoRoot}`);
+      setTimeout(() => app.quit(), 200);
     });
   });
 }
@@ -372,12 +374,7 @@ function run(start: StartApp = {}): void {
     if (state.status !== "ready") return { ok: false, message: "The app server is not ready to approve an update. Try again after it reconnects." };
     return withUpdateControl(state.url, (control) => launchApprovedUpdate(request, control, async (approvedCommit, askedAt) => {
       const plan = updaterLaunch({ repoRoot, pid: process.pid, dataDir, argv: process.argv, cwd: process.cwd(), env: process.env, exists: existsSync, approvedCommit });
-      const started = await startDetached(plan, approvedHandoffEnv(process.env, askedAt));
-      if (started.ok) {
-        console.error(`[desktop] approved updater started; quitting so it can update ${repoRoot}`);
-        setTimeout(() => app.quit(), 200);
-      }
-      return started;
+      return handOffToUpdater(plan, approvedHandoffEnv(process.env, askedAt));
     })).catch(() => ({ ok: false, message: "Could not validate the update with the app server. Check for updates again to retry." }));
   });
   ipcMain.handle(IPC.updateAndRestart, (event, request: unknown): Promise<UpdateAndRestartResult> => {

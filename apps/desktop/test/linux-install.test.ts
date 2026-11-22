@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { DESKTOP_ID, renderDesktopEntry } from "../src/desktop-entry.ts";
-import { BACKUP_DIR, installLinux, linuxDataHome } from "../src/linux-install.ts";
+import { BACKUP_DIR, type DataHome, absoluteDataHome, installLinux, linuxDataHome } from "../src/linux-install.ts";
 
 const desktopDir = path.resolve(import.meta.dirname, "..");
 const assets = path.join(desktopDir, "assets");
@@ -12,10 +12,10 @@ const work = mkdtempSync(path.join(tmpdir(), "gates-linux-install-"));
 afterAll(() => rmSync(work, { recursive: true, force: true }));
 
 let n = 0;
-const fresh = (): string => {
+const fresh = (): DataHome => {
   const dir = path.join(work, `case-${++n}`);
   mkdirSync(dir);
-  return dir;
+  return absoluteDataHome(dir);
 };
 
 /** Every regular file under dir (symlinks not followed), as path (relative to dir) -> contents. */

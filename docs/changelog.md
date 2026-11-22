@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-22: five states that were cleared by hand now have one owner
+
+- Five places kept a flag, a timer or a check beside the real state and needed one line on every path to clear it. Dropping that line got through typecheck, lint and the whole unit suite each time (m02, n23, m38, n38 and m49 in `test/mistakes/`). The app looks and behaves the same.
+- Updates: a Check or Download press is one value, asking or failed. Starting a press replaces it, so an old error has nothing left to forget, and the download spinner is the same value.
+- Navigation: a new navigation no longer clears the Settings or Pictures pending mark; the mark counts only while its navigation is current. Showing the screen ends it in the same call that refuses a stale navigation.
+- Server start: the ready timer is never cleared. When it fires it reads whether the launch is still waiting (current, not ready, no failure, still running), so an exit path that forgets it no longer exists.
+- Update from a checkout: the function that starts the updater also quits the app, so no caller can start the updater and stay open.
+- Linux install: `installLinux` takes only a `DataHome`, made where the environment is read and refused if relative. Reading `XDG_DATA_HOME` by hand is now a type error.
+- What this did not do: for the first four, the same mistake can still be written by dropping the one line that is left, and nothing stops it yet. Their rows in `test/mistakes/` are rewritten against the new code and still read "through". Only the Linux install row is now stopped, by typecheck. The code is 6 lines shorter and each of these has one place instead of one per path.
+
 ## 2026-11-22: four past mistakes that got through now fail typecheck, lint or a test
 
 - A Library source could be saved as ready with an error's words still on it ("The last refresh did not finish…"), and nothing objected. A source's `detail` now exists only on its error state, so writing one on a ready or refreshing source fails typecheck. A source that leaves the error state drops its old words; registries written before this load as they did.

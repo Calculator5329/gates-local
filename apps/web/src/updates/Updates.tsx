@@ -8,7 +8,7 @@ import { useDocumentEvent } from "../lib/ui/kit/events.ts";
 import { useChange } from "../lib/ui/kit/popover.ts";
 import { useLoad } from "../lib/ui/kit/async.ts";
 import { useAfter } from "../lib/ui/kit/flash.ts";
-import { RESTART, restartable, type UpdateClick, type UpdateIcon, type UpdateInput, outdated, updateIcon, ver } from "./update-state.ts";
+import { type ClickError, RESTART, restartable, type UpdateClick, type UpdateIcon, outdated, updateIcon, ver } from "./update-state.ts";
 import { updateWork, workLines } from "./update-work.ts";
 
 export function Ring({ progress }: { progress: number | null }) {
@@ -148,6 +148,9 @@ function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStat
   );
 }
 
+// why: a new press replaces the last one, so an old error cannot stay up beside it
+type Press = { readonly click: ClickError["click"]; readonly phase: "asking" } | (ClickError & { readonly phase: "failed" });
+
 export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
   const status = useStore((s) => s.update);
   const checking = useStore((s) => s.updateChecking);
@@ -156,8 +159,9 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
   const drawer = useStore((s) => s.drawer);
   const [asking, setAsking] = useState(false);
   const [before, setBefore] = useState<readonly string[] | null>(null);
-  const [clickError, setClickError] = useState<UpdateInput["clickError"]>(null);
-  const [downloading, setDownloading] = useState(false);
+  const [press, setPress] = useState<Press | null>(null);
+  const clickError = press?.phase === "failed" ? press : null;
+  const downloading = press?.phase === "asking" && press.click === "download";
   const button = useRef<HTMLSpanElement>(null);
   const known = status === NA || status === undefined ? null : status;
   const desktop = canUpdateHere();
@@ -166,7 +170,7 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
   useChange(click, (now) => { if (now !== "update" && now !== "restart") setAsking(false); });
   useChange(drawer, (now) => { if (!now) setAsking(false); });
   const lastCheck = known?.lastCheck;
-  if (clickError != null && outdated(clickError, lastCheck)) setClickError(null);
+  if (clickError !== null && outdated(clickError, lastCheck)) setPress(null);
   useDocumentEvent("pointerdown", (e) => {
     if (!(e.target instanceof Element && e.target.closest(".sb-foot .cfm, .sb-foot .upd"))) setAsking(false);
   }, { capture: true, when: asking });
@@ -194,21 +198,15 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
     if (idle && now?.approval !== undefined) return void go(now.approval, workLines(updateWork(now.activity)), u.dismiss === true);
     setAsking(true);
   };
+  const attempt = (kind: ClickError["click"], work: () => Promise<string | null>) => {
+    setPress({ click: kind, phase: "asking" });
+    void work().then((message) => setPress(message === null ? null : { click: kind, phase: "failed", message, since }));
+  };
   const run: Record<UpdateClick, () => void> = {
-    check: () => {
-      setClickError(null);
-      void checkForUpdates().then((message) => setClickError(message === null ? null : { click: "check", message, since }));
-    },
+    check: () => attempt("check", checkForUpdates),
     update: () => void restart(),
     restart: () => void restart(),
-    download: () => {
-      setClickError(null);
-      setDownloading(true);
-      void downloadUpdate().then((message) => {
-        setDownloading(false);
-        if (message !== null) setClickError({ click: "download", message, since });
-      });
-    },
+    download: () => attempt("download", downloadUpdate),
     page: () => {
       if (u.page !== undefined) window.open(u.page, "_blank", "noopener,noreferrer");
     },

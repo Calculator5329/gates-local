@@ -4,13 +4,22 @@ import { DESKTOP_ID, renderDesktopEntry } from "./desktop-entry.ts";
 
 export const BACKUP_DIR = "gates-local-install-backups";
 
-export function linuxDataHome(env: Readonly<Record<string, string | undefined>>, home: string): string {
+declare const checked: unique symbol;
+// why: installLinux takes only this, so a relative path cannot write under the working folder
+export type DataHome = string & { readonly [checked]: true };
+
+export function absoluteDataHome(dir: string): DataHome {
+  if (!path.isAbsolute(dir)) throw new Error(`data home must be absolute: ${dir}`);
+  return dir as DataHome;
+}
+
+export function linuxDataHome(env: Readonly<Record<string, string | undefined>>, home: string): DataHome {
   const xdg = env["XDG_DATA_HOME"];
-  return xdg && path.posix.isAbsolute(xdg) ? xdg : path.posix.join(home, ".local", "share");
+  return absoluteDataHome(xdg && path.posix.isAbsolute(xdg) ? xdg : path.posix.join(home, ".local", "share"));
 }
 
 export interface InstallOptions {
-  dataHome: string;
+  dataHome: DataHome;
   exec: readonly string[];
   assets: string;
   now: Date;
@@ -18,7 +27,6 @@ export interface InstallOptions {
 }
 
 export function installLinux(o: InstallOptions): void {
-  if (!path.isAbsolute(o.dataHome)) throw new Error(`data home must be absolute: ${o.dataHome}`);
   const plan: Array<{ rel: string; bytes: Buffer }> = [{ rel: path.join("applications", `${DESKTOP_ID}.desktop`), bytes: Buffer.from(renderDesktopEntry(o.exec)) }];
   for (const [dir, ext] of [["scalable", "svg"], ["512x512", "png"]] as const) {
     const source = path.join(o.assets, `icon.${ext}`);

@@ -3,17 +3,18 @@ Class: K8
 Fix: planted
 Browser: no
 Seen: A server that crashes before it is ready is reported 20 s later as 'no ready line' instead of its crash.
-Note: planted c at apps/desktop/src/supervisor.ts:238
+Note: the ready timer no longer asks whether the child is still running (the timer is never cleared since 2026-11-22; before, three hand clears)
 
 diff --git a/apps/desktop/src/supervisor.ts b/apps/desktop/src/supervisor.ts
-index ad11f76d..243a099c 100644
+index c010ded8..b7e62a74 100644
 --- a/apps/desktop/src/supervisor.ts
 +++ b/apps/desktop/src/supervisor.ts
-@@ -235,7 +235,6 @@ export class Supervisor {
-       if (this.#isCurrent(id)) this.#crash(id, null, { kind: "spawn-error", message: error.message }, []);
-     });
-     child.once("exit", (code, signal) => {
--      clearReadyTimer(launch);
-       child.stdin?.destroy();
-       if (!this.#isCurrent(id) && launch.failure === null) {
-         exited.resolve();
+@@ -249,7 +249,7 @@ export class Supervisor {
+     const readyTimeoutMs = this.#opts.readyTimeoutMs ?? DEFAULTS.readyTimeoutMs;
+     // why: never cleared; every way a launch stops waiting is read when it fires
+     setTimeout(() => {
+-      if (!this.#isCurrent(id) || this.#state.status === "ready" || launch.failure !== null || !isRunning(child)) return;
++      if (!this.#isCurrent(id) || this.#state.status === "ready" || launch.failure !== null) return;
+       this.#log(`[supervisor] launch ${id}: no ready line within ${readyTimeoutMs} ms`);
+       launch.failure = { kind: "ready-timeout", timeoutMs: readyTimeoutMs };
+       void this.#terminate(launch);

@@ -3,18 +3,18 @@ Class: K6
 Fix: planted
 Browser: no
 Seen: A relative XDG_DATA_HOME writes the .desktop entry under the working folder instead of refusing.
-Note: planted a at apps/desktop/src/linux-install.ts:21
+Note: planted a at apps/desktop/src/linux-install.ts:21; since installLinux takes only a checked DataHome, the same mistake is reading the environment by hand where the install starts
 
-diff --git a/apps/desktop/src/linux-install.ts b/apps/desktop/src/linux-install.ts
-index ba84a860..7444fe53 100644
---- a/apps/desktop/src/linux-install.ts
-+++ b/apps/desktop/src/linux-install.ts
-@@ -18,7 +18,7 @@ export interface InstallOptions {
+diff --git a/apps/desktop/scripts/install-linux.ts b/apps/desktop/scripts/install-linux.ts
+index 3bcdfd51..0987d9dd 100644
+--- a/apps/desktop/scripts/install-linux.ts
++++ b/apps/desktop/scripts/install-linux.ts
+@@ -16,7 +16,7 @@ if (values.exec === undefined || values.exec === "") {
+   process.exit(2);
  }
- 
- export function installLinux(o: InstallOptions): void {
--  if (!path.isAbsolute(o.dataHome)) throw new Error(`data home must be absolute: ${o.dataHome}`);
-+  if (false) throw new Error(`data home must be absolute: ${o.dataHome}`);
-   const plan: Array<{ rel: string; bytes: Buffer }> = [{ rel: path.join("applications", `${DESKTOP_ID}.desktop`), bytes: Buffer.from(renderDesktopEntry(o.exec)) }];
-   for (const [dir, ext] of [["scalable", "svg"], ["512x512", "png"]] as const) {
-     const source = path.join(o.assets, `icon.${ext}`);
+ installLinux({
+-  dataHome: linuxDataHome(process.env, homedir()),
++  dataHome: process.env["XDG_DATA_HOME"] || path.join(homedir(), ".local", "share"),
+   exec: [path.resolve(values.exec), ...(values["exec-arg"] ?? [])],
+   assets: path.resolve(import.meta.dirname, "..", "assets"),
+   now: new Date(),

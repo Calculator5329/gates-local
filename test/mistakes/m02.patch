@@ -3,17 +3,17 @@ Class: K3
 Fix: planted
 Browser: no
 Seen: After a failed check, pressing Check again keeps the old error up until the new answer arrives.
-Note: planted c at apps/web/src/updates/Updates.tsx:199
+Note: the one write that replaces the last press when a new press starts is dropped (one owner since 2026-11-22; before, a separate error was cleared by hand)
 
 diff --git a/apps/web/src/updates/Updates.tsx b/apps/web/src/updates/Updates.tsx
-index 3703f498..88940229 100644
+index 8f9b6758..fcf3807a 100644
 --- a/apps/web/src/updates/Updates.tsx
 +++ b/apps/web/src/updates/Updates.tsx
-@@ -196,7 +196,6 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
+@@ -199,7 +199,6 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
+     setAsking(true);
+   };
+   const attempt = (kind: ClickError["click"], work: () => Promise<string | null>) => {
+-    setPress({ click: kind, phase: "asking" });
+     void work().then((message) => setPress(message === null ? null : { click: kind, phase: "failed", message, since }));
    };
    const run: Record<UpdateClick, () => void> = {
-     check: () => {
--      setClickError(null);
-       void checkForUpdates().then((message) => setClickError(message === null ? null : { click: "check", message, since }));
-     },
-     update: () => void restart(),
