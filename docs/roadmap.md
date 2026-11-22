@@ -9,43 +9,43 @@ never shows a whisper stop, start or restart.
 
 *2026-11-14, owed from the landings since 0.2.4:*
 
-- [ ] The update changes since 0.2.4 (a copy that cannot replace its own file says why, a copy run from its download folder, "Checking…" on Windows while the go-back installer is checked) have run against fakes only.
+- [ ] <!-- workspace:id=work:c72b02a2-3329-5587-ab7a-c464f72d32a9 --> The update changes since 0.2.4 (a copy that cannot replace its own file says why, a copy run from its download folder, "Checking…" on Windows while the go-back installer is checked) have run against fakes only.
       *Accept:* one packaged AppImage run and one installed Windows run, with screenshots.
-- [ ] On Windows, the retry that moves the unpacked chat engine into place has not run on a real Windows computer with a virus scanner holding a file.
+- [ ] <!-- workspace:id=work:0d0f7533-cfe5-55b2-abb1-d1b6268154cc --> On Windows, the retry that moves the unpacked chat engine into place has not run on a real Windows computer with a virus scanner holding a file.
       *Accept:* one Windows run with a file held during the move that shows the retry, and Retry moving the kept copy without a second download.
-- [ ] The gemma4 E2B and E4B estimates were changed from the model files' own tables; no reading on a real card has been compared with them.
+- [ ] <!-- workspace:id=work:ba32aef8-6af0-5322-adf9-59f5e2cf6533 --> The gemma4 E2B and E4B estimates were changed from the model files' own tables; no reading on a real card has been compared with them.
       *Accept:* one load of each on a card, the need read from the runner, within the margin the fit table uses.
-- [ ] The fit check for a model that would spill into system memory does not add the table the runtime keeps off the card, and the reading taken from the runner's own list of loaded models has not been checked on a real card.
+- [ ] <!-- workspace:id=work:f74e161b-2772-5a5d-ba82-4916add07de1 --> The fit check for a model that would spill into system memory does not add the table the runtime keeps off the card, and the reading taken from the runner's own list of loaded models has not been checked on a real card.
       *Accept:* a spilling model's check counts that table, and one load on a card shows the runner's list agreeing with the card's own reading.
-- [ ] "Stopping the picture" (Stop on a picture made on the processor) has no browser test: the test picture engine cannot hold a picture after an interrupt or say that it runs on the processor.
+- [ ] <!-- workspace:id=work:2aac166e-8f98-57f7-bbab-c16b4e883fc2 --> "Stopping the picture" (Stop on a picture made on the processor) has no browser test: the test picture engine cannot hold a picture after an interrupt or say that it runs on the processor.
       *Accept:* the test engine can do both, and one browser test shows the card from Stop until the next picture runs.
-- [ ] A page made in chat: what its link hints can still look up has not been measured, and the lockdown has been probed in Chromium only. Safari and Firefox are unprobed.
+- [ ] <!-- workspace:id=work:7a293bc7-19ae-5b37-9314-6a2c51d61998 --> A page made in chat: what its link hints can still look up has not been measured, and the lockdown has been probed in Chromium only. Safari and Firefox are unprobed.
       *Accept:* a measured list of what a link hint reaches, and the probes in `docs/design/pages.md` run in Firefox and Safari.
-- [ ] The message box's bottom row on a touch screen with a page open has not been checked with the Image pill and the context meter showing.
+- [ ] <!-- workspace:id=work:7f33a9ef-eebb-5007-85c3-213fb6227de8 --> The message box's bottom row on a touch screen with a page open has not been checked with the Image pill and the context meter showing.
       *Accept:* a screenshot at 1200 by 800 on a screen with no hover, a page open, Image on and the context meter showing, with Send inside the box and the model's name readable.
-- [ ] Sizes are written "x of y GB" by more than one helper (the model download rows, the picture download, the first window).
+- [ ] <!-- workspace:id=work:c7006a85-5d78-56b2-8953-a485f8bd913c --> Sizes are written "x of y GB" by more than one helper (the model download rows, the picture download, the first window).
       *Accept:* one helper in the shared package writes them all, and the time-left text keeps its number and unit on one line.
-- [ ] Making pictures on the processor has not run on Windows.
+- [ ] <!-- workspace:id=work:65e719c5-650f-52c8-8d9e-a0df0f27e9c3 --> Making pictures on the processor has not run on Windows.
       *Accept:* one picture made on the processor on a Windows computer, with its time.
-- [ ] On a computer with no supported card the downloaded Ollama still carries its CUDA libraries. The whole pinned archive is unpacked (1.5 GB to download; 2.5 GB on disk on Linux, 2.3 GB on Windows), CUDA 12 and 13 libraries included; their share of that is not measured.
+- [ ] <!-- workspace:id=work:0fe6be90-f7ef-59af-82e4-975528d28b9f --> On a computer with no supported card the downloaded Ollama still carries its CUDA libraries. The whole pinned archive is unpacked (1.5 GB to download; 2.5 GB on disk on Linux, 2.3 GB on Windows), CUDA 12 and 13 libraries included; their share of that is not measured.
       *Accept:* the share measured, then a decision from it: such a computer keeps only what the processor needs, or the whole archive stays with the reason written down.
-- [ ] A link or text dragged onto the desktop window is refused by the web page only. The desktop shell has no guard of its own, so a drop the page missed would still open the link in the system browser.
+- [ ] <!-- workspace:id=work:91fab5ba-b083-5443-8431-8fe8697b93f1 --> A link or text dragged onto the desktop window is refused by the web page only. The desktop shell has no guard of its own, so a drop the page missed would still open the link in the system browser.
       *Accept:* the desktop shell refuses a dropped link by itself, shown by a test with the page's guard taken out.
-- [ ] In Automatic mode the app's own Ollama uses the models folder of an Ollama the person installed. This is how it is built and documented; whether it should is an open product decision.
+- [ ] <!-- workspace:id=work:488185fe-fc74-503c-af23-b749a59b6b95 --> In Automatic mode the app's own Ollama uses the models folder of an Ollama the person installed. This is how it is built and documented; whether it should is an open product decision.
       *Accept:* the owner decides, and the rule is written in `docs/design.md`.
 
 *2026-11-13, owed from the Windows low-memory fixes (0.2.4):*
 
-- [ ] A real load on a 6 GB card with 16 GB of system memory has not been measured for the Windows low-memory fixes (WIN-MEM-01 to WIN-MEM-07); every check so far ran against fakes.
+- [ ] <!-- workspace:id=work:62265835-40d7-5be4-b67d-039f603d37f3 --> A real load on a 6 GB card with 16 GB of system memory has not been measured for the Windows low-memory fixes (WIN-MEM-01 to WIN-MEM-07); every check so far ran against fakes.
       *Accept:* one measured send that spills, one image after a chat and one chat after an image on that machine, with the readings.
-- [ ] The refusal's offer tries only the fit table's context sizes, so 4k is never offered even when it is the one that runs.
+- [ ] <!-- workspace:id=work:532c077f-ae41-56a2-8a2d-8bde030d1787 --> The refusal's offer tries only the fit table's context sizes, so 4k is never offered even when it is the one that runs.
       *Accept:* a model that runs only at 4k is offered at 4k.
-- [x] A download folder picked with the person's own ComfyUI: nothing tells that ComfyUI to look there, so the files are on disk and the engine does not see them.
+- [x] <!-- workspace:id=work:3e0083ad-8f81-5eb3-bb17-18599e8f1045 --> A download folder picked with the person's own ComfyUI: nothing tells that ComfyUI to look there, so the files are on disk and the engine does not see them.
       *Accept:* the row says so, or the folder is offered to that ComfyUI's model paths.
       *Done 2026-11-14:* "Images are judged by your card, and set up from Settings"; Settings shows the "Add to extra_model_paths.yaml" row with the line to copy (`extraModelPathsLine` in `apps/server/src/image/own.ts`).
-- [ ] Disk planning before a download, the folder dialog and the image live line have not been run on Windows.
+- [ ] <!-- workspace:id=work:5e58eed0-f455-5075-a7f2-952f5375836b --> Disk planning before a download, the folder dialog and the image live line have not been run on Windows.
       *Accept:* one Windows run of each, with screenshots.
-- [ ] "A version that cannot start is put back" (IU-W2) has not been observed on Windows: its run stopped before the click.
+- [ ] <!-- workspace:id=work:0a0c25dd-ca7a-5286-a479-525f8b6062d5 --> "A version that cannot start is put back" (IU-W2) has not been observed on Windows: its run stopped before the click.
       *Accept:* one Windows run of IU-W2 with its report.
 
 *2026-11-11, picker freshness:* The first opening waits for current fit answers
@@ -128,24 +128,24 @@ probe. Legacy migration and the bounded metadata-only single-tab path remain.
 - [ ] <!-- workspace:id=work:3bed893c-95bb-50a1-8273-f79de8250400 --> The update ask tells the server's activity lines apart by matching their words (`update-work.ts` against the strings built in the server's `main.ts`). A reworded server line would fall through to "must finish before the update", which is untrue for a reply. Send a kind and a count with each line and build every word in the client.
 - [ ] <!-- workspace:id=work:69f9ff9e-cbc0-5a39-8474-2714f488329e --> Settings › General: the Update button still asks with the browser's dialog (`update-install.ts`). Use the footer's ask, or its lines in our own dialog. The sentence under it ("Falls back to … if a step fails.") can be shortened at the same time.
 - [ ] <!-- workspace:id=work:1c1f4645-fb03-5c2a-8da8-60dd55b65f5a --> Footer update ask: Go dismisses the shown result before the install's outcome is known. Keep it until the outcome arrives.
-- [ ] Settings › Updates on a clone whose remote has no release tags, with Get every change off: every check comes back as the main channel and the row drops it, so it says "Not checked yet" again and never offers the update. Fix on the server: drop the last check and send `update.changed` when the switch changes, and stop comparing channels in `SettingsUpdates.tsx`. That also stops the footer offering the other choice's commit after the switch flips (nothing installs it: the install checks again first).
-- [x] Settings › Updates on a phone that only listens: the release page link grows the second row from 73 to 110 px at 390 px, because it is drawn outside `.upd-acts`. Reserve the line or keep the link in the tip, and add a 390 px listener step to the spec.
+- [ ] <!-- workspace:id=work:38632d35-c8a1-589a-b27f-832837c3a9bb --> Settings › Updates on a clone whose remote has no release tags, with Get every change off: every check comes back as the main channel and the row drops it, so it says "Not checked yet" again and never offers the update. Fix on the server: drop the last check and send `update.changed` when the switch changes, and stop comparing channels in `SettingsUpdates.tsx`. That also stops the footer offering the other choice's commit after the switch flips (nothing installs it: the install checks again first).
+- [x] <!-- workspace:id=work:ff451295-fb05-5a72-b7ba-4fe704cc975a --> Settings › Updates on a phone that only listens: the release page link grows the second row from 73 to 110 px at 390 px, because it is drawn outside `.upd-acts`. Reserve the line or keep the link in the tip, and add a 390 px listener step to the spec.
       *Done 2026-11-14:* "Updates take one click and say each thing once"; the release page link is drawn inside `.upd-acts` and only for a window that can install (`SettingsUpdates.tsx`), held by `test/e2e/updates.spec.ts` "at 390px a listener's row keeps its height and offers no control".
-- [x] Settings › Updates: a failed Download stays shown over a newer check (`outdated()` covers only a failed check).
+- [x] <!-- workspace:id=work:77d9d668-57e9-5741-accf-d4a0e50fe683 --> Settings › Updates: a failed Download stays shown over a newer check (`outdated()` covers only a failed check).
       *Done 2026-11-14, met before 0.2.4:* "Updates found on a clone without releases show again"; `outdated()` in `update-state.ts` judges a failed Download and a failed check the same way, held by `apps/web/src/updates/updates.test.ts` "a failed Download gives way to a newer check".
-- [ ] Settings: an accent name this version does not know (a file written by a newer version) fails the whole settings decode, so every setting goes back to its default. Drop the unknown value and keep the rest; the same holds for any later choice list.
-- [ ] The desktop app keeps no server log: the server's output is thrown away, so a reply that failed cannot be looked into afterwards. Keep a small rolling log in the app's data folder.
-- [ ] Pictures: the thumbnail encoder (WebAssembly) is proved in the packaged Linux build only. Run the packaged Windows build once and ask for a thumbnail before the Pictures screen ships.
-- [ ] Pictures: `THIRD_PARTY_NOTICES.md` in the repo does not list the WebP encoder and the PNG reader yet; only the packaged notices file does.
-- [ ] Pictures: backfill time on a large library is not measured, and the phone listener's thumbnail route has no test.
-- [ ] Pictures round 3: Compare, Save all, Delete; timing journeys with 5,000 pictures.
-- [ ] Image defaults: the style bench should report winners for Icons, Text and logos, and Painterly and concept art. Until then the Defaults menu has no row for those three.
-- [x] The shell tool description could show a quoted dot command, such as `sqlite3 db ".schema elements"`. A model that writes `sqlite3 db .schema elements` passes "elements" as a separate SQL argument and the call fails.
+- [ ] <!-- workspace:id=work:68d25439-26c2-5afb-b571-c04532b3f5b1 --> Settings: an accent name this version does not know (a file written by a newer version) fails the whole settings decode, so every setting goes back to its default. Drop the unknown value and keep the rest; the same holds for any later choice list.
+- [ ] <!-- workspace:id=work:c3a6c51a-d8b8-5091-84dc-e32b181f38b9 --> The desktop app keeps no server log: the server's output is thrown away, so a reply that failed cannot be looked into afterwards. Keep a small rolling log in the app's data folder.
+- [ ] <!-- workspace:id=work:1be64b8d-644e-52e4-9ace-4e4dd4aac581 --> Pictures: the thumbnail encoder (WebAssembly) is proved in the packaged Linux build only. Run the packaged Windows build once and ask for a thumbnail before the Pictures screen ships.
+- [ ] <!-- workspace:id=work:0e65bef2-77b5-596a-83cb-fb5e91d77ab2 --> Pictures: `THIRD_PARTY_NOTICES.md` in the repo does not list the WebP encoder and the PNG reader yet; only the packaged notices file does.
+- [ ] <!-- workspace:id=work:48fa254b-87f5-5c3e-8a62-48be761f0e72 --> Pictures: backfill time on a large library is not measured, and the phone listener's thumbnail route has no test.
+- [ ] <!-- workspace:id=work:7c90ce25-6ad2-5b98-b18d-757b79d881c2 --> Pictures round 3: Compare, Save all, Delete; timing journeys with 5,000 pictures.
+- [ ] <!-- workspace:id=work:445ce869-2465-5ee5-bc7e-9d73b1d556ca --> Image defaults: the style bench should report winners for Icons, Text and logos, and Painterly and concept art. Until then the Defaults menu has no row for those three.
+- [x] <!-- workspace:id=work:5552ef21-8375-58ce-90bf-df1f89aff47a --> The shell tool description could show a quoted dot command, such as `sqlite3 db ".schema elements"`. A model that writes `sqlite3 db .schema elements` passes "elements" as a separate SQL argument and the call fails.
       *Done 2026-11-14:* "Tools on can run a command with an empty Library, and the running line stops saying Loading once the model is in"; the shell description in `packages/harness/src/prompt.ts` shows `".schema elements"` in quotes.
-- [x] Settings row 6: Models is its own pop-up (done 2026-11-13). Usage, wider and shorter, and Settings as a pop-up in the same style are next.
+- [x] <!-- workspace:id=work:3c52590c-dfc6-5fda-88f2-8010f355dd5b --> Settings row 6: Models is its own pop-up (done 2026-11-13). Usage, wider and shorter, and Settings as a pop-up in the same style are next.
       *Done 2026-11-14, met before 0.2.4:* "Usage and Settings are pop-ups like Models"; Models, Usage and Settings are each a `Dialog` in `App.tsx` on a wide screen, held by `test/e2e/popups.spec.ts`.
-- [ ] Settings › Advanced at 360 px: a fit table that arrives late can push the rows below it. Give the table its room from the first frame.
-- [ ] The suggested chat models are a data file now, but a new list still needs an app update. Fetching a signed list between updates needs a key and the owner's go.
+- [ ] <!-- workspace:id=work:0d36f279-0cef-517e-ba74-e7bec6be2695 --> Settings › Advanced at 360 px: a fit table that arrives late can push the rows below it. Give the table its room from the first frame.
+- [ ] <!-- workspace:id=work:53c66261-7984-56a5-867a-d7afb3e9aaa2 --> The suggested chat models are a data file now, but a new list still needs an app update. Fetching a signed list between updates needs a key and the owner's go.
 - [ ] <!-- workspace:id=work:ac0688c8-5c8a-5e45-9db3-ff28388854c2 --> A tooltip that kept its left edge while its anchor's words changed can end up no longer over its anchor when the anchor moved a long way. Keep the old edge only while it still overlaps the anchor.
 - [ ] <!-- workspace:id=work:8f735c71-ed2b-50ce-af38-4f7fb674a909 --> An installed copy with a bad release signature: the footer's click that opens the release page is not built; it opens Settings.
 - [ ] <!-- workspace:id=work:fc4fd672-4932-5890-95b8-e2804d8dcdb5 --> Footer browser specs for the fix rounds (errors cleared by good news, the ask re-read at Go, Escape order) were written with their fixes and were not each watched failing in a browser first; the unit tests for the same rules were.
@@ -166,14 +166,14 @@ probe. Legacy migration and the bounded metadata-only single-tab path remain.
 - [ ] <!-- workspace:id=work:b7c16486-811b-5ff4-b102-bbbcae47de41 --> A model's measured speed can stay on a page left open past the 14-day window with no chat in between; it corrects on the next finished reply or reload. Drop it on time without a polling timer (for example when the window is shown again).
 
 - [ ] <!-- workspace:id=work:ac143e6e-95f6-5116-a351-159edf9b6db9 --> Send a non-image file by path (owner decision 2026-11-11): the app keeps a copy of an attached file with the thread, the model is told the file's name and reads it in pieces with its read tool, and the message shows a file chip. Today a non-image file becomes a "not sent" chip that blocks Send.
-- [x] A queued message waiting on a reply in another chat shows no reason in its tray row; say which chat it waits on.
+- [x] <!-- workspace:id=work:6f30c7ca-20b1-590a-93d6-10a4e2263d85 --> A queued message waiting on a reply in another chat shows no reason in its tray row; say which chat it waits on.
       *Done 2026-11-14:* the row says "Sends when another chat's reply ends" while a reply runs in another chat and none in its own (`replyElsewhere` and `queueWords` in `Composer.tsx`), held by `queue-words.test.ts` "a message that waits only for a reply in another chat". It names no chat: the reply that ends first sends it, whichever chat that is. On hold it says "On hold", and Send now waits only for its own chat, so neither says it.
-- [x] Queued messages are kept in the page only, so a reload or restart drops them. Save them with the thread's draft.
+- [x] <!-- workspace:id=work:99245766-0ce8-5deb-b701-432ca29b2970 --> Queued messages are kept in the page only, so a reload or restart drops them. Save them with the thread's draft.
       *Done 2026-11-14:* "A question gets its answer in the chat"; the queue is kept by the server, held by `apps/server/src/chat/queue.test.ts` "is kept on disk; one a closed app left comes back on hold".
-- [ ] Dictation that is running when Dictate becomes held (a reply starts) is discarded with no word. Keep the words, or say they were dropped.
-- [ ] `Voice.tsx` records when Dictate came back in a `useEffect`, so a click in the same frame can slip past the double-click guard. Use `useLayoutEffect`.
+- [ ] <!-- workspace:id=work:c910a18a-23be-5bc3-ab59-6cdece7d5ba4 --> Dictation that is running when Dictate becomes held (a reply starts) is discarded with no word. Keep the words, or say they were dropped.
+- [ ] <!-- workspace:id=work:ce99aed4-f96a-593a-833f-71e408f9cadc --> `Voice.tsx` records when Dictate came back in a `useEffect`, so a click in the same frame can slip past the double-click guard. Use `useLayoutEffect`.
 
-- [ ] Text size: removed from Settings 2026-11-13 because it did not work (owner). Think it through before adding it back: what it scales (chat only, or every screen), how it shows on the phone, and a browser check at each size.
+- [ ] <!-- workspace:id=work:0a70eaa1-92f1-569d-8e36-3df41376fd09 --> Text size: removed from Settings 2026-11-13 because it did not work (owner). Think it through before adding it back: what it scales (chat only, or every screen), how it shows on the phone, and a browser check at each size.
 - [ ] <!-- workspace:id=work:f14a8e12-81be-5e22-b536-c6e83c659b45 --> The model picker is placed when it opens and is not placed again when the window is resized while it is open.
 - [ ] <!-- workspace:id=work:429d2e26-ea6a-5741-a4f3-a493e0274206 --> No browser spec covers the "this model cannot see images" message for an image picked with "Attach a file", the 8-image limit reached through a drop, or the file chooser at phone width.
 - [ ] <!-- workspace:id=work:e2c7100d-e7e6-59b0-87d1-f31241b341db --> Dropping files is proven with synthetic drag events only. Try a real drag from the desktop into the desktop window, and a dropped folder end to end (unit test only today).
@@ -739,11 +739,11 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
 
 *2026-11-16, from the 0.2.5 release review (both present in 0.2.4 already):*
 
-- [ ] A send the fit check refuses carries an offer (a smaller context or model that would fit), but the wire's error drops it: `errorCode` keeps only the code, message and blocking flag, and the error body has no field for it, so the window never shows the offer.
+- [ ] <!-- workspace:id=work:06e8386a-8307-58c5-8933-691e1a38e716 --> A send the fit check refuses carries an offer (a smaller context or model that would fit), but the wire's error drops it: `errorCode` keeps only the code, message and blocking flag, and the error body has no field for it, so the window never shows the offer.
       *Accept:* a refused send in the window shows the offer the server made, with a test across the real socket.
-- [ ] Pictures scrolls back to the picked picture whenever its list changes, so a new picture arriving pulls a person who scrolled away back to their pick.
+- [ ] <!-- workspace:id=work:ce1fe20e-2d93-5c33-bcb2-789f6adaf7b1 --> Pictures scrolls back to the picked picture whenever its list changes, so a new picture arriving pulls a person who scrolled away back to their pick.
       *Accept:* a new picture leaves the scroll where the person put it; opening Pictures still shows the pick.
-- [ ] A send that reached the server but whose numbered record never came back (a dead socket that still reads open) is still called unsent. Sending it again is harmless, since the same message id is dropped as a repeat, unless the box held other words by then.
+- [ ] <!-- workspace:id=work:26e34ce7-9894-55e1-9056-b526b95f7431 --> A send that reached the server but whose numbered record never came back (a dead socket that still reads open) is still called unsent. Sending it again is harmless, since the same message id is dropped as a repeat, unless the box held other words by then.
       *Accept:* a send that reached the server is never called unsent, with a test that drops the record on a socket that stays open.
 
 ## Next: slices 2 to 4
@@ -832,6 +832,14 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       is room; on 12 and 16 GB cards the 9B stays first, leaving the card room
       for a longer context and for speech and images. Measure them on the test
       machines and adjust.
+- [ ] <!-- workspace:id=work:f6a2b025-3606-5822-8e34-fe51a0c532e5 --> The best chat model for each GPU size (small, medium, large), picked by a harness eval
+      built from real failures, then each tier's pick fine-tuned on Gates Local's tool format
+      (owner's idea, 2026-11-21). The first case is the 2026-11-21 reply from
+      `huihui_ai/gemma-4-abliterated:12b` that wrote `{"action": "image", "prompts": [...]}` as
+      its answer instead of a tool call.
+      *Accept:* the eval runs every tier's candidates on the same cases and records per-model
+      scores; each tier names its pick from those scores; a fine-tuned model beats its base on
+      the eval before it is offered.
 - [ ] <!-- workspace:id=work:7cb6f429-529c-5443-b3cd-91999212715b --> `pnpm setup:probe`: device facts as JSON (OS, GPU vendor and memory,
       system memory, disk free, CPU, Ollama and ComfyUI found, models
       installed).
@@ -907,10 +915,10 @@ Space in an empty box), let go to send, the reply read a sentence at a
 time by the device's own `speechSynthesis` voice (local voices only), a
 speaker icon to turn it off. No voice is bundled.
 
-- [ ] Choose the bundled CPU voice; the owner picks before anything ships. Measured on disk: Pocket TTS English weights 219 MB (`model.safetensors` 219,029,196 bytes plus a 59 KB tokenizer; Milo's measured path; the CC0-catalogued voices are marius, javert, bill_boerst, stuart_bell, with alba as Milo's reference); Kokoro 82M 354 MB (ONNX 325.5 MB plus 28.2 MB of voices); Piper `en_US-lessac-high` 114 MB.
+- [ ] <!-- workspace:id=work:7122d407-98e1-5086-b436-1126baedc471 --> Choose the bundled CPU voice; the owner picks before anything ships. Measured on disk: Pocket TTS English weights 219 MB (`model.safetensors` 219,029,196 bytes plus a 59 KB tokenizer; Milo's measured path; the CC0-catalogued voices are marius, javert, bill_boerst, stuart_bell, with alba as Milo's reference); Kokoro 82M 354 MB (ONNX 325.5 MB plus 28.2 MB of voices); Piper `en_US-lessac-high` 114 MB.
       *Accept:* the chosen voice runs on the processor behind the same sentence reader (`apps/web/src/voice/talk.ts` `Speaker`), with its first-audio time measured against `docs/design/voice.md` targets and its licence written down.
       2026-11-13 listening page (chat row 41; the pick is by ear, on the owner's hub): three replies (short, list, long paragraph) read sentence by sentence on 12 efficiency cores with no GPU, two runs. First sound: Pocket TTS 0.04 to 0.09 s on every reply (it streams within a sentence); Kokoro 0.19 s short, 2.3 to 2.5 s for a 35-word first sentence; Piper 0.07 s short, 1.2 s for the same sentence. Seconds of audio per second of work: Pocket 3.7 to 6.3, Kokoro 5.6 to 6.2, Piper 10.2 to 10.6. What each needs to run besides its weights: Pocket TTS needs PyTorch (715 MB installed, CPU build); Kokoro and Piper need ONNX Runtime (67 to 78 MB) with espeak-ng data. Pocket TTS leaves longer quiet after a sentence (up to 1.9 s for javert). Licences read 2026-11-13 (chat row 43): one table in `docs/design/voice.md`, "What a bundled voice would ship, and its licence". Pocket TTS is the only set with no GPL part; Kokoro as packaged brings GPL phonemizing and two files with no stated licence; Piper brings a GPL runtime and a voice trained on research-only data.
-- [x] Stop on a reply also stops its reading and pulls back the sentences already handed to the voice (chat row 42, coordinator default named to the owner, 2026-11-13). A reply that fails is still read to its last written word. Any stop of the reply on screen counts, including one from another window; which window's Stop may stop a reply stays the open two-window row under Client ordering replay.
+- [x] <!-- workspace:id=work:191505ca-8f48-5148-a2c7-e20769d31f0e --> Stop on a reply also stops its reading and pulls back the sentences already handed to the voice (chat row 42, coordinator default named to the owner, 2026-11-13). A reply that fails is still read to its last written word. Any stop of the reply on screen counts, including one from another window; which window's Stop may stop a reply stays the open two-window row under Client ordering replay.
       *Proof:* `talk.test.ts` "Stop on a reply silences it" (red on dev: the queue kept "One.", "Two.", "Thr") and the Stop step in `test/e2e/voice.spec.ts` (red on dev: no cancel on Stop).
 
 - [ ] <!-- workspace:id=work:467cf6a2-d944-5751-89dd-5115d78c96a6 --> Dictation cancellation is keyed twice: Composer remounts `Voice` by draft identity, while `Voice` also tears capture down on identity changes.
@@ -971,7 +979,7 @@ RS-03 remains dropped.
       *Accept:* another window clears the listed running marker without waiting for reconnect when admission fails there.
 - [ ] <!-- workspace:id=work:c587a493-aab1-56bb-9bf4-37a11af524c5 --> Sending into a chat with a listed-only turn replaces its marker; a turn-active refusal drops it until the other client's start arrives (`session/chat.ts`).
       *Accept:* a held other-client start and refused local send retain the sidebar's truthful running state.
-- [ ] Another window starts a reply in a chat while this window's send is still unanswered: this send is refused as turn-active, and this window's Stop then stops the other window's reply, which is the one on screen (chat row 32 edge case, 2026-11-13).
+- [ ] <!-- workspace:id=work:dfb15422-3ee5-5105-abe9-26b32192cffe --> Another window starts a reply in a chat while this window's send is still unanswered: this send is refused as turn-active, and this window's Stop then stops the other window's reply, which is the one on screen (chat row 32 edge case, 2026-11-13).
       *Accept:* the refused send keeps its words with a true line, and a browser test with two windows shows which reply Stop stops (the owner decides: only this window's own, or the reply on screen whoever sent it).
 - [ ] <!-- workspace:id=work:0d656ff2-effc-5c4c-9ffb-9e3d65679a19 --> `oldTurns` in `session/chat.ts` only retires ids on terminal events, so missed terminals can grow the set for the session's lifetime.
       *Accept:* repeated missed endings stay bounded without allowing late events into a replacement turn.
@@ -1026,23 +1034,23 @@ RS-03 remains dropped.
 
 *2026-11-17, from the 0.2.5 release check and the CI speed work:*
 
-- [ ] The release check's browser shards all run on one machine. Spread them across the test machines, so a release does not wait on the busiest one.
+- [ ] <!-- workspace:id=work:e6091c89-9a33-5afc-983e-dc46371a5ce3 --> The release check's browser shards all run on one machine. Spread them across the test machines, so a release does not wait on the busiest one.
       *Accept:* one release check runs its shards on at least two machines and sums one report.
-- [x] `session.test` failed three times on the second test machine (seeds 1794900758983, 1794901863240). On 2026-11-20 it failed once on the development machine in a full `pnpm verify` (seed 1795234684278, "a reply that finishes while the reconnect's thread load waits survives the older snapshot": `m1` missing at line 579), then passed three times alone and in the next full run. *Done 2026-11-20:* it also failed the 0.2.7 release check. Cause: the test helper went on as soon as the send was answered, and the start that carries the saved question is pushed a task later; a test that dropped the socket in that gap got the start on the next socket, mid-reconnect, and read the chat without its question. Delaying the start by 2 to 15 ms fails it every time. The helper now waits for the saved question.
+- [x] <!-- workspace:id=work:2577761b-1805-5209-83b4-7440c0166a41 --> `session.test` failed three times on the second test machine (seeds 1794900758983, 1794901863240). On 2026-11-20 it failed once on the development machine in a full `pnpm verify` (seed 1795234684278, "a reply that finishes while the reconnect's thread load waits survives the older snapshot": `m1` missing at line 579), then passed three times alone and in the next full run. *Done 2026-11-20:* it also failed the 0.2.7 release check. Cause: the test helper went on as soon as the send was answered, and the start that carries the saved question is pushed a task later; a test that dropped the socket in that gap got the start on the next socket, mid-reconnect, and read the chat without its question. Delaying the start by 2 to 15 ms fails it every time. The helper now waits for the saved question.
       *Accept:* those seeds replayed, the race named and fixed. It is not only the test machine.
-- [ ] The voice dictation check has a fixed 50 ms limit that a busy machine misses.
+- [ ] <!-- workspace:id=work:5897f3d7-09a4-5cb5-9db6-69c9aad8d1d6 --> The voice dictation check has a fixed 50 ms limit that a busy machine misses.
       *Accept:* the limit moves to the timing project, or the check measures against its own idle baseline.
-- [ ] The image-stopping control test polls for 2 s.
+- [ ] <!-- workspace:id=work:be83f992-5ee2-52e8-854c-caff73aeb631 --> The image-stopping control test polls for 2 s.
       *Accept:* it waits on state.
-- [ ] `pages.spec` "a page arrives" ran past 30 s once in a full suite.
+- [ ] <!-- workspace:id=work:c62ebcbd-bc0b-566c-857d-ebb8eff971ac --> `pages.spec` "a page arrives" ran past 30 s once in a full suite.
       *Accept:* the slow step named, and the test waits on state or the step gets faster.
-- [ ] Five fit table tests wait on a 20 ms sleep.
+- [ ] <!-- workspace:id=work:b7734e43-1dcb-54d4-8565-87f34a30e31e --> Five fit table tests wait on a 20 ms sleep.
       *Accept:* they wait on state.
-- [ ] A lane's browser run picks its specs by hand.
+- [ ] <!-- workspace:id=work:e6e78186-d0b0-5f8d-8959-b3519dc61e01 --> A lane's browser run picks its specs by hand.
       *Accept:* the specs a change can touch are chosen from its paths, and a lane's run lists what it skipped.
-- [ ] The dev browser suite runs on four shards (517 s); six would take about 320 s by estimate.
+- [ ] <!-- workspace:id=work:b5c76423-d52e-5ea4-9c2d-d20c233dce4e --> The dev browser suite runs on four shards (517 s); six would take about 320 s by estimate.
       *Accept:* six shards measured on the test machines, and the faster count kept.
-- [ ] A reply's wait counts from the send, not from Enter. The window's checks before the send (running replies, a new chat) take about 100 ms on a busy machine and are left out.
+- [ ] <!-- workspace:id=work:9b91e217-ffbf-585d-a741-179465ba7d84 --> A reply's wait counts from the send, not from Enter. The window's checks before the send (running replies, a new chat) take about 100 ms on a busy machine and are left out.
       *Accept:* the wait counts from Enter, a stop-to-continue dialog between Enter and the send is not counted, and a test holds both.
 
 - [ ] <!-- workspace:id=work:59afc336-b09f-5253-9af1-a8b0ecee7160 --> Test audit 2026-11-11, breaks still caught by nothing: an outside Ollama shown with the wrong version (`runtime/runtime.ts`), a relative data folder accepted by the Linux install (`desktop/src/linux-install.ts`), the Regenerate spinner, a stale "check failed" message, "0 KB" chips. Removing the wait for the image sweep before a thread delete changes nothing a test can see, so that wait is either not needed or not testable as written: decide which.
@@ -1306,11 +1314,11 @@ RS-03 remains dropped.
       *Accept:* the move acts on the file that was checked, or the design states the limit.
 - [ ] <!-- workspace:id=work:5bd68647-099d-5fd3-8daa-7a2ff0f582aa --> Installed update downloads the whole program file each time (about 90 MB). Downloading only the parts that changed would make updates smaller.
       *Accept:* a measured size for an update between two real versions, and a decision from it.
-- [ ] Chat model list from the release page: the list is published by hand (`pnpm release:models`, then an upload to the release). A list with the same revision as the one built into the app changes nothing, so the first upload that does anything is revision 2. Nothing has read a list from a real release page yet.
+- [ ] <!-- workspace:id=work:cc4f25cc-be1b-58ee-b016-b746466e5840 --> Chat model list from the release page: the list is published by hand (`pnpm release:models`, then an upload to the release). A list with the same revision as the one built into the app changes nothing, so the first upload that does anything is revision 2. Nothing has read a list from a real release page yet.
       *Accept:* every release page carries `models.json` and `models.json.sig`, and an installed copy has been seen taking a revision 2 list from one.
-- [ ] Chat model list from the release page: the list is read inside the update check, so a page that answers for `release.json` and then stalls keeps "Checking…" showing up to 60 seconds longer.
+- [ ] <!-- workspace:id=work:6d2a5e5e-7b58-54d5-8d81-3643bb160a60 --> Chat model list from the release page: the list is read inside the update check, so a page that answers for `release.json` and then stalls keeps "Checking…" showing up to 60 seconds longer.
       *Accept:* the check's answer shows before the list is read.
-- [ ] Image setups are not in the list from the release page. A setup names the node code that runs and the files that get downloaded, so a downloaded image list needs a decision on what it may do: add a new setup, or only change numbers in setups the app already ships.
+- [ ] <!-- workspace:id=work:ec86a6af-a480-570a-aea5-51a2f637524a --> Image setups are not in the list from the release page. A setup names the node code that runs and the files that get downloaded, so a downloaded image list needs a decision on what it may do: add a new setup, or only change numbers in setups the app already ships.
       *Accept:* that decision; if a list may add a setup, an allow-list of node types and download hosts limited to the ones built in.
 - [ ] <!-- workspace:id=work:dc5b68a0-32a1-577a-a58a-6dcc57461a2e --> No check runs an older released version's data through the current version. Chat store upgrades are tested from fixtures built by the current code.
       *Accept:* a test opens a store, settings file and profile written by each released version and reads the chats back; it runs before a release is tagged.

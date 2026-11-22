@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-21: an image asked for in the model's own JSON is made
+
+- Asked to "Generate an image of a dog", Gemma 4 12B answered with `{ "action": "image", "prompts": [ "A cute dog sitting in a lush green field during the golden hour." ] }` and the chat showed that JSON; no picture was queued. The app knew `action` paired with `action_input`, but this reply put the tool's own fields beside `action`. Such a reply now queues the picture and shows no JSON, with native tool calls and with text calls. It counts only when the JSON is the whole reply (or one whole code block), `action` comes first and names a tool the turn offered, and every other key is a field of that tool that fits it, so a reply that quotes JSON in its prose stays an answer.
+
+## 2026-11-21: the model picker has no Show more when there is no more
+
+- With few models installed, the picker still showed a greyed-out "Show more" under the list that did nothing. It now appears only when more models are installed than the list shows, and not while searching.
+
 ## 2026-11-21: the screenshot rig follows the new Models and Settings
 
 - Seven pictures in the screenshot rig had stopped being taken, because the rig still went to Settings the old way. Models now opens from its own sidebar button on a computer or tablet, and a tablet's Settings has its own section list, so the tablet Models and Runtime pictures and the desktop Models picture go there now. The "Image generation, on" pictures waited for a set-up button that no longer shows when a ComfyUI address is saved; they now turn the switch on and show the connection rows, which is the state their name describes. The app is unchanged.

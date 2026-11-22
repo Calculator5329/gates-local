@@ -187,6 +187,8 @@ type LooseShape = readonly [nameKey: string, argumentsKey: string];
 const LOOSE_SHAPES = [["name", "arguments"], ["name", "parameters"], ["action", "action_input"], ["tool", "tool_input"]] as const satisfies readonly LooseShape[];
 // why: {function: {...}} is accepted around the first shape only.
 const WRAPPED_SHAPES = LOOSE_SHAPES.slice(0, 1);
+// external: Gemma 4 also wrote the tool's own fields beside `action` (2026-11-21): {"action":"image","prompts":[...]}.
+const FLAT_NAME = "action";
 const WHOLE_FENCE = new RegExp(`^${literal(FENCE)}[\\w-]*[ \\t]*${LF_OR_CRLF}([\\s\\S]*?)${literal(FENCE)}$`);
 type LooseCall = { name: string; arguments: Record<string, unknown> };
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -218,6 +220,7 @@ function callFrom(value: unknown, offered: readonly ToolDefinition[]): LooseCall
   const object = wrapped ? value.function : value;
   if (!isObject(object)) return undefined;
   const shape = (wrapped ? WRAPPED_SHAPES : LOOSE_SHAPES).find(([name, args]) => Object.keys(object).length === 2 && name in object && args in object);
+  if (!shape && !wrapped) return flatCallFrom(object, offered);
   if (!shape || typeof object[shape[0]] !== "string") return undefined;
   let args = object[shape[1]];
   if (typeof args === "string") args = parseObject(args) ?? args;
@@ -236,9 +239,21 @@ function callFrom(value: unknown, offered: readonly ToolDefinition[]): LooseCall
   return fitsDefinition(definition, call.input) ? { name: call.name, arguments: call.input } : undefined;
 }
 
+function flatCallFrom(object: Record<string, unknown>, offered: readonly ToolDefinition[]): LooseCall | undefined {
+  const { [FLAT_NAME]: name, ...fields } = object;
+  // why: `action` first, so a streaming hold knows the tool before its fields arrive
+  if (Object.keys(object)[0] !== FLAT_NAME || typeof name !== "string") return undefined;
+  let call: ToolCall;
+  try { call = repairCall({ name, arguments: fields }); } catch { return undefined; }
+  const definition = offered.find(d => d.function.name === call.name);
+  if (!definition || !Object.keys(fields).every(key => key in definition.function.parameters.properties)) return undefined;
+  return fitsDefinition(definition, call.input) ? { name: call.name, arguments: call.input } : undefined;
+}
+
 /**
  * A reply whose whole visible text (outside thinking, trimmed, optionally inside one code fence)
- * is one JSON object naming a tool offered this turn, with arguments that fit its definition:
+ * is one JSON object naming a tool offered this turn, with arguments that fit its definition
+ * (in one of LOOSE_SHAPES, or flat: the tool's fields beside `action`):
  * that call, in the `{name, arguments}` form repairCall reads. Anything else (other text beside
  * it, two objects, an unknown tool, arguments that do not fit, more than HOLD_LIMIT characters)
  * is not a call.
@@ -270,7 +285,8 @@ const isSpace = (c: string) => c === " " || c === "\t" || c === "\n" || c === "\
  * Watches a reply as it streams, for the moment it can no longer be a looseCall, so text held
  * back in case it is a call is shown at once. It can be one while it is white space, at most one
  * fence line, and one JSON object whose first key is a call's, whose name is a tool offered this
- * turn, whose second key is the first's partner and which has no third; once that object closes
+ * turn, whose second key is the first's partner and which has no third (or, after `action`, only
+ * that tool's own fields, each once); once that object closes
  * it must be a call with at most a closing fence after it. More than HOLD_LIMIT characters never is.
  */
 export function createCallHold(offered: readonly ToolDefinition[]): CallHold {
@@ -292,6 +308,9 @@ export function createCallHold(offered: readonly ToolDefinition[]): CallHold {
   let keys: string[] = [];
   let keyNext = false;
   let valueNext = false;
+  let named: ToolDefinition | undefined;
+  // why: once one of the named tool's fields follows `action`, more of its fields may follow
+  let flat = false;
   let functionWrapClosed = false;
   let capture: "key" | "name" | undefined;
   let captured = "";
@@ -304,12 +323,20 @@ export function createCallHold(offered: readonly ToolDefinition[]): CallHold {
   const capturedString = (kind: "key" | "name") => {
     let value: string;
     try { value = JSON.parse(`"${captured}"`) as string; } catch { return false; }
-    if (kind === "name") return offered.some(d => d.function.name === repairName(value));
-    const allowed = keys.length === 0
-      ? [...shapes.flat(), ...(keyDepth === 1 ? ["function"] : [])]
-      : shapes.flatMap(([name, args]) => name === keys[0] ? [args] : args === keys[0] ? [name] : []);
+    if (kind === "name") {
+      named = offered.find(d => d.function.name === repairName(value));
+      return named !== undefined;
+    }
+    if (keys.length === 0) {
+      keys.push(value);
+      return [...shapes.flat(), ...(keyDepth === 1 ? ["function"] : [])].includes(value);
+    }
+    const partners = keys.length === 1 ? shapes.flatMap(([name, args]) => name === keys[0] ? [args] : args === keys[0] ? [name] : []) : [];
+    const fields = keyDepth === 1 && keys[0] === FLAT_NAME && named && (flat || keys.length === 1)
+      ? Object.keys(named.function.parameters.properties).filter(key => !keys.includes(key)) : [];
     keys.push(value);
-    return allowed.includes(value);
+    if (fields.includes(value)) { flat = true; return true; }
+    return partners.includes(value);
   };
   const closed = () => {
     let value: unknown;
@@ -356,7 +383,7 @@ export function createCallHold(offered: readonly ToolDefinition[]): CallHold {
     }
     if (c === '"') inString = true;
     else if (c === ":" && level) valueNext = true;
-    else if (c === "," && level) { if (keys.length >= 2) return false; keyNext = true; }
+    else if (c === "," && level) { if (keys.length >= 2 && !flat) return false; keyNext = true; }
     else if (c === "{" || c === "[") depth++;
     else if (c === "}" || c === "]") {
       if (--depth === 0) return closed();

@@ -85,6 +85,20 @@ test("approved picker keeps its columns fixed through hover, filtering and empty
   await expect(page.locator("#ta")).toBeFocused();
 });
 
+// The owner, 2026-11-21: "show more button doesn't work here. there isn't more. so it should not be there".
+test.describe("one installed model", () => {
+  test.use({ installed: ["qwen3.5:9b"] });
+  test("the picker shows its one model and no Show more", async ({ page, open }, info) => {
+    await open(); await waitReady(page);
+    await page.locator("#modelBtn").click();
+    const picker = page.locator("#picker");
+    await expect(picker.getByRole("option")).toHaveCount(1);
+    await expect(picker.locator(".fit-skel, .pk-cost.skel")).toHaveCount(0);
+    await expect(picker.getByTestId("models.picker.more")).toHaveCount(0);
+    await picker.screenshot({ path: info.outputPath("one-model-picker.png"), animations: "disabled" });
+  });
+});
+
 // Guards the owner's ask that models download from Models (unsure: he may not need it to start from the picker).
 test("Download models shows the models to download and can start a pull", async ({ page, open }) => {
   await open(); await waitReady(page);

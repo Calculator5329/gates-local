@@ -204,7 +204,7 @@ export function Picker() {
             </div>)}
             {visible.length === 0 ? <div className="pk-empty">{models === undefined ? <>Couldn't read installed models. <button type="button" className="co-act" data-testid="models.picker.retry" onClick={() => void refreshModels()}>Retry</button></> : group === "favorites" && !q ? "No favorites yet. Star a model to keep it here." : "No installed model matches."}</div> : null}
           </div>
-          <button className="pk-more" data-testid="models.picker.more" disabled={filtered.length <= limit || q !== ""} onClick={() => setExpanded(!expanded)}>{expanded ? "Show less" : "Show more"}</button>
+          {filtered.length > limit && q === "" ? <button className="pk-more" data-testid="models.picker.more" onClick={() => setExpanded(!expanded)}>{expanded ? "Show less" : "Show more"}</button> : null}
         </div>
       </div>
       <section className="pk-context" aria-label="Context length">

@@ -57,6 +57,25 @@ describe("a tool call written as the whole reply is run, not shown (owner screen
   });
 });
 
+// The owner's reply of 2026-11-21: `action` names the tool and its arguments sit beside it.
+const DOG = "A cute dog sitting in a lush green field during the golden hour.";
+const FLAT = `{ "action": "image", "prompts": [ "${DOG}" ] }`;
+
+describe("a flat call, the tool's fields beside `action`, is run, not shown (owner reply 2026-11-21)", () => {
+  for (const native of [true, false]) {
+    it(`${native ? "native" : "text"} path: the reply queues one image with its prompt and shows no JSON`, async () => {
+      const { queued, complete, shown, requests } = await run(native, [{ deltas: pieces(FLAT), content: FLAT }]);
+      expect(queued).toEqual([DOG]);
+      expect(shown).toBe("");
+      expect(complete).toMatchObject({ content: "", tools: [{ name: "image", state: "done" }] });
+      expect(requests).toHaveLength(1);
+    });
+  }
+  it("is a call as a whole fenced block too", () => {
+    expect(looseCall("```json\n" + FLAT + "\n```", withImage)).toEqual({ name: "image", arguments: { prompts: [DOG] } });
+  });
+});
+
 describe("looseCall: the accepted shapes", () => {
   // the image tool takes a list of prompts: one prompt, or a bare string, is a list of one
   const image = { name: "image", arguments: { prompts: ["a ship"] } };
@@ -105,6 +124,13 @@ describe("looseCall: not a call", () => {
     ["a shape not on the list", '{"tool_name":"image","input":{"prompt":"a ship"}}'],
     ["a fence that never closes", '```json\n{"name":"image","arguments":{"prompt":"a ship"}}'],
     ["a call inside thinking only", '<think>{"name":"image","arguments":{"prompt":"a ship"}}</think>'],
+    ["prose that quotes a flat call", 'A call looks like this: {"action":"image","prompts":["a ship"]}'],
+    ["a flat call beside prose in a fence", 'Example:\n```json\n{"action":"image","prompts":["a ship"]}\n```'],
+    ["a flat call with a field the tool does not take", '{"action":"image","prompts":["a ship"],"size":"8k"}'],
+    ["a flat call whose field does not fit", '{"action":"image","prompts":[]}'],
+    ["a flat call naming a tool not offered", '{"action":"draw","prompts":["a ship"]}'],
+    ["a flat call with `action` not first", '{"prompts":["a ship"],"action":"image"}'],
+    ["a flat call under `name`, not `action`", '{"name":"image","prompts":["a ship"]}'],
   ])("%s", (_, text) => {
     expect(looseCall(text, withImage)).toBeUndefined();
   });
@@ -343,6 +369,9 @@ describe("the hold ends as soon as the text cannot be a call", () => {
       '{"name":"image","arguments":{"prompt":"a neon sign reading \\"}\\" over a door"}}',
       // a fence word with a dash
       '```tool-code\n{"name":"image","arguments":{"prompt":"a ship"}}\n```',
+      // the flat shape: the tool's own fields beside `action`
+      FLAT,
+      '{"action":"read","path":"/library/docs","limit":20}',
     ]) {
       expect(looseCall(text, withImage), text).toBeDefined();
       const hold = createCallHold(withImage);

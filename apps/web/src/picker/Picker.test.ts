@@ -86,6 +86,13 @@ describe("approved model picker", () => {
     expect(empty.replaceAll("&#x27;", "'")).toContain("Couldn't read installed models.");
     expect(empty).toMatch(/<button[^>]*data-testid="models\.picker\.retry"[^>]*>Retry<\/button>/);
   });
+  it("offers Show more only when more models are installed than the list shows (owner 2026-11-21)", () => {
+    expect(markup()).not.toContain("models.picker.more");
+    const one = mock.state as { models: { name: string }[]; catalog: { name: string; label: string }[] };
+    const tags = Array.from({ length: 7 }, (_, i) => `model-${i}:latest`);
+    mock.state = { ...one, models: tags.map(name => ({ ...one.models[0], name })), catalog: tags.map(name => ({ ...one.catalog[0], name, label: name })) };
+    expect(renderToStaticMarkup(createElement(Picker))).toMatch(/data-testid="models\.picker\.more"[^>]*>Show more</);
+  });
   it("offers a Context length column and an actual Download models control", () => {
     const html = markup();
     // the size group is named for its model; the wide header itself is just "Context length"
