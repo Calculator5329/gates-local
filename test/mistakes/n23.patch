@@ -3,7 +3,7 @@ Class: K3
 Fix: planted
 Browser: no
 Seen: After Settings shows, a later navigation still sees Settings as pending.
-Note: the one line in arrive() that ends the pending mark is dropped (one place since 2026-11-22; before, three hand clears)
+Note: the one line in arrive() that ends the pending mark is dropped (one place since 2026-11-22; before, three hand clears). Read twice on 2026-11-22: no visible effect was found below a browser, so this row may be a mistake nobody can see
 
 diff --git a/apps/web/src/app/navigation.ts b/apps/web/src/app/navigation.ts
 index 4e3c5959..b0379043 100644

@@ -2,7 +2,7 @@ Mistake: m02
 Class: K3
 Fix: planted
 Browser: no
-Seen: After a failed check, pressing Check again keeps the old error up until the new answer arrives.
+Seen: Pressing Download leaves the button saying Download until the server answers, instead of Downloading.
 Note: the one write that replaces the last press when a new press starts is dropped (one owner since 2026-11-22; before, a separate error was cleared by hand)
 
 diff --git a/apps/web/src/updates/Updates.tsx b/apps/web/src/updates/Updates.tsx

@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTools } from "@gates-local/harness";
 import { createSources } from "./index.ts";
 import { createLibraryImports } from "./imports.ts";
-import { cloneRepository, githubRepo, importSize, REPO_BYTES, runGit, type GitTransport } from "./clone.ts";
+import { cloneRepository, githubRepo, importSize, REPO_BYTES, runGit, TOO_LARGE, type GitTransport } from "./clone.ts";
 import { SAMPLES, type PinnedSample } from "./samples.ts";
 import { createImportActivity } from "./activity.ts";
 import { createUpdateAdmission } from "@gates-local/update/admission";
@@ -492,6 +492,13 @@ describe("repository imports", () => {
     const job = imports.handlers["sources.clone"]({ url: "https://github.com/example/docs" });
     expect((await finished(imports, job.id)).detail).toMatch(/too large/);
     expect(readdirSync(path.join(s.dataDir, "library-imports"))).toEqual([]);
+  });
+  it.skipIf(process.platform === "win32")("a git that prints without end fails as too large instead of running until the timeout", async () => {
+    const s = setup();
+    const flood = "alias.flood=!node -e 'process.stdout.write(Buffer.alloc(3e6, 120)); setTimeout(()=>{},60000)'";
+    const imports = createLibraryImports({ sources: s.sources, timeoutMs: 4000, git: call => runGit({ ...call, args: ["-c", flood, "flood"] }) });
+    const job = imports.handlers["sources.clone"]({ url: "https://github.com/example/docs" });
+    expect((await finished(imports, job.id)).detail).toBe(TOO_LARGE);
   });
   it("recovers a restart mid-clone without following a link out, then allows retry", async () => {
     const s = setup(); const outside = path.join(s.root, "outside"); mkdirSync(outside); writeFileSync(path.join(outside, "keep"), "keep");

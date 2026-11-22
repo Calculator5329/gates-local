@@ -291,14 +291,18 @@ describe("Supervisor", () => {
     expect(procState(record?.pid ?? -1)).toBe("gone");
   });
 
-  it("reports an exit before ready with its code and stderr", async () => {
-    const { supervisor } = setup("exit-early");
+  it("reports an exit before ready with its code and stderr, and its ready timer later adds no 'no ready line'", async () => {
+    const readyTimeoutMs = 1_500;
+    const { supervisor, logs, states } = setup("exit-early", { readyTimeoutMs });
     const state = await supervisor.start();
     expect(state).toMatchObject({
       status: "crashed",
       reason: { kind: "exit", code: 3, signal: null },
       stderrTail: ["fatal: cannot open database"],
     });
+    await new Promise((resolve) => setTimeout(resolve, readyTimeoutMs + 200));
+    expect(states.at(-1)).toBe(state);
+    expect(logs.filter((line) => line.includes("no ready line"))).toEqual([]);
   });
 
   it("refuses a ready line that names another port", async () => {

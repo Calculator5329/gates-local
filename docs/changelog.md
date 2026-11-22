@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-22: six of the mistakes that still got through now fail a test
+
+- Tests: five rows in `test/mistakes/` (m02, m38, n38, t13, t03) and the planted lock typo (n27) could be made by dropping one line and still pass every check. Each now has one test, extended beside its neighbour, that checks what a person would see and was watched failing with the mistake put back. The app is unchanged. 92 test lines added, 6 replaced.
+- Updates (m02): pressing Download says "Downloading" at once, before the server answers, and a refused download says it failed. Without the dropped line, the button kept saying "Download" until the answer came. The row used to say an old check error stays up; in the app a new check shows its own spinner first, so the row and the test now name Download, where the line is the only thing that changes the label.
+- Server start (m38): a server that exits before it is ready is reported with its exit code and its error output, and its ready timer later adds no "no ready line" to the log.
+- Update from a checkout (n38): approving an update in a running checkout starts the updater and closes the app. The test runs the real start-up with Electron faked and the app server's approval answered yes.
+- Chat (t13): Stop while a pasted picture is being saved ends the reply as stopped, not as a picture error, and stores nothing.
+- Library (t03): a Git that prints without end fails as "too large" instead of running until the import times out.
+- Linux install (n27): every pinned hash in the lock is 64 hex characters after `sha256:`, the form pip's hash check reads. A wrong hash that is still well formed still gets through.
+- Left without a test: n23 (a leftover Settings or Pictures pending mark changes nothing a person sees; it lives only while that screen is up and no navigation has happened).
+- Composer (n01): the drop marker's leave path checked that the drag carried files before doing two things that change nothing for a drag without them. The check is gone, one line, and with it the place the mistake was made; the row moved to `no-place-left.tsv`.
+
 ## 2026-11-22: Stop beats a failed start in one place, and every child pipe the server reads has a cap
 
 - Chat: whether Stop beat a failed file or picture save was decided by a wrapper around each of the two saves, so a new step could fail after Stop and show its own error. The admission's one catch now decides it: a start stopped before its question was stored ends as stopped, whatever failed after. The two saves behave as before. The rule now also covers the other steps of a start: by reading the code, a Stop while the app asked Ollama whether the model reads images ended with an internal "This operation was aborted" error, and now ends as stopped. That case was not reproduced.

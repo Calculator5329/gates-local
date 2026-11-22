@@ -14,6 +14,12 @@ it("pins the 103 packages uv resolved, one entry each", () => {
   expect(new Set(names).size).toBe(103);
 });
 
+it("writes every pinned hash the way pip's hash check reads it, 64 hex characters after sha256", () => {
+  const hashes = LINUX_LOCK.match(/--hash=\S*/g) ?? [];
+  expect(hashes.length).toBeGreaterThan(103);
+  expect(hashes.filter((h) => !/^--hash=sha256:[0-9a-f]{64}$/.test(h))).toEqual([]);
+});
+
 it("holds torch and torchvision to the cu130 index's 2.14.1 and 0.29.1", () => {
   expect([pin(LINUX_LOCK, "torch"), pin(LINUX_LOCK, "torchvision")]).toEqual(["torch==2.14.1+cu130", "torchvision==0.29.1+cu130"]);
 });

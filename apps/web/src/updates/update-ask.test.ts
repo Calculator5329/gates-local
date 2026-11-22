@@ -255,6 +255,18 @@ it("a footer check that failed shows until a newer check answers, and a later st
   expect(button()?.getAttribute("aria-label")).toBe("Check for updates");
 });
 
+it("Download says Downloading the moment it is pressed, before the server answers, and a refused download says it failed", async () => {
+  let answer!: (message: string | null) => void;
+  h.downloadUpdate.mockReturnValue(new Promise((resolve) => { answer = resolve; }));
+  await push({ version: { kind: "installed", version: "1.2.3" }, result: null, activity: [], lastCheck: { state: "newer", checkedAt: 1, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Version 1.3.0 is available."], page: "https://example.invalid/releases/latest" } });
+  expect(button()?.getAttribute("aria-label")).toBe("Download 1.3.0");
+  await click(button());
+  expect(button()?.getAttribute("aria-label")).toBe("Downloading 1.3.0");
+  await act(async () => { answer("The server could not start the download."); });
+  await settle();
+  expect(button()?.getAttribute("aria-label")).toBe("Download failed");
+});
+
 it("a stopped update's note goes with the press that acts on it: Go dismisses it, Cancel leaves it, a check dismisses it at once", async () => {
   const stopped = { at: 1, outcome: "stopped" as const, line: "The update stopped. The previous version is restored." };
   await push({ ...OFFERED, result: stopped });

@@ -12,6 +12,8 @@ import { acquireLock } from "@gates-local/update/lock";
 import type { Runner } from "@gates-local/update/run";
 import { type Repos, commit, crashAt, fakePnpm, head, makeRepos, publish, removeRepos, testEnv } from "@gates-local/update/testing";
 import { readTransaction } from "@gates-local/update/transaction";
+import { IPC } from "./bridge.ts";
+import type { UpdateControl } from "./update-launch.ts";
 
 const fake = vi.hoisted(() => ({
   /** The supervised server's start: the one thing a half-installed checkout must never reach. */
@@ -21,6 +23,10 @@ const fake = vi.hoisted(() => ({
   exit: vi.fn(),
   quit: vi.fn(),
   relaunch: vi.fn(),
+  /** What the supervised server says it is, the windows main opened and the IPC handlers it registered. */
+  server: { status: "idle" } as Record<string, unknown>,
+  windows: [] as Array<{ webContents: { mainFrame: object } }>,
+  handlers: new Map<string, (event: unknown, ...args: unknown[]) => unknown>(),
   /** The test checkout, and the folders main asked about. */
   checkout: "",
   asked: [] as string[],
@@ -31,12 +37,13 @@ vi.mock("electron", () => ({
     whenReady: () => Promise.resolve(), isPackaged: false, quit: fake.quit, exit: fake.exit, relaunch: fake.relaunch, commandLine: { hasSwitch: () => false, appendSwitch: vi.fn() },
   },
   BrowserWindow: class {
+    constructor() { fake.windows.push(this); }
     webContents = { mainFrame: {}, on: vi.fn(), getURL: () => "", send: vi.fn(), setWindowOpenHandler: vi.fn(), setWebRTCIPHandlingPolicy: vi.fn() };
     on = vi.fn(); isDestroyed = () => false; isFocused = () => true;
     loadURL = async (url: string) => { fake.loaded.push(decodeURIComponent(url)); };
   },
   clipboard: { read: vi.fn() },
-  ipcMain: { handle: vi.fn() },
+  ipcMain: { handle: (channel: string, fn: (event: unknown, ...args: unknown[]) => unknown) => { fake.handlers.set(channel, fn); } },
   Menu: { setApplicationMenu: vi.fn() }, net: {}, protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
   session: { defaultSession: { setPermissionRequestHandler: vi.fn(), setPermissionCheckHandler: vi.fn() } },
   shell: { openExternal: vi.fn(), openPath: vi.fn() },
@@ -54,7 +61,7 @@ vi.mock("@gates-local/update/checkout-start", async (original) => {
   };
 });
 vi.mock("./running.ts", () => ({ writeRunning: vi.fn(), clearRunning: vi.fn() }));
-vi.mock("./supervisor.ts", () => ({ Supervisor: class { state = { status: "idle" }; subscribe = vi.fn(); start = fake.started; stop = vi.fn(async () => undefined); killNow = vi.fn(); } }));
+vi.mock("./supervisor.ts", () => ({ Supervisor: class { get state() { return fake.server; } subscribe = vi.fn(); start = fake.started; stop = vi.fn(async () => undefined); killNow = vi.fn(); } }));
 // The updater main would start is recorded, never run; git in the test repositories runs as it is.
 vi.mock("node:child_process", async (original) => {
   const real = await original<typeof import("node:child_process")>();
@@ -69,6 +76,13 @@ vi.mock("node:child_process", async (original) => {
     },
   };
 });
+// The app server's side of an approved update: it accepts the commit it is asked to approve.
+vi.mock("./update-control.ts", () => ({
+  withUpdateControl: <T>(_url: string, run: (control: UpdateControl) => Promise<T>) => run({
+    commit: async ({ release }) => ({ accepted: true, release }),
+    cancel: async () => ({ cancelled: true }),
+  }),
+}));
 
 let r: Repos;
 const children: number[] = [];
@@ -82,7 +96,8 @@ afterEach(() => {
   for (const pid of [...children.splice(0), ...fake.spawned.map((s) => s.pid)]) end(pid);
   vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.resetModules();
   for (const f of [fake.started, fake.exit, fake.quit, fake.relaunch]) f.mockClear();
-  fake.loaded.length = 0; fake.spawned.length = 0; fake.asked.length = 0;
+  fake.loaded.length = 0; fake.spawned.length = 0; fake.asked.length = 0; fake.windows.length = 0; fake.handlers.clear();
+  fake.server = { status: "idle" };
   removeRepos(r);
 });
 
@@ -103,6 +118,17 @@ it("a checkout with no update in flight starts its server", async () => {
   expect(fake.spawned).toEqual([]);
   // It looked before it took the app's lock and again after, both times at the checkout it runs from.
   expect(fake.asked).toEqual([path.resolve(import.meta.dirname, "..", "..", ".."), path.resolve(import.meta.dirname, "..", "..", "..")]);
+});
+
+it("Update in a running checkout starts the updater and closes the app, so the updater is not left waiting on it", async () => {
+  await startApp();
+  await vi.waitFor(() => expect(fake.started).toHaveBeenCalledTimes(1));
+  fake.server = { status: "ready", launch: 1, pid: 1, port: 1, url: "ws://127.0.0.1:1/?token=t" };
+  const contents = fake.windows.at(-1)!.webContents;
+  const install = fake.handlers.get(IPC.updateAndRestart)!;
+  expect(await install({ sender: contents, senderFrame: contents.mainFrame }, { reservation: "r1", target: "a".repeat(40) })).toEqual({ ok: true });
+  expect(fake.spawned).toHaveLength(1);
+  await vi.waitFor(() => expect(fake.quit).toHaveBeenCalledTimes(1));
 });
 
 it("an update cut off after the switch is not started as it is: the start hands it to the updater and says it is finishing", async () => {

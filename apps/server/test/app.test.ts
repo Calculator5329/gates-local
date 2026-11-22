@@ -535,6 +535,31 @@ it("failed admission leaves no new image file", async () => {
   expect(readdirSync(path.join(path.dirname(r.store.dbPath), "images"))).toEqual([]);
 });
 
+it("Stop while a pasted picture is being saved ends the reply as stopped, not as a picture error", async () => {
+  const lifecycle = imageFiles.imageLifecycle;
+  let reached!: () => void;
+  const saving = new Promise<void>(resolve => { reached = resolve; });
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  // the real save runs, only later: Stop lands while the picture is on its way to disk
+  const factory = vi.spyOn(imageFiles, "imageLifecycle").mockImplementation((...args) => {
+    const real = lifecycle(...args);
+    return { ...real, save: async (images, append) => { reached(); await held; return real.save(images, append); } };
+  });
+  try {
+    const r = await rig({ show: { ...(SHOW as Record<string, unknown>), capabilities: ["completion", "vision"] } });
+    const thread = r.store.createThread();
+    const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOor6//DwAFewJ94ITM6gAAAABJRU5ErkJggg==";
+    const sent = await sendTurn(r, { threadId: thread.id, content: "chart", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] });
+    await saving;
+    await r.client.call("reply.stop", { id: sent.turnId });
+    release();
+    const end = await r.waitFor("turn", p => p.turnId === sent.turnId && p.event.type === "error", 2000);
+    expect(end.event).toMatchObject({ type: "error", code: "cancelled" });
+    expect(r.store.getThread(thread.id).messages).toEqual([]);
+  } finally { factory.mockRestore(); }
+});
+
 it("a draft referencing an image that is gone is refused in plain words before saving", async () => {
   const r = await rig({ show: { ...(SHOW as Record<string, unknown>), capabilities: ["completion", "vision"] } });
   const thread = r.store.createThread();

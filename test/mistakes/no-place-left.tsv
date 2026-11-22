@@ -7,3 +7,4 @@ B111	K12	c9d778f4	The finding is a measured gap in the checks themselves; this f
 B112	K12	58a265a8	Sentence-literal browser specs going stale is a test-writing habit; no product line carries it.
 B114	K12	a20fc872	Sandbox tests skipped on machines without bsdtar, sqlite3 or bubblewrap is test-machine setup, not product code.
 B115	K12	d6ae9733	A script reporting its tail's exit instead of lint's is a shell-script mistake outside the product.
+n01	K14	planted	The guard the mutant removed in the drop overlay's leave path was itself removed: without it the path prevents a dragleave, which a browser ignores, and hides a marker that a drag without files never shows.

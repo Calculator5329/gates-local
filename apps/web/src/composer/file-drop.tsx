@@ -60,7 +60,6 @@ function over(e: DragEvent): void {
 }
 
 function leave(e: DragEvent): void {
-  if (!carriesFiles(e)) return;
   e.preventDefault();
   // external: a browser's dragleave names the next element, or null on leaving the window
   if (e.relatedTarget === null) hide();
