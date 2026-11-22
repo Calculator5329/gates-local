@@ -16,6 +16,7 @@ import { type LibraryTool, libraryToolCanUse } from "../lib/words/settings-rules
 import { COMPUTER_ONLY, Fail, Grp, Head, Na, Row, Seg2, Skel, useAct, useOutside, walk } from "../lib/ui/settings-ui.tsx";
 import { Updates } from "../updates/SettingsUpdates.tsx";
 import Instructions from "./Instructions.tsx";
+import type { RESET_SETTINGS } from "./settings.ts";
 import { VoiceSettings } from "../voice/VoiceSettings.tsx";
 import { closeTip } from "../lib/ui/ui.tsx";
 import { focusFirstOf, focusOnDraw, requestFocus } from "../lib/ui/kit/focus.ts";
@@ -745,6 +746,20 @@ function DataFolder() {
   );
 }
 
+// why: keyed by Reset's own table, so a setting Reset no longer has cannot stay in its confirm
+const RESET_SAID = {
+  theme: ["back", "theme"], accent: ["back", "accent"], defaultModel: ["back", "default model"], defaultNumCtx: ["back", "context"], tools: ["back", "tools"],
+  imageGen: ["back", "image generation"], imageChoice: ["back", "image generation"], imageTool: ["back", "image generation"], comfyUrl: ["back", "image generation"], imageFolder: ["back", "image generation"],
+  systemPrompt: ["cleared", "shared instructions"], modelSettings: ["cleared", "model instructions", "reply controls"],
+  thinking: null, whisperUrl: null, updateEveryChange: null, updateAutomatic: null, freeOthers: null,
+} as const satisfies Record<keyof typeof RESET_SETTINGS, readonly ["back" | "cleared", ...string[]] | null>;
+
+function resetList(how: "back" | "cleared"): string {
+  const words = [...new Set(Object.values(RESET_SAID).flatMap((entry) => (entry?.[0] === how ? entry.slice(1) : [])))];
+  const list = words.length > 1 ? `${words.slice(0, -1).join(", ")} and ${words.at(-1)}` : words.join("");
+  return list.charAt(0).toUpperCase() + list.slice(1);
+}
+
 function ResetSettings() {
   const [asking, setAsking] = useState(false);
   const [err, run] = useAct();
@@ -759,8 +774,8 @@ function ResetSettings() {
         <div className="cfm" role="group" aria-label="Confirm reset">
           <b>Reset every setting?</b>
           <ul>
-            <li>Theme, accent, default model, context, tools and image generation go back to how they started.</li>
-            <li>Shared instructions, model instructions and reply controls are cleared.</li>
+            <li>{resetList("back")} go back to how they started.</li>
+            <li>{resetList("cleared")} are cleared.</li>
             <li>Your chats, Library and downloaded models stay.</li>
             <li>Which Ollama Gates Local uses stays as it is.</li>
           </ul>

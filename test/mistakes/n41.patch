@@ -3,15 +3,15 @@ Class: K5
 Fix: planted
 Browser: no
 Seen: A source whose last refresh never finished shows as ready, with no error state.
-Note: planted d at apps/server/src/sources/index.ts:124
+Note: planted at apps/server/src/sources/index.ts:125; detail exists only on the error state, so typecheck refuses it
 
 diff --git a/apps/server/src/sources/index.ts b/apps/server/src/sources/index.ts
-index ee0df099..40501a5b 100644
+index 3efae0df..03cea79c 100644
 --- a/apps/server/src/sources/index.ts
 +++ b/apps/server/src/sources/index.ts
-@@ -121,7 +121,7 @@ export function createSources(deps: SourcesDeps): Sources {
+@@ -122,7 +122,7 @@ export function createSources(deps: SourcesDeps): Sources {
        for (const source of loaded) if (!/^[a-zA-Z0-9_-]+$/.test(source.id)) throw new Error(`invalid source id ${JSON.stringify(source.id)}`);
-       return { registry: "decoded", sources: loaded.map(s => s.state !== "refreshing" ? s
+       return { registry: "decoded", sources: loaded.map((s): Source => s.state !== "refreshing" ? s
          : s.kind !== "sqlite" || ownFile(snapshots.lstat(snapshotName(s.id))) ? { ...s, state: "ready" }
 -        : { ...s, state: "error", detail: "The last refresh did not finish; refresh this source again." }) };
 +        : { ...s, state: "ready", detail: "The last refresh did not finish; refresh this source again." }) };

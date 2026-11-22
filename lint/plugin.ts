@@ -5,6 +5,7 @@ import disableNeedsReason from "./rules/disable-needs-reason.ts";
 import effectNeedsReason from "./rules/effect-needs-reason.ts";
 import noRelativeImportAcrossPackages from "./rules/no-relative-import-across-packages.ts";
 import noWaitForTimeout from "./rules/no-wait-for-timeout.ts";
+import parentPidIsPassed from "./rules/parent-pid-is-passed.ts";
 import testSwitchStaysInTests from "./rules/test-switch-stays-in-tests.ts";
 import timerNeedsReason from "./rules/timer-needs-reason.ts";
 
@@ -18,6 +19,7 @@ export default {
     "effect-needs-reason": effectNeedsReason,
     "no-relative-import-across-packages": noRelativeImportAcrossPackages,
     "no-wait-for-timeout": noWaitForTimeout,
+    "parent-pid-is-passed": parentPidIsPassed,
     "test-switch-stays-in-tests": testSwitchStaysInTests,
     "timer-needs-reason": timerNeedsReason,
   },

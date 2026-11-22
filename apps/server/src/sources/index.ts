@@ -29,6 +29,7 @@ export interface Sources {
 }
 
 const decodeRegistry = S.decodeUnknownSync(S.Array(Source));
+const withoutDetail = (s: Source) => { if (s.state !== "error") return s; const { detail: _, ...rest } = s; return rest; };
 const SQLITE_HEADER = Buffer.from("SQLite format 3\0", "latin1");
 const MAX_TABLES = 500;
 export const SQLITE_FILE_REFUSED = "This is a SQLite database; add it as a database source so the model reads a snapshot, never the live file.";
@@ -119,7 +120,7 @@ export function createSources(deps: SourcesDeps): Sources {
       const loaded = [...decodeRegistry(JSON.parse(readFileSync(registryPath, "utf8")))];
       // why: an id forms a snapshot file name, so a corrupt one is refused before it makes a path
       for (const source of loaded) if (!/^[a-zA-Z0-9_-]+$/.test(source.id)) throw new Error(`invalid source id ${JSON.stringify(source.id)}`);
-      return { registry: "decoded", sources: loaded.map(s => s.state !== "refreshing" ? s
+      return { registry: "decoded", sources: loaded.map((s): Source => s.state !== "refreshing" ? s
         : s.kind !== "sqlite" || ownFile(snapshots.lstat(snapshotName(s.id))) ? { ...s, state: "ready" }
         : { ...s, state: "error", detail: "The last refresh did not finish; refresh this source again." }) };
     } catch (e) {
@@ -244,7 +245,7 @@ export function createSources(deps: SourcesDeps): Sources {
   const materialize = async (source: Source, signal?: AbortSignal): Promise<Source> => {
     signal?.throwIfAborted();
     const canonical = checkPath(source);
-    if (source.kind !== "sqlite") return { ...source, path: canonical, state: "ready", sizeBytes: statSync(canonical).size, detail: undefined };
+    if (source.kind !== "sqlite") return { ...withoutDetail(source), path: canonical, state: "ready", sizeBytes: statSync(canonical).size };
     if (!snapshots.placed()) throw moved();
     const pending = `${source.id}.${randomUUID()}.pending.db`;
     let listed: Listed | undefined;
@@ -259,9 +260,9 @@ export function createSources(deps: SourcesDeps): Sources {
         renameSync(snapshots.at(pending), snapshots.at(snapshotName(source.id)));
       } finally { copy?.close(); }
     } finally { if (snapshots.placed()) unlinkIfAny(snapshots, pending); }
-    const { tables: _older, tableCount: _olderCount, ...rest } = source;
+    const { tables: _older, tableCount: _olderCount, ...rest } = withoutDetail(source);
     const tables = listed === undefined ? {} : { tables: listed.tables, ...(listed.count > listed.tables.length ? { tableCount: listed.count } : {}) };
-    return { ...rest, path: canonical, state: "ready", snapshotAt: now(), sizeBytes: snapshots.lstat(snapshotName(source.id))?.size ?? 0, detail: undefined, ...tables };
+    return { ...rest, path: canonical, state: "ready", snapshotAt: now(), sizeBytes: snapshots.lstat(snapshotName(source.id))?.size ?? 0, ...tables };
   };
   const find = (id: string) => {
     const source = sources.find(s => s.id === id);
@@ -318,7 +319,7 @@ export function createSources(deps: SourcesDeps): Sources {
     async refresh(id, signal) {
       signal?.throwIfAborted();
       const old = find(id);
-      sources = sources.map(s => s.id === id ? { ...s, state: "refreshing" } : s); save();
+      sources = sources.map(s => s.id === id ? { ...withoutDetail(s), state: "refreshing" } : s); save();
       let source: Source;
       try { source = await materialize(old, signal); }
       catch (e) { source = { ...old, state: "error", detail: (e as Error).message }; }

@@ -81,4 +81,6 @@ it("the set of chats with a reply on its way stays the same object while words a
   expect([...both].toSorted()).toEqual(["A", "B"]);
   setState({ turns: { A: turn("A", { text: "a word", end: { kind: "stopped", secs: 2 } }), B: turn("B", { text: "more" }) } });
   expect([...runningThreads(getState())]).toEqual(["B"]);
+  setState({ turns: { B: turn("B", { text: "more", end: { kind: "error", code: "runtime", message: "It failed." } }) } });
+  expect([...runningThreads(getState())]).toEqual([]);
 });

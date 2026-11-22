@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-22: four past mistakes that got through now fail typecheck, lint or a test
+
+- A Library source could be saved as ready with an error's words still on it ("The last refresh did not finish…"), and nothing objected. A source's `detail` now exists only on its error state, so writing one on a ready or refreshing source fails typecheck. A source that leaves the error state drops its old words; registries written before this load as they did.
+- The Reset confirm listed its settings by hand, so a removed setting ("text size") could stay in the list. The list is now built from a table keyed by the same defaults Reset sends: a setting Reset no longer has fails typecheck, and a new one must be given its words. The words on screen are unchanged.
+- A database query could outlive the app that asked for it when its child read `process.ppid` after starting, by which time the parent may be gone. A lint rule now refuses keeping `process.ppid` as the parent's pid anywhere in `packages/harness/src`, strings included, and says to pass the parent's pid in. Comparing against the passed pid is still allowed. Before, a test caught this only some of the time.
+- A reply that failed could keep its chat marked as working in the sidebar (B041). No type can refuse a wrong answer for a kind that already exists, so the store's existing test now also asks about a turn that ended in an error: two lines, watched failing with the mistake put back.
+
 ## 2026-11-22: past mistakes are put back to see which checks still stop them
 
 - Tests: nothing said whether today's checks would stop a mistake the app has already made once. `test/mistakes/` now holds 60 of them as patches: 33 rows from the census of fixed bugs, and 27 mistakes planted on purpose that an earlier run saw survive. `node scripts/mistakes.ts` puts each one back in a scratch worktree and records the first check that stops it: typecheck, lint, the unit tests of the touched files, then the whole unit suite. A patch that no longer applies stops the run and is named.

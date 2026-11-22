@@ -5,6 +5,26 @@ import { NA, type State, getState, setState } from "../lib/store/store.ts";
 
 type Act = <M extends MethodName>(method: M, params: Params<M>, what: string, todo?: string, options?: CallOptions<M>) => Promise<{ readonly ok: true; readonly value: ResultOf<M> } | { readonly ok: false; readonly message: string }>;
 
+export const RESET_SETTINGS = {
+  defaultModel: null,
+  defaultNumCtx: 16384,
+  thinking: true,
+  theme: "dark",
+  tools: true,
+  imageGen: false,
+  imageChoice: null,
+  imageTool: null,
+  comfyUrl: null,
+  imageFolder: null,
+  whisperUrl: null,
+  updateEveryChange: false,
+  updateAutomatic: true,
+  freeOthers: false,
+  accent: "neutral",
+  systemPrompt: null,
+  modelSettings: null,
+} as const satisfies SettingsPatch;
+
 interface SettingsEffects {
   readonly applyServerEvent: (event: ServerEvent) => void;
   readonly authority: SettingsAuthority;
@@ -62,26 +82,6 @@ export function createSettings({ applyServerEvent, authority, sync, act, applyTh
     systemPrompt: "save the system prompt",
     modelSettings: "reset model settings",
   };
-
-  const RESET_SETTINGS = {
-    defaultModel: null,
-    defaultNumCtx: 16384,
-    thinking: true,
-    theme: "dark",
-    tools: true,
-    imageGen: false,
-    imageChoice: null,
-    imageTool: null,
-    comfyUrl: null,
-    imageFolder: null,
-    whisperUrl: null,
-    updateEveryChange: false,
-    updateAutomatic: true,
-    freeOthers: false,
-    accent: "neutral",
-    systemPrompt: null,
-    modelSettings: null,
-  } as const satisfies SettingsPatch;
 
   function settingsPatch(_s: State, settings: Settings, first: boolean): Partial<State> {
     const before = _s.settings === NA ? undefined : _s.settings;

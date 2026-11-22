@@ -128,6 +128,21 @@ const CASES: Case[] = [
     },
   },
   {
+    rule: "gates/parent-pid-is-passed",
+    planted: {
+      "packages/harness/src/child.ts": text(
+        'const CHILD = "const parent = process.ppid; setInterval(() => { if (process.ppid !== parent) process.exit(1); }, 250);";',
+        'export const args = ["-e", CHILD];',
+      ),
+    },
+    fixed: {
+      "packages/harness/src/child.ts": text(
+        'const CHILD = "const parent = Number(process.argv[1]); setInterval(() => { if (process.ppid !== parent) process.exit(1); }, 250);";',
+        'export const args = ["-e", CHILD, String(process.pid)];',
+      ),
+    },
+  },
+  {
     rule: "gates/disable-needs-reason",
     planted: { "scripts/quiet.ts": text("// oxlint-disable-next-line no-console", 'console.log("done");') },
     fixed: { "scripts/quiet.ts": text("// oxlint-disable-next-line no-console -- this script's output is its result", 'console.log("done");') },
@@ -253,6 +268,8 @@ const UNTOUCHED: Files = {
   // The closed package's tests may use the test runner; other desktop files may use Node.
   "packages/contracts/src/closed.test.ts": text('import { expect, it } from "vitest";', 'it("holds", () => { expect(1).toBe(1); });'),
   "apps/desktop/src/main.ts": text('import { join } from "node:path";', "export const joined = join;"),
+  // A harness test may read the pid it was started under.
+  "packages/harness/src/child.test.ts": text("export const startedUnder = process.ppid;"),
   // A test sets a guard's test-only switch, and so does the one world the GPU rules run in.
   "apps/server/src/door.test.ts": text(...DOOR, 'export const door = createDoor({ faultForTest: "left-open" });'),
   "apps/server/src/gpu/rules-harness.ts": text(...DOOR, 'export const door = createDoor({ faultForTest: "left-open" });'),

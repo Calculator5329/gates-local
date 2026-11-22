@@ -68,6 +68,13 @@
       }
     },
     {
+      "files": ["**/packages/harness/src/**"],
+      "excludeFiles": ["**/*.test.ts"],
+      "rules": {
+        "gates/parent-pid-is-passed": "error"
+      }
+    },
+    {
       "files": ["**/packages/contracts/src/**"],
       "excludeFiles": ["**/*.test.ts"],
       "rules": {

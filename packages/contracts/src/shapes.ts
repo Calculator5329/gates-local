@@ -889,8 +889,7 @@ export type ModelEstimate = typeof ModelEstimate.Type;
 export const SourceKind = S.Literals(["folder", "file", "sqlite"]);
 export type SourceKind = typeof SourceKind.Type;
 
-/** A read-only source in the Library. The model reads a snapshot, never the live file. */
-export const Source = S.Struct({
+const SourceFields = {
   id: S.String,
   kind: SourceKind,
   label: S.String,
@@ -898,12 +897,18 @@ export const Source = S.Struct({
   addedAt: Millis,
   snapshotAt: S.optional(Millis),
   sizeBytes: S.optional(Count),
-  state: S.Literals(["ready", "refreshing", "error"]),
-  detail: S.optional(S.String),
   managed: S.optional(S.Struct({ kind: S.Literals(["sample", "repository"]), key: S.String })),
   tables: S.optional(S.Array(S.Struct({ name: S.String, rows: S.optional(Count) }))),
   tableCount: S.optional(Count),
-});
+};
+/**
+ * A read-only source in the Library. The model reads a snapshot, never the live file. Only an error
+ * has a `detail`, the words saying what went wrong, so a ready source cannot carry one.
+ */
+export const Source = S.Union([
+  S.Struct({ ...SourceFields, state: S.Literals(["ready", "refreshing"]) }),
+  S.Struct({ ...SourceFields, state: S.Literal("error"), detail: S.optional(S.String) }),
+]);
 export type Source = typeof Source.Type;
 
 /** `questions`: the four a person can start a chat with, text only. */
