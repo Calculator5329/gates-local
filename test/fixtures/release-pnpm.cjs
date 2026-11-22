@@ -52,7 +52,7 @@ if (command === "--version") {
   run(process.execPath, [path.resolve(path.dirname(metadata), cli), ...args.slice(1)]);
 } else if (command === "perf:compare") {
   run(process.execPath, ["perf.cjs", ...args]);
-} else if (command === "verify" || command === "build") {
+} else if (command === "verify:no-models" || command === "build") {
   const script = pkg.scripts?.[command];
   if (typeof script !== "string") throw new Error("Missing fixture script");
   run("/bin/sh", ["-c", `exec ${script}`]);

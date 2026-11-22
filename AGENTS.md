@@ -39,7 +39,9 @@ decision.
 ## Run and verify
 
 - `pnpm verify` is the gate: root and per-package `tsc`, `pnpm lint`,
-  `vitest run`. It must fail on a planted type error.
+  `pnpm model-check` (the formal models in `model/`, each run again with a
+  past bug put back; skill `verify-models` reads a red run), `vitest run`.
+  It must fail on a planted type error.
 - `pnpm lint` is two passes: `oxlint --deny-warnings` with its stock checks,
   then the project's own rules (`lint/rules.oxlintrc.json`, plugin in
   `lint/`). Code that broke a project rule before the rule existed is

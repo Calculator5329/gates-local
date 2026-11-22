@@ -1,0 +1,13 @@
+{
+  "commit": "f26ab416",
+  "files": {
+    "apps/desktop/src/checkout-start.ts": "f152456240e96c42b38cb63bda8e6d0bcef46f717a610d74ed78f77b1a3e0b7c",
+    "apps/desktop/src/update-launch.ts": "c6f1c5219aa5995ecd2c86af5d9ab963f36dae7c4783bbe84d5763cada530d56",
+    "apps/server/src/update/installed/module.ts": "8c54feeb8e51310e671db81a9c942e67f50cfa2061d844c28e78a7eb47a5e4bb",
+    "apps/server/src/update/module.ts": "3ef365d09bc7ef99f3f1bdd10b190d1ea3d27008fe36653acaf795ca36eccde9",
+    "packages/update/src/apply.ts": "bc812c980328687d3001ca53078a193a16e111af49b46bc34e5feee8a4aa02df",
+    "packages/update/src/cli.ts": "5eb136eed9f8e92d1e8fafcf9344a809d93fb2ecdda6ce66e87295f7b73ae55c",
+    "packages/update/src/installed/transaction.ts": "b611231b5fc3336bfaf50bf13e570a9f9afb3b4fee6e6066ad7916155a3a194c",
+    "packages/update/src/startup.ts": "5623ddc2f41dced5c5d17ada4833dc22aa781f9f3a3eb2d8ab570eb76717fb77"
+  }
+}

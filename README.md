@@ -362,7 +362,7 @@ download.
 ## Development
 
 ```sh
-pnpm verify        # typecheck, lint and unit tests
+pnpm verify        # typecheck, lint, the formal models (needs Java, see model/README.md) and unit tests
 pnpm e2e           # functional browser journeys and reported bundle sizes against a fake Ollama
 pnpm e2e:timing    # wall-clock measurements against unchanged timing budgets
 pnpm shots:readme  # regenerate the images in docs/screenshots

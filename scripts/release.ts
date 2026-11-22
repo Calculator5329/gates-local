@@ -433,7 +433,7 @@ export async function runReleaseCheck(options: CheckOptions): Promise<ReleaseRep
     // starved: on 8 cores its time doubled, unit tests that wait 50 ms for an answer timed out, and
     // the check took no less time, since the shards fill every core either way. A unit red still
     // lets the browser step run, and the report keeps both verdicts.
-    const verified = options.part !== "timing" ? await step("verify", ["pnpm", "verify"], clone) : undefined;
+    const verified = options.part !== "timing" ? await step("verify", ["pnpm", "verify:no-models"], clone) : undefined;
     let browserError: { step: string; error: unknown } | undefined;
     let playwright: string[] = [];
     try {

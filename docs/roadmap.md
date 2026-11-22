@@ -1050,6 +1050,13 @@ RS-03 remains dropped.
 
 ## Next: test suite health
 
+*2026-11-21, from bringing the formal models into `pnpm verify`:*
+
+- [ ] <!-- workspace:id=work:c26cfa36-3d26-5c56-9c03-d83e487d35e7 --> The GPU, queue-pump and update-run models are written by hand from 21 source files and only notice a change by file hash, so an edit to any of them stops the check until someone reads the model again (9 of the 39 commits after 0.2.5 touched one). The reply table, the GPU lease, the start decision and update admission are read from the real functions and need no such step.
+      *Accept:* the hand-modelled rules move behind a table or a pure function the check calls, and the hashed file count falls from 21; a past bug put back in one of them fails `pnpm model-check` with no hash message.
+- [ ] <!-- workspace:id=work:46cb5404-ef58-5dcb-aa08-f16a26842b54 --> `pnpm model-check` records two orders today's code allows and requires them to keep failing: a load whose request was dropped can still be loading when the next one starts, and a picture engine the app did not start can hold memory past the hold time.
+      *Accept:* each is closed in code and its must-fail line removed, or a row in `docs/decisions.md` says why it is accepted.
+
 *2026-11-17, from the 0.2.5 release check and the CI speed work:*
 
 - [ ] <!-- workspace:id=work:e6091c89-9a33-5afc-983e-dc46371a5ce3 --> The release check's browser shards all run on one machine. Spread them across the test machines, so a release does not wait on the busiest one.

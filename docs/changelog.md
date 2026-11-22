@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-21: five past ordering bugs are checked in every order, in 6 seconds
+
+- Five past bugs came from steps happening in an order no test had written down: a Stop during a file save lost the hold, a chat model loaded beside a stuck picture, a refused runtime switch forgot what the app had loaded, a copy was started on a half-installed update, and an installed copy let new work start under an approved update. Each was fixed with one guard and a test for the order that was found. `node scripts/model-check.ts` now checks every order of the steps for the reply queue, GPU loading and updates, inside small printed bounds (two messages, two chats and a picture, two crashes). The app is unchanged.
+- Each model is run again with one guard switched off, and that run has to fail: 12 guards, among them the five that fixed those bugs. A model that stops seeing one of them fails the check.
+- The models cannot quietly drift from the code. The reply table, the GPU lease, the start decision and update admission are read from the real functions on every run, so a change there that breaks a rule fails with the steps that break it. Another 21 files are modelled by hand; a change to one fails the check and names the file until someone has read the change against the model.
+- Known and unchanged: "never two things loading at once" rests on Ollama giving up a load whose request was dropped, and on a ComfyUI the app did not start letting go of a stopped picture within the hold time. Both are written into the check as runs that must still fail without that.
+- `pnpm verify` runs it as `pnpm model-check`, between lint and the unit tests, so every landing passes it. The release check's clone runs `pnpm verify:no-models`: its machine has no Java, and the models give the same answer on any machine.
+- `model/README.md` explains the models; `.claude/skills/verify-models/SKILL.md` tells an agent how to read a red run. It needs Java and the TLA+ tools jar and says what to install when either is missing.
+
 ## 2026-11-21: 0.2.9 published, in 3 minutes 19 seconds
 
 - Gates Local 0.2.9 is out (docs/releasing.md) with the picture-from-JSON and bare-path fixes, Measure version 5, the failed tool row that says its path once, and Show more only when there is more.

@@ -46,7 +46,7 @@ function fixture(unitCommand = "node --test unit.cjs") {
   execFileSync("git", ["init", "--initial-branch=main", cwd], { stdio: "ignore" });
   git("config", "user.name", "Release test");
   git("config", "user.email", "release@example.com");
-  writeFileSync(path.join(cwd, "package.json"), JSON.stringify({ name: "release-fixture", private: true, packageManager: "pnpm@11.10.0", scripts: { verify: unitCommand, build: 'node -e "process.exit(0)"' } }));
+  writeFileSync(path.join(cwd, "package.json"), JSON.stringify({ name: "release-fixture", private: true, packageManager: "pnpm@11.10.0", scripts: { "verify:no-models": unitCommand, build: 'node -e "process.exit(0)"' } }));
   writeFileSync(path.join(cwd, "unit.cjs"), 'require("node:test")("planted unit test", () => require("node:assert/strict").fail("intentional unit failure"));');
   writeFileSync(path.join(cwd, "desktop-build.cjs"), 'require("node:fs").writeFileSync("desktop-built", "built");');
   execFileSync("pnpm", ["install", "--lockfile-only"], { cwd, stdio: "ignore" });
@@ -302,7 +302,7 @@ function protocolFixture(extraCli: readonly string[] = []) {
   const tool = path.join(f.cwd, "tools");
   mkdirSync(tool);
   writeFileSync(path.join(f.cwd, "unit.cjs"), 'require("node:test")("passing unit", () => require("node:assert/strict").ok(true));');
-  writeFileSync(path.join(f.cwd, "package.json"), JSON.stringify({ name: "release-fixture", private: true, packageManager: "pnpm@11.10.0", scripts: { verify: "node --test unit.cjs", build: 'node -e "process.exit(0)"' }, devDependencies: { playwright: "file:tools" } }));
+  writeFileSync(path.join(f.cwd, "package.json"), JSON.stringify({ name: "release-fixture", private: true, packageManager: "pnpm@11.10.0", scripts: { "verify:no-models": "node --test unit.cjs", build: 'node -e "process.exit(0)"' }, devDependencies: { playwright: "file:tools" } }));
   writeFileSync(path.join(tool, "package.json"), JSON.stringify({ name: "playwright", version: "0.0.0", bin: { playwright: "cli.cjs" } }));
   writeFileSync(path.join(tool, "cli.cjs"), [
     '#!/usr/bin/env node',
@@ -638,7 +638,7 @@ test("RJ inherited writers: the failed report discloses a possible escaped desce
   const realPnpm = execFileSync("which", ["pnpm"], { encoding: "utf8" }).trim();
   writeFileSync(path.join(bin, "pnpm"), [
     '#!/usr/bin/env node',
-    `if (process.argv[2] === "verify") { require("node:child_process").spawn(process.execPath,["-e",${JSON.stringify(worker)}],{detached:true,stdio:["ignore",1,2]}).unref(); setInterval(()=>{},1000); }`,
+    `if (process.argv[2] === "verify:no-models") { require("node:child_process").spawn(process.execPath,["-e",${JSON.stringify(worker)}],{detached:true,stdio:["ignore",1,2]}).unref(); setInterval(()=>{},1000); }`,
     `else { const result = require("node:child_process").spawnSync(${JSON.stringify(realPnpm)},process.argv.slice(2),{stdio:"inherit"}); process.exit(result.status ?? 1); }`,
   ].join("\n"), { mode: 0o755 });
   const priorPath = process.env["PATH"];

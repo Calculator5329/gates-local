@@ -5,7 +5,7 @@ import path from "node:path";
 import { check, configuredRules, findings, OXLINT, readBaseline, rewrite } from "./ratchet.ts";
 
 const ROOT = path.join(import.meta.dirname, "..");
-const PATHS = ["apps", "packages", "scripts", "test", "lint"];
+const PATHS = ["apps", "packages", "scripts", "test", "lint", "model"];
 
 const write = process.argv.includes("--write");
 

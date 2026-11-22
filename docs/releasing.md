@@ -850,7 +850,9 @@ report. A timing report ran no tests and `release:tag` refuses it.
 The check defaults to this clone's origin and current origin/main tracking
 ref. Refresh that ref first. It clones into a new cache directory with a
 fresh home and configuration, checks out the exact commit, installs with
-`--frozen-lockfile`, runs `pnpm verify`, builds the web client with
+`--frozen-lockfile`, runs `pnpm verify:no-models` (types, lint and unit
+tests; the formal models need Java, do not depend on the machine, and were
+checked when each change landed), builds the web client with
 `pnpm build`, builds Electron with `pnpm --filter @gates-local/desktop build`
 as a blocking `desktop-build` step, then runs Playwright's blocking `e2e` project.
 Every functional test blocks. JS and CSS sizes are reported against soft
