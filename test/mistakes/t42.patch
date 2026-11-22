@@ -1,0 +1,20 @@
+Mistake: t42
+Class: K14
+Fix: planted
+Browser: no
+Seen: After Copy Ollama name the button never says Copied.
+Note: planted a at apps/web/src/models/Models.tsx:308
+
+diff --git a/apps/web/src/models/Models.tsx b/apps/web/src/models/Models.tsx
+index b277f9ef..34eade47 100644
+--- a/apps/web/src/models/Models.tsx
++++ b/apps/web/src/models/Models.tsx
+@@ -305,7 +305,7 @@ function RowMenu({ r, saved, onRemove }: { r: InstalledRow; saved: string | unde
+             }}
+           >
+             <Icon id={copied === "yes" ? "check" : "copy"} />
+-            {copied === "yes" ? "Copied" : copied === "no" ? "Couldn't copy" : "Copy Ollama name"}
++            {false ? "Copied" : copied === "no" ? "Couldn't copy" : "Copy Ollama name"}
+             <span className="mp-k mono">
+               <span className="mp-h">{head}</span>
+               {tail ? <span className="mp-t">{tail}</span> : null}

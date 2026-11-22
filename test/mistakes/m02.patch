@@ -1,0 +1,19 @@
+Mistake: m02
+Class: K3
+Fix: planted
+Browser: no
+Seen: After a failed check, pressing Check again keeps the old error up until the new answer arrives.
+Note: planted c at apps/web/src/updates/Updates.tsx:199
+
+diff --git a/apps/web/src/updates/Updates.tsx b/apps/web/src/updates/Updates.tsx
+index 3703f498..88940229 100644
+--- a/apps/web/src/updates/Updates.tsx
++++ b/apps/web/src/updates/Updates.tsx
+@@ -196,7 +196,6 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
+   };
+   const run: Record<UpdateClick, () => void> = {
+     check: () => {
+-      setClickError(null);
+       void checkForUpdates().then((message) => setClickError(message === null ? null : { click: "check", message, since }));
+     },
+     update: () => void restart(),

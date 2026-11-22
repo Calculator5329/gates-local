@@ -1,0 +1,20 @@
+Mistake: m24
+Class: K2
+Fix: planted
+Browser: yes
+Seen: The reply's Retry button shows a busy spinner icon.
+Note: planted d at apps/web/src/thread/Thread.tsx:79
+
+diff --git a/apps/web/src/thread/Thread.tsx b/apps/web/src/thread/Thread.tsx
+index a84090d3..5ca16297 100644
+--- a/apps/web/src/thread/Thread.tsx
++++ b/apps/web/src/thread/Thread.tsx
+@@ -76,7 +76,7 @@ function ActRow({ text, meta, wait, regen, regenOff = false, stop, empty = false
+             retry();
+           }}
+         >
+-          <Icon id="redo" />
++          <Icon id="spin" />
+         </button>
+       ) : null}
+       <button type="button" className="ibtn xs a-det" data-testid="chat.reply.details" aria-label="Reply details" aria-expanded={details} onClick={() => setDetails(!details)}>

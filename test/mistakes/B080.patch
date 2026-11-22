@@ -1,0 +1,24 @@
+Mistake: B080
+Class: K8
+Fix: b160c16
+Browser: no
+Seen: After switching runtimes, a late /api/ps answer from the old one empties the list of loaded models.
+Note: residency prunes on every /api/ps answer, not only one from the current runtime generation
+
+diff --git a/apps/server/src/runtime/load.ts b/apps/server/src/runtime/load.ts
+index 835f276b..6de24649 100644
+--- a/apps/server/src/runtime/load.ts
++++ b/apps/server/src/runtime/load.ts
+@@ -180,10 +180,8 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
+     try {
+       const loaded = await deps.listLoaded(baseUrl, signal);
+       pollFailure = undefined;
+-      if (gen === generation) {
+-        prune(loaded.map((m) => m.name));
+-        memory?.observe(loaded);
+-      }
++      prune(loaded.map((m) => m.name));
++      memory?.observe(loaded);
+       return { ok: true, models: new Map(loaded.map((m) => [canonicalTag(m.name), m])) };
+     } catch (e) {
+       const message = (e as Error).message;

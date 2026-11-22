@@ -1,0 +1,20 @@
+Mistake: B039
+Class: K9
+Fix: 824be7a9
+Browser: yes
+Seen: Live thinking text paints over Settings and takes its clicks.
+Note: the chat under Settings is only visibility:hidden, which an open thought undoes
+
+diff --git a/apps/web/src/lib/ui/panel.css b/apps/web/src/lib/ui/panel.css
+index b8503bf0..fecdf633 100644
+--- a/apps/web/src/lib/ui/panel.css
++++ b/apps/web/src/lib/ui/panel.css
+@@ -55,7 +55,7 @@
+    A child can undo visibility:hidden (an open thought sets visible), but not an ancestor's opacity
+    or pointer-events: so nothing of the chat paints over Settings or takes its clicks. */
+ .work{position:relative}
+-.stage.under{position:absolute;inset:0;visibility:hidden;opacity:0;pointer-events:none}
++.stage.under{position:absolute;inset:0;visibility:hidden}
+ /* a phone: the whole window (Settings and Models are pages there; Usage is this), and the
+    header may take a second line for Usage's controls */
+ @media (max-width:640px){

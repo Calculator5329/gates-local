@@ -1,0 +1,19 @@
+Mistake: B059
+Class: K1
+Fix: 6bac7d49
+Browser: yes
+Seen: With Image on, the page is not marked ready for seconds after a reload, or never if ComfyUI stalls.
+Note: the first load waits on the image status read again
+
+diff --git a/apps/web/src/lib/session/index.ts b/apps/web/src/lib/session/index.ts
+index 359ad5a3..39ea9106 100644
+--- a/apps/web/src/lib/session/index.ts
++++ b/apps/web/src/lib/session/index.ts
+@@ -273,6 +273,7 @@ async function hydrateWith(
+     probe("update.status", {}, { onResult: (read, sync) => onArrival(UPDATE, () => applyServerEvent({ update: read }))(sync) }),
+     probe("models.speed", {}, { onResult: (read, sync) => onArrival(SPEEDS, () => applyServerEvent((s) => speedsRead(s, read)))(sync) }),
+     probe("models.measures", {}, { onResult: (read, sync) => onArrival(MEASURES, () => applyServerEvent(measuresRead(read)))(sync) }),
++    probe("image.status", {}),
+   ]);
+   applyServerEvent((s) => ({
+     ...(gpu === NA ? { gpu } : {}), ...(update === NA ? { update } : {}),

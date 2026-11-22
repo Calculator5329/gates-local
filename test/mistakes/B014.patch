@@ -1,0 +1,20 @@
+Mistake: B014
+Class: K9
+Fix: 3f8e663e
+Browser: yes
+Seen: Back to chat in Settings sits 16 px lower than Search in the chat sidebar.
+Note: the Settings nav gets its top padding back
+
+diff --git a/apps/web/src/app/styles.css b/apps/web/src/app/styles.css
+index 695d0bfd..793680c1 100644
+--- a/apps/web/src/app/styles.css
++++ b/apps/web/src/app/styles.css
+@@ -840,7 +840,7 @@ a.btn{text-decoration:none}
+ .cfm li+li{margin-top:2px}
+ .cfm .mono{font-size:12.5px;color:var(--foreground);white-space:nowrap}
+ .cfm .ca{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+-.snav{flex:1;overflow-y:auto;padding:0 8px 8px;display:flex;flex-direction:column;gap:2px}
++.snav{flex:1;overflow-y:auto;padding:16px 8px 8px;display:flex;flex-direction:column;gap:2px}
+ .snav .sb-act{font-size:14px;flex:none}
+ .snav .sb-act.on{background:var(--snav-on);box-shadow:inset 2px 0 0 var(--green)}
+ .snav .sb-act.gap{margin-top:12px}

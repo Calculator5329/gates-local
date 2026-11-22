@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-22: past mistakes are put back to see which checks still stop them
+
+- Tests: nothing said whether today's checks would stop a mistake the app has already made once. `test/mistakes/` now holds 60 of them as patches: 33 rows from the census of fixed bugs, and 27 mistakes planted on purpose that an earlier run saw survive. `node scripts/mistakes.ts` puts each one back in a scratch worktree and records the first check that stops it: typecheck, lint, the unit tests of the touched files, then the whole unit suite. A patch that no longer applies stops the run and is named.
+- First reading, at f26ab416: of 47 judged, 28 were stopped (2 by lint, 26 by unit tests) and 19 got through, 17 of them planted. 12 can only be seen in a browser and are listed as not judged here. One (B071, a query that can outlive its dead app) was red in one run and green in another, so it counts as neither. 8 census rows have nothing left to patch and are listed with the reason. `test/mistakes/through.md` names the cheapest change that would stop each of the 19, most often holding a state in one value instead of clearing a flag by hand.
+
 ## 2026-11-21: five past ordering bugs are checked in every order, in 6 seconds
 
 - Five past bugs came from steps happening in an order no test had written down: a Stop during a file save lost the hold, a chat model loaded beside a stuck picture, a refused runtime switch forgot what the app had loaded, a copy was started on a half-installed update, and an installed copy let new work start under an approved update. Each was fixed with one guard and a test for the order that was found. `node scripts/model-check.ts` now checks every order of the steps for the reply queue, GPU loading and updates, inside small printed bounds (two messages, two chats and a picture, two crashes). The app is unchanged.

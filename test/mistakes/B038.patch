@@ -1,0 +1,20 @@
+Mistake: B038
+Class: K3
+Fix: 272b97df
+Browser: no
+Seen: "Thought for" counts the seconds the model spent loading into memory.
+Note: the thought clock counts from the turn's start, not from the model being ready
+
+diff --git a/apps/server/src/chat/times.ts b/apps/server/src/chat/times.ts
+index 3af08ae7..f9199abc 100644
+--- a/apps/server/src/chat/times.ts
++++ b/apps/server/src/chat/times.ts
+@@ -66,7 +66,7 @@ export function turnClock(startedAt: number): TurnClock {
+     spans.push({ from: open.from, ms: Math.max(0, now - open.since) });
+     open = undefined;
+   };
+-  const thoughtUntil = (now: number) => Math.max(0, now - (readyAt ?? startedAt));
++  const thoughtUntil = (now: number) => Math.max(0, now - startedAt);
+   const finish = (now: number, thought: string, as: "stopping" | "ended") => {
+     close(now);
+     if (thought !== "" && thoughtMs === undefined && firstTokenAt === undefined) thoughtMs = thoughtUntil(now);

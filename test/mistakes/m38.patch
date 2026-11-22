@@ -1,0 +1,19 @@
+Mistake: m38
+Class: K8
+Fix: planted
+Browser: no
+Seen: A server that crashes before it is ready is reported 20 s later as 'no ready line' instead of its crash.
+Note: planted c at apps/desktop/src/supervisor.ts:238
+
+diff --git a/apps/desktop/src/supervisor.ts b/apps/desktop/src/supervisor.ts
+index ad11f76d..243a099c 100644
+--- a/apps/desktop/src/supervisor.ts
++++ b/apps/desktop/src/supervisor.ts
+@@ -235,7 +235,6 @@ export class Supervisor {
+       if (this.#isCurrent(id)) this.#crash(id, null, { kind: "spawn-error", message: error.message }, []);
+     });
+     child.once("exit", (code, signal) => {
+-      clearReadyTimer(launch);
+       child.stdin?.destroy();
+       if (!this.#isCurrent(id) && launch.failure === null) {
+         exited.resolve();

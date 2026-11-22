@@ -1,0 +1,20 @@
+Mistake: m48
+Class: K2
+Fix: planted
+Browser: no
+Seen: 'Steam and 1 other programs are using 3 GB'.
+Note: planted a at apps/web/src/models/ModelDownloads.tsx:324
+
+diff --git a/apps/web/src/models/ModelDownloads.tsx b/apps/web/src/models/ModelDownloads.tsx
+index 9c55aa08..e13e36f9 100644
+--- a/apps/web/src/models/ModelDownloads.tsx
++++ b/apps/web/src/models/ModelDownloads.tsx
+@@ -321,7 +321,7 @@ export const othersOf = (s: Pick<State, "fitTable">) => (s.fitTable?.memory.kind
+ 
+ export function othersLine(others: { programs: readonly string[]; bytes: number }): string {
+   const [first, second] = others.programs;
+-  const who = first === undefined ? "Other programs" : others.programs.length === 1 ? first : others.programs.length === 2 ? `${first} and ${second}` : `${first} and ${others.programs.length - 1} other programs`;
++  const who = first === undefined ? "Other programs" : others.programs.length === 1 ? first : false ? `${first} and ${second}` : `${first} and ${others.programs.length - 1} other programs`;
+   return `${who} ${others.programs.length === 1 ? "is" : "are"} using ${gb(others.bytes)} of GPU memory right now.`;
+ }
+ 

@@ -1,0 +1,20 @@
+Mistake: B033
+Class: K4
+Fix: 516861c1
+Browser: no
+Seen: Models marks a model Too big because ComfyUI and whisper hold memory right now, though the card holds it.
+Note: the card verdict reads free VRAM, not the whole card
+
+diff --git a/apps/server/src/fit/fit.ts b/apps/server/src/fit/fit.ts
+index 2ade7bdc..9cce87c4 100644
+--- a/apps/server/src/fit/fit.ts
++++ b/apps/server/src/fit/fit.ts
+@@ -107,7 +107,7 @@ export function judge(basis: FitBasis, input: JudgeInput): FitReport {
+     model: input.model,
+     numCtx: input.numCtx,
+     needBytes: input.needBytes,
+-    freeVramBytes: basis === "card" ? Math.max(cardFreeBytes(input.gpu), nowVram) : nowVram,
++    freeVramBytes: nowVram,
+     // why: what others hold now is the system's to page out, so never less than the computer has.
+     memAvailableBytes: basis === "card" ? ram : Math.max(input.memAvailableBytes ?? 0, ram),
+     measuredAt: input.gpu.measuredAt,

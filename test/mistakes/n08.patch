@@ -1,0 +1,20 @@
+Mistake: n08
+Class: K9
+Fix: planted
+Browser: yes
+Seen: Settings' reply controls lose their layout.
+Note: planted d at apps/web/src/settings/Instructions.tsx:104
+
+diff --git a/apps/web/src/settings/Instructions.tsx b/apps/web/src/settings/Instructions.tsx
+index 180407d2..70bbc4cd 100644
+--- a/apps/web/src/settings/Instructions.tsx
++++ b/apps/web/src/settings/Instructions.tsx
+@@ -101,7 +101,7 @@ function ReplyControls({ model, saved, defaults, locked }: { model: string; save
+     if (error === null) { setDraft(null); setStatus({ text: "Saved", error: false }); }
+     else setStatus({ text: error, error: true });
+   };
+-  return <form className="inst-controls" data-testid="settings.reply-controls.form" aria-label="Reply controls" aria-busy={busy} onSubmit={e => { e.preventDefault(); void save(); }}>
++  return <form className="inst-controlsx" data-testid="settings.reply-controls.form" aria-label="Reply controls" aria-busy={busy} onSubmit={e => { e.preventDefault(); void save(); }}>
+     <Grp title="Reply controls">
+       {CONTROLS.map(control => {
+         const key = control.key, custom = values[key] !== null;

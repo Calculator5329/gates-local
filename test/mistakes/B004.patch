@@ -1,0 +1,20 @@
+Mistake: B004
+Class: K4
+Fix: f8499ccd
+Browser: no
+Seen: A model that takes 2k of context is asked for 16k.
+Note: a 16k floor comes back on the context a model is run at
+
+diff --git a/apps/server/src/fit/estimate.ts b/apps/server/src/fit/estimate.ts
+index b4320d1d..4f5735e3 100644
+--- a/apps/server/src/fit/estimate.ts
++++ b/apps/server/src/fit/estimate.ts
+@@ -115,7 +115,7 @@ export function reportedContextLength(modelInfo: Readonly<Record<string, unknown
+ }
+ 
+ export function effectiveNumCtx(requested: number, contextLength: number | undefined): number {
+-  return Math.min(requested, contextLength ?? UNREPORTED_MAX_CONTEXT);
++  return Math.max(16_384, Math.min(requested, contextLength ?? UNREPORTED_MAX_CONTEXT));
+ }
+ 
+ export interface EstimateOptions {

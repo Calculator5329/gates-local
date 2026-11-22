@@ -1,0 +1,20 @@
+Mistake: B044
+Class: K4
+Fix: b9b43fec
+Browser: no
+Seen: A 17.4 GB model's download reads '0.2 of 1.1 GB': the first file's size shown as the whole.
+Note: before the registry answers, the files Ollama has named so far go out as the total
+
+diff --git a/apps/server/src/runtime/pull.ts b/apps/server/src/runtime/pull.ts
+index f6662819..3008c953 100644
+--- a/apps/server/src/runtime/pull.ts
++++ b/apps/server/src/runtime/pull.ts
+@@ -98,7 +98,7 @@ export function createPullManager(options: PullManagerOptions): PullManager {
+ 
+   const progressed = (job: Job, flush = false) => {
+     const { listed, completed } = sums(job);
+-    const total = options.sizeOf === undefined || job.unsized === true ? listed : job.size === undefined ? 0 : Math.max(job.size, listed);
++    const total = options.sizeOf === undefined || job.unsized === true ? listed : job.size === undefined ? listed : Math.max(job.size, listed);
+     const t = now();
+     if (!flush && t - job.lastPushAt < interval && job.progress.state === "downloading") {
+       const { totalBytes: _total, ...held } = job.progress;

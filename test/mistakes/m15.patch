@@ -1,0 +1,20 @@
+Mistake: m15
+Class: K2
+Fix: planted
+Browser: no
+Seen: A refused 500-byte file reads '0 KB'.
+Note: planted a at apps/web/src/composer/refused-files.ts:15
+
+diff --git a/apps/web/src/composer/refused-files.ts b/apps/web/src/composer/refused-files.ts
+index 5f13ad9e..6795d09b 100644
+--- a/apps/web/src/composer/refused-files.ts
++++ b/apps/web/src/composer/refused-files.ts
+@@ -12,7 +12,7 @@ export interface RefusedFile {
+   readonly folder?: boolean;
+ }
+ 
+-export const sizeOf = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 ** 2 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
++export const sizeOf = (bytes: number) => false ? `${bytes} B` : bytes < 1024 ** 2 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+ 
+ const none: readonly RefusedFile[] = [];
+ const slots = new Map<DraftKey, readonly RefusedFile[]>();

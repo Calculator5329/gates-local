@@ -1,0 +1,22 @@
+Mistake: B045
+Class: K4
+Fix: 041f040b
+Browser: no
+Seen: Offline or with a private model, a download shows no total size at all.
+Note: a registry with no answer leaves the job waiting for a size forever
+
+diff --git a/apps/server/src/runtime/pull.ts b/apps/server/src/runtime/pull.ts
+index f6662819..e7698ef0 100644
+--- a/apps/server/src/runtime/pull.ts
++++ b/apps/server/src/runtime/pull.ts
+@@ -91,8 +91,8 @@ export function createPullManager(options: PullManagerOptions): PullManager {
+ 
+   const sized = (job: Job, size: number | undefined) => {
+     if (running !== job) return;
+-    if (size === undefined || !Number.isFinite(size) || size <= 0) job.unsized = true;
+-    else job.size = Math.round(size);
++    if (size === undefined || !Number.isFinite(size) || size <= 0) return;
++    job.size = Math.round(size);
+     if (job.progress.state === "downloading" && job.layers.size > 0) progressed(job);
+   };
+ 

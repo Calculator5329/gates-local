@@ -1,0 +1,20 @@
+Mistake: B056
+Class: K14
+Fix: 6bac7d49
+Browser: no
+Seen: 'Generate 5 images' is refused and the reply points at another service, though an image setup is ready.
+Note: Make images left unset counts as off again
+
+diff --git a/apps/server/src/image/presets.ts b/apps/server/src/image/presets.ts
+index b6ca4c58..a65697ab 100644
+--- a/apps/server/src/image/presets.ts
++++ b/apps/server/src/image/presets.ts
+@@ -305,7 +305,7 @@ export function describeChoice(choice: ImageChoice, fallback: ImageChoice, extra
+ }
+ 
+ export function imageToolOn(settings: Pick<Settings, "imageGen" | "imageTool">, runnable: boolean): boolean {
+-  return settings.imageGen === true && (settings.imageTool ?? runnable);
++  return settings.imageGen === true && (settings.imageTool ?? false);
+ }
+ 
+ export function imageOffLine(settings: Pick<Settings, "imageGen" | "imageTool">, runnable: boolean, toolsOn: boolean): string | undefined {

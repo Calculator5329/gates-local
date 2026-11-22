@@ -1,0 +1,28 @@
+Mistake: B022
+Class: K10
+Fix: 2fe22e13
+Browser: no
+Seen: A model that writes its call as JSON text shows the raw {"action":"image",...} as its answer and nothing runs.
+Note: a reply that is one written-out call is no longer read as a call
+
+diff --git a/packages/harness/src/loop.ts b/packages/harness/src/loop.ts
+index db793c83..8d744b30 100644
+--- a/packages/harness/src/loop.ts
++++ b/packages/harness/src/loop.ts
+@@ -1,6 +1,6 @@
+ import { randomUUID } from "node:crypto";
+ import { urlsFromText } from "@gates-local/contracts";
+-import { createCallHold, createTextView, looseCall, parseTextCalls, partialAnswer, repairCall } from "./parser.ts";
++import { createCallHold, createTextView, parseTextCalls, partialAnswer, repairCall } from "./parser.ts";
+ import type { ToolDefinition } from "./prompt.ts";
+ import type { LoopEvent, ModelEvent, ModelMessage, ModelStream, ToolCall, ToolResult, ToolStep } from "./types.ts";
+ 
+@@ -241,7 +241,7 @@ async function* turn(input: LoopInput, toolPhase: AbortSignal): AsyncGenerator<L
+     if (!complete) throw new Error("The model stream ended without a done line");
+     thinking += complete.thinking ?? "";
+     let parsed: { items: readonly ({ call: unknown } | { error: string })[]; content: string } = input.native ? { items: complete.calls.map(call => ({ call })), content: complete.content } : parseTextCalls(complete.content);
+-    const loose = parsed.items.length === 0 && !final && holding ? looseCall(complete.content, offered) : undefined;
++    const loose = undefined;
+     if (loose) parsed = { items: [{ call: loose }], content: "" };
+     else yield* showHeldText();
+     const pending: { call?: ToolCall; error?: string; name: string }[] = parsed.items.map(item => {

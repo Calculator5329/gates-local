@@ -1,0 +1,756 @@
+{
+  "head": "f26ab416",
+  "date": "2026-11-22",
+  "only": null,
+  "table": [
+    "class    planted  typecheck  lint  model-check  unit (related)  unit (whole)  through  not judged here  noise  no place left",
+    "K1       2        0          0     0            0               0             0        2                0      0            ",
+    "K2       10       0          0     0            3               0             6        1                0      1            ",
+    "K3       7        0          0     0            4               0             3        0                0      0            ",
+    "K4       7        0          1     0            5               0             1        0                0      0            ",
+    "K5       3        0          0     0            2               0             1        0                0      0            ",
+    "K6       6        0          0     0            3               0             2        1                0      0            ",
+    "K8       7        0          0     0            3               0             3        0                1      0            ",
+    "K9       8        0          0     0            0               0             0        8                0      0            ",
+    "K10      2        0          0     0            2               0             0        0                0      0            ",
+    "K11      2        0          0     0            2               0             0        0                0      0            ",
+    "K12      0        0          0     0            0               0             0        0                0      6            ",
+    "K14      6        0          1     0            2               0             3        0                0      1            ",
+    "census   33       0          2     0            21              0             2        7                1      8            ",
+    "planted  27       0          0     0            5               0             17       5                0      0            ",
+    "all      60       0          2     0            26              0             19       12               1      8            ",
+    "",
+    "19 of 47 judged got through (40%)"
+  ],
+  "rows": [
+    {
+      "id": "B004",
+      "class": "K4",
+      "fix": "f8499ccd",
+      "browser": false,
+      "seen": "A model that takes 2k of context is asked for 16k.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/server/src/chat/attachments.test.ts > an earlier image too old for the window is never read: a missing one there changes nothing the model is sent (+20 more)"
+      },
+      "seconds": 72
+    },
+    {
+      "id": "B010",
+      "class": "K3",
+      "fix": "27ba50ed",
+      "browser": false,
+      "seen": "The running dot shows only on the open thread; a reply running in another chat has no mark.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/web/src/thread/session.test.ts > background turn endings TE-01: pending parked send stays unique and frees the automatic queue (completion before acknowledgment: false) (+25 more)"
+      },
+      "seconds": 42
+    },
+    {
+      "id": "B014",
+      "class": "K9",
+      "fix": "3f8e663e",
+      "browser": true,
+      "seen": "Back to chat in Settings sits 16 px lower than Search in the chat sidebar.",
+      "verdict": {
+        "kind": "not judged here"
+      },
+      "seconds": 96
+    },
+    {
+      "id": "B022",
+      "class": "K10",
+      "fix": "2fe22e13",
+      "browser": false,
+      "seen": "A model that writes its call as JSON text shows the raw {\"action\":\"image\",...} as its answer and nothing runs.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "packages/harness/src/text-calls.test.ts > a tool call written as the whole reply is run, not shown (owner screenshot 2026-11-11) native path: the screenshot's reply, streamed with no tool_calls, queues one image with its prompt and shows no JSON (+9 more)"
+      },
+      "seconds": 30
+    },
+    {
+      "id": "B024",
+      "class": "K1",
+      "fix": "37391441",
+      "browser": true,
+      "seen": "Settings, Models and Usage each size to their content, so the pop-up jumps size between them.",
+      "verdict": {
+        "kind": "not judged here",
+        "red": "caught at unit (whole): test/finder/known.test.ts > the board's cases one-size-popups has its words, an undo and screens that exist"
+      },
+      "seconds": 97
+    },
+    {
+      "id": "B025",
+      "class": "K9",
+      "fix": "cb61371c",
+      "browser": true,
+      "seen": "A hairline is drawn under the sidebar head in the desktop app.",
+      "verdict": {
+        "kind": "not judged here",
+        "red": "caught at unit (whole): test/finder/known.test.ts > the board's cases sidebar-head-line has its words, an undo and screens that exist"
+      },
+      "seconds": 73
+    },
+    {
+      "id": "B033",
+      "class": "K4",
+      "fix": "516861c1",
+      "browser": false,
+      "seen": "Models marks a model Too big because ComfyUI and whisper hold memory right now, though the card holds it.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/server/src/runtime/services.test.ts > a typed name before its download a name that is not installed gets its size and fit over the socket, and nothing is downloaded (+3 more)"
+      },
+      "seconds": 53
+    },
+    {
+      "id": "B035",
+      "class": "K5",
+      "fix": "30743a53",
+      "browser": false,
+      "seen": "Settings says Run commands is Ready on a machine where the sandbox cannot run a command.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "packages/harness/src/sandbox/sandbox.test.ts > sandbox probe turns the shell off with a reason, never a throw, when bwrap fails its own check (seen on a WSL runner) (+2 more)"
+      },
+      "seconds": 35
+    },
+    {
+      "id": "B036",
+      "class": "K5",
+      "fix": "cef84b46",
+      "browser": false,
+      "seen": "Run commands reads plain Ready on a machine with no sqlite3, and every Library database read fails.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/server/src/chat/shell.test.ts > ready with sqlite3 is plain ready; without it the status says what cannot be done"
+      },
+      "seconds": 6
+    },
+    {
+      "id": "B038",
+      "class": "K3",
+      "fix": "272b97df",
+      "browser": false,
+      "seen": "\"Thought for\" counts the seconds the model spent loading into memory.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/server/src/chat/times.test.ts > turnClock (chat row 32, decision 33) times a warm reply's thought from ready to its first answer word, and each round"
+      },
+      "seconds": 18
+    },
+    {
+      "id": "B039",
+      "class": "K9",
+      "fix": "824be7a9",
+      "browser": true,
+      "seen": "Live thinking text paints over Settings and takes its clicks.",
+      "verdict": {
+        "kind": "not judged here",
+        "red": "caught at unit (whole): test/finder/known.test.ts > the board's cases thought-through-settings has its words, an undo and screens that exist"
+      },
+      "seconds": 93
+    },
+    {
+      "id": "B041",
+      "class": "K3",
+      "fix": "e4c31f58",
+      "browser": false,
+      "seen": "After a reply fails, the sidebar dot keeps saying it is working.",
+      "verdict": {
+        "kind": "through"
+      },
+      "seconds": 87
+    },
+    {
+      "id": "B043",
+      "class": "K9",
+      "fix": "b9b43fec",
+      "browser": true,
+      "seen": "The model name field draws two focus rings.",
+      "verdict": {
+        "kind": "not judged here"
+      },
+      "seconds": 77
+    },
+    {
+      "id": "B044",
+      "class": "K4",
+      "fix": "b9b43fec",
+      "browser": false,
+      "seen": "A 17.4 GB model's download reads '0.2 of 1.1 GB': the first file's size shown as the whole.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/server/src/runtime/pull.test.ts > models.pull gives no total while the registry is still being asked, then the true one when done"
+      },
+      "seconds": 19
+    },
+    {
+      "id": "B045",
+      "class": "K4",
+      "fix": "041f040b",
+      "browser": false,
+      "seen": "Offline or with a private model, a download shows no total size at all.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/server/src/runtime/pull.test.ts > models.pull when the registry has no answer, the total is the running sum of the files Ollama has named (+2 more)"
+      },
+      "seconds": 18
+    },
+    {
+      "id": "B048",
+      "class": "K4",
+      "fix": "4663784a",
+      "browser": false,
+      "seen": "An idle chat model stays in GPU memory and the model you picked is refused: 'VRAM usable 0.00 GB'.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "lint",
+        "detail": "no-unused-vars",
+        "rules": [
+          "no-unused-vars"
+        ]
+      },
+      "seconds": 5
+    },
+    {
+      "id": "B053",
+      "class": "K3",
+      "fix": "9aa28494",
+      "browser": false,
+      "seen": "Enter with words typed and Send off does nothing: no reason, no memory panel.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/web/src/composer/composer-keys.test.ts > Enter with words typed and Send off opens the memory panel on a memory refusal, and otherwise shows Send's reason at Send (+1 more)"
+      },
+      "seconds": 12
+    },
+    {
+      "id": "B054",
+      "class": "K9",
+      "fix": "84253b30",
+      "browser": true,
+      "seen": "In the desktop window the pop-up's top right corner sits under the window's own buttons.",
+      "verdict": {
+        "kind": "not judged here"
+      },
+      "seconds": 88
+    },
+    {
+      "id": "B056",
+      "class": "K14",
+      "fix": "6bac7d49",
+      "browser": false,
+      "seen": "'Generate 5 images' is refused and the reply points at another service, though an image setup is ready.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "lint",
+        "detail": "no-unused-vars",
+        "rules": [
+          "no-unused-vars"
+        ]
+      },
+      "seconds": 5
+    },
+    {
+      "id": "B059",
+      "class": "K1",
+      "fix": "6bac7d49",
+      "browser": true,
+      "seen": "With Image on, the page is not marked ready for seconds after a reload, or never if ComfyUI stalls.",
+      "verdict": {
+        "kind": "not judged here"
+      },
+      "seconds": 91
+    },
+    {
+      "id": "B065",
+      "class": "K10",
+      "fix": "b174963d",
+      "browser": false,
+      "seen": "On a model with no tool calling, with Tools on, the reply appears only once it is whole.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "packages/harness/src/text-calls.test.ts > text mode: the answer is shown as it comes while it cannot be a call a fenced call after prose is never shown; a code answer's fence is, line by line (+5 more)"
+      },
+      "seconds": 26
+    },
+    {
+      "id": "B066",
+      "class": "K14",
+      "fix": "9a487002",
+      "browser": false,
+      "seen": "With Tools on and an empty Library the model is offered no tools, so it cannot run a single command.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/server/src/chat/tools.test.ts > tool chat transport an empty Library with Run commands ready offers the shell (+1 more)"
+      },
+      "seconds": 26
+    },
+    {
+      "id": "B068",
+      "class": "K11",
+      "fix": "6afccc3",
+      "browser": false,
+      "seen": "Typing in one chat before saved drafts load throws away every other chat's unsent draft.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/web/src/composer/draft-recovery.test.ts > TD-14: recovery preserves a cleared editor and never replaces its marker with another saved edit (+3 more)"
+      },
+      "seconds": 18
+    },
+    {
+      "id": "B070",
+      "class": "K4",
+      "fix": "d0781d2",
+      "browser": false,
+      "seen": "On a two-GPU machine only the first card's memory counts, so models that fit read Too big.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/server/src/fit/fit.test.ts > nvidia-smi parsing reads every card, a small display card listed first included, and counts them together (+3 more)"
+      },
+      "seconds": 52
+    },
+    {
+      "id": "B071",
+      "class": "K8",
+      "fix": "6a6fc3b",
+      "browser": false,
+      "seen": "A database query keeps running after the app that asked for it has died, now and then.",
+      "verdict": {
+        "kind": "noise",
+        "layer": "unit (whole)",
+        "detail": "packages/harness/src/tools.test.ts > Library tools a query child does not outlive a parent that dies mid-query (red once, green when run again with the mistake in)"
+      },
+      "seconds": 98
+    },
+    {
+      "id": "B076",
+      "class": "K6",
+      "fix": "4a411cc",
+      "browser": false,
+      "seen": "On Windows every store upgrade is refused at start: flushing the folder throws there.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/server/src/threads/copies.test.ts > copies before schema upgrades saves the copy on Windows, where a folder cannot be flushed and a file only through a handle that may write"
+      },
+      "seconds": 39
+    },
+    {
+      "id": "B080",
+      "class": "K8",
+      "fix": "b160c16",
+      "browser": false,
+      "seen": "After switching runtimes, a late /api/ps answer from the old one empties the list of loaded models.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/server/src/runtime/load.test.ts > runtime generation a GPU-poll reading of A that answers after the switch prunes nothing and reads as empty"
+      },
+      "seconds": 35
+    },
+    {
+      "id": "B087",
+      "class": "K3",
+      "fix": "39648ec2",
+      "browser": false,
+      "seen": "After Stop, a real failure that arrives later is shown as 'Stopped', so the error is hidden.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/web/src/thread/turn.test.ts > reduceTurn an error without a saved row keeps the turn with why it ended (+3 more)"
+      },
+      "seconds": 20
+    },
+    {
+      "id": "B095",
+      "class": "K2",
+      "fix": "a9bc11c2",
+      "browser": false,
+      "seen": "The Reset confirm still lists 'text size', a setting the app no longer has.",
+      "verdict": {
+        "kind": "through"
+      },
+      "seconds": 81
+    },
+    {
+      "id": "B096",
+      "class": "K8",
+      "fix": "8906c19e",
+      "browser": false,
+      "seen": "An update waits on a process that has already exited, because a failed read of its state counts as alive.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "packages/update/src/process-state.test.ts > process liveness distinguishes exited zombies from running, sleeping and stopped processes"
+      },
+      "seconds": 47
+    },
+    {
+      "id": "B097",
+      "class": "K8",
+      "fix": "584af56a",
+      "browser": false,
+      "seen": "Ctrl+C during an update can leave the command's process group running (9 of 400 tries).",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "packages/update/src/run-signal.test.ts > listens for Ctrl+C before a command starts, and stops listening when it ends (+1 more)"
+      },
+      "seconds": 40
+    },
+    {
+      "id": "B100",
+      "class": "K6",
+      "fix": "1d46bd5f",
+      "browser": false,
+      "seen": "On a fresh install the first picture always fails: the app's image engine exits at start.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/server/src/image/own.test.ts > createOwnComfy is not installed until an engine tree is whole, then starts on its own port and stops (+11 more)"
+      },
+      "seconds": 133
+    },
+    {
+      "id": "B103",
+      "class": "K6",
+      "fix": "90a301f9",
+      "browser": false,
+      "seen": "A downloaded Linux update cannot be run: the AppImage is saved without execute permission.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "packages/update/src/installed/download.test.ts > downloading a version writes an AppImage executable, so a person who puts it in place can start it"
+      },
+      "seconds": 16
+    },
+    {
+      "id": "m02",
+      "class": "K3",
+      "fix": "planted",
+      "browser": false,
+      "seen": "After a failed check, pressing Check again keeps the old error up until the new answer arrives.",
+      "verdict": {
+        "kind": "through"
+      },
+      "seconds": 75
+    },
+    {
+      "id": "m06",
+      "class": "K11",
+      "fix": "planted",
+      "browser": false,
+      "seen": "Deleting a thread while its picture is finishing can leave that picture's file behind.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/server/src/app/app-state.test.ts > a chat delete waits for the start-up sweep of pasted images before the chat leaves the store"
+      },
+      "seconds": 17
+    },
+    {
+      "id": "m12",
+      "class": "K9",
+      "fix": "planted",
+      "browser": true,
+      "seen": "The start-failure banner's Retry button loses its row styling.",
+      "verdict": {
+        "kind": "not judged here",
+        "red": "caught at lint: gates/class-in-css"
+      },
+      "seconds": 4
+    },
+    {
+      "id": "m15",
+      "class": "K2",
+      "fix": "planted",
+      "browser": false,
+      "seen": "A refused 500-byte file reads '0 KB'.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/web/src/lib/words/window-words.test.ts > the window's words for a file's size an empty file (+2 more)"
+      },
+      "seconds": 17
+    },
+    {
+      "id": "m24",
+      "class": "K2",
+      "fix": "planted",
+      "browser": true,
+      "seen": "The reply's Retry button shows a busy spinner icon.",
+      "verdict": {
+        "kind": "not judged here"
+      },
+      "seconds": 71
+    },
+    {
+      "id": "m32",
+      "class": "K2",
+      "fix": "planted",
+      "browser": false,
+      "seen": "A model's menu says Copied before anything was copied.",
+      "verdict": {
+        "kind": "through"
+      },
+      "seconds": 72
+    },
+    {
+      "id": "m38",
+      "class": "K8",
+      "fix": "planted",
+      "browser": false,
+      "seen": "A server that crashes before it is ready is reported 20 s later as 'no ready line' instead of its crash.",
+      "verdict": {
+        "kind": "through"
+      },
+      "seconds": 77
+    },
+    {
+      "id": "m46",
+      "class": "K9",
+      "fix": "planted",
+      "browser": true,
+      "seen": "A refused Restart on the failure page's restart view shows no reason.",
+      "verdict": {
+        "kind": "not judged here"
+      },
+      "seconds": 59
+    },
+    {
+      "id": "m48",
+      "class": "K2",
+      "fix": "planted",
+      "browser": false,
+      "seen": "'Steam and 1 other programs are using 3 GB'.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/web/src/models/download-rows.test.ts > the line about other programs names one, two, the first and how many more, or just other programs"
+      },
+      "seconds": 16
+    },
+    {
+      "id": "m49",
+      "class": "K6",
+      "fix": "planted",
+      "browser": false,
+      "seen": "A relative XDG_DATA_HOME writes the .desktop entry under the working folder instead of refusing.",
+      "verdict": {
+        "kind": "through"
+      },
+      "seconds": 66
+    },
+    {
+      "id": "n01",
+      "class": "K14",
+      "fix": "planted",
+      "browser": false,
+      "seen": "Dragging text or a link out of the window runs the drop overlay's leave path.",
+      "verdict": {
+        "kind": "through"
+      },
+      "seconds": 70
+    },
+    {
+      "id": "n07",
+      "class": "K2",
+      "fix": "planted",
+      "browser": false,
+      "seen": "The error that quotes a malformed Ollama line is missing its first character.",
+      "verdict": {
+        "kind": "through"
+      },
+      "seconds": 85
+    },
+    {
+      "id": "n08",
+      "class": "K9",
+      "fix": "planted",
+      "browser": true,
+      "seen": "Settings' reply controls lose their layout.",
+      "verdict": {
+        "kind": "not judged here",
+        "red": "caught at lint: gates/class-in-css"
+      },
+      "seconds": 4
+    },
+    {
+      "id": "n10",
+      "class": "K14",
+      "fix": "planted",
+      "browser": false,
+      "seen": "In Pictures, the right arrow moves to the previous picture.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/web/src/pictures/Pictures-screen.test.ts > keys the arrows pick the next or previous picture, stop at the ends, and move focus to its tile unless it is shown large"
+      },
+      "seconds": 15
+    },
+    {
+      "id": "n23",
+      "class": "K3",
+      "fix": "planted",
+      "browser": false,
+      "seen": "After Settings shows, a later navigation still sees Settings as pending.",
+      "verdict": {
+        "kind": "through"
+      },
+      "seconds": 72
+    },
+    {
+      "id": "n27",
+      "class": "K6",
+      "fix": "planted",
+      "browser": false,
+      "seen": "The Linux image-engine install fails pip's hash check on the platform whose kornia-rs wheel had that hash.",
+      "verdict": {
+        "kind": "through"
+      },
+      "seconds": 64
+    },
+    {
+      "id": "n32",
+      "class": "K2",
+      "fix": "planted",
+      "browser": false,
+      "seen": "update.log reads 'updated (2.1.0 to 2.1.0)'.",
+      "verdict": {
+        "kind": "through"
+      },
+      "seconds": 66
+    },
+    {
+      "id": "n36",
+      "class": "K2",
+      "fix": "planted",
+      "browser": false,
+      "seen": "'Gates Local refused it (xpermission denied)'.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/web/src/lib/session/session-actions.test.ts > a long refusal is cut to 120 characters in the sentence, and one of 120 stays whole"
+      },
+      "seconds": 17
+    },
+    {
+      "id": "n38",
+      "class": "K14",
+      "fix": "planted",
+      "browser": false,
+      "seen": "After Update, the old app stays open and the updater waits for it to close.",
+      "verdict": {
+        "kind": "through"
+      },
+      "seconds": 59
+    },
+    {
+      "id": "n41",
+      "class": "K5",
+      "fix": "planted",
+      "browser": false,
+      "seen": "A source whose last refresh never finished shows as ready, with no error state.",
+      "verdict": {
+        "kind": "through"
+      },
+      "seconds": 69
+    },
+    {
+      "id": "t03",
+      "class": "K4",
+      "fix": "planted",
+      "browser": false,
+      "seen": "A library source whose git prints without end grows the server's memory instead of failing with 'too large'.",
+      "verdict": {
+        "kind": "through"
+      },
+      "seconds": 75
+    },
+    {
+      "id": "t08",
+      "class": "K6",
+      "fix": "planted",
+      "browser": true,
+      "seen": "The desktop window's page loses normal origin rules: relative links and storage misbehave.",
+      "verdict": {
+        "kind": "not judged here"
+      },
+      "seconds": 60
+    },
+    {
+      "id": "t13",
+      "class": "K8",
+      "fix": "planted",
+      "browser": false,
+      "seen": "Stop pressed while files or pictures are saved shows an attach error instead of 'stopped'.",
+      "verdict": {
+        "kind": "through"
+      },
+      "seconds": 85
+    },
+    {
+      "id": "t39",
+      "class": "K2",
+      "fix": "planted",
+      "browser": false,
+      "seen": "While dictation is transcribed the mic button shows the wrong words.",
+      "verdict": {
+        "kind": "through"
+      },
+      "seconds": 71
+    },
+    {
+      "id": "t40",
+      "class": "K8",
+      "fix": "planted",
+      "browser": false,
+      "seen": "A measurement can start during shutdown and be cut off.",
+      "verdict": {
+        "kind": "through"
+      },
+      "seconds": 82
+    },
+    {
+      "id": "t42",
+      "class": "K14",
+      "fix": "planted",
+      "browser": false,
+      "seen": "After Copy Ollama name the button never says Copied.",
+      "verdict": {
+        "kind": "through"
+      },
+      "seconds": 76
+    },
+    {
+      "id": "t47",
+      "class": "K2",
+      "fix": "planted",
+      "browser": false,
+      "seen": "A slow model's measure row loses its slow mark.",
+      "verdict": {
+        "kind": "through"
+      },
+      "seconds": 79
+    }
+  ]
+}

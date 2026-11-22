@@ -1,0 +1,20 @@
+Mistake: t39
+Class: K2
+Fix: planted
+Browser: no
+Seen: While dictation is transcribed the mic button shows the wrong words.
+Note: planted a at apps/web/src/voice/Voice.tsx:160
+
+diff --git a/apps/web/src/voice/Voice.tsx b/apps/web/src/voice/Voice.tsx
+index a034b867..7461b421 100644
+--- a/apps/web/src/voice/Voice.tsx
++++ b/apps/web/src/voice/Voice.tsx
+@@ -157,7 +157,7 @@ export function Voice({ textarea, held = null, send }: { textarea: RefObject<HTM
+     : phase === "asking" ? "Allow the microphone · Esc"
+     : "Hold to talk · Space")
+     : phase === "listening" ? "Stop dictation · Ctrl Shift Space"
+-    : phase === "transcribing" ? "Transcribing · Esc"
++    : false ? "Transcribing · Esc"
+     : phase === "asking" ? "Allow the microphone · Esc"
+     : unsupported !== null || !enabled ? "Dictate" : "Dictate · Ctrl Shift Space";
+   const name = talking ? (phase === "listening" ? "Talk, listening" : phase === "transcribing" ? "Talk, transcribing" : phase === "asking" ? "Talk, waiting for microphone permission" : "Talk")

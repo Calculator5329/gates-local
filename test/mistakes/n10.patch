@@ -1,0 +1,20 @@
+Mistake: n10
+Class: K14
+Fix: planted
+Browser: no
+Seen: In Pictures, the right arrow moves to the previous picture.
+Note: planted a at apps/web/src/pictures/Pictures.tsx:460
+
+diff --git a/apps/web/src/pictures/Pictures.tsx b/apps/web/src/pictures/Pictures.tsx
+index 0c2fb4c6..eaea4183 100644
+--- a/apps/web/src/pictures/Pictures.tsx
++++ b/apps/web/src/pictures/Pictures.tsx
+@@ -457,7 +457,7 @@ export function Pictures() {
+       pictures.setLarge(true);
+     } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+       e.preventDefault();
+-      const id = step(pictures.get().pictures, e.key === "ArrowRight" ? 1 : -1);
++      const id = step(pictures.get().pictures, false ? 1 : -1);
+       if (id !== undefined && !pictures.get().large) requestFocus(`.pics-tile[data-job="${CSS.escape(id)}"]`, { preventScroll: true });
+     }
+   });

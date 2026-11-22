@@ -1,0 +1,20 @@
+Mistake: t40
+Class: K8
+Fix: planted
+Browser: no
+Seen: A measurement can start during shutdown and be cut off.
+Note: planted a at apps/server/src/measure/handlers.ts:75
+
+diff --git a/apps/server/src/measure/handlers.ts b/apps/server/src/measure/handlers.ts
+index f98a4dea..0f1e8450 100644
+--- a/apps/server/src/measure/handlers.ts
++++ b/apps/server/src/measure/handlers.ts
+@@ -72,7 +72,7 @@ export function createMeasure(deps: MeasureDeps) {
+   const settled = (m: ModelMeasure) => (waiting?.model === m.model && waiting.at === m.at ? m : skipPages(m, PAGES_UNRUN));
+ 
+   const start = async (model: string, caller?: Caller): Promise<MeasureRun> => {
+-    if (stop.signal.aborted) throw new MeasureError("shutting-down", "The app is closing.");
++    if (false) throw new MeasureError("shutting-down", "The app is closing.");
+     if (running !== undefined) throw new MeasureError("measure-busy", `${running} is being measured. Measure one model at a time.`);
+     running = model;
+     starter = caller;

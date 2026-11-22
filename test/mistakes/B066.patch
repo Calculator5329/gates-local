@@ -1,0 +1,20 @@
+Mistake: B066
+Class: K14
+Fix: 9a487002
+Browser: no
+Seen: With Tools on and an empty Library the model is offered no tools, so it cannot run a single command.
+Note: a turn uses tools only when the Library has a source, whatever the shell says
+
+diff --git a/apps/server/src/app/run-turn.ts b/apps/server/src/app/run-turn.ts
+index b036ab1d..a337d29f 100644
+--- a/apps/server/src/app/run-turn.ts
++++ b/apps/server/src/app/run-turn.ts
+@@ -140,7 +140,7 @@ export function createTurnRunner({ deps, store, log, push, said, pushReply, draf
+       const image = imageChoice !== undefined;
+       const shell = wantsTools && deps.shellStatus && process.platform !== "win32" ? await untilHalted(deps.shellStatus()) : undefined;
+       if (shell === HALTED || turn.halted) { finish(haltedEnd(turn.halted!)); return; }
+-      const useTools = (wantsTools && (sources.length > 0 || shell?.state === "ready")) || image;
++      const useTools = (wantsTools && sources.length > 0) || image;
+       // external: Ollama refuses think: true for a model that cannot think
+       const think = await untilHalted(thinkFlag(baseUrl, model, options.think ?? deps.think, controller.signal));
+       if (think === HALTED || turn.halted) {

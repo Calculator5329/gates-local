@@ -1,0 +1,19 @@
+Mistake: n23
+Class: K3
+Fix: planted
+Browser: no
+Seen: After Settings shows, a later navigation still sees Settings as pending.
+Note: planted c at apps/web/src/app/navigation.ts:108
+
+diff --git a/apps/web/src/app/navigation.ts b/apps/web/src/app/navigation.ts
+index 74b20c14..d45bb7dc 100644
+--- a/apps/web/src/app/navigation.ts
++++ b/apps/web/src/app/navigation.ts
+@@ -105,7 +105,6 @@ export function createNavigation({ editEnded, catchUp, chooseModel, newChatModel
+     dropPendingPanel();
+     const show = () => {
+       if (nav !== navGen) return;
+-      pendingSettings = null;
+       setState((s) => ({ view: "settings", section: section ?? (s.section === "models" ? "general" : s.section), addPage, ownerConfirm, panel: null }));
+       enterScreen();
+       sectionShown(getState().section);

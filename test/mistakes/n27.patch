@@ -1,0 +1,20 @@
+Mistake: n27
+Class: K6
+Fix: planted
+Browser: no
+Seen: The Linux image-engine install fails pip's hash check on the platform whose kornia-rs wheel had that hash.
+Note: planted d at apps/server/src/image/linux-lock.ts:783
+
+diff --git a/apps/server/src/image/linux-lock.ts b/apps/server/src/image/linux-lock.ts
+index 2cbf6e6f..a4847b29 100644
+--- a/apps/server/src/image/linux-lock.ts
++++ b/apps/server/src/image/linux-lock.ts
+@@ -780,7 +780,7 @@ kornia-rs==0.2.0 \
+     --hash=sha256:5d93fea9f284fe1349edd99c3f36804200e8d039296330b205cdf1c7670b1984 \
+     --hash=sha256:617c04eebe311ddd9ffa5c4fc17ba3acf8a9a1228c38b2346e54fd7753c9f358 \
+     --hash=sha256:712a76c0e163c86f646188c4aa3ded6079894a4a570ee8847627a500e1353a7e \
+-    --hash=sha256:7ea1a91d30abf6b057b75be8816f635f82eec60c23e1e766ba044f242f5a91de \
++    --hash=sha256:7ea1a91d30abf6b057b75be8816f635f82eec60c23e1e766ba044f242f5a91dex \
+     --hash=sha256:82833277685b31e9ae1a2e9ecd00a28646463a05c0ea8b72e3ddb329699f8d16 \
+     --hash=sha256:98d0f6a17d114304755dd922d0fbf5e917db59a2602dbc1aad63c1ae051ce7b1 \
+     --hash=sha256:9b10498e5661f222c334f659f8db4606ec5d6eb0343710ebda67b9e49914566a \

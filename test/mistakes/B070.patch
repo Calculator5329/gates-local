@@ -1,0 +1,19 @@
+Mistake: B070
+Class: K4
+Fix: d0781d2
+Browser: no
+Seen: On a two-GPU machine only the first card's memory counts, so models that fit read Too big.
+Note: the nvidia-smi totals stop after the first card's line
+
+diff --git a/apps/server/src/fit/gpu.ts b/apps/server/src/fit/gpu.ts
+index ed71cda7..c856e8e2 100644
+--- a/apps/server/src/fit/gpu.ts
++++ b/apps/server/src/fit/gpu.ts
+@@ -79,6 +79,7 @@ export function parseGpuTotals(text: string): GpuTotals {
+     const [total, used, free] = line.split(",").map((f) => parseMib(f));
+     if (total === undefined || used === undefined || free === undefined) continue;
+     cards.push({ totalBytes: total, usedBytes: used, freeBytes: free });
++    break;
+   }
+   if (cards.length === 0) {
+     throw new FitError("gpu-unreadable", `nvidia-smi printed no GPU memory line: ${JSON.stringify(text.slice(0, 200))}`);

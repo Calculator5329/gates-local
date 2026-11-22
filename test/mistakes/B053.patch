@@ -1,0 +1,43 @@
+Mistake: B053
+Class: K3
+Fix: 9aa28494
+Browser: no
+Seen: Enter with words typed and Send off does nothing: no reason, no memory panel.
+Note: enterSend is gone; Enter calls submit, which returns quietly when Send is off
+
+diff --git a/apps/web/src/composer/Composer.tsx b/apps/web/src/composer/Composer.tsx
+index 620ad4c6..1b8e8cb5 100644
+--- a/apps/web/src/composer/Composer.tsx
++++ b/apps/web/src/composer/Composer.tsx
+@@ -53,7 +53,7 @@ import {
+ import { NA, type NoticeActKind, type State, type WaitingReply, behindSetup, getState, runningTurn, setState, streamingHere, useStore, waitingReplies } from "../lib/store/store.ts";
+ import { drawsPicture } from "../thread/turn.ts";
+ import { editDraft, getDraft, useDraft } from "../lib/store/drafts.ts";
+-import { PHONE, SheetHead, Skel, closePop, closeTip, esc, isTouch, openTip, place, togglePop, useMedia } from "../lib/ui/ui.tsx";
++import { PHONE, SheetHead, Skel, closePop, closeTip, esc, isTouch, place, togglePop, useMedia } from "../lib/ui/ui.tsx";
+ 
+ // external: a remote desktop's browser can report (hover: none) with a keyboard present
+ const PHONE_TOUCH = `(pointer: coarse) and ${PHONE}`;
+@@ -231,13 +231,6 @@ export function Composer() {
+     if (sendDisabled) return;
+     void send(getDraft().text);
+   };
+-  const enterSend = () => {
+-    const answer = enterAnswer({ sendDisabled, memRefused, text, showStop });
+-    if (answer === "send") submit();
+-    else if (answer === "fit") openFit();
+-    else if (answer === "tip") openTip(primary.current);
+-    else if (answer === "note") setState({ notice: sendTip });
+-  };
+   const latestSubmit = useRef(submit);
+   // oxlint-disable-next-line gates/effect-needs-reason -- the committed draft's Send, kept in step for Dictate, which sends after the draft is drawn; a write during render could hold a render React drops
+   useLayoutEffect(() => { latestSubmit.current = submit; });
+@@ -290,7 +283,7 @@ export function Composer() {
+             void attachFiles(chosen);
+           }}
+         />
+-        <DraftTextarea key={voiceThread} textarea={ta} placeholder={placeholder} submit={enterSend} />
++        <DraftTextarea key={voiceThread} textarea={ta} placeholder={placeholder} submit={submit} />
+         <div className="cf">
+           <div className="cf-l">
+             <button

@@ -1,0 +1,20 @@
+Mistake: t08
+Class: K6
+Fix: planted
+Browser: yes
+Seen: The desktop window's page loses normal origin rules: relative links and storage misbehave.
+Note: planted d at apps/desktop/src/main.ts:52
+
+diff --git a/apps/desktop/src/main.ts b/apps/desktop/src/main.ts
+index 9f1dc326..25349e75 100644
+--- a/apps/desktop/src/main.ts
++++ b/apps/desktop/src/main.ts
+@@ -49,7 +49,7 @@ app.setName("gates-local");
+ app.setPath("userData", desktopUserDataDir({ platform: process.platform, env: process.env, appData: app.getPath("appData"), packaged: app.isPackaged }));
+ // external: Electron takes privileged schemes only before ready; standard+secure gives an origin.
+ protocol.registerSchemesAsPrivileged([
+-  { scheme: CLIENT_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
++  { scheme: CLIENT_SCHEME, privileges: { standard: false, secure: true, supportFetchAPI: true } },
+ ]);
+ 
+ function isFolder(p: string): boolean {

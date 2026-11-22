@@ -1,0 +1,19 @@
+Mistake: B065
+Class: K10
+Fix: b174963d
+Browser: no
+Seen: On a model with no tool calling, with Tools on, the reply appears only once it is whole.
+Note: text-mode replies no longer pass their shown words on as they stream
+
+diff --git a/packages/harness/src/loop.ts b/packages/harness/src/loop.ts
+index db793c83..c5fed3f7 100644
+--- a/packages/harness/src/loop.ts
++++ b/packages/harness/src/loop.ts
+@@ -218,7 +218,6 @@ async function* turn(input: LoopInput, toolPhase: AbortSignal): AsyncGenerator<L
+             const piece = view.push(event.text);
+             passedByView += piece.shown;
+             if (holding) { if (!hold?.push(piece.visible)) yield* showHeldText(); }
+-            else if (piece.shown) { viewShown += piece.shown; yield* show(piece.shown); }
+           } else if (!holding) yield* show(event.text);
+           else if (!hold?.push(event.text)) yield* showHeldText();
+         }

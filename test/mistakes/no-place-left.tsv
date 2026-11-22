@@ -1,0 +1,9 @@
+id	class	fix	why no patch
+B027	K2	272b97df	The reply's context notice was taken out of the turn and the wire; no code path carries a notice under a reply any more.
+B030	K14	00071253	The text size setting was removed from Settings; there is no setting left to leave unwired.
+B109	K12	92fbcf02	The mistake lives in a browser test fixture, not the product; the runner judges product patches only.
+B110	K12	9d36fdca	Red browser tests sitting on main behind green landings is a process failure; no source line carries it.
+B111	K12	c9d778f4	The finding is a measured gap in the checks themselves; this folder is the place that measures it.
+B112	K12	58a265a8	Sentence-literal browser specs going stale is a test-writing habit; no product line carries it.
+B114	K12	a20fc872	Sandbox tests skipped on machines without bsdtar, sqlite3 or bubblewrap is test-machine setup, not product code.
+B115	K12	d6ae9733	A script reporting its tail's exit instead of lint's is a shell-script mistake outside the product.

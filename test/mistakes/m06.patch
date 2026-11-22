@@ -1,0 +1,19 @@
+Mistake: m06
+Class: K11
+Fix: planted
+Browser: no
+Seen: Deleting a thread while its picture is finishing can leave that picture's file behind.
+Note: planted c at apps/server/src/app/handlers.ts:146
+
+diff --git a/apps/server/src/app/handlers.ts b/apps/server/src/app/handlers.ts
+index 77210ab2..7671fe1f 100644
+--- a/apps/server/src/app/handlers.ts
++++ b/apps/server/src/app/handlers.ts
+@@ -143,7 +143,6 @@ export function createHandlers({
+       try {
+         await cancelThreadTurn(threadId, true);
+         await cancelThreadImages(threadId);
+-        await imageReady;
+         const messages = store.getThread(threadId).messages;
+         const files = messages.flatMap(message => message.images ?? []);
+         const attached = messages.flatMap(message => message.files ?? []).map(file => file.path);

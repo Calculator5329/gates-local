@@ -1,0 +1,20 @@
+Mistake: m32
+Class: K2
+Fix: planted
+Browser: no
+Seen: A model's menu says Copied before anything was copied.
+Note: planted e at apps/web/src/models/Models.tsx:247
+
+diff --git a/apps/web/src/models/Models.tsx b/apps/web/src/models/Models.tsx
+index b277f9ef..ae271016 100644
+--- a/apps/web/src/models/Models.tsx
++++ b/apps/web/src/models/Models.tsx
+@@ -244,7 +244,7 @@ function ModelRowView({ r, def, saved, onRemove }: { r: InstalledRow; def: strin
+ 
+ function RowMenu({ r, saved, onRemove }: { r: InstalledRow; saved: string | undefined; onRemove: (back: HTMLElement | null) => void }) {
+   const [open, setOpen] = useState(false);
+-  const [copied, setCopied] = useState<"yes" | "no" | null>(null);
++  const [copied, setCopied] = useState<"yes" | "no" | null>("yes");
+   const [err, run] = useAct();
+   const box = useRef<HTMLDivElement>(null);
+   const btn = useRef<HTMLButtonElement>(null);

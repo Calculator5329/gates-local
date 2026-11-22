@@ -1,0 +1,20 @@
+Mistake: B010
+Class: K3
+Fix: 27ba50ed
+Browser: no
+Seen: The running dot shows only on the open thread; a reply running in another chat has no mark.
+Note: only the open thread's turn counts as running
+
+diff --git a/apps/web/src/lib/store/store.ts b/apps/web/src/lib/store/store.ts
+index 3adae57d..b6db99d3 100644
+--- a/apps/web/src/lib/store/store.ts
++++ b/apps/web/src/lib/store/store.ts
+@@ -355,7 +355,7 @@ export function streamingHere(s: State): boolean {
+ let running: ReadonlySet<string> = new Set();
+ 
+ export function runningThreads(s: State): ReadonlySet<string> {
+-  const now = Object.values(s.turns).filter((t) => t.end === undefined).map((t) => t.threadId);
++  const now = Object.values(s.turns).filter((t) => t.end === undefined && t.threadId === s.threadId).map((t) => t.threadId);
+   if (now.length !== running.size || now.some((id) => !running.has(id))) running = new Set(now);
+   return running;
+ }

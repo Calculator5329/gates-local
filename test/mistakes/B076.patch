@@ -1,0 +1,20 @@
+Mistake: B076
+Class: K6
+Fix: 4a411cc
+Browser: no
+Seen: On Windows every store upgrade is refused at start: flushing the folder throws there.
+Note: the Windows skip before the folder flush is removed; tests run on Linux
+
+diff --git a/apps/server/src/threads/copies.ts b/apps/server/src/threads/copies.ts
+index 45aede37..b76f5aa1 100644
+--- a/apps/server/src/threads/copies.ts
++++ b/apps/server/src/threads/copies.ts
+@@ -6,8 +6,6 @@ import { DatabaseSync } from "node:sqlite";
+ import { StoreCopyError } from "./errors.ts";
+ 
+ function syncFolder(folder: string): void {
+-  // external: Windows cannot flush a folder handle; the rename there is still atomic
+-  if (process.platform === "win32") return;
+   const fd = fs.openSync(folder, "r");
+   try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+ }

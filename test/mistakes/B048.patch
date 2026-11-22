@@ -1,0 +1,19 @@
+Mistake: B048
+Class: K4
+Fix: 4663784a
+Browser: no
+Seen: An idle chat model stays in GPU memory and the model you picked is refused: 'VRAM usable 0.00 GB'.
+Note: the idle models are counted as asked to leave but never sent the unload
+
+diff --git a/apps/server/src/gpu/memory.ts b/apps/server/src/gpu/memory.ts
+index b98fa32c..508615df 100644
+--- a/apps/server/src/gpu/memory.ts
++++ b/apps/server/src/gpu/memory.ts
+@@ -228,7 +228,6 @@ export function createMemoryOwner(deps: MemoryOwnerDeps): MemoryOwner {
+     const before = oneChat(want) ? await freeNow(signal) : undefined;
+     const askedBytes = listed.filter((m) => asked.includes(m.name)).reduce((sum, m) => sum + m.sizeVramBytes, 0);
+     const target = before === undefined ? {} : { target: before + askedBytes };
+-    for (const model of asked) await unload(baseUrl, model, signal);
+     // external: Ollama answers an unload before its runner has gone, so /api/ps is read until it goes.
+     const deadline = now() + waitMs;
+     let still = new Set(asked.map(canonicalTag));

@@ -1,0 +1,20 @@
+Mistake: B068
+Class: K11
+Fix: 6afccc3
+Browser: no
+Seen: Typing in one chat before saved drafts load throws away every other chat's unsent draft.
+Note: restoring saved drafts is all-or-nothing again: one draft in memory skips the rest
+
+diff --git a/apps/web/src/lib/store/drafts.ts b/apps/web/src/lib/store/drafts.ts
+index 5397e971..a3b8fb59 100644
+--- a/apps/web/src/lib/store/drafts.ts
++++ b/apps/web/src/lib/store/drafts.ts
+@@ -81,7 +81,7 @@ export function restoreDrafts(drafts: readonly { key: DraftKey; draft: DraftWord
+   const memory = new Map([...slots].filter(([, draft]) => holds(draft) || draft.beforeEdit !== undefined));
+   const restored = new Set<DraftKey>();
+   slots.clear();
+-  for (const { key, draft } of drafts) if (!memory.has(key)) {
++  if (memory.size === 0) for (const { key, draft } of drafts) {
+     slots.set(key, { ...draft, version: ++version });
+     restored.add(key);
+   }

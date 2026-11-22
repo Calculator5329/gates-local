@@ -1,0 +1,20 @@
+Mistake: B041
+Class: K3
+Fix: e4c31f58
+Browser: no
+Seen: After a reply fails, the sidebar dot keeps saying it is working.
+Note: a turn that ended in an error still counts as running
+
+diff --git a/apps/web/src/lib/store/store.ts b/apps/web/src/lib/store/store.ts
+index 3adae57d..343dcaac 100644
+--- a/apps/web/src/lib/store/store.ts
++++ b/apps/web/src/lib/store/store.ts
+@@ -355,7 +355,7 @@ export function streamingHere(s: State): boolean {
+ let running: ReadonlySet<string> = new Set();
+ 
+ export function runningThreads(s: State): ReadonlySet<string> {
+-  const now = Object.values(s.turns).filter((t) => t.end === undefined).map((t) => t.threadId);
++  const now = Object.values(s.turns).filter((t) => t.end === undefined || t.end.kind === "error").map((t) => t.threadId);
+   if (now.length !== running.size || now.some((id) => !running.has(id))) running = new Set(now);
+   return running;
+ }

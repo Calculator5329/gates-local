@@ -1,0 +1,20 @@
+Mistake: B087
+Class: K3
+Fix: 39648ec2
+Browser: no
+Seen: After Stop, a real failure that arrives later is shown as 'Stopped', so the error is hidden.
+Note: the client's own Stop decides the end instead of the server's reason
+
+diff --git a/apps/web/src/thread/turn.ts b/apps/web/src/thread/turn.ts
+index 61abc2de..cf0418c7 100644
+--- a/apps/web/src/thread/turn.ts
++++ b/apps/web/src/thread/turn.ts
+@@ -59,7 +59,7 @@ export function reduceTurn(turn: LiveTurn, event: TurnEvent, now: number): LiveT
+       const reply: TurnClock | undefined = turn.reply === undefined ? undefined
+         : { ...turn.reply, stage: drawsPicture(turn) ? "drawing" : "ended", workMs: event.question?.times?.workMs ?? turn.reply.workMs, ...(event.ended === undefined ? {} : { ended: event.ended }) };
+       const ended = { ...turn, ...(reply === undefined ? {} : { reply, replyAt: now }) };
+-      if (endReason(event) !== "stopped") return { ...ended, end: { kind: "error", code: event.code, message: event.message } };
++      if (turn.end?.kind !== "stopped" && endReason(event) !== "stopped") return { ...ended, end: { kind: "error", code: event.code, message: event.message } };
+       return { ...ended, end: turn.end?.kind === "stopped" ? turn.end : { kind: "stopped", secs: stoppedSecs(turn.reply, event.ended?.at) } };
+     }
+   }

@@ -1,0 +1,27 @@
+Mistake: B036
+Class: K5
+Fix: cef84b46
+Browser: no
+Seen: Run commands reads plain Ready on a machine with no sqlite3, and every Library database read fails.
+Note: the probe's sqlite answer no longer reaches the status word
+
+diff --git a/apps/server/src/chat/shell.ts b/apps/server/src/chat/shell.ts
+index a1ca5433..b6ab94ba 100644
+--- a/apps/server/src/chat/shell.ts
++++ b/apps/server/src/chat/shell.ts
+@@ -1,14 +1,13 @@
+ import type { ShellStatus } from "@gates-local/contracts";
+ import type { SandboxProbe } from "@gates-local/harness/sandbox";
+ 
+-const NO_SQLITE = "Databases in your Library can't be read: this machine has no sqlite3 (/usr/bin/sqlite3).";
+ 
+ export function createShellStatus(probe: () => Promise<SandboxProbe>, log: (line: string) => void): () => Promise<ShellStatus> {
+   let logged: string | undefined;
+   return async () => {
+     const result = await probe();
+     const status: ShellStatus = !result.available ? { state: "off", word: result.word, reason: result.reason }
+-      : result.sqlite ? { state: "ready" } : { state: "ready", word: "Ready, without sqlite3", reason: NO_SQLITE };
++      : { state: "ready" };
+     const line = result.available ? `shell sandbox: ready${result.sqlite ? "" : ", no /usr/bin/sqlite3 (database reads will fail)"}` : `shell sandbox: off, ${result.reason}${result.detail ? ` (${result.detail})` : ""}`;
+     if (line !== logged) { logged = line; log(line); }
+     return status;

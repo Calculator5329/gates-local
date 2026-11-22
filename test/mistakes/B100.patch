@@ -1,0 +1,20 @@
+Mistake: B100
+Class: K6
+Fix: 1d46bd5f
+Browser: no
+Seen: On a fresh install the first picture always fails: the app's image engine exits at start.
+Note: the engine's custom_nodes folder is no longer made
+
+diff --git a/apps/server/src/image/own.ts b/apps/server/src/image/own.ts
+index 1774ac99..034793fb 100644
+--- a/apps/server/src/image/own.ts
++++ b/apps/server/src/image/own.ts
+@@ -214,7 +214,7 @@ export function createOwnComfy(opts: OwnComfyOptions): OwnComfy {
+       const files = engineFiles(dir, layout);
+       endLeftover();
+       // external: ComfyUI 0.44 exits at start when <base>/custom_nodes is missing
+-      mkdirSync(path.join(engineDataDir(opts.appDataDir), "custom_nodes"), { recursive: true });
++      mkdirSync(engineDataDir(opts.appDataDir), { recursive: true });
+       mkdirSync(runtimeDir(opts.appDataDir), { recursive: true });
+       const picked = opts.extraModels?.();
+       const extra = path.join(runtimeDir(opts.appDataDir), "comfyui-extra-models.yaml");

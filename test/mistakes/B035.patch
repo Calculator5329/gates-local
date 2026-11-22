@@ -1,0 +1,20 @@
+Mistake: B035
+Class: K5
+Fix: 30743a53
+Browser: no
+Seen: Settings says Run commands is Ready on a machine where the sandbox cannot run a command.
+Note: the probe counts a sandboxed command that started but exited non-zero as ready
+
+diff --git a/packages/harness/src/sandbox/index.ts b/packages/harness/src/sandbox/index.ts
+index bfd49d59..8f0e12cb 100644
+--- a/packages/harness/src/sandbox/index.ts
++++ b/packages/harness/src/sandbox/index.ts
+@@ -175,7 +175,7 @@ export async function probeSandboxWith(host: SandboxHost): Promise<SandboxProbe>
+   const expected = `${SCOPE_LIMITS.memoryMaxBytes}\n0\n${SCOPE_LIMITS.tasksMax}`;
+   if (caps.error || caps.code !== 0 || caps.output.trim() !== expected) return scopeOff((caps.error?.message ?? caps.output.trim()) || `exit ${caps.code}`);
+   const result = await host.run(systemdRun(), [...cappedScopeArgs(`gates-shell-probe-${randomUUID()}`), bwrap(), ...bwrapArgs([], ["/usr/bin/true"])], writtenFds(arch));
+-  if (!result.error && result.code === 0) return { available: true, arch, sqlite: host.exists(sqlite()) };
++  if (!result.error) return { available: true, arch, sqlite: host.exists(sqlite()) };
+   const message = result.output.trim() || result.error?.message || `exit ${result.code}`;
+   if (/operation not permitted|permission denied|creating new namespace|no permissions to create/i.test(message)) {
+     return { available: false, word: "Can't create its sandbox", reason: "The shell tool cannot create its sandbox on this machine; it is off.", detail: message };

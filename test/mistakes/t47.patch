@@ -1,0 +1,20 @@
+Mistake: t47
+Class: K2
+Fix: planted
+Browser: no
+Seen: A slow model's measure row loses its slow mark.
+Note: planted a at apps/web/src/measure/ModelMeasure.tsx:65
+
+diff --git a/apps/web/src/measure/ModelMeasure.tsx b/apps/web/src/measure/ModelMeasure.tsx
+index 819a3cdd..822a15dd 100644
+--- a/apps/web/src/measure/ModelMeasure.tsx
++++ b/apps/web/src/measure/ModelMeasure.tsx
+@@ -62,7 +62,7 @@ export function MeasureCells({ name, label }: { name: string; label: string }) {
+           aria-label={`${scoreWords(m)}, ${label}: details`}
+           onClick={() => openMeasure(name)}
+         >
+-          {m.slow ? <Icon id="snail" cls="s14 mp-slow" /> : null}
++          {false ? <Icon id="snail" cls="s14 mp-slow" /> : null}
+           <ScoreMarks m={m} />
+           {scoreText(m)}
+         </button>

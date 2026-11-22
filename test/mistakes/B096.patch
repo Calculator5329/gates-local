@@ -1,0 +1,20 @@
+Mistake: B096
+Class: K8
+Fix: 8906c19e
+Browser: no
+Seen: An update waits on a process that has already exited, because a failed read of its state counts as alive.
+Note: a process that vanished between checks reads as alive again
+
+diff --git a/packages/update/src/process-state.ts b/packages/update/src/process-state.ts
+index e1f5bdb8..d5c6829e 100644
+--- a/packages/update/src/process-state.ts
++++ b/packages/update/src/process-state.ts
+@@ -70,7 +70,7 @@ export function processAlive(pid: number, on: ProcessSystem = system): boolean {
+     if (!again || !dead(again.state) || again.start !== row.start || again.group !== row.group) return true;
+     const second = exitedTasks(pid, again, on);
+     return second === undefined || !same(first, second);
+-  } catch (error) { return !missing(error); }
++  } catch { return true; }
+ }
+ 
+ /** Any live member counts, even after its leader exits. Only a stable all-dead group is cleared. */

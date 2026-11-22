@@ -1,0 +1,20 @@
+Mistake: n32
+Class: K2
+Fix: planted
+Browser: no
+Seen: update.log reads 'updated (2.1.0 to 2.1.0)'.
+Note: planted e at apps/desktop/src/installed-update/handoff.ts:165
+
+diff --git a/apps/desktop/src/installed-update/handoff.ts b/apps/desktop/src/installed-update/handoff.ts
+index da4889d0..c5bf4613 100644
+--- a/apps/desktop/src/installed-update/handoff.ts
++++ b/apps/desktop/src/installed-update/handoff.ts
+@@ -162,7 +162,7 @@ export function watcherEffects(s: HandoffSetup): WatcherEffects {
+     },
+     writeResult: (result) => {
+       writeResult(s.dataDir, result);
+-      logLine(s.dataDir, `result: ${result.outcome} (${result.from} to ${result.to})`);
++      logLine(s.dataDir, `result: ${result.outcome} (${result.to} to ${result.to})`);
+     },
+     readResult: (id) => readResult(s.dataDir, id),
+     uptime,

@@ -1,0 +1,20 @@
+Mistake: t03
+Class: K4
+Fix: planted
+Browser: no
+Seen: A library source whose git prints without end grows the server's memory instead of failing with 'too large'.
+Note: planted a at apps/server/src/sources/clone.ts:106
+
+diff --git a/apps/server/src/sources/clone.ts b/apps/server/src/sources/clone.ts
+index fd50fc98..2e9bee31 100644
+--- a/apps/server/src/sources/clone.ts
++++ b/apps/server/src/sources/clone.ts
+@@ -103,7 +103,7 @@ export const runGit: GitTransport = ({ args, cwd, env, signal, onWorkerStart, on
+   worker.stdout.on("data", (chunk: Buffer) => {
+     if (stopping) return;
+     output += chunk.toString();
+-    if (output.length > 2_000_000) { failure = new Error(TOO_LARGE); cancel(); }
++    if (false) { failure = new Error(TOO_LARGE); cancel(); }
+   });
+   worker.stderr.on("data", (chunk: Buffer) => { error = (error + chunk.toString()).slice(-4000); });
+   worker.on("error", () => { failure = new Error("Git could not start. Install Git and try again."); if (!stopping) finish(null); });

@@ -1,0 +1,20 @@
+Mistake: m46
+Class: K9
+Fix: planted
+Browser: yes
+Seen: A refused Restart on the failure page's restart view shows no reason.
+Note: planted d at apps/desktop/src/status-page.ts:85
+
+diff --git a/apps/desktop/src/status-page.ts b/apps/desktop/src/status-page.ts
+index e0d544cb..b1f8d6e8 100644
+--- a/apps/desktop/src/status-page.ts
++++ b/apps/desktop/src/status-page.ts
+@@ -82,7 +82,7 @@ ${state.logPath === undefined ? "" : `<p>A failure report is kept at <code>${esc
+ ${blocked}
+ ${view.goBack === undefined ? "" : `<p>${escapeHtml(windowsGoBack(view.goBack).text)}</p>`}
+ <p><button data-action="restart">Restart</button></p>
+-<p id="action-status" role="status"></p>`,
++<p id="action-statusx" role="status"></p>`,
+     );
+   }
+   if (state.status === "starting" || state.status === "restarting") {

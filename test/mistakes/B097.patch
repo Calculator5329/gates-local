@@ -1,0 +1,31 @@
+Mistake: B097
+Class: K8
+Fix: 584af56a
+Browser: no
+Seen: Ctrl+C during an update can leave the command's process group running (9 of 400 tries).
+Note: the stop-signal listeners go in after the command is spawned
+
+diff --git a/packages/update/src/run.ts b/packages/update/src/run.ts
+index 8880b704..571bd253 100644
+--- a/packages/update/src/run.ts
++++ b/packages/update/src/run.ts
+@@ -173,7 +173,6 @@ export function createRunner(stop: Partial<TreeStop> = {}): Runner {
+       let failure: RunResult["failure"];
+       let stopping = false;
+       let child: ChildProcessByStdio<null, Readable, Readable>;
+-      if (ownGroup) listenForStop();
+       try {
+         child = spawn(command, [...args], {
+           cwd: path.resolve(options.cwd),
+@@ -184,10 +183,10 @@ export function createRunner(stop: Partial<TreeStop> = {}): Runner {
+           stdio: ["ignore", "pipe", "pipe"],
+         });
+       } catch (e) {
+-        if (ownGroup) stopListening();
+         resolve({ code: null, stdout, stderr: (e as Error).message, failure: "spawn-error" });
+         return;
+       }
++      if (ownGroup) listenForStop();
+       const group = ownGroup ? child.pid : undefined;
+       if (group !== undefined) liveGroups.add(group);
+       let settled = false;

@@ -1,0 +1,20 @@
+Mistake: n07
+Class: K2
+Fix: planted
+Browser: no
+Seen: The error that quotes a malformed Ollama line is missing its first character.
+Note: planted d at apps/server/src/chat/stream.ts:91
+
+diff --git a/apps/server/src/chat/stream.ts b/apps/server/src/chat/stream.ts
+index b82b0434..c0b0a589 100644
+--- a/apps/server/src/chat/stream.ts
++++ b/apps/server/src/chat/stream.ts
+@@ -88,7 +88,7 @@ function parseLine(line: string): ChatChunk | { bad: string } {
+   try {
+     return decodeChunk(JSON.parse(line));
+   } catch (error) {
+-    return { bad: `${describe(error)} in line ${JSON.stringify(line.slice(0, 200))}` };
++    return { bad: `${describe(error)} in line ${JSON.stringify(line.slice(1, 200))}` };
+   }
+ }
+ 

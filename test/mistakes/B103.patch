@@ -1,0 +1,20 @@
+Mistake: B103
+Class: K6
+Fix: 90a301f9
+Browser: no
+Seen: A downloaded Linux update cannot be run: the AppImage is saved without execute permission.
+Note: the downloaded file is created 0644 whatever its kind
+
+diff --git a/packages/update/src/installed/download.ts b/packages/update/src/installed/download.ts
+index e869b7ef..91d6f457 100644
+--- a/packages/update/src/installed/download.ts
++++ b/packages/update/src/installed/download.ts
+@@ -417,7 +417,7 @@ async function fetchInto(folder: string, final: string, artifact: ReleaseArtifac
+   await writeFlushed(path.join(folder, LIST_FILE), o.list);
+   await writeFlushed(path.join(folder, SIGNATURE_FILE), o.signature);
+   const part = `${final}${PART}`;
+-  const handle = await fs.promises.open(part, "wx", artifact.kind === "appimage" ? 0o755 : 0o644);
++  const handle = await fs.promises.open(part, "wx", 0o644);
+   let read: Streamed<Read> | undefined;
+   let taken = 0;
+   try {

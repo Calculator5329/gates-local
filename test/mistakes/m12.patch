@@ -1,0 +1,20 @@
+Mistake: m12
+Class: K9
+Fix: planted
+Browser: yes
+Seen: The start-failure banner's Retry button loses its row styling.
+Note: planted d at apps/web/src/runtime/Banner.tsx:153
+
+diff --git a/apps/web/src/runtime/Banner.tsx b/apps/web/src/runtime/Banner.tsx
+index 065814f2..61e57862 100644
+--- a/apps/web/src/runtime/Banner.tsx
++++ b/apps/web/src/runtime/Banner.tsx
+@@ -150,7 +150,7 @@ export function Banner() {
+       return (
+         <Shell icon={<Icon id="alert" cls="err" />} role="alert" title={failWords(failure).title}>
+           <div className="bm" data-why={failWhy(detail, failure)}>{underTitle(detail, failure) ?? FAIL_FALLBACK[failure ?? "start"]}</div>
+-          <div className="ba">
++          <div className="bx">
+             <RetryButton primary />
+           </div>
+         </Shell>

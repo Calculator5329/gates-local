@@ -1,0 +1,20 @@
+Mistake: B024
+Class: K1
+Fix: 37391441
+Browser: yes
+Seen: Settings, Models and Usage each size to their content, so the pop-up jumps size between them.
+Note: the pop-up's fixed height becomes a maximum again
+
+diff --git a/apps/web/src/lib/ui/panel.css b/apps/web/src/lib/ui/panel.css
+index b8503bf0..b6b32b7d 100644
+--- a/apps/web/src/lib/ui/panel.css
++++ b/apps/web/src/lib/ui/panel.css
+@@ -16,7 +16,7 @@
+ .dlg-dim{position:fixed;inset:0;z-index:55;background:var(--dlg-veil);animation:dlg-fade .2s ease-out}
+ @media (prefers-reduced-motion:reduce){.dlg-dim{animation:none}}
+ /* centred with margins, not a transform: a transform would hold the fixed layers inside (the Remove confirm) */
+-.dlg{position:fixed;z-index:56;inset:0;margin:auto;width:min(calc(100vw - 80px),1280px);height:min(calc(100dvh - 80px),960px);display:flex;flex-direction:column;overflow:hidden;background:var(--popover);color:var(--foreground);border:1px solid var(--popover-border);border-radius:16px;outline:none}
++.dlg{position:fixed;z-index:56;inset:0;margin:auto;width:min(calc(100vw - 80px),1280px);max-height:min(calc(100dvh - 80px),960px);display:flex;flex-direction:column;overflow:hidden;background:var(--popover);color:var(--foreground);border:1px solid var(--popover-border);border-radius:16px;outline:none}
+ @media (max-width:1023px){.dlg{width:calc(100vw - 48px);height:calc(100dvh - 48px)}}
+ /* In the desktop window the window's own buttons are an opaque box in the top right corner, as
+    tall as the header. The pop-up stays 8 px under it (and as far from the bottom, so it stays

@@ -1,0 +1,20 @@
+Mistake: n36
+Class: K2
+Fix: planted
+Browser: no
+Seen: 'Gates Local refused it (xpermission denied)'.
+Note: planted d at apps/web/src/lib/session/connection.ts:48
+
+diff --git a/apps/web/src/lib/session/connection.ts b/apps/web/src/lib/session/connection.ts
+index 34a3ce4b..2f79e6d7 100644
+--- a/apps/web/src/lib/session/connection.ts
++++ b/apps/web/src/lib/session/connection.ts
+@@ -45,7 +45,7 @@ function reasonOf(message: string): string {
+   const kind = /must be a (folder|file)/i.exec(message)?.[1];
+   if (kind) return `that path is not a ${kind}`;
+   if (/own data directory/i.test(message)) return "it holds Gates Local's own data";
+-  const short = message.replace(/^\w*Error:\s*/, "").replace(/[.\s]+$/, "");
++  const short = message.replace(/^\w*Error:\s*/, "x").replace(/[.\s]+$/, "");
+   return `Gates Local refused it (${short.length > 120 ? `${short.slice(0, 117)}…` : short})`;
+ }
+ 
