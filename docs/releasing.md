@@ -22,6 +22,48 @@ After the release, the whole `release:check` (unit tests and every browser
 test) runs on the released commit and reports its reds. It never holds a
 release.
 
+## Published 0.2.9, 2026-11-21
+
+[Release 0.2.9](https://github.com/Calculator5329/gates-local/releases/tag/v0.2.9)
+contains the Windows x64 installer, Linux x64 AppImage, `release.json` and
+its Ed25519 signature, all from `f26ab416327d7735dffec64ed62a764410bbad0c`,
+plus the signed model list (`models.json`). It carries the fixes for a model
+that writes its tool calls in its own words: a picture asked for in the
+model's own JSON is made, and a file named without `/library` reads. It also
+carries Measure version 5, a failed tool row that says its path once, and
+"Show more" only when there is more. Types, lint, the build and the 37 tests
+in `test/e2e/journeys.txt` passed before anything was pushed. From the
+release command starting to the release being public and verified took
+3 minutes 19 seconds (0.2.8: 4 minutes 38 seconds).
+
+The Windows build no longer waited for its machine: the timed specs were
+admitted at 7 seconds and the installer was built from 9 to 173 seconds,
+with the gate green at 93 and the Linux round, on another machine, done at 53.
+Publishing took 18 seconds. A rehearsal at the same commit three minutes
+earlier would have published at 163 seconds.
+
+The independent read of everything since 0.2.8 ran after the release, not
+before it. It found nothing to hold for: no stored shape changed except the
+Measure version (0.2.8 keeps a version-5 result as raw text and writes it
+back, so a downgrade hides it but does not lose it), nothing in the desktop
+app, server or updater changed, and the new bare path reaches only a source
+whose id it names exactly, through the same `..`, containment and symlink
+refusals as `/library/<id>/...`. One small gap: on Windows a bare path
+written with a backslash is still refused, and the refusal names the path
+to use. Pictures from a model's own JSON were checked with a test model, not
+a real Gemma 4 run. Native Linux packaging, the packaged smoke and the plain
+update check passed. The Windows installer was built natively; it was not
+installed or opened before release. The whole `release:check` was started on
+the commit afterwards; its result goes in the next release's record.
+
+The machine first in line for the Linux round was off the network from
+2026-11-19 until a power cycle that evening, so 0.2.9's Linux round went to
+the second one. The first machine's first Linux round since was a rehearsal
+(as 0.2.10, nothing outward) at the same commit: packaging and the packaged
+checks passed there in 35 seconds on the machine, and the rehearsal would have
+published at 194 seconds. The Windows build waited 47 seconds for the timed
+specs there because the whole `release:check` on 0.2.9 was running beside it.
+
 ## Published 0.2.8, 2026-11-21
 
 [Release 0.2.8](https://github.com/Calculator5329/gates-local/releases/tag/v0.2.8)

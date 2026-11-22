@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-21: 0.2.9 published, in 3 minutes 19 seconds
+
+- Gates Local 0.2.9 is out (docs/releasing.md) with the picture-from-JSON and bare-path fixes, Measure version 5, the failed tool row that says its path once, and Show more only when there is more.
+- In 0.2.8 the Windows installer waited 98 seconds for its machine behind the Linux packaging round. This time the Linux round went to another machine and the installer started at 9 seconds, so the release took 3 minutes 19 seconds instead of 4 minutes 38.
+- The independent read since 0.2.8 ran after the release instead of before it, and found nothing to hold for.
+
 ## 2026-11-21: Measure checks pictures, and can set the app's harness beside a shell-only one
 
 - Measure: a model could score well and still fail the picture requests people actually make. Gemma 4 12B answered "Generate an image of a dog" with the image tool's JSON as text, and models have written a made-up image link after queueing a picture. Measure had no check for either. A new Images part (weight 10) asks for one picture, for three different pictures, and for a description in words that must not make a picture. It is graded on the prompts the image tool was called with: one about the thing asked for, one distinct prompt per picture, no image link in the reply, and no picture when only words were asked for. Measure never makes a picture; its image tool records the prompt and returns at once. The image tool is offered on these three checks only, so the other checks stay as they were.
