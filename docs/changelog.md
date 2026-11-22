@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-22: the tier candidates are measured, and qwen3.5:9b scores 100
+
+- Models: the chat model tiers were picked from a memory estimate, never from a score. Measure 6 ran headless on every candidate with the app's harness and a shell-only one, one run each: qwen3.5:9b 100 with both, gemma4:12b 95, gpt-oss:20b 81 (95 shell-only), qwen3.5:4b 86 (95 shell-only), and huihui_ai/gemma-4-abliterated:12b 65. Inkling 2 Mini did not load at 16k. The table, the misses and the card memory each model held are in `docs/research/measure-tiers-2026-11-22.md`.
+- The picks proposed are qwen3.5:4b for 8 GB cards and qwen3.5:9b for 12 and 16 GB. The 12 and 16 GB tiers already match; `chat-models.json` is unchanged and the 8 GB swap waits for the owner.
+- Measure 6 tops out at qwen3.5:9b, so a new roadmap item asks for harder checks before the 16 GB candidates can be ranked.
+
 ## 2026-11-22: 8 of 47 past mistakes still get through, down from 19
 
 - Tests: the first replay of past mistakes had 19 of 47 passing every check. After the type, lint, one-owner and behaviour-test changes of the same day, `node scripts/mistakes.ts` on the whole set reads 8 of 47 (`test/mistakes/reading.json`, head efbb1f98): typecheck stops 3 (it stopped none), lint 3, unit tests 33, and no row from the census of real fixed bugs gets through. Six of the eight left are words picked inline in a component; the other two may not be mistakes at all. `test/mistakes/through.md` lists them and what stopped the other eleven.

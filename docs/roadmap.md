@@ -843,7 +843,13 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *2026-11-21:* the eval is Measure, version 6: an Images part (one picture, three different
       pictures, and a question that must not make one) and a question on a table's columns, and
       `pnpm measure:compare` runs it headless with the app's harness or a shell-only one.
-- [ ] <!-- workspace:id=work:e21cf626-6481-586b-8fe9-c6d620446029 --> Run the tier plan: `pnpm measure:compare <model> --variant default` and again with
+      *2026-11-22:* picks from the first tier run (`docs/research/measure-tiers-2026-11-22.md`):
+      8 GB qwen3.5:4b (86, 95 shell-only; the 9b holds 6.9 GiB and leaves no room for speech),
+      12 GB qwen3.5:9b (100), 16 GB qwen3.5:9b until Measure separates the top. The 12 and 16 GB
+      tiers in `chat-models.json` already match; the 8 GB tier still puts the 9b first and waits
+      for the owner. Shell-only scored the same or higher for four of five models (gpt-oss:20b 81
+      to 95, qwen3.5:4b 86 to 95), one run each.
+- [x] <!-- workspace:id=work:e21cf626-6481-586b-8fe9-c6d620446029 --> Run the tier plan: `pnpm measure:compare <model> --variant default` and again with
       `--variant shell-only` for every candidate below, on the Linux test machine's 16 GB card with
       nothing else loaded, then name each tier's pick under the item above. Candidates come from
       `chat-models.json`, with the 16k estimate from `fit/fit.ts`:
@@ -858,6 +864,16 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       read from the fit estimate, not from this run.
       *Accept:* a JSON per run under `~/.cache/gates-local-measure-compare`, a table of score per
       part, variant and model, and a pick for each tier.
+      *Done 2026-11-22:* run on the maintainer's desktop with its speech server loaded, not the
+      test machine (scores hold, gpt-oss:20b's speed does not). Table and picks in
+      `docs/research/measure-tiers-2026-11-22.md`. qwen3.5:9b 100 with both harnesses; Inkling 2
+      Mini did not load at 16k and was not measured.
+- [ ] <!-- workspace:id=work:b8802b94-0eac-5dfc-bb70-a16376b6dc92 --> Measure 6 tops out: qwen3.5:9b scored 100 and three more runs 95, so the 16 GB candidates
+      cannot be ranked against each other. Add harder checks (longer tool chains, files that need
+      two reads, a larger table) and run the 16 GB candidates again, Inkling 2 Mini included with
+      nothing else on the card, three runs each.
+      *Accept:* no candidate scores 100, and each 16 GB pick is ahead of the next by more than one
+      check over three runs.
 - [ ] <!-- workspace:id=work:7cb6f429-529c-5443-b3cd-91999212715b --> `pnpm setup:probe`: device facts as JSON (OS, GPU vendor and memory,
       system memory, disk free, CPU, Ollama and ComfyUI found, models
       installed).
