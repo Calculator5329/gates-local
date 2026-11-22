@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-21: Measure checks pictures, and can set the app's harness beside a shell-only one
+
+- Measure: a model could score well and still fail the picture requests people actually make. Gemma 4 12B answered "Generate an image of a dog" with the image tool's JSON as text, and models have written a made-up image link after queueing a picture. Measure had no check for either. A new Images part (weight 10) asks for one picture, for three different pictures, and for a description in words that must not make a picture. It is graded on the prompts the image tool was called with: one about the thing asked for, one distinct prompt per picture, no image link in the reply, and no picture when only words were asked for. Measure never makes a picture; its image tool records the prompt and returns at once. The image tool is offered on these three checks only, so the other checks stay as they were.
+- Measure: `sqlite3 db .schema orders` without quotes once failed a model's turn, and no check asked about a table's columns. A new Database check asks for the orders table's columns.
+- Measure: the weights still add up to 100. Images is a tool call, so it came out of Tools (25 to 20); Pages gave 5 (20 to 15) because its three checks were worth almost 7 points each. Version 6; a version 5 score says it had no Images checks and weighed Tools and Pages more.
+- `pnpm measure:compare <model> [--variant default|shell-only]` runs Measure headless against a running Ollama and writes every check's grade as JSON. The shell-only harness offers only the shell (and the image tool on Images checks) in place of read and the database tool, to see how a model does with one general tool. It is never shown in the app. Linux only, as the database checks run in the shell's sandbox; pages are skipped, as they need the app's window and do not change with the harness.
+- A 0.2.9 copy keeps a version 6 measure it cannot read as it is and does not show it; measure the model again in that copy for a score it shows.
+
 ## 2026-11-21: a file named without /library reads, and a failed call says its path once
 
 - Tools: a model that asked to read `measure-notes/expenses.csv` was refused with "use /library/<source id>", which told it the rule but not the answer, so a small model sent the same call three times and failed the question. A path that starts with a Library source's id now reads as that source's file. A path that is still refused names the exact one to use when a single source fits it (for example "use /library/measure-notes/expenses.csv"). Paths that leave a source are refused as before. The shell already starts in /library, so `cat measure-notes/expenses.csv` worked there all along.

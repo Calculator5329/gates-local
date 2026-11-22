@@ -14,7 +14,7 @@ import type { LibraryEntry, ToolCall, ToolResult } from "./types.ts";
  * `image`: the turn asked for images (`chat.send` `image: true`). The image tool exists only
  * with this and `queueImage`.
  * `shell: false`: the sandbox probe failed on this machine, so the shell tool is neither
- * offered nor run.
+ * offered nor run. `read: false`: the same for read; only Measure's shell-only comparison sets it.
  * `realpath` and `fs` are for tests to inject (a realpath, and the read tool's filesystem
  * calls to race them); the app uses the native realpath from paths.ts and node:fs/promises.
  */
@@ -24,6 +24,7 @@ export interface ToolsDeps {
   queueImage?: (prompt: string, signal: AbortSignal) => Promise<{ jobId: string }>;
   image?: boolean;
   shell?: boolean;
+  read?: boolean;
   realpath?: Realpath;
   fs?: Partial<LibraryFs>;
   sqlTimeoutMs?: number;
@@ -50,11 +51,13 @@ export function createTools(deps: ToolsDeps) {
   const queueImage = deps.image === true ? deps.queueImage : undefined;
   let imagesQueuedThisTurn = 0;
   return {
-    definitions: toolDefinitions(platform, { image: queueImage !== undefined, ...(deps.shell === false ? { shell: false } : {}) }),
+    definitions: toolDefinitions(platform, { image: queueImage !== undefined, ...(deps.shell === false ? { shell: false } : {}), ...(deps.read === false ? { read: false } : {}) }),
     async execute(call: ToolCall, signal: AbortSignal): Promise<ToolResult> {
       signal.throwIfAborted();
       switch (call.name) {
-        case "read": return readLibrary(deps.sources, call.input, signal, deps.realpath ?? canonicalPath, platform, { stat, opendir, open, ...deps.fs });
+        case "read":
+          if (deps.read === false) throw new TypeError("read is not offered here; use shell");
+          return readLibrary(deps.sources, call.input, signal, deps.realpath ?? canonicalPath, platform, { stat, opendir, open, ...deps.fs });
         case "shell": {
           if (platform === "win32") throw new TypeError("Shell is unavailable on Windows; use sql or read");
           if (deps.shell === false) throw new TypeError("Run commands is off on this machine; use read");

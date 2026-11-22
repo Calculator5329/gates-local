@@ -840,6 +840,24 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Accept:* the eval runs every tier's candidates on the same cases and records per-model
       scores; each tier names its pick from those scores; a fine-tuned model beats its base on
       the eval before it is offered.
+      *2026-11-21:* the eval is Measure, version 6: an Images part (one picture, three different
+      pictures, and a question that must not make one) and a question on a table's columns, and
+      `pnpm measure:compare` runs it headless with the app's harness or a shell-only one.
+- [ ] <!-- workspace:id=work:e21cf626-6481-586b-8fe9-c6d620446029 --> Run the tier plan: `pnpm measure:compare <model> --variant default` and again with
+      `--variant shell-only` for every candidate below, on the Linux test machine's 16 GB card with
+      nothing else loaded, then name each tier's pick under the item above. Candidates come from
+      `chat-models.json`, with the 16k estimate from `fit/fit.ts`:
+      8 GB: qwen3.5:4b (4.4 GiB), qwen3.5:9b (7.7, tight);
+      12 GB: qwen3.5:9b, gemma4:12b (9.2);
+      16 GB: qwen3.5:9b, gemma4:12b, gpt-oss:20b (15.1).
+      One run asks for at most 23,500 answer tokens (`RUN_BUDGET`: each check's part budget,
+      summed over 27 checks), plus up to 1,500 thinking tokens a check with thinking on. At
+      80 tok/s that is under 5 minutes of decoding, about 13 with every thinking allowance used,
+      plus the model's load; at 40 tok/s, twice that. Seven candidates, two variants each: about
+      14 runs, 1 to 3.5 hours. A smaller card is slower than the 16 GB one, so each tier's speed is
+      read from the fit estimate, not from this run.
+      *Accept:* a JSON per run under `~/.cache/gates-local-measure-compare`, a table of score per
+      part, variant and model, and a pick for each tier.
 - [ ] <!-- workspace:id=work:7cb6f429-529c-5443-b3cd-91999212715b --> `pnpm setup:probe`: device facts as JSON (OS, GPU vendor and memory,
       system memory, disk free, CPU, Ollama and ComfyUI found, models
       installed).

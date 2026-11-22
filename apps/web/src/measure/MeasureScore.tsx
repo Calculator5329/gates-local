@@ -3,8 +3,8 @@ import { k } from "../lib/words/format.ts";
 import { Icon, type IconId } from "../lib/ui/icons.tsx";
 import { tpsText } from "../models/model-speed.tsx";
 
-export const PART: Readonly<Record<MeasurePart, string>> = { tools: "Tools", files: "Files", database: "Database", instructions: "Follows instructions", pages: "Pages" };
-const ORDER: readonly MeasurePart[] = ["tools", "files", "database", "instructions", "pages"];
+export const PART: Readonly<Record<MeasurePart, string>> = { tools: "Tools", files: "Files", database: "Database", instructions: "Follows instructions", images: "Images", pages: "Pages" };
+const ORDER: readonly MeasurePart[] = ["tools", "files", "database", "instructions", "images", "pages"];
 const partOf = (c: MeasureCheck): MeasurePart => (c.kind === "sql" ? "database" : c.kind);
 
 export const SLOW_WORDS: Readonly<Record<NonNullable<ModelMeasure["slow"]>, string>> = {
@@ -19,7 +19,8 @@ export const isEarlier = (m: ModelMeasure) => m.version !== undefined && m.versi
 export const EARLIER_WORDS = "Earlier checks";
 export const earlierWords = (m: ModelMeasure): string => {
   if (!isEarlier(m)) return "";
-  const what = m.version === 4 ? "a Library file named without /library was refused; it reads now"
+  const what = m.version === 5 ? "no Images checks and no question on a table's columns, and Tools and Pages weighed more"
+    : m.version === 4 ? "a Library file named without /library was refused; it reads now"
     : m.version === 3 ? "a check the model cut short was skipped; it fails now" : "fewer tasks, and some replies graded differently";
   return `${EARLIER_WORDS}: ${what}. Measure again to set it beside newer scores.`;
 };

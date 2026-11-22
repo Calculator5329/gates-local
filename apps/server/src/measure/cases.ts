@@ -5,17 +5,18 @@ import type { MeasurePart, PageAction } from "@gates-local/contracts";
 import type { LibraryEntry, ToolStep } from "@gates-local/harness";
 
 // why: a new kind of check joins a part and keeps its weight, so a share keeps its meaning.
-export const WEIGHTS: Readonly<Record<MeasurePart, number>> = { tools: 25, files: 20, database: 20, pages: 20, instructions: 15 };
-export const BUDGET: Readonly<Record<MeasurePart, number>> = { tools: 900, files: 900, database: 900, pages: 1600, instructions: 500 };
-export const PARTS: readonly MeasurePart[] = ["tools", "files", "database", "instructions", "pages"];
+export const WEIGHTS: Readonly<Record<MeasurePart, number>> = { tools: 20, files: 20, database: 20, pages: 15, instructions: 15, images: 10 };
+export const BUDGET: Readonly<Record<MeasurePart, number>> = { tools: 900, files: 900, database: 900, pages: 1600, instructions: 500, images: 600 };
+export const PARTS: readonly MeasurePart[] = ["tools", "files", "database", "instructions", "images", "pages"];
 
 export const NOTES_ID = "measure-notes";
 export const SHOP_ID = "measure-shop";
 const NOTES_LABEL = "Measure notes";
 const SHOP_LABEL = "Shop database";
 
-export interface Turn { answer: string; steps: readonly ToolStep[] }
-export type RefCall = { read: string } | { sql: string };
+// why: Measure's image tool makes no picture, so a turn's images are the prompts it was called with
+export interface Turn { answer: string; steps: readonly ToolStep[]; images?: readonly string[] }
+export type RefCall = { read: string } | { sql: string } | { image: readonly string[] };
 type Grade = (turn: Turn) => string | undefined;
 interface Base {
   id: string;
@@ -100,6 +101,20 @@ const givesPhone = (text: string) => [...text.matchAll(/\+?\d[\d\s().-]{4,}\d/g)
 const saysAbsent = (thing: RegExp) => (t: Turn) =>
   thing.test(t.answer) && /\b(?:no|not|none|nothing|without|only|isn['’]t|aren['’]t|doesn['’]t|don['’]t|didn['’]t|can['’]t|cannot|couldn['’]t|unable)\b/i.test(t.answer);
 const visibleSet = (text: string | undefined) => (text ?? "").split("|").map((s) => s.trim().toLowerCase()).filter(Boolean).toSorted().join("|");
+const queuedImages = (t: Turn) => t.images ?? [];
+// why: a picture is only queued when the reply ends, so any image link in the reply is made up.
+const INVENTED_IMAGE = /!\[[^\]]*\]\([^)]*\)|https?:\/\/\S+\.(?:png|jpe?g|gif|webp)\b/i;
+const noInventedImage: [(t: Turn) => boolean, string] = [(t) => !INVENTED_IMAGE.test(t.answer), "It showed an image link it made up."];
+const PICTURES = [{ asked: "a lighthouse at night", about: /lighthouse/i }, { asked: "a bowl of ramen", about: /ramen|noodle/i }, { asked: "a hot air balloon over a desert", about: /balloon/i }];
+const onePromptEach = (t: Turn): string | undefined => {
+  const prompts = queuedImages(t);
+  if (prompts.length === 0) return "No image was queued.";
+  if (prompts.length !== PICTURES.length) return `It queued ${prompts.length} ${prompts.length === 1 ? "image" : "images"} for the ${PICTURES.length} asked for.`;
+  const subjects = prompts.map((p) => PICTURES.filter((s) => s.about.test(p)));
+  if (subjects.some((s) => s.length !== 1)) return "A prompt was not about exactly one of the pictures asked for.";
+  return new Set(subjects.map((s) => s[0])).size === PICTURES.length ? undefined : "Two prompts were for the same picture.";
+};
+const COLUMNS = ["id", "customer_id", "ordered_on"];
 
 export const CASES: readonly MeasureCase[] = [
   {
@@ -201,6 +216,13 @@ export const CASES: readonly MeasureCase[] = [
     reference: { calls: [{ sql: "SELECT p.category, SUM(i.quantity * p.price) AS revenue FROM orders o JOIN order_items i ON i.order_id = o.id JOIN products p ON p.id = i.product_id WHERE o.ordered_on >= '2024-03-01' AND o.ordered_on < '2024-04-01' GROUP BY p.category ORDER BY revenue DESC LIMIT 1" }], answer: "Kitchen had the highest revenue in March 2024: 117.00." },
   },
   {
+    // why: `sqlite3 db .schema orders` unquoted failed a turn once, and the model guessed instead
+    id: "db-schema", part: "database", kind: "answer", needs: `Reads the schema: ${COLUMNS.join(", ")}`, db: true,
+    prompt: `Which columns does the orders table in the ${SHOP_LABEL} have? List their names.`,
+    grade: all([queried, "The database was not queried."], [(t) => COLUMNS.every((c) => hasWords(t.answer, c)), `The columns, ${COLUMNS.join(", ")}, were not all named.`]),
+    reference: { calls: [{ sql: "SELECT group_concat(name, ', ') AS columns FROM pragma_table_info('orders')" }], answer: `The orders table has three columns: ${COLUMNS.join(", ")}.` },
+  },
+  {
     id: "instr-json", part: "instructions", kind: "answer", needs: "Only a JSON object: Paris, France",
     prompt: 'Reply with only a JSON object and no other text. Its keys are "city" and "country", for where the Eiffel Tower stands.',
     grade: (t) => {
@@ -251,6 +273,30 @@ export const CASES: readonly MeasureCase[] = [
     reference: { calls: [], answer: FIXED },
   },
   {
+    // why: Gemma 4 12B answered this with the image tool's JSON as text, and the chat printed it.
+    id: "images-one", part: "images", kind: "answer", needs: "One image queued, its prompt about a fox",
+    prompt: "Generate an image of a red fox curled up asleep in the snow.",
+    grade: all(
+      [(t) => queuedImages(t).length > 0, "No image was queued."],
+      [(t) => queuedImages(t).length === 1, "It queued more than the one image asked for."],
+      [(t) => /\bfox/i.test(queuedImages(t)[0] ?? ""), "The image prompt was not about a fox."],
+      noInventedImage,
+    ),
+    reference: { calls: [{ image: ["A red fox curled up asleep in fresh snow, soft winter light"] }], answer: "" },
+  },
+  {
+    id: "images-several", part: "images", kind: "answer", needs: "Three images queued, one distinct prompt for each picture",
+    prompt: `Make three pictures: ${PICTURES[0]!.asked}, ${PICTURES[1]!.asked}, and ${PICTURES[2]!.asked}.`,
+    grade: all(onePromptEach, noInventedImage),
+    reference: { calls: [{ image: ["A lighthouse at night, its beam sweeping over dark water", "A steaming bowl of ramen with egg and spring onion", "A hot air balloon drifting over red desert dunes"] }], answer: "" },
+  },
+  {
+    id: "images-none", part: "images", kind: "answer", needs: "Describes it in words and queues no image",
+    prompt: "In two sentences, describe what a typical photo of a lighthouse at night shows.",
+    grade: all([(t) => queuedImages(t).length === 0, "It made a picture when only words were asked for."], [(t) => /\b(?:light|beam|lamp|glow)/i.test(t.answer.replace(/lighthouse/gi, "")), "The description did not mention the light."]),
+    reference: { calls: [], answer: "A tall tower stands against a dark sky with its lamp lit. A bright beam of light sweeps out over the water." },
+  },
+  {
     id: "page-counter", part: "pages", kind: "page", needs: "The number goes from 0 to 3 after three clicks",
     prompt: `${PAGE_ASK} It shows a number that starts at 0 in an element with id "count", and a button with id "add". Each click on the button adds 1 to the number. ${PAGE_REPLY}`,
     script: [{ do: "read", target: "#count" }, { do: "click", target: "#add" }, { do: "click", target: "#add" }, { do: "click", target: "#add" }, { do: "read", target: "#count" }],
@@ -278,8 +324,10 @@ export const CASES: readonly MeasureCase[] = [
   },
 ];
 
-export function toolCallOf(call: RefCall, windows: boolean): { name: string; arguments: Record<string, unknown> } {
-  if ("read" in call) return { name: "read", arguments: { path: call.read } };
+// why: the shell-only harness has no read tool, so its reference reads go through the shell
+export function toolCallOf(call: RefCall, windows: boolean, shellOnly = false): { name: string; arguments: Record<string, unknown> } {
+  if ("image" in call) return { name: "image", arguments: { prompts: call.image } };
+  if ("read" in call) return shellOnly ? { name: "shell", arguments: { command: `if [ -d ${call.read} ]; then ls -p ${call.read}; else cat ${call.read}; fi` } } : { name: "read", arguments: { path: call.read } };
   return windows
     ? { name: "sql", arguments: { source: SHOP_ID, query: call.sql } }
     : { name: "shell", arguments: { command: `sqlite3 /data/${SHOP_ID}.db "${call.sql}"` } };

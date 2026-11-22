@@ -3,7 +3,7 @@ import { NA, type State, useStore } from "../lib/store/store.ts";
 import { nameOf } from "../models/models-rules.ts";
 import { measuringNow, runOf } from "./measures.ts";
 
-const PART_NAME: Readonly<Record<MeasurePart, string>> = { tools: "Tools", files: "Files", database: "Database", instructions: "Instructions", pages: "Pages" };
+const PART_NAME: Readonly<Record<MeasurePart, string>> = { tools: "Tools", files: "Files", database: "Database", instructions: "Instructions", images: "Images", pages: "Pages" };
 
 const labelOf = (s: State, model: string) => nameOf(model, s.catalog === NA ? undefined : s.catalog).text;
 

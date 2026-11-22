@@ -26,6 +26,7 @@
     "release:models": "node scripts/release-kit.ts models",
     "machine-check": "node scripts/machine-check.ts",
     "measure-models": "node scripts/measure-models.ts",
+    "measure:compare": "node scripts/measure-compare.ts",
     "feature-map": "node scripts/feature-map.ts",
     "test": "vitest run",
     "verify": "pnpm typecheck && pnpm lint && pnpm test",

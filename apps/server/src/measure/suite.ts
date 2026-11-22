@@ -24,8 +24,13 @@ const median = (xs: readonly number[]) => {
   return s.length === 0 ? undefined : s.length % 2 ? s[(s.length - 1) / 2]! : (s[s.length / 2 - 1]! + s[s.length / 2]!) / 2;
 };
 
+// why: shell-only is pi's one-tool style, for measure:compare; the app always runs "default"
+export const VARIANTS = ["default", "shell-only"] as const;
+export type HarnessVariant = (typeof VARIANTS)[number];
+
 export interface MeasureInput {
   baseUrl: string;
+  variant?: HarnessVariant;
   model: string;
   signal: AbortSignal;
   sources: readonly LibraryEntry[];
@@ -70,6 +75,8 @@ export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasu
   const now = input.now ?? Date.now;
   const windows = (input.platform ?? process.platform) === "win32";
   const noDatabase = !windows && input.shell?.state === "off";
+  const shellOnly = input.variant === "shell-only";
+  if (shellOnly && (windows || noDatabase)) throw new Error("The shell-only harness needs the Linux shell sandbox, and it is not on here.");
   const sources = noDatabase ? input.sources.filter((s) => s.id !== SHOP_ID) : input.sources;
 
   const show = await fetcher(new URL("/api/show", input.baseUrl), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: input.model }), signal: input.signal });
@@ -108,7 +115,11 @@ export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasu
     const meter: Meter = { cap, think: think === true ? THINK_BUDGET : 0, used: 0, thought: 0, start: now(), cut: false, cutThinking: false };
     const metered = meterFetch(fetcher, meter, now, (count, ns) => { evalCount += count; evalNs += ns; });
     const calls: string[] = [];
-    const tools = createTools({ sources, platform: input.platform, ...(noDatabase ? { shell: false } : {}) });
+    // why: Measure never makes a picture; its image tool records the prompt and answers at once.
+    const images: string[] = [];
+    const queueImage = async (prompt: string) => ({ jobId: `measure-image-${images.push(prompt)}` });
+    const offered = { ...(c.part === "images" ? { image: true, queueImage } : {}), ...(shellOnly ? { read: false as const } : {}) };
+    const tools = createTools({ sources, platform: input.platform, ...offered, ...(noDatabase ? { shell: false } : {}) });
     const execute = async (call: ToolCall, signal: AbortSignal): Promise<ToolResult> => {
       const named = `${call.name} ${clip(JSON.stringify(call.input), CALL_KEPT)}`;
       try {
@@ -123,7 +134,7 @@ export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasu
     const messages: TurnMessage[] = [...(system ? [{ role: "system" as const, content: system }] : []), ...c.history ?? [], { role: "user", content: c.prompt }];
     const turn: ToolTurnInput = {
       baseUrl: input.baseUrl, model: input.model, messages, numCtx: input.numCtx, signal: input.signal,
-      sources, ...(input.platform ? { platform: input.platform } : {}), ...(input.shell ? { shell: input.shell } : {}),
+      sources, ...offered, ...(input.platform ? { platform: input.platform } : {}), ...(input.shell ? { shell: input.shell } : {}),
       ...(think === undefined ? {} : { think }), settings: { temperature: SAMPLING.temperature, ...(input.keepAlive === undefined ? {} : { keep_alive: input.keepAlive }) },
     };
     const onTurn = input.onTurn;
@@ -140,6 +151,7 @@ export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasu
     // why: a turn that failed on the runtime says nothing about the model, so the run stops.
     if (end.type === "error") throw new Error(`Measure stopped at check ${checks.length + 1} of ${CASES.length}: ${end.message}`);
     const { answer, steps } = end;
+    const queued = [...images];
     live = { ...live, answer, steps };
     if (meter.firstMs !== undefined) firstWords.push(meter.firstMs);
     runLeft -= answered(meter);
@@ -149,11 +161,11 @@ export async function measureModel(input: MeasureInput): Promise<Omit<ModelMeasu
       tokens: meter.used, ...(meter.thought > 0 ? { thinkTokens: meter.thought } : {}), ms: Math.round(now() - meter.start),
       ...(meter.cut ? { cut: true } : {}), ...(meter.cut && meter.cutThinking ? { cutThinking: true } : {}),
     };
-    const noTools = needsTools(c) ? toolsLeftOut(steps) ?? await windowTooSmall(c, answer, turn, details, windows) : undefined;
+    const noTools = needsTools(c) ? toolsLeftOut(steps) ?? await windowTooSmall(c, answer, turn, details, windows, shellOnly) : undefined;
     input.signal.throwIfAborted();
     graded(noTools !== undefined
       ? { id: c.id, kind: c.part, ok: false, state: "skipped", needs: c.needs, why: noTools, ...evidence }
-      : grade(c, { answer, steps: steps.filter((s) => s.name !== "note") }, evidence));
+      : grade(c, { answer, steps: steps.filter((s) => s.name !== "note"), images: queued }, evidence));
   }
 
   const tokensPerSecond = speedOf(evalCount, evalNs);
@@ -177,7 +189,7 @@ function toolsLeftOut(steps: readonly ToolStep[]): string | undefined {
   return note ? `${note}.` : undefined;
 }
 
-async function windowTooSmall(c: AnswerCase, answer: string, turn: ToolTurnInput, show: { capabilities?: unknown }, windows: boolean): Promise<string | undefined> {
+async function windowTooSmall(c: AnswerCase, answer: string, turn: ToolTurnInput, show: { capabilities?: unknown }, windows: boolean, shellOnly: boolean): Promise<string | undefined> {
   const full = windowFullWords(turn.numCtx);
   const endedFull = (said: string) => (said.trim().split(/\n\n/).at(-1) ?? "").startsWith(full);
   if (!endedFull(answer)) return undefined;
@@ -186,7 +198,7 @@ async function windowTooSmall(c: AnswerCase, answer: string, turn: ToolTurnInput
   const right = (async (url: URL | string) => {
     if (!String(url).endsWith("/api/chat")) return Response.json(show);
     const call = c.reference.calls[round++];
-    const fn = call === undefined ? undefined : toolCallOf(call, windows);
+    const fn = call === undefined ? undefined : toolCallOf(call, windows, shellOnly);
     const message = fn === undefined ? { content: c.reference.answer }
       : native ? { content: "", tool_calls: [{ function: fn }] } : { content: `${CALL_OPEN}${JSON.stringify(fn)}${CALL_CLOSE}` };
     return new Response(`${JSON.stringify({ message: { role: "assistant", ...message }, done: false })}\n${JSON.stringify({ message: { role: "assistant", content: "" }, done: true, done_reason: "stop" })}\n`);
@@ -203,7 +215,9 @@ function grade(c: MeasureCase, turn: Turn, evidence: Evidence): MeasureCheck {
   const base = { id: c.id, kind: c.part, needs: c.needs, ...evidence };
   const cutWhy = evidence.cutThinking ? CUT_THINKING : CUT_ANSWER;
   if (c.kind === "answer") {
-    const wrong = turn.answer.trim() || evidence.cut ? c.grade(turn) : "It gave no answer.";
+    // why: a turn that only queued pictures answers through their cards, with no words of its own.
+    const said = turn.answer.trim() !== "" || (turn.images?.length ?? 0) > 0;
+    const wrong = said || evidence.cut ? c.grade(turn) : "It gave no answer.";
     const why = wrong && evidence.cut ? cutWhy : wrong;
     return { ...base, ok: why === undefined, ...(why ? { why } : {}) };
   }

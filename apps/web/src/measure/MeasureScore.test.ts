@@ -110,6 +110,8 @@ describe("two scores side by side", () => {
     expect(earlierWords({ ...full, version: 2 })).toContain("fewer tasks");
     // version 4 refused "<source id>/<file>"; it reads now
     expect(earlierWords({ ...full, version: 4 })).toContain("named without /library");
+    // version 5 had no Images part and other weights
+    expect(earlierWords({ ...full, version: 5 })).toContain("no Images checks");
     expect(earlierWords(full)).toBe("");
   });
 });

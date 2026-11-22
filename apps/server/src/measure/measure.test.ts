@@ -57,6 +57,12 @@ const reference = (windows: boolean, text = false) => (c: MeasureCase | undefine
   const fn = toolCallOf(call, windows);
   return text ? { content: `<tool_call>${JSON.stringify(fn)}</tool_call>` } : { calls: [{ function: fn }] };
 };
+/** The reference again, reading files through the shell as the shell-only harness must. */
+const shellPlay = (c: MeasureCase | undefined, round: number): Answer => {
+  if (!c || c.kind === "page") return reference(false)(c, round);
+  const call = c.reference.calls[round];
+  return call ? { calls: [{ function: toolCallOf(call, false, true) }] } : { content: c.reference.answer };
+};
 
 const run = (rt: ReturnType<typeof fakeRuntime>, extra: Partial<MeasureInput> = {}) => {
   const data = dir();
@@ -66,12 +72,17 @@ const run = (rt: ReturnType<typeof fakeRuntime>, extra: Partial<MeasureInput> = 
   });
 };
 const check = (m: { checks: readonly ModelMeasure["checks"][number][] }, id: string) => m.checks.find((c) => c.id === id)!;
+/** The names of the tools a request offered natively. */
+const toolNames = (b: Body) => (b.tools ?? []).map((t) => (t as { function: { name: string } }).function.name).toSorted();
 const sandbox = process.platform === "linux" ? await probeSandbox() : undefined;
 /** The shell's sandbox and sqlite3 are here, or the release check says they must be. */
 const linuxDatabase = (sandbox?.available === true && sandbox.sqlite) || (process.platform === "linux" && process.env["GATES_LOCAL_REQUIRE_HOST_TOOLS"] === "1");
 /** A check's grade of `answer` alone, from a turn that read a file and queried the database. */
 const gradeAlone = (id: string) => (answer: string) => (CASES.find((c) => c.id === id) as Extract<MeasureCase, { kind: "answer" }>)
   .grade({ answer, steps: [{ callId: "1", name: "read", state: "done", summary: "" }, { callId: "2", name: "sql", state: "done", summary: "" }] });
+/** An Images check's grade of the prompts the image tool was called with, and the reply's words. */
+const pictures = (id: string) => (images: string[], answer = "") => (CASES.find((c) => c.id === id) as Extract<MeasureCase, { kind: "answer" }>)
+  .grade({ answer, steps: images.length ? [{ callId: "1", name: "image", state: "done", summary: "" }] : [], images });
 /**
  * Each reply as a runtime writes it under num_predict: `think` tokens of thinking (one piece a
  * token), then `answer` tokens; past num_predict it stops there, cut.
@@ -272,6 +283,46 @@ describe("grading words", () => {
     expect(march("In March 2024 there were 4 orders.")).toBeUndefined();
     expect(march("4 orders, on March 2, March 9, March 15 and March 28.")).toBeUndefined();
   });
+
+  it("passes the orders table's three columns named, and fails a guessed column", () => {
+    const schema = gradeAlone("db-schema");
+    const MISSING = "The columns, id, customer_id, ordered_on, were not all named.";
+    expect(schema("The orders table has id, customer_id and ordered_on.")).toBeUndefined();
+    expect(schema("Columns:\n- `id`\n- `customer_id`\n- `ordered_on`")).toBeUndefined();
+    // the name a model guesses instead of reading the schema
+    expect(schema("The orders table has id, customer_id and order_date.")).toBe(MISSING);
+    expect(schema("It has an id and a customer_id.")).toBe(MISSING);
+  });
+
+  it("passes one fox picture queued, and fails none, two, another animal, or a made-up image link", () => {
+    const one = pictures("images-one");
+    expect(one(["A red fox asleep in the snow"])).toBeUndefined();
+    expect(one(["Red fox curled up in snow"], "Your picture is on its way.")).toBeUndefined();
+    expect(one([], '{"name":"image","arguments":{"prompts":["a red fox"]}}')).toBe("No image was queued.");
+    expect(one(["A red fox in the snow", "A red fox in the snow, closer"])).toBe("It queued more than the one image asked for.");
+    expect(one(["A wolf sleeping in the snow"])).toBe("The image prompt was not about a fox.");
+    expect(one(["A red fox asleep in the snow"], "Here it is: ![fox](https://example.com/fox.png)")).toBe("It showed an image link it made up.");
+  });
+
+  it("passes three pictures with one prompt each, and fails one combined prompt or the same picture twice", () => {
+    const several = pictures("images-several");
+    const RIGHT = ["A lighthouse at night", "A bowl of ramen", "A hot air balloon over a desert"];
+    expect(several(RIGHT)).toBeUndefined();
+    expect(several(["Noodles in a deep bowl", "A balloon above sand dunes", "Lighthouse beam at midnight"])).toBeUndefined();
+    expect(several([])).toBe("No image was queued.");
+    expect(several(["A lighthouse at night, a bowl of ramen, and a hot air balloon over a desert"])).toBe("It queued 1 image for the 3 asked for.");
+    // the one prompt each image of a batch got, three times over
+    expect(several(Array(3).fill(RIGHT.join(", ")))).toBe("A prompt was not about exactly one of the pictures asked for.");
+    expect(several(["A lighthouse at night", "A lighthouse at dusk", "A hot air balloon over a desert"])).toBe("Two prompts were for the same picture.");
+    expect(several(RIGHT, "![1](a.png)")).toBe("It showed an image link it made up.");
+  });
+
+  it("passes a description in words, and fails one that made a picture or never says the light", () => {
+    const none = pictures("images-none");
+    expect(none([], "A white tower stands on the rocks at night. Its lamp throws a bright beam over the sea.")).toBeUndefined();
+    expect(none(["A lighthouse at night"], "Here is a picture of a lighthouse at night.")).toBe("It made a picture when only words were asked for.");
+    expect(none([], "A lighthouse stands on a rocky coast. Waves crash below it.")).toBe("The description did not mention the light.");
+  });
 });
 
 describe("measureModel", () => {
@@ -284,7 +335,7 @@ describe("measureModel", () => {
     expect(m.checks.filter((c) => c.ok)).toHaveLength(answers.length);
     expect(m.checks.filter((c) => c.state === "pending").map((c) => c.id)).toEqual(["page-counter", "page-filter", "page-total"]);
     expect(m).toMatchObject({ at: 5, version: MEASURE_VERSION, numCtx: 8192, tokensPerSecond: 60, score: 100 });
-    expect(m.parts?.map((p) => p.part)).toEqual(["tools", "files", "database", "instructions"]);
+    expect(m.parts?.map((p) => p.part)).toEqual(["tools", "files", "database", "instructions", "images"]);
     expect(steps).toEqual(Array.from({ length: STEPS }, (_, i) => i + 1));
     // the real tools ran: the evidence keeps each call and what it returned
     expect(check(m, "tools-chain").calls).toEqual([
@@ -314,6 +365,41 @@ describe("measureModel", () => {
     expect(m.score).toBe(100);
     expect(rt.checks().every((b) => !("tools" in b))).toBe(true);
   });
+
+  it("offers the image tool on the Images checks alone, and records each prompt instead of drawing it", async () => {
+    const rt = fakeRuntime(["completion", "tools"], reference(true));
+    const m = await run(rt);
+    const asked = (id: string) => toolNames(rt.checks().find((b) => b.messages.some((x) => x.content === CASES.find((c) => c.id === id)!.prompt))!);
+    expect(asked("images-one")).toContain("image");
+    expect(asked("images-none")).toContain("image");
+    expect(asked("tools-chain")).not.toContain("image");
+    expect(asked("instr-caps")).not.toContain("image");
+    expect(["images-one", "images-several", "images-none"].map((id) => check(m, id).ok)).toEqual([true, true, true]);
+    expect(check(m, "images-several").calls).toEqual([expect.stringMatching(/^image .*lighthouse.*ramen.*balloon/s)]);
+    // an image-only turn ends at the call: the model is not asked again for words
+    expect(rt.checks().filter((b) => b.messages.some((x) => x.content === CASES.find((c) => c.id === "images-one")!.prompt))).toHaveLength(1);
+  });
+
+  it("refuses the shell-only harness where the shell sandbox is not on", async () => {
+    const rt = fakeRuntime(["completion", "tools"], reference(true));
+    await expect(run(rt, { variant: "shell-only" })).rejects.toThrow("needs the Linux shell sandbox");
+    await expect(run(rt, { variant: "shell-only", platform: "linux", shell: { state: "off", word: "Sandbox check failed" } })).rejects.toThrow("needs the Linux shell sandbox");
+    expect(rt.checks()).toEqual([]);
+  });
+
+  // The comparison harness: shell in place of read (and of sql, as on Linux), the image tool on
+  // the Images checks. A model that reads files with the shell passes; one that still calls read is refused.
+  it.skipIf(!linuxDatabase)(`offers only the shell, and the image tool on Images checks, in the shell-only harness${linuxDatabase ? "" : " [SKIP: no sandbox or sqlite3 here]"}`, async () => {
+    const rt = fakeRuntime(["completion", "tools"], shellPlay);
+    const m = await run(rt, { platform: "linux", shell: { state: "ready" }, variant: "shell-only" });
+    const offered = new Set(rt.checks().map((b) => toolNames(b).join(",")));
+    expect([...offered].toSorted()).toEqual(["image,shell", "shell"]);
+    expect(m.checks.filter((c) => c.state === undefined && !c.ok).map((c) => [c.id, c.why])).toEqual([]);
+    // the default harness's read call, sent anyway, gets the tool's refusal back, not the file
+    const stale = fakeRuntime(["completion", "tools"], (c, round) => c?.id === "files-nested" ? reference(false)(c, round) : shellPlay(c, round));
+    const refused = await run(stale, { platform: "linux", shell: { state: "ready" }, variant: "shell-only" });
+    expect(check(refused, "files-nested").calls?.[0]).toMatch(/read is not offered here; use shell/);
+  }, 90_000);
 
   it("fails each check a small model gets wrong, says why, and weighs the parts", async () => {
     const wrong: Record<string, Answer> = {
@@ -349,11 +435,11 @@ describe("measureModel", () => {
     expect(check(m, "instr-fix").why).toBe("The reply had more than the corrected line.");
     expect(check(m, "page-counter").why).toBe("The reply had no HTML page.");
     expect(m.parts).toEqual([
-      { part: "tools", passed: 2, total: 5, weight: 25 }, { part: "files", passed: 3, total: 5, weight: 20 },
-      { part: "database", passed: 4, total: 5, weight: 20 }, { part: "instructions", passed: 0, total: 5, weight: 15 },
-      { part: "pages", passed: 0, total: 1, weight: 20 },
+      { part: "tools", passed: 2, total: 5, weight: 20 }, { part: "files", passed: 3, total: 5, weight: 20 },
+      { part: "database", passed: 5, total: 6, weight: 20 }, { part: "instructions", passed: 0, total: 5, weight: 15 },
+      { part: "images", passed: 3, total: 3, weight: 10 }, { part: "pages", passed: 0, total: 1, weight: 15 },
     ]);
-    expect(m.score).toBe(Math.round(100 * (25 * 0.4 + 20 * 0.6 + 20 * 0.8) / 100));
+    expect(m.score).toBe(Math.round(100 * (20 * 0.4 + 20 * 0.6 + 20 * (5 / 6) + 10) / 100));
   });
 
   it("cuts a check at its tokens, says when it was still thinking, keeps the start and end of a long reply, and sends nothing past it", async () => {
@@ -550,15 +636,19 @@ describe("measureModel", () => {
     // no check failed for what the window did; the ones that need no tools are graded as ever
     expect(m.checks.filter((c) => c.state === undefined && !c.ok)).toEqual([]);
     expect(check(m, "tools-none").ok).toBe(true);
-    expect(m.parts?.map((p) => p.part)).toEqual(["tools", "instructions"]);
+    expect(m.parts?.map((p) => p.part)).toEqual(["tools", "instructions", "images"]);
   });
 
   it("skips the checks whose right calls do not fit the window either, with the sentence the app ended the turn on", async () => {
-    // written as text, the tools fit beside the question at this window; the results of three checks' own calls do not
+    // written as text, the tools fit beside the question at this window; the results of three checks' own calls do not,
+    // and with the image tool's definition too the tool block does not fit at all
     const rt = fakeRuntime(["completion"], reference(true, true));
     const m = await run(rt, { numCtx: NARROW });
     const why = `This model's ${contextWords(NARROW)} context has no room left for the tool results, so the turn stopped here.`;
-    expect(m.checks.filter((c) => c.state === "skipped").map((c) => [c.id, c.why])).toEqual(["tools-recover", "tools-chain", "files-nested"].map((id) => [id, why]));
+    const noTools = `This model's ${contextWords(NARROW)} context is too small for its tools, so it answered without tools.`;
+    expect(m.checks.filter((c) => c.state === "skipped").map((c) => [c.id, c.why])).toEqual([
+      ...["tools-recover", "tools-chain", "files-nested"].map((id) => [id, why]), ...["images-one", "images-several"].map((id) => [id, noTools]),
+    ]);
     expect(m.checks.filter((c) => c.state === undefined && !c.ok).map((c) => [c.id, c.why])).toEqual([]);
   });
 
@@ -668,9 +758,9 @@ describe("page grading", () => {
     ]);
     expect(graded.checks.filter((c) => c.kind === "pages").map((c) => [c.id, c.ok, c.state])).toEqual([["page-counter", true, undefined], ["page-filter", true, undefined], ["page-total", false, undefined]]);
     expect(check(graded, "page-total").why).toBe("12.5 times 3 did not show 37.50.");
-    expect(graded.parts?.at(-1)).toEqual({ part: "pages", passed: 2, total: 3, weight: 20 });
+    expect(graded.parts?.at(-1)).toEqual({ part: "pages", passed: 2, total: 3, weight: 15 });
     expect(graded.score).toBe(scoreOf(partsOf(graded.checks)));
-    expect(graded.score).toBe(Math.round(80 + 20 * (2 / 3)));
+    expect(graded.score).toBe(Math.round(85 + 15 * (2 / 3)));
     const broken = gradePages(m, [{ id: "page-counter", seen: [], error: "The page left for another address." }]);
     expect(check(broken, "page-counter")).toMatchObject({ ok: false, why: "The page left for another address." });
     expect(check(broken, "page-filter").state).toBe("pending");
@@ -818,7 +908,7 @@ describe("models.measure", () => {
     await t.ended();
     const { measures: [saved] } = t.measure.handlers["models.measures"]();
     expect(saved!.checks.filter((c) => c.kind === "pages").map((c) => [c.state, c.why])).toEqual(Array.from({ length: 3 }, () => ["skipped", PAGES_UNRUN]));
-    expect(saved!.parts?.map((p) => p.part)).toEqual(["tools", "files", "database", "instructions"]);
+    expect(saved!.parts?.map((p) => p.part)).toEqual(["tools", "files", "database", "instructions", "images"]);
     expect(saved!.score).toBe(100);
     expect(t.pushes.filter(([c]) => c === "models.measures").at(-1)?.[1]).toEqual([saved]);
     expect(t.pushes.filter(([c]) => c === "models.measuring").at(-1)?.[1]).toMatchObject({ state: "done" });
@@ -849,7 +939,7 @@ describe("models.measure", () => {
     await t.ended();
     const kept = measureStore(t.dataDir).list()[0]!;
     expect(kept.checks.filter((c) => c.kind === "pages").map((c) => [c.state, c.why])).toEqual(Array.from({ length: 3 }, () => ["skipped", why]));
-    expect(kept.parts?.map((p) => p.part)).toEqual(["tools", "files", "database", "instructions"]);
+    expect(kept.parts?.map((p) => p.part)).toEqual(["tools", "files", "database", "instructions", "images"]);
     expect(kept.score).toBe(100);
     expect(t.pushes.filter(([c]) => c === "models.measuring").at(-1)?.[1]).toMatchObject({ state: "done" });
   });

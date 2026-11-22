@@ -14,6 +14,8 @@ export interface ToolTurnInput extends StreamTurnInput {
   queueImage?: (prompt: string, signal: AbortSignal) => Promise<{ jobId: string }>;
   image?: boolean;
   shell?: ShellStatus;
+  // why: Measure's shell-only comparison; a chat always offers read
+  read?: false;
   execute?: (call: ToolCall, signal: AbortSignal) => Promise<ToolResult>;
 }
 const decodeShow = S.decodeUnknownSync(S.Struct({ capabilities: S.optional(S.Array(S.String)) }));
@@ -38,7 +40,7 @@ export async function* streamToolTurn(input: ToolTurnInput): AsyncGenerator<Chat
     const native = decodeShow(await response.json()).capabilities?.includes("tools") ?? false;
     const windows = (input.platform ?? process.platform) === "win32";
     const shellOff = !windows && input.shell?.state === "off";
-    const tools = createTools({ sources: input.sources, platform: input.platform, queueImage: input.queueImage, image: input.image === true, ...(shellOff ? { shell: false } : {}) });
+    const tools = createTools({ sources: input.sources, platform: input.platform, queueImage: input.queueImage, image: input.image === true, ...(shellOff ? { shell: false } : {}), ...(input.read === false ? { read: false } : {}) });
     const sqlite = (id: string) => windows ? `: use sql with source "${id}"` : shellOff ? ": can't be read, Run commands is off on this machine" : ` at /data/${id}.db`;
     const library = input.sources.map(s => `${s.id}: ${s.label} (${s.kind})${s.kind === "sqlite" ? sqlite(s.id) : ` at /library/${s.id}`}`).join("\n");
     const shellNote = shellOff && input.sources.some(s => s.kind === "sqlite")

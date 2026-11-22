@@ -193,8 +193,8 @@ export const ModelSpeed = S.Struct({
 });
 export type ModelSpeed = typeof ModelSpeed.Type;
 
-/** The parts a Measure score is made of (version 2); each has its own count and weight. */
-export const MeasurePart = S.Literals(["tools", "files", "database", "instructions", "pages"]);
+/** The parts a Measure score is made of (version 2; images since 6); each has its own count and weight. */
+export const MeasurePart = S.Literals(["tools", "files", "database", "instructions", "pages", "images"]);
 export type MeasurePart = typeof MeasurePart.Type;
 
 /** One thing the window does to a page a model wrote (Measure's Pages part), by CSS selector. */
@@ -212,7 +212,7 @@ export type PageAction = typeof PageAction.Type;
  */
 export const MeasureCheck = S.Struct({
   id: S.String,
-  kind: S.Literals(["tools", "sql", "files", "database", "instructions", "pages"]),
+  kind: S.Literals(["tools", "sql", "files", "database", "instructions", "pages", "images"]),
   ok: S.Boolean,
   reply: S.optional(S.String),
   result: S.optional(S.String),
@@ -236,7 +236,7 @@ export type MeasureCheck = typeof MeasureCheck.Type;
  * checks run changes, so a score from before is marked as earlier and never sits beside a new one
  * as if made alike.
  */
-export const MEASURE_VERSION = 5;
+export const MEASURE_VERSION = 6;
 
 /** A part's count: checks passed of the ones that ran, and its weight in the score. */
 export const MeasurePartCount = S.Struct({ part: MeasurePart, passed: S.Int, total: S.Int, weight: S.Int });
@@ -253,12 +253,14 @@ export type MeasurePartCount = typeof MeasurePartCount.Type;
  * turn limit, a window it filled), where this build fails it: its score can be higher.
  * Version 4 ran with a read tool that refused "<source id>/<file>", which this build reads as
  * /library/<source id>/<file>: its file scores can be lower.
+ * Version 5 had no Images part and no check on a table's columns, and weighed Tools 25 and Pages 20
+ * where this build weighs them 20 and 15 beside Images 10.
  */
 export const ModelMeasure = S.Struct({
   model: S.String,
   digest: S.String,
   at: S.Finite,
-  version: S.optional(S.Literals([2, 3, 4, 5])),
+  version: S.optional(S.Literals([2, 3, 4, 5, 6])),
   numCtx: S.Int,
   think: S.optional(S.Boolean),
   sampling: S.optional(S.Struct({ temperature: S.Finite, seed: S.Int })),
