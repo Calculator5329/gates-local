@@ -3,6 +3,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { constants, readFileSync } from "node:fs";
 import { access, cp, mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { childOutput } from "../child-output.ts";
 import { installPinned, type InstallTarget } from "../runtime/install.ts";
 import { runtimeDir } from "@gates-local/runtime-files/paths";
 import type { InstallManifest } from "../runtime/schemas.ts";
@@ -104,19 +105,17 @@ function runUv(uv: string, args: string[], env: NodeJS.ProcessEnv, signal: Abort
     let run: ChildProcess;
     try { run = spawn(uv, args, { env, stdio: ["ignore", "ignore", "pipe"], signal }); }
     catch (error) { reject(error as Error); return; }
-    let tail = "", partial = "";
-    run.stderr?.on("data", (c: Buffer) => {
-      const text = c.toString("utf8");
-      tail = (tail + text).slice(-2000);
-      if (onLine === undefined) return;
-      const lines = (partial + text).split(/\r?\n/);
+    const tail = run.stderr ? childOutput(run.stderr, 2000) : () => "";
+    let partial = "";
+    if (onLine !== undefined) run.stderr?.on("data", (c: Buffer) => {
+      const lines = (partial + c.toString("utf8")).split(/\r?\n/);
       partial = lines.pop() ?? "";
       for (const line of lines) onLine(line);
     });
     run.once("error", reject);
     run.once("close", (code) => {
       if (code === 0) resolve();
-      else reject(new Error(`Building the image engine failed (uv ${args[0]}: ${tail.trim().split("\n").at(-1) ?? `exit ${code}`}). Nothing was installed.`));
+      else reject(new Error(`Building the image engine failed (uv ${args[0]}: ${tail().trim().split("\n").at(-1) ?? `exit ${code}`}). Nothing was installed.`));
     });
   });
 }

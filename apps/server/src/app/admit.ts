@@ -97,6 +97,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, said
     let stoppedAt: number | undefined;
     let admissionImages: string[] = [];
     const still = () => replies.starting(turn.turnId, turn.attempt);
+    const stoppedEarly = () => turn.halted ?? cancelledBeforeStart();
     const ending = () => {
       releaseGpu?.();
       end();
@@ -121,7 +122,6 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, said
           if (reservation.signal.aborted) runtimeGone();
           else reservation.signal.addEventListener("abort", runtimeGone, { once: true });
         }
-        const stoppedEarly = () => turn.halted ?? cancelledBeforeStart();
         const baseUrl = load ? load.baseUrl : runtime.baseUrl();
         if (baseUrl === undefined) throw notReady();
         const show = images.length || prior.some(m => m.images?.length) ? await fetchShow(baseUrl, model, turn.controller.signal) : undefined;
@@ -212,9 +212,8 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, said
           replies.started(turn.turnId, turn.attempt, question, model, { cold: load?.cold === true, drawing: false, ...(replaced.length === 0 ? { chat: store.numbers.chat(threadId) } : {}) });
           return question;
         };
-        const stopFirst = (wrap: (error: unknown) => never) => (error: unknown): never => { if (!still() && replies.question(turn.turnId) === undefined) throw stoppedEarly(); return wrap(error); };
-        const withImages = () => imageFiles ? imageFiles.save(savedImages, append).catch(stopFirst(imageError)) : append();
-        const userMessage = attachedFiles && files.length ? await attachedFiles.save(files, withImages, threadId).catch(stopFirst(attachError)) : await withImages();
+        const withImages = () => imageFiles ? imageFiles.save(savedImages, append).catch(imageError) : append();
+        const userMessage = attachedFiles && files.length ? await attachedFiles.save(files, withImages, threadId).catch(attachError) : await withImages();
         sendMark("saved");
         started = userMessage;
         turn.inMemory = true;
@@ -228,8 +227,9 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, said
         fitTable.changed({ afterPlan: true });
         void runTurn(turn, ending, baseUrl, model, report.numCtx, modelHistory, load, { tools, think, settings, files: [...fileEntries.values()] });
       } catch (e) {
-        failure = e;
-        replies.refused(turn.turnId, turn.attempt, refusalOf(e));
+        // why: Stop before the question was stored wins over whatever failed after it
+        failure = !still() && replies.question(turn.turnId) === undefined ? stoppedEarly() : e;
+        replies.refused(turn.turnId, turn.attempt, refusalOf(failure));
         stoppedAt = replies.stoppedAt(turn.turnId);
       } finally {
         try {

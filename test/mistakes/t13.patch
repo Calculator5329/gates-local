@@ -3,18 +3,18 @@ Class: K8
 Fix: planted
 Browser: no
 Seen: Stop pressed while files or pictures are saved shows an attach error instead of 'stopped'.
-Note: planted a at apps/server/src/app/admit.ts:215
+Note: drops the one line in admitTurn()'s catch that ends a start stopped before its question was stored as stopped
 
 diff --git a/apps/server/src/app/admit.ts b/apps/server/src/app/admit.ts
-index 54ca9feb..931ff71e 100644
+index a0bb32f1..a90e38ca 100644
 --- a/apps/server/src/app/admit.ts
 +++ b/apps/server/src/app/admit.ts
-@@ -212,7 +212,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, said
-           replies.started(turn.turnId, turn.attempt, question, model, { cold: load?.cold === true, drawing: false, ...(replaced.length === 0 ? { chat: store.numbers.chat(threadId) } : {}) });
-           return question;
-         };
--        const stopFirst = (wrap: (error: unknown) => never) => (error: unknown): never => { if (!still() && replies.question(turn.turnId) === undefined) throw stoppedEarly(); return wrap(error); };
-+        const stopFirst = (wrap: (error: unknown) => never) => (error: unknown): never => { if (false) throw stoppedEarly(); return wrap(error); };
-         const withImages = () => imageFiles ? imageFiles.save(savedImages, append).catch(stopFirst(imageError)) : append();
-         const userMessage = attachedFiles && files.length ? await attachedFiles.save(files, withImages, threadId).catch(stopFirst(attachError)) : await withImages();
-         sendMark("saved");
+@@ -228,7 +228,7 @@ export function createAdmission({ deps, store, runtime, catalog, log, push, said
+         void runTurn(turn, ending, baseUrl, model, report.numCtx, modelHistory, load, { tools, think, settings, files: [...fileEntries.values()] });
+       } catch (e) {
+         // why: Stop before the question was stored wins over whatever failed after it
+-        failure = !still() && replies.question(turn.turnId) === undefined ? stoppedEarly() : e;
++        failure = e;
+         replies.refused(turn.turnId, turn.attempt, refusalOf(failure));
+         stoppedAt = replies.stoppedAt(turn.turnId);
+       } finally {

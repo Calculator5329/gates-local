@@ -2,8 +2,8 @@
 
 Each `.patch` here puts one real past mistake back into today's code.
 `node scripts/mistakes.ts` applies them one at a time in a scratch worktree and
-says which check stops each one first: typecheck, lint, the model check (once
-`scripts/model-check.ts` exists), the unit tests that import the touched files,
+says which check stops each one first: typecheck, lint, the models (run with `--as-read`,
+so a changed file alone is not a catch), the unit tests that import the touched files,
 then the whole unit suite. A mistake nothing stops got through.
 
 A patch starts with its record, then the diff:

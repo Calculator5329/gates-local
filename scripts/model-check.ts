@@ -1,7 +1,8 @@
 // `node scripts/model-check.ts [model ...]`: checks the formal models in model/ against the product code.
 // The true model of each must pass, every replay of a past bug must FAIL, and a file a model was
 // written from by hand must be unchanged since the model was last read against it.
-// `--confirm <model>` records that reading. Needs Java and the TLA+ tools jar; says what to install when either is missing.
+// `--confirm <model>` records that reading. `--as-read` leaves that last check out, for a runner that edits
+// those files on purpose and wants to know only whether a model notices (scripts/mistakes.ts). Needs Java and the TLA+ tools jar; says what to install when either is missing.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -20,6 +21,7 @@ const JAVA_AT_LEAST = 11;
 const VIOLATED = 12;
 
 const problems: string[] = [];
+const AS_READ = process.argv.includes("--as-read");
 const say = (line = ""): void => { console.log(line); };
 const sha256 = (file: string): string => createHash("sha256").update(readFileSync(file)).digest("hex");
 
@@ -78,6 +80,7 @@ function confirm(m: Model): void {
 
 /** Says which hand-modelled files changed since the model was confirmed, and how to confirm it again. */
 function drift(m: Model): string {
+  if (AS_READ) return "not asked, --as-read";
   const again = `Read model/${m.name}/README.md, bring model/${m.name}/${m.spec}.tla in line with the file, then run: node scripts/model-check.ts --confirm ${m.name}`;
   if (!existsSync(coveredFile(m))) {
     problems.push(`${m.name}: model/${m.name}/covered.json is missing, so nothing says this model was read against the code. ${again}`);
@@ -310,7 +313,7 @@ function named(name: string): Model {
 
 async function main(): Promise<void> {
   const started = Date.now();
-  const args = process.argv.slice(2);
+  const args = process.argv.slice(2).filter((a) => a !== "--as-read");
   const picked: Model[] = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--confirm") { const m = named(args[++i] ?? ""); confirm(m); picked.push(m); }

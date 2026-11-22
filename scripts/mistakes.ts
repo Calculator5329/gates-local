@@ -1,6 +1,6 @@
 // Puts each mistake in test/mistakes back into today's code, one at a time, and
-// says which check stops it first: typecheck, lint, model check (when
-// scripts/model-check.ts exists), the unit tests that import the touched files,
+// says which check stops it first: typecheck, lint, the models (without their
+// "file changed since it was read" guard), the unit tests that import the touched files,
 // then the whole unit suite. A mistake no layer stops "got through". A mistake
 // whose record says only a browser shows it, and that no layer stops, is "not
 // judged here": these layers cannot see it, and the browser suite is not run.
@@ -197,10 +197,9 @@ async function layers(tree: string, m: Mistake, knownReds: ReadonlySet<string>):
         return { kind: "caught", layer: "lint", detail: `lint failed for a reason this runner does not parse: ${first.trim()}` };
       }
     }
-    if (existsSync(path.join(tree, "scripts/model-check.ts"))) {
-      const model = await run(tree, "node", ["scripts/model-check.ts"], LIMIT["model-check"]);
-      if (model.code !== 0) return { kind: "caught", layer: "model-check", detail: model.out.trim().split("\n").at(-1) ?? "" };
-    }
+    // why: every patch to a hand-modelled file trips the "changed since it was read" guard, whatever the patch does; counted as a catch it hid t13 getting through (2026-11-22)
+    const model = await run(tree, "node", ["scripts/model-check.ts", "--as-read"], LIMIT["model-check"]);
+    if (model.code !== 0) return { kind: "caught", layer: "model-check", detail: model.out.trim().split("\n").at(-1) ?? "" };
     const related = await vitest(tree, ["related", "--run", "--passWithNoTests", ...m.touched], LIMIT["unit (related)"]);
     unitReds = related.reds.filter(r => !knownReds.has(key(r)));
     if (unitReds.length === 0 && !related.timedOut) {

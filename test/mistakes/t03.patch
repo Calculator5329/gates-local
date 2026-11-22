@@ -3,18 +3,18 @@ Class: K4
 Fix: planted
 Browser: no
 Seen: A library source whose git prints without end grows the server's memory instead of failing with 'too large'.
-Note: planted a at apps/server/src/sources/clone.ts:106
+Note: drops the cap in childOutput(), the one collector the git worker's output goes through
 
-diff --git a/apps/server/src/sources/clone.ts b/apps/server/src/sources/clone.ts
-index fd50fc98..2e9bee31 100644
---- a/apps/server/src/sources/clone.ts
-+++ b/apps/server/src/sources/clone.ts
-@@ -103,7 +103,7 @@ export const runGit: GitTransport = ({ args, cwd, env, signal, onWorkerStart, on
-   worker.stdout.on("data", (chunk: Buffer) => {
-     if (stopping) return;
-     output += chunk.toString();
--    if (output.length > 2_000_000) { failure = new Error(TOO_LARGE); cancel(); }
-+    if (false) { failure = new Error(TOO_LARGE); cancel(); }
+diff --git a/apps/server/src/child-output.ts b/apps/server/src/child-output.ts
+index cd7cd940..df427b33 100644
+--- a/apps/server/src/child-output.ts
++++ b/apps/server/src/child-output.ts
+@@ -6,7 +6,7 @@ export function childOutput(pipe: Readable, max: number, over?: () => void): ()
+   let full = false;
+   pipe.on("data", (chunk: Buffer) => {
+     text += chunk.toString("utf8");
+-    if (text.length <= max) return;
++    if (true) return;
+     text = text.slice(-max);
+     if (!full) { full = true; over?.(); }
    });
-   worker.stderr.on("data", (chunk: Buffer) => { error = (error + chunk.toString()).slice(-4000); });
-   worker.on("error", () => { failure = new Error("Git could not start. Install Git and try again."); if (!stopping) finish(null); });

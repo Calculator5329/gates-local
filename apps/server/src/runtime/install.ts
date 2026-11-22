@@ -7,6 +7,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import zlib from "node:zlib";
 import { NBSP, gb } from "@gates-local/contracts";
+import { childOutput } from "../child-output.ts";
 import { volumeFree } from "../image/download.ts";
 import { binaryIn, installRoot, installedBinary, runtimeDir } from "@gates-local/runtime-files/paths";
 import type { InstallManifest } from "./schemas.ts";
@@ -226,12 +227,9 @@ export function windowsTar(env: Readonly<Record<string, string | undefined>> = p
 function extractWithLibarchive(archive: string, into: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const tar = spawn(process.platform === "win32" ? windowsTar() : "bsdtar", ["-x", "-f", archive, "-C", into], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
-    let stderr = "";
-    tar.stderr.on("data", (c: Buffer) => {
-      stderr += c.toString("utf8");
-    });
+    const stderr = childOutput(tar.stderr, 4000);
     tar.on("error", (e) => reject(e));
-    tar.on("close", (code) => (code === 0 ? resolve() : reject(new Error(stderr.trim() || `tar exited ${code}`))));
+    tar.on("close", (code) => (code === 0 ? resolve() : reject(new Error(stderr().trim() || `tar exited ${code}`))));
   });
 }
 
@@ -239,10 +237,7 @@ function extract(archive: string, format: InstallManifest["format"], into: strin
   if (format === "zip" || format === "7z") return extractWithLibarchive(archive, into);
   return new Promise((resolve, reject) => {
     const tar = spawn("tar", ["-x", "-f", "-", "-C", into, "--no-same-owner"], { stdio: ["pipe", "ignore", "pipe"] });
-    let stderr = "";
-    tar.stderr.on("data", (c: Buffer) => {
-      stderr += c.toString("utf8");
-    });
+    const stderr = childOutput(tar.stderr, 4000);
     const decompress = format === "tar.zst" ? zlib.createZstdDecompress() : zlib.createGunzip();
     const feed = pipeline(createReadStream(archive), decompress, tar.stdin);
     let fed: Error | undefined;
@@ -253,7 +248,7 @@ function extract(archive: string, format: InstallManifest["format"], into: strin
     tar.on("error", (e) => reject(e));
     tar.on("close", (code) => {
       if (code === 0 && !fed) resolve();
-      else reject(new Error(fed ? fed.message : stderr.trim() || `tar exited ${code}`));
+      else reject(new Error(fed ? fed.message : stderr().trim() || `tar exited ${code}`));
     });
   });
 }

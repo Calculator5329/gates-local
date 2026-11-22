@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, lstat, opendir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { childOutput } from "../child-output.ts";
 
 export const REPO_BYTES = 64 * 1024 * 1024;
 export const REPO_FILES = 10_000;
@@ -50,8 +51,6 @@ export const runGit: GitTransport = ({ args, cwd, env, signal, onWorkerStart, on
   signal.throwIfAborted();
   const token = randomUUID();
   const worker = spawn(process.execPath, [fileURLToPath(new URL("./git-worker.ts", import.meta.url)), JSON.stringify(args), cwd, token], { env, detached: process.platform !== "win32", windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
-  let output = "";
-  let error = "";
   let failure: Error | undefined;
   let settled = false;
   let stopping = false;
@@ -67,9 +66,9 @@ export const runGit: GitTransport = ({ args, cwd, env, signal, onWorkerStart, on
     worker.stdin.destroy(); worker.stdout.destroy(); worker.stderr.destroy();
     if (signal.aborted) reject(signal.reason);
     else if (failure) reject(failure);
-    else if (code === 0) resolve(output);
-    else reject(new Error(error.includes("git-not-found") ? "Git is not installed. Install Git and try again."
-      : /could not resolve|unable to access|failed to connect|network is unreachable/i.test(error) ? "GitHub could not be reached. Check your connection and retry."
+    else if (code === 0) resolve(output());
+    else reject(new Error(error().includes("git-not-found") ? "Git is not installed. Install Git and try again."
+      : /could not resolve|unable to access|failed to connect|network is unreachable/i.test(error()) ? "GitHub could not be reached. Check your connection and retry."
       : "This repository is private, missing or unavailable. Choose a public GitHub repository and retry."));
   };
   const cancel = () => {
@@ -100,12 +99,8 @@ export const runGit: GitTransport = ({ args, cwd, env, signal, onWorkerStart, on
   };
   signal.addEventListener("abort", cancel, { once: true });
   worker.stdin.on("error", () => { failure = new Error("The Git worker's start pipe closed. Retry."); cancel(); });
-  worker.stdout.on("data", (chunk: Buffer) => {
-    if (stopping) return;
-    output += chunk.toString();
-    if (output.length > 2_000_000) { failure = new Error(TOO_LARGE); cancel(); }
-  });
-  worker.stderr.on("data", (chunk: Buffer) => { error = (error + chunk.toString()).slice(-4000); });
+  const output = childOutput(worker.stdout, 2_000_000, () => { if (stopping) return; failure = new Error(TOO_LARGE); cancel(); });
+  const error = childOutput(worker.stderr, 4000);
   worker.on("error", () => { failure = new Error("Git could not start. Install Git and try again."); if (!stopping) finish(null); });
   worker.on("exit", () => {
     exited = true;

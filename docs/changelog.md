@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-22: Stop beats a failed start in one place, and every child pipe the server reads has a cap
+
+- Chat: whether Stop beat a failed file or picture save was decided by a wrapper around each of the two saves, so a new step could fail after Stop and show its own error. The admission's one catch now decides it: a start stopped before its question was stored ends as stopped, whatever failed after. The two saves behave as before. The rule now also covers the other steps of a start: by reading the code, a Stop while the app asked Ollama whether the model reads images ended with an internal "This operation was aborted" error, and now ends as stopped. That case was not reproduced.
+- Server: the Git import had its own 2 MB output cap, and the two tar extractions of a runtime or engine download kept all of tar's error output in memory. All four children whose output the server reads (the Git worker, uv, both tars) now go through one collector that keeps at most its cap. A tar error longer than 4,000 characters now shows its last 4,000.
+- Measure is unchanged: only Start begins work, and it is the one place that refuses while the app closes.
+- Tests: `node scripts/mistakes.ts` counted any failing model check as a catch. A patch to a file a model was written from by hand always trips the guard that says the file changed since it was read, so the Stop mistake above read "caught by the models" while the models pass with it in. The runner now runs them with `--as-read`, which leaves that one guard out; `pnpm model-check` itself is unchanged. Both mistakes in this entry can still be made by dropping the one line that is left, and both still get through every check.
+
 ## 2026-11-22: five states that were cleared by hand now have one owner
 
 - Five places kept a flag, a timer or a check beside the real state and needed one line on every path to clear it. Dropping that line got through typecheck, lint and the whole unit suite each time (m02, n23, m38, n38 and m49 in `test/mistakes/`). The app looks and behaves the same.
