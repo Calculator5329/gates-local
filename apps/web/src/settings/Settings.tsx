@@ -746,16 +746,17 @@ function DataFolder() {
   );
 }
 
-// why: keyed by Reset's own table, so a setting Reset no longer has cannot stay in its confirm
+// why: keyed by Reset's own table, so the confirm names what Reset changes and nothing else
 const RESET_SAID = {
   theme: ["back", "theme"], accent: ["back", "accent"], defaultModel: ["back", "default model"], defaultNumCtx: ["back", "context"], tools: ["back", "tools"],
   imageGen: ["back", "image generation"], imageChoice: ["back", "image generation"], imageTool: ["back", "image generation"], comfyUrl: ["back", "image generation"], imageFolder: ["back", "image generation"],
   systemPrompt: ["cleared", "shared instructions"], modelSettings: ["cleared", "model instructions", "reply controls"],
-  thinking: null, whisperUrl: null, updateEveryChange: null, updateAutomatic: null, freeOthers: null,
-} as const satisfies Record<keyof typeof RESET_SETTINGS, readonly ["back" | "cleared", ...string[]] | null>;
+  thinking: ["back", "thinking"], updateEveryChange: ["back", "updates"], updateAutomatic: ["back", "updates"], freeOthers: ["back", "freeing other programs' memory"],
+  whisperUrl: ["cleared", "speech server"],
+} as const satisfies Record<keyof typeof RESET_SETTINGS, readonly ["back" | "cleared", ...string[]]>;
 
 function resetList(how: "back" | "cleared"): string {
-  const words = [...new Set(Object.values(RESET_SAID).flatMap((entry) => (entry?.[0] === how ? entry.slice(1) : [])))];
+  const words = [...new Set(Object.values(RESET_SAID).flatMap((entry) => (entry[0] === how ? entry.slice(1) : [])))];
   const list = words.length > 1 ? `${words.slice(0, -1).join(", ")} and ${words.at(-1)}` : words.join("");
   return list.charAt(0).toUpperCase() + list.slice(1);
 }

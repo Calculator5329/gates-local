@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-22: the Reset confirm names every setting it resets
+
+- Settings: Reset put five settings back without saying so: thinking, the two update switches, freeing other programs' memory, and the speech server. The confirm now reads "Theme, accent, default model, context, tools, image generation, thinking, updates and freeing other programs' memory go back to how they started" and "Shared instructions, model instructions, reply controls and speech server are cleared". What Reset does is unchanged. The table behind the list no longer allows a setting without words, so a new setting Reset touches fails typecheck until it is named.
+
 ## 2026-11-22: 8 GB cards get Qwen 3.5 4B first
 
 - Models: an 8 GB card was offered qwen3.5:9b first. Measured at 16k context it holds 6.9 GiB of the card, which leaves an 8 GB card no room for speech or pictures. The 4B holds 4.3 GiB and scored 86 (95 shell-only) against the 9B's 100 (`docs/research/measure-tiers-2026-11-22.md`). The 8 GB tier now puts the 4B first and the 9B second. The list's revision is 2, so an installed 0.2.9 takes it from the next release page. Other tiers are unchanged.

@@ -6,15 +6,15 @@ Seen: The Reset confirm still lists 'text size', a setting the app no longer has
 Note: the removed setting's name is back in the reset list; the list is keyed by Reset's own table, so typecheck refuses it
 
 diff --git a/apps/web/src/settings/Settings.tsx b/apps/web/src/settings/Settings.tsx
-index 00ce287f..1d55a48b 100644
+index ad3e19bc..12467fbb 100644
 --- a/apps/web/src/settings/Settings.tsx
 +++ b/apps/web/src/settings/Settings.tsx
 @@ -748,7 +748,7 @@ function DataFolder() {
-
- // why: keyed by Reset's own table, so a setting Reset no longer has cannot stay in its confirm
+ 
+ // why: keyed by Reset's own table, so the confirm names what Reset changes and nothing else
  const RESET_SAID = {
 -  theme: ["back", "theme"], accent: ["back", "accent"], defaultModel: ["back", "default model"], defaultNumCtx: ["back", "context"], tools: ["back", "tools"],
 +  theme: ["back", "theme"], accent: ["back", "accent"], textSize: ["back", "text size"], defaultModel: ["back", "default model"], defaultNumCtx: ["back", "context"], tools: ["back", "tools"],
    imageGen: ["back", "image generation"], imageChoice: ["back", "image generation"], imageTool: ["back", "image generation"], comfyUrl: ["back", "image generation"], imageFolder: ["back", "image generation"],
    systemPrompt: ["cleared", "shared instructions"], modelSettings: ["cleared", "model instructions", "reply controls"],
-   thinking: null, whisperUrl: null, updateEveryChange: null, updateAutomatic: null, freeOthers: null,
+   thinking: ["back", "thinking"], updateEveryChange: ["back", "updates"], updateAutomatic: ["back", "updates"], freeOthers: ["back", "freeing other programs' memory"],
