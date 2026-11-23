@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-22: 8 GB cards get Qwen 3.5 4B first
+
+- Models: an 8 GB card was offered qwen3.5:9b first. Measured at 16k context it holds 6.9 GiB of the card, which leaves an 8 GB card no room for speech or pictures. The 4B holds 4.3 GiB and scored 86 (95 shell-only) against the 9B's 100 (`docs/research/measure-tiers-2026-11-22.md`). The 8 GB tier now puts the 4B first and the 9B second. The list's revision is 2, so an installed 0.2.9 takes it from the next release page. Other tiers are unchanged.
+
 ## 2026-11-22: the Measure browser tests expect Measure 6's score
 
 - Tests: dev's browser suite had six Measure tests red in every run since Measure 6 landed (ae48081e). The new weights move the test model's score from 90 to 92 (Instructions 4 of 5 now costs 3 points, Pages 2 of 3 costs 5), and the tests still expected 90 and the old five-part breakdown. They now expect 92, Database 6/6 and an Images row at 3/3. The app is unchanged.

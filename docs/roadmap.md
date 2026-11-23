@@ -846,8 +846,8 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *2026-11-22:* picks from the first tier run (`docs/research/measure-tiers-2026-11-22.md`):
       8 GB qwen3.5:4b (86, 95 shell-only; the 9b holds 6.9 GiB and leaves no room for speech),
       12 GB qwen3.5:9b (100), 16 GB qwen3.5:9b until Measure separates the top. The 12 and 16 GB
-      tiers in `chat-models.json` already match; the 8 GB tier still puts the 9b first and waits
-      for the owner. Shell-only scored the same or higher for four of five models (gpt-oss:20b 81
+      tiers in `chat-models.json` already matched; the owner took the 8 GB swap the same day, so
+      8 GB cards now get the 4b first (list revision 2). Shell-only scored the same or higher for four of five models (gpt-oss:20b 81
       to 95, qwen3.5:4b 86 to 95), one run each.
 - [x] <!-- workspace:id=work:e21cf626-6481-586b-8fe9-c6d620446029 --> Run the tier plan: `pnpm measure:compare <model> --variant default` and again with
       `--variant shell-only` for every candidate below, on the Linux test machine's 16 GB card with

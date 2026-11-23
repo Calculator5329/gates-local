@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "revision": 1,
+  "revision": 2,
   "checked": "2026-11-11",
   "about": "The chat models Gates Local suggests. Edit this file to change the list: no code names a model. Raise revision by one with every edit: an installed copy takes a list from the release page (models.json) only when its revision is higher than the one it has. Each model must be one anyone can fetch with ollama pull. downloadBytes is the sum of layer and config sizes in the registry manifest (registry.ollama.ai/v2/<name>/manifests/<tag>); an installed model uses its own size instead. purpose is four words or fewer and must hold on any computer (no GPU words). The order of models is the rank the app picks a chat model by.",
   "models": [
@@ -20,7 +20,7 @@
     "gpu": [
       { "gb": 4, "picks": ["qwen3.5:4b"] },
       { "gb": 6, "picks": ["qwen3.5:4b"] },
-      { "gb": 8, "picks": ["qwen3.5:9b", "qwen3.5:4b"] },
+      { "gb": 8, "picks": ["qwen3.5:4b", "qwen3.5:9b"] },
       { "gb": 12, "picks": ["qwen3.5:9b", "gemma4:12b"] },
       { "gb": 16, "picks": ["qwen3.5:9b", "gpt-oss:20b", "gemma4:12b"] },
       { "gb": 24, "picks": ["qwen3.8:27b", "gpt-oss:20b", "gemma4:12b"] }

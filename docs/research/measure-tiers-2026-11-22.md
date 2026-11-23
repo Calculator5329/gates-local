@@ -79,5 +79,5 @@ part of it most likely ran on the CPU. Its 84 tok/s is not a clean reading.
 | 12 GB | qwen3.5:9b | The only 100. gemma4:12b is one check behind and about 1.5 times faster. |
 | 16 GB | qwen3.5:9b | Nothing larger beat it; gpt-oss:20b reached 95 only with the shell-only harness. Until Measure separates the top. |
 
-`chat-models.json` already puts qwen3.5:9b first on 12 and 16 GB cards. On 8 GB cards it puts the
-9b first and the 4b second; the swap waits for the owner.
+`chat-models.json` already put qwen3.5:9b first on 12 and 16 GB cards. On 8 GB cards it put the
+9b first; the owner took the swap the same day, and revision 2 of the list puts the 4b first.

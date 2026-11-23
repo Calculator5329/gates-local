@@ -45,7 +45,7 @@ const PROFILES: readonly Profile[] = [
     name: "an 8 GB card and 8 GB of memory, one downloading",
     shot: "dl-a-after-8gb-downloading.png",
     computer: async () => { await stack.computer(7.6); await stack.gpu(0, 8 * 1024 - 150); },
-    picks: ["qwen3.5:9b", "qwen3.5:4b"],
+    picks: ["qwen3.5:4b", "qwen3.5:9b"],
     runs: "split",
     tooBig: ["gpt-oss:20b", "qwen3.8:27b"],
     download: "qwen3.5:4b",
