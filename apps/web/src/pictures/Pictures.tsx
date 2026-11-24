@@ -281,7 +281,6 @@ function TileRow({ row, list, sel, multi, onPick }: { row: Extract<Row, { kind: 
   );
 }
 
-// why: asks for the next page while the window is within MORE_AT of the sheet's end
 function askNearEnd(el: HTMLElement, height: number, next: string | undefined): void {
   if (next !== undefined && el.clientHeight > 0 && el.scrollTop + el.clientHeight > height - MORE_AT) void pictures.more();
 }

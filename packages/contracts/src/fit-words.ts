@@ -2,6 +2,9 @@ import type { FitReport, FitVerdict, FitWords } from "./shapes.ts";
 
 const GIB = 1024 ** 3;
 
+// why: kept free beyond the estimate for allocator slack and the desktop's growth.
+export const VRAM_SAFETY_MARGIN_BYTES = 512 * 1024 ** 2;
+
 /** The no-break space between a number and its unit. */
 export const NBSP = String.fromCharCode(160);
 

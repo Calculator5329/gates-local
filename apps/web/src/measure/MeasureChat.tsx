@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { type MeasureCheck, type MeasureRun, type MeasureTurn, type ModelMeasure, pageBlocks, pageTitle } from "@gates-local/contracts";
+import { type MeasureCheck, type MeasureRun, type MeasureTurn, type ModelMeasure, checksOf, pageBlocks, pageTitle } from "@gates-local/contracts";
 import { Icon } from "../lib/ui/icons.tsx";
 import { TurnSkel } from "../lib/ui/ui.tsx";
 import { useStore } from "../lib/store/store.ts";
@@ -8,7 +8,7 @@ import { Markdown } from "../thread/markdown.tsx";
 import { ThoughtRound, ToolRow } from "../thread/Thread.tsx";
 import { stopMeasure } from "../lib/session/index.ts";
 import { ScoreTop, gradeOf, seconds, whyShown } from "./MeasureScore.tsx";
-import { checksOf, gradedOf } from "./MeasureLive.tsx";
+import { gradedOf } from "./MeasureLive.tsx";
 import { measureOf, runOf } from "./measures.ts";
 
 // why: a page draws as a still chip, as outside a thread there is no page panel for it to open
@@ -127,7 +127,7 @@ function Going({ model, run, graded, asked, onStop }: { model: string; run: Meas
   const of = checksOf(run);
   const loading = run.state === "waiting" || run.done === 0;
   // why: once every check is graded the measure is saved, and only its pages are left to wait on
-  const pages = run.done >= run.total - 1;
+  const pages = run.done > of;
   return (
     <>
       <span className="mc-n">{loading ? "Loading model" : `${graded} of ${of}`}</span>

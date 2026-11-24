@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-23: the unit suite was read for tests to retire, and none were
+
+- Tests: before cutting unit tests, each file was read by planting small breaks in the source it tests (3,081 plants over 223 files) and by putting 27 real past mistakes back. No file read was safe to retire: 128 plants were stopped by one unit file and nothing else, and eight files alone stop a real past bug. The reading was stopped with 98 files unread and the suite stays as it is. What was found and what it does not show is in `docs/research/unit-suite-worth-2026-11.md`.
+
+## 2026-11-23: the card's kept-free memory and Measure's step count each have one owner
+
+- Code: the 512 MB the server keeps free on the card was written three times, in the server's fit, in the web's "of the card kept free" sentence and in the picker's context ruler, with only a comment asking them to agree. It now lives once in contracts and all three read it. Measure's run total (loading, one step per check, then the pages) was built by the server and taken apart by hand in three web places; `measureTotal` and `checksOf` beside `MeasureRun` now own it. Five comments that only restated their code are gone. Nothing a person sees changes.
+
 ## 2026-11-22: the Reset confirm names every setting it resets
 
 - Settings: Reset put five settings back without saying so: thinking, the two update switches, freeing other programs' memory, and the speech server. The confirm now reads "Theme, accent, default model, context, tools, image generation, thinking, updates and freeing other programs' memory go back to how they started" and "Shared instructions, model instructions, reply controls and speech server are cleared". What Reset does is unchanged. The table behind the list no longer allows a setting without words, so a new setting Reset touches fails typecheck until it is named.

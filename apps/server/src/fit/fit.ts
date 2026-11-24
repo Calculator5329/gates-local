@@ -424,7 +424,6 @@ export async function fitEach(deps: FitDeps & { numCtx: number }): Promise<(mode
     try {
       return (await fitWithReadings({ ...deps, reclaim }, model, deps.numCtx, readings)).report;
     } catch {
-      // why: a model whose check fails has no report.
       return undefined;
     }
   };

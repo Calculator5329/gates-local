@@ -1,4 +1,4 @@
-import { NBSP, gb, k, type CatalogEntry, type ContextSize, type FitReport, type FitWords, type GpuOccupant, type Message, type ModelInfo, type PullProgress, type Source } from "@gates-local/contracts";
+import { NBSP, VRAM_SAFETY_MARGIN_BYTES, gb, k, type CatalogEntry, type ContextSize, type FitReport, type FitWords, type GpuOccupant, type Message, type ModelInfo, type PullProgress, type Source } from "@gates-local/contracts";
 
 export { NBSP, gb, k };
 
@@ -95,9 +95,6 @@ export function holderName(o: Pick<GpuOccupant, "kind" | "label">): string {
   return o.kind === "whisper" ? "Whisper" : o.kind === "unknown" ? "Other" : o.label;
 }
 
-// why: the server's VRAM safety margin (fit/constants.ts), which a predicted spill includes
-const CARD_RESERVE = 512 * 1024 ** 2;
-
 export interface SlowReason {
   readonly short: string;
   readonly way: string;
@@ -115,7 +112,7 @@ export function slowReason(slow: { readonly inTheWay: readonly GpuOccupant[]; re
   const off = first === undefined ? `other programs (${gb(unnamedBytes)})` : parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
   const slower = tps === undefined ? "Slower now" : `Slower now, ${tps}`;
   // why: a spill /api/ps reported is said in the present; a predicted one as a prediction, with ~
-  const spill = slow.measured ? `${gb(slow.spillRamBytes)} is in system memory now.` : `Would use ~${gb(slow.spillRamBytes)} of system memory, with ${gb(CARD_RESERVE)} of the card kept free.`;
+  const spill = slow.measured ? `${gb(slow.spillRamBytes)} is in system memory now.` : `Would use ~${gb(slow.spillRamBytes)} of system memory, with ${gb(VRAM_SAFETY_MARGIN_BYTES)} of the card kept free.`;
   return {
     short: first !== undefined && said.includes(first.label) ? slower : `${slower} · ${who} in the way`,
     way: `${who} in the way`,

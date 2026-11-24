@@ -1,4 +1,4 @@
-import type { MeasureRun, MeasurePart, MeasureTurn } from "@gates-local/contracts";
+import { checksOf, type MeasurePart, type MeasureTurn } from "@gates-local/contracts";
 import { NA, type State, useStore } from "../lib/store/store.ts";
 import { nameOf } from "../models/models-rules.ts";
 import { measuringNow, runOf } from "./measures.ts";
@@ -6,9 +6,6 @@ import { measuringNow, runOf } from "./measures.ts";
 const PART_NAME: Readonly<Record<MeasurePart, string>> = { tools: "Tools", files: "Files", database: "Database", instructions: "Instructions", images: "Images", pages: "Pages" };
 
 const labelOf = (s: State, model: string) => nameOf(model, s.catalog === NA ? undefined : s.catalog).text;
-
-// why: a run's steps are loading the model, one per check, then the wait for its pages.
-export const checksOf = (run: MeasureRun) => Math.max(0, run.total - 2);
 
 // why: a page that waits for the window to run it is not graded yet
 export const gradedOf = (turns: readonly MeasureTurn[]) => turns.filter((t) => t.check !== undefined && t.check.state !== "pending").length;

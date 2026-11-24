@@ -1,4 +1,4 @@
-import { makerIn, type CatalogEntry, type MakerRule, type ModelInfo, type PullProgress, type SuggestedList } from "@gates-local/contracts";
+import { VRAM_SAFETY_MARGIN_BYTES, makerIn, type CatalogEntry, type MakerRule, type ModelInfo, type PullProgress, type SuggestedList } from "@gates-local/contracts";
 import { friendlyName, type Verdict } from "../lib/words/format.ts";
 import { chatModels, pendingDownload } from "../models/pick.ts";
 import { NA, type State } from "../lib/store/store.ts";
@@ -73,7 +73,7 @@ export function memoryRuler(need: number, usable: number): { fill: number; overf
 
 export function contextRuler(v: Verdict) {
   if (!v.measured) {
-    const room = Math.max(0, v.avail - 512 * 1024 ** 2);
+    const room = Math.max(0, v.avail - VRAM_SAFETY_MARGIN_BYTES);
     return { ...memoryRuler(v.need, room), room };
   }
   const spill = v.k === "spill" ? v.amt : 0;

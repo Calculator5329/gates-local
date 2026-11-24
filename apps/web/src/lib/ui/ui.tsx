@@ -141,7 +141,6 @@ const holdTip = (el: HTMLDivElement | null): (() => void) | undefined => {
     source = target.getAttribute("data-tip") || target.getAttribute("data-tipt");
     at = target.getBoundingClientRect();
   };
-  // why: a tooltip opens after the pointer rests on its anchor for the hover delay
   const wait = debounce((t: Element) => show(t), TIP_DELAY_MS);
   const cancelWait = () => {
     wait.cancel();

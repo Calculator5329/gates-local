@@ -46,7 +46,6 @@ export async function offerFrom(deps: OfferDeps, r: Readings, refused: FitReport
     try {
       return (await planWith({ ...deps, model, numCtx, busy: deps.busy, ...(deps.comfyPid === undefined ? {} : { comfyPid: deps.comfyPid }) }, r)).report;
     } catch {
-      // why: a candidate whose check fails is left out of the offer.
       return undefined;
     }
   };

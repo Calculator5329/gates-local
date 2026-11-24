@@ -6,8 +6,7 @@ export const UNREPORTED_MAX_CONTEXT = 4096;
 
 export const KV_REFERENCE_CONTEXT = 16 * 1024;
 
-// why: kept free beyond the estimate for allocator slack and the desktop's growth.
-export const VRAM_SAFETY_MARGIN_BYTES = 512 * MIB;
+export { VRAM_SAFETY_MARGIN_BYTES } from "@gates-local/contracts";
 
 export const RAM_SAFETY_MARGIN_BYTES = 2 * GIB;
 

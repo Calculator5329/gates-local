@@ -299,6 +299,9 @@ export const MeasureRun = S.Struct({
   tokensPerSecond: S.optional(S.Finite),
 });
 export type MeasureRun = typeof MeasureRun.Type;
+/** A run's steps are loading the model, one per check, then the wait for its pages. */
+export const measureTotal = (checks: number) => checks + 2;
+export const checksOf = (run: MeasureRun) => Math.max(0, run.total - 2);
 
 /**
  * One check of a Measure run as a chat turn: the question (after any earlier turns the check

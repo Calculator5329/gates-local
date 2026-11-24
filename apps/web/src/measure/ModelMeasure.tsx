@@ -1,4 +1,4 @@
-import type { ModelMeasure } from "@gates-local/contracts";
+import { checksOf, type ModelMeasure } from "@gates-local/contracts";
 import { handleKey } from "../lib/ui/handles.ts";
 import { EARLIER_WORDS, SLOW_WORDS, isEarlier, isOlder, shortWords } from "./MeasureScore.tsx";
 import { Icon } from "../lib/ui/icons.tsx";
@@ -75,7 +75,7 @@ export function MeasureCells({ name, label }: { name: string; label: string }) {
 // why: pressed while its own run goes, the button opens that run's chat rather than starting one
 function MeasureButton({ name, label, run, other }: { name: string; label: string; run: ReturnType<typeof runOf>; other: boolean }) {
   // why: idle is an icon whose tip says Measure; running words must fit the two 64px cells
-  const text = run === undefined ? "" : run.state !== "running" || run.done === 0 ? "Loading model" : run.done === run.total - 1 ? "Grading pages" : `${run.done} / ${run.total}`;
+  const text = run === undefined ? "" : run.state !== "running" || run.done === 0 ? "Loading model" : run.done > checksOf(run) ? "Grading pages" : `${run.done} / ${run.total}`;
   return (
     <span className="mp-meas">
       <button

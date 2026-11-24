@@ -50,5 +50,4 @@ export function callsOf(product: readonly Source[], names: readonly string[]): r
   return product.flatMap((p) => [...p.text.matchAll(call)].map((m) => ({ file: p.file, name: m[1] ?? "", args: argumentsOf(p.text, m.index + m[0].length) })));
 }
 
-// why: a trailing comma after the last argument is allowed
 export const oneArgument = (c: Call): boolean => !c.args.replace(/,\s*$/, "").includes(",");

@@ -1,12 +1,12 @@
-import type { FitReport, MeasureChat, MeasureList, MeasureRun, ModelInfo, ModelMeasure, PageSeen, ShellStatus } from "@gates-local/contracts";
+import { measureTotal, type FitReport, type MeasureChat, type MeasureList, type MeasureRun, type ModelInfo, type ModelMeasure, type PageSeen, type ShellStatus } from "@gates-local/contracts";
 import type { GpuLease } from "../gpu/lease.ts";
 import type { MemoryOwner, Want } from "../gpu/memory.ts";
 import type { Push } from "../app/push.ts";
 import type { ModelLoader } from "../runtime/load.ts";
 import type { SettingsReader } from "../settings/store.ts";
 import { turnSettings } from "../settings/turn.ts";
-import { ensureFixtures } from "./cases.ts";
-import { STEPS, measureModel } from "./suite.ts";
+import { CASES, ensureFixtures } from "./cases.ts";
+import { measureModel } from "./suite.ts";
 import { gradePages, pendingPages, skipPages } from "./score.ts";
 import { measureStore } from "./store.ts";
 import { chatOf, chatStore } from "./chat.ts";
@@ -64,7 +64,7 @@ export function createMeasure(deps: MeasureDeps) {
   let waiting: { model: string; at: number; resolve: () => void; held: (on: boolean) => void } | undefined;
   let starter: Caller | undefined;
   let holder: { model: string; at: number; clientId: number } | undefined;
-  const total = STEPS + 1;
+  const total = measureTotal(CASES.length);
   const step = (run: MeasureRun) => {
     last = run;
     deps.push("models.measuring", run);
