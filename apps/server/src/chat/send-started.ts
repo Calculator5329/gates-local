@@ -16,11 +16,11 @@ export function replySend({ id = `send-${++sends}`, threadId, content, messageId
   } as Params<"reply.send">;
 }
 
-export async function sendTaken(app: Pick<App, "handlers" | "started">, params: Sending, ctx: Ctx = { clientId: 1 }): Promise<{ id: string; turnId: string; admission: Promise<Message>; replayed?: true }> {
+export async function sendTaken(app: Pick<App, "handlers" | "started">, params: Sending, ctx: Ctx = { clientId: 1 }): Promise<{ id: string; turnId: string; admission: Promise<Message>; ended: Promise<void>; replayed?: true }> {
   const send = replySend(params);
   const answer = await app.handlers["reply.send"](send, ctx);
   if (answer.answer === "gone") {
-    if (answer.question !== undefined) return { id: send.id, turnId: `saved-${answer.question.id}`, admission: Promise.resolve(answer.question), replayed: true };
+    if (answer.question !== undefined) return { id: send.id, turnId: `saved-${answer.question.id}`, admission: Promise.resolve(answer.question), ended: Promise.resolve(), replayed: true };
     if (answer.why === "chat-deleted") throw new AppError("thread-not-found", `thread ${params.threadId} is being deleted`);
     throw new Error(`the message is gone: ${answer.why}`);
   }
@@ -40,7 +40,7 @@ export async function sendTaken(app: Pick<App, "handlers" | "started">, params: 
   return { id: send.id, ...started };
 }
 
-export async function sendStarted(app: Pick<App, "handlers" | "started">, params: Sending, ctx: Ctx = { clientId: 1 }): Promise<{ id: string; turnId: string; userMessage: Message; replayed?: true }> {
+export async function sendStarted(app: Pick<App, "handlers" | "started">, params: Sending, ctx: Ctx = { clientId: 1 }): Promise<{ id: string; turnId: string; userMessage: Message; ended: Promise<void>; replayed?: true }> {
   const { admission, ...taken } = await sendTaken(app, params, ctx);
   return { ...taken, userMessage: await admission };
 }

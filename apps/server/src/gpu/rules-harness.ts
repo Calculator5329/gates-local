@@ -1,3 +1,4 @@
+import { copyFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -133,6 +134,19 @@ interface OllamaModel {
   readonly ready: Promise<void>;
   readonly loaded: () => void;
   readonly failed: (reason: unknown) => void;
+}
+
+// why: a new store migrates one fsync at a time; 48 of them passed 30 s on a busy machine
+let migrated: Promise<string> | undefined;
+async function freshStore(dataDir: string) {
+  migrated ??= mkdtemp(path.join(tmpdir(), "gates-gpu-rules-store-")).then((dir) => {
+    const file = path.join(dir, "threads.sqlite");
+    openThreadStore(file).close();
+    return file;
+  });
+  const file = path.join(dataDir, "threads.sqlite");
+  copyFileSync(await migrated, file);
+  return openThreadStore(file);
 }
 
 export type World = Awaited<ReturnType<typeof createWorld>>;
@@ -437,7 +451,7 @@ export async function createWorld(options: WorldOptions) {
     return [...real, ...others];
   };
   const dataDir = await mkdtemp(path.join(tmpdir(), "gates-gpu-rules-"));
-  const store = openThreadStore(path.join(dataDir, "threads.sqlite"));
+  const store = await freshStore(dataDir);
   const owner = createMemoryOwner({
     ollamaUrl: () => runtime.baseUrl(),
     holdsOne,

@@ -225,7 +225,7 @@ export function createApp(deps: AppDeps, rules?: Rules): App {
       pump();
     },
     started(id) {
-      for (const t of turns.values()) if (t.admission !== undefined && replies.of(t.turnId)?.id === id) return { turnId: t.turnId, admission: t.admission };
+      for (const t of turns.values()) if (t.admission !== undefined && replies.of(t.turnId)?.id === id) return { turnId: t.turnId, admission: t.admission, ended: t.ended };
       return undefined;
     },
     async shutdown() {

@@ -74,7 +74,7 @@ export interface App {
   readonly handlers: AppHandlers;
   activeTurns(): number;
   windowGone(window: number): void;
-  started(id: string): { readonly turnId: string; readonly admission: Promise<Message> } | undefined;
+  started(id: string): { readonly turnId: string; readonly admission: Promise<Message>; readonly ended: Promise<void> } | undefined;
   readonly fitTable: Pick<FitTableSource, "changed" | "load">;
   shutdown(): Promise<void>;
   thumbnail(jobId: string): Promise<Buffer | undefined>;

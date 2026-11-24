@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-24: a good engine download no longer fails "Unpacking Ollama failed (Premature close)"
+
+- Install: unpacking a good engine archive could fail with "Unpacking Ollama failed (Premature close)" on a busy machine. GNU tar exits as soon as it reads the end-of-archive mark, which can be before the last bytes of the file reach it; Node then closes tar's input under the feed, and the install took that as a failure even when tar had exited 0. Once tar has exited, its exit code now decides. A test that holds the last bytes back 300 ms reproduced the exact message, and the same forced order passes after the fix. That test is in the suite now (`install-unpack-order.test.ts`), and replay row f01 puts the bug back.
+- Tests: three unit tests timed out or misread on a busy machine. The GPU order rule opened 48 new thread stores, each migrating one disk-synced commit at a time; it took 35 s against its 30 s limit under load, and had been given 120 s. Its worlds now copy one store migrated once, and it takes 11 s under the same load with the old limit back. The chat tools tests polled the running-turn count for one second; a reply that took longer read "expected 1 to be 0". They now wait for the turn's own end, which `app.started()` hands back.
 ## 2026-11-23: the unit suite was read for tests to retire, and none were
 
 - Tests: before cutting unit tests, each file was read by planting small breaks in the source it tests (3,081 plants over 223 files) and by putting 27 real past mistakes back. No file read was safe to retire: 128 plants were stopped by one unit file and nothing else, and eight files alone stop a real past bug. The reading was stopped with 98 files unread and the suite stays as it is. What was found and what it does not show is in `docs/research/unit-suite-worth-2026-11.md`.

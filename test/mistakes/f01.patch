@@ -1,0 +1,19 @@
+Mistake: f01
+Class: K8
+Fix: changelog 2026-11-24
+Browser: no
+Seen: Installing the engine fails with "Unpacking Ollama failed (Premature close)" on a good download, now and then on a busy machine.
+Note: drops the line that lets tar's exit code decide once tar has exited
+
+diff --git a/apps/server/src/runtime/install.ts b/apps/server/src/runtime/install.ts
+index 4b451782..8a1510bb 100644
+--- a/apps/server/src/runtime/install.ts
++++ b/apps/server/src/runtime/install.ts
+@@ -243,7 +243,6 @@ function extract(archive: string, format: InstallManifest["format"], into: strin
+     let fed: Error | undefined;
+     // external: tar exits at its end-of-archive mark and Node closes its stdin under the feed
+     feed.catch((e: Error) => {
+-      if (tar.exitCode !== null) return;
+       fed = e;
+       tar.kill();
+     });

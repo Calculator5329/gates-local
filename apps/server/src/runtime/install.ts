@@ -241,7 +241,9 @@ function extract(archive: string, format: InstallManifest["format"], into: strin
     const decompress = format === "tar.zst" ? zlib.createZstdDecompress() : zlib.createGunzip();
     const feed = pipeline(createReadStream(archive), decompress, tar.stdin);
     let fed: Error | undefined;
+    // external: tar exits at its end-of-archive mark and Node closes its stdin under the feed
     feed.catch((e: Error) => {
+      if (tar.exitCode !== null) return;
       fed = e;
       tar.kill();
     });

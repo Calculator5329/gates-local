@@ -204,8 +204,7 @@ describe("tool chat transport", () => {
     try {
       const thread = store.createThread();
       for (const content of ["first", "second"]) {
-        await sendStarted(app, { threadId: thread.id, content, model: "m", numCtx: 16384, think: true }, { clientId: 1 });
-        await vi.waitFor(() => expect(app.activeTurns()).toBe(0));
+        await (await sendStarted(app, { threadId: thread.id, content, model: "m", numCtx: 16384, think: true }, { clientId: 1 })).ended;
       }
       expect(store.getThread(thread.id).messages[1]).toMatchObject({ content: "answer 1", thinking: "private plan 1" });
       expect(sentMessages(chatBodies.slice(1)).map(m => m.content)).toContain("answer 1");
@@ -329,8 +328,7 @@ describe("tool chat transport", () => {
     });
     try {
       const thread = await app.handlers["threads.create"]({ title: "tools" }, { clientId: 1 });
-      await sendStarted(app, { threadId: thread.id, content: "read", model: "m", numCtx: 16384 }, { clientId: 1 });
-      await vi.waitFor(() => expect(app.activeTurns()).toBe(0));
+      await (await sendStarted(app, { threadId: thread.id, content: "read", model: "m", numCtx: 16384 }, { clientId: 1 })).ended;
       expect(store.getThread(thread.id).messages.at(-1)).toMatchObject({ role: "assistant", content: "hello library", tools: [{ name: "read", state: "done" }] });
       expect(JSON.stringify(pushed)).toContain('"state":"running"');
     } finally { await app.shutdown(); store.close(); vi.unstubAllGlobals(); }
@@ -361,12 +359,10 @@ describe("tool chat transport", () => {
     });
     try {
       const thread = store.createThread();
-      await sendStarted(app, { threadId: thread.id, content: "read", model: "m", numCtx: 16384 }, { clientId: 1 });
-      await vi.waitFor(() => expect(app.activeTurns()).toBe(0));
+      await (await sendStarted(app, { threadId: thread.id, content: "read", model: "m", numCtx: 16384 }, { clientId: 1 })).ended;
       expect(store.getThread(thread.id).messages.at(-1)).toMatchObject({ role: "assistant", content: "answered" });
       expect(chatBodies.map(body => body.tools !== undefined), "both attempts of the running turn offer the tools").toEqual([true, true]);
-      await sendStarted(app, { threadId: thread.id, content: "again", model: "m", numCtx: 16384 }, { clientId: 1 });
-      await vi.waitFor(() => expect(app.activeTurns()).toBe(0));
+      await (await sendStarted(app, { threadId: thread.id, content: "again", model: "m", numCtx: 16384 }, { clientId: 1 })).ended;
       expect(chatBodies.map(body => body.tools !== undefined), "the next turn goes without them").toEqual([true, true, false]);
     } finally { await app.shutdown(); store.close(); vi.unstubAllGlobals(); }
   });
@@ -375,9 +371,8 @@ describe("tool chat transport", () => {
       const t = await imageApp(() => ndjson([{ message: { content: "Here's an image: ![Star Trek Ship](https://example.com/invented.png)" }, done: true }]), undefined, undefined, image);
       try {
         const thread = t.store.createThread();
-        await sendStarted(t.app, { threadId: thread.id, content: "draw", model: "m", numCtx: 16384 }, { clientId: 1 });
         // The turn holds a shared GPU claim to its end; a tool that waited for the picture would never get here.
-        await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+        await (await sendStarted(t.app, { threadId: thread.id, content: "draw", model: "m", numCtx: 16384 }, { clientId: 1 })).ended;
         const offered = t.chatBodies[0]!.tools!.map(tool => tool.function.name);
         if (image) {
           expect(offered).toContain("image");
@@ -405,11 +400,11 @@ describe("tool chat transport", () => {
       const t = await imageApp(hang, gate);
       try {
         const thread = t.store.createThread();
-        const { turnId } = await sendStarted(t.app, { threadId: thread.id, content: "draw", model: "m", numCtx: 16384 }, { clientId: 1 });
+        const { turnId, ended } = await sendStarted(t.app, { threadId: thread.id, content: "draw", model: "m", numCtx: 16384 }, { clientId: 1 });
         await vi.waitFor(() => expect(t.fake.generate).toHaveBeenCalledTimes(1));
         expect(await t.app.handlers["reply.stop"]({ id: turnId }, { clientId: 1 })).toMatchObject({ answer: "done" });
         open?.();
-        await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+        await ended;
         await vi.waitFor(() => expect(t.lease.status()).toEqual({ holder: null, holders: 0, waiting: [] }));
         expect(t.fake.cancel).toHaveBeenCalledWith("job-1");
         expect(t.fake.ran).toEqual([]);
@@ -427,10 +422,10 @@ describe("tool chat transport", () => {
       const t = await imageApp(hang, undefined, first);
       try {
         const thread = t.store.createThread();
-        const { turnId } = await sendStarted(t.app, { threadId: thread.id, content: "draw", model: "m", numCtx: 16384, image: true }, { clientId: 1 });
+        const { turnId, ended } = await sendStarted(t.app, { threadId: thread.id, content: "draw", model: "m", numCtx: 16384, image: true }, { clientId: 1 });
         await vi.waitFor(() => expect(t.pushed).toContainEqual(expect.objectContaining({ payload: expect.objectContaining({ event: { type: "thinking", text: "drawing" } }) })));
         expect(await t.app.handlers["reply.stop"]({ id: turnId }, { clientId: 1 })).toMatchObject({ answer: "done" });
-        await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+        await ended;
         expect(t.pushed).toContainEqual(expect.objectContaining({ payload: expect.objectContaining({ event: { type: "delta", text: held } }) }));
         expect(t.store.getThread(thread.id).messages).toMatchObject([{ role: "user" }, { role: "assistant", content: held, interrupted: true }]);
       } finally { await t.close(); }
@@ -461,8 +456,7 @@ describe("tool chat transport", () => {
       });
       try {
         const thread = store.createThread();
-        await sendStarted(app, { threadId: thread.id, content: "hello", model: "m", numCtx: 16384, think: false, ...(scenario === "tools explicitly off" ? { tools: false } : scenario === "empty Library" ? { tools: true } : {}) }, { clientId: 1 });
-        await vi.waitFor(() => expect(app.activeTurns()).toBe(0));
+        await (await sendStarted(app, { threadId: thread.id, content: "hello", model: "m", numCtx: 16384, think: false, ...(scenario === "tools explicitly off" ? { tools: false } : scenario === "empty Library" ? { tools: true } : {}) }, { clientId: 1 })).ended;
         expect(store.getThread(thread.id).messages.at(-1)).toMatchObject({ role: "assistant", content: "plain reply" });
         expect(chatBodies).toEqual([{ model: "m", messages: [{ role: "user", content: "hello" }], stream: true, think: false, options: { num_ctx: 16384 } }]);
       } finally { await app.shutdown(); store.close(); vi.unstubAllGlobals(); }
@@ -490,8 +484,7 @@ describe("tool chat transport", () => {
       });
       try {
         const thread = store.createThread();
-        await sendStarted(app, { threadId: thread.id, content: "run uname -a", model: "m", numCtx: 16384, think: false, tools: true }, { clientId: 1 });
-        await vi.waitFor(() => expect(app.activeTurns()).toBe(0));
+        await (await sendStarted(app, { threadId: thread.id, content: "run uname -a", model: "m", numCtx: 16384, think: false, tools: true }, { clientId: 1 })).ended;
         expect(chatBodies).toHaveLength(1);
         if (state === "off") expect(chatBodies[0]!.tools).toBeUndefined();
         else expect(chatBodies[0]!.tools?.map(t => t.function.name)).toEqual(["read", "shell"]);
@@ -522,8 +515,7 @@ describe("tool chat transport", () => {
     });
     try {
       const thread = store.createThread();
-      await sendStarted(app, { threadId: thread.id, content: "how often do I water basil", model: "m", numCtx: 16384, think: false, tools: true }, { clientId: 1 });
-      await vi.waitFor(() => expect(app.activeTurns()).toBe(0));
+      await (await sendStarted(app, { threadId: thread.id, content: "how often do I water basil", model: "m", numCtx: 16384, think: false, tools: true }, { clientId: 1 })).ended;
       expect(chatBodies).toHaveLength(1);
       const body = chatBodies[0] as { tools?: unknown; messages: { role: string; content: string }[] };
       expect(body.tools).toBeUndefined();
