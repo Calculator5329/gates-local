@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-24: the past mistakes were put back once more, and the same 8 of 49 get through
+
+- Tests: all 61 rows in `test/mistakes` were replayed on today's code. Of the 49 the run can judge, 8 get through typecheck, lint, the models and the unit suite, down from 19 of 47 at the first reading. The 8 are six places where a screen picks its words inline and two that may not be mistakes; `test/mistakes/through.md` names each. The two rows added this week, a good archive failing to unpack and a one-second poll in a test, are both stopped. No row read as noise.
+
 ## 2026-11-24: server tests wait for a reply's own end, and a lint rule keeps it that way
 
 - Tests: 55 places in the server tests waited for a reply to finish by checking the running-turn count over and over, with limits from one to twenty seconds. On a busy machine a reply could outlast the limit and the test failed with "expected 1 to be 0", the same miss the chat tools tests had. Each one now waits for the reply's own end, which `sendStarted`, `sendTaken` and `app.started()` hand back; no limit was raised. Two of them waited for a count of 1 that is already true when the send returns, and now just check it. The new lint rule `gates/turn-end-not-polled` refuses a `vi.waitFor`, `expect.poll` or `until` callback, or a loop condition, that reads the count; it flags all ten lines of the old chat tools test and all 55 places it was run on before this change.

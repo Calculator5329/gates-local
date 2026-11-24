@@ -1,8 +1,9 @@
 # What would stop the mistakes that still get through
 
-From the reading of 2026-11-22 (`reading.json`, head efbb1f98): 8 of 47 judged
+From the reading of 2026-11-24 (`reading.json`, head 124447f5): 8 of 49 judged
 mistakes get through typecheck, lint, the models and the whole unit suite. The
-first reading, at f26ab416, had 19 of 47. Each line names the cheapest change
+first reading, at f26ab416, had 19 of 47. The 8 are the same as on 2026-11-22;
+the two rows added since (f01, f02) are both stopped. Each line names the cheapest change
 that would stop it, looking first for an architecture change, then a type, then
 a lint rule, then a test.
 
@@ -33,7 +34,7 @@ the screen catches each one.
   changes nothing a person sees today. One admission for Measure would matter if
   Measure should also pause while an update installs, which is undecided.
 
-## What stopped the other eleven
+## What stopped the others
 
 | row | stopped by |
 |---|---|
@@ -41,6 +42,8 @@ the screen catches each one.
 | B071 | lint: `parent-pid-is-passed` (the flaky test no longer carries it) |
 | B041, m02, m38, n38, t13, t03, n27 | one behaviour test each, watched failing with the row's patch |
 | n01 | nothing to stop: the guard it removed was dead and is gone (`no-place-left.tsv`) |
+| f01 | a test that forces the order with real tar (a good archive failing to unpack, found 2026-11-24) |
+| f02 | lint: `turn-end-not-polled` (a one-second poll of the running-turn count in a test) |
 
 For m02, n23, m38, n38, t13 and t03 the state got one owner first. That cut the
 places to one each and did not stop the mistake: a dropped line is a right-typed

@@ -1,6 +1,6 @@
 {
-  "head": "efbb1f98",
-  "date": "2026-11-22",
+  "head": "124447f5",
+  "date": "2026-11-24",
   "only": null,
   "table": [
     "class    planted  typecheck  lint  model-check  unit (related)  unit (whole)  through  not judged here  noise  no place left",
@@ -10,17 +10,17 @@
     "K4       7        0          1     0            6               0             0        0                0      0            ",
     "K5       3        1          0     0            2               0             0        0                0      0            ",
     "K6       6        1          0     0            4               0             0        1                0      0            ",
-    "K8       7        0          1     0            5               0             1        0                0      0            ",
+    "K8       9        0          2     0            6               0             1        0                0      0            ",
     "K9       8        0          0     0            0               0             0        8                0      0            ",
     "K10      2        0          0     0            2               0             0        0                0      0            ",
     "K11      2        0          0     0            2               0             0        0                0      0            ",
     "K12      0        0          0     0            0               0             0        0                0      6            ",
     "K14      5        0          1     0            3               0             1        0                0      2            ",
-    "census   33       1          3     0            22              0             0        7                0      9            ",
+    "census   35       1          4     0            23              0             0        7                0      9            ",
     "planted  26       2          0     0            11              0             8        5                0      0            ",
-    "all      59       3          3     0            33              0             8        12               0      9            ",
+    "all      61       3          4     0            34              0             8        12               0      9            ",
     "",
-    "8 of 47 judged got through (17%)"
+    "8 of 49 judged got through (16%)"
   ],
   "rows": [
     {
@@ -32,9 +32,9 @@
       "verdict": {
         "kind": "caught",
         "layer": "unit (related)",
-        "detail": "apps/server/src/fit/table.test.ts > every context of one model is stated on one basis: a larger context never needs less (+20 more)"
+        "detail": "apps/server/src/fit/fit.test.ts > a model's own context window runs a model that takes at most 2048 at 2048 when more is asked for: memory decides, nothing refuses (+20 more)"
       },
-      "seconds": 105
+      "seconds": 59
     },
     {
       "id": "B010",
@@ -45,9 +45,9 @@
       "verdict": {
         "kind": "caught",
         "layer": "unit (related)",
-        "detail": "apps/web/src/app/ordering-state.test.ts > a dropped window's off-screen marks follow the server's list across completion and hydration (+25 more)"
+        "detail": "apps/web/src/sidebar/sidebar-running.test.ts > sidebar running replies hydrates a reply that started before this window connected (+25 more)"
       },
-      "seconds": 56
+      "seconds": 47
     },
     {
       "id": "B014",
@@ -58,7 +58,7 @@
       "verdict": {
         "kind": "not judged here"
       },
-      "seconds": 150
+      "seconds": 144
     },
     {
       "id": "B022",
@@ -69,9 +69,9 @@
       "verdict": {
         "kind": "caught",
         "layer": "unit (related)",
-        "detail": "packages/harness/src/text-calls.test.ts > a tool call written as the whole reply is run, not shown (owner screenshot 2026-11-11) native path: the screenshot's reply, streamed with no tool_calls, queues one image with its prompt and shows no JSON (+9 more)"
+        "detail": "apps/server/src/chat/tools.test.ts > tool chat transport runs an image call the model wrote as its whole reply, on both paths, and shows it as text only when the image tool is off (+9 more)"
       },
-      "seconds": 38
+      "seconds": 45
     },
     {
       "id": "B024",
@@ -83,7 +83,7 @@
         "kind": "not judged here",
         "red": "caught at unit (whole): test/finder/known.test.ts > the board's cases one-size-popups has its words, an undo and screens that exist"
       },
-      "seconds": 157
+      "seconds": 82
     },
     {
       "id": "B025",
@@ -95,7 +95,7 @@
         "kind": "not judged here",
         "red": "caught at unit (whole): test/finder/known.test.ts > the board's cases sidebar-head-line has its words, an undo and screens that exist"
       },
-      "seconds": 138
+      "seconds": 136
     },
     {
       "id": "B033",
@@ -106,9 +106,9 @@
       "verdict": {
         "kind": "caught",
         "layer": "unit (related)",
-        "detail": "apps/server/src/fit/fit.test.ts > nvidia-smi parsing two cards are judged together a model too big for the large card alone fits on both, less one margin per card (+3 more)"
+        "detail": "apps/server/src/fit/in-the-way.test.ts > the 27B at 16K: fits the card, spills right now, and the card names Whisper first, then as many as cover the spill (+3 more)"
       },
-      "seconds": 96
+      "seconds": 62
     },
     {
       "id": "B035",
@@ -119,9 +119,9 @@
       "verdict": {
         "kind": "caught",
         "layer": "unit (related)",
-        "detail": "apps/server/src/chat/shell.test.ts > asks the sandbox again only after a failed check has stood a while, and never again once it passed (+2 more)"
+        "detail": "packages/harness/src/sandbox/sandbox.test.ts > sandbox probe turns the shell off with a reason, never a throw, when bwrap fails its own check (seen on a WSL runner) (+2 more)"
       },
-      "seconds": 55
+      "seconds": 59
     },
     {
       "id": "B036",
@@ -134,7 +134,7 @@
         "layer": "unit (related)",
         "detail": "apps/server/src/chat/shell.test.ts > ready with sqlite3 is plain ready; without it the status says what cannot be done"
       },
-      "seconds": 14
+      "seconds": 10
     },
     {
       "id": "B038",
@@ -147,7 +147,7 @@
         "layer": "unit (related)",
         "detail": "apps/server/src/chat/times.test.ts > turnClock (chat row 32, decision 33) times a warm reply's thought from ready to its first answer word, and each round"
       },
-      "seconds": 32
+      "seconds": 22
     },
     {
       "id": "B039",
@@ -159,7 +159,7 @@
         "kind": "not judged here",
         "red": "caught at unit (whole): test/finder/known.test.ts > the board's cases thought-through-settings has its words, an undo and screens that exist"
       },
-      "seconds": 169
+      "seconds": 76
     },
     {
       "id": "B041",
@@ -172,7 +172,7 @@
         "layer": "unit (related)",
         "detail": "apps/web/src/lib/store/store.test.ts > the set of chats with a reply on its way stays the same object while words arrive, and is new only when a chat joins or leaves it"
       },
-      "seconds": 30
+      "seconds": 24
     },
     {
       "id": "B043",
@@ -183,7 +183,7 @@
       "verdict": {
         "kind": "not judged here"
       },
-      "seconds": 156
+      "seconds": 63
     },
     {
       "id": "B044",
@@ -196,7 +196,7 @@
         "layer": "unit (related)",
         "detail": "apps/server/src/runtime/pull.test.ts > models.pull gives no total while the registry is still being asked, then the true one when done"
       },
-      "seconds": 32
+      "seconds": 22
     },
     {
       "id": "B045",
@@ -209,7 +209,7 @@
         "layer": "unit (related)",
         "detail": "apps/server/src/runtime/pull.test.ts > models.pull when the registry has no answer, the total is the running sum of the files Ollama has named (+2 more)"
       },
-      "seconds": 32
+      "seconds": 23
     },
     {
       "id": "B048",
@@ -225,7 +225,7 @@
           "no-unused-vars"
         ]
       },
-      "seconds": 5
+      "seconds": 4
     },
     {
       "id": "B053",
@@ -238,7 +238,7 @@
         "layer": "unit (related)",
         "detail": "apps/web/src/composer/composer-keys.test.ts > Enter with words typed and Send off opens the memory panel on a memory refusal, and otherwise shows Send's reason at Send (+1 more)"
       },
-      "seconds": 21
+      "seconds": 16
     },
     {
       "id": "B054",
@@ -249,7 +249,7 @@
       "verdict": {
         "kind": "not judged here"
       },
-      "seconds": 182
+      "seconds": 78
     },
     {
       "id": "B056",
@@ -265,7 +265,7 @@
           "no-unused-vars"
         ]
       },
-      "seconds": 5
+      "seconds": 4
     },
     {
       "id": "B059",
@@ -276,7 +276,7 @@
       "verdict": {
         "kind": "not judged here"
       },
-      "seconds": 192
+      "seconds": 83
     },
     {
       "id": "B065",
@@ -289,7 +289,7 @@
         "layer": "unit (related)",
         "detail": "packages/harness/src/harness.test.ts > what the user saw is what is saved: the concatenated deltas are the saved content (T2-04) text mode: a cut a lone < keeps no call syntax in the interrupted message or the saved content (+5 more)"
       },
-      "seconds": 46
+      "seconds": 26
     },
     {
       "id": "B066",
@@ -302,7 +302,7 @@
         "layer": "unit (related)",
         "detail": "apps/server/src/chat/tools.test.ts > tool chat transport an empty Library with Run commands ready offers the shell (+1 more)"
       },
-      "seconds": 46
+      "seconds": 24
     },
     {
       "id": "B068",
@@ -315,7 +315,7 @@
         "layer": "unit (related)",
         "detail": "apps/web/src/composer/draft-recovery.test.ts > TD-14: recovery preserves a cleared editor and never replaces its marker with another saved edit (+3 more)"
       },
-      "seconds": 31
+      "seconds": 23
     },
     {
       "id": "B070",
@@ -328,7 +328,7 @@
         "layer": "unit (related)",
         "detail": "apps/server/src/fit/table.test.ts > two cards, a small display card listed first: every row is judged against both, the line names them (+3 more)"
       },
-      "seconds": 76
+      "seconds": 52
     },
     {
       "id": "B071",
@@ -344,7 +344,7 @@
           "gates/parent-pid-is-passed"
         ]
       },
-      "seconds": 5
+      "seconds": 4
     },
     {
       "id": "B076",
@@ -357,7 +357,7 @@
         "layer": "unit (related)",
         "detail": "apps/server/src/threads/copies.test.ts > copies before schema upgrades saves the copy on Windows, where a folder cannot be flushed and a file only through a handle that may write"
       },
-      "seconds": 42
+      "seconds": 34
     },
     {
       "id": "B080",
@@ -370,7 +370,7 @@
         "layer": "unit (related)",
         "detail": "apps/server/src/runtime/load.test.ts > runtime generation a GPU-poll reading of A that answers after the switch prunes nothing and reads as empty"
       },
-      "seconds": 53
+      "seconds": 32
     },
     {
       "id": "B087",
@@ -383,7 +383,7 @@
         "layer": "unit (related)",
         "detail": "apps/web/src/thread/turn.test.ts > reduceTurn an error without a saved row keeps the turn with why it ended (+3 more)"
       },
-      "seconds": 35
+      "seconds": 22
     },
     {
       "id": "B095",
@@ -394,9 +394,9 @@
       "verdict": {
         "kind": "caught",
         "layer": "typecheck",
-        "detail": "apps/web typecheck: src/settings/Settings.tsx(751,57): error TS2353: Object literal may only specify known properties, and 'textSize' does not exist in type 'Record<\"accent\" | \"comfyUrl\" | \"defaultModel\" | \"defaultNumCtx\" | \"freeOthers\" | \"imageChoice\" | \"imageFolder\" | \"imageGen\" | \"imageTool\" | \"modelSettings\" | \"systemPrompt\" | \"theme\" | ... 4 more ... | \"whisperUrl\", readonly [...] | null>'."
+        "detail": "apps/web typecheck: src/settings/Settings.tsx(751,57): error TS2353: Object literal may only specify known properties, and 'textSize' does not exist in type 'Record<\"accent\" | \"comfyUrl\" | \"defaultModel\" | \"defaultNumCtx\" | \"freeOthers\" | \"imageChoice\" | \"imageFolder\" | \"imageGen\" | \"imageTool\" | \"modelSettings\" | \"systemPrompt\" | \"theme\" | ... 4 more ... | \"whisperUrl\", readonly [...]>'."
       },
-      "seconds": 4
+      "seconds": 3
     },
     {
       "id": "B096",
@@ -409,7 +409,7 @@
         "layer": "unit (related)",
         "detail": "packages/update/src/process-state.test.ts > process liveness distinguishes exited zombies from running, sleeping and stopped processes"
       },
-      "seconds": 64
+      "seconds": 36
     },
     {
       "id": "B097",
@@ -422,7 +422,7 @@
         "layer": "unit (related)",
         "detail": "packages/update/src/run-signal.test.ts > listens for Ctrl+C before a command starts, and stops listening when it ends (+1 more)"
       },
-      "seconds": 58
+      "seconds": 34
     },
     {
       "id": "B100",
@@ -435,7 +435,7 @@
         "layer": "unit (related)",
         "detail": "apps/server/src/image/own.test.ts > createOwnComfy is not installed until an engine tree is whole, then starts on its own port and stops (+11 more)"
       },
-      "seconds": 151
+      "seconds": 136
     },
     {
       "id": "B103",
@@ -448,7 +448,36 @@
         "layer": "unit (related)",
         "detail": "packages/update/src/installed/download.test.ts > downloading a version writes an AppImage executable, so a person who puts it in place can start it"
       },
-      "seconds": 26
+      "seconds": 21
+    },
+    {
+      "id": "f01",
+      "class": "K8",
+      "fix": "changelog 2026-11-24",
+      "browser": false,
+      "seen": "Installing the engine fails with \"Unpacking Ollama failed (Premature close)\" on a good download, now and then on a busy machine.",
+      "verdict": {
+        "kind": "caught",
+        "layer": "unit (related)",
+        "detail": "apps/server/src/runtime/install-unpack-order.test.ts > a good archive unpacks when tar exits before its input ends"
+      },
+      "seconds": 80
+    },
+    {
+      "id": "f02",
+      "class": "K8",
+      "fix": "changelog 2026-11-24",
+      "browser": false,
+      "seen": "A landing that touched no chat code is refused now and then on a busy machine: a chat tools test reads \"expected 1 to be 0\".",
+      "verdict": {
+        "kind": "caught",
+        "layer": "lint",
+        "detail": "gates/turn-end-not-polled",
+        "rules": [
+          "gates/turn-end-not-polled"
+        ]
+      },
+      "seconds": 5
     },
     {
       "id": "m02",
@@ -461,7 +490,7 @@
         "layer": "unit (related)",
         "detail": "apps/web/src/updates/update-ask.test.ts > Download says Downloading the moment it is pressed, before the server answers, and a refused download says it failed"
       },
-      "seconds": 30
+      "seconds": 25
     },
     {
       "id": "m06",
@@ -474,7 +503,7 @@
         "layer": "unit (related)",
         "detail": "apps/server/src/app/app-state.test.ts > a chat delete waits for the start-up sweep of pasted images before the chat leaves the store"
       },
-      "seconds": 44
+      "seconds": 58
     },
     {
       "id": "m12",
@@ -486,7 +515,7 @@
         "kind": "not judged here",
         "red": "caught at lint: gates/class-in-css"
       },
-      "seconds": 5
+      "seconds": 6
     },
     {
       "id": "m15",
@@ -499,7 +528,7 @@
         "layer": "unit (related)",
         "detail": "apps/web/src/lib/words/window-words.test.ts > the window's words for a file's size an empty file (+2 more)"
       },
-      "seconds": 31
+      "seconds": 30
     },
     {
       "id": "m24",
@@ -510,7 +539,7 @@
       "verdict": {
         "kind": "not judged here"
       },
-      "seconds": 167
+      "seconds": 83
     },
     {
       "id": "m32",
@@ -521,7 +550,7 @@
       "verdict": {
         "kind": "through"
       },
-      "seconds": 154
+      "seconds": 92
     },
     {
       "id": "m38",
@@ -534,7 +563,7 @@
         "layer": "unit (related)",
         "detail": "apps/desktop/test/supervisor.test.ts > Supervisor reports an exit before ready with its code and stderr, and its ready timer later adds no 'no ready line'"
       },
-      "seconds": 32
+      "seconds": 29
     },
     {
       "id": "m46",
@@ -545,7 +574,7 @@
       "verdict": {
         "kind": "not judged here"
       },
-      "seconds": 137
+      "seconds": 70
     },
     {
       "id": "m48",
@@ -558,7 +587,7 @@
         "layer": "unit (related)",
         "detail": "apps/web/src/models/download-rows.test.ts > the line about other programs names one, two, the first and how many more, or just other programs"
       },
-      "seconds": 31
+      "seconds": 22
     },
     {
       "id": "m49",
@@ -571,7 +600,7 @@
         "layer": "typecheck",
         "detail": "apps/desktop typecheck: scripts/install-linux.ts(19,3): error TS2322: Type 'string' is not assignable to type 'DataHome'."
       },
-      "seconds": 4
+      "seconds": 3
     },
     {
       "id": "n07",
@@ -582,7 +611,7 @@
       "verdict": {
         "kind": "through"
       },
-      "seconds": 158
+      "seconds": 76
     },
     {
       "id": "n08",
@@ -594,7 +623,7 @@
         "kind": "not judged here",
         "red": "caught at lint: gates/class-in-css"
       },
-      "seconds": 5
+      "seconds": 4
     },
     {
       "id": "n10",
@@ -607,7 +636,7 @@
         "layer": "unit (related)",
         "detail": "apps/web/src/pictures/Pictures-screen.test.ts > keys the arrows pick the next or previous picture, stop at the ends, and move focus to its tile unless it is shown large"
       },
-      "seconds": 33
+      "seconds": 20
     },
     {
       "id": "n23",
@@ -618,7 +647,7 @@
       "verdict": {
         "kind": "through"
       },
-      "seconds": 148
+      "seconds": 76
     },
     {
       "id": "n27",
@@ -631,7 +660,7 @@
         "layer": "unit (related)",
         "detail": "apps/server/src/image/linux-lock.test.ts > writes every pinned hash the way pip's hash check reads it, 64 hex characters after sha256"
       },
-      "seconds": 17
+      "seconds": 14
     },
     {
       "id": "n32",
@@ -642,7 +671,7 @@
       "verdict": {
         "kind": "through"
       },
-      "seconds": 140
+      "seconds": 71
     },
     {
       "id": "n36",
@@ -655,7 +684,7 @@
         "layer": "unit (related)",
         "detail": "apps/web/src/lib/session/session-actions.test.ts > a long refusal is cut to 120 characters in the sentence, and one of 120 stays whole"
       },
-      "seconds": 31
+      "seconds": 21
     },
     {
       "id": "n38",
@@ -668,7 +697,7 @@
         "layer": "unit (related)",
         "detail": "apps/desktop/src/main-checkout-start.test.ts > Update in a running checkout starts the updater and closes the app, so the updater is not left waiting on it"
       },
-      "seconds": 19
+      "seconds": 15
     },
     {
       "id": "n41",
@@ -694,7 +723,7 @@
         "layer": "unit (related)",
         "detail": "apps/server/src/sources/imports.test.ts > repository imports a git that prints without end fails as too large instead of running until the timeout"
       },
-      "seconds": 69
+      "seconds": 52
     },
     {
       "id": "t08",
@@ -705,7 +734,7 @@
       "verdict": {
         "kind": "not judged here"
       },
-      "seconds": 139
+      "seconds": 68
     },
     {
       "id": "t13",
@@ -718,7 +747,7 @@
         "layer": "unit (related)",
         "detail": "apps/server/test/app.test.ts > Stop while a pasted picture is being saved ends the reply as stopped, not as a picture error"
       },
-      "seconds": 61
+      "seconds": 43
     },
     {
       "id": "t39",
@@ -729,7 +758,7 @@
       "verdict": {
         "kind": "through"
       },
-      "seconds": 131
+      "seconds": 71
     },
     {
       "id": "t40",
@@ -740,7 +769,7 @@
       "verdict": {
         "kind": "through"
       },
-      "seconds": 143
+      "seconds": 95
     },
     {
       "id": "t42",
@@ -751,7 +780,7 @@
       "verdict": {
         "kind": "through"
       },
-      "seconds": 136
+      "seconds": 72
     },
     {
       "id": "t47",
@@ -762,7 +791,7 @@
       "verdict": {
         "kind": "through"
       },
-      "seconds": 159
+      "seconds": 82
     }
   ]
 }
