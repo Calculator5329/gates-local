@@ -5,6 +5,7 @@ import type { Message } from "@gates-local/contracts";
 import { afterEach, expect, it, vi } from "vitest";
 import { createApp } from "../app.ts";
 import { entry, waits } from "../chat/queue-testing.ts";
+import { endOf } from "../chat/send-started.ts";
 import { createReplies, type Ready, type Replies } from "../chat/replies.ts";
 import type { RuntimeState, RuntimeStatus } from "../runtime/types.ts";
 import { openThreadStore, type ThreadStore } from "../threads/store.ts";
@@ -148,6 +149,9 @@ function appRig(start: RuntimeState) {
   const status = (): RuntimeStatus => ({ state, owner: "external", baseUrl: "http://fake" });
   const listeners: ((status: RuntimeStatus) => void)[] = [];
   const signal = new AbortController().signal;
+  let admitted!: (ended: Promise<void>) => void;
+  /** The end of send `q1`'s turn, read when the loader admits it. */
+  const q1Ended = new Promise<void>((resolve) => (admitted = resolve));
   const app = createApp({
     store: db,
     runtime: {
@@ -160,6 +164,7 @@ function appRig(start: RuntimeState) {
     models: { handlers: {}, loader: { reserve: () => ({
       baseUrl: "http://fake", signal, cold: false, firstToken: () => {}, end: () => {},
       admit: async (_ctx, options) => {
+        admitted(endOf(app, "q1"));
         if (options?.fit === undefined) throw new Error("missing app fit");
         return options.fit(signal, { handoff: undefined, leave: async () => undefined });
       },
@@ -170,7 +175,7 @@ function appRig(start: RuntimeState) {
     state = next;
     for (const listener of listeners) listener(status());
   };
-  return { app, db, thread, change };
+  return { app, db, thread, change, q1Ended };
 }
 
 it("a message typed while Ollama is still being set up goes as soon as the runtime turns ready, with nothing else happening", async () => {
@@ -181,6 +186,6 @@ it("a message typed while Ollama is still being set up goes as soon as the runti
   await turnsOver(4);
   expect(r.db.getMessage("m-q1"), "nothing goes while Ollama is being set up").toBeUndefined();
   r.change("ready");
-  await until(() => r.db.getMessage("m-q1") !== undefined && r.app.activeTurns() === 0, "the waiting message sent");
+  await r.q1Ended;
   expect(r.db.getThread(r.thread.id).messages.map((m) => [m.role, m.content])).toEqual([["user", "hello"], ["assistant", "ok"]]);
 });

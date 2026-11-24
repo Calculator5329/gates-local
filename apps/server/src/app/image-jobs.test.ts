@@ -174,23 +174,23 @@ describe("deleting a thread takes back its image jobs", () => {
 describe("the image tool's job and the turn that queued it", () => {
   it("a Stop after the image tool has returned takes back the picture it queued", async () => {
     const t = await rig();
-    const { turnId } = await t.chat();
+    const { turnId, ended } = await t.chat();
     await vi.waitFor(() => expect(t.chats()).toBe(2));
     expect(t.fake.generate).toHaveBeenCalledOnce();
     expect(t.fake.cancel).not.toHaveBeenCalled();
     expect(await t.app.handlers["reply.stop"]({ id: turnId }, CTX)).toMatchObject({ answer: "done" });
-    await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+    await ended;
     expect(t.fake.cancel).toHaveBeenCalledWith("job-1");
     expect(t.store.getMessage("job-1")?.imageJob).toMatchObject({ state: "cancelled" });
   });
 
   it("deleting a thread while its reply still runs takes back the picture the reply already queued, and answers once that picture has ended", async () => {
     const t = await rig({ slowCancel: true });
-    await t.chat();
+    const { ended } = await t.chat();
     await vi.waitFor(() => expect(t.chats()).toBe(2));
     const deleting = tracked(t.remove(t.thread.id));
-    await vi.waitFor(() => expect(t.fake.cancel).toHaveBeenCalledWith("job-1"));
-    await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+    await ended;
+    expect(t.fake.cancel).toHaveBeenCalledWith("job-1");
     await settle();
     expect(deleting.state.done).toBe(false);
     t.fake.end("job-1", "cancelled");
@@ -212,10 +212,10 @@ describe("an Image mode turn", () => {
 
   it("deleting its question while it draws cancels the picture and takes the card away with the question", async () => {
     const t = await rig();
-    const { turnId, userMessage } = await t.draw();
+    const { turnId, userMessage, ended } = await t.draw();
     expect(await within(3000, Promise.resolve(t.app.handlers["messages.delete"]!({ threadId: t.thread.id, messageId: userMessage.id }, CTX)), "messages.delete")).toEqual({ messageId: userMessage.id });
     expect(t.fake.cancel).toHaveBeenCalledWith("job-1");
-    await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+    await ended;
     expect(t.store.getThread(t.thread.id).messages).toEqual([]);
     expect(t.events(turnId).at(-1)).toMatchObject({ type: "error", code: "cancelled" });
   });
@@ -230,21 +230,21 @@ describe("an Image mode turn", () => {
 
   it("holds no chat claim on the GPU while it draws", async () => {
     const t = await rig();
-    const { turnId } = await t.draw();
+    const { turnId, ended } = await t.draw();
     await settle();
     expect(t.lease.status().holders).toBe(0);
     t.fake.end("job-1", "done");
-    await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+    await ended;
     expect(t.acquire.mock.calls.map(([kind]) => kind)).not.toContain("chat");
     expect(t.events(turnId).at(-1)).toMatchObject({ type: "done" });
   });
 
   it("a picture that fails ends the turn with its card, and the card says why", async () => {
     const t = await rig();
-    const { turnId } = await t.draw();
+    const { turnId, ended } = await t.draw();
     const why = "The picture needed more GPU memory than was free; try a smaller size.";
     t.fake.end("job-1", "error", { message: why, errorKind: "wont-fit" });
-    await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+    await ended;
     expect(t.events(turnId).at(-1)).toMatchObject({ type: "done", message: { id: "job-1", imageJob: { state: "error", message: why } } });
     expect(t.store.getThread(t.thread.id).messages.at(-1)?.imageJob).toMatchObject({ state: "error", message: why });
   });

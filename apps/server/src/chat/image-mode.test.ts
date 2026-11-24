@@ -90,8 +90,7 @@ describe("Tools › Make images decides whether a chat model is offered the imag
   it("off: the chat request offers no image tool, and an old client's image: true does not turn it on", async () => {
     const t = await rig();
     try {
-      await t.send({ image: true });
-      await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+      await (await t.send({ image: true })).ended;
       const offered = t.chatBodies[0]!.tools!.map((tool) => tool.function.name);
       expect(offered).toContain("read");
       expect(offered).not.toContain("image");
@@ -102,8 +101,7 @@ describe("Tools › Make images decides whether a chat model is offered the imag
   it("on: the chat request offers the image tool, and the model's call starts one job with the app's chosen preset and size", async () => {
     const t = await rig({ imageTool: CHOSEN });
     try {
-      await t.send();
-      await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+      await (await t.send()).ended;
       expect(t.chatBodies[0]!.tools!.map((tool) => tool.function.name)).toContain("image");
       expect(t.generate).toHaveBeenCalledOnce();
       expect(t.generate).toHaveBeenCalledWith({ prompt: "a cat", threadId: t.thread.id, choice: CHOSEN });
@@ -114,8 +112,7 @@ describe("Tools › Make images decides whether a chat model is offered the imag
     const t = await rig({ imageTool: CHOSEN });
     try {
       t.store.setImageChoice(t.thread.id, DRAWN);
-      await t.send();
-      await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+      await (await t.send()).ended;
       expect(t.generate).toHaveBeenCalledWith({ prompt: "a cat", threadId: t.thread.id, choice: DRAWN });
     } finally { await t.close(); }
   });
@@ -142,7 +139,7 @@ describe("Image mode: the typed words go straight to the image model", () => {
       try {
         const sent = await t.send({ draw: DRAWN });
         expect(sent.userMessage).toMatchObject({ role: "user", content: "a lighthouse at dusk" });
-        await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+        await sent.ended;
         expect(t.requests).toEqual([]);
         expect(t.generate).toHaveBeenCalledOnce();
         expect(t.generate).toHaveBeenCalledWith({ prompt: "a lighthouse at dusk", threadId: t.thread.id, choice: DRAWN });
@@ -160,11 +157,11 @@ describe("Image mode: the typed words go straight to the image model", () => {
   it("is a running turn until the image ends: a second send waits its turn, and Stop cancels the job", async () => {
     const t = await rig({ hold: true });
     try {
-      const { id, turnId } = await t.send({ draw: DRAWN });
+      const { id, turnId, ended } = await t.send({ draw: DRAWN });
       expect(await t.app.handlers["reply.list"]!({}, { clientId: 1 })).toMatchObject([{ reply: { id, threadId: t.thread.id, stage: "drawing" } }]);
       await expect(t.send({ draw: DRAWN })).rejects.toMatchObject({ code: "turn-active" });
       expect(await t.app.handlers["reply.stop"]({ id: turnId }, { clientId: 1 })).toMatchObject({ answer: "done" });
-      await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+      await ended;
       expect(t.cancel).toHaveBeenCalledWith("job-1");
       expect(t.store.getThread(t.thread.id).messages.at(-1)!.imageJob).toMatchObject({ state: "cancelled" });
       expect(t.events.at(-1)).toMatchObject({ type: "done", message: { imageJob: { state: "cancelled" } } });
@@ -175,10 +172,8 @@ describe("Image mode: the typed words go straight to the image model", () => {
   it("an edited prompt sent again is a new turn with its own picture; the first stays", async () => {
     const t = await rig();
     try {
-      await t.send({ draw: DRAWN });
-      await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
-      await sendStarted(t.app, { threadId: t.thread.id, content: "a lighthouse at dawn", model: "m", numCtx: 16384, draw: DRAWN }, { clientId: 1 });
-      await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+      await (await t.send({ draw: DRAWN })).ended;
+      await (await sendStarted(t.app, { threadId: t.thread.id, content: "a lighthouse at dawn", model: "m", numCtx: 16384, draw: DRAWN }, { clientId: 1 })).ended;
       expect(t.store.getThread(t.thread.id).messages.map((m) => [m.role, m.content, m.imageJob?.state])).toEqual([
         ["user", "a lighthouse at dusk", undefined], ["assistant", "a lighthouse at dusk", "done"],
         ["user", "a lighthouse at dawn", undefined], ["assistant", "a lighthouse at dawn", "done"],
@@ -192,10 +187,9 @@ describe("Image mode: the typed words go straight to the image model", () => {
     try {
       const first = await t.send({ draw: DRAWN });
       await t.app.handlers["reply.stop"]({ id: first.turnId }, { clientId: 1 });
-      await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+      await first.ended;
       t.release();
-      await t.send({ draw: DRAWN, retryOf: first.userMessage.id });
-      await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+      await (await t.send({ draw: DRAWN, retryOf: first.userMessage.id })).ended;
       expect(t.store.getThread(t.thread.id).messages.map((m) => [m.role, m.imageJob?.state])).toEqual([["user", undefined], ["assistant", "done"]]);
     } finally { await t.close(); }
   });
@@ -203,7 +197,7 @@ describe("Image mode: the typed words go straight to the image model", () => {
   it("a count of 3: three jobs one after another, seeds one apart, one group; the thread keeps 3, and Stop keeps the finished picture", async () => {
     const t = await rig({ hold: true, firstDone: true });
     try {
-      const { turnId } = await t.send({ draw: DRAWN, drawCount: 3 });
+      const { turnId, ended } = await t.send({ draw: DRAWN, drawCount: 3 });
       expect(t.generate).toHaveBeenCalledTimes(3);
       const sent = t.generate.mock.calls.map(([p]) => ({ group: p.group!, seed: p.seed! }));
       expect(sent.map((p) => [p.group.index, p.group.of])).toEqual([[0, 3], [1, 3], [2, 3]]);
@@ -212,12 +206,11 @@ describe("Image mode: the typed words go straight to the image model", () => {
       expect(t.store.getThread(t.thread.id).thread.imageCount).toBe(3);
       await vi.waitFor(() => expect(t.store.getMessage("job-1")?.imageJob?.state).toBe("done"));
       await t.app.handlers["reply.stop"]({ id: turnId }, { clientId: 1 });
-      await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+      await ended;
       expect(t.store.getThread(t.thread.id).messages.map((m) => m.imageJob?.state)).toEqual([undefined, "done", "cancelled", "cancelled"]);
       // the thread's next send makes three again without saying so
       t.release();
-      await t.send({ draw: DRAWN, content: "again" });
-      await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+      await (await t.send({ draw: DRAWN, content: "again" })).ended;
       expect(t.generate).toHaveBeenCalledTimes(6);
     } finally { t.release(); await t.close(); }
   });
@@ -250,8 +243,12 @@ describe("a chat turn's end", () => {
       const acquire = t.lease.acquire.bind(t.lease);
       let sentAtRelease: unknown;
       let activeAtRelease: number | undefined;
+      let secondClaimed!: (ended: Promise<void>) => void;
+      const second = new Promise<void>((resolve) => (secondClaimed = resolve));
       t.lease.acquire = async (kind, signal) => {
         const release = await acquire(kind, signal);
+        const ended = t.app.started("second")?.ended;
+        if (ended !== undefined) secondClaimed(ended);
         return () => {
           if (kind === "chat" && sentAtRelease === undefined) {
             activeAtRelease = t.app.activeTurns();
@@ -260,12 +257,11 @@ describe("a chat turn's end", () => {
           release();
         };
       };
-      await t.send();
-      await vi.waitFor(() => expect(sentAtRelease).toBeDefined());
+      await (await t.send()).ended;
       expect(activeAtRelease).toBe(1);
       expect(await sentAtRelease).toMatchObject({ answer: "done", reply: { id: "second", stage: "queued" } });
-      await vi.waitFor(() => expect(t.store.getThread(t.thread.id).messages.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["a lighthouse at dusk", "second"]));
-      await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+      await second;
+      expect(t.store.getThread(t.thread.id).messages.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["a lighthouse at dusk", "second"]);
     } finally { await t.close(); }
   });
 });

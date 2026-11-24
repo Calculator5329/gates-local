@@ -13,7 +13,7 @@ import type { SavedEntry } from "./queue-file.ts";
 import { sentFree, waits as joins } from "./queue-testing.ts";
 import { type Replies, type SendNow, type Sent, createReplies } from "./replies.ts";
 import { type Call as Asked, type Event, type Queued, type Rec, type Stage, type Words, fromQueued, heardAs, move, shownStage, stillStarting, toQueued } from "./reply.ts";
-import { sendTaken } from "./send-started.ts";
+import { endOf, sendTaken } from "./send-started.ts";
 
 /** Where a case starts: a reply the server has taken and not started, one being written, one a Stop was taken for. */
 type From = "starting" | "writing" | "stopping";
@@ -1221,12 +1221,13 @@ describe("reply.send, through the app", () => {
     const r = rig({ drip: true });
     r.open();
     await r.h["reply.send"](said(r), { clientId: ME });
+    const ended = endOf(r.app, "q1");
     await until(() => toldStages(r).at(-1) === "writing", "the reply being written");
     // busy: a Retry does not wait
     await expect(r.h["reply.send"](said(r, { id: "q2", messageId: "m-q2", retryOf: "m-q1" }), { clientId: ME })).rejects.toMatchObject({ code: "turn-active" });
     await r.h["reply.stop"]({ id: "q1" }, { clientId: ME });
     await until(() => toldStages(r).at(-1)?.startsWith("stopped") === true, "the stopped reply's end");
-    await until(() => r.app.activeTurns() === 0, "its work gone");
+    await ended;
     expect(await r.h["reply.send"](said(r, { id: "q2", messageId: "m-q2", retryOf: "m-q1" }), { clientId: ME })).toMatchObject({ answer: "done", reply: { id: "q2", stage: "starting", retryOf: "m-q1" } });
     await until(() => r.starts().length === 2, "the Retry's start");
     r.finish();
@@ -1238,8 +1239,8 @@ describe("reply.send, through the app", () => {
     const r = rig();
     r.open();
     await r.h["reply.send"](said(r), { clientId: ME });
+    await endOf(r.app, "q1");
     await until(() => toldStages(r).at(-1) === "done +1", "the first reply's end");
-    await until(() => r.app.activeTurns() === 0, "its work gone");
     const before = r.db.getThread(r.thread.id).messages;
     r.refusals.push(new AppError("wont-fit", "it does not fit"));
     await r.h["reply.send"](said(r, { id: "q2", messageId: "m-q2", retryOf: "m-q1" }), { clientId: ME });
@@ -1253,8 +1254,8 @@ describe("reply.send, through the app", () => {
     const r = rig();
     r.open();
     await r.h["reply.send"](said(r), { clientId: ME });
+    await endOf(r.app, "q1");
     await until(() => toldStages(r).at(-1) === "done +1", "the first reply's end");
-    await until(() => r.app.activeTurns() === 0, "its work gone");
     r.refusals.push(new AppError("wont-fit", "it does not fit"));
     await r.h["reply.send"](said(r, { id: "q2", messageId: "m-q2", retryOf: "m-q1" }), { clientId: ME });
     await until(() => toldStages(r).at(-1) === "failed", "the refusal");

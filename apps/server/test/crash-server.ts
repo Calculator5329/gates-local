@@ -90,8 +90,7 @@ await runtime.discover();
 
 const thread = store.createThread({ title: "crash test" });
 const send = (content: string) => sendStarted(app, { threadId: thread.id, content, model: MODEL, numCtx: 16384 }, { clientId: 1 });
-await send("first question");
-while (app.activeTurns() > 0) await sleep(1);
+await (await send("first question")).ended;
 const second = await send("second question");
 
 for (;;) {

@@ -167,14 +167,9 @@ async function rig(native = true) {
     fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
   });
   cleanups.push(() => app.shutdown());
-  const send = async (tools = false) => {
-    const thread = store.createThread();
-    await sendStarted(app, { threadId: thread.id, content: "hello", model: MODEL, numCtx: 16384, tools }, { clientId: 1 });
-    return thread;
-  };
-  const finish = () => vi.waitFor(() => expect(app.activeTurns()).toBe(0));
+  const send = (tools = false) => sendStarted(app, { threadId: store.createThread().id, content: "hello", model: MODEL, numCtx: 16384, tools }, { clientId: 1 });
   const bodies = () => fake.requests.filter(r => r.path === "/api/chat").map(r => r.body as { messages: { role: string; content: string }[]; options: Record<string, number>; keep_alive?: number });
-  return { app, settings, fake, send, finish, bodies, events, source, respond: (next: typeof respond) => { respond = next; } };
+  return { app, settings, fake, send, bodies, events, source, respond: (next: typeof respond) => { respond = next; } };
 }
 
 describe("chat settings on the actual fake Ollama request", () => {
@@ -185,7 +180,7 @@ describe("chat settings on the actual fake Ollama request", () => {
     const loaded = await saved(root);
     const get = vi.spyOn(r.settings, "get").mockReturnValue(loaded.get());
     try {
-      await r.send(tools); await r.finish();
+      await (await r.send(tools)).ended;
       const body = r.bodies()[0]!;
       const { keep_alive, ...options } = MAXIMUMS;
       expect(body).toMatchObject({ options: { ...options, num_ctx: 16384 }, keep_alive });
@@ -200,7 +195,7 @@ describe("chat settings on the actual fake Ollama request", () => {
       // Decode through the existing file schema so this probe also fails when an old build strips the new fields.
       const current = S.decodeUnknownSync(Settings)({ ...r.settings.get(), modelSettings: { [MODEL]: { ...generation, ...(prompt === "model" ? { systemPrompt: "Model prompt" } : prompt === "empty" ? { systemPrompt: "" } : {}) } } });
       const get = vi.spyOn(r.settings, "get").mockReturnValue(current);
-      await r.send(tools); await r.finish(); get.mockRestore();
+      await (await r.send(tools)).ended; get.mockRestore();
       const body = r.bodies()[0]!;
       expect(body).toBeDefined();
       expect(body.options).toEqual({ num_ctx: 16384, temperature: 0, top_p: 0.7, top_k: 12, repeat_penalty: 1.2, seed: 42, num_predict: 111 });
@@ -218,11 +213,11 @@ describe("chat settings on the actual fake Ollama request", () => {
     r.settings.updateModel(MODEL, { systemPrompt: "Before", seed: 1 });
     let release: (() => void) | undefined;
     r.respond(res => { release = () => res.end(JSON.stringify({ message: { content: "ok" }, done: true }) + "\n"); });
-    await r.send(); await vi.waitFor(() => expect(release).toBeDefined());
+    const { ended } = await r.send(); await vi.waitFor(() => expect(release).toBeDefined());
     r.settings.updateModel(MODEL, { systemPrompt: "After", seed: 2 });
-    expect(r.app.activeTurns()).toBe(1); release!(); await r.finish();
+    expect(r.app.activeTurns()).toBe(1); release!(); await ended;
     r.respond(res => { res.end(JSON.stringify({ message: { content: "ok" }, done: true }) + "\n"); });
-    await r.send(); await r.finish();
+    await (await r.send()).ended;
     expect(r.bodies().map(b => b.options.seed)).toEqual([1, 2]);
     expect(r.bodies()[0]!.messages[0]!.content).toBe(`Before\n\n${PAGE_RULE}`);
     expect(r.bodies()[1]!.messages[0]!.content).toBe(`After\n\n${PAGE_RULE}`);
@@ -230,7 +225,7 @@ describe("chat settings on the actual fake Ollama request", () => {
   it("omits default controls and never borrows another model's overrides", async () => {
     const r = await rig();
     r.settings.updateModel("other", { ...generation, systemPrompt: "Other model only" });
-    await r.send(); await r.finish();
+    await (await r.send()).ended;
     expect(r.bodies()[0]!.options).toEqual({ num_ctx: 16384 });
     expect(r.bodies()[0]).not.toHaveProperty("keep_alive");
     expect(r.bodies()[0]!.messages[0]!.content).toBe(`Shipped prompt\n\n${PAGE_RULE}`);
@@ -244,7 +239,7 @@ describe("chat settings on the actual fake Ollama request", () => {
         res.end(JSON.stringify({ message: { tool_calls: [{ function: { name: "read", arguments: { path: `/library/${r.source.id}` } } }] }, done: true }) + "\n");
       } else quickReply(res);
     });
-    await r.send(true); await r.finish();
+    await (await r.send(true)).ended;
     expect(r.bodies()).toHaveLength(2);
     for (const b of r.bodies()) {
       expect(b.options).toMatchObject({ seed: 42, num_predict: 111 });
@@ -258,7 +253,7 @@ describe("chat settings on the actual fake Ollama request", () => {
   it.each([false, true])("an oversized system prompt gets a plain error and sends no chat (tools=%s)", async tools => {
     const r = await rig();
     r.settings.updateModel(MODEL, { systemPrompt: "x".repeat(70000) });
-    await r.send(tools); await r.finish();
+    await (await r.send(tools)).ended;
     expect(r.bodies()).toHaveLength(0);
     expect(JSON.stringify(r.events)).toContain("system prompt is too long");
   });

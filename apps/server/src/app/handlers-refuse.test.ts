@@ -8,7 +8,6 @@ import { sendStarted } from "../chat/send-started.ts";
 import { ModelActionError, type ModelLoader } from "../runtime/load.ts";
 import type { ModelInfo } from "../runtime/types.ts";
 import { openThreadStore } from "../threads/store.ts";
-import { until } from "../../test/send-rig.ts";
 
 const MODEL = "qwen3.5:9b";
 const CHAT_MODEL: ModelInfo = { name: MODEL, digest: "d", sizeBytes: 6_600_000_000, modifiedAt: "2026-11-01T00:00:00Z", capabilities: ["completion"] };
@@ -91,8 +90,7 @@ describe("what a Retry replaces", () => {
     r.store.appendMessage({ threadId: r.thread.id, role: "assistant", content: "an answer" });
     r.store.appendMessage({ threadId: r.thread.id, role: "user", content: "second" });
     r.store.appendMessage({ threadId: r.thread.id, role: "assistant", content: "cut o", interrupted: true });
-    await sendStarted(r.app, { threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384, retryOf: older.id });
-    await until(() => r.app.activeTurns() === 0, "the Retry's reply");
+    await (await sendStarted(r.app, { threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384, retryOf: older.id })).ended;
     expect(r.rows()).toEqual([
       ["user", "first", false], ["assistant", "an answer", false],
       ["user", "second", false], ["assistant", "cut o", true],

@@ -195,10 +195,10 @@ it("a load of the model a send waits on is said as loading only once the send ha
 
 it("a send still waiting to be admitted counts as an active turn before anything streams", async () => {
   const r = rig();
-  const { turnId } = await sent(r, "hi");
+  const { turnId, ended } = await sent(r, "hi");
   await settle();
   expect(r.events(turnId).filter((e) => e.type !== "reply")).toEqual([]);
   expect(r.app.activeTurns()).toBe(1);
   r.open();
-  await until(() => r.app.activeTurns() === 0, "the turn to end");
+  await ended;
 });

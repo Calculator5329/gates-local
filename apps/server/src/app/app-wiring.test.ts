@@ -194,7 +194,7 @@ it.each([
   cut(r);
   expect(await r.listed(sent.id)).toMatchObject({ stage: "held", held: { why: "refused" } });
   r.open();
-  await until(() => r.app.activeTurns() === 0, "the start to end");
+  await sent.ended;
   expect(r.events(sent.turnId).map((e) => e.type)).not.toContain("start");
   expect(r.db.getThread(r.thread.id).messages).toEqual([]);
 });

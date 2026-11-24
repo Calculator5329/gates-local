@@ -58,12 +58,8 @@ async function rig(chat: Chat) {
     fit: { runNvidiaSmi: async (args) => (args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : ""), readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
   });
   const read = async () => (await usage.handlers["usage.read"]({ since: 0 }, { clientId: 1 })).rows.map((r) => [r.model, r.promptTokens, r.completionTokens, r.replies]);
-  const send = async (threadId: string, extra: Record<string, unknown> = {}) => {
-    const sent = await sendStarted(app, { threadId, content: "hi", model: "m", numCtx: 16384, ...extra }, { clientId: 1 });
-    return sent;
-  };
-  const settle = () => vi.waitFor(() => expect(app.activeTurns()).toBe(0));
-  return { app, store, usage, pushed, read, send, settle, close: async () => { await app.shutdown(); usage.close(); store.close(); } };
+  const send = (threadId: string, extra: Record<string, unknown> = {}) => sendStarted(app, { threadId, content: "hi", model: "m", numCtx: 16384, ...extra }, { clientId: 1 });
+  return { app, store, usage, pushed, read, send, close: async () => { await app.shutdown(); usage.close(); store.close(); } };
 }
 
 const close = async (t: { close: () => Promise<void> }) => t.close();
@@ -73,8 +69,7 @@ describe("usage from turns", () => {
     const t = await rig(() => ndjson([{ model: "m", message: { content: "hello" }, done: false }, done(11, 3, { eval_duration: 2e9, prompt_eval_duration: 5e8, total_duration: 3e9 })]));
     try {
       const thread = t.store.createThread();
-      await t.send(thread.id);
-      await t.settle();
+      await (await t.send(thread.id)).ended;
       expect(await t.read()).toEqual([["m:latest", 11, 3, 1]]);
       // Ollama's nanoseconds arrive as milliseconds.
       expect(t.usage.handlers["usage.read"]({ since: 0 }).rows[0]).toMatchObject({ decodeTokens: 3, decodeMs: 2000, readTokens: 11, readMs: 500, wallMs: 3000 });
@@ -86,8 +81,7 @@ describe("usage from turns", () => {
     const t = await rig(() => ndjson([{ model: "m", message: { content: "a private answer" }, done: false }, done(11, 3, { eval_duration: 2e9, prompt_eval_duration: 5e8, total_duration: 3e9 })]));
     try {
       const thread = t.store.createThread({ title: "Secret plans" });
-      await t.send(thread.id, { content: "a private question" });
-      await t.settle();
+      await (await t.send(thread.id, { content: "a private question" })).ended;
       const read = t.usage.handlers["usage.read"]({ since: 0 });
       expect(read.rows).toHaveLength(1);
       expect(Object.keys(read.rows[0]!).toSorted()).toEqual(["completionTokens", "decodeMs", "decodeTokens", "hour", "model", "promptTokens", "readMs", "readTokens", "replies", "wallMs"]);
@@ -102,8 +96,7 @@ describe("usage from turns", () => {
       : ndjson([{ message: { content: "found it" }, done: false }, done(150, 20)])));
     try {
       const thread = t.store.createThread();
-      await t.send(thread.id, { tools: true });
-      await t.settle();
+      await (await t.send(thread.id, { tools: true })).ended;
       expect(t.store.getThread(thread.id).messages.at(-1)).toMatchObject({ role: "assistant", content: "found it" });
       expect(await t.read()).toEqual([["m:latest", 250, 30, 1]]);
     } finally { await close(t); }
@@ -113,10 +106,10 @@ describe("usage from turns", () => {
     const t = await rig((_, signal) => hang(signal));
     try {
       const thread = t.store.createThread();
-      const { turnId } = await t.send(thread.id);
-      await vi.waitFor(() => expect(t.app.activeTurns()).toBe(1));
+      const { turnId, ended } = await t.send(thread.id);
+      expect(t.app.activeTurns()).toBe(1);
       await t.app.handlers["reply.stop"]({ id: turnId }, { clientId: 1 });
-      await t.settle();
+      await ended;
       expect(await t.read()).toEqual([]);
     } finally { await close(t); }
   });
@@ -127,10 +120,10 @@ describe("usage from turns", () => {
       : hang(signal)));
     try {
       const thread = t.store.createThread();
-      const { turnId } = await t.send(thread.id, { tools: true });
+      const { turnId, ended } = await t.send(thread.id, { tools: true });
       await vi.waitFor(async () => expect(await t.read()).toEqual([["m:latest", 100, 10, 1]]));
       await t.app.handlers["reply.stop"]({ id: turnId }, { clientId: 1 });
-      await t.settle();
+      await ended;
       expect(await t.read()).toEqual([["m:latest", 100, 10, 1]]);
     } finally { await close(t); }
   });
@@ -140,10 +133,10 @@ describe("usage from turns", () => {
     try {
       const thread = t.store.createThread();
       const first = await t.send(thread.id);
-      await t.settle();
+      await first.ended;
       // Retry as the client sends it: a new question row that replaces the old one and its reply.
       const again = await t.send(thread.id, { retryOf: first.userMessage.id });
-      await t.settle();
+      await again.ended;
       expect(again.replayed).toBeUndefined();
       expect(await t.read()).toEqual([["m:latest", 22, 6, 2]]);
       await t.app.handlers["threads.delete"]({ threadId: thread.id }, { clientId: 1 });

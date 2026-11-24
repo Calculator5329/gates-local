@@ -145,14 +145,14 @@ it("a message's work reads as started while its reply streams, and as gone from 
   r.streams[0]!.close();
   await until(() => r.ended(sent.turnId), "the reply's end");
   expect(atEnd).toEqual([undefined]);
-  await until(() => r.app.activeTurns() === 0, "the work's end");
+  await sent.ended;
   expect(r.app.started("q1")).toBeUndefined();
 });
 
 it("a second shutdown while the first still waits also waits for the active turn to end, and a later one returns at once", async () => {
   const r = sendRig();
   await r.h["reply.send"](r.entry("a", "hi"), { clientId: 1 });
-  await until(() => r.app.activeTurns() === 1, "the start");
+  expect(r.app.activeTurns()).toBe(1);
   await settle();
   const first = r.app.shutdown();
   const second = r.app.shutdown();

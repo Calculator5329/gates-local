@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-24: server tests wait for a reply's own end, and a lint rule keeps it that way
+
+- Tests: 55 places in the server tests waited for a reply to finish by checking the running-turn count over and over, with limits from one to twenty seconds. On a busy machine a reply could outlast the limit and the test failed with "expected 1 to be 0", the same miss the chat tools tests had. Each one now waits for the reply's own end, which `sendStarted`, `sendTaken` and `app.started()` hand back; no limit was raised. Two of them waited for a count of 1 that is already true when the send returns, and now just check it. The new lint rule `gates/turn-end-not-polled` refuses a `vi.waitFor`, `expect.poll` or `until` callback, or a loop condition, that reads the count; it flags all ten lines of the old chat tools test and all 55 places it was run on before this change.
+
 ## 2026-11-24: a good engine download no longer fails "Unpacking Ollama failed (Premature close)"
 
 - Install: unpacking a good engine archive could fail with "Unpacking Ollama failed (Premature close)" on a busy machine. GNU tar exits as soon as it reads the end-of-archive mark, which can be before the last bytes of the file reach it; Node then closes tar's input under the feed, and the install took that as a failure even when tar had exited 0. Once tar has exited, its exit code now decides. A test that holds the last bytes back 300 ms reproduced the exact message, and the same forced order passes after the fix. That test is in the suite now (`install-unpack-order.test.ts`), and replay row f01 puts the bug back.

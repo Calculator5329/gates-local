@@ -118,11 +118,11 @@ describe("an Image mode turn's start and end, as the windows hear them", () => {
 
   it("deleting the question of a picture still being drawn takes its pictures with it", async () => {
     const r = rig();
-    const { turnId, admission } = await r.draw({ drawCount: 2 });
+    const { turnId, admission, ended } = await r.draw({ drawCount: 2 });
     const question = await admission;
     expect(r.rows()).toEqual([["user", undefined], ["assistant", "queued"], ["assistant", "queued"]]);
     await r.app.handlers["messages.delete"]!({ threadId: r.thread.id, messageId: question.id }, { clientId: 1 });
-    await until(() => r.app.activeTurns() === 0, "the turn's end");
+    await ended;
     expect(r.rows()).toEqual([]);
     expect(r.lastEvent(turnId)).toMatchObject({ type: "error", code: "cancelled" });
   });
@@ -165,10 +165,10 @@ describe("Retry of an Image mode question", () => {
     const question = r.store.appendMessage({ threadId: r.thread.id, role: "user", content: "a lighthouse at dusk" });
     r.store.saveImageJob({ jobId: "job-failed", threadId: r.thread.id, state: "error", choice: DRAWN, message: "ComfyUI stopped answering" }, "a lighthouse at dusk");
     expect(r.rows()).toEqual([["user", undefined], ["assistant", "error"]]);
-    const { admission } = await r.draw({ retryOf: question.id });
+    const { admission, ended } = await r.draw({ retryOf: question.id });
     await admission;
     r.settle("job-1", "done");
-    await until(() => r.app.activeTurns() === 0, "the Retry's end");
+    await ended;
     expect(r.rows()).toEqual([["user", undefined], ["assistant", "done"]]);
   });
 });

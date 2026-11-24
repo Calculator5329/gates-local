@@ -7,6 +7,8 @@ export type Context = Parameters<NonNullable<Rule["create"]>>[0];
 type Visitor = ReturnType<NonNullable<Rule["create"]>>;
 type NodeOf<Kind extends keyof Visitor> = Parameters<NonNullable<Visitor[Kind]>>[0];
 type ModuleName = NodeOf<"ImportDeclaration">["source"];
+/** Any node of the syntax tree, as its `parent` links name it. */
+export type AstNode = NodeOf<"CallExpression">["parent"];
 
 /** The file being linted, from the folder oxlint runs in, with forward slashes on every platform. */
 export function repoPath(context: Context, file: string = context.filename): string {
@@ -42,7 +44,7 @@ type Call = { on?: string; name: string };
  * `{ on: "React", name: "useEffect" }` for `React.useEffect(…)`. `on` is
  * "" when the receiver is anything but a plain name.
  */
-function called(callee: NodeOf<"CallExpression">["callee"]): Call | undefined {
+export function called(callee: NodeOf<"CallExpression">["callee"]): Call | undefined {
   if (callee.type === "Identifier") return { name: callee.name };
   if (callee.type !== "MemberExpression" || callee.computed || callee.property.type !== "Identifier") return undefined;
   return { on: callee.object.type === "Identifier" ? callee.object.name : "", name: callee.property.name };

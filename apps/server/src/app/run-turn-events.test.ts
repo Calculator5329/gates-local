@@ -111,10 +111,9 @@ function rig({ chat, tools: toolRig, onSaid, onPush }: RigOptions) {
   cleanups.push(async () => { await app.shutdown(); db.close(); });
   const events = (turnId: string): TurnEvent[] => heard.flatMap((h) => { const s = saidOf(h); return s?.turnId === turnId ? [s.event] : []; });
   const terminal = (turnId: string) => events(turnId).find((e) => e.type === "done" || e.type === "error");
-  const ended = (turnId: string) => until(() => terminal(turnId) !== undefined && app.activeTurns() === 0, "the turn to end");
   const send = (content: string) => sendStarted(app, { threadId: thread.id, content, model: MODEL, numCtx: 16384 }, { clientId: 1 });
   const rows = (): readonly Message[] => db.getThread(thread.id).messages;
-  return { app, db, thread, heard, logged, firstTokens, events, terminal, ended, send, rows };
+  return { app, db, thread, heard, logged, firstTokens, events, terminal, send, rows };
 }
 
 const running = (step: ToolStep) => step.state === "running";
@@ -129,8 +128,8 @@ it("a tool call is not the model's first word: the first-word mark and the send'
       if (s.event.type === "tool") atTool.push({ marks: r.firstTokens.length, lines: r.logged.filter((l) => l.includes("first token")).length });
     },
   });
-  const { turnId } = await r.send("look it up");
-  await r.ended(turnId);
+  const { turnId, ended } = await r.send("look it up");
+  await ended;
   expect(r.terminal(turnId)).toMatchObject({ type: "done", message: { content: "found nothing" } });
   expect(atTool.length, "the call was said before any text").toBeGreaterThan(0);
   expect(atTool.every((at) => at.marks === 0 && at.lines === 0)).toBe(true);
@@ -140,8 +139,8 @@ it("a tool call is not the model's first word: the first-word mark and the send'
 
 it("each stream event moves the reply's times to the stage its record shows: thinking while it thinks, writing once words come", async () => {
   const r = rig({ chat: () => body(thought("a plan"), piece("the answer"), DONE) });
-  const { turnId } = await r.send("think first");
-  await r.ended(turnId);
+  const { turnId, ended } = await r.send("think first");
+  await ended;
   const stages = r.events(turnId).flatMap((e) => (e.type === "reply" ? [e.reply.stage] : []));
   expect(stages).toContain("thinking");
   expect(stages.indexOf("thinking")).toBeLessThan(stages.indexOf("writing"));
@@ -149,8 +148,8 @@ it("each stream event moves the reply's times to the stage its record shows: thi
 
 it("a window gets a reply's new words before the record that names the stage they put it in", async () => {
   const r = rig({ chat: () => body(piece("some words"), DONE) });
-  const { id, turnId } = await r.send("say something");
-  await r.ended(turnId);
+  const { id, turnId, ended } = await r.send("say something");
+  await ended;
   const words = r.heard.findIndex((h) => { const w = wordsOf(h); return w?.id === id && w.part.type === "text"; });
   const record = r.heard.findIndex((h) => { const s = saidOf(h); return s?.turnId === turnId && s.event.type === "reply" && s.event.reply.stage === "writing"; });
   const told = r.heard.findIndex((h) => { const c = changeOf(h); return c !== undefined && c.kind === "is" && changedId(c) === id && c.reply.stage === "writing"; });
@@ -181,8 +180,8 @@ it("a reply that fails on its own while a tool call runs saves the call as faile
     yield { type: "error", code: "stream-error", message: "model runner crashed" };
   });
   const r = rig({ tools: { generate: async () => ({ jobId: "job" }) }, chat: () => body(DONE) });
-  const { turnId } = await r.send("read it");
-  await r.ended(turnId);
+  const { turnId, ended } = await r.send("read it");
+  await ended;
   expect(r.terminal(turnId)).toMatchObject({ type: "error", code: "stream-error", ended: { reason: "failed" } });
   const saved = r.rows().at(-1);
   expect(saved).toMatchObject({ role: "assistant", interrupted: true, tools: [{ callId: "call-1", state: "error" }] });
@@ -221,8 +220,8 @@ it("deleting the whole chat as the reply's last word lands ends it as stopped, n
       deleting = Promise.resolve(r.app.handlers["threads.delete"]({ threadId: s.threadId }, { clientId: 1 }));
     },
   });
-  const { turnId } = await r.send("count");
-  await r.ended(turnId);
+  const { turnId, ended } = await r.send("count");
+  await ended;
   await deleting;
   expect(r.events(turnId).some((e) => e.type === "done")).toBe(false);
   expect(r.terminal(turnId)).toMatchObject({ type: "error", code: "cancelled", ended: { reason: "stopped" } });
@@ -257,8 +256,8 @@ it("the windows hear what became of a message waiting behind a reply only after 
 
 it("a reply that fails on its own starts over in the same place, and only its second failure is said", async () => {
   const r = rig({ chat: (n) => body(piece(n === 1 ? "first try " : "second try "), failing(`crash ${n}`)) });
-  const { id, turnId } = await r.send("go");
-  await r.ended(turnId);
+  const { id, turnId, ended } = await r.send("go");
+  await ended;
   const parts = r.heard.flatMap((h) => { const w = wordsOf(h); return w?.id === id ? [w.part] : []; });
   expect(parts).toEqual([
     { type: "text", from: 0, text: "first try " },
@@ -276,8 +275,8 @@ it("a second attempt keeps none of the first attempt's words, on screen or on di
       if (channel === "reply.words" && (payload as WordsPayload).part.type === "again") onDiskAtAgain.push(r.rows().map((m) => m.content));
     },
   });
-  const { id, turnId } = await r.send("go");
-  await r.ended(turnId);
+  const { id, turnId, ended } = await r.send("go");
+  await ended;
   expect(onDiskAtAgain).toEqual([["go"]]);
   const again = r.heard.findIndex((h) => wordsOf(h)?.part.type === "again");
   const before = r.heard.slice(0, again).flatMap((h) => { const w = wordsOf(h); return w?.id === id ? [w.part] : []; });

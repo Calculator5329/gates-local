@@ -429,14 +429,14 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
         json(res, 200, SHOW);
       },
     });
-    const { turnId } = await sendStarted(r.app, { threadId: r.thread.id, content: "hello", model: MODEL, numCtx: 16384, think: true }, { clientId: 1 });
+    const { turnId, ended } = await sendStarted(r.app, { threadId: r.thread.id, content: "hello", model: MODEL, numCtx: 16384, think: true }, { clientId: 1 });
     expect(turnId).toBeTruthy();
     expect(await settled(asked.promise, "held request readiness")).toEqual({ resolved: undefined });
     const switching = r.s.runtime.setMode("app");
     await until(() => r.s.runtime.baseUrl() === undefined);
     show.resolve();
     await switching;
-    await until(() => r.app.activeTurns() === 0);
+    await ended;
     expect(r.chats()).toBe(0);
     expect(r.app.activeTurns()).toBe(0);
     expectRuntimeChangedEnd(r.events);
@@ -469,14 +469,14 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
       },
       { image },
     );
-    await sendStarted(r.app, { threadId: r.thread.id, content: "draw a cat", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+    const { ended } = await sendStarted(r.app, { threadId: r.thread.id, content: "draw a cat", model: MODEL, numCtx: 16384 }, { clientId: 1 });
     expect(await settled(queuedOnce.promise, "tool request readiness")).toEqual({ resolved: undefined });
     expect([queued, r.chats()]).toEqual([1, 1]);
     const switching = r.s.runtime.setMode("app");
     await until(() => r.s.runtime.baseUrl() === undefined);
     tool.resolve();
     await switching;
-    await until(() => r.app.activeTurns() === 0);
+    await ended;
     expect(r.chats()).toBe(1);
     expect(r.app.activeTurns()).toBe(0);
     expectRuntimeChangedEnd(r.events);
@@ -683,8 +683,7 @@ describe("a turn's stream ends once", () => {
     );
     // A switch's first step, landing while the turn handles its error event.
     switchNow = () => r.s.loader.runtimeChanged();
-    await sendStarted(r.app, { threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 });
-    await until(() => r.app.activeTurns() <= 0);
+    await (await sendStarted(r.app, { threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).ended;
     expect(r.app.activeTurns()).toBe(0);
     expect(r.events.filter((e) => e.type === "error" || e.type === "done")).toMatchObject([{ type: "error", code: "stream-error" }]);
     r.s.loader.runtimeSettled();
@@ -701,8 +700,7 @@ describe("a turn's stream ends once", () => {
         return new Promise<void>(() => undefined);
       },
     });
-    await sendStarted(r.app, { threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 });
-    await until(() => r.app.activeTurns() <= 0);
+    await (await sendStarted(r.app, { threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).ended;
     expect(r.events.filter((e) => e.type === "error" || e.type === "done")).toMatchObject([{ type: "done" }]);
     expect(await settled(closed.promise, "HTTP request socket closure")).toEqual({ resolved: undefined });
     await r.done();

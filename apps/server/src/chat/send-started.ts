@@ -40,6 +40,12 @@ export async function sendTaken(app: Pick<App, "handlers" | "started">, params: 
   return { id: send.id, ...started };
 }
 
+export function endOf(app: Pick<App, "started">, id: string): Promise<void> {
+  const started = app.started(id);
+  if (started === undefined) throw new Error(`send ${id} has no running turn`);
+  return started.ended;
+}
+
 export async function sendStarted(app: Pick<App, "handlers" | "started">, params: Sending, ctx: Ctx = { clientId: 1 }): Promise<{ id: string; turnId: string; userMessage: Message; ended: Promise<void>; replayed?: true }> {
   const { admission, ...taken } = await sendTaken(app, params, ctx);
   return { ...taken, userMessage: await admission };

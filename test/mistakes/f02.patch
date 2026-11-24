@@ -1,0 +1,21 @@
+Mistake: f02
+Class: K8
+Fix: changelog 2026-11-24
+Browser: no
+Seen: A landing that touched no chat code is refused now and then on a busy machine: a chat tools test reads "expected 1 to be 0".
+Note: puts back a one-second poll of the running-turn count where the test awaits the turn's own end
+
+diff --git a/apps/server/src/chat/tools.test.ts b/apps/server/src/chat/tools.test.ts
+index 780538df..54de724e 100644
+--- a/apps/server/src/chat/tools.test.ts
++++ b/apps/server/src/chat/tools.test.ts
+@@ -328,7 +328,8 @@ describe("tool chat transport", () => {
+     });
+     try {
+       const thread = await app.handlers["threads.create"]({ title: "tools" }, { clientId: 1 });
+-      await (await sendStarted(app, { threadId: thread.id, content: "read", model: "m", numCtx: 16384 }, { clientId: 1 })).ended;
++      await sendStarted(app, { threadId: thread.id, content: "read", model: "m", numCtx: 16384 }, { clientId: 1 });
++      await vi.waitFor(() => expect(app.activeTurns()).toBe(0));
+       expect(store.getThread(thread.id).messages.at(-1)).toMatchObject({ role: "assistant", content: "hello library", tools: [{ name: "read", state: "done" }] });
+       expect(JSON.stringify(pushed)).toContain('"state":"running"');
+     } finally { await app.shutdown(); store.close(); vi.unstubAllGlobals(); }

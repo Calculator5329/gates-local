@@ -9,6 +9,7 @@
     "gates/no-wait-for-timeout": "error",
     "gates/disable-needs-reason": "error",
     "gates/test-switch-stays-in-tests": "error",
+    "gates/turn-end-not-polled": "error",
     "import/no-cycle": ["error", { "ignoreTypes": true }],
     "import/extensions": ["error", "always", { "ignorePackages": true }],
     "typescript/no-import-type-side-effects": "error",

@@ -95,10 +95,9 @@ it("a refusal after the answer is the turn's error event, before any start, with
   const r = rig(async () => { throw new AppError("would-stop", "needs the GPU memory of a running reply", undefined, undefined, blocking); });
   const answer = await sendTaken(r.app, { threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384, askFirst: true }, { clientId: 1 });
   r.gate.resolve();
-  await until(() => r.events(answer.turnId).length > 0, "the refusal");
+  await answer.ended;
   expect(r.events(answer.turnId)).toEqual([{ type: "error", code: "would-stop", message: "needs the GPU memory of a running reply", blocking, ended: { reason: "failed", at: expect.any(Number) } }]);
   expect(r.db.getThread(r.thread.id).messages, "the question was not saved").toEqual([]);
-  await until(() => r.app.activeTurns() === 0, "the turn to go");
 });
 
 it("a Stop before the turn started ends it as stopped, with nothing saved", async () => {

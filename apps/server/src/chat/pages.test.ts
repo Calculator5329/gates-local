@@ -73,8 +73,7 @@ it("a chat turn sends the model the newest page in full and the older one as a s
   try {
     const thread = store.createThread();
     for (const content of ["make a loan page", "make the rate a slider", "thanks"]) {
-      await sendStarted(app, { threadId: thread.id, content, model: "m", numCtx: 16384, think: false }, { clientId: 1 });
-      await vi.waitFor(() => expect(app.activeTurns()).toBe(0));
+      await (await sendStarted(app, { threadId: thread.id, content, model: "m", numCtx: 16384, think: false }, { clientId: 1 })).ended;
     }
     expect(bodies[2]!.messages.map((m) => m.content)).toEqual([
       "make a loan page", `Here.\n\n${pageStandIn("Loan")}`,

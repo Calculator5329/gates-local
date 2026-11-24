@@ -17,6 +17,7 @@
     "gates/parent-pid-is-passed": {},
     "gates/test-switch-stays-in-tests": {},
     "gates/timer-needs-reason": {},
+    "gates/turn-end-not-polled": {},
     "import/extensions": {},
     "import/no-cycle": {},
     "react/forbid-elements": {},

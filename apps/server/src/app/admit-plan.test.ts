@@ -194,7 +194,7 @@ it("a reply cut by a runtime switch still holds its model in every plan until it
   expect(r.terminal(x.turnId), "X has not ended yet").toEqual([]);
   expect(await blocking()).toEqual([{ threadId: other.id, title: "Long answer", model: OTHER, turnId: x.turnId }]);
   held.resolve();
-  await until(() => r.app.activeTurns() === 0, "X to end");
+  await x.ended;
   expect(r.terminal(x.turnId)).toMatchObject([{ type: "error", code: "runtime-changed" }]);
   expect(await blocking()).toEqual([]);
 });

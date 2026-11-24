@@ -139,6 +139,8 @@ interface Rig {
   waitFor<C extends Seen>(channel: C, match: (p: SeenPayload<C>) => boolean, timeoutMs?: number): Promise<SeenPayload<C>>;
   /** The start a message sent over the socket was taken for, read in process as the send was answered. */
   turnOf(id: string): string | undefined;
+  /** The end of that start's turn. */
+  endOf(id: string): Promise<void>;
 }
 
 /**
@@ -287,14 +289,14 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
   });
   cleanups.push(() => app.shutdown());
   // Every kind ordered, as the app runs: a writer that pushes without its number fails here.
-  const taken = new Map<string, string>();
+  const taken = new Map<string, { turnId: string; ended: Promise<void> }>();
   const send = app.handlers["reply.send"];
   const handlers: AppHandlers = {
     ...app.handlers,
     "reply.send": async (params, ctx) => {
       const answer = await send(params, ctx);
       const started = app.started(params.id);
-      if (started !== undefined) taken.set(params.id, started.turnId);
+      if (started !== undefined) taken.set(params.id, started);
       return answer;
     },
   };
@@ -331,11 +333,16 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
       }, timeoutMs);
       if (!check()) waiters.add(check);
     });
+  const endOf = (id: string) => {
+    const started = taken.get(id);
+    if (started === undefined) throw new Error(`send ${id} was not taken for a start`);
+    return started.ended;
+  };
 
   // The pushes below come from this discover(): runtime.changed, then the
   // catalog refresh it triggers, then models.changed.
   await runtime.discover();
-  return { app, server, client, store, runtime, ollama, gpu, lease, setChat: (r) => (chat = r), setShow: (r) => (show = r), pushes, storedAtDonePush, listedAtDone, catalog, setTags: (t) => (tags = t), waitFor, ps, memory, loader, turnOf: (id) => taken.get(id) };
+  return { app, server, client, store, runtime, ollama, gpu, lease, setChat: (r) => (chat = r), setShow: (r) => (show = r), pushes, storedAtDonePush, listedAtDone, catalog, setTags: (t) => (tags = t), waitFor, ps, memory, loader, turnOf: (id) => taken.get(id)?.turnId, endOf };
 }
 
 const turnEvents = (r: Rig, turnId: string) =>
@@ -1847,7 +1854,7 @@ describe("Stop and threads.delete during a turn", () => {
       const t = await r.client.call("threads.create", {});
       const older = await sendStarted(r, { threadId: t.id, content: "earlier", model: MODEL, numCtx: 16384 });
       await r.waitFor("turn", (p) => p.turnId === older.turnId && p.event.type === "done");
-      await vi.waitFor(() => expect(r.app.activeTurns()).toBe(0));
+      await r.endOf(older.id);
       r.setChat(heldReply().route);
       const sent = await sendStarted(r, { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
       await untilWords(r, sent.turnId);
@@ -2448,7 +2455,7 @@ describe("a reply's turn as it ends", () => {
     const t = await r.client.call("threads.create", {});
     const sent = await sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     await r.waitFor("turn", (p) => p.turnId === sent.turnId && p.event.type === "done");
-    await until(() => r.app.activeTurns() === 0);
+    await r.endOf(sent.id);
     expect(runningAtEnd).toEqual([1]);
   });
 });

@@ -148,6 +148,24 @@ const CASES: Case[] = [
     fixed: { "scripts/quiet.ts": text("// oxlint-disable-next-line no-console -- this script's output is its result", 'console.log("done");') },
   },
   {
+    rule: "gates/turn-end-not-polled",
+    planted: {
+      "apps/server/src/turn-wait.test.ts": text(
+        'import { vi } from "vitest";',
+        "declare const app: { activeTurns(): number };",
+        "await vi.waitFor(() => { if (app.activeTurns() !== 0) throw new Error(\"running\"); });",
+      ),
+    },
+    fixed: {
+      "apps/server/src/turn-wait.test.ts": text(
+        "declare const sent: { ended: Promise<void> };",
+        "declare const app: { activeTurns(): number };",
+        "await sent.ended;",
+        "export const running = app.activeTurns();",
+      ),
+    },
+  },
+  {
     rule: "import/no-cycle",
     planted: {
       "apps/server/src/loop-a.ts": text('import { b } from "./loop-b.ts";', "export const a = () => b();"),

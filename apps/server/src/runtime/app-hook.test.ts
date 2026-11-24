@@ -156,23 +156,22 @@ it("a turn on a cold model pushes loading, then ready at the first token, and th
   });
 
   expect(typeof app.handlers["models.catalog"]).toBe("function");
-  await send();
+  const { ended } = await send();
   await until(() => loads().includes("ready"));
   expect(loads()).toEqual(["loading", "ready"]);
   expect(loader.appLoadedModels()).toEqual([MODEL]);
   expect(loader.inUse(MODEL)).toBe(true);
   // The turn is no longer counted once it ends.
   held.release();
-  await until(() => app.activeTurns() === 0);
+  await ended;
   expect(loader.inUse(MODEL)).toBe(false);
 });
 
 it("R-04: a cold turn whose first event is an error claims nothing and pushes no ready", async () => {
-  const { app, loader, loads, send } = await setup([], {
+  const { loader, loads, send } = await setup([], {
     "POST /api/chat": (_b, res) => json(res, 500, { error: "model requires more system memory (12.0 GiB) than is available (4.0 GiB)" }),
   });
-  await send();
-  await until(() => app.activeTurns() === 0);
+  await (await send()).ended;
   await until(() => loads().length === 2);
   expect(loads()).toEqual(["loading", "unloaded"]);
   expect(loader.appLoadedModels()).toEqual([]);
@@ -180,7 +179,7 @@ it("R-04: a cold turn whose first event is an error claims nothing and pushes no
 
 it("R-05: with a slow /api/ps, the model a cold turn loaded still ends up owned", async () => {
   const ps: string[] = [];
-  const { app, loader, loads, send } = await setup(ps, {
+  const { loader, loads, send } = await setup(ps, {
     "GET /api/ps": async (_b, res) => {
       const snapshot = [...ps];
       await sleep(150);
@@ -193,8 +192,7 @@ it("R-05: with a slow /api/ps, the model a cold turn loaded still ends up owned"
       res.end(line({ model: MODEL, message: { role: "assistant", content: "" }, done: true, done_reason: "stop", eval_count: 1, prompt_eval_count: 1 }));
     },
   });
-  await send();
-  await until(() => app.activeTurns() === 0);
+  await (await send()).ended;
   await until(() => loader.appLoadedModels().includes(MODEL));
   expect(loader.appLoadedModels()).toEqual([MODEL]);
   expect(loads()).toEqual(["loading", "ready"]);
@@ -247,15 +245,14 @@ const chats = (ollama: FakeServer) => ollama.requests.filter((r) => r.method ===
 it("a turn waits while an image job holds the GPU, then streams once the job ends", async () => {
   const lease = createGpuLease();
   const releaseImage = await lease.acquire("image");
-  const { app, ollama, send } = await setup([MODEL], { "POST /api/chat": (_b, res) => reply(res) }, lease);
+  const { ollama, send } = await setup([MODEL], { "POST /api/chat": (_b, res) => reply(res) }, lease);
   let sent = false;
-  const sending = send().then(() => (sent = true));
+  const sending = send().finally(() => (sent = true));
   await until(() => lease.status().waiting.includes("chat"));
   expect([sent, chats(ollama)]).toEqual([false, 0]);
   expect(lease.status()).toEqual({ holder: "image", holders: 1, waiting: ["chat"] });
   releaseImage();
-  await sending;
-  await until(() => app.activeTurns() === 0);
+  await (await sending).ended;
   expect(chats(ollama)).toBe(1);
   expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
 });
@@ -263,7 +260,7 @@ it("a turn waits while an image job holds the GPU, then streams once the job end
 it("an image job waits until a streaming turn ends", async () => {
   const lease = createGpuLease();
   const held = deferred();
-  const { app, ollama, send } = await setup([MODEL], {
+  const { ollama, send } = await setup([MODEL], {
     "POST /api/chat": async (_b, res) => {
       res.writeHead(200, { "content-type": "application/x-ndjson" });
       res.write(line({ model: MODEL, message: { role: "assistant", content: "hi" }, done: false }));
@@ -271,7 +268,7 @@ it("an image job waits until a streaming turn ends", async () => {
       res.end(line({ model: MODEL, message: { role: "assistant", content: "" }, done: true, done_reason: "stop", eval_count: 1, prompt_eval_count: 1 }));
     },
   }, lease);
-  await send();
+  const { ended } = await send();
   await until(() => chats(ollama) === 1);
   let imaged = false;
   const image = lease.run("image", undefined, async () => { imaged = true; });
@@ -281,7 +278,7 @@ it("an image job waits until a streaming turn ends", async () => {
   held.release();
   await image;
   expect(imaged).toBe(true);
-  await until(() => app.activeTurns() === 0);
+  await ended;
 });
 
 it("a turn that ends in an error, or is cancelled while it waits for the GPU, gives its claim back", async () => {
@@ -289,8 +286,7 @@ it("a turn that ends in an error, or is cancelled while it waits for the GPU, gi
   const { app, send } = await setup([MODEL], {
     "POST /api/chat": (_b, res) => json(res, 500, { error: "boom" }),
   }, lease);
-  await send();
-  await until(() => app.activeTurns() === 0);
+  await (await send()).ended;
   expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
 
   const releaseImage = await lease.acquire("image");

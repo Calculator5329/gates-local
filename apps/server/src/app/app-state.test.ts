@@ -7,7 +7,7 @@ import type { ModelCatalog } from "../runtime/models.ts";
 import type { ModelInfo, RuntimeState, RuntimeStatus } from "../runtime/types.ts";
 import { openThreadStore } from "../threads/store.ts";
 import { MODEL, chatCatalog, rig, settle, until } from "../../test/send-rig.ts";
-import { sendTaken } from "../chat/send-started.ts";
+import { endOf, sendTaken } from "../chat/send-started.ts";
 
 const sweep = vi.hoisted(() => ({ hold: undefined as Promise<void> | undefined, release: undefined as (() => void) | undefined }));
 
@@ -84,26 +84,25 @@ it("a window that cannot be told about a change does not fail the call that made
 it("reading the fit table while a reply streams leaves that reply running to its end", async () => {
   const r = rig({ drip: true });
   r.open();
-  const { turnId } = await sendTaken(r.app, { threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 });
+  const { turnId, ended } = await sendTaken(r.app, { threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 });
   await until(() => r.events(turnId).some((e) => e.type === "delta"), "the reply's first words");
   await r.h["fit.table"]({}, ctx);
   await settle();
   expect(r.app.activeTurns(), "the reply still runs").toBe(1);
   r.finish();
-  await until(() => r.app.activeTurns() === 0, "the reply's end");
+  await ended;
   expect(r.events(turnId).at(-1)).toMatchObject({ type: "done" });
 });
 
 it("once a message has been deleted, the next message in that chat is sent as usual", async () => {
   const r = rig();
   r.open();
-  await sendTaken(r.app, { threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 });
-  await until(() => r.starts().length === 1 && r.app.activeTurns() === 0, "the first reply");
+  await (await sendTaken(r.app, { threadId: r.thread.id, content: "first", model: MODEL, numCtx: 16384 })).ended;
   const first = r.db.getThread(r.thread.id).messages.find((m) => m.role === "user");
   if (first === undefined) throw new Error("the first question was not saved");
   await r.h["messages.delete"]({ threadId: r.thread.id, messageId: first.id }, ctx);
   await r.h["reply.send"](r.entry("q1", "second"), ctx);
-  await until(() => r.starts().length === 2 && r.app.activeTurns() === 0, "the second reply");
+  await endOf(r.app, "q1");
   expect(r.db.getMessage("m-q1")?.content).toBe("second");
 });
 
@@ -112,11 +111,12 @@ it("a send waits for the start-up sweep of pasted images before its question is 
   const r = rig();
   r.open();
   await r.h["reply.send"](r.entry("q1", "hello"), ctx);
+  const ended = endOf(r.app, "q1");
   await settle();
   expect(r.starts(), "nothing started while the sweep runs").toEqual([]);
   expect(r.db.getMessage("m-q1")).toBeUndefined();
   release();
-  await until(() => r.starts().length === 1 && r.app.activeTurns() === 0, "the reply after the sweep");
+  await ended;
   expect(r.db.getMessage("m-q1")?.content).toBe("hello");
 });
 

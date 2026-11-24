@@ -8,6 +8,7 @@ import noWaitForTimeout from "./rules/no-wait-for-timeout.ts";
 import parentPidIsPassed from "./rules/parent-pid-is-passed.ts";
 import testSwitchStaysInTests from "./rules/test-switch-stays-in-tests.ts";
 import timerNeedsReason from "./rules/timer-needs-reason.ts";
+import turnEndNotPolled from "./rules/turn-end-not-polled.ts";
 
 export default {
   meta: { name: "gates" },
@@ -22,5 +23,6 @@ export default {
     "parent-pid-is-passed": parentPidIsPassed,
     "test-switch-stays-in-tests": testSwitchStaysInTests,
     "timer-needs-reason": timerNeedsReason,
+    "turn-end-not-polled": turnEndNotPolled,
   },
 };

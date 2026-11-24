@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ImageChoice, ImageEvent, ImageStatus, Params } from "@gates-local/contracts";
 import { createApp } from "../app.ts";
-import { replySend, type Sending } from "../chat/send-started.ts";
+import { endOf, replySend, type Sending } from "../chat/send-started.ts";
 import { IMAGES_UNSET, notRunning, type ImageModule } from "../image/module.ts";
 import { openThreadStore, type ThreadStore } from "../threads/store.ts";
 import { chatCatalog } from "../../test/send-rig.ts";
@@ -114,7 +114,7 @@ function rig(options: Options = {}) {
   const send = async (extra: Pick<Sending, "drawCount"> = {}) => {
     const params = replySend({ threadId: thread.id, content: "a lighthouse at dusk", model: "m", numCtx: 16384, draw: DRAWN, ...extra });
     await app.handlers["reply.send"](params, { clientId: 1 });
-    return params.id;
+    return { id: params.id, ended: endOf(app, params.id) };
   };
   const stop = (id: string) => app.handlers["reply.stop"]({ id }, { clientId: 1 });
   const record = async (id: string) => (await app.handlers["reply.list"]!({}, { clientId: 1 })).find((l) => l.reply.id === id)?.reply;
@@ -141,12 +141,10 @@ describe("an Image mode send's start", () => {
 
   it("a refusal after the answer ends the turn with one error event saying why, and keeps no question and no picture", async () => {
     const t = rig({ current: SET_BUT_DOWN });
-    await t.send();
-    await vi.waitFor(() => expect(t.events()).toHaveLength(1));
+    await (await t.send()).ended;
     expect(t.events()).toEqual([{ type: "error", code: "image-input", message: notRunning(COMFY), ended: ended("failed") }]);
     expect(t.messages()).toEqual([]);
     expect(t.generate).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
   });
 
   it("with no ComfyUI address set, a missing ComfyUI refuses the send with the line that says images are not set up", async () => {
@@ -170,7 +168,7 @@ describe("an Image mode send's start", () => {
     const probe = deferred<ImageStatus>();
     const t = rig({ current: UNSET, probe: () => probe.promise });
     const append = vi.spyOn(t.store, "appendMessage");
-    const id = await t.send();
+    const { id } = await t.send();
     await vi.waitFor(() => expect(t.status).toHaveBeenCalledOnce());
     t.stop(id);
     probe.resolve(READY);
@@ -184,7 +182,7 @@ describe("an Image mode send's start", () => {
   it("a Stop between pictures queues no more, and takes back the question and the pictures already queued", async () => {
     const queueing = deferred();
     const t = rig({ hold: true, queueing: queueing.promise });
-    const id = await t.send({ drawCount: 3 });
+    const { id } = await t.send({ drawCount: 3 });
     await vi.waitFor(() => expect(t.generate).toHaveBeenCalledOnce());
     t.stop(id);
     queueing.resolve();
@@ -197,7 +195,7 @@ describe("an Image mode send's start", () => {
   it("a Stop while its only picture is being queued undoes the start: no start, no question, the picture cancelled and its card gone", async () => {
     const queueing = deferred();
     const t = rig({ hold: true, queueing: queueing.promise });
-    const id = await t.send();
+    const { id } = await t.send();
     await vi.waitFor(() => expect(t.generate).toHaveBeenCalledOnce());
     t.stop(id);
     queueing.resolve();
@@ -219,17 +217,17 @@ describe("an Image mode send's start", () => {
 
   it("a refused send's message waits on hold with the refusal's own reason", async () => {
     const t = rig({ current: UNSET });
-    const id = await t.send();
-    await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+    const { id, ended: over } = await t.send();
+    await over;
     expect(await t.record(id)).toMatchObject({ stage: "held", held: { why: "refused", code: "image-input", message: IMAGES_UNSET } });
   });
 
   it("a send stopped before it started stays on hold as stopped, not as refused, and its turn ends as stopped", async () => {
     const t = rig();
-    const id = await t.send();
+    const { id, ended: over } = await t.send();
     t.stop(id);
-    await vi.waitFor(() => expect(t.events()).toEqual([cancelledBeforeStart]));
-    await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+    await over;
+    expect(t.events()).toEqual([cancelledBeforeStart]);
     expect(await t.record(id)).toMatchObject({ stage: "held", held: { why: "stopped" } });
     expect(t.messages()).toEqual([]);
     expect(t.requests).toEqual([]);
